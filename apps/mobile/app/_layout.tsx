@@ -16,7 +16,7 @@ function SessionRedirect() {
     if (!session.ready) return;
     const top = segments[0];
     if (!session.origin) {
-      if (top !== "server") router.replace("/server");
+      if (top) router.replace("/");
       return;
     }
     if (!session.signedIn && top !== "login" && top !== "server") {

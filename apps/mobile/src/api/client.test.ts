@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ApiError, createApiClient, type TokenPair } from "./client.ts";
+import { ApiError, createApiClient, shouldLogoutAfterRefresh, type TokenPair } from "./client.ts";
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -144,4 +144,11 @@ test("refresh 401 clears the session", async () => {
   const { client, expired } = createHarness({ refreshToken: "dead" });
   await assert.rejects(() => client.get("/servers"), (error: unknown) => error instanceof ApiError && error.status === 401);
   assert.equal(expired(), 1);
+});
+
+test("shouldLogoutAfterRefresh is only a refresh 401", () => {
+  assert.equal(shouldLogoutAfterRefresh(new ApiError("no", 401, null)), true);
+  assert.equal(shouldLogoutAfterRefresh(new ApiError("down", 503, null)), false);
+  assert.equal(shouldLogoutAfterRefresh(new ApiError("offline", 0, null)), false);
+  assert.equal(shouldLogoutAfterRefresh(new Error("network")), false);
 });

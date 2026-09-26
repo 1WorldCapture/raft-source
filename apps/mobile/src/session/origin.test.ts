@@ -12,11 +12,11 @@ test("normalizeServerOrigin keeps http for local and IP hosts", () => {
   assert.equal(normalizeServerOrigin("http://192.168.1.20:3000"), "http://192.168.1.20:3000");
 });
 
-test("resolveBundledServerOrigin uses the env override and falls back to the default domain", () => {
-  assert.equal(resolveBundledServerOrigin(undefined), "http://grokbot.tailf3efbe.ts.net:3001");
-  assert.equal(resolveBundledServerOrigin("  "), "http://grokbot.tailf3efbe.ts.net:3001");
+test("resolveBundledServerOrigin requires a valid build-time origin", () => {
+  assert.equal(resolveBundledServerOrigin(undefined), null);
+  assert.equal(resolveBundledServerOrigin("  "), null);
   assert.equal(resolveBundledServerOrigin("https://raft.example.com/api"), "https://raft.example.com");
-  assert.equal(resolveBundledServerOrigin("https://raft.example.com/app"), "http://grokbot.tailf3efbe.ts.net:3001");
+  assert.equal(resolveBundledServerOrigin("https://raft.example.com/app"), null);
 });
 
 test("normalizeServerOrigin rejects paths and credentials", () => {

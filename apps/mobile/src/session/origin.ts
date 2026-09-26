@@ -1,16 +1,14 @@
-const DEFAULT_SERVER_ORIGIN = "http://grokbot.tailf3efbe.ts.net:3001";
-
 /**
- * Build-time server address. Set `EXPO_PUBLIC_RAFT_SERVER_URL` to override.
- * The sign-in screen does not ask for it. An empty or invalid value keeps the default domain.
+ * Build-time server address from `EXPO_PUBLIC_RAFT_SERVER_URL`.
+ * There is no default. A missing or invalid value means the build is not configured.
  */
-export function resolveBundledServerOrigin(configured?: string): string {
+export function resolveBundledServerOrigin(configured?: string): string | null {
   const trimmed = configured?.trim();
-  if (!trimmed) return DEFAULT_SERVER_ORIGIN;
+  if (!trimmed) return null;
   try {
     return normalizeServerOrigin(trimmed);
   } catch {
-    return DEFAULT_SERVER_ORIGIN;
+    return null;
   }
 }
 

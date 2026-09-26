@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AppState } from "react-native";
 import * as SecureStore from "expo-secure-store";
-import { ApiError, createApiClient, type ApiClient, type TokenPair } from "../api/client";
+import { ApiError, createApiClient, shouldLogoutAfterRefresh, type ApiClient, type TokenPair } from "../api/client";
 import { createInstallationId } from "../api/ids";
 import { syncSince } from "../api/sync";
 import { parseUser, type RaftUser } from "../model/messages";
@@ -189,6 +189,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         try {
           const storedOrigin = await SecureStore.getItemAsync(ORIGIN);
           const origin = BUNDLED_SERVER_ORIGIN;
+          if (!origin) {
+            if (!cancelled) apply({ origin: null, ready: true });
+            return;
+          }
           let accessToken = await SecureStore.getItemAsync(ACCESS);
           let refreshToken = await SecureStore.getItemAsync(REFRESH);
           let userJson = await SecureStore.getItemAsync(USER);
@@ -231,8 +235,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                 await client.refreshTokens();
                 const me = parseUser(await client.get("/auth/me"));
                 if (me) apply({ user: me });
-              } catch {
-                clearAuth();
+              } catch (refreshError) {
+                if (shouldLogoutAfterRefresh(refreshError)) clearAuth();
               }
             }
           }

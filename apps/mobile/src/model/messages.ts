@@ -292,5 +292,9 @@ export function minSeq(messages: RaftMessage[]): number | null {
 export function mergeMessages(existing: RaftMessage[], incoming: RaftMessage[]): RaftMessage[] {
   const byId = new Map<string, RaftMessage>();
   for (const message of [...existing, ...incoming]) byId.set(message.id, message);
-  return [...byId.values()].sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0) || a.id.localeCompare(b.id));
+  return [...byId.values()].sort((a, b) => {
+    const aSeq = typeof a.seq === "number" ? a.seq : Number.POSITIVE_INFINITY;
+    const bSeq = typeof b.seq === "number" ? b.seq : Number.POSITIVE_INFINITY;
+    return aSeq - bSeq || a.id.localeCompare(b.id);
+  });
 }

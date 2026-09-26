@@ -66,6 +66,10 @@ async function readBody(response: Response): Promise<unknown> {
   }
 }
 
+export function shouldLogoutAfterRefresh(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 401;
+}
+
 function isAuthPath(path: string): boolean {
   return path.includes("/auth/");
 }

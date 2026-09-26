@@ -1,4 +1,5 @@
 import { io, type Socket } from "socket.io-client";
+import { shouldLogoutAfterRefresh } from "../api/client";
 import { isRecord, parseMessage, type RaftMessage, type ThreadSummary } from "../model/messages";
 import { hasSeqGap } from "../model/reconcile";
 import { parseAccessTokenExp, planReconnectAuthRefresh } from "./reconnectAuth";
@@ -37,9 +38,10 @@ function channelIdFrom(payload: unknown): string | null {
 
 export function createRealtime(options: RealtimeOptions) {
   let socket: Socket | null = null;
-  let refreshing = false;
+  let refreshInFlight: Promise<boolean> | null = null;
   let lastHeartbeat = 0;
   let watchdog: ReturnType<typeof setInterval> | null = null;
+  let refreshedAfterAuthRejection = false;
   const joinedThreads = new Set<string>();
 
   function freshAuth(): Record<string, unknown> {
@@ -55,7 +57,13 @@ export function createRealtime(options: RealtimeOptions) {
     socket.auth = freshAuth();
   }
 
-  async function refreshAuthBeforeHandshake(current: Socket): Promise<boolean> {
+  async function refreshAuthBeforeHandshake(current: Socket, force = false): Promise<boolean> {
+    if (refreshInFlight) {
+      return refreshInFlight.then((ok) => {
+        if (ok) current.auth = freshAuth();
+        return ok;
+      });
+    }
     const action = planReconnectAuthRefresh({
       latestAccessToken: options.getAccessToken(),
       freshAuth: freshAuth(),
@@ -63,27 +71,23 @@ export function createRealtime(options: RealtimeOptions) {
       now: Date.now(),
     });
     if (action.type === "skip") return false;
-    if (action.type === "update-auth-only") {
+    if (action.type === "update-auth-only" && !force) {
       current.auth = action.auth;
       return true;
     }
-    if (refreshing) {
-      current.auth = freshAuth();
-      return true;
-    }
-    refreshing = true;
-    try {
+    refreshInFlight = (async () => {
       try {
         await options.refreshTokens();
-      } catch {
-        options.onSessionExpired();
+      } catch (error) {
+        if (shouldLogoutAfterRefresh(error)) options.onSessionExpired();
         return false;
       }
       current.auth = freshAuth();
       return true;
-    } finally {
-      refreshing = false;
-    }
+    })().finally(() => {
+      refreshInFlight = null;
+    });
+    return refreshInFlight;
   }
 
   function rejoinThreads() {
@@ -154,8 +158,21 @@ export function createRealtime(options: RealtimeOptions) {
     });
     created.on("connect_error", (error: Error) => {
       if (!looksLikeAuthFailure(error.message)) return;
-      void refreshAuthBeforeHandshake(created).then((ok) => {
-        if (!ok || socket !== created || created.connected || !options.getAccessToken()) return;
+      if (refreshInFlight) return;
+      if (refreshedAfterAuthRejection) {
+        created.io.reconnection(false);
+        created.disconnect();
+        return;
+      }
+      refreshedAfterAuthRejection = true;
+      void refreshAuthBeforeHandshake(created, true).then((ok) => {
+        if (socket !== created) return;
+        if (!ok || !options.getAccessToken()) {
+          created.io.reconnection(false);
+          created.disconnect();
+          return;
+        }
+        if (created.connected) return;
         created.auth = freshAuth();
         created.connect();
       });
@@ -165,6 +182,7 @@ export function createRealtime(options: RealtimeOptions) {
     });
     created.on("connect", () => {
       lastHeartbeat = Date.now();
+      refreshedAfterAuthRejection = false;
     });
     socket = created;
     return created;
@@ -187,6 +205,8 @@ export function createRealtime(options: RealtimeOptions) {
       if (!options.getAccessToken() || !options.getServerId()) return;
       const current = ensure();
       if (!current) return;
+      refreshedAfterAuthRejection = false;
+      current.io.reconnection(true);
       current.auth = freshAuth();
       startWatchdog();
       if (!current.connected) current.connect();
