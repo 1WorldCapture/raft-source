@@ -16,6 +16,7 @@ export interface RealtimeOptions {
   onMessageUpdated: (message: RaftMessage) => void;
   onThreadUpdated: (summary: ThreadSummary & { parentMessageId: string }) => void;
   onReadState: (channelId: string) => void;
+  onReadStateBulk: (scopeIds: string[]) => void;
   onDirectoryChanged: (joinChannelId?: string) => void;
   onRoomsJoined: () => void;
 }
@@ -168,6 +169,13 @@ export function createRealtime(options: RealtimeOptions) {
         ? payload.scopeId
         : typeof payload.channelId === "string" ? payload.channelId : null;
       if (channelId) options.onReadState(channelId);
+    });
+    created.on("read_state:updated_bulk", (payload: unknown) => {
+      if (!isRecord(payload) || !Array.isArray(payload.scopes)) return;
+      const scopeIds = payload.scopes.flatMap((scope) => (
+        isRecord(scope) && typeof scope.scopeId === "string" ? [scope.scopeId] : []
+      ));
+      if (scopeIds.length > 0) options.onReadStateBulk(scopeIds);
     });
     created.on("channel:updated", () => options.onDirectoryChanged());
     created.on("dm:new", (payload: unknown) => {

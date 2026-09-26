@@ -5,6 +5,7 @@ import { ApiError, createApiClient, shouldLogoutAfterRefresh, type ApiClient, ty
 import { createInstallationId } from "../api/ids";
 import { syncSince } from "../api/sync";
 import { parseChannelUnread, parseUser, type RaftUser } from "../model/messages";
+import { useActivityStore } from "../activity/store";
 import { createRealtime, type Realtime } from "../realtime/socket";
 import { BUNDLED_SERVER_ORIGIN } from "../session/origin";
 import { shouldApplyServerResponse, shouldCommitTokens, shouldMarkVisibleRead, catchUpPlan, releaseFocus } from "./sessionPolicy";
@@ -166,6 +167,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     onSessionExpired: () => clearAuth(),
     onMessage: (message) => {
       useRaftStore.getState().upsertMessages([message]);
+      useActivityStore.getState().scheduleRefresh(client);
       if (shouldMarkVisibleRead(focusedRef.current, message.channelId)) {
         useRaftStore.getState().clearLiveUnread(message.channelId);
         if (typeof message.seq === "number") void markReadRef.current(message.channelId, message.seq);
@@ -200,16 +202,26 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       useRaftStore.getState().setThreadSummaries({
         [summary.parentMessageId]: summary,
       });
+      useActivityStore.getState().scheduleRefresh(client);
     },
     onReadState: (channelId) => {
       useRaftStore.getState().clearChannelUnread(channelId);
       useRaftStore.getState().clearLiveUnread(channelId);
+      useActivityStore.getState().applyReadStates([channelId]);
+    },
+    onReadStateBulk: (scopeIds) => {
+      for (const scopeId of scopeIds) {
+        useRaftStore.getState().clearChannelUnread(scopeId);
+        useRaftStore.getState().clearLiveUnread(scopeId);
+      }
+      useActivityStore.getState().applyReadStates(scopeIds);
     },
     onDirectoryChanged: () => {
       useRaftStore.getState().bumpDirectory();
     },
     onRoomsJoined: () => {
       useRaftStore.getState().bumpDirectory();
+      void useActivityStore.getState().refresh(client);
     },
   }), [client]);
   realtimeRef.current = realtime;

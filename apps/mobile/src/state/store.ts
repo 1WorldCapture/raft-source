@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { useActivityStore } from "../activity/store";
 import { reconcileIncoming } from "../model/reconcile";
 import type { ChannelUnreadEntry, RaftMessage, ThreadSummary } from "../model/messages";
 
@@ -82,12 +83,15 @@ export const useRaftStore = create<RaftDataState>((set) => ({
   noteSeq: (seq) => set((state) => ({ lastSeq: Math.max(state.lastSeq, seq) })),
   bumpDirectory: () => set((state) => ({ directoryVersion: state.directoryVersion + 1 })),
   setNotice: (notice) => set({ notice }),
-  clearServerData: () => set({
-    messagesByChannel: {},
-    threadSummaries: {},
-    channelUnread: {},
-    liveUnread: {},
-    lastSeq: 0,
-    senderAvatars: {},
-  }),
+  clearServerData: () => {
+    useActivityStore.getState().reset();
+    set({
+      messagesByChannel: {},
+      threadSummaries: {},
+      channelUnread: {},
+      liveUnread: {},
+      lastSeq: 0,
+      senderAvatars: {},
+    });
+  },
 }));
