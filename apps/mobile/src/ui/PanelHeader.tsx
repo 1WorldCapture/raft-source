@@ -8,11 +8,13 @@ export function PanelHeader({
   title,
   subtitle,
   onBack,
+  onTitlePress,
   actions,
 }: {
   title: string;
   subtitle?: string;
   onBack?: () => void;
+  onTitlePress?: () => void;
   actions?: ReactNode;
 }) {
   const { height } = useWindowDimensions();
@@ -23,10 +25,10 @@ export function PanelHeader({
           <ArrowLeft color={color.ink} size={18} />
         </Pressable>
       ) : null}
-      <View style={styles.titles}>
+      <Pressable disabled={!onTitlePress} onPress={onTitlePress} style={styles.titles}>
         <AppText numberOfLines={1} style={styles.title}>{title}</AppText>
         {subtitle ? <AppText numberOfLines={1} style={styles.subtitle}>{subtitle}</AppText> : null}
-      </View>
+      </Pressable>
       <View style={styles.actions}>{actions}</View>
     </View>
   );

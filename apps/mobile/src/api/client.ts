@@ -261,6 +261,10 @@ export function createApiClient(options: ApiClientOptions) {
       request<T>(path, { ...init, method: "GET" }),
     post: <T = unknown>(path: string, body?: unknown, init?: Omit<RequestOptions, "method" | "body">) =>
       request<T>(path, { ...init, method: "POST", body }),
+    patch: <T = unknown>(path: string, body?: unknown, init?: Omit<RequestOptions, "method" | "body">) =>
+      request<T>(path, { ...init, method: "PATCH", body }),
+    delete: <T = unknown>(path: string, body?: unknown, init?: Omit<RequestOptions, "method" | "body">) =>
+      request<T>(path, { ...init, method: "DELETE", body }),
     upload: uploadForm,
   };
 }

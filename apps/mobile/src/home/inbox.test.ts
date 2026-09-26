@@ -12,17 +12,20 @@ test("parseInbox uses inbox fields and the unread total", () => {
         kind: "thread",
         threadChannelId: "thread-1",
         parentChannelId: "all",
+        parentMessageId: "message-1",
         parentChannelName: "all",
         latestActivityPreview: "reply",
       },
     ],
   });
   assert.equal(parsed.totalUnreadCount, 4);
-  assert.deepEqual(parsed.rows.map((row) => [row.title, row.channelId]), [
-    ["hello", "all"],
-    ["ping", "dm-1"],
-    ["reply", "thread-1"],
+  assert.deepEqual(parsed.rows.map((row) => [row.kind, row.title, row.channelId]), [
+    ["channel", "hello", "all"],
+    ["dm", "ping", "dm-1"],
+    ["thread", "reply", "thread-1"],
   ]);
+  assert.equal(parsed.rows[2]?.parentChannelId, "all");
+  assert.equal(parsed.rows[2]?.parentMessageId, "message-1");
 });
 
 test("parseInbox does not use the row index as a title", () => {
