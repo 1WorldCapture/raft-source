@@ -1,3 +1,5 @@
+import { normalizeTimeFormatPreference } from "@botiverse/raft-shared/src/timeFormatPreference.ts";
+
 export interface MessageTimeOptions {
   now: Date;
   hour12?: boolean;
@@ -54,19 +56,43 @@ interface ZonedParts {
   dayKey: string;
 }
 
+const formatters = new Map<string, Intl.DateTimeFormat>();
+
 function zonedParts(date: Date, timeZone?: string): ZonedParts {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(date);
+  const key = timeZone ?? "";
+  let formatter = formatters.get(key);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    });
+    formatters.set(key, formatter);
+  }
+  const parts = formatter.formatToParts(date);
   const read = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
   const year = read("year");
   const month = read("month");
   const day = read("day");
   return { year, month, day, hour: read("hour"), minute: read("minute"), dayKey: `${year}-${month}-${day}` };
+}
+
+/** User preference wins. Otherwise follow the locale the way the web client does. */
+export function resolveHour12(preferred: unknown, locale?: string): boolean {
+  const format = normalizeTimeFormatPreference(preferred);
+  if (format === "12h") return true;
+  if (format === "24h") return false;
+  const resolved = new Intl.DateTimeFormat(locale, { hour: "numeric" }).resolvedOptions();
+  if (resolved.hour12 === false || resolved.hourCycle === "h23" || resolved.hourCycle === "h24") return false;
+  return true;
+}
+
+export function resolveTimeZone(preferred: string | null | undefined): string | undefined {
+  const trimmed = preferred?.trim();
+  if (trimmed) return trimmed;
+  return Intl.DateTimeFormat().resolvedOptions().timeZone;
 }

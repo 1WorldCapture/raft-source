@@ -1,3 +1,4 @@
+import { extractRaftRefTargets } from "@botiverse/raft-shared/src/raftRefs.ts";
 import type { MessageMention } from "./messages";
 
 export type InlineToken =
@@ -7,9 +8,7 @@ export type InlineToken =
   | { kind: "thread"; text: string }
   | { kind: "task"; text: string };
 
-const REF = /(^|[\s])((?:task #\d+)|(?:#[\p{L}\p{N}_-]+:[A-Za-z0-9]+)|(?:#[\p{L}\p{N}_-]+))/giu;
-
-/** Split plain text into mention chips and #channel / thread / task chips. */
+/** Split plain text into mention chips and raft ref chips. Ref grammar comes from `raftRefs`. */
 export function inlineTokens(
   text: string,
   mentions: MessageMention[] | undefined,
@@ -47,18 +46,19 @@ function mentionPattern(mentions: MessageMention[] | undefined): RegExp | null {
 }
 
 function refTokens(text: string): InlineToken[] {
+  const refs = extractRaftRefTargets(text, { dedupe: false }).filter((ref) => ref.target.kind !== "user");
   const tokens: InlineToken[] = [];
   let cursor = 0;
-  for (const match of text.matchAll(REF)) {
-    const start = match.index ?? 0;
-    const lead = match[1] ?? "";
-    const chip = match[2] ?? "";
-    const chipStart = start + lead.length;
-    if (chipStart > cursor) tokens.push({ kind: "text", text: text.slice(cursor, chipStart) });
-    if (/^task #\d+$/i.test(chip)) tokens.push({ kind: "task", text: chip });
-    else if (chip.includes(":")) tokens.push({ kind: "thread", text: chip });
-    else tokens.push({ kind: "channel", text: chip });
-    cursor = chipStart + chip.length;
+  for (const ref of refs) {
+    if (ref.start < cursor) continue;
+    if (ref.start > cursor) tokens.push({ kind: "text", text: text.slice(cursor, ref.start) });
+    const kind = ref.target.kind === "task"
+      ? "task"
+      : ref.target.kind === "channel-thread" || ref.target.kind === "dm-thread" || ref.target.kind === "message" || ref.target.kind === "dm-message"
+        ? "thread"
+        : "channel";
+    tokens.push({ kind, text: text.slice(ref.start, ref.end) });
+    cursor = ref.end;
   }
   if (cursor < text.length) tokens.push({ kind: "text", text: text.slice(cursor) });
   return tokens.filter((token) => token.text.length > 0);

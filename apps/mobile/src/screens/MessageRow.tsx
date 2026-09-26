@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { memo, useState } from "react";
 import { Image, Pressable, StyleSheet, View } from "react-native";
 import type { MessageAttachment, RaftMessage, ThreadReplyPreview } from "../model/messages";
 import { senderLabel } from "../model/messages";
@@ -18,7 +18,7 @@ export interface LinkedTaskChip {
 const COLLAPSE_AT = 320;
 
 /** Shared message row. Task #14 adds press and long-press on top of this layout. */
-export function MessageRow({
+export const MessageRow = memo(function MessageRow({
   message,
   group,
   timeLabel,
@@ -76,10 +76,10 @@ export function MessageRow({
   collapseLabel: string;
   savedLabel: string;
   readLabel: string;
-  onOpenThread?: () => void;
-  onResend?: () => void;
-  onDelete?: () => void;
-  onToggleSystem?: () => void;
+  onOpenThread?: (messageId: string) => void;
+  onResend?: (messageId: string) => void;
+  onDelete?: (messageId: string) => void;
+  onToggleSystem?: (messageId: string) => void;
   onOpenAttachment?: (attachment: MessageAttachment, disposition: "inline" | "attachment") => void;
   replyTime?: (createdAt: string) => string;
 }) {
@@ -99,7 +99,7 @@ export function MessageRow({
       ) : null}
       {system ? (
         systemCount && systemCount > 1 && !systemOpen ? (
-          <Pressable onPress={onToggleSystem}>
+          <Pressable onPress={() => onToggleSystem?.(message.id)}>
             <AppText style={styles.system}>{systemSummary ?? `${systemCount}`}</AppText>
           </Pressable>
         ) : (
@@ -187,7 +187,7 @@ export function MessageRow({
               {showDmRead ? <AppText style={styles.read}>{readLabel}</AppText> : null}
             </View>
             {onOpenThread && threadCountLabel ? (
-              <Pressable onPress={onOpenThread} style={styles.preview}>
+              <Pressable onPress={() => onOpenThread?.(message.id)} style={styles.preview}>
                 <AppText style={styles.previewCount}>{threadCountLabel}</AppText>
                 {threadReplies?.map((reply) => (
                   <View key={reply.messageId} style={styles.previewRow}>
@@ -207,8 +207,8 @@ export function MessageRow({
             {message.pending === "sending" ? <AppText style={styles.pending}>{sendingLabel}</AppText> : null}
             {message.pending === "failed" ? (
               <View style={styles.retryRow}>
-                <Pressable onPress={onResend}><AppText style={styles.retry}>{resendLabel}</AppText></Pressable>
-                <Pressable onPress={onDelete}><AppText style={styles.retry}>{deleteLabel}</AppText></Pressable>
+                <Pressable onPress={() => onResend?.(message.id)}><AppText style={styles.retry}>{resendLabel}</AppText></Pressable>
+                <Pressable onPress={() => onDelete?.(message.id)}><AppText style={styles.retry}>{deleteLabel}</AppText></Pressable>
               </View>
             ) : null}
           </View>
@@ -216,7 +216,7 @@ export function MessageRow({
       )}
     </View>
   );
-}
+});
 
 function isImage(attachment: MessageAttachment): boolean {
   if (attachment.mimeType?.toLowerCase().startsWith("image/")) return true;

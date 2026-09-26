@@ -1,4 +1,4 @@
-import { ScrollView, Text, View } from "react-native";
+import { Linking, ScrollView, Text, View } from "react-native";
 import { inlineTokens, type InlineToken } from "../model/inlineTokens";
 import { markdownPieces, type MarkdownPiece } from "../model/markdown";
 import type { MessageMention } from "../model/messages";
@@ -81,7 +81,17 @@ function inlinePiece(
     return <Text key={index} style={{ backgroundColor: color.inlineCode, fontFamily: "SpaceMono-400", fontSize: fontSize * 0.875 }}>{piece.text}</Text>;
   }
   if (piece.type === "link") {
-    return <Text key={index} style={{ color: color.link, textDecorationColor: color.link, textDecorationLine: "underline" }}>{piece.text}</Text>;
+    return (
+      <Text
+        key={index}
+        onPress={() => {
+          if (piece.url.startsWith("https://") || piece.url.startsWith("http://")) void Linking.openURL(piece.url);
+        }}
+        style={{ color: color.link, textDecorationColor: color.link, textDecorationLine: "underline" }}
+      >
+        {piece.text}
+      </Text>
+    );
   }
   if (piece.type === "text") return <Text key={index}>{tokens(piece.text, mentions, currentUserId, agentRead, fontSize)}</Text>;
   return null;

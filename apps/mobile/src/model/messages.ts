@@ -5,6 +5,8 @@ export interface RaftUser {
   displayName?: string | null;
   displayLanguage?: string | null;
   preferredMessageBodyFontSize?: string | null;
+  preferredTimeFormat?: string | null;
+  preferredTimezone?: string | null;
 }
 
 export interface MessageMention {
@@ -121,6 +123,8 @@ export function parseUser(value: unknown): RaftUser | null {
     displayName: typeof value.displayName === "string" ? value.displayName : null,
     displayLanguage: typeof value.displayLanguage === "string" ? value.displayLanguage : null,
     preferredMessageBodyFontSize: typeof value.preferredMessageBodyFontSize === "string" ? value.preferredMessageBodyFontSize : null,
+    preferredTimeFormat: typeof value.preferredTimeFormat === "string" ? value.preferredTimeFormat : null,
+    preferredTimezone: typeof value.preferredTimezone === "string" ? value.preferredTimezone : null,
   };
 }
 

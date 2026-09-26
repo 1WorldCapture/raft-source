@@ -13,6 +13,26 @@ export interface MessageGroupState {
   dayKey: string;
 }
 
+export function retainGroupStates(
+  previous: ReadonlyMap<string, MessageGroupState> | null,
+  next: Map<string, MessageGroupState>,
+): Map<string, MessageGroupState> {
+  if (!previous) return next;
+  for (const [id, state] of next) {
+    const old = previous.get(id);
+    if (
+      old
+      && old.isFirstInGroup === state.isFirstInGroup
+      && old.showAvatar === state.showAvatar
+      && old.showDayDivider === state.showDayDivider
+      && old.dayKey === state.dayKey
+    ) {
+      next.set(id, old);
+    }
+  }
+  return next;
+}
+
 /** Oldest-first. A row continues the previous group only for the same sender, the same local day, and when neither row is a system message or marked standalone. */
 export function computeMessageGrouping(
   messages: readonly GroupableMessage[],

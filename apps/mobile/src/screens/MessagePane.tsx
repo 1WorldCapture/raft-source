@@ -37,8 +37,9 @@ import { colors, space } from "../ui/theme";
 import { bodyFont, color } from "../ui/tokens";
 import { useT } from "../i18n/provider";
 import { MessageRow, type LinkedTaskChip } from "./MessageRow";
-import { computeMessageGrouping, hiddenSystemIds, systemRunHeads } from "./messageGrouping";
-import { formatDayLabel, formatMessageStamp } from "./messageTime";
+import { computeMessageGrouping, hiddenSystemIds, retainGroupStates, systemRunHeads } from "./messageGrouping";
+import { formatDayLabel, formatMessageStamp, resolveHour12, resolveTimeZone } from "./messageTime";
+import { newerMessageCount } from "./newerMessages";
 import { dmReadByPeer, parsePeerReads, type PeerRead } from "./readReceipt";
 
 const PAGE = 50;
@@ -103,13 +104,8 @@ export function MessagePane({
   const summaries = useRaftStore((state) => state.threadSummaries);
   const userId = session.user?.id;
   const t = useT();
-  const grouping = useMemo(() => {
-    const standalone = new Set<string>();
-    for (const message of messages) {
-      if (message.threadId || summaries[message.id]) standalone.add(message.id);
-    }
-    return computeMessageGrouping(messages, { standaloneIds: standalone });
-  }, [messages, summaries]);
+  const timeZone = resolveTimeZone(session.user?.preferredTimezone);
+  const hour12 = resolveHour12(session.user?.preferredTimeFormat);
   const systemHeads = useMemo(() => systemRunHeads(messages), [messages]);
   const body = bodyFont(session.user?.preferredMessageBodyFontSize);
   const [loading, setLoading] = useState(true);
@@ -131,12 +127,21 @@ export function MessagePane({
   const [tasksByMessage, setTasksByMessage] = useState<Map<string, LinkedTaskChip>>(new Map());
   const [openSystems, setOpenSystems] = useState<Set<string>>(new Set());
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const groupCache = useRef<Map<string, import("./messageGrouping").MessageGroupState> | null>(null);
+  const grouping = useMemo(() => {
+    const standalone = new Set<string>();
+    for (const message of messages) {
+      if (message.threadId || summaries[message.id] || tasksByMessage.has(message.id)) standalone.add(message.id);
+    }
+    const next = retainGroupStates(groupCache.current, computeMessageGrouping(messages, { standaloneIds: standalone, timeZone }));
+    groupCache.current = next;
+    return next;
+  }, [messages, summaries, tasksByMessage, timeZone]);
   const listRef = useRef<FlatList<RaftMessage>>(null);
   const nearBottom = useRef(true);
   const lastOffset = useRef(0);
-  const loadingOlderRef = useRef(false);
+  const newestSeq = useRef(0);
   const checkedSaved = useRef(new Set<string>());
-  const previousCount = useRef(messages.length);
   const hiddenSystems = useMemo(() => hiddenSystemIds(messages, openSystems), [messages, openSystems]);
 
   useLayoutEffect(() => {
@@ -177,7 +182,7 @@ export function MessagePane({
     setOpenSystems(new Set());
     setUnseen(0);
     setStickyAt(null);
-    previousCount.current = useRaftStore.getState().messagesByChannel[channelId]?.length ?? 0;
+    newestSeq.current = 0;
     const savedOffset = scrollOffsets.get(channelId) ?? 0;
     lastOffset.current = savedOffset;
     nearBottom.current = savedOffset < 100;
@@ -189,12 +194,12 @@ export function MessagePane({
   }, [channelId]);
 
   useEffect(() => {
-    const grew = messages.length - previousCount.current;
-    previousCount.current = messages.length;
-    if (grew <= 0 || loadingOlderRef.current) return;
-    if (nearBottom.current) setUnseen(0);
-    else setUnseen((count) => count + grew);
-  }, [messages.length]);
+    const { newest, added } = newerMessageCount(messages, newestSeq.current);
+    newestSeq.current = newest;
+    if (added <= 0) return;
+    if (nearBottom.current) setUnseen((count) => (count === 0 ? count : 0));
+    else setUnseen((count) => count + added);
+  }, [messages]);
 
   useEffect(() => {
     if (channelId === "pending-thread") return;
@@ -261,10 +266,9 @@ export function MessagePane({
   }, [channelId]);
 
   async function loadOlder() {
-    if (!hasMore || loadingOlder || loadingOlderRef.current) return;
+    if (!hasMore || loadingOlder) return;
     const before = minSeq(messages);
     if (before === null) return;
-    loadingOlderRef.current = true;
     setLoadingOlder(true);
     try {
       const data = await sessionRef.current.client.get<unknown>(`/messages/channel/${channelId}?limit=${PAGE}&before=${before}`);
@@ -276,7 +280,6 @@ export function MessagePane({
       if (caught instanceof StaleRequestError) return;
       setError(sendError(caught, t));
     } finally {
-      loadingOlderRef.current = false;
       setLoadingOlder(false);
     }
   }
@@ -427,7 +430,56 @@ export function MessagePane({
     if (createdAt) setStickyAt(createdAt);
   }).current;
   const query = mentionQuery(draft);
-  const timeOptions = { now: new Date(), yesterdayLabel: t("message.dateDivider.yesterday"), todayLabel: t("message.dateDivider.today") };
+  const [clock, setClock] = useState(() => new Date());
+  useEffect(() => {
+    const timer = setInterval(() => setClock(new Date()), 60_000);
+    return () => clearInterval(timer);
+  }, []);
+  const timeOptions = useMemo(() => ({
+    now: clock,
+    hour12,
+    timeZone,
+    yesterdayLabel: t("message.dateDivider.yesterday"),
+    todayLabel: t("message.dateDivider.today"),
+  }), [clock, hour12, t, timeZone]);
+  const reversed = useMemo(() => [...messages].reverse(), [messages]);
+  const sendRef = useRef(send);
+  sendRef.current = send;
+  const openThread = useCallback((messageId: string) => {
+    const summary = useRaftStore.getState().threadSummaries[messageId];
+    const message = (useRaftStore.getState().messagesByChannel[channelId] ?? []).find((item) => item.id === messageId);
+    router.push({
+      pathname: "/thread/[threadId]",
+      params: {
+        threadId: summary?.threadChannelId ?? message?.threadId ?? "pending-thread",
+        parentChannelId: channelId,
+        parentMessageId: messageId,
+        title: t("message.threadPanel.thread"),
+      },
+    });
+  }, [channelId, router, t]);
+  const resendMessage = useCallback((messageId: string) => {
+    const message = (useRaftStore.getState().messagesByChannel[channelId] ?? []).find((item) => item.id === messageId);
+    if (message) void sendRef.current(message);
+  }, [channelId]);
+  const deleteMessage = useCallback((messageId: string) => {
+    const message = (useRaftStore.getState().messagesByChannel[channelId] ?? []).find((item) => item.id === messageId);
+    if (message) removeFailed(message);
+  }, [channelId]);
+  const toggleSystem = useCallback((messageId: string) => {
+    setOpenSystems((current) => {
+      const next = new Set(current);
+      if (next.has(messageId)) next.delete(messageId);
+      else next.add(messageId);
+      return next;
+    });
+  }, []);
+  const openAttachmentRef = useRef(openAttachment);
+  openAttachmentRef.current = openAttachment;
+  const openAttachmentStable = useCallback((attachment: MessageAttachment, disposition: "inline" | "attachment") => {
+    void openAttachmentRef.current(attachment, disposition);
+  }, []);
+  const replyTime = useCallback((createdAt: string) => formatMessageStamp(createdAt, timeOptions), [timeOptions]);
 
   if (loading && messages.length === 0) {
     return <View style={styles.center}><ActivityIndicator color={colors.accent} /></View>;
@@ -442,7 +494,7 @@ export function MessagePane({
       <View style={styles.timeline}>
         <FlatList
           ref={listRef}
-          data={[...messages].reverse()}
+          data={reversed}
           inverted
           keyExtractor={(item) => item.id}
           maintainVisibleContentPosition={{ minIndexForVisible: 0, autoscrollToTopThreshold: 100 }}
@@ -486,27 +538,14 @@ export function MessagePane({
                 group={group}
                 linkedTask={tasksByMessage.get(item.id)}
                 message={item}
-                onDelete={() => removeFailed(item)}
-                onOpenAttachment={(attachment, disposition) => void openAttachment(attachment, disposition)}
-                onOpenThread={threadCountLabel ? () => router.push({
-                  pathname: "/thread/[threadId]",
-                  params: {
-                    threadId: summary?.threadChannelId ?? item.threadId ?? "pending-thread",
-                    parentChannelId: channelId,
-                    parentMessageId: item.id,
-                    title: t("message.threadPanel.thread"),
-                  },
-                }) : undefined}
-                onResend={() => void send(item)}
-                onToggleSystem={() => setOpenSystems((current) => {
-                  const next = new Set(current);
-                  if (next.has(item.id)) next.delete(item.id);
-                  else next.add(item.id);
-                  return next;
-                })}
+                onDelete={deleteMessage}
+                onOpenAttachment={openAttachmentStable}
+                onOpenThread={threadCountLabel ? openThread : undefined}
+                onResend={resendMessage}
+                onToggleSystem={toggleSystem}
                 peers={peers}
                 readLabel={t("message.messageItem.read")}
-                replyTime={(createdAt) => formatMessageStamp(createdAt, timeOptions)}
+                replyTime={replyTime}
                 resendLabel={t("mobile.messages.resend")}
                 saved={savedIds.has(item.id)}
                 savedLabel={t("message.messageItem.saved")}
