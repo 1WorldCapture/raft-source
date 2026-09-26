@@ -40,7 +40,7 @@ export default function TasksScreen() {
   const load = useCallback(async () => {
     setError(null);
     try {
-      const data = await session.client.get<unknown>("/tasks/server");
+      const data = await session.client.get<unknown>("/tasks/server?detail=summary");
       setTasks(parseTasks(data));
     } catch (caught) {
       if (caught instanceof StaleRequestError) return;

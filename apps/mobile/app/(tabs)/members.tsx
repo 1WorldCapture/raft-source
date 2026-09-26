@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { FlatList, Pressable, StyleSheet, View } from "react-native";
+import { Alert, FlatList, Pressable, StyleSheet, View } from "react-native";
 import { useFocusEffect, useRouter } from "expo-router";
 import { ApiError, StaleRequestError } from "../../src/api/client";
 import { useT } from "../../src/i18n/provider";
@@ -58,7 +58,7 @@ export default function MembersScreen() {
       router.push({ pathname: "/messages/[channelId]", params: { channelId: id, name: person.name } });
     } catch (caught) {
       if (caught instanceof StaleRequestError) return;
-      setError(t("mobile.members.openFailed"));
+      Alert.alert(t("mobile.members.openFailed"));
     }
   }, [router, session.client, t]);
 
@@ -91,7 +91,7 @@ export default function MembersScreen() {
 function parseAgents(data: unknown): Person[] {
   const list = Array.isArray(data) ? data : isRecord(data) && Array.isArray(data.agents) ? data.agents : [];
   return list.flatMap((item) => {
-    if (!isRecord(item) || typeof item.id !== "string") return [];
+    if (!isRecord(item) || typeof item.id !== "string" || item.deletedAt) return [];
     const name = stringField(item.displayName) || stringField(item.name) || item.id;
     return [{ id: item.id, name, kind: "agent", avatarUrl: stringField(item.avatarUrl), status: agentStatus(item), section: "search.scopeAgents" }];
   });

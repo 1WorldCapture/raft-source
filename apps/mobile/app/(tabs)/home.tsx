@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Alert, BackHandler, FlatList, Modal, Pressable, StyleSheet, View, useWindowDimensions } from "react-native";
 import { useFocusEffect, useRouter } from "expo-router";
 import { Bell, ChevronDown, Hash, Pencil, Search } from "lucide-react-native";
 import { ApiError, StaleRequestError } from "../../src/api/client";
 import { groupHasUnread, groupHomeChannels, pinnedChannelIds, type HomeGroups } from "../../src/home/directory";
+import { parseInbox } from "../../src/home/inbox";
 import { channelHasDraft } from "../../src/home/drafts";
 import { setCurrentServerRole } from "../../src/home/serverRole";
 import { useT } from "../../src/i18n/provider";
@@ -33,11 +34,12 @@ export default function HomeScreen() {
   const [menu, setMenu] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const loadTicket = useRef(0);
 
   const current = servers.find((server) => server.id === session.serverId) ?? null;
   const { height } = useWindowDimensions();
 
-  const loadServers = useCallback(async () => {
+  const loadServers = useCallback(async (preferredId: string | null) => {
     const [serverData, unreadData] = await Promise.all([
       session.client.get<unknown>("/servers", { server: false }),
       session.client.get<unknown>("/servers/unread-summary", { server: false }),
@@ -45,47 +47,50 @@ export default function HomeScreen() {
     const next = parseServers(serverData);
     setServers(next);
     setServerUnread(parseUnreadSummary(unreadData));
-    const selected = next.find((server) => server.id === session.serverId) ?? next[0] ?? null;
+    const selected = next.find((server) => server.id === preferredId) ?? next[0] ?? null;
     setCurrentServerRole(selected?.role ?? null);
     if (selected && selected.id !== session.serverId) await session.selectServer(selected.id);
     return selected;
   }, [session]);
 
-  const loadDirectory = useCallback(async (serverId: string) => {
+  const loadDirectory = useCallback(async (serverId: string, ticket: number) => {
     const [channelData, dmData, unreadData, orderData, inboxData] = await Promise.all([
       session.client.get<unknown>("/channels?archived=exclude"),
       session.client.get<unknown>("/channels/dm"),
       session.client.get<unknown>("/channels/unread?summary=1"),
-      session.client.get<unknown>(`/servers/${serverId}/sidebar-order`).catch(() => ({})),
-      session.client.get<unknown>("/channels/inbox?limit=20").catch(() => ({})),
+      optionalGet(session.client, `/servers/${serverId}/sidebar-order`),
+      optionalGet(session.client, "/channels/inbox?limit=20"),
     ]);
+    if (ticket !== loadTicket.current) return;
     const channels = parseChannels(channelData).filter((channel) => channel.type !== "dm");
     const dms = parseChannels(dmData).map((channel) => ({ ...channel, type: channel.type || "dm" }));
     useRaftStore.getState().setChannelUnread(parseChannelUnread(unreadData));
     setGroups(groupHomeChannels([...channels, ...dms], pinnedChannelIds(orderData)));
-    setActivityCount(countItems(inboxData));
+    setActivityCount(parseInbox(inboxData).totalUnreadCount);
   }, [session.client]);
 
-  const load = useCallback(async () => {
+  const loadFor = useCallback(async (preferredId: string | null) => {
+    const ticket = ++loadTicket.current;
     setError(null);
     try {
-      const selected = await loadServers();
+      const selected = await loadServers(preferredId);
+      if (ticket !== loadTicket.current) return;
       if (!selected) {
         setGroups(EMPTY_GROUPS);
         return;
       }
-      await loadDirectory(selected.id);
+      await loadDirectory(selected.id, ticket);
     } catch (caught) {
-      if (caught instanceof StaleRequestError) return;
+      if (ticket !== loadTicket.current || caught instanceof StaleRequestError) return;
       setError(caught instanceof ApiError ? caught.message : t("mobile.channels.loadFailed"));
     } finally {
-      setLoading(false);
+      if (ticket === loadTicket.current) setLoading(false);
     }
   }, [loadDirectory, loadServers, t]);
 
   useFocusEffect(useCallback(() => {
-    void load();
-  }, [load, directoryVersion]));
+    void loadFor(session.serverId);
+  }, [loadFor, directoryVersion, session.serverId]));
 
   useEffect(() => {
     if (!menu) return;
@@ -100,6 +105,7 @@ export default function HomeScreen() {
     Alert.alert(channelLabel(channel), undefined, [
       { text: t("layout.sidebar.markAsRead"), onPress: () => void session.client.post(`/channels/${channel.id}/read-all`).then(() => {
         useRaftStore.getState().clearChannelUnread(channel.id);
+        useRaftStore.getState().clearLiveUnread(channel.id);
       }).catch(() => Alert.alert(t("mobile.channels.loadFailed"))) },
       { text: t("search.back"), style: "cancel" },
     ]);
@@ -158,7 +164,13 @@ export default function HomeScreen() {
             {servers.map((server) => (
               <Pressable key={server.id} onPress={() => {
                 setMenu(false);
-                void session.selectServer(server.id).then(() => load());
+                if (server.id === session.serverId) return;
+                setGroups(EMPTY_GROUPS);
+                setActivityCount(0);
+                setLoading(true);
+                setError(null);
+                setCurrentServerRole(server.role ?? null);
+                void session.selectServer(server.id).then(() => loadFor(server.id));
               }} style={[styles.menuRow, server.id === current?.id ? styles.menuCurrent : null]}>
                 <AppText style={styles.serverName}>{server.name}</AppText>
                 {(serverUnread[server.id] ?? 0) > 0 && server.id !== current?.id ? <View style={styles.dot} /> : null}
@@ -198,11 +210,13 @@ function ChannelRow({ channel, onOpen, onLongPress }: { channel: RaftChannel; on
   );
 }
 
-function countItems(data: unknown): number {
-  if (!data || typeof data !== "object") return 0;
-  const record = data as { total?: unknown; items?: unknown };
-  if (typeof record.total === "number") return record.total;
-  return Array.isArray(record.items) ? record.items.length : 0;
+async function optionalGet(client: { get: (path: string) => Promise<unknown> }, path: string): Promise<unknown> {
+  try {
+    return await client.get(path);
+  } catch (caught) {
+    if (caught instanceof StaleRequestError) throw caught;
+    return {};
+  }
 }
 
 const styles = StyleSheet.create({
