@@ -35,23 +35,28 @@ export default function HomeScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const loadTicket = useRef(0);
+  const sessionRef = useRef(session);
+  sessionRef.current = session;
 
   const current = servers.find((server) => server.id === session.serverId) ?? null;
   const { height } = useWindowDimensions();
 
   const loadServers = useCallback(async (preferredId: string | null) => {
+    const currentSession = sessionRef.current;
     const [serverData, unreadData] = await Promise.all([
-      session.client.get<unknown>("/servers", { server: false }),
-      session.client.get<unknown>("/servers/unread-summary", { server: false }),
+      currentSession.client.get<unknown>("/servers", { server: false }),
+      currentSession.client.get<unknown>("/servers/unread-summary", { server: false }),
     ]);
     const next = parseServers(serverData);
     setServers(next);
     setServerUnread(parseUnreadSummary(unreadData));
     const selected = next.find((server) => server.id === preferredId) ?? next[0] ?? null;
     setCurrentServerRole(selected?.role ?? null);
-    if (selected && selected.id !== session.serverId) await session.selectServer(selected.id);
+    // Use the id this load was given, not a serverId closed over from an earlier render.
+    const activeId = preferredId ?? sessionRef.current.serverId;
+    if (selected && selected.id !== activeId) await sessionRef.current.selectServer(selected.id);
     return selected;
-  }, [session]);
+  }, []);
 
   const loadDirectory = useCallback(async (serverId: string, ticket: number) => {
     const [channelData, dmData, unreadData, orderData, inboxData] = await Promise.all([
@@ -89,8 +94,9 @@ export default function HomeScreen() {
   }, [loadDirectory, loadServers, t]);
 
   useFocusEffect(useCallback(() => {
+    if (!session.ready) return;
     void loadFor(session.serverId);
-  }, [loadFor, directoryVersion, session.serverId]));
+  }, [loadFor, directoryVersion, session.ready, session.serverId]));
 
   useEffect(() => {
     if (!menu) return;

@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 import Constants from "expo-constants";
+import { getLocales } from "expo-localization";
 import { useRouter } from "expo-router";
+import { resolveLocale } from "../../src/i18n/catalog";
 import { useT } from "../../src/i18n/provider";
 import { userLabel } from "../../src/model/messages";
 import { useSession } from "../../src/state/session";
@@ -21,7 +23,7 @@ export default function SettingsScreen() {
   const t = useT();
   const [error, setError] = useState<string | null>(null);
   const font = session.user?.preferredMessageBodyFontSize || "md";
-  const language = session.user?.displayLanguage?.toLowerCase().startsWith("zh") ? "zh-cn" : "en";
+  const language = resolveLocale(session.user?.displayLanguage, getLocales()[0]?.languageTag ?? null);
 
   async function save(fields: { displayLanguage?: string; preferredMessageBodyFontSize?: "sm" | "md" | "lg" }) {
     setError(null);
