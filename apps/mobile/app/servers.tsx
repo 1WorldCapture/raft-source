@@ -1,7 +1,7 @@
 import { useCallback, useState } from "react";
 import { useFocusEffect, useRouter } from "expo-router";
 import { FlatList, Pressable, StyleSheet, Text, View } from "react-native";
-import { ApiError } from "../src/api/client";
+import { ApiError, StaleRequestError } from "../src/api/client";
 import { parseServers, parseUnreadSummary, userLabel, type RaftServer } from "../src/model/messages";
 import { useSession } from "../src/state/session";
 import { LoadingScreen, ScreenMessage } from "../src/ui/screen";
@@ -25,6 +25,7 @@ export default function ServersScreen() {
       setServers(parseServers(serverData));
       setUnread(parseUnreadSummary(unreadData));
     } catch (caught) {
+      if (caught instanceof StaleRequestError) return;
       setError(caught instanceof ApiError ? caught.message : "Couldn't load servers");
     } finally {
       setLoading(false);

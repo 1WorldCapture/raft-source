@@ -1,7 +1,7 @@
 import { io, type Socket } from "socket.io-client";
 import { shouldLogoutAfterRefresh } from "../api/client";
 import { isRecord, parseMessage, type RaftMessage, type ThreadSummary } from "../model/messages";
-import { hasSeqGap } from "../model/reconcile";
+import { authFailureAction, authRetryDelayMs } from "./authRetry";
 import { parseAccessTokenExp, planReconnectAuthRefresh } from "./reconnectAuth";
 
 export interface RealtimeOptions {
@@ -18,7 +18,6 @@ export interface RealtimeOptions {
   onReadState: (channelId: string) => void;
   onDirectoryChanged: (joinChannelId?: string) => void;
   onRoomsJoined: () => void;
-  onGap: (channelId: string, sinceSeq: number) => void;
 }
 
 const HEARTBEAT_STALE_MS = 90_000;
@@ -42,6 +41,8 @@ export function createRealtime(options: RealtimeOptions) {
   let lastHeartbeat = 0;
   let watchdog: ReturnType<typeof setInterval> | null = null;
   let refreshedAfterAuthRejection = false;
+  let authRetryAttempt = 0;
+  let authRetryTimer: ReturnType<typeof setTimeout> | null = null;
   const joinedThreads = new Set<string>();
 
   function freshAuth(): Record<string, unknown> {
@@ -90,6 +91,42 @@ export function createRealtime(options: RealtimeOptions) {
     return refreshInFlight;
   }
 
+  function clearAuthRetry() {
+    if (!authRetryTimer) return;
+    clearTimeout(authRetryTimer);
+    authRetryTimer = null;
+  }
+
+  function scheduleAuthRetry(current: Socket) {
+    if (authRetryTimer) return;
+    const delay = authRetryDelayMs(authRetryAttempt);
+    authRetryAttempt += 1;
+    current.io.reconnection(false);
+    authRetryTimer = setTimeout(() => {
+      authRetryTimer = null;
+      if (socket !== current) return;
+      void refreshAuthBeforeHandshake(current, true).then((ok) => {
+        if (socket !== current) return;
+        const action = authFailureAction({
+          refreshOk: ok,
+          hasAccessToken: Boolean(options.getAccessToken()),
+          alreadyRefreshed: false,
+        });
+        if (action === "stop") {
+          current.io.reconnection(false);
+          current.disconnect();
+          return;
+        }
+        if (action === "retry-later") {
+          scheduleAuthRetry(current);
+          return;
+        }
+        current.io.reconnection(true);
+        current.auth = freshAuth();
+        current.connect();
+      });
+    }, delay);
+  }
   function rejoinThreads() {
     if (!socket) return;
     for (const channelId of joinedThreads) socket.emit("join:channel", channelId);
@@ -109,8 +146,6 @@ export function createRealtime(options: RealtimeOptions) {
     created.on("message:new", (payload: unknown) => {
       const message = parseMessage(payload);
       if (!message) return;
-      const lastSeq = options.getLastSeq();
-      if (hasSeqGap(lastSeq, message.seq)) options.onGap(message.channelId, lastSeq);
       options.onMessage(message);
     });
     created.on("message:updated", (payload: unknown) => {
@@ -159,17 +194,22 @@ export function createRealtime(options: RealtimeOptions) {
     created.on("connect_error", (error: Error) => {
       if (!looksLikeAuthFailure(error.message)) return;
       if (refreshInFlight) return;
-      if (refreshedAfterAuthRejection) {
-        created.io.reconnection(false);
-        created.disconnect();
-        return;
-      }
-      refreshedAfterAuthRejection = true;
       void refreshAuthBeforeHandshake(created, true).then((ok) => {
         if (socket !== created) return;
-        if (!ok || !options.getAccessToken()) {
+        const action = authFailureAction({
+          refreshOk: ok,
+          hasAccessToken: Boolean(options.getAccessToken()),
+          alreadyRefreshed: refreshedAfterAuthRejection,
+        });
+        if (ok) refreshedAfterAuthRejection = true;
+        if (action === "stop") {
+          clearAuthRetry();
           created.io.reconnection(false);
           created.disconnect();
+          return;
+        }
+        if (action === "retry-later") {
+          scheduleAuthRetry(created);
           return;
         }
         if (created.connected) return;
@@ -183,6 +223,8 @@ export function createRealtime(options: RealtimeOptions) {
     created.on("connect", () => {
       lastHeartbeat = Date.now();
       refreshedAfterAuthRejection = false;
+      authRetryAttempt = 0;
+      clearAuthRetry();
     });
     socket = created;
     return created;
@@ -206,6 +248,8 @@ export function createRealtime(options: RealtimeOptions) {
       const current = ensure();
       if (!current) return;
       refreshedAfterAuthRejection = false;
+      authRetryAttempt = 0;
+      clearAuthRetry();
       current.io.reconnection(true);
       current.auth = freshAuth();
       startWatchdog();
@@ -223,6 +267,9 @@ export function createRealtime(options: RealtimeOptions) {
     reset() {
       if (watchdog) clearInterval(watchdog);
       watchdog = null;
+      clearAuthRetry();
+      authRetryAttempt = 0;
+      refreshedAfterAuthRejection = false;
       joinedThreads.clear();
       if (!socket) return;
       socket.removeAllListeners();

@@ -4,9 +4,10 @@ import * as SecureStore from "expo-secure-store";
 import { ApiError, createApiClient, shouldLogoutAfterRefresh, type ApiClient, type TokenPair } from "../api/client";
 import { createInstallationId } from "../api/ids";
 import { syncSince } from "../api/sync";
-import { parseUser, type RaftUser } from "../model/messages";
+import { parseChannelUnread, parseUser, type RaftUser } from "../model/messages";
 import { createRealtime, type Realtime } from "../realtime/socket";
 import { BUNDLED_SERVER_ORIGIN } from "../session/origin";
+import { shouldApplyServerResponse, shouldCommitTokens, shouldMarkVisibleRead, catchUpPlan, releaseFocus } from "./sessionPolicy";
 import { useRaftStore } from "./store";
 
 const ORIGIN = "raft_mobile_origin";
@@ -49,6 +50,7 @@ export interface SessionApi {
   joinThread: (threadChannelId: string) => void;
   leaveThread: (threadChannelId: string) => void;
   setFocusedChannelId: (channelId: string | null) => void;
+  clearFocusedChannelId: (channelId: string) => void;
 }
 
 const SessionContext = createContext<SessionApi | null>(null);
@@ -79,6 +81,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const backgroundAt = useRef<number | null>(null);
   const pendingReads = useRef(new Map<string, number>());
   const realtimeRef = useRef<Realtime | null>(null);
+  const authEpoch = useRef(0);
+  const serverEpoch = useRef(0);
+  const markReadRef = useRef<(channelId: string, seq: number) => Promise<void>>(async () => {});
 
   function apply(patch: Partial<Snapshot>) {
     snapshotRef.current = { ...snapshotRef.current, ...patch };
@@ -106,7 +111,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     ]);
   }
 
+  function bumpServerEpoch() {
+    serverEpoch.current += 1;
+    pendingReads.current.clear();
+  }
+
   function clearAuth() {
+    authEpoch.current += 1;
+    bumpServerEpoch();
     apply({ accessToken: null, refreshToken: null, user: null, serverId: null });
     useRaftStore.getState().clearServerData();
     useRaftStore.getState().setNotice(null);
@@ -121,9 +133,17 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     getRefreshToken: () => snapshotRef.current.refreshToken,
     getServerId: () => snapshotRef.current.serverId,
     getInstallationId: () => snapshotRef.current.installationId,
-    setTokens: (tokens) => {
+    getAuthEpoch: () => authEpoch.current,
+    getServerEpoch: () => serverEpoch.current,
+    setTokens: async (tokens, startedAuthEpoch) => {
+      const started = startedAuthEpoch ?? authEpoch.current;
+      if (!shouldCommitTokens(started, authEpoch.current)) return;
+      await persistTokens(tokens);
+      if (!shouldCommitTokens(started, authEpoch.current)) {
+        await persistTokens(null);
+        return;
+      }
       apply({ accessToken: tokens.accessToken, refreshToken: tokens.refreshToken });
-      void persistTokens(tokens);
       realtimeRef.current?.syncAuth();
     },
     onSessionExpired: () => {
@@ -141,15 +161,30 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     onSessionExpired: () => clearAuth(),
     onMessage: (message) => {
       useRaftStore.getState().upsertMessages([message]);
-      if (message.channelId !== focusedRef.current) useRaftStore.getState().bumpLiveUnread(message.channelId);
+      if (shouldMarkVisibleRead(focusedRef.current, message.channelId)) {
+        useRaftStore.getState().clearLiveUnread(message.channelId);
+        if (typeof message.seq === "number") void markReadRef.current(message.channelId, message.seq);
+        return;
+      }
+      useRaftStore.getState().bumpLiveUnread(message.channelId);
     },
     onCatchUp: (messages, hasMore) => {
+      const epoch = serverEpoch.current;
       useRaftStore.getState().upsertMessages(messages);
+      const plan = catchUpPlan(hasMore);
+      if (plan.refreshDirectory) useRaftStore.getState().bumpDirectory();
+      if (plan.refreshUnread) {
+        void client.get<unknown>("/channels/unread?summary=1").then((unreadData) => {
+          if (!shouldApplyServerResponse(epoch, serverEpoch.current)) return;
+          useRaftStore.getState().setChannelUnread(parseChannelUnread(unreadData));
+        }).catch(() => {});
+      }
       if (!hasMore) return;
       const channelId = focusedRef.current;
       const since = useRaftStore.getState().lastSeq;
       if (!channelId || since <= 0) return;
       void syncSince(client, since, channelId).then((page) => {
+        if (!shouldApplyServerResponse(epoch, serverEpoch.current)) return;
         useRaftStore.getState().upsertMessages(page);
       }).catch(() => {});
     },
@@ -170,11 +205,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     },
     onRoomsJoined: () => {
       useRaftStore.getState().bumpDirectory();
-    },
-    onGap: (channelId, sinceSeq) => {
-      void syncSince(client, sinceSeq, channelId).then((page) => {
-        useRaftStore.getState().upsertMessages(page);
-      }).catch(() => {});
     },
   }), [client]);
   realtimeRef.current = realtime;
@@ -318,7 +348,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       }
     },
     selectServer: async (serverId: string) => {
-      if (snapshotRef.current.serverId !== serverId) useRaftStore.getState().clearServerData();
+      if (snapshotRef.current.serverId !== serverId) {
+        bumpServerEpoch();
+        useRaftStore.getState().clearServerData();
+      }
       apply({ serverId });
       await SecureStore.setItemAsync(SERVER, serverId);
       realtime.reset();
@@ -345,7 +378,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       focusedRef.current = channelId;
       if (channelId) useRaftStore.getState().clearLiveUnread(channelId);
     },
+    clearFocusedChannelId: (channelId: string) => {
+      focusedRef.current = releaseFocus(focusedRef.current, channelId);
+    },
   }), [client, realtime, snapshot]);
+  markReadRef.current = api.markRead;
 
   return <SessionContext.Provider value={api}>{children}</SessionContext.Provider>;
 }

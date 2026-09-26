@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useLocalSearchParams } from "expo-router";
-import { ApiError } from "../../src/api/client";
+import { ApiError, StaleRequestError } from "../../src/api/client";
 import { isRecord } from "../../src/model/messages";
 import { MessagePane } from "../../src/screens/MessagePane";
 import { useSession } from "../../src/state/session";
@@ -36,7 +36,7 @@ export default function ThreadScreen() {
           setMissing(false);
         }
       } catch (caught) {
-        if (cancelled) return;
+        if (cancelled || caught instanceof StaleRequestError) return;
         if (caught instanceof ApiError && caught.status === 404) {
           setMissing(true);
           setThreadChannelId(null);
