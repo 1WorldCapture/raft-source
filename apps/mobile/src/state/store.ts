@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { useActivityStore } from "../activity/store";
+import { useTaskStore } from "../tasks/store";
 import { maxSeq } from "../model/messages";
 import { reconcileIncoming } from "../model/reconcile";
 import type { ChannelUnreadEntry, RaftMessage, ThreadSummary } from "../model/messages";
@@ -91,6 +92,7 @@ export const useRaftStore = create<RaftDataState>((set) => ({
   setNotice: (notice) => set({ notice }),
   clearServerData: () => {
     useActivityStore.getState().reset();
+    useTaskStore.getState().reset();
     set({
       messagesByChannel: {},
       threadSummaries: {},

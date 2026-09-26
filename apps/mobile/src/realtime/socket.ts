@@ -19,6 +19,11 @@ export interface RealtimeOptions {
   onReadStateBulk: (scopeIds: string[]) => void;
   onDirectoryChanged: (joinChannelId?: string) => void;
   onRoomsJoined: () => void;
+  onConnect: () => void;
+  onDisconnect: () => void;
+  onTaskCreated: (payload: unknown) => void;
+  onTaskUpdated: (payload: unknown) => void;
+  onTaskDeleted: (payload: unknown) => void;
 }
 
 const HEARTBEAT_STALE_MS = 90_000;
@@ -233,6 +238,19 @@ export function createRealtime(options: RealtimeOptions) {
       refreshedAfterAuthRejection = false;
       authRetryAttempt = 0;
       clearAuthRetry();
+      options.onConnect();
+    });
+    created.on("disconnect", () => {
+      options.onDisconnect();
+    });
+    created.on("task:created", (payload: unknown) => {
+      options.onTaskCreated(payload);
+    });
+    created.on("task:updated", (payload: unknown) => {
+      options.onTaskUpdated(payload);
+    });
+    created.on("task:deleted", (payload: unknown) => {
+      options.onTaskDeleted(payload);
     });
     socket = created;
     return created;
