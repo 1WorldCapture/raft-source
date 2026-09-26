@@ -16,3 +16,22 @@ export function collectSenderAvatars(agents: unknown, members: unknown): Record<
   add(isRecord(members) && Array.isArray(members.members) ? members.members : members, "userId");
   return map;
 }
+
+/** Prefer a directory name over the raw sender name carried on an inbox row. */
+export function collectSenderNames(agents: unknown, members: unknown): Record<string, string> {
+  const map: Record<string, string> = {};
+  const add = (list: unknown, idKey: "id" | "userId") => {
+    if (!Array.isArray(list)) return;
+    for (const item of list) {
+      if (!isRecord(item) || item.deletedAt) continue;
+      const id = item[idKey];
+      const displayName = typeof item.displayName === "string" ? item.displayName.trim() : "";
+      const name = typeof item.name === "string" ? item.name.trim() : "";
+      const label = displayName || name;
+      if (typeof id === "string" && label) map[id] = label;
+    }
+  };
+  add(isRecord(agents) && Array.isArray(agents.agents) ? agents.agents : agents, "id");
+  add(isRecord(members) && Array.isArray(members.members) ? members.members : members, "userId");
+  return map;
+}
