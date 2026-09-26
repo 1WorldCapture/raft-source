@@ -10,6 +10,9 @@ interface RaftDataState {
   lastSeq: number;
   directoryVersion: number;
   notice: "verify-email" | "profile-setup" | null;
+  /** Sender id → avatar URL from `/agents` and server members; messages do not carry avatars. */
+  senderAvatars: Record<string, string>;
+  setSenderAvatars: (avatars: Record<string, string>) => void;
   upsertMessages: (incoming: RaftMessage[]) => void;
   setThreadSummaries: (summaries: Record<string, ThreadSummary>) => void;
   setChannelUnread: (unread: Record<string, ChannelUnreadEntry>) => void;
@@ -31,6 +34,8 @@ export const useRaftStore = create<RaftDataState>((set) => ({
   lastSeq: 0,
   directoryVersion: 0,
   notice: null,
+  senderAvatars: {},
+  setSenderAvatars: (avatars) => set({ senderAvatars: avatars }),
   upsertMessages: (incoming) => set((state) => {
     const messagesByChannel = { ...state.messagesByChannel };
     let lastSeq = state.lastSeq;
@@ -83,5 +88,6 @@ export const useRaftStore = create<RaftDataState>((set) => ({
     channelUnread: {},
     liveUnread: {},
     lastSeq: 0,
+    senderAvatars: {},
   }),
 }));

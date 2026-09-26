@@ -21,6 +21,8 @@ export interface MessageAttachment {
   thumbnailUrl?: string | null;
   mimeType?: string;
   sizeBytes?: number;
+  width?: number;
+  height?: number;
 }
 
 export interface MessageReaction {
@@ -245,6 +247,8 @@ function parseAttachments(value: unknown): MessageAttachment[] | undefined {
       id: typeof item.id === "string" ? item.id : undefined,
       filename: item.filename,
       thumbnailUrl: typeof item.thumbnailUrl === "string" ? item.thumbnailUrl : null,
+      width: typeof item.width === "number" && item.width > 0 ? item.width : undefined,
+      height: typeof item.height === "number" && item.height > 0 ? item.height : undefined,
       mimeType: typeof item.mimeType === "string" ? item.mimeType : undefined,
       sizeBytes: Number.isFinite(sizeBytes) ? sizeBytes : undefined,
     }];

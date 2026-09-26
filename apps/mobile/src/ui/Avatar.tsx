@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
-import { Animated, StyleSheet, View } from "react-native";
+import { Animated, Image, StyleSheet, View } from "react-native";
+import { User } from "lucide-react-native";
 import { pixelColor, resolvePixel } from "./pixelAvatar";
 import { AppText } from "./text";
 import { border, color, radius } from "./tokens";
@@ -21,6 +22,7 @@ export function Avatar({
   const stroke = size >= 36 ? border.strong : border.hairline;
   const fill = kind === "agent" ? color.cyan : kind === "server" ? color.ink : color.lavender;
   const letter = (name.trim()[0] || "?").toUpperCase();
+  const photo = !pixel && avatarUrl && /^https?:\/\//.test(avatarUrl) ? avatarUrl : null;
   return (
     <View style={{ width: size, height: size }}>
       <View style={[styles.box, { width: size, height: size, borderWidth: stroke, backgroundColor: pixel ? pixel.bg : fill }]}>
@@ -32,6 +34,10 @@ export function Avatar({
               ))}
             </View>
           ))
+        ) : photo ? (
+          <Image source={{ uri: photo }} style={{ width: size - stroke * 2, height: size - stroke * 2 }} />
+        ) : kind === "human" ? (
+          <User color={color.ink} size={Math.round(size * 0.5)} strokeWidth={2.25} />
         ) : (
           <AppText style={[styles.letter, { color: kind === "server" ? color.yellow : color.ink, fontSize: size * 0.42 }]}>{letter}</AppText>
         )}

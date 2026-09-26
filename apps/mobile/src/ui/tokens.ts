@@ -18,6 +18,8 @@ export const color = {
   link: "#1447E6",
   muted: "rgba(0, 0, 0, 0.45)",
   mutedStrong: "rgba(0, 0, 0, 0.5)",
+  /** Web `bg-black/[0.05]`: inline code and empty media frames. */
+  mutedFill: "rgba(0, 0, 0, 0.05)",
   pinkSoft: "rgba(254, 125, 168, 0.2)",
   pinkChip: "rgba(254, 125, 168, 0.3)",
   cyanSoft: "rgba(39, 204, 243, 0.3)",

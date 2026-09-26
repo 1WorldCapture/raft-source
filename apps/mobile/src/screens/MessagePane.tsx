@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useFocusEffect, useNavigation, useRouter } from "expo-router";
 import {
   ActivityIndicator,
@@ -18,7 +18,7 @@ import {
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from "react-native";
-import { Camera, Image as ImageIcon, ListChecks, Paperclip, Search, Settings } from "lucide-react-native";
+import { Camera, Hash, ImagePlus, ListChecks, Lock, MessageSquare, Paperclip, Search, SendHorizontal, Settings, Users } from "lucide-react-native";
 import { ApiError, StaleRequestError } from "../api/client";
 import { createRandomId } from "../api/ids";
 import {
@@ -40,14 +40,17 @@ import { useSession } from "../state/session";
 import { useRaftStore } from "../state/store";
 import { colors, space } from "../ui/theme";
 import { AppText } from "../ui/text";
-import { bodyFont, color } from "../ui/tokens";
+import { bodyFont, color, shadowOffset } from "../ui/tokens";
+import { Avatar } from "../ui/Avatar";
+import { collectSenderAvatars } from "./senderAvatars";
 import { useT } from "../i18n/provider";
 import { MessageRow, type LinkedTaskChip } from "./MessageRow";
 import { computeMessageGrouping, hiddenSystemIds, retainGroupStates, systemRunHeads } from "./messageGrouping";
 import { formatDayLabel, formatMessageStamp, resolveHour12, resolveTimeZone } from "./messageTime";
 import { newerMessageCount } from "./newerMessages";
 import { rankComposerSuggestions } from "../../../../packages/web/src/utils/composerSuggestionSearch";
-import { PanelHeader } from "../ui/PanelHeader";
+import { HeaderIconButton, HeaderIconSlot, PanelHeader } from "../ui/PanelHeader";
+import { HardShadow } from "../ui/shadow";
 import { Sheet } from "../ui/Sheet";
 import { channelQuery, parseUploadedAttachmentId, attachmentIdsForSend } from "./attachmentUpload";
 import { ChannelSettings } from "./ChannelSettings";
@@ -174,6 +177,23 @@ export function MessagePane({
   const slugRef = useRef<string | null>(null);
   const reactionFlight = useRef(new Set<string>());
   const settingsChannelId = thread && parentChannelId ? parentChannelId : thread ? null : channelId;
+  const [memberCount, setMemberCount] = useState<number | null>(null);
+  useEffect(() => {
+    if (!settingsChannelId || settingsChannelId === "pending-thread") return;
+    let cancelled = false;
+    void sessionRef.current.client.get<unknown>(`/channels/${settingsChannelId}/members`).then((data) => {
+      if (cancelled || !isRecord(data)) return;
+      let count = 0;
+      for (const key of ["humans", "agents", "externalMembers"] as const) {
+        const list = data[key];
+        if (Array.isArray(list)) count += list.length;
+      }
+      setMemberCount(count);
+    }).catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [settingsChannelId]);
   const groupCache = useRef<Map<string, import("./messageGrouping").MessageGroupState> | null>(null);
   const grouping = useMemo(() => {
     const standalone = new Set<string>();
@@ -707,6 +727,20 @@ export function MessagePane({
       return next;
     });
   }, []);
+  const imageUrls = useRef(new Map<string, Promise<string | null>>());
+  const resolveImageUrl = useCallback((attachment: MessageAttachment): Promise<string | null> => {
+    if (!attachment.id) return Promise.resolve(null);
+    const cached = imageUrls.current.get(attachment.id);
+    if (cached) return cached;
+    const pending = sessionRef.current.client.get<unknown>(`/attachments/${attachment.id}/url?disposition=inline`)
+      .then((data) => (isRecord(data) && typeof data.url === "string" ? data.url : null))
+      .catch(() => {
+        imageUrls.current.delete(attachment.id as string);
+        return null;
+      });
+    imageUrls.current.set(attachment.id, pending);
+    return pending;
+  }, []);
   const openAttachmentRef = useRef(openAttachment);
   openAttachmentRef.current = openAttachment;
   const openAttachmentStable = useCallback((attachment: MessageAttachment, disposition: "inline" | "attachment") => {
@@ -722,6 +756,22 @@ export function MessagePane({
       if (cancelled) return;
       slugRef.current = parseServers(data).find((server) => server.id === serverId)?.slug ?? null;
     }).catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [session.serverId]);
+
+  useEffect(() => {
+    const serverId = session.serverId;
+    if (!serverId || Object.keys(useRaftStore.getState().senderAvatars).length > 0) return;
+    let cancelled = false;
+    void Promise.all([
+      sessionRef.current.client.get<unknown>("/agents").catch(() => null),
+      sessionRef.current.client.get<unknown>(`/servers/${serverId}/members`).catch(() => null),
+    ]).then(([agents, members]) => {
+      if (cancelled) return;
+      useRaftStore.getState().setSenderAvatars(collectSenderAvatars(agents, members));
+    });
     return () => {
       cancelled = true;
     };
@@ -956,6 +1006,12 @@ export function MessagePane({
     }
   }
 
+  const headerIcon = thread
+    ? <HeaderIconSlot fill={color.cyan}><MessageSquare color={color.ink} size={16} strokeWidth={2.5} /></HeaderIconSlot>
+    : meta?.type === "dm"
+      ? <Avatar avatarUrl={meta.peerAvatarUrl} kind={meta.peerKind === "agent" ? "agent" : "human"} name={meta.peerName || title} size={36} />
+      : <HeaderIconSlot>{meta?.visibility === "private" || meta?.type === "private" ? <Lock color={color.ink} size={16} strokeWidth={2.5} /> : <Hash color={color.ink} size={16} strokeWidth={2.5} />}</HeaderIconSlot>;
+  const composerTarget = meta?.type === "dm" ? `@${meta.peerName || title}` : `#${meta?.name || title}`;
   const headerTitle = thread
     ? `${t("message.threadPanel.thread")} — #${meta?.name || title}`
     : meta?.type === "dm" ? (meta.peerName || title) : (meta?.name || title);
@@ -993,16 +1049,23 @@ export function MessagePane({
                 </AppText>
               </Pressable>
             ) : null}
-            <View accessibilityLabel={t("message.chatPanel.searchChannel")} style={styles.headerAction}>
-              <Search color={color.ink} size={18} />
-            </View>
+            <HeaderIconButton accessibilityLabel={t("message.chatPanel.searchChannel")} onPress={() => router.push("/search")}>
+              <Search color={color.ink} size={16} strokeWidth={2.5} />
+            </HeaderIconButton>
             {settingsChannelId ? (
-              <Pressable accessibilityRole="button" onPress={() => setSettingsOpen(true)} style={styles.headerAction}>
-                <Settings color={color.ink} size={18} />
-              </Pressable>
+              <HeaderIconButton accessibilityLabel={t("mobile.messages.members")} onPress={() => setSettingsOpen(true)}>
+                <Settings color={color.ink} size={16} strokeWidth={2.5} />
+              </HeaderIconButton>
+            ) : null}
+            {settingsChannelId && memberCount !== null && meta?.type !== "dm" ? (
+              <HeaderIconButton accessibilityLabel={t("mobile.messages.members")} onPress={() => setSettingsOpen(true)} wide>
+                <Users color={color.ink} size={16} strokeWidth={2.5} />
+                <AppText style={styles.memberCount}>{String(memberCount)}</AppText>
+              </HeaderIconButton>
             ) : null}
           </>
         )}
+        icon={headerIcon}
         onBack={() => router.back()}
         onTitlePress={thread ? () => listRef.current?.scrollToEnd({ animated: true }) : undefined}
         subtitle={headerSubtitle}
@@ -1063,6 +1126,7 @@ export function MessagePane({
                 onLongPressMessage={longPressMessage}
                 onLongPressSender={mentionSender}
                 onOpenAttachment={openAttachmentStable}
+                resolveImageUrl={resolveImageUrl}
                 onOpenThread={threadCountLabel ? openThread : undefined}
                 onPressMessage={thread ? undefined : openThread}
                 onPressSender={pressSender}
@@ -1149,7 +1213,7 @@ export function MessagePane({
           blurOnSubmit={false}
           multiline
           onChangeText={(value) => void onChangeDraft(value)}
-          placeholder={t("message.composer.messagePlaceholder", { channel: title || (thread ? t("message.threadPanel.thread") : "") })}
+          placeholder={thread ? t("message.threadPanel.composerPlaceholder") : t("message.composer.messagePlaceholder", { channel: composerTarget })}
           placeholderTextColor={colors.muted}
           style={styles.input}
           submitBehavior="newline"
@@ -1157,18 +1221,27 @@ export function MessagePane({
         />
         <View style={styles.toolbar}>
           <View style={styles.tools}>
-            <Pressable accessibilityRole="button" onPress={() => void pickImage(false)} style={styles.tool}><ImageIcon color={color.ink} size={18} /></Pressable>
-            <Pressable accessibilityRole="button" onPress={() => void pickImage(true)} style={styles.tool}><Camera color={color.ink} size={18} /></Pressable>
-            <Pressable accessibilityRole="button" onPress={() => void pickFile()} style={styles.tool}><Paperclip color={color.ink} size={18} /></Pressable>
+            <ToolButton onPress={() => void pickImage(false)}><ImagePlus color={color.ink} size={16} strokeWidth={2.5} /></ToolButton>
+            <ToolButton onPress={() => void pickImage(true)}><Camera color={color.ink} size={16} strokeWidth={2.5} /></ToolButton>
+            <ToolButton onPress={() => void pickFile()}><Paperclip color={color.ink} size={16} strokeWidth={2.5} /></ToolButton>
             <Pressable accessibilityRole="checkbox" accessibilityState={{ checked: asTask }} onPress={() => { setAsTask((current) => !current); focusComposer(); }} style={styles.taskToggle}>
               <ListChecks color={color.ink} size={16} />
               <AppText style={styles.taskLabel}>{t("message.composer.asTask")}</AppText>
               <View style={[styles.box, asTask ? styles.boxOn : null]} />
             </Pressable>
           </View>
-          <Pressable disabled={uploads.some((file) => file.status !== "ready") || (draft.trim().length === 0 && !uploads.some((file) => file.status === "ready"))} onPress={() => void send()} style={styles.send}>
-            <AppText style={styles.sendText}>{t("mobile.messages.send")}</AppText>
-          </Pressable>
+          {(() => {
+            const sendDisabled = uploads.some((file) => file.status !== "ready") || (draft.trim().length === 0 && !uploads.some((file) => file.status === "ready"));
+            return (
+              <Pressable accessibilityLabel={t("mobile.messages.send")} accessibilityRole="button" disabled={sendDisabled} onPress={() => void send()}>
+                <HardShadow offset={sendDisabled ? 0 : shadowOffset.sm}>
+                  <View style={[styles.send, sendDisabled ? styles.sendDisabled : null]}>
+                    <SendHorizontal color={sendDisabled ? color.muted : color.ink} size={16} strokeWidth={2.5} />
+                  </View>
+                </HardShadow>
+              </Pressable>
+            );
+          })()}
         </View>
       </View>
       <Modal animationType="fade" onRequestClose={() => setPreviewUrl(null)} transparent visible={previewUrl !== null}>
@@ -1264,14 +1337,25 @@ export function MessagePane({
   );
 }
 
+
+function ToolButton({ children, onPress }: { children: ReactNode; onPress: () => void }) {
+  return (
+    <Pressable accessibilityRole="button" hitSlop={4} onPress={onPress}>
+      <HardShadow offset={shadowOffset.sm}>
+        <View style={styles.toolFace}>{children}</View>
+      </HardShadow>
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: colors.bg },
   center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: colors.bg },
   list: { padding: space.md },
   timeline: { flex: 1 },
-  sticky: { alignSelf: "center", backgroundColor: color.white, borderColor: color.border, borderWidth: 2, paddingHorizontal: 8, paddingVertical: 2, position: "absolute", top: 8 },
+  sticky: { alignSelf: "center", backgroundColor: color.white, borderColor: color.border, borderWidth: 2, paddingHorizontal: 10, paddingVertical: 3, position: "absolute", top: 6, zIndex: 2 },
   stickyText: { color: color.ink, fontSize: 10, fontWeight: "700", letterSpacing: 0.8, textTransform: "uppercase" },
-  jump: { backgroundColor: color.yellow, borderColor: color.border, borderWidth: 2, bottom: 12, paddingHorizontal: 10, paddingVertical: 6, position: "absolute", right: 12 },
+  jump: { alignSelf: "center", backgroundColor: color.yellow, borderColor: color.border, borderWidth: 2, bottom: 12, paddingHorizontal: 12, paddingVertical: 6, position: "absolute" },
   jumpText: { color: color.ink, fontSize: 13, fontWeight: "700" },
   headerAction: { alignItems: "center", justifyContent: "center", minHeight: 32, paddingHorizontal: 4 },
   headerActionText: { color: color.ink, fontSize: 12, fontWeight: "700" },
@@ -1294,13 +1378,16 @@ const styles = StyleSheet.create({
   },
   input: { color: color.ink, fontFamily: "SpaceGrotesk-400", fontSize: 16, maxHeight: 128, minHeight: 24, paddingHorizontal: 4, paddingVertical: 4 },
   toolbar: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
-  tools: { alignItems: "center", flexDirection: "row", gap: 4 },
+  tools: { alignItems: "center", flexDirection: "row", gap: 8 },
   tool: { alignItems: "center", height: 32, justifyContent: "center", width: 32 },
   taskToggle: { alignItems: "center", flexDirection: "row", gap: 6 },
   taskLabel: { color: color.ink, fontSize: 12, fontWeight: "700" },
   box: { borderColor: color.border, borderWidth: 2, height: 16, width: 16 },
   boxOn: { backgroundColor: color.yellow },
-  send: { backgroundColor: color.pink, borderColor: color.border, borderWidth: 2, paddingHorizontal: 12, paddingVertical: 8 },
+  send: { alignItems: "center", backgroundColor: color.pink, borderColor: color.border, borderWidth: 2, height: 32, justifyContent: "center", width: 36 },
+  sendDisabled: { backgroundColor: color.pinkSoft, borderColor: color.muted },
+  toolFace: { alignItems: "center", backgroundColor: color.page, borderColor: color.border, borderWidth: 2, height: 30, justifyContent: "center", width: 30 },
+  memberCount: { color: color.ink, fontSize: 13, fontWeight: "700" },
   sendText: { color: color.ink, fontSize: 14, fontWeight: "700" },
   uploads: { gap: 4, paddingHorizontal: 12 },
   uploadRow: { alignItems: "center", flexDirection: "row", gap: 8 },

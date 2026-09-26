@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { Alert, BackHandler, FlatList, Modal, Pressable, StyleSheet, View, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
-import { Bell, ChevronDown, Hash, Pencil, Search } from "lucide-react-native";
+import { Activity, Bell, Bookmark, ChevronDown, ChevronRight, Hash, Lock, Pencil, Search } from "lucide-react-native";
 import { ApiError, StaleRequestError } from "../../src/api/client";
 import { groupHasUnread, groupHomeChannels, pinnedChannelIds, type HomeGroups } from "../../src/home/directory";
 import { parseInbox } from "../../src/home/inbox";
@@ -15,8 +15,9 @@ import { useRaftStore } from "../../src/state/store";
 import { Avatar } from "../../src/ui/Avatar";
 import { Badge, MentionMark } from "../../src/ui/Badge";
 import { LoadingScreen, ScreenMessage } from "../../src/ui/screen";
+import { HardShadow } from "../../src/ui/shadow";
 import { AppText } from "../../src/ui/text";
-import { color, fontSize, size } from "../../src/ui/tokens";
+import { border, color, fontSize, shadowOffset, size } from "../../src/ui/tokens";
 
 const EMPTY_GROUPS: HomeGroups = { pinned: [], joint: [], channels: [], dms: [] };
 
@@ -137,19 +138,23 @@ export default function HomeScreen() {
   if (error) return <ScreenMessage title={t("mobile.channels.loadFailed")} body={error} />;
 
   const sections = [
-    { id: "pinned", title: t("layout.sidebar.pinned"), channels: groups.pinned },
-    { id: "joint", title: t("layout.sidebar.jointChannels"), channels: groups.joint },
-    { id: "channels", title: t("layout.sidebar.channels"), channels: groups.channels },
-    { id: "dms", title: t("layout.sidebar.directMessages"), channels: groups.dms },
-  ].filter((section) => section.channels.length > 0);
+    { id: "pinned", title: t("layout.sidebar.pinned"), channels: groups.pinned, empty: t("layout.sidebar.pinnedEmptyHint") },
+    { id: "joint", title: t("layout.sidebar.jointChannels"), channels: groups.joint, empty: t("layout.sidebar.jointChannelsEmpty") },
+    { id: "channels", title: t("layout.sidebar.channels"), channels: groups.channels, empty: null },
+    { id: "dms", title: t("layout.sidebar.directMessages"), channels: groups.dms, empty: null },
+  ];
 
   return (
     <View style={styles.page}>
       <View style={[styles.header, { height: headerHeight, paddingTop: insets.top }]}>
-        <Pressable accessibilityRole="button" onPress={() => setMenu(true)} style={styles.switcher}>
-          <AppText numberOfLines={1} style={styles.serverName}>{current?.name || t("mobile.servers.title")}</AppText>
-          <ChevronDown color={color.ink} size={16} />
-          {servers.some((server) => server.id !== current?.id && (serverUnread[server.id] ?? 0) > 0) ? <View style={styles.dot} /> : null}
+        <Pressable accessibilityRole="button" onPress={() => setMenu(true)} style={styles.switcherWrap}>
+          <HardShadow offset={shadowOffset.sm}>
+            <View style={styles.switcher}>
+              <AppText numberOfLines={1} style={styles.switcherName}>{current?.name || t("mobile.servers.title")}</AppText>
+              <ChevronDown color={color.yellow} size={16} strokeWidth={2.5} />
+            </View>
+          </HardShadow>
+          {servers.some((server) => server.id !== current?.id && (serverUnread[server.id] ?? 0) > 0) ? <View style={styles.switcherDot} /> : null}
         </Pressable>
         <Pressable accessibilityRole="button" onPress={() => router.push("/activity")} style={styles.icon}>
           <Bell color={color.ink} size={18} />
@@ -161,18 +166,21 @@ export default function HomeScreen() {
         ListHeaderComponent={
           <View>
             <Entry compact={height <= 600} icon={<Search color={color.ink} size={16} />} label={t("layout.sidebar.search")} onPress={() => router.push("/search")} />
-            <Entry compact={height <= 600} icon={<Bell color={color.ink} size={16} />} label={t("layout.sidebar.activity")} count={activityCount} onPress={() => router.push("/activity")} />
-            <Entry compact={height <= 600} label={t("layout.sidebar.saved")} onPress={() => router.push("/saved")} />
+            <Entry compact={height <= 600} icon={<Activity color={color.ink} size={16} />} label={t("layout.sidebar.activity")} count={activityCount} onPress={() => router.push("/activity")} />
+            <Entry compact={height <= 600} icon={<Bookmark color={color.ink} size={16} />} label={t("layout.sidebar.saved")} onPress={() => router.push("/saved")} />
           </View>
         }
         renderItem={({ item }) => {
           const closed = collapsed[item.id] === true;
           return (
             <View>
-              <Pressable onPress={() => setCollapsed((state) => ({ ...state, [item.id]: !closed }))} style={styles.section}>
+              <Pressable accessibilityRole="button" onPress={() => setCollapsed((state) => ({ ...state, [item.id]: !closed }))} style={styles.section}>
+                {closed ? <ChevronRight color={color.ink} size={14} strokeWidth={2.5} /> : <ChevronDown color={color.ink} size={14} strokeWidth={2.5} />}
                 <AppText style={styles.sectionTitle}>{item.title}</AppText>
+                <AppText style={styles.sectionCount}>{String(item.channels.length)}</AppText>
                 {closed && groupHasUnread(item.channels, channelUnread, liveUnread) ? <View style={styles.dot} /> : null}
               </Pressable>
+              {!closed && item.channels.length === 0 && item.empty ? <AppText style={styles.sectionEmpty}>{item.empty}</AppText> : null}
               {closed ? null : item.channels.map((channel) => (
                 <ChannelRow compact={height <= 600} key={channel.id} channel={channel} onOpen={() => router.push({ pathname: "/messages/[channelId]", params: { channelId: channel.id, name: channelLabel(channel) } })} onLongPress={() => markRead(channel)} />
               ))}
@@ -223,7 +231,7 @@ function ChannelRow({ channel, onOpen, onLongPress, compact }: { channel: RaftCh
   const dm = channel.type === "dm";
   return (
     <Pressable delayLongPress={500} onLongPress={onLongPress} onPress={onOpen} style={[styles.row, compact ? styles.rowCompact : null]}>
-      {dm ? <Avatar name={channelLabel(channel)} kind={channel.peerType === "agent" ? "agent" : "human"} avatarUrl={channel.peerAvatarUrl} size={28} /> : <Hash color={color.ink} size={16} />}
+      {dm ? <Avatar name={channelLabel(channel)} kind={channel.peerType === "agent" ? "agent" : "human"} avatarUrl={channel.peerAvatarUrl} size={18} /> : channel.type === "private" ? <Lock color={color.ink} size={16} /> : <Hash color={color.ink} size={16} />}
       <AppText numberOfLines={1} style={[styles.name, bold ? styles.unread : null]}>{channelLabel(channel)}</AppText>
       <Badge count={count} quiet={channel.activityMuted} />
       {unread?.hasMention ? <MentionMark /> : null}
@@ -253,11 +261,16 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     paddingHorizontal: 12,
   },
-  switcher: { alignItems: "center", borderColor: color.border, borderRadius: 999, borderWidth: 2, flexDirection: "row", gap: 6, maxWidth: "75%", paddingHorizontal: 12, paddingVertical: 6 },
+  switcherWrap: { maxWidth: "75%" },
+  switcher: { alignItems: "center", backgroundColor: color.ink, borderColor: color.border, borderWidth: border.strong, flexDirection: "row", gap: 8, paddingHorizontal: 14, paddingVertical: 7 },
+  switcherName: { color: color.yellow, fontSize: 18, fontWeight: "700", lineHeight: 22 },
+  switcherDot: { backgroundColor: color.pink, borderColor: color.border, borderRadius: 5, borderWidth: 1, height: 10, position: "absolute", right: -2, top: -2, width: 10 },
   serverName: { color: color.ink, fontSize: 14, fontWeight: "700" },
   icon: { alignItems: "center", height: size.iconButton, justifyContent: "center", width: size.iconButton },
-  section: { alignItems: "center", flexDirection: "row", gap: 8, paddingHorizontal: 16, paddingTop: 16 },
-  sectionTitle: { ...fontSize.group, color: color.ink, fontWeight: "700", letterSpacing: 0.8, textTransform: "uppercase" },
+  section: { alignItems: "center", flexDirection: "row", gap: 4, height: 24, marginBottom: 4, marginTop: 16, paddingHorizontal: 16 },
+  sectionTitle: { ...fontSize.group, color: color.ink, fontWeight: "700", letterSpacing: 1.2, textTransform: "uppercase" },
+  sectionCount: { ...fontSize.group, color: color.muted, fontFamily: "mono", marginLeft: 2 },
+  sectionEmpty: { ...fontSize.group, color: color.muted, paddingBottom: 4, paddingHorizontal: 16 },
   row: { alignItems: "center", borderColor: "transparent", borderWidth: 2, flexDirection: "row", gap: 10, marginBottom: 4, paddingHorizontal: 16, paddingVertical: 8 },
   rowCompact: { paddingVertical: 4 },
   name: { ...fontSize.list, color: color.ink, flex: 1, fontWeight: "500" },
