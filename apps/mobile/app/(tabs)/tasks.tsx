@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Pressable, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
-import { useFocusEffect } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import { CheckSquare } from "lucide-react-native";
 import * as SecureStore from "expo-secure-store";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -37,6 +37,7 @@ function filterKey(serverId: string): string {
 }
 
 export default function TasksScreen() {
+  const router = useRouter();
   const session = useSession();
   const role = useServerRole();
   const t = useT();
@@ -156,6 +157,7 @@ export default function TasksScreen() {
               ) : group.tasks.map((task) => (
                 <TaskCardView
                   key={task.id}
+                  onOpen={() => router.push({ pathname: "/task/[taskId]", params: { taskId: task.id } })}
                   onStatus={(status: TaskStatus) => void useTaskStore.getState().setStatus(session.client, task.id, status)}
                   role={role}
                   task={task}

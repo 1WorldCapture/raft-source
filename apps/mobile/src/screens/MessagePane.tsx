@@ -134,6 +134,8 @@ export function MessagePane({
   parentChannelId,
   parentMessageId,
   targetMessageId,
+  embedded,
+  listHeader,
 }: {
   channelId: string;
   title: string;
@@ -141,6 +143,10 @@ export function MessagePane({
   parentChannelId?: string;
   parentMessageId?: string;
   targetMessageId?: string;
+  /** Task detail draws its own bar and keeps this pane as the discussion only. */
+  embedded?: boolean;
+  /** Task head, rendered above the replies in the same list. */
+  listHeader?: ReactNode;
 }) {
   const session = useSession();
   const insets = useSafeAreaInsets();
@@ -467,7 +473,8 @@ export function MessagePane({
           setShowBack(false);
           setTimeout(() => {
             if (cancelled) return;
-            listRef.current?.scrollToOffset({ offset: 0, animated: false });
+            if (embedded) listRef.current?.scrollToEnd({ animated: false });
+            else listRef.current?.scrollToOffset({ offset: 0, animated: false });
           }, 50);
         }
       } catch (caught) {
@@ -548,7 +555,10 @@ export function MessagePane({
       if (caught instanceof StaleRequestError) return;
       setError(sendError(caught, t));
     }
-    requestAnimationFrame(() => listRef.current?.scrollToOffset({ offset: 0, animated: true }));
+    requestAnimationFrame(() => {
+      if (embedded) listRef.current?.scrollToEnd({ animated: true });
+      else listRef.current?.scrollToOffset({ offset: 0, animated: true });
+    });
   }
 
   async function openAttachment(attachment: MessageAttachment, disposition: "inline" | "attachment") {
@@ -731,7 +741,10 @@ export function MessagePane({
     useRaftStore.getState().upsertMessages([optimistic]);
     nearBottom.current = true;
     setUnseen(0);
-    requestAnimationFrame(() => listRef.current?.scrollToOffset({ offset: 0, animated: true }));
+    requestAnimationFrame(() => {
+      if (embedded) listRef.current?.scrollToEnd({ animated: true });
+      else listRef.current?.scrollToOffset({ offset: 0, animated: true });
+    });
     if (!existing) {
       setDraft("");
       setAsTask(false);
@@ -1199,13 +1212,14 @@ export function MessagePane({
     ? t("mobile.messages.private")
     : meta?.visibility === "joint" ? t("mobile.messages.joint") : t("mobile.messages.public");
 
+  const frameStyle = [styles.page, androidKeyboard > 0 ? { paddingBottom: androidKeyboard } : null];
   return (
     <KeyboardAvoidingView
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
-      keyboardVerticalOffset={insets.top + 56}
-      style={[styles.page, androidKeyboard > 0 ? { paddingBottom: androidKeyboard } : null]}
+      behavior={embedded || Platform.OS !== "ios" ? undefined : "padding"}
+      keyboardVerticalOffset={embedded ? 0 : insets.top + 56}
+      style={frameStyle}
     >
-      <PanelHeader
+      {embedded ? null : <PanelHeader
         actions={(
           <>
             {thread && parentMessageId ? (
@@ -1243,20 +1257,20 @@ export function MessagePane({
         onTitlePress={thread ? () => listRef.current?.scrollToEnd({ animated: true }) : undefined}
         subtitle={headerSubtitle}
         title={headerTitle}
-      />
-      {loading && messages.length === 0 ? (
+      />}
+      {loading && messages.length === 0 && !embedded ? (
         <View style={styles.center}><ActivityIndicator color={colors.accent} /></View>
       ) : (
       <View style={styles.timeline}>
         <FlatList
           ref={listRef}
-          data={reversed}
-          inverted
+          data={embedded ? visibleMessages : reversed}
+          inverted={!embedded}
           keyExtractor={(item) => item.id}
-          maintainVisibleContentPosition={hasNewer
+          maintainVisibleContentPosition={embedded ? undefined : hasNewer
             ? { minIndexForVisible: 0 }
             : { minIndexForVisible: 0, autoscrollToTopThreshold: 100 }}
-          onEndReached={() => void loadOlder()}
+          onEndReached={embedded ? undefined : () => void loadOlder()}
           onEndReachedThreshold={0.3}
           onScrollToIndexFailed={(info) => {
             listRef.current?.scrollToOffset({ offset: Math.max(0, info.averageItemLength * info.index), animated: false });
@@ -1266,6 +1280,10 @@ export function MessagePane({
           }}
           onScroll={(event: NativeSyntheticEvent<NativeScrollEvent>) => {
             const offset = event.nativeEvent.contentOffset.y;
+            if (embedded) {
+              if (offset < 48) void loadOlder();
+              return;
+            }
             lastOffset.current = offset;
             const atTail = !hasNewerRef.current && offset < 100;
             nearBottom.current = atTail;
@@ -1277,9 +1295,20 @@ export function MessagePane({
           onViewableItemsChanged={onViewableItemsChanged}
           scrollEventThrottle={32}
           viewabilityConfig={viewabilityConfig}
-          contentContainerStyle={styles.list}
-          ListHeaderComponent={loadingNewer ? <ActivityIndicator color={colors.accent} /> : null}
-          ListFooterComponent={loadingOlder
+          contentContainerStyle={embedded ? styles.embeddedList : styles.list}
+          ListHeaderComponent={embedded ? (
+            <View>
+              {listHeader}
+              {loadingOlder ? <ActivityIndicator color={colors.accent} /> : null}
+              {!hasMore && messages.length > 0 ? (
+                <View style={styles.threadStart}>
+                  <AppText style={styles.note}>{t(thread ? "message.historyTop.beginningOfReplies" : "message.historyTop.beginningOfMessages")}</AppText>
+                  {thread ? <AppText style={styles.note}>{t("message.inlineThreadReplies.replyCount", { count: messages.length })}</AppText> : null}
+                </View>
+              ) : null}
+            </View>
+          ) : loadingNewer ? <ActivityIndicator color={colors.accent} /> : null}
+          ListFooterComponent={embedded ? (loadingNewer ? <ActivityIndicator color={colors.accent} /> : null) : loadingOlder
             ? <ActivityIndicator color={colors.accent} />
             : limited
               ? <AppText style={styles.note}>{t("mobile.messages.historyLimited")}</AppText>
@@ -1341,12 +1370,12 @@ export function MessagePane({
             );
           }}
         />
-        {stickyAt ? (
+        {stickyAt && !embedded ? (
           <View pointerEvents="none" style={styles.sticky}>
             <AppText style={styles.stickyText}>{formatDayLabel(stickyAt, timeOptions)}</AppText>
           </View>
         ) : null}
-        {showBack || hasNewer || unseen > 0 ? (
+        {!embedded && (showBack || hasNewer || unseen > 0) ? (
           <Pressable
             onPress={() => {
               if (hasNewerRef.current) {
@@ -1417,11 +1446,13 @@ export function MessagePane({
             <ToolButton onPress={() => void pickImage(false)}><ImagePlus color={color.ink} size={16} strokeWidth={2.5} /></ToolButton>
             <ToolButton onPress={() => void pickImage(true)}><Camera color={color.ink} size={16} strokeWidth={2.5} /></ToolButton>
             <ToolButton onPress={() => void pickFile()}><Paperclip color={color.ink} size={16} strokeWidth={2.5} /></ToolButton>
-            <Pressable accessibilityRole="checkbox" accessibilityState={{ checked: asTask }} onPress={() => { setAsTask((current) => !current); focusComposer(); }} style={styles.taskToggle}>
-              <ListChecks color={color.ink} size={16} />
-              <AppText style={styles.taskLabel}>{t("message.composer.asTask")}</AppText>
-              <View style={[styles.box, asTask ? styles.boxOn : null]} />
-            </Pressable>
+            {thread ? null : (
+              <Pressable accessibilityRole="checkbox" accessibilityState={{ checked: asTask }} onPress={() => { setAsTask((current) => !current); focusComposer(); }} style={styles.taskToggle}>
+                <ListChecks color={color.ink} size={16} />
+                <AppText style={styles.taskLabel}>{t("message.composer.asTask")}</AppText>
+                <View style={[styles.box, asTask ? styles.boxOn : null]} />
+              </Pressable>
+            )}
           </View>
           {(() => {
             const sendDisabled = uploads.some((file) => file.status !== "ready") || (draft.trim().length === 0 && !uploads.some((file) => file.status === "ready"));
@@ -1551,6 +1582,8 @@ const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: colors.bg },
   center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: colors.bg },
   list: { padding: space.md },
+  embeddedList: { paddingBottom: space.md },
+  threadStart: { borderBottomColor: colors.line, borderBottomWidth: 1, marginBottom: 8, paddingBottom: 8 },
   timeline: { flex: 1 },
   sticky: { alignSelf: "center", backgroundColor: color.white, borderColor: color.border, borderWidth: 2, paddingHorizontal: 10, paddingVertical: 3, position: "absolute", top: 6, zIndex: 2 },
   stickyText: { color: color.ink, fontSize: 10, fontWeight: "700", letterSpacing: 0.8, textTransform: "uppercase" },

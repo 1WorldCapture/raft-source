@@ -84,6 +84,7 @@ function AppStack() {
       <Stack.Screen name="channels/[serverId]" options={{ title: t("mobile.channels.title") }} />
       <Stack.Screen name="messages/[channelId]" options={{ title: t("mobile.messages.title") }} />
       <Stack.Screen name="thread/[threadId]" options={{ title: t("message.threadPanel.thread") }} />
+      <Stack.Screen name="task/[taskId]" options={{ headerShown: false }} />
       <Stack.Screen name="design" options={{ title: t("mobile.design.title") }} />
     </Stack>
   );

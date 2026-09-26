@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Modal, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
 import { Ban, Check, CheckCircle, ChevronDown, Circle, Eye, Hash, Pencil, Play, User, UserCircle2 } from "lucide-react-native";
 import type { AppMessageId } from "../i18n/catalog";
@@ -87,60 +87,90 @@ export function TaskEmptyGroup({ status }: { status: TaskStatus }) {
 export function TaskCardView({
   task,
   role,
+  onOpen,
   onStatus,
 }: {
   task: RaftTask;
+  role: string | null;
+  onOpen: () => void;
+  onStatus: (status: TaskStatus) => void;
+}) {
+  const description = plainDescription(task.description);
+  const touch = useRef({ x: 0, y: 0 });
+  return (
+    <HardShadow offset={shadowOffset.sm}>
+      <View style={styles.card}>
+        <View
+          onTouchEnd={(event) => {
+            const dx = Math.abs(event.nativeEvent.pageX - touch.current.x);
+            const dy = Math.abs(event.nativeEvent.pageY - touch.current.y);
+            if (dx < 8 && dy < 8) onOpen();
+          }}
+          onTouchStart={(event) => {
+            touch.current = { x: event.nativeEvent.pageX, y: event.nativeEvent.pageY };
+          }}
+        >
+          <View style={styles.metaRow}>
+            <AppText numberOfLines={1} style={styles.channel}>{channelLabel(task.channelName)}</AppText>
+            <AppText style={styles.number}>{`#${task.taskNumber}`}</AppText>
+          </View>
+          <AppText numberOfLines={3} style={styles.title}>{task.title}</AppText>
+          {description ? <AppText numberOfLines={2} style={styles.description}>{description}</AppText> : null}
+        </View>
+        <View style={styles.statusSlot}>
+          <TaskStatusButton onStatus={onStatus} role={role} status={task.status} />
+        </View>
+      </View>
+    </HardShadow>
+  );
+}
+
+export function TaskStatusButton({
+  status,
+  role,
+  onStatus,
+}: {
+  status: TaskStatus;
   role: string | null;
   onStatus: (status: TaskStatus) => void;
 }) {
   const t = useT();
   const [pressed, setPressed] = useState(false);
   const [menu, setMenu] = useState(false);
-  const description = plainDescription(task.description);
-  const options = taskStatusOptions(task.status, role);
+  const options = taskStatusOptions(status, role);
   const readOnly = options.length === 0;
   return (
-    <HardShadow offset={pressed ? 1 : shadowOffset.sm}>
-      <View style={[styles.card, pressed ? styles.cardPressed : null]}>
-        <View style={styles.metaRow}>
-          <AppText numberOfLines={1} style={styles.channel}>{channelLabel(task.channelName)}</AppText>
-          <AppText style={styles.number}>{`#${task.taskNumber}`}</AppText>
+    <>
+      {readOnly ? (
+        <View style={[styles.statusButton, { backgroundColor: taskStatusFill(status) }]}>
+          <StatusIcon status={status} size={10} />
+          <AppText style={styles.statusButtonText}>{t(STATUS_LABEL[status])}</AppText>
         </View>
-        <AppText numberOfLines={3} style={styles.title}>{task.title}</AppText>
-        {description ? <AppText numberOfLines={2} style={styles.description}>{description}</AppText> : null}
-        <View style={styles.statusSlot}>
-          {readOnly ? (
-            <View style={[styles.statusButton, { backgroundColor: taskStatusFill(task.status) }]}>
-              <StatusIcon status={task.status} size={10} />
-              <AppText style={styles.statusButtonText}>{t(STATUS_LABEL[task.status])}</AppText>
-            </View>
-          ) : (
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => setMenu(true)}
-              onPressIn={() => setPressed(true)}
-              onPressOut={() => setPressed(false)}
-            >
-              <View style={[styles.statusButton, { backgroundColor: taskStatusFill(task.status) }]}>
-                <Pencil color={color.ink} size={10} strokeWidth={2.5} />
-                <AppText style={styles.statusButtonText}>{t(STATUS_LABEL[task.status])}</AppText>
-              </View>
-            </Pressable>
-          )}
-        </View>
-        {menu ? (
-          <StatusMenu
-            current={task.status}
-            onClose={() => setMenu(false)}
-            onSelect={(status) => {
-              setMenu(false);
-              onStatus(status);
-            }}
-            options={options}
-          />
-        ) : null}
-      </View>
-    </HardShadow>
+      ) : (
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => setMenu(true)}
+          onPressIn={() => setPressed(true)}
+          onPressOut={() => setPressed(false)}
+        >
+          <View style={[styles.statusButton, pressed ? styles.cardPressed : null, { backgroundColor: taskStatusFill(status) }]}>
+            <AppText style={styles.statusButtonText}>{t(STATUS_LABEL[status])}</AppText>
+            <Pencil color={color.ink} size={10} strokeWidth={2.5} />
+          </View>
+        </Pressable>
+      )}
+      {menu ? (
+        <StatusMenu
+          current={status}
+          onClose={() => setMenu(false)}
+          onSelect={(next) => {
+            setMenu(false);
+            onStatus(next);
+          }}
+          options={options}
+        />
+      ) : null}
+    </>
   );
 }
 
