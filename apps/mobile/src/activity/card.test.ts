@@ -6,9 +6,13 @@ import {
   activityBadges,
   activityBodyPreview,
   activityEmptyCopy,
+  activityMenuActions,
   activityPrimaryText,
   activitySender,
+  activityTargetMessageId,
   activityThreadTag,
+  nextNewUpdateCount,
+  nextUnreadKey,
   showMarkAllRead,
   taskStatusFill,
 } from "./card";
@@ -102,4 +106,32 @@ test("empty copy and task fills follow the filter and status", () => {
   assert.equal(taskStatusFill("done"), color.lime);
   assert.equal(taskStatusFill("closed"), color.stone);
   assert.equal(taskStatusFill("other"), color.orange);
+});
+
+test("opening a card prefers the mention, then the first unread, then the latest", () => {
+  assert.equal(activityTargetMessageId({ ...thread, unreadCount: 2, firstUnreadMessageId: "unread-1" }), "unread-1");
+  assert.equal(activityTargetMessageId({ ...thread, unreadCount: 2, firstUnreadMessageId: null }), "m2");
+  assert.equal(activityTargetMessageId(thread), "m2");
+  assert.equal(activityTargetMessageId({ ...channel, firstMentionMessageId: "mention-1", unreadCount: 0 }), "mention-1");
+  assert.equal(activityTargetMessageId(channel), "m1");
+  assert.equal(activityTargetMessageId({ ...channel, unreadCount: 0, firstUnreadMessageId: "old" }), "m1");
+});
+
+test("the long-press menu hides read on an unfollowed thread and adds follow", () => {
+  assert.deepEqual(activityMenuActions(channel), ["read", "done"]);
+  assert.deepEqual(activityMenuActions({ ...channel, unreadCount: 0 }), ["unread", "done"]);
+  assert.deepEqual(activityMenuActions({ ...thread, isFollowing: true, unreadCount: 1 }), ["read", "done", "unfollow"]);
+  assert.deepEqual(activityMenuActions(thread), ["done", "follow"]);
+});
+
+test("title double-tap cycles unread rows, and new updates wait until the list leaves the top", () => {
+  const later = { ...channel, channelId: "later", unreadCount: 1 };
+  const read = { ...channel, channelId: "read", unreadCount: 0 };
+  assert.equal(nextUnreadKey([read, channel, later], null), "channel:all");
+  assert.equal(nextUnreadKey([read, channel, later], "channel:all"), "channel:later");
+  assert.equal(nextUnreadKey([read, channel, later], "channel:later"), "channel:all");
+  assert.equal(nextUnreadKey([read], null), null);
+  assert.equal(nextNewUpdateCount("a", "b", true, 2), 0);
+  assert.equal(nextNewUpdateCount(null, "b", false, 0), 0);
+  assert.equal(nextNewUpdateCount("a", "b", false, 1), 2);
 });

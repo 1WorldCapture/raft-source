@@ -271,7 +271,7 @@ function StatusMenu({
   );
 }
 
-function StatusIcon({ status, size }: { status: TaskStatus; size: number }) {
+export function StatusIcon({ status, size }: { status: string; size: number }) {
   const props = { color: color.ink, size, strokeWidth: 2.5 };
   if (status === "in_progress") return <Play {...props} />;
   if (status === "in_review") return <Eye {...props} />;

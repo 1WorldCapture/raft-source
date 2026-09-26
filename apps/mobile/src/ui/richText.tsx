@@ -1,4 +1,4 @@
-import { Linking, ScrollView, Text, View } from "react-native";
+import { Linking, ScrollView, Text, View, type StyleProp, type TextStyle } from "react-native";
 import { inlineTokens, type InlineToken } from "../model/inlineTokens";
 import { markdownPieces, type MarkdownPiece } from "../model/markdown";
 import type { MessageMention } from "../model/messages";
@@ -66,6 +66,30 @@ export function RichText({
         );
       })}
     </View>
+  );
+}
+
+/** One clamped line of inline markdown: bold, code, and links, with block markers stripped. */
+export function InlineRichText({
+  content,
+  numberOfLines,
+  style,
+  fontSize = 14,
+}: {
+  content: string;
+  numberOfLines?: number;
+  style?: StyleProp<TextStyle>;
+  fontSize?: number;
+}) {
+  return (
+    <AppText numberOfLines={numberOfLines} style={style}>
+      {markdownPieces(content).map((piece, index) => {
+        if (piece.type === "heading" || piece.type === "quote" || piece.type === "list" || piece.type === "codeBlock") {
+          return <Text key={index}>{piece.text}</Text>;
+        }
+        return inlinePiece(piece, index, undefined, undefined, undefined, fontSize);
+      })}
+    </AppText>
   );
 }
 
