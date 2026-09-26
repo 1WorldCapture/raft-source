@@ -109,8 +109,11 @@ export default function ActivityScreen() {
 
   useEffect(() => {
     const top = items[0] ? activityKey(items[0]) : null;
-    setNewUpdates((count) => nextNewUpdateCount(previousTop.current, top, nearTop.current, count));
+    // Snapshot first. The setState updater runs on the next render, after this ref moves.
+    const previous = previousTop.current;
+    const atTop = nearTop.current;
     previousTop.current = top;
+    setNewUpdates((count) => nextNewUpdateCount(previous, top, atTop, count));
   }, [items]);
 
   const reveal = useCallback((key: string) => {
