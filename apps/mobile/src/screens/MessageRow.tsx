@@ -11,6 +11,7 @@ import { agentHasRead, type PeerRead } from "./readReceipt";
 
 export interface LinkedTaskChip {
   taskNumber: number;
+  taskId?: string;
   claimedByName?: string | null;
   status?: string;
 }
@@ -49,6 +50,13 @@ export const MessageRow = memo(function MessageRow({
   onDelete,
   onToggleSystem,
   onOpenAttachment,
+  onPressMessage,
+  onLongPressMessage,
+  onPressSender,
+  onLongPressSender,
+  onToggleReaction,
+  onShowReactors,
+  onAddReaction,
   replyTime,
 }: {
   message: RaftMessage;
@@ -81,6 +89,13 @@ export const MessageRow = memo(function MessageRow({
   onDelete?: (messageId: string) => void;
   onToggleSystem?: (messageId: string) => void;
   onOpenAttachment?: (attachment: MessageAttachment, disposition: "inline" | "attachment") => void;
+  onPressMessage?: (messageId: string) => void;
+  onLongPressMessage?: (messageId: string, x: number, y: number) => void;
+  onPressSender?: (messageId: string) => void;
+  onLongPressSender?: (messageId: string) => void;
+  onToggleReaction?: (messageId: string, emoji: string) => void;
+  onShowReactors?: (messageId: string, emoji: string) => void;
+  onAddReaction?: (messageId: string, x: number, y: number) => void;
   replyTime?: (createdAt: string) => string;
 }) {
   const [tall, setTall] = useState(false);
@@ -109,18 +124,35 @@ export const MessageRow = memo(function MessageRow({
         <View style={[styles.row, message.pending === "failed" ? styles.failed : null]}>
           <View style={styles.avatar}>
             {group.showAvatar ? (
-              <Avatar
-                name={senderLabel(message)}
-                kind={message.senderType === "agent" ? "agent" : "human"}
-                avatarUrl={message.senderAvatarUrl}
-              />
+              <Pressable
+                delayLongPress={500}
+                onLongPress={() => onLongPressSender?.(message.id)}
+                onPress={() => onPressSender?.(message.id)}
+              >
+                <Avatar
+                  name={senderLabel(message)}
+                  kind={message.senderType === "agent" ? "agent" : "human"}
+                  avatarUrl={message.senderAvatarUrl}
+                />
+              </Pressable>
             ) : null}
           </View>
-          <View style={styles.body}>
+          <Pressable
+            delayLongPress={500}
+            onLongPress={(event) => onLongPressMessage?.(message.id, event.nativeEvent.pageX, event.nativeEvent.pageY)}
+            onPress={() => onPressMessage?.(message.id)}
+            style={styles.body}
+          >
             {group.showAvatar ? (
               <View>
                 <View style={styles.head}>
-                  <AppText style={styles.name}>{senderLabel(message)}</AppText>
+                  <Pressable
+                    delayLongPress={500}
+                    onLongPress={() => onLongPressSender?.(message.id)}
+                    onPress={() => onPressSender?.(message.id)}
+                  >
+                    <AppText style={styles.name}>{senderLabel(message)}</AppText>
+                  </Pressable>
                   {timeLabel ? <AppText style={styles.time}>{timeLabel}</AppText> : null}
                 </View>
                 {subtitle ? <AppText style={styles.subtitle}>{subtitle}</AppText> : null}
@@ -179,11 +211,22 @@ export const MessageRow = memo(function MessageRow({
               {message.reactions?.map((reaction) => {
                 const mine = reaction.reactedByMe || Boolean(currentUserId && reaction.userIds?.includes(currentUserId));
                 return (
-                  <View key={reaction.emoji} style={[styles.capsule, mine ? styles.mine : styles.reaction]}>
+                  <Pressable
+                    delayLongPress={500}
+                    key={reaction.emoji}
+                    onLongPress={() => onShowReactors?.(message.id, reaction.emoji)}
+                    onPress={() => onToggleReaction?.(message.id, reaction.emoji)}
+                    style={[styles.capsule, mine ? styles.mine : styles.reaction]}
+                  >
                     <AppText style={styles.capsuleText}>{`${reaction.emoji} ${reaction.count}`}</AppText>
-                  </View>
+                  </Pressable>
                 );
               })}
+              {(message.reactions?.length ?? 0) > 0 ? (
+                <Pressable onPress={(event) => onAddReaction?.(message.id, event.nativeEvent.pageX, event.nativeEvent.pageY)} style={[styles.capsule, styles.reaction]}>
+                  <AppText style={styles.capsuleText}>+</AppText>
+                </Pressable>
+              ) : null}
               {showDmRead ? <AppText style={styles.read}>{readLabel}</AppText> : null}
             </View>
             {onOpenThread && threadCountLabel ? (
@@ -211,7 +254,7 @@ export const MessageRow = memo(function MessageRow({
                 <Pressable onPress={() => onDelete?.(message.id)}><AppText style={styles.retry}>{deleteLabel}</AppText></Pressable>
               </View>
             ) : null}
-          </View>
+          </Pressable>
         </View>
       )}
     </View>

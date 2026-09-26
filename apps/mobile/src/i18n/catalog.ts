@@ -49,6 +49,14 @@ export const mobileEn = {
   "mobile.settings.english": "English",
   "mobile.settings.chinese": "中文",
   "mobile.members.openFailed": "Couldn't open the direct message",
+  "mobile.messages.unsave": "Unsave",
+  "mobile.messages.leave": "Leave channel",
+  "mobile.messages.dm": "Message",
+  "mobile.messages.members": "Members",
+  "mobile.messages.public": "Public",
+  "mobile.messages.private": "Private",
+  "mobile.messages.joint": "Joint",
+  "mobile.messages.actionFailed": "That didn't work. Try again.",
 } as const;
 
 export const mobileZh: Record<keyof typeof mobileEn, string> = {
@@ -98,6 +106,14 @@ export const mobileZh: Record<keyof typeof mobileEn, string> = {
   "mobile.settings.english": "English",
   "mobile.settings.chinese": "中文",
   "mobile.members.openFailed": "无法打开私信",
+  "mobile.messages.unsave": "取消收藏",
+  "mobile.messages.leave": "离开频道",
+  "mobile.messages.dm": "发私信",
+  "mobile.messages.members": "成员",
+  "mobile.messages.public": "公开",
+  "mobile.messages.private": "私有",
+  "mobile.messages.joint": "联合",
+  "mobile.messages.actionFailed": "操作失败，请再试一次",
 };
 
 export type MobileId = keyof typeof mobileEn;
