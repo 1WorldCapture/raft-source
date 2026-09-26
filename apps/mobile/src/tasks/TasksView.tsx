@@ -101,7 +101,7 @@ export function TaskCardView({
   const readOnly = options.length === 0;
   return (
     <HardShadow offset={pressed ? 1 : shadowOffset.sm}>
-      <Pressable onPressIn={() => setPressed(true)} onPressOut={() => setPressed(false)} style={[styles.card, pressed ? styles.cardPressed : null]}>
+      <View style={[styles.card, pressed ? styles.cardPressed : null]}>
         <View style={styles.metaRow}>
           <AppText numberOfLines={1} style={styles.channel}>{channelLabel(task.channelName)}</AppText>
           <AppText style={styles.number}>{`#${task.taskNumber}`}</AppText>
@@ -115,7 +115,12 @@ export function TaskCardView({
               <AppText style={styles.statusButtonText}>{t(STATUS_LABEL[task.status])}</AppText>
             </View>
           ) : (
-            <Pressable accessibilityRole="button" onPress={() => setMenu(true)}>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => setMenu(true)}
+              onPressIn={() => setPressed(true)}
+              onPressOut={() => setPressed(false)}
+            >
               <View style={[styles.statusButton, { backgroundColor: taskStatusFill(task.status) }]}>
                 <Pencil color={color.ink} size={10} strokeWidth={2.5} />
                 <AppText style={styles.statusButtonText}>{t(STATUS_LABEL[task.status])}</AppText>
@@ -134,7 +139,7 @@ export function TaskCardView({
             options={options}
           />
         ) : null}
-      </Pressable>
+      </View>
     </HardShadow>
   );
 }
