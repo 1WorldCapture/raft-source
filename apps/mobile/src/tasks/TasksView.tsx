@@ -64,7 +64,6 @@ export function TaskGroupHeader({
   return (
     <Pressable accessibilityRole="button" onPress={onPress} style={styles.groupHeader}>
       <View style={[styles.statusPill, { backgroundColor: taskStatusFill(status) }]}>
-        <StatusIcon status={status} size={10} />
         <AppText style={styles.statusPillText}>{t(STATUS_LABEL[status])}</AppText>
       </View>
       <AppText style={styles.groupCount}>{String(count)}</AppText>
