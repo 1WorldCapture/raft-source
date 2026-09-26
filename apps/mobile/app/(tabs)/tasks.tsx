@@ -61,7 +61,7 @@ export default function TasksScreen() {
 
   return (
     <View style={styles.page}>
-      <PanelHeader title={t("layout.mobileTabBar.tasks")} />
+      <PanelHeader tone="yellow" title={t("layout.mobileTabBar.tasks")} />
       <FlatList
         data={groups}
         keyExtractor={(group) => group.status}

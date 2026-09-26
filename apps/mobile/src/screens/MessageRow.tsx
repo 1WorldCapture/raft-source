@@ -1,8 +1,9 @@
-import { memo, useState } from "react";
+import { memo, useEffect, useState } from "react";
 import { Image, Pressable, StyleSheet, View } from "react-native";
 import type { MessageAttachment, RaftMessage, ThreadReplyPreview } from "../model/messages";
 import { senderLabel } from "../model/messages";
 import { Avatar } from "../ui/Avatar";
+import { useRaftStore } from "../state/store";
 import { AppText } from "../ui/text";
 import { RichText } from "../ui/richText";
 import { color, fontSize, radius } from "../ui/tokens";
@@ -50,6 +51,7 @@ export const MessageRow = memo(function MessageRow({
   onDelete,
   onToggleSystem,
   onOpenAttachment,
+  resolveImageUrl,
   onPressMessage,
   onLongPressMessage,
   onPressSender,
@@ -89,6 +91,8 @@ export const MessageRow = memo(function MessageRow({
   onDelete?: (messageId: string) => void;
   onToggleSystem?: (messageId: string) => void;
   onOpenAttachment?: (attachment: MessageAttachment, disposition: "inline" | "attachment") => void;
+  /** Signed inline URL for image attachments that have no CDN thumbnail. */
+  resolveImageUrl?: (attachment: MessageAttachment) => Promise<string | null>;
   onPressMessage?: (messageId: string) => void;
   onLongPressMessage?: (messageId: string, x: number, y: number) => void;
   onPressSender?: (messageId: string) => void;
@@ -129,11 +133,7 @@ export const MessageRow = memo(function MessageRow({
                 onLongPress={() => onLongPressSender?.(message.id)}
                 onPress={() => onPressSender?.(message.id)}
               >
-                <Avatar
-                  name={senderLabel(message)}
-                  kind={message.senderType === "agent" ? "agent" : "human"}
-                  avatarUrl={message.senderAvatarUrl}
-                />
+                <SenderAvatar message={message} />
               </Pressable>
             ) : null}
           </View>
@@ -182,11 +182,7 @@ export const MessageRow = memo(function MessageRow({
               <View style={styles.grid}>
                 {images.map((attachment) => (
                   <Pressable key={attachment.id ?? attachment.filename} onPress={() => onOpenAttachment?.(attachment, "inline")}>
-                    {attachment.thumbnailUrl ? (
-                      <Image source={{ uri: attachment.thumbnailUrl }} style={styles.thumb} />
-                    ) : (
-                      <View style={[styles.thumb, styles.fileCard]}><AppText numberOfLines={2} style={styles.file}>{attachment.filename}</AppText></View>
-                    )}
+                    <AttachmentImage attachment={attachment} count={images.length} resolve={resolveImageUrl} />
                   </Pressable>
                 ))}
               </View>
@@ -272,6 +268,52 @@ function formatFileSize(bytes: number): string {
   return `${Math.round(bytes / (1024 * 102.4)) / 10} MB`;
 }
 
+function AttachmentImage({
+  attachment,
+  count,
+  resolve,
+}: {
+  attachment: MessageAttachment;
+  count: number;
+  resolve?: (attachment: MessageAttachment) => Promise<string | null>;
+}) {
+  const [uri, setUri] = useState<string | null>(attachment.thumbnailUrl ?? null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    if (uri || !resolve) return;
+    let cancelled = false;
+    void resolve(attachment).then((url) => {
+      if (!cancelled) setUri(url);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [attachment, resolve, uri]);
+  // Web caps gallery images at min(22rem, 100vw - 7rem); two or more share the row.
+  const width = count > 1 ? 132 : 240;
+  const ratio = attachment.width && attachment.height ? attachment.height / attachment.width : 0.75;
+  const height = Math.min(Math.round(width * ratio), 320);
+  if (!uri || failed) {
+    return <View style={[styles.imageFrame, styles.imagePlaceholder, { width, height }]}><AppText numberOfLines={2} style={styles.file}>{attachment.filename}</AppText></View>;
+  }
+  return (
+    <View style={[styles.imageFrame, { width, height }]}>
+      <Image onError={() => setFailed(true)} resizeMode="cover" source={{ uri }} style={{ width: "100%", height: "100%" }} />
+    </View>
+  );
+}
+
+function SenderAvatar({ message }: { message: RaftMessage }) {
+  const known = useRaftStore((state) => (message.senderId ? state.senderAvatars[message.senderId] : undefined));
+  return (
+    <Avatar
+      name={senderLabel(message)}
+      kind={message.senderType === "agent" ? "agent" : "human"}
+      avatarUrl={message.senderAvatarUrl ?? known ?? null}
+    />
+  );
+}
+
 const styles = StyleSheet.create({
   divider: { borderBottomColor: color.stone, borderBottomWidth: 2, marginBottom: 8, marginTop: 12 },
   dividerLabel: { ...fontSize.date, color: color.mutedStrong, fontWeight: "700", letterSpacing: 0.8, textAlign: "center", textTransform: "uppercase" },
@@ -288,6 +330,8 @@ const styles = StyleSheet.create({
   more: { color: color.link, fontSize: 13, fontWeight: "700", marginTop: 4 },
   grid: { flexDirection: "row", flexWrap: "wrap", gap: 4, marginTop: 6 },
   thumb: { height: 120, width: 120 },
+  imageFrame: { borderColor: color.border, borderWidth: 2, marginTop: 6, overflow: "hidden" },
+  imagePlaceholder: { alignItems: "center", backgroundColor: color.mutedFill, justifyContent: "center", padding: 8 },
   fileCard: { borderColor: color.border, borderWidth: 2, marginTop: 6, paddingHorizontal: 8, paddingVertical: 6 },
   file: { color: color.ink, fontSize: 13, fontWeight: "700" },
   fileMeta: { color: color.muted, fontSize: 12 },

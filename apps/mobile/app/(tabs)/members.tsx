@@ -67,7 +67,7 @@ export default function MembersScreen() {
 
   return (
     <View style={styles.page}>
-      <PanelHeader title={t("layout.mobileTabBar.members")} />
+      <PanelHeader tone="yellow" title={t("layout.mobileTabBar.members")} />
       <FlatList
         data={people}
         keyExtractor={(person) => `${person.kind}:${person.id}`}

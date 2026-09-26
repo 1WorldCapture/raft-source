@@ -36,7 +36,7 @@ export default function SettingsScreen() {
 
   return (
     <View style={styles.page}>
-      <PanelHeader title={t("layout.mobileTabBar.settings")} />
+      <PanelHeader tone="yellow" title={t("layout.mobileTabBar.settings")} />
       <View style={styles.block}>
         <AppText style={styles.label}>{userLabel(session.user) || t("mobile.account.signedIn")}</AppText>
         <AppText style={styles.hint}>{session.user?.email || ""}</AppText>
