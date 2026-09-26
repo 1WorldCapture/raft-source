@@ -68,9 +68,6 @@ export default function ServersScreen() {
       />
       <View style={styles.footer}>
         <Text style={styles.who}>{userLabel(session.user)}</Text>
-        <Pressable onPress={() => router.push("/server")}>
-          <Text style={styles.link}>Server</Text>
-        </Pressable>
         <Pressable onPress={() => void session.logout().then(() => router.replace("/login"))}>
           <Text style={styles.link}>Sign out</Text>
         </Pressable>

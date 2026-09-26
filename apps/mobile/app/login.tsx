@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useRouter } from "expo-router";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 import { ApiError } from "../src/api/client";
 import { useSession } from "../src/state/session";
 import { ErrorText, Field, PrimaryButton } from "../src/ui/screen";
@@ -53,9 +53,6 @@ export default function LoginScreen() {
         label={submitting ? "Signing in…" : "Sign in"}
         onPress={() => void submit()}
       />
-      <Pressable onPress={() => router.push("/server")}>
-        <Text style={styles.link}>Change server</Text>
-      </Pressable>
     </View>
   );
 }
@@ -63,5 +60,4 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   page: { flex: 1, gap: space.md, padding: space.lg, backgroundColor: colors.bg },
   origin: { color: colors.muted, fontSize: 13 },
-  link: { color: colors.accent, fontSize: 15, fontWeight: "600", textAlign: "center" },
 });

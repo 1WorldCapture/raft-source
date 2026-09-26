@@ -1,3 +1,6 @@
+/** This private build talks to one deployment. The sign-in screen does not ask for it. */
+export const BUNDLED_SERVER_ORIGIN = "http://grokbot.tailf3efbe.ts.net:3001";
+
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "0.0.0.0", "::1"]);
 
 function prefersHttp(hostname: string): boolean {

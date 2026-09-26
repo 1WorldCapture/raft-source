@@ -6,6 +6,7 @@ import { createInstallationId } from "../api/ids";
 import { syncSince } from "../api/sync";
 import { parseUser, type RaftUser } from "../model/messages";
 import { createRealtime, type Realtime } from "../realtime/socket";
+import { BUNDLED_SERVER_ORIGIN } from "../session/origin";
 import { useRaftStore } from "./store";
 
 const ORIGIN = "raft_mobile_origin";
@@ -186,11 +187,23 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     const timer = setTimeout(() => {
       void (async () => {
         try {
-          const origin = await SecureStore.getItemAsync(ORIGIN);
-          const accessToken = await SecureStore.getItemAsync(ACCESS);
-          const refreshToken = await SecureStore.getItemAsync(REFRESH);
-          const userJson = await SecureStore.getItemAsync(USER);
-          const serverId = await SecureStore.getItemAsync(SERVER);
+          const storedOrigin = await SecureStore.getItemAsync(ORIGIN);
+          const origin = BUNDLED_SERVER_ORIGIN;
+          let accessToken = await SecureStore.getItemAsync(ACCESS);
+          let refreshToken = await SecureStore.getItemAsync(REFRESH);
+          let userJson = await SecureStore.getItemAsync(USER);
+          let serverId = await SecureStore.getItemAsync(SERVER);
+          if (storedOrigin !== origin) {
+            void SecureStore.setItemAsync(ORIGIN, origin);
+            if (storedOrigin) {
+              accessToken = null;
+              refreshToken = null;
+              userJson = null;
+              serverId = null;
+              void persistTokens(null);
+              void SecureStore.deleteItemAsync(SERVER);
+            }
+          }
           const storedInstallation = await SecureStore.getItemAsync(INSTALLATION);
           let installationId = storedInstallation && /^ari_[0-9a-f]{32}$/.test(storedInstallation)
             ? storedInstallation
@@ -224,7 +237,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             }
           }
         } catch {
-          if (!cancelled) apply({ ready: true });
+          if (!cancelled) apply({ origin: BUNDLED_SERVER_ORIGIN, ready: true });
         }
       })();
     }, 0);
