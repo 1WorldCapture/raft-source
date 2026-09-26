@@ -16,6 +16,7 @@ interface RaftDataState {
   bumpLiveUnread: (channelId: string) => void;
   clearLiveUnread: (channelId: string) => void;
   clearChannelUnread: (channelId: string) => void;
+  dropMessage: (channelId: string, messageId: string) => void;
   noteSeq: (seq: number) => void;
   bumpDirectory: () => void;
   setNotice: (notice: RaftDataState["notice"]) => void;
@@ -60,6 +61,16 @@ export const useRaftStore = create<RaftDataState>((set) => ({
       channelUnread: {
         ...state.channelUnread,
         [channelId]: { unreadCount: 0, hasMention: false },
+      },
+    };
+  }),
+  dropMessage: (channelId, messageId) => set((state) => {
+    const bucket = state.messagesByChannel[channelId];
+    if (!bucket?.some((message) => message.id === messageId)) return state;
+    return {
+      messagesByChannel: {
+        ...state.messagesByChannel,
+        [channelId]: bucket.filter((message) => message.id !== messageId),
       },
     };
   }),

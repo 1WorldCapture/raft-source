@@ -4,7 +4,7 @@ Expo client for a private Raft deployment. Phase 1 covers sign-in, servers, chan
 
 ## Layout
 
-- `app/` — expo-router screens (server address, login, servers, channels, messages, threads)
+- `app/` — expo-router screens (login, servers, channels, messages, threads)
 - `src/api/` — fetch client, token refresh, health check
 - `src/model/` — message, mention, and unread parsing
 - `src/realtime/` — socket.io connection
@@ -19,7 +19,7 @@ pnpm install
 pnpm --filter @botiverse/raft-mobile start
 ```
 
-Then open the project in the iOS simulator, Android emulator, or Expo Go. The first screen asks for the server origin, for example `https://raft.example.com` or `127.0.0.1:8787`. The app calls `GET /health` and only saves the address when the response is `{ "status": "ok" }`.
+Then open the project in the iOS simulator, Android emulator, or Expo Go. The server address comes from `EXPO_PUBLIC_RAFT_SERVER_URL` at build time. There is no address screen. A missing or invalid value stops on a configuration error.
 
 Tokens and the server address live in expo-secure-store. They are not written to logs.
 

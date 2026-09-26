@@ -1,8 +1,14 @@
 import { mergeMessages, type RaftMessage } from "./messages";
 
-export function hasSeqGap(lastSeq: number, incomingSeq: number | undefined): boolean {
-  if (incomingSeq === undefined || lastSeq <= 0) return false;
-  return incomingSeq > lastSeq + 1;
+/**
+ * Seq is shared by the whole server, so a jump inside one channel is normal.
+ * Live `message:new` must not call `/messages/sync`.
+ */
+export function liveMessageNeedsSync(
+  _channelMaxSeq: number,
+  _incomingSeq: number | undefined,
+): boolean {
+  return false;
 }
 
 /** Replace an optimistic row that shares randomId, otherwise append. */

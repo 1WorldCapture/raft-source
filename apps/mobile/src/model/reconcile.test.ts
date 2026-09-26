@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { hasSeqGap, reconcileIncoming } from "./reconcile.ts";
+import { liveMessageNeedsSync, reconcileIncoming } from "./reconcile.ts";
 import type { RaftMessage } from "./messages.ts";
 
 const base = (patch: Partial<RaftMessage>): RaftMessage => ({
@@ -10,10 +10,11 @@ const base = (patch: Partial<RaftMessage>): RaftMessage => ({
   ...patch,
 });
 
-test("hasSeqGap is true only when a newer seq skips ahead of the local max", () => {
-  assert.equal(hasSeqGap(0, 4), false);
-  assert.equal(hasSeqGap(10, 11), false);
-  assert.equal(hasSeqGap(10, 12), true);
+test("live delivery does not sync when the server-wide seq jumps", () => {
+  assert.equal(liveMessageNeedsSync(0, 4), false);
+  assert.equal(liveMessageNeedsSync(10, 11), false);
+  assert.equal(liveMessageNeedsSync(10, 20), false);
+  assert.equal(liveMessageNeedsSync(10, undefined), false);
 });
 
 test("reconcileIncoming replaces the optimistic row with the same randomId", () => {

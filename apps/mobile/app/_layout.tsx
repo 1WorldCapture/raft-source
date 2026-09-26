@@ -19,7 +19,7 @@ function SessionRedirect() {
       if (top) router.replace("/");
       return;
     }
-    if (!session.signedIn && top !== "login" && top !== "server") {
+    if (!session.signedIn && top !== "login") {
       router.replace("/login");
     }
   }, [router, segments, session.origin, session.ready, session.signedIn]);
@@ -65,7 +65,6 @@ export default function RootLayout() {
         }}
       >
         <Stack.Screen name="index" options={{ headerShown: false }} />
-        <Stack.Screen name="server" options={{ title: "Server" }} />
         <Stack.Screen name="login" options={{ title: "Sign in" }} />
         <Stack.Screen name="servers" options={{ title: "Servers", headerBackVisible: false }} />
         <Stack.Screen name="channels/[serverId]" options={{ title: "Channels" }} />

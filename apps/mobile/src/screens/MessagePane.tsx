@@ -1,5 +1,5 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { useNavigation, useRouter } from "expo-router";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useFocusEffect, useNavigation, useRouter } from "expo-router";
 import {
   ActivityIndicator,
   FlatList,
@@ -13,7 +13,7 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { ApiError } from "../api/client";
+import { ApiError, StaleRequestError } from "../api/client";
 import { createRandomId } from "../api/ids";
 import {
   historyLimited,
@@ -110,14 +110,14 @@ export function MessagePane({
     };
   }, []);
 
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
     sessionRef.current.setFocusedChannelId(channelId);
-    if (thread) sessionRef.current.joinThread(channelId);
+    if (thread && channelId !== "pending-thread") sessionRef.current.joinThread(channelId);
     return () => {
-      sessionRef.current.setFocusedChannelId(null);
-      if (thread) sessionRef.current.leaveThread(channelId);
+      sessionRef.current.clearFocusedChannelId(channelId);
+      if (thread && channelId !== "pending-thread") sessionRef.current.leaveThread(channelId);
     };
-  }, [channelId, thread]);
+  }, [channelId, thread]));
 
   useEffect(() => {
     let cancelled = false;
@@ -139,7 +139,8 @@ export function MessagePane({
         const seq = maxSeq(page);
         if (seq > 0) void sessionRef.current.markRead(channelId, seq);
       } catch (caught) {
-        if (!cancelled) setError(sendError(caught));
+        if (cancelled || caught instanceof StaleRequestError) return;
+        setError(sendError(caught));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -161,6 +162,7 @@ export function MessagePane({
       setHasMore(page.length >= PAGE);
       setLimited((current) => current || historyLimited(data));
     } catch (caught) {
+      if (caught instanceof StaleRequestError) return;
       setError(sendError(caught));
     } finally {
       setLoadingOlder(false);
@@ -224,6 +226,9 @@ export function MessagePane({
         const created = await sessionRef.current.client.post<{ threadChannelId?: string }>(`/channels/${parentChannelId}/threads`, { parentMessageId });
         if (!created.threadChannelId) throw new Error("Thread was not created");
         targetChannelId = created.threadChannelId;
+        const optimistic = useRaftStore.getState().messagesByChannel["pending-thread"]?.find((item) => item.id === optimisticId);
+        useRaftStore.getState().dropMessage("pending-thread", optimisticId);
+        if (optimistic) useRaftStore.getState().upsertMessages([{ ...optimistic, channelId: targetChannelId }]);
         sessionRef.current.joinThread(targetChannelId);
         useRaftStore.getState().setThreadSummaries({
           [parentMessageId]: { threadChannelId: targetChannelId, replyCount: 0 },
@@ -240,6 +245,7 @@ export function MessagePane({
       if (message) useRaftStore.getState().upsertMessages([message]);
       else useRaftStore.getState().upsertMessages(useRaftStore.getState().messagesByChannel[targetChannelId]?.filter((item) => item.id !== optimisticId) ?? []);
     } catch (caught) {
+      if (caught instanceof StaleRequestError) return;
       const current = useRaftStore.getState().messagesByChannel[channelId] ?? [];
       useRaftStore.getState().upsertMessages(current.map((item) => item.id === optimisticId ? { ...item, pending: "failed" as const } : item));
       setError(sendError(caught));

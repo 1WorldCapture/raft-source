@@ -1,7 +1,7 @@
 import { useCallback, useLayoutEffect, useState } from "react";
 import { useFocusEffect, useLocalSearchParams, useNavigation, useRouter } from "expo-router";
 import { FlatList, Image, Pressable, RefreshControl, StyleSheet, Text, View } from "react-native";
-import { ApiError } from "../../src/api/client";
+import { ApiError, StaleRequestError } from "../../src/api/client";
 import { channelLabel, parseChannelUnread, parseChannels, type RaftChannel } from "../../src/model/messages";
 import { useSession } from "../../src/state/session";
 import { useRaftStore } from "../../src/state/store";
@@ -47,6 +47,7 @@ export default function ChannelsScreen() {
       setDms(visibleChannels(parseChannels(dmData).map((channel) => ({ ...channel, type: channel.type || "dm" }))).sort((a, b) => (b.lastMessageAt ?? "").localeCompare(a.lastMessageAt ?? "")));
       useRaftStore.getState().setChannelUnread(parseChannelUnread(unreadData));
     } catch (caught) {
+      if (caught instanceof StaleRequestError) return;
       if (caught instanceof ApiError && caught.status === 0) setError("网络不通。恢复后下拉刷新。");
       else setError(caught instanceof ApiError ? caught.error : "Couldn't load channels");
     } finally {
