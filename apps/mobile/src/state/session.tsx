@@ -180,51 +180,55 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let cancelled = false;
-    void (async () => {
-      try {
-        const [origin, accessToken, refreshToken, userJson, serverId, storedInstallation] = await Promise.all([
-          SecureStore.getItemAsync(ORIGIN),
-          SecureStore.getItemAsync(ACCESS),
-          SecureStore.getItemAsync(REFRESH),
-          SecureStore.getItemAsync(USER),
-          SecureStore.getItemAsync(SERVER),
-          SecureStore.getItemAsync(INSTALLATION),
-        ]);
-        let installationId = storedInstallation && /^ari_[0-9a-f]{32}$/.test(storedInstallation)
-          ? storedInstallation
-          : createInstallationId();
-        if (installationId !== storedInstallation) await SecureStore.setItemAsync(INSTALLATION, installationId);
-        if (cancelled) return;
-        apply({
-          origin,
-          accessToken,
-          refreshToken,
-          installationId,
-          user: userJson ? parseUser(JSON.parse(userJson) as unknown) : null,
-          serverId,
-          ready: true,
-        });
-        if (!accessToken) return;
+    // SecureStore reads started in this effect never settle on Android release builds.
+    // Open the first screen immediately, then hydrate on the next turn.
+    apply({ ready: true });
+    const timer = setTimeout(() => {
+      void (async () => {
         try {
-          const me = parseUser(await client.get("/auth/me"));
-          if (me) apply({ user: me });
-        } catch (error) {
-          if (error instanceof ApiError && error.status === 401 && snapshotRef.current.refreshToken) {
-            try {
-              await client.refreshTokens();
-              const me = parseUser(await client.get("/auth/me"));
-              if (me) apply({ user: me });
-            } catch {
-              clearAuth();
+          const origin = await SecureStore.getItemAsync(ORIGIN);
+          const accessToken = await SecureStore.getItemAsync(ACCESS);
+          const refreshToken = await SecureStore.getItemAsync(REFRESH);
+          const userJson = await SecureStore.getItemAsync(USER);
+          const serverId = await SecureStore.getItemAsync(SERVER);
+          const storedInstallation = await SecureStore.getItemAsync(INSTALLATION);
+          let installationId = storedInstallation && /^ari_[0-9a-f]{32}$/.test(storedInstallation)
+            ? storedInstallation
+            : createInstallationId();
+          if (installationId !== storedInstallation) await SecureStore.setItemAsync(INSTALLATION, installationId);
+          if (cancelled) return;
+          apply({
+            origin,
+            accessToken,
+            refreshToken,
+            installationId,
+            user: userJson ? parseUser(JSON.parse(userJson) as unknown) : null,
+            serverId,
+            ready: true,
+          });
+          if (!accessToken) return;
+          try {
+            const me = parseUser(await client.get("/auth/me"));
+            if (me) apply({ user: me });
+          } catch (error) {
+            if (error instanceof ApiError && error.status === 401 && snapshotRef.current.refreshToken) {
+              try {
+                await client.refreshTokens();
+                const me = parseUser(await client.get("/auth/me"));
+                if (me) apply({ user: me });
+              } catch {
+                clearAuth();
+              }
             }
           }
+        } catch {
+          if (!cancelled) apply({ ready: true, installationId: snapshotRef.current.installationId ?? createInstallationId() });
         }
-      } catch {
-        if (!cancelled) apply({ ready: true, installationId: snapshotRef.current.installationId ?? createInstallationId() });
-      }
-    })();
+      })();
+    }, 0);
     return () => {
       cancelled = true;
+      clearTimeout(timer);
     };
   }, [client]);
 

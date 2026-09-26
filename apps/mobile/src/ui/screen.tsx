@@ -14,6 +14,7 @@ export function LoadingScreen() {
   return (
     <View style={styles.center}>
       <ActivityIndicator color={colors.accent} />
+      <Text style={styles.body}>正在打开</Text>
     </View>
   );
 }
