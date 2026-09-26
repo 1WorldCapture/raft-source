@@ -1,5 +1,6 @@
 import { StyleSheet, Text, type TextProps, type TextStyle } from "react-native";
 import { cjkFamily, latinFamily } from "./fonts";
+import { runFontFamily } from "./runFont";
 
 const CJK = /[\u3400-\u9fff\uf900-\ufaff]/;
 
@@ -30,7 +31,7 @@ export function AppText({ style, children, ...rest }: TextProps) {
   return (
     <Text {...rest} style={[style, { fontFamily: family }]}>
       {runs(children).map((run, index) => (
-        <Text key={`${index}-${run.cjk}`} style={run.cjk ? { fontFamily: cjkFamily } : undefined}>{run.text}</Text>
+        <Text key={`${index}-${run.cjk}`} style={{ fontFamily: runFontFamily(run.cjk, family, cjkFamily) }}>{run.text}</Text>
       ))}
     </Text>
   );

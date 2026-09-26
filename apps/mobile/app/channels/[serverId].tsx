@@ -1,12 +1,13 @@
 import { useCallback, useLayoutEffect, useState } from "react";
 import { useFocusEffect, useLocalSearchParams, useNavigation, useRouter } from "expo-router";
-import { FlatList, Image, Pressable, RefreshControl, StyleSheet, Text, View } from "react-native";
+import { FlatList, Image, Pressable, RefreshControl, StyleSheet, View } from "react-native";
 import { ApiError, StaleRequestError } from "../../src/api/client";
 import { useT } from "../../src/i18n/provider";
 import { channelLabel, parseChannelUnread, parseChannels, type RaftChannel } from "../../src/model/messages";
 import { useRaftStore } from "../../src/state/store";
 import { useSession } from "../../src/state/session";
 import { LoadingScreen, ScreenMessage } from "../../src/ui/screen";
+import { AppText } from "../../src/ui/text";
 import { colors, space } from "../../src/ui/theme";
 
 function visibleChannels(channels: RaftChannel[]): RaftChannel[] {
@@ -76,7 +77,7 @@ export default function ChannelsScreen() {
       keyExtractor={(item) => item.id}
       style={styles.list}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); void load(); }} />}
-      ListEmptyComponent={<Text style={styles.empty}>{t("mobile.channels.empty")}</Text>}
+      ListEmptyComponent={<AppText style={styles.empty}>{t("mobile.channels.empty")}</AppText>}
       contentContainerStyle={rows.length === 0 ? styles.emptyWrap : undefined}
       renderItem={({ item, index }) => {
         const showHeader = index === 0 || rows[index - 1]?.section !== item.section;
@@ -86,7 +87,7 @@ export default function ChannelsScreen() {
         const showBadge = count > 0 || summary?.hasMention === true;
         return (
           <View>
-            {showHeader ? <Text style={styles.section}>{item.section}</Text> : null}
+            {showHeader ? <AppText style={styles.section}>{item.section}</AppText> : null}
             <Pressable
               onPress={() => router.push({
                 pathname: "/messages/[channelId]",
@@ -94,11 +95,11 @@ export default function ChannelsScreen() {
               })}
               style={styles.row}
             >
-              {item.peerAvatarUrl ? <Image source={{ uri: item.peerAvatarUrl }} style={styles.avatar} /> : <Text style={styles.hash}>{item.type === "dm" ? "@" : "#"}</Text>}
-              <Text style={styles.name}>{channelLabel(item)}{item.peerType === "agent" ? " · Agent" : ""}</Text>
+              {item.peerAvatarUrl ? <Image source={{ uri: item.peerAvatarUrl }} style={styles.avatar} /> : <AppText style={styles.hash}>{item.type === "dm" ? "@" : "#"}</AppText>}
+              <AppText style={styles.name}>{channelLabel(item)}{item.peerType === "agent" ? " · Agent" : ""}</AppText>
               {showBadge ? (
                 <View style={[styles.badge, summary?.hasMention && styles.mentionBadge]}>
-                  <Text style={styles.badgeText}>{count > 0 ? (count > 99 ? "99+" : String(count)) : "@"}</Text>
+                  <AppText style={styles.badgeText}>{count > 0 ? (count > 99 ? "99+" : String(count)) : "@"}</AppText>
                 </View>
               ) : null}
             </Pressable>

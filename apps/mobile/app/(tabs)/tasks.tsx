@@ -98,6 +98,6 @@ function parseTasks(data: unknown): TaskRow[] {
 const styles = StyleSheet.create({
   page: { backgroundColor: color.page, flex: 1 },
   section: { ...fontSize.group, color: color.ink, fontWeight: "700", letterSpacing: 0.8, paddingHorizontal: 16, paddingTop: 16, textTransform: "uppercase" },
-  row: { paddingHorizontal: 16, paddingVertical: 12 },
-  title: { color: color.ink, fontSize: 14, fontWeight: "700" },
+  row: { justifyContent: "center", minHeight: 55, paddingHorizontal: 16 },
+  title: { ...fontSize.list, color: color.ink, fontWeight: "700" },
 });

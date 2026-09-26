@@ -13,7 +13,6 @@ import {
   Platform,
   Pressable,
   StyleSheet,
-  Text,
   TextInput,
   View,
   type NativeScrollEvent,
@@ -40,6 +39,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useSession } from "../state/session";
 import { useRaftStore } from "../state/store";
 import { colors, space } from "../ui/theme";
+import { AppText } from "../ui/text";
 import { bodyFont, color } from "../ui/tokens";
 import { useT } from "../i18n/provider";
 import { MessageRow, type LinkedTaskChip } from "./MessageRow";
@@ -988,9 +988,9 @@ export function MessagePane({
                 }}
                 style={styles.headerAction}
               >
-                <Text style={styles.headerActionText}>
+                <AppText style={styles.headerActionText}>
                   {followedIds.has(parentMessageId) ? t("message.messageItem.unfollowThread") : t("message.messageItem.followThread")}
-                </Text>
+                </AppText>
               </Pressable>
             ) : null}
             <View accessibilityLabel={t("message.chatPanel.searchChannel")} style={styles.headerAction}>
@@ -1033,11 +1033,11 @@ export function MessagePane({
           ListFooterComponent={loadingOlder
             ? <ActivityIndicator color={colors.accent} />
             : limited
-              ? <Text style={styles.note}>{t("mobile.messages.historyLimited")}</Text>
+              ? <AppText style={styles.note}>{t("mobile.messages.historyLimited")}</AppText>
               : !hasMore && messages.length > 0
-                ? <Text style={styles.note}>{t(thread ? "message.historyTop.beginningOfReplies" : "message.historyTop.beginningOfMessages")}</Text>
+                ? <AppText style={styles.note}>{t(thread ? "message.historyTop.beginningOfReplies" : "message.historyTop.beginningOfMessages")}</AppText>
                 : null}
-          ListEmptyComponent={<Text style={styles.note}>{t("mobile.messages.empty")}</Text>}
+          ListEmptyComponent={<AppText style={styles.note}>{t("mobile.messages.empty")}</AppText>}
           renderItem={({ item }) => {
             if (hiddenSystems.has(item.id)) return null;
             const summary = summaries[item.id];
@@ -1092,7 +1092,7 @@ export function MessagePane({
         />
         {stickyAt ? (
           <View pointerEvents="none" style={styles.sticky}>
-            <Text style={styles.stickyText}>{formatDayLabel(stickyAt, timeOptions)}</Text>
+            <AppText style={styles.stickyText}>{formatDayLabel(stickyAt, timeOptions)}</AppText>
           </View>
         ) : null}
         {unseen > 0 ? (
@@ -1104,7 +1104,7 @@ export function MessagePane({
             }}
             style={styles.jump}
           >
-            <Text style={styles.jumpText}>{`↓ ${t("message.chatPanel.newMessagesCount", { count: unseen })}`}</Text>
+            <AppText style={styles.jumpText}>{`↓ ${t("message.chatPanel.newMessagesCount", { count: unseen })}`}</AppText>
           </Pressable>
         ) : null}
       </View>
@@ -1113,8 +1113,8 @@ export function MessagePane({
         <View style={styles.candidates}>
           {candidates.map((candidate) => (
             <Pressable key={candidate.id} onPress={() => chooseMention(candidate)} style={styles.candidate}>
-              <Text style={styles.candidateName}>@{candidate.name}</Text>
-              <Text style={styles.candidateLabel}>{candidate.label}</Text>
+              <AppText style={styles.candidateName}>@{candidate.name}</AppText>
+              <AppText style={styles.candidateLabel}>{candidate.label}</AppText>
             </Pressable>
           ))}
         </View>
@@ -1123,8 +1123,8 @@ export function MessagePane({
         <View style={styles.candidates}>
           {channelHits.map((channel) => (
             <Pressable key={channel.id} onPress={() => chooseChannel(channel)} style={styles.candidate}>
-              <Text style={styles.candidateName}>#{channel.name}</Text>
-              <Text style={styles.candidateLabel}>{channel.archived ? t("message.composer.archivedBadge") : channel.description ?? ""}</Text>
+              <AppText style={styles.candidateName}>#{channel.name}</AppText>
+              <AppText style={styles.candidateLabel}>{channel.archived ? t("message.composer.archivedBadge") : channel.description ?? ""}</AppText>
             </Pressable>
           ))}
         </View>
@@ -1133,16 +1133,16 @@ export function MessagePane({
         <View style={styles.uploads}>
           {uploads.map((file) => (
             <View key={file.localId} style={styles.uploadRow}>
-              <Text numberOfLines={1} style={styles.uploadName}>{file.status === "uploading" ? `${file.name} ${file.progress}%` : file.name}</Text>
+              <AppText numberOfLines={1} style={styles.uploadName}>{file.status === "uploading" ? `${file.name} ${file.progress}%` : file.name}</AppText>
               {file.status === "error" ? (
-                <Pressable onPress={() => void uploadLocal(file)}><Text style={styles.uploadAction}>{t("mobile.messages.resend")}</Text></Pressable>
+                <Pressable onPress={() => void uploadLocal(file)}><AppText style={styles.uploadAction}>{t("mobile.messages.resend")}</AppText></Pressable>
               ) : null}
-              <Pressable onPress={() => setUploads((current) => current.filter((item) => item.localId !== file.localId))}><Text style={styles.uploadAction}>{t("mobile.messages.delete")}</Text></Pressable>
+              <Pressable onPress={() => setUploads((current) => current.filter((item) => item.localId !== file.localId))}><AppText style={styles.uploadAction}>{t("mobile.messages.delete")}</AppText></Pressable>
             </View>
           ))}
         </View>
       ) : null}
-      {error ? <Text style={styles.error}>{error}</Text> : null}
+      {error ? <AppText style={styles.error}>{error}</AppText> : null}
       <View style={[styles.composer, { paddingBottom: androidKeyboard > 0 ? 8 : Math.max(insets.bottom, 12) }]}>
         <TextInput
           ref={inputRef}
@@ -1162,12 +1162,12 @@ export function MessagePane({
             <Pressable accessibilityRole="button" onPress={() => void pickFile()} style={styles.tool}><Paperclip color={color.ink} size={18} /></Pressable>
             <Pressable accessibilityRole="checkbox" accessibilityState={{ checked: asTask }} onPress={() => { setAsTask((current) => !current); focusComposer(); }} style={styles.taskToggle}>
               <ListChecks color={color.ink} size={16} />
-              <Text style={styles.taskLabel}>{t("message.composer.asTask")}</Text>
+              <AppText style={styles.taskLabel}>{t("message.composer.asTask")}</AppText>
               <View style={[styles.box, asTask ? styles.boxOn : null]} />
             </Pressable>
           </View>
           <Pressable disabled={uploads.some((file) => file.status !== "ready") || (draft.trim().length === 0 && !uploads.some((file) => file.status === "ready"))} onPress={() => void send()} style={styles.send}>
-            <Text style={styles.sendText}>{t("mobile.messages.send")}</Text>
+            <AppText style={styles.sendText}>{t("mobile.messages.send")}</AppText>
           </Pressable>
         </View>
       </View>
@@ -1292,7 +1292,7 @@ const styles = StyleSheet.create({
     marginHorizontal: 12,
     padding: 8,
   },
-  input: { color: color.ink, fontSize: 16, maxHeight: 128, minHeight: 24, paddingHorizontal: 4, paddingVertical: 4 },
+  input: { color: color.ink, fontFamily: "SpaceGrotesk-400", fontSize: 16, maxHeight: 128, minHeight: 24, paddingHorizontal: 4, paddingVertical: 4 },
   toolbar: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
   tools: { alignItems: "center", flexDirection: "row", gap: 4 },
   tool: { alignItems: "center", height: 32, justifyContent: "center", width: 32 },

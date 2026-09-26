@@ -122,6 +122,6 @@ function agentStatus(item: Record<string, unknown>): Person["status"] {
 const styles = StyleSheet.create({
   page: { backgroundColor: color.page, flex: 1 },
   section: { ...fontSize.group, color: color.ink, fontWeight: "700", letterSpacing: 0.8, paddingHorizontal: 16, paddingTop: 16, textTransform: "uppercase" },
-  row: { alignItems: "center", flexDirection: "row", gap: 10, paddingHorizontal: 16, paddingVertical: 10 },
-  name: { color: color.ink, flex: 1, fontSize: 14 },
+  row: { alignItems: "center", flexDirection: "row", gap: 10, minHeight: 55, paddingHorizontal: 16 },
+  name: { ...fontSize.list, color: color.ink, flex: 1, fontWeight: "500" },
 });

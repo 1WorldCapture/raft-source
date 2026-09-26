@@ -8,7 +8,7 @@ import { useSession } from "../src/state/session";
 import { LoadingScreen, ScreenMessage } from "../src/ui/screen";
 import { PanelHeader } from "../src/ui/PanelHeader";
 import { AppText } from "../src/ui/text";
-import { color } from "../src/ui/tokens";
+import { color, fontSize } from "../src/ui/tokens";
 
 export default function ActivityScreen() {
   const session = useSession();
@@ -70,7 +70,7 @@ export default function ActivityScreen() {
 
 const styles = StyleSheet.create({
   page: { backgroundColor: color.page, flex: 1 },
-  row: { paddingHorizontal: 16, paddingVertical: 12 },
-  title: { color: color.ink, fontSize: 14 },
+  row: { justifyContent: "center", minHeight: 55, paddingHorizontal: 16 },
+  title: { ...fontSize.list, color: color.ink, fontWeight: "500" },
   empty: { color: color.muted, padding: 16, textAlign: "center" },
 });

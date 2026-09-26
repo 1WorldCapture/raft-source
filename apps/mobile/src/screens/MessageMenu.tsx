@@ -1,6 +1,6 @@
 import { Modal, Pressable, StyleSheet, useWindowDimensions, View } from "react-native";
 import { AppText } from "../ui/text";
-import { color } from "../ui/tokens";
+import { color, fontSize } from "../ui/tokens";
 import { QUICK_REACTIONS } from "./reactions";
 
 const GUARD_MS = 600;
@@ -97,5 +97,5 @@ const styles = StyleSheet.create({
   emoji: { alignItems: "center", height: 32, justifyContent: "center", width: 32 },
   emojiText: { fontSize: 18 },
   item: { paddingHorizontal: 12, paddingVertical: 10 },
-  itemText: { color: color.ink, fontSize: 14, fontWeight: "700" },
+  itemText: { ...fontSize.list, color: color.ink, fontWeight: "700" },
 });
