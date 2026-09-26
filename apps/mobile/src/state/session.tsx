@@ -6,6 +6,7 @@ import { createInstallationId } from "../api/ids";
 import { syncSince } from "../api/sync";
 import { parseChannelUnread, parseUser, type RaftUser } from "../model/messages";
 import { useActivityStore } from "../activity/store";
+import { useTaskStore } from "../tasks/store";
 import { createRealtime, type Realtime } from "../realtime/socket";
 import { BUNDLED_SERVER_ORIGIN } from "../session/origin";
 import { shouldApplyServerResponse, shouldCommitTokens, shouldMarkVisibleRead, catchUpPlan, releaseFocus } from "./sessionPolicy";
@@ -222,6 +223,21 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     onRoomsJoined: () => {
       useRaftStore.getState().bumpDirectory();
       void useActivityStore.getState().refresh(client);
+    },
+    onConnect: () => {
+      void useTaskStore.getState().catchUp(client);
+    },
+    onDisconnect: () => {
+      useTaskStore.getState().markStale();
+    },
+    onTaskCreated: (payload) => {
+      useTaskStore.getState().applyCreated(payload);
+    },
+    onTaskUpdated: (payload) => {
+      useTaskStore.getState().applyUpdated(payload);
+    },
+    onTaskDeleted: (payload) => {
+      useTaskStore.getState().applyDeleted(payload);
     },
   }), [client]);
   realtimeRef.current = realtime;
