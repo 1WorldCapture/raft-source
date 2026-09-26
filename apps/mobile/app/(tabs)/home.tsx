@@ -160,9 +160,9 @@ export default function HomeScreen() {
         keyExtractor={(section) => section.id}
         ListHeaderComponent={
           <View>
-            <Entry icon={<Search color={color.ink} size={16} />} label={t("layout.sidebar.search")} onPress={() => router.push("/search")} />
-            <Entry icon={<Bell color={color.ink} size={16} />} label={t("layout.sidebar.activity")} count={activityCount} onPress={() => router.push("/activity")} />
-            <Entry label={t("layout.sidebar.saved")} onPress={() => router.push("/saved")} />
+            <Entry compact={height <= 600} icon={<Search color={color.ink} size={16} />} label={t("layout.sidebar.search")} onPress={() => router.push("/search")} />
+            <Entry compact={height <= 600} icon={<Bell color={color.ink} size={16} />} label={t("layout.sidebar.activity")} count={activityCount} onPress={() => router.push("/activity")} />
+            <Entry compact={height <= 600} label={t("layout.sidebar.saved")} onPress={() => router.push("/saved")} />
           </View>
         }
         renderItem={({ item }) => {
@@ -174,7 +174,7 @@ export default function HomeScreen() {
                 {closed && groupHasUnread(item.channels, channelUnread, liveUnread) ? <View style={styles.dot} /> : null}
               </Pressable>
               {closed ? null : item.channels.map((channel) => (
-                <ChannelRow key={channel.id} channel={channel} onOpen={() => router.push({ pathname: "/messages/[channelId]", params: { channelId: channel.id, name: channelLabel(channel) } })} onLongPress={() => markRead(channel)} />
+                <ChannelRow compact={height <= 600} key={channel.id} channel={channel} onOpen={() => router.push({ pathname: "/messages/[channelId]", params: { channelId: channel.id, name: channelLabel(channel) } })} onLongPress={() => markRead(channel)} />
               ))}
             </View>
           );
@@ -205,9 +205,9 @@ export default function HomeScreen() {
   );
 }
 
-function Entry({ icon, label, count, onPress }: { icon?: ReactNode; label: string; count?: number; onPress: () => void }) {
+function Entry({ icon, label, count, onPress, compact }: { icon?: ReactNode; label: string; count?: number; onPress: () => void; compact?: boolean }) {
   return (
-    <Pressable onPress={onPress} style={styles.row}>
+    <Pressable onPress={onPress} style={[styles.row, compact ? styles.rowCompact : null]}>
       {icon ?? <View style={styles.iconGap} />}
       <AppText style={styles.name}>{label}</AppText>
       <Badge count={count ?? 0} />
@@ -215,14 +215,14 @@ function Entry({ icon, label, count, onPress }: { icon?: ReactNode; label: strin
   );
 }
 
-function ChannelRow({ channel, onOpen, onLongPress }: { channel: RaftChannel; onOpen: () => void; onLongPress: () => void }) {
+function ChannelRow({ channel, onOpen, onLongPress, compact }: { channel: RaftChannel; onOpen: () => void; onLongPress: () => void; compact?: boolean }) {
   const unread = useRaftStore((state) => state.channelUnread[channel.id]);
   const live = useRaftStore((state) => state.liveUnread[channel.id] ?? 0);
   const count = (unread?.unreadCount ?? 0) + live;
   const bold = count > 0 || unread?.hasMention === true;
   const dm = channel.type === "dm";
   return (
-    <Pressable delayLongPress={500} onLongPress={onLongPress} onPress={onOpen} style={styles.row}>
+    <Pressable delayLongPress={500} onLongPress={onLongPress} onPress={onOpen} style={[styles.row, compact ? styles.rowCompact : null]}>
       {dm ? <Avatar name={channelLabel(channel)} kind={channel.peerType === "agent" ? "agent" : "human"} avatarUrl={channel.peerAvatarUrl} size={28} /> : <Hash color={color.ink} size={16} />}
       <AppText numberOfLines={1} style={[styles.name, bold ? styles.unread : null]}>{channelLabel(channel)}</AppText>
       <Badge count={count} quiet={channel.activityMuted} />
@@ -258,8 +258,9 @@ const styles = StyleSheet.create({
   icon: { alignItems: "center", height: size.iconButton, justifyContent: "center", width: size.iconButton },
   section: { alignItems: "center", flexDirection: "row", gap: 8, paddingHorizontal: 16, paddingTop: 16 },
   sectionTitle: { ...fontSize.group, color: color.ink, fontWeight: "700", letterSpacing: 0.8, textTransform: "uppercase" },
-  row: { alignItems: "center", flexDirection: "row", gap: 10, paddingHorizontal: 16, paddingVertical: 10 },
-  name: { color: color.ink, flex: 1, fontSize: 14 },
+  row: { alignItems: "center", borderColor: "transparent", borderWidth: 2, flexDirection: "row", gap: 10, marginBottom: 4, paddingHorizontal: 16, paddingVertical: 8 },
+  rowCompact: { paddingVertical: 4 },
+  name: { ...fontSize.list, color: color.ink, flex: 1, fontWeight: "500" },
   unread: { fontWeight: "700" },
   iconGap: { width: 16 },
   dot: { backgroundColor: color.pink, borderRadius: 4, height: 8, width: 8 },

@@ -77,7 +77,7 @@ const styles = StyleSheet.create({
   choices: { flexDirection: "row", gap: 8, paddingHorizontal: 16, paddingTop: 8 },
   choice: { borderColor: color.border, borderWidth: 2, paddingHorizontal: 12, paddingVertical: 8 },
   current: { backgroundColor: color.yellow },
-  choiceLabel: { color: color.ink, fontSize: 14, fontWeight: "700" },
+  choiceLabel: { ...fontSize.list, color: color.ink, fontWeight: "700" },
   error: { color: color.red, paddingHorizontal: 16, paddingTop: 12 },
   logout: { alignSelf: "flex-start", borderColor: color.border, borderWidth: 2, marginHorizontal: 16, marginTop: 24, paddingHorizontal: 12, paddingVertical: 8 },
 });

@@ -2,6 +2,7 @@ import { Linking, ScrollView, Text, View } from "react-native";
 import { inlineTokens, type InlineToken } from "../model/inlineTokens";
 import { markdownPieces, type MarkdownPiece } from "../model/markdown";
 import type { MessageMention } from "../model/messages";
+import { latinFamily } from "./fonts";
 import { AppText } from "./text";
 import { color } from "./tokens";
 
@@ -76,7 +77,7 @@ function inlinePiece(
   agentRead: ((agentId: string) => boolean | null) | undefined,
   fontSize: number,
 ) {
-  if (piece.type === "bold") return <Text key={index} style={{ fontWeight: "700" }}>{tokens(piece.text, mentions, currentUserId, agentRead, fontSize)}</Text>;
+  if (piece.type === "bold") return <Text key={index} style={{ fontFamily: latinFamily("700"), fontWeight: "700" }}>{tokens(piece.text, mentions, currentUserId, agentRead, fontSize)}</Text>;
   if (piece.type === "code") {
     return <Text key={index} style={{ backgroundColor: color.inlineCode, fontFamily: "SpaceMono-400", fontSize: fontSize * 0.875 }}>{piece.text}</Text>;
   }
@@ -87,13 +88,13 @@ function inlinePiece(
         onPress={() => {
           if (piece.url.startsWith("https://") || piece.url.startsWith("http://")) void Linking.openURL(piece.url);
         }}
-        style={{ color: color.link, textDecorationColor: color.link, textDecorationLine: "underline" }}
+        style={{ color: color.link, fontFamily: latinFamily(), textDecorationColor: color.link, textDecorationLine: "underline" }}
       >
         {piece.text}
       </Text>
     );
   }
-  if (piece.type === "text") return <Text key={index}>{tokens(piece.text, mentions, currentUserId, agentRead, fontSize)}</Text>;
+  if (piece.type === "text") return <Text key={index} style={{ fontFamily: latinFamily() }}>{tokens(piece.text, mentions, currentUserId, agentRead, fontSize)}</Text>;
   return null;
 }
 
@@ -113,7 +114,7 @@ function chip(
   agentRead: ((agentId: string) => boolean | null) | undefined,
   fontSize: number,
 ) {
-  if (token.kind === "text") return <Text key={index}>{token.text}</Text>;
+  if (token.kind === "text") return <Text key={index} style={{ fontFamily: latinFamily() }}>{token.text}</Text>;
   const read = token.kind === "mention" && token.type === "agent" ? agentRead?.(token.id ?? "") : null;
   const background = token.kind === "mention" && token.self
     ? color.yellow
@@ -133,6 +134,7 @@ function chip(
         borderColor: bordered ? color.border : undefined,
         borderRadius: bordered ? 4 : 0,
         borderWidth: bordered ? 1 : 0,
+        fontFamily: latinFamily("700"),
         fontSize: bordered ? fontSize * 0.875 : undefined,
         fontWeight: "700",
         textDecorationLine: token.kind === "mention" && !token.self ? "underline" : "none",
