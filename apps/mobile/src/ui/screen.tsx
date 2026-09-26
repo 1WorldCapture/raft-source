@@ -1,20 +1,25 @@
-import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View, type TextInputProps } from "react-native";
+import { ActivityIndicator, Pressable, StyleSheet, TextInput, View, type TextInputProps } from "react-native";
+import { useT } from "../i18n/provider";
+import { BrutalButton } from "./BrutalButton";
+import { AppText } from "./text";
 import { colors, space } from "./theme";
+import { border, color, fontSize } from "./tokens";
 
 export function ScreenMessage({ title, body }: { title: string; body?: string }) {
   return (
     <View style={styles.center}>
-      <Text style={styles.title}>{title}</Text>
-      {body ? <Text style={styles.body}>{body}</Text> : null}
+      <AppText style={styles.title}>{title}</AppText>
+      {body ? <AppText style={styles.body}>{body}</AppText> : null}
     </View>
   );
 }
 
 export function LoadingScreen() {
+  const t = useT();
   return (
     <View style={styles.center}>
       <ActivityIndicator color={colors.accent} />
-      <Text style={styles.body}>正在打开</Text>
+      <AppText style={styles.body}>{t("common.loading")}</AppText>
     </View>
   );
 }
@@ -24,15 +29,19 @@ export function Field(props: TextInputProps) {
 }
 
 export function PrimaryButton({ label, onPress, disabled }: { label: string; onPress: () => void; disabled?: boolean }) {
-  return (
-    <Pressable accessibilityRole="button" disabled={disabled} onPress={onPress} style={[styles.button, disabled && styles.buttonDisabled]}>
-      <Text style={styles.buttonLabel}>{label}</Text>
-    </Pressable>
-  );
+  return <BrutalButton disabled={disabled} label={label} onPress={onPress} />;
 }
 
 export function ErrorText({ children }: { children: string }) {
-  return <Text style={styles.error}>{children}</Text>;
+  return <AppText style={styles.error}>{children}</AppText>;
+}
+
+export function QuietPress({ label, onPress }: { label: string; onPress: () => void }) {
+  return (
+    <Pressable accessibilityRole="button" onPress={onPress}>
+      <AppText style={styles.link}>{label}</AppText>
+    </Pressable>
+  );
 }
 
 const styles = StyleSheet.create({
@@ -44,25 +53,19 @@ const styles = StyleSheet.create({
     backgroundColor: colors.bg,
     gap: space.sm,
   },
-  title: { fontSize: 18, fontWeight: "600", color: colors.ink, textAlign: "center" },
+  title: { fontSize: 18, fontWeight: "700", color: colors.ink, textAlign: "center" },
   body: { fontSize: 15, color: colors.muted, textAlign: "center" },
   input: {
     backgroundColor: colors.card,
-    borderColor: colors.line,
-    borderWidth: 1,
-    borderRadius: 12,
+    borderColor: color.border,
+    borderWidth: border.strong,
+    borderRadius: 0,
     color: colors.ink,
-    fontSize: 16,
+    fontSize: fontSize.input.fontSize,
+    fontFamily: "SpaceGrotesk-400",
     paddingHorizontal: space.md,
     paddingVertical: 14,
   },
-  button: {
-    alignItems: "center",
-    backgroundColor: colors.accent,
-    borderRadius: 12,
-    paddingVertical: 14,
-  },
-  buttonDisabled: { opacity: 0.5 },
-  buttonLabel: { color: "#fff", fontSize: 16, fontWeight: "600" },
   error: { color: colors.danger, fontSize: 14 },
+  link: { color: colors.accent, fontWeight: "700" },
 });

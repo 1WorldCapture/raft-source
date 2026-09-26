@@ -107,6 +107,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         email: user.email,
         name: user.name,
         displayName: user.displayName,
+        displayLanguage: user.displayLanguage,
+        preferredMessageBodyFontSize: user.preferredMessageBodyFontSize,
       })) : Promise.resolve(),
     ]);
   }

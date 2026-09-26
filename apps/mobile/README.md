@@ -4,7 +4,9 @@ Expo client for a private Raft deployment. Phase 1 covers sign-in, servers, chan
 
 ## Layout
 
-- `app/` — expo-router screens (login, servers, channels, messages, threads)
+- `app/` — expo-router screens (login, servers, channels, messages, threads, `/design`)
+- `src/ui/` — design tokens, Space Grotesk / Space Mono, and the shared controls
+- `src/i18n/` — web catalogs plus `mobile.*` strings
 - `src/api/` — fetch client, token refresh, health check
 - `src/model/` — message, mention, and unread parsing
 - `src/realtime/` — socket.io connection
@@ -29,7 +31,10 @@ Tokens and the server address live in expo-secure-store. They are not written to
 pnpm --filter @botiverse/raft-mobile test
 pnpm --filter @botiverse/raft-mobile typecheck
 pnpm --filter @botiverse/raft-mobile lint
+pnpm --filter @botiverse/raft-mobile check:colors
 ```
+
+The interface stays light. Fonts load before the splash hides. Chinese falls back to PingFang SC on iOS and the system CJK face on Android.
 
 Lint uses oxlint, the same linter as `packages/web`, instead of a second ESLint setup.
 

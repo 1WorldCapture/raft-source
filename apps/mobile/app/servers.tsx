@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 import { useFocusEffect, useRouter } from "expo-router";
 import { FlatList, Pressable, StyleSheet, Text, View } from "react-native";
 import { ApiError, StaleRequestError } from "../src/api/client";
+import { useT } from "../src/i18n/provider";
 import { parseServers, parseUnreadSummary, userLabel, type RaftServer } from "../src/model/messages";
 import { useSession } from "../src/state/session";
 import { LoadingScreen, ScreenMessage } from "../src/ui/screen";
@@ -14,6 +15,7 @@ export default function ServersScreen() {
   const [unread, setUnread] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const t = useT();
 
   const load = useCallback(async () => {
     setError(null);
@@ -26,25 +28,25 @@ export default function ServersScreen() {
       setUnread(parseUnreadSummary(unreadData));
     } catch (caught) {
       if (caught instanceof StaleRequestError) return;
-      setError(caught instanceof ApiError ? caught.message : "Couldn't load servers");
+      setError(caught instanceof ApiError ? caught.message : t("mobile.servers.loadFailed"));
     } finally {
       setLoading(false);
     }
-  }, [session.client]);
+  }, [session.client, t]);
 
   useFocusEffect(useCallback(() => {
     void load();
   }, [load]));
 
   if (loading) return <LoadingScreen />;
-  if (error) return <ScreenMessage title="Couldn't load servers" body={error} />;
+  if (error) return <ScreenMessage title={t("mobile.servers.loadFailed")} body={error} />;
 
   return (
     <View style={styles.page}>
       <FlatList
         data={servers}
         keyExtractor={(server) => server.id}
-        ListEmptyComponent={<Text style={styles.empty}>No servers on this account.</Text>}
+        ListEmptyComponent={<Text style={styles.empty}>{t("mobile.servers.empty")}</Text>}
         contentContainerStyle={servers.length === 0 ? styles.emptyWrap : undefined}
         renderItem={({ item }) => {
           const count = unread[item.id] ?? 0;
@@ -68,9 +70,9 @@ export default function ServersScreen() {
         }}
       />
       <View style={styles.footer}>
-        <Text style={styles.who}>{userLabel(session.user)}</Text>
+        <Text style={styles.who}>{userLabel(session.user) || t("mobile.account.signedIn")}</Text>
         <Pressable onPress={() => void session.logout().then(() => router.replace("/login"))}>
-          <Text style={styles.link}>Sign out</Text>
+          <Text style={styles.link}>{t("pages.serverSelector.logOut")}</Text>
         </Pressable>
       </View>
     </View>
@@ -108,7 +110,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
     paddingVertical: 2,
   },
-  badgeText: { color: "#fff", fontSize: 12, fontWeight: "700", textAlign: "center" },
+  badgeText: { color: colors.mineText, fontSize: 12, fontWeight: "700", textAlign: "center" },
   emptyWrap: { flex: 1, justifyContent: "center" },
   empty: { color: colors.muted, textAlign: "center" },
   footer: {

@@ -1,15 +1,18 @@
+import { color, fontSize } from "./tokens";
+
+/** Phase-1 screen aliases. New UI should import `tokens` directly. */
 export const colors = {
-  bg: "#f4f5f7",
-  card: "#ffffff",
-  ink: "#1c1c1e",
-  muted: "#6b7280",
-  line: "#e5e7eb",
-  accent: "#1d4ed8",
-  accentSoft: "#dbe4ff",
-  danger: "#b91c1c",
-  mine: "#1d4ed8",
-  mineText: "#ffffff",
-  other: "#ffffff",
+  bg: color.page,
+  card: color.page,
+  ink: color.ink,
+  muted: color.muted,
+  line: color.border,
+  accent: color.pink,
+  accentSoft: color.yellow,
+  danger: color.red,
+  mine: color.pink,
+  mineText: color.white,
+  other: color.page,
 };
 
 export const space = {
@@ -18,3 +21,5 @@ export const space = {
   md: 16,
   lg: 24,
 };
+
+export { fontSize };

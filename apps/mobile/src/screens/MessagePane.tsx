@@ -32,6 +32,8 @@ import { useSession } from "../state/session";
 import { useRaftStore } from "../state/store";
 import { RichText } from "../ui/richText";
 import { colors, space } from "../ui/theme";
+import { color } from "../ui/tokens";
+import { useT } from "../i18n/provider";
 
 const PAGE = 50;
 const EMPTY_MESSAGES: RaftMessage[] = [];
@@ -43,13 +45,13 @@ interface MentionCandidate {
   label: string;
 }
 
-function sendError(error: unknown): string {
-  if (!(error instanceof ApiError)) return "网络不通，请稍后再试";
-  if (error.status === 0) return "网络不通，请稍后再试";
-  if (error.status === 403) return "没有权限，或这个频道是只读的";
-  if (error.status === 409 && error.code === "channel_archived") return "频道已归档";
-  if (error.status === 409 && error.code === "random_id_conflict") return "这条消息的内容和上次不一致，请改一下再发";
-  return error.error || "发送失败";
+function sendError(error: unknown, t: (id: "mobile.network.later" | "mobile.messages.forbidden" | "mobile.messages.archived" | "mobile.messages.conflict" | "mobile.messages.sendFailed") => string): string {
+  if (!(error instanceof ApiError)) return t("mobile.network.later");
+  if (error.status === 0) return t("mobile.network.later");
+  if (error.status === 403) return t("mobile.messages.forbidden");
+  if (error.status === 409 && error.code === "channel_archived") return t("mobile.messages.archived");
+  if (error.status === 409 && error.code === "random_id_conflict") return t("mobile.messages.conflict");
+  return error.error || t("mobile.messages.sendFailed");
 }
 
 function mentionQuery(draft: string): string | null {
@@ -79,6 +81,7 @@ export function MessagePane({
   const messages = useRaftStore((state) => state.messagesByChannel[channelId] ?? EMPTY_MESSAGES);
   const summaries = useRaftStore((state) => state.threadSummaries);
   const userId = session.user?.id;
+  const t = useT();
   const [loading, setLoading] = useState(true);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [hasMore, setHasMore] = useState(true);
@@ -93,8 +96,8 @@ export function MessagePane({
   useLayoutEffect(() => {
     // setOptions replaces the navigation object. Depending on it retriggers this
     // effect and overflows the update depth as soon as a channel opens.
-    navigation.setOptions({ title: title || (thread ? "Thread" : "Messages") });
-  }, [thread, title]);
+    navigation.setOptions({ title: title || (thread ? t("message.threadPanel.thread") : t("mobile.messages.title")) });
+  }, [thread, title, t]);
 
   useEffect(() => {
     if (Platform.OS !== "android") return;
@@ -140,7 +143,7 @@ export function MessagePane({
         if (seq > 0) void sessionRef.current.markRead(channelId, seq);
       } catch (caught) {
         if (cancelled || caught instanceof StaleRequestError) return;
-        setError(sendError(caught));
+        setError(sendError(caught, t));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -163,7 +166,7 @@ export function MessagePane({
       setLimited((current) => current || historyLimited(data));
     } catch (caught) {
       if (caught instanceof StaleRequestError) return;
-      setError(sendError(caught));
+      setError(sendError(caught, t));
     } finally {
       setLoadingOlder(false);
     }
@@ -224,7 +227,7 @@ export function MessagePane({
       let targetChannelId = channelId;
       if (thread && parentChannelId && parentMessageId && channelId === "pending-thread") {
         const created = await sessionRef.current.client.post<{ threadChannelId?: string }>(`/channels/${parentChannelId}/threads`, { parentMessageId });
-        if (!created.threadChannelId) throw new Error("Thread was not created");
+        if (!created.threadChannelId) throw new Error(t("mobile.thread.missing"));
         targetChannelId = created.threadChannelId;
         const optimistic = useRaftStore.getState().messagesByChannel["pending-thread"]?.find((item) => item.id === optimisticId);
         useRaftStore.getState().dropMessage("pending-thread", optimisticId);
@@ -248,7 +251,7 @@ export function MessagePane({
       if (caught instanceof StaleRequestError) return;
       const current = useRaftStore.getState().messagesByChannel[channelId] ?? [];
       useRaftStore.getState().upsertMessages(current.map((item) => item.id === optimisticId ? { ...item, pending: "failed" as const } : item));
-      setError(sendError(caught));
+      setError(sendError(caught, t));
     }
   }
 
@@ -256,7 +259,7 @@ export function MessagePane({
     const content = (existing?.content ?? draft).trim();
     if (!content) return;
     if (content.length > 32000) {
-      setError("消息超过 32000 个字符");
+      setError(t("mobile.messages.tooLong"));
       return;
     }
     const randomId = existing?.randomId ?? createRandomId();
@@ -307,8 +310,8 @@ export function MessagePane({
         onEndReached={() => void loadOlder()}
         onEndReachedThreshold={0.3}
         contentContainerStyle={styles.list}
-        ListFooterComponent={loadingOlder ? <ActivityIndicator color={colors.accent} /> : limited ? <Text style={styles.note}>更早的消息受套餐限制不可见</Text> : null}
-        ListEmptyComponent={<Text style={styles.note}>还没有消息。</Text>}
+        ListFooterComponent={loadingOlder ? <ActivityIndicator color={colors.accent} /> : limited ? <Text style={styles.note}>{t("mobile.messages.historyLimited")}</Text> : null}
+        ListEmptyComponent={<Text style={styles.note}>{t("mobile.messages.empty")}</Text>}
         renderItem={({ item }) => {
           const summary = summaries[item.id];
           const mine = item.senderId === userId;
@@ -334,11 +337,11 @@ export function MessagePane({
                     {item.reactions.map((reaction) => `${reaction.emoji} ${reaction.count}`).join("  ")}
                   </Text>
                 ) : null}
-                {item.pending === "sending" ? <Text style={styles.pending}>发送中</Text> : null}
+                {item.pending === "sending" ? <Text style={styles.pending}>{t("mobile.messages.sending")}</Text> : null}
                 {item.pending === "failed" ? (
                   <View style={styles.retryRow}>
-                    <Pressable onPress={() => void send(item)}><Text style={styles.retry}>重发</Text></Pressable>
-                    <Pressable onPress={() => removeFailed(item)}><Text style={styles.retry}>删除</Text></Pressable>
+                    <Pressable onPress={() => void send(item)}><Text style={styles.retry}>{t("mobile.messages.resend")}</Text></Pressable>
+                    <Pressable onPress={() => removeFailed(item)}><Text style={styles.retry}>{t("mobile.messages.delete")}</Text></Pressable>
                   </View>
                 ) : null}
               </View>
@@ -350,12 +353,12 @@ export function MessagePane({
                       threadId: summary?.threadChannelId ?? item.threadId ?? "pending-thread",
                       parentChannelId: channelId,
                       parentMessageId: item.id,
-                      title: "Thread",
+                      title: t("message.threadPanel.thread"),
                     },
                   })}
                   style={styles.thread}
                 >
-                  <Text style={styles.threadText}>{summary ? `${summary.replyCount} 条回复` : "查看线程"}</Text>
+                  <Text style={styles.threadText}>{summary ? t("mobile.messages.replies", { count: summary.replyCount }) : t("mobile.messages.viewThread")}</Text>
                 </Pressable>
               ) : null}
             </View>
@@ -377,13 +380,13 @@ export function MessagePane({
         <TextInput
           multiline
           onChangeText={(value) => void onChangeDraft(value)}
-          placeholder={thread ? "回复" : "消息"}
+          placeholder={thread ? t("mobile.messages.replyPlaceholder") : t("mobile.messages.placeholder")}
           placeholderTextColor={colors.muted}
           style={styles.input}
           value={draft}
         />
         <Pressable disabled={draft.trim().length === 0} onPress={() => void send()} style={styles.send}>
-          <Text style={styles.sendText}>发送</Text>
+          <Text style={styles.sendText}>{t("mobile.messages.send")}</Text>
         </Pressable>
       </View>
     </KeyboardAvoidingView>
@@ -395,19 +398,19 @@ const styles = StyleSheet.create({
   center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: colors.bg },
   list: { padding: space.md },
   item: { marginBottom: space.sm },
-  mentioned: { backgroundColor: "#fff7ed", borderRadius: 12 },
+  mentioned: { backgroundColor: color.yellow, borderRadius: 4 },
   bubble: { borderRadius: 16, maxWidth: "88%", paddingHorizontal: 12, paddingVertical: 8 },
   mine: { alignSelf: "flex-end", backgroundColor: colors.mine },
   other: { alignSelf: "flex-start", backgroundColor: colors.other, borderColor: colors.line, borderWidth: StyleSheet.hairlineWidth },
   system: { alignSelf: "center", backgroundColor: "transparent" },
   failed: { borderColor: colors.danger, borderWidth: 1 },
   sender: { color: colors.muted, fontSize: 12, fontWeight: "600", marginBottom: 2 },
-  senderMine: { color: "#dbe4ff" },
+  senderMine: { color: color.white },
   attachment: { marginTop: 6 },
   thumb: { borderRadius: 8, height: 120, width: 160 },
   file: { color: colors.ink, fontSize: 13, marginTop: 2 },
   reactions: { color: colors.muted, fontSize: 13, marginTop: 4 },
-  pending: { color: "#dbe4ff", fontSize: 12, marginTop: 4 },
+  pending: { color: color.white, fontSize: 12, marginTop: 4 },
   retryRow: { flexDirection: "row", gap: space.md, marginTop: 4 },
   retry: { color: colors.danger, fontWeight: "700" },
   thread: { alignSelf: "flex-start", marginLeft: 8, marginTop: 4 },

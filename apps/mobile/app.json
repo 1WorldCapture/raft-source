@@ -5,7 +5,13 @@
     "scheme": "raft",
     "version": "0.1.0",
     "orientation": "portrait",
-    "userInterfaceStyle": "automatic",
+    "userInterfaceStyle": "light",
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#FFD440"
+    },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "build.raft.mobile"
@@ -13,12 +19,19 @@
     "android": {
       "package": "build.raft.mobile",
       "predictiveBackGestureEnabled": false,
-      "usesCleartextTraffic": false
+      "usesCleartextTraffic": false,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/icon.png",
+        "backgroundColor": "#FFD440"
+      }
     },
     "plugins": [
       "expo-router",
       "expo-secure-store",
-      "./plugins/withCleartext"
+      "./plugins/withCleartext",
+      "expo-font",
+      "expo-splash-screen",
+      "expo-localization"
     ],
     "experiments": {
       "typedRoutes": false
