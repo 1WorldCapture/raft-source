@@ -134,6 +134,7 @@ export function MessagePane({
   parentChannelId,
   parentMessageId,
   targetMessageId,
+  embedded,
 }: {
   channelId: string;
   title: string;
@@ -141,6 +142,8 @@ export function MessagePane({
   parentChannelId?: string;
   parentMessageId?: string;
   targetMessageId?: string;
+  /** Task detail draws its own bar and keeps this pane as the discussion only. */
+  embedded?: boolean;
 }) {
   const session = useSession();
   const insets = useSafeAreaInsets();
@@ -1199,13 +1202,14 @@ export function MessagePane({
     ? t("mobile.messages.private")
     : meta?.visibility === "joint" ? t("mobile.messages.joint") : t("mobile.messages.public");
 
+  const frameStyle = [styles.page, androidKeyboard > 0 ? { paddingBottom: androidKeyboard } : null];
   return (
     <KeyboardAvoidingView
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
-      keyboardVerticalOffset={insets.top + 56}
-      style={[styles.page, androidKeyboard > 0 ? { paddingBottom: androidKeyboard } : null]}
+      behavior={embedded || Platform.OS !== "ios" ? undefined : "padding"}
+      keyboardVerticalOffset={embedded ? 0 : insets.top + 56}
+      style={frameStyle}
     >
-      <PanelHeader
+      {embedded ? null : <PanelHeader
         actions={(
           <>
             {thread && parentMessageId ? (
@@ -1243,7 +1247,7 @@ export function MessagePane({
         onTitlePress={thread ? () => listRef.current?.scrollToEnd({ animated: true }) : undefined}
         subtitle={headerSubtitle}
         title={headerTitle}
-      />
+      />}
       {loading && messages.length === 0 ? (
         <View style={styles.center}><ActivityIndicator color={colors.accent} /></View>
       ) : (
