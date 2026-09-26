@@ -5,7 +5,7 @@ import { useFocusEffect, useRouter } from "expo-router";
 import { Activity, Bell, Bookmark, ChevronDown, ChevronRight, Hash, Lock, Pencil, Search } from "lucide-react-native";
 import { ApiError, StaleRequestError } from "../../src/api/client";
 import { groupHasUnread, groupHomeChannels, pinnedChannelIds, type HomeGroups } from "../../src/home/directory";
-import { parseInbox } from "../../src/home/inbox";
+import { activityUnreadByServer } from "../../src/activity/model";
 import { channelHasDraft } from "../../src/home/drafts";
 import { setCurrentServerRole } from "../../src/home/serverRole";
 import { useT } from "../../src/i18n/provider";
@@ -34,7 +34,7 @@ export default function HomeScreen() {
   const [servers, setServers] = useState<RaftServer[]>([]);
   const [serverUnread, setServerUnread] = useState<Record<string, number>>({});
   const [groups, setGroups] = useState<HomeGroups>(EMPTY_GROUPS);
-  const [activityCount, setActivityCount] = useState(0);
+  const [activityUnread, setActivityUnread] = useState<Record<string, number>>({});
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [menu, setMenu] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -46,6 +46,7 @@ export default function HomeScreen() {
   tRef.current = t;
 
   const current = servers.find((server) => server.id === session.serverId) ?? null;
+  const activityCount = activityUnread[session.serverId ?? ""] ?? 0;
 
   const loadServers = useCallback(async (preferredId: string | null) => {
     const currentSession = sessionRef.current;
@@ -56,6 +57,7 @@ export default function HomeScreen() {
     const next = parseServers(serverData);
     setServers(next);
     setServerUnread(parseUnreadSummary(unreadData));
+    setActivityUnread(activityUnreadByServer(unreadData));
     const selected = next.find((server) => server.id === preferredId) ?? next[0] ?? null;
     setCurrentServerRole(selected?.role ?? null);
     // Use the id this load was given, not a serverId closed over from an earlier render.
@@ -65,19 +67,17 @@ export default function HomeScreen() {
   }, []);
 
   const loadDirectory = useCallback(async (serverId: string, ticket: number) => {
-    const [channelData, dmData, unreadData, orderData, inboxData] = await Promise.all([
+    const [channelData, dmData, unreadData, orderData] = await Promise.all([
       session.client.get<unknown>("/channels?archived=exclude"),
       session.client.get<unknown>("/channels/dm"),
       session.client.get<unknown>("/channels/unread?summary=1"),
       optionalGet(session.client, `/servers/${serverId}/sidebar-order`),
-      optionalGet(session.client, "/channels/inbox?limit=20"),
     ]);
     if (ticket !== loadTicket.current) return;
     const channels = parseChannels(channelData).filter((channel) => channel.type !== "dm");
     const dms = parseChannels(dmData).map((channel) => ({ ...channel, type: channel.type || "dm" }));
     useRaftStore.getState().setChannelUnread(parseChannelUnread(unreadData));
     setGroups(groupHomeChannels([...channels, ...dms], pinnedChannelIds(orderData)));
-    setActivityCount(parseInbox(inboxData).totalUnreadCount);
   }, [session.client]);
 
   const loadFor = useCallback(async (preferredId: string | null) => {
@@ -196,7 +196,6 @@ export default function HomeScreen() {
                 setMenu(false);
                 if (server.id === session.serverId) return;
                 setGroups(EMPTY_GROUPS);
-                setActivityCount(0);
                 setLoading(true);
                 setError(null);
                 setCurrentServerRole(server.role ?? null);

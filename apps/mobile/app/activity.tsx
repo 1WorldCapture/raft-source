@@ -1,9 +1,9 @@
-import { useCallback, useState } from "react";
+import { useCallback } from "react";
 import { FlatList, Pressable, StyleSheet, View } from "react-native";
 import { useFocusEffect, useRouter } from "expo-router";
-import { ApiError, StaleRequestError } from "../src/api/client";
+import { activityKey, activityTitle } from "../src/activity/model";
+import { useActivityStore } from "../src/activity/store";
 import { useT } from "../src/i18n/provider";
-import { parseInbox } from "../src/home/inbox";
 import { useSession } from "../src/state/session";
 import { LoadingScreen, ScreenMessage } from "../src/ui/screen";
 import { PanelHeader } from "../src/ui/PanelHeader";
@@ -14,26 +14,13 @@ export default function ActivityScreen() {
   const session = useSession();
   const router = useRouter();
   const t = useT();
-  const [rows, setRows] = useState<ReturnType<typeof parseInbox>["rows"]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    setError(null);
-    try {
-      const data = await session.client.get<unknown>("/channels/inbox?limit=50");
-      setRows(parseInbox(data).rows);
-    } catch (caught) {
-      if (caught instanceof StaleRequestError) return;
-      setError(caught instanceof ApiError ? caught.message : t("mobile.channels.loadFailed"));
-    } finally {
-      setLoading(false);
-    }
-  }, [session.client, t]);
+  const rows = useActivityStore((state) => state.items);
+  const loading = useActivityStore((state) => state.loading);
+  const error = useActivityStore((state) => state.error);
 
   useFocusEffect(useCallback(() => {
-    void load();
-  }, [load]));
+    void useActivityStore.getState().load(session.client, "all");
+  }, [session.client]));
 
   return (
     <View style={styles.page}>
@@ -41,7 +28,7 @@ export default function ActivityScreen() {
       {loading ? <LoadingScreen /> : error ? <ScreenMessage title={t("mobile.channels.loadFailed")} body={error} /> : (
         <FlatList
           data={rows}
-          keyExtractor={(row) => row.id}
+          keyExtractor={(row) => activityKey(row)}
           ListEmptyComponent={<AppText style={styles.empty}>{t("thread.empty.defaultTitle")}</AppText>}
           renderItem={({ item }) => (
             <Pressable onPress={() => {
@@ -49,9 +36,9 @@ export default function ActivityScreen() {
                 router.push({
                   pathname: "/thread/[threadId]",
                   params: {
-                    threadId: item.channelId,
-                    parentChannelId: item.parentChannelId ?? "",
-                    parentMessageId: item.parentMessageId ?? "",
+                    threadId: item.threadChannelId,
+                    parentChannelId: item.parentChannelId,
+                    parentMessageId: item.parentMessageId,
                     title: t("message.threadPanel.thread"),
                   },
                 });
@@ -59,7 +46,7 @@ export default function ActivityScreen() {
               }
               router.push({ pathname: "/messages/[channelId]", params: { channelId: item.channelId, name: item.channelName } });
             }} style={styles.row}>
-              <AppText style={styles.title}>{item.title}</AppText>
+              <AppText style={styles.title}>{activityTitle(item)}</AppText>
             </Pressable>
           )}
         />
