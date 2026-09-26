@@ -68,8 +68,8 @@ export function MessageMenu({
           </View>
           {reactionsOnly ? null : (
             <View>
-              <Item label={labels.copy} onPress={() => press(onCopy)} />
               <Item label={labels.link} onPress={() => press(onCopyLink)} />
+              <Item label={labels.copy} onPress={() => press(onCopy)} />
               {onThread ? <Item label={labels.thread} onPress={() => press(onThread)} /> : null}
               <Item label={saved ? labels.unsave : labels.save} onPress={() => press(onSave)} />
               {onFollow ? <Item label={following ? labels.unfollow : labels.follow} onPress={() => press(onFollow)} /> : null}
