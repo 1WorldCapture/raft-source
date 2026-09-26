@@ -80,7 +80,7 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
 
   async load(client, filter) {
     const seq = ++requestSeq;
-    set({ filter, loading: true, loadingMore: false, error: null });
+    set({ filter, items: [], hasMore: false, loading: true, loadingMore: false, error: null });
     try {
       const page = await fetchPage(client, filter, PAGE_SIZE, 0);
       if (seq !== requestSeq) return;

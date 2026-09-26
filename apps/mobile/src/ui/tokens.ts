@@ -18,6 +18,14 @@ export const color = {
   link: "#1447E6",
   muted: "rgba(0, 0, 0, 0.45)",
   mutedStrong: "rgba(0, 0, 0, 0.5)",
+  /** Read activity body: web `text-black/55`. */
+  inkSoft: "rgba(0, 0, 0, 0.55)",
+  /** Activity sender label: web `text-black/70`. */
+  inkLabel: "rgba(0, 0, 0, 0.7)",
+  /** Unselected filter chip: web `border-black/20`. */
+  borderFaint: "rgba(0, 0, 0, 0.2)",
+  /** Resting activity card: web `border-black/30`. */
+  borderSoft: "rgba(0, 0, 0, 0.3)",
   /** Web `bg-black/[0.05]`: inline code and empty media frames. */
   mutedFill: "rgba(0, 0, 0, 0.05)",
   /** Opaque pink-20 on white, for disabled pink buttons (a translucent fill would show the hard shadow through). */

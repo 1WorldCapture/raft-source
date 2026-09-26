@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { collectSenderAvatars } from "./senderAvatars.ts";
+import { collectSenderAvatars, collectSenderNames } from "./senderAvatars.ts";
 
 test("collectSenderAvatars maps agent ids and member user ids, skipping deleted agents", () => {
   const map = collectSenderAvatars(
@@ -12,4 +12,12 @@ test("collectSenderAvatars maps agent ids and member user ids, skipping deleted 
 
 test("collectSenderAvatars tolerates missing or malformed responses", () => {
   assert.deepEqual(collectSenderAvatars(null, { members: "nope" }), {});
+});
+
+test("collectSenderNames prefers displayName and skips deleted rows", () => {
+  const map = collectSenderNames(
+    { agents: [{ id: "a1", name: "bot", displayName: "Builder" }, { id: "a2", name: "gone", deletedAt: "2026-01-01" }] },
+    [{ userId: "u1", name: "ada", displayName: "Ada" }, { userId: "u2", name: "  " }],
+  );
+  assert.deepEqual(map, { a1: "Builder", u1: "Ada" });
 });
