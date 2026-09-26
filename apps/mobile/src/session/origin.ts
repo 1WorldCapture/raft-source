@@ -1,5 +1,20 @@
-/** This private build talks to one deployment. The sign-in screen does not ask for it. */
-export const BUNDLED_SERVER_ORIGIN = "http://grokbot.tailf3efbe.ts.net:3001";
+const DEFAULT_SERVER_ORIGIN = "http://grokbot.tailf3efbe.ts.net:3001";
+
+/**
+ * Build-time server address. Set `EXPO_PUBLIC_RAFT_SERVER_URL` to override.
+ * The sign-in screen does not ask for it. An empty or invalid value keeps the default domain.
+ */
+export function resolveBundledServerOrigin(configured?: string): string {
+  const trimmed = configured?.trim();
+  if (!trimmed) return DEFAULT_SERVER_ORIGIN;
+  try {
+    return normalizeServerOrigin(trimmed);
+  } catch {
+    return DEFAULT_SERVER_ORIGIN;
+  }
+}
+
+export const BUNDLED_SERVER_ORIGIN = resolveBundledServerOrigin(process.env.EXPO_PUBLIC_RAFT_SERVER_URL);
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "0.0.0.0", "::1"]);
 
