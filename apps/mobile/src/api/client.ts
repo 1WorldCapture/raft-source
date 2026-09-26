@@ -202,6 +202,58 @@ export function createApiClient(options: ApiClientOptions) {
     return body as T;
   }
 
+  function uploadForm<T>(path: string, form: FormData, onProgress?: (percent: number) => void, retry = false): Promise<T> {
+    const serverEpoch = options.getServerEpoch?.();
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", apiUrl(path));
+      xhr.setRequestHeader("Accept", "application/json");
+      const token = options.getAccessToken();
+      if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+      const serverId = options.getServerId();
+      if (serverId) xhr.setRequestHeader("X-Server-Id", serverId);
+      xhr.upload.onprogress = (event) => {
+        if (!onProgress || !event.lengthComputable || event.total <= 0) return;
+        onProgress(Math.max(1, Math.min(99, Math.round((event.loaded / event.total) * 100))));
+      };
+      xhr.onerror = () => reject(new ApiError("Network request failed", 0, null));
+      xhr.onload = () => {
+        void (async () => {
+          let parsed: unknown = null;
+          try {
+            parsed = xhr.responseText ? JSON.parse(xhr.responseText) as unknown : null;
+          } catch {
+            parsed = xhr.responseText;
+          }
+          try {
+            assertServer(serverEpoch);
+          } catch (error) {
+            reject(error);
+            return;
+          }
+          if (xhr.status === 401 && !retry && !isAuthPath(path)) {
+            try {
+              await refreshTokens();
+              assertServer(serverEpoch);
+              resolve(await uploadForm<T>(path, form, onProgress, true));
+            } catch (error) {
+              reject(error);
+            }
+            return;
+          }
+          if (xhr.status < 200 || xhr.status >= 300) {
+            const apiError = new ApiError(errorMessage(parsed, `Request failed (${xhr.status})`), xhr.status, parsed);
+            options.onApiError?.(apiError);
+            reject(apiError);
+            return;
+          }
+          resolve(parsed as T);
+        })();
+      };
+      xhr.send(form);
+    });
+  }
+
   return {
     request,
     refreshTokens,
@@ -213,6 +265,7 @@ export function createApiClient(options: ApiClientOptions) {
       request<T>(path, { ...init, method: "PATCH", body }),
     delete: <T = unknown>(path: string, body?: unknown, init?: Omit<RequestOptions, "method" | "body">) =>
       request<T>(path, { ...init, method: "DELETE", body }),
+    upload: uploadForm,
   };
 }
 

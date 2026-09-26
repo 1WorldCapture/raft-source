@@ -28,6 +28,13 @@
     "plugins": [
       "expo-router",
       "expo-secure-store",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Raft uses your photos so you can attach them to a message.",
+          "cameraPermission": "Raft uses the camera so you can attach a photo to a message."
+        }
+      ],
       "./plugins/withCleartext",
       "expo-font",
       "expo-splash-screen",
