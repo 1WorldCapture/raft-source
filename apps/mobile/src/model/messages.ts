@@ -5,6 +5,8 @@ export interface RaftUser {
   displayName?: string | null;
   displayLanguage?: string | null;
   preferredMessageBodyFontSize?: string | null;
+  preferredTimeFormat?: string | null;
+  preferredTimezone?: string | null;
 }
 
 export interface MessageMention {
@@ -17,11 +19,15 @@ export interface MessageAttachment {
   id?: string;
   filename: string;
   thumbnailUrl?: string | null;
+  mimeType?: string;
+  sizeBytes?: number;
 }
 
 export interface MessageReaction {
   emoji: string;
   count: number;
+  userIds?: string[];
+  reactedByMe?: boolean;
 }
 
 export interface RaftMessage {
@@ -34,6 +40,7 @@ export interface RaftMessage {
   senderName?: string;
   senderDisplayName?: string;
   senderAvatarUrl?: string | null;
+  senderDescription?: string | null;
   messageType?: string;
   content: string;
   mentions?: MessageMention[];
@@ -44,10 +51,22 @@ export interface RaftMessage {
   pending?: "sending" | "failed";
 }
 
+export interface ThreadReplyPreview {
+  messageId: string;
+  preview: string;
+  senderName: string;
+  senderDisplayName?: string;
+  senderAvatarUrl?: string | null;
+  senderType?: string;
+  createdAt?: string;
+}
+
 export interface ThreadSummary {
   threadChannelId: string;
   replyCount: number;
+  unreadCount?: number;
   lastReplyAt?: string | null;
+  latestReplies?: ThreadReplyPreview[];
 }
 
 export interface ChannelReadState {
@@ -104,6 +123,8 @@ export function parseUser(value: unknown): RaftUser | null {
     displayName: typeof value.displayName === "string" ? value.displayName : null,
     displayLanguage: typeof value.displayLanguage === "string" ? value.displayLanguage : null,
     preferredMessageBodyFontSize: typeof value.preferredMessageBodyFontSize === "string" ? value.preferredMessageBodyFontSize : null,
+    preferredTimeFormat: typeof value.preferredTimeFormat === "string" ? value.preferredTimeFormat : null,
+    preferredTimezone: typeof value.preferredTimezone === "string" ? value.preferredTimezone : null,
   };
 }
 
@@ -136,6 +157,7 @@ export function parseMessage(value: unknown): RaftMessage | null {
     messageType: typeof value.messageType === "string" ? value.messageType : undefined,
     randomId: typeof value.randomId === "string" ? value.randomId : null,
     senderAvatarUrl: typeof value.senderAvatarUrl === "string" ? value.senderAvatarUrl : null,
+    senderDescription: typeof value.senderDescription === "string" ? value.senderDescription : null,
     content: typeof value.content === "string" ? value.content : "",
     attachments: parseAttachments(value.attachments),
     reactions: parseReactions(value.reactions),
@@ -168,10 +190,13 @@ export function parseThreadSummaries(data: unknown): Record<string, ThreadSummar
   for (const [parentId, value] of Object.entries(data.threadSummariesByParentMessageId)) {
     if (!isRecord(value) || typeof value.threadChannelId !== "string") continue;
     const replyCount = Number(value.replyCount);
+    const unreadCount = Number(value.unreadCount);
     summaries[parentId] = {
       threadChannelId: value.threadChannelId,
       replyCount: Number.isFinite(replyCount) ? replyCount : 0,
+      unreadCount: Number.isFinite(unreadCount) ? Math.max(0, Math.floor(unreadCount)) : 0,
       lastReplyAt: typeof value.lastReplyAt === "string" ? value.lastReplyAt : null,
+      latestReplies: parseLatestReplies(value.latestReplies),
     };
   }
   return summaries;
@@ -193,14 +218,35 @@ export function parseChannelUnread(data: unknown): Record<string, ChannelUnreadE
   return unread;
 }
 
+function parseLatestReplies(value: unknown): ThreadReplyPreview[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const replies = value.flatMap((item) => {
+    if (!isRecord(item) || typeof item.preview !== "string") return [];
+    const senderName = typeof item.senderName === "string" ? item.senderName : "";
+    return [{
+      messageId: typeof item.messageId === "string" ? item.messageId : senderName + item.preview,
+      preview: item.preview,
+      senderName,
+      senderDisplayName: typeof item.senderDisplayName === "string" ? item.senderDisplayName : undefined,
+      senderAvatarUrl: typeof item.senderAvatarUrl === "string" ? item.senderAvatarUrl : null,
+      senderType: typeof item.senderType === "string" ? item.senderType : undefined,
+      createdAt: typeof item.createdAt === "string" ? parseCreatedAt(item.createdAt) : undefined,
+    }];
+  }).filter((reply) => reply.senderType !== "system").slice(0, 3);
+  return replies.length > 0 ? replies : undefined;
+}
+
 function parseAttachments(value: unknown): MessageAttachment[] | undefined {
   if (!Array.isArray(value)) return undefined;
   const attachments = value.flatMap((item) => {
     if (!isRecord(item) || typeof item.filename !== "string") return [];
+    const sizeBytes = Number(item.sizeBytes);
     return [{
       id: typeof item.id === "string" ? item.id : undefined,
       filename: item.filename,
       thumbnailUrl: typeof item.thumbnailUrl === "string" ? item.thumbnailUrl : null,
+      mimeType: typeof item.mimeType === "string" ? item.mimeType : undefined,
+      sizeBytes: Number.isFinite(sizeBytes) ? sizeBytes : undefined,
     }];
   });
   return attachments.length > 0 ? attachments : undefined;
@@ -210,10 +256,9 @@ function parseReactions(value: unknown): MessageReaction[] | undefined {
   if (!Array.isArray(value)) return undefined;
   const reactions = value.flatMap((item) => {
     if (!isRecord(item) || typeof item.emoji !== "string") return [];
-    const count = typeof item.count === "number"
-      ? item.count
-      : Array.isArray(item.userIds) ? item.userIds.length : 1;
-    return [{ emoji: item.emoji, count }];
+    const userIds = Array.isArray(item.userIds) ? item.userIds.filter((id): id is string => typeof id === "string") : undefined;
+    const count = typeof item.count === "number" ? item.count : userIds?.length ?? 1;
+    return [{ emoji: item.emoji, count, userIds, reactedByMe: item.reactedByMe === true }];
   });
   return reactions.length > 0 ? reactions : undefined;
 }

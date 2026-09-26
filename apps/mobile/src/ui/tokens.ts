@@ -18,6 +18,15 @@ export const color = {
   link: "#1447E6",
   muted: "rgba(0, 0, 0, 0.45)",
   mutedStrong: "rgba(0, 0, 0, 0.5)",
+  pinkSoft: "rgba(254, 125, 168, 0.2)",
+  pinkChip: "rgba(254, 125, 168, 0.3)",
+  cyanSoft: "rgba(39, 204, 243, 0.3)",
+  yellowSoft: "rgba(255, 212, 64, 0.4)",
+  orangeSoft: "rgba(248, 161, 111, 0.15)",
+  inlineCode: "rgba(0, 0, 0, 0.05)",
+  quoteBorder: "rgba(0, 0, 0, 0.4)",
+  previewSurface: "rgba(0, 0, 0, 0.03)",
+  scrim: "rgba(0, 0, 0, 0.9)",
 } as const;
 
 export const fontSize = {

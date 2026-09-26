@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseCreatedAt, parseMessage, mergeMessages } from "./messages.ts";
+import { parseCreatedAt, parseMessage, parseThreadSummaries, mergeMessages } from "./messages.ts";
 
 test("parseCreatedAt accepts a Postgres timestamp Hermes would reject", () => {
   assert.equal(parseCreatedAt("2026-09-25 19:01:14.059169-07"), "2026-09-26T02:01:14.059Z");
@@ -19,6 +19,24 @@ test("parseMessage stores a Hermes-safe createdAt", () => {
   });
   assert.equal(message?.createdAt, "2026-09-26T02:01:14.059Z");
   assert.equal(Number.isNaN(new Date(message?.createdAt ?? "").getTime()), false);
+});
+
+test("thread preview times are normalized the same way as message times", () => {
+  const summaries = parseThreadSummaries({
+    threadSummariesByParentMessageId: {
+      parent: {
+        threadChannelId: "thread-1",
+        replyCount: 1,
+        latestReplies: [{
+          messageId: "r1",
+          preview: "hello",
+          senderName: "Lyon",
+          createdAt: "2026-09-26 01:58:28.486061-07",
+        }],
+      },
+    },
+  });
+  assert.equal(summaries.parent?.latestReplies?.[0]?.createdAt, "2026-09-26T08:58:28.486Z");
 });
 
 test("mergeMessages keeps an unsent row after messages that have a seq", () => {

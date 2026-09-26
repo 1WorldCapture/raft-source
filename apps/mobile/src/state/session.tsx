@@ -110,6 +110,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         displayName: user.displayName,
         displayLanguage: user.displayLanguage,
         preferredMessageBodyFontSize: user.preferredMessageBodyFontSize,
+        preferredTimeFormat: user.preferredTimeFormat,
+        preferredTimezone: user.preferredTimezone,
       })) : Promise.resolve(),
     ]);
   }
