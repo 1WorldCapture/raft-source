@@ -7,7 +7,7 @@ import { syncSince } from "../api/sync";
 import { parseChannelUnread, parseUser, type RaftUser } from "../model/messages";
 import { createRealtime, type Realtime } from "../realtime/socket";
 import { BUNDLED_SERVER_ORIGIN } from "../session/origin";
-import { shouldCommitSession, shouldMarkVisibleRead, catchUpPlan, releaseFocus } from "./sessionPolicy";
+import { shouldApplyServerResponse, shouldCommitTokens, shouldMarkVisibleRead, catchUpPlan, releaseFocus } from "./sessionPolicy";
 import { useRaftStore } from "./store";
 
 const ORIGIN = "raft_mobile_origin";
@@ -81,7 +81,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const backgroundAt = useRef<number | null>(null);
   const pendingReads = useRef(new Map<string, number>());
   const realtimeRef = useRef<Realtime | null>(null);
-  const sessionEpoch = useRef(0);
+  const authEpoch = useRef(0);
+  const serverEpoch = useRef(0);
   const markReadRef = useRef<(channelId: string, seq: number) => Promise<void>>(async () => {});
 
   function apply(patch: Partial<Snapshot>) {
@@ -110,13 +111,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     ]);
   }
 
-  function nextEpoch() {
-    sessionEpoch.current += 1;
+  function bumpServerEpoch() {
+    serverEpoch.current += 1;
     pendingReads.current.clear();
   }
 
   function clearAuth() {
-    nextEpoch();
+    authEpoch.current += 1;
+    bumpServerEpoch();
     apply({ accessToken: null, refreshToken: null, user: null, serverId: null });
     useRaftStore.getState().clearServerData();
     useRaftStore.getState().setNotice(null);
@@ -131,11 +133,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     getRefreshToken: () => snapshotRef.current.refreshToken,
     getServerId: () => snapshotRef.current.serverId,
     getInstallationId: () => snapshotRef.current.installationId,
-    getEpoch: () => sessionEpoch.current,
-    setTokens: async (tokens) => {
-      const epoch = sessionEpoch.current;
+    getAuthEpoch: () => authEpoch.current,
+    getServerEpoch: () => serverEpoch.current,
+    setTokens: async (tokens, startedAuthEpoch) => {
+      const started = startedAuthEpoch ?? authEpoch.current;
+      if (!shouldCommitTokens(started, authEpoch.current)) return;
       await persistTokens(tokens);
-      if (!shouldCommitSession(epoch, sessionEpoch.current)) {
+      if (!shouldCommitTokens(started, authEpoch.current)) {
         await persistTokens(null);
         return;
       }
@@ -165,13 +169,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       useRaftStore.getState().bumpLiveUnread(message.channelId);
     },
     onCatchUp: (messages, hasMore) => {
-      const epoch = sessionEpoch.current;
+      const epoch = serverEpoch.current;
       useRaftStore.getState().upsertMessages(messages);
       const plan = catchUpPlan(hasMore);
       if (plan.refreshDirectory) useRaftStore.getState().bumpDirectory();
       if (plan.refreshUnread) {
         void client.get<unknown>("/channels/unread?summary=1").then((unreadData) => {
-          if (!shouldCommitSession(epoch, sessionEpoch.current)) return;
+          if (!shouldApplyServerResponse(epoch, serverEpoch.current)) return;
           useRaftStore.getState().setChannelUnread(parseChannelUnread(unreadData));
         }).catch(() => {});
       }
@@ -180,7 +184,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       const since = useRaftStore.getState().lastSeq;
       if (!channelId || since <= 0) return;
       void syncSince(client, since, channelId).then((page) => {
-        if (!shouldCommitSession(epoch, sessionEpoch.current)) return;
+        if (!shouldApplyServerResponse(epoch, serverEpoch.current)) return;
         useRaftStore.getState().upsertMessages(page);
       }).catch(() => {});
     },
@@ -345,7 +349,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     },
     selectServer: async (serverId: string) => {
       if (snapshotRef.current.serverId !== serverId) {
-        nextEpoch();
+        bumpServerEpoch();
         useRaftStore.getState().clearServerData();
       }
       apply({ serverId });

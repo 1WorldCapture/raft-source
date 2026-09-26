@@ -1,10 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { catchUpPlan, releaseFocus, shouldCommitSession, shouldMarkVisibleRead } from "./sessionPolicy.ts";
+import { catchUpPlan, releaseFocus, shouldApplyServerResponse, shouldCommitTokens, shouldMarkVisibleRead } from "./sessionPolicy.ts";
 
-test("shouldCommitSession rejects a refresh that outlives logout", () => {
-  assert.equal(shouldCommitSession(1, 1), true);
-  assert.equal(shouldCommitSession(1, 2), false);
+test("shouldCommitTokens drops a refresh that outlives logout", () => {
+  assert.equal(shouldCommitTokens(1, 1), true);
+  assert.equal(shouldCommitTokens(1, 2), false);
+});
+
+test("shouldApplyServerResponse ignores a server switch without touching auth", () => {
+  assert.equal(shouldApplyServerResponse(1, 1), true);
+  assert.equal(shouldApplyServerResponse(1, 2), false);
 });
 
 test("releaseFocus keeps a newer screen's channel", () => {

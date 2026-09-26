@@ -32,9 +32,11 @@ export interface ApiClientOptions {
   getInstallationId?: () => string | null;
   /** Per-refresh `arf_<16 hex>` id. Defaults to a random id. */
   createAttemptId?: () => string;
-  setTokens: (tokens: TokenPair) => void | Promise<void>;
-  /** Changes when the user signs out or switches server. In-flight responses are dropped. */
-  getEpoch?: () => number;
+  setTokens: (tokens: TokenPair, startedAuthEpoch?: number) => void | Promise<void>;
+  /** Bumps only on logout. Captured when a refresh starts. */
+  getAuthEpoch?: () => number;
+  /** Bumps when the selected server changes. Does not affect token writes. */
+  getServerEpoch?: () => number;
   onSessionExpired: () => void;
   onApiError?: (error: ApiError) => void;
   fetchImpl?: typeof fetch;
@@ -100,14 +102,14 @@ export function createApiClient(options: ApiClientOptions) {
     return `${origin}/api${suffix}`;
   }
 
-  function assertCurrent(epoch: number | undefined) {
-    if (epoch === undefined || !options.getEpoch) return;
-    if (options.getEpoch() !== epoch) throw new StaleRequestError();
+  function assertServer(epoch: number | undefined) {
+    if (epoch === undefined || !options.getServerEpoch) return;
+    if (options.getServerEpoch() !== epoch) throw new StaleRequestError();
   }
 
   async function refreshTokens(): Promise<TokenPair> {
     if (!refreshInFlight) {
-      const epoch = options.getEpoch?.();
+      const authEpoch = options.getAuthEpoch?.();
       refreshInFlight = (async () => {
         const refreshToken = options.getRefreshToken();
         if (!refreshToken) {
@@ -141,8 +143,10 @@ export function createApiClient(options: ApiClientOptions) {
           accessToken: (body as TokenPair).accessToken,
           refreshToken: (body as TokenPair).refreshToken,
         };
-        await options.setTokens(tokens);
-        assertCurrent(epoch);
+        await options.setTokens(tokens, authEpoch);
+        if (authEpoch !== undefined && options.getAuthEpoch && options.getAuthEpoch() !== authEpoch) {
+          throw new StaleRequestError();
+        }
         return tokens;
       })().finally(() => {
         refreshInFlight = null;
@@ -152,7 +156,7 @@ export function createApiClient(options: ApiClientOptions) {
   }
 
   async function request<T = unknown>(path: string, init: RequestOptions = {}): Promise<T> {
-    const epoch = options.getEpoch?.();
+    const serverEpoch = options.getServerEpoch?.();
     const headers: Record<string, string> = { Accept: "application/json" };
     if (init.body !== undefined) headers["Content-Type"] = "application/json";
 
@@ -178,7 +182,7 @@ export function createApiClient(options: ApiClientOptions) {
     }
 
     const body = await readBody(response);
-    assertCurrent(epoch);
+    assertServer(serverEpoch);
     if (
       response.status === 401 &&
       !init.retry &&
@@ -186,7 +190,7 @@ export function createApiClient(options: ApiClientOptions) {
       !isAuthPath(path)
     ) {
       await refreshTokens();
-      assertCurrent(epoch);
+      assertServer(serverEpoch);
       return request<T>(path, { ...init, retry: true });
     }
     if (!response.ok) {
@@ -194,7 +198,7 @@ export function createApiClient(options: ApiClientOptions) {
       options.onApiError?.(apiError);
       throw apiError;
     }
-    assertCurrent(epoch);
+    assertServer(serverEpoch);
     return body as T;
   }
 

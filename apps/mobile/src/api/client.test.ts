@@ -188,22 +188,64 @@ test("retry waits until setTokens finishes", async () => {
   assert.equal(persisted?.accessToken, "access-2");
 });
 
-test("a server change during refresh does not retry", async () => {
-  let epoch = 1;
-  let retried = false;
+test("logout during refresh does not write the new tokens", async () => {
+  let authEpoch = 1;
+  let stored: TokenPair | null = { accessToken: "access-1", refreshToken: "refresh-1" };
   const client = createApiClient({
     getOrigin: () => "https://raft.example.com",
-    getAccessToken: () => "access-1",
-    getRefreshToken: () => "refresh-1",
+    getAccessToken: () => (authEpoch === 1 ? "access-1" : null),
+    getRefreshToken: () => stored?.refreshToken ?? "refresh-1",
     getServerId: () => "server-1",
-    getEpoch: () => epoch,
-    setTokens: async () => {
-      epoch = 2;
+    getAuthEpoch: () => authEpoch,
+    setTokens: async (tokens, startedAuthEpoch) => {
+      if (startedAuthEpoch !== authEpoch) return;
+      stored = tokens;
     },
     onSessionExpired: () => {},
     fetchImpl: async (url, init) => {
       const path = new URL(String(url)).pathname;
-      if (path === "/api/auth/refresh") return jsonResponse(200, { accessToken: "access-2", refreshToken: "refresh-2" });
+      if (path === "/api/auth/refresh") {
+        authEpoch += 1;
+        stored = null;
+        return jsonResponse(200, { accessToken: "access-2", refreshToken: "refresh-2" });
+      }
+      const headers = new Headers(init?.headers);
+      if (headers.get("Authorization") === "Bearer access-1") return jsonResponse(401, { error: "expired" });
+      return jsonResponse(200, { ok: true });
+    },
+  });
+  await assert.rejects(() => client.get("/servers"), (error: unknown) => error instanceof StaleRequestError);
+  assert.equal(stored, null);
+});
+
+test("a server switch during refresh keeps the new tokens and drops the old request", async () => {
+  let serverEpoch = 1;
+  const authEpoch = 1;
+  let stored: TokenPair | null = { accessToken: "access-1", refreshToken: "refresh-1" };
+  let cleared = false;
+  let retried = false;
+  const client = createApiClient({
+    getOrigin: () => "https://raft.example.com",
+    getAccessToken: () => stored?.accessToken ?? "access-1",
+    getRefreshToken: () => "refresh-1",
+    getServerId: () => "server-1",
+    getAuthEpoch: () => authEpoch,
+    getServerEpoch: () => serverEpoch,
+    setTokens: async (tokens, startedAuthEpoch) => {
+      if (startedAuthEpoch !== authEpoch) {
+        stored = null;
+        cleared = true;
+        return;
+      }
+      stored = tokens;
+    },
+    onSessionExpired: () => {},
+    fetchImpl: async (url, init) => {
+      const path = new URL(String(url)).pathname;
+      if (path === "/api/auth/refresh") {
+        serverEpoch += 1;
+        return jsonResponse(200, { accessToken: "access-2", refreshToken: "refresh-2" });
+      }
       const headers = new Headers(init?.headers);
       if (headers.get("Authorization") === "Bearer access-2") retried = true;
       if (headers.get("Authorization") === "Bearer access-1") return jsonResponse(401, { error: "expired" });
@@ -211,5 +253,7 @@ test("a server change during refresh does not retry", async () => {
     },
   });
   await assert.rejects(() => client.get("/servers"), (error: unknown) => error instanceof StaleRequestError);
+  assert.equal(cleared, false);
+  assert.equal(stored?.accessToken, "access-2");
   assert.equal(retried, false);
 });

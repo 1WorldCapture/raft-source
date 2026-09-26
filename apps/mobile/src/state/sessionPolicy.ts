@@ -1,6 +1,11 @@
-/** A refresh that started before logout or a server switch must not write tokens back. */
-export function shouldCommitSession(startedEpoch: number, currentEpoch: number): boolean {
-  return startedEpoch === currentEpoch;
+/** A refresh that started before logout must not write tokens. A server switch does not count. */
+export function shouldCommitTokens(startedAuthEpoch: number, currentAuthEpoch: number): boolean {
+  return startedAuthEpoch === currentAuthEpoch;
+}
+
+/** In-flight reads belong to the server that was selected when the request started. */
+export function shouldApplyServerResponse(startedServerEpoch: number, currentServerEpoch: number): boolean {
+  return startedServerEpoch === currentServerEpoch;
 }
 
 /** A blurred screen may clear focus only while it still owns it. */
