@@ -59,6 +59,23 @@ test("request sends the bearer token and X-Server-Id", async () => {
   assert.equal(calls[0]?.url, "https://raft.example.com/api/channels");
 });
 
+test("401 refresh still runs when crypto.getRandomValues is missing", async () => {
+  const cryptoObj = globalThis.crypto;
+  const previous = cryptoObj.getRandomValues.bind(cryptoObj);
+  Object.defineProperty(cryptoObj, "getRandomValues", { value: undefined, configurable: true });
+  const host = globalThis as { expo?: { uuidv4?: () => string } };
+  const previousExpo = host.expo;
+  host.expo = { uuidv4: () => "01234567-89ab-cdef-0123-456789abcdef" };
+  try {
+    const { client, calls } = createHarness();
+    await client.get("/servers");
+    assert.equal(calls.filter((call) => call.url.endsWith("/api/auth/refresh")).length, 1);
+  } finally {
+    Object.defineProperty(cryptoObj, "getRandomValues", { value: previous, configurable: true });
+    host.expo = previousExpo;
+  }
+});
+
 test("401 refreshes once and retries with the new access token", async () => {
   const { client, calls, state } = createHarness();
   const body = await client.get<{ authorization: string }>("/servers");

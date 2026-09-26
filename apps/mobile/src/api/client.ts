@@ -1,3 +1,5 @@
+import { createRefreshAttemptId } from "./ids";
+
 export class ApiError extends Error {
   readonly status: number;
   readonly code: string | null;
@@ -69,10 +71,7 @@ function isAuthPath(path: string): boolean {
 }
 
 function defaultRefreshAttemptId(): string {
-  const bytes = new Uint8Array(8);
-  globalThis.crypto.getRandomValues(bytes);
-  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
-  return `arf_${hex}`;
+  return createRefreshAttemptId();
 }
 
 export function createApiClient(options: ApiClientOptions) {

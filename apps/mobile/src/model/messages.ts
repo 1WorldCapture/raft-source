@@ -106,6 +106,17 @@ export function userLabel(user: RaftUser | null): string {
   return user.displayName || user.name || user.email || "Signed in";
 }
 
+/** Server timestamps can be `YYYY-MM-DD HH:mm:ss.ffffff-07`. Hermes rejects that shape. */
+export function parseCreatedAt(value: string): string {
+  const normalized = value.trim()
+    .replace(/^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})/, "$1T$2")
+    .replace(/\.(\d{3})\d+/, ".$1")
+    .replace(/([+-]\d{2})(\d{2})$/, "$1:$2")
+    .replace(/([+-]\d{2})$/, "$1:00");
+  const parsed = Date.parse(normalized);
+  return Number.isNaN(parsed) ? value : new Date(parsed).toISOString();
+}
+
 export function parseMessage(value: unknown): RaftMessage | null {
   if (!isRecord(value) || typeof value.id !== "string" || typeof value.channelId !== "string") return null;
   return {
@@ -128,7 +139,7 @@ export function parseMessage(value: unknown): RaftMessage | null {
       name: typeof mention.name === "string" ? mention.name : undefined,
     })) : undefined,
     threadId: typeof value.threadId === "string" ? value.threadId : value.threadId === null ? null : undefined,
-    createdAt: typeof value.createdAt === "string" ? value.createdAt : undefined,
+    createdAt: typeof value.createdAt === "string" ? parseCreatedAt(value.createdAt) : undefined,
   };
 }
 

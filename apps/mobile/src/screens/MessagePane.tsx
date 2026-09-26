@@ -4,6 +4,7 @@ import {
   ActivityIndicator,
   FlatList,
   Image,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -84,6 +85,7 @@ export function MessagePane({
   const [limited, setLimited] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
+  const [androidKeyboard, setAndroidKeyboard] = useState(0);
   const [mentions, setMentions] = useState<MentionCandidate[]>([]);
   const [candidates, setCandidates] = useState<MentionCandidate[]>([]);
   const [memberCache, setMemberCache] = useState<MentionCandidate[] | null>(null);
@@ -93,6 +95,20 @@ export function MessagePane({
     // effect and overflows the update depth as soon as a channel opens.
     navigation.setOptions({ title: title || (thread ? "Thread" : "Messages") });
   }, [thread, title]);
+
+  useEffect(() => {
+    if (Platform.OS !== "android") return;
+    // Edge-to-edge ignores adjustResize, so the IME covers the composer and
+    // the mention list. Pad by the reported keyboard height instead.
+    const show = Keyboard.addListener("keyboardDidShow", (event) => {
+      setAndroidKeyboard(event.endCoordinates.height);
+    });
+    const hide = Keyboard.addListener("keyboardDidHide", () => setAndroidKeyboard(0));
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
 
   useEffect(() => {
     sessionRef.current.setFocusedChannelId(channelId);
@@ -273,7 +289,11 @@ export function MessagePane({
   }
 
   return (
-    <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={88} style={styles.page}>
+    <KeyboardAvoidingView
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      keyboardVerticalOffset={88}
+      style={[styles.page, androidKeyboard > 0 ? { paddingBottom: androidKeyboard } : null]}
+    >
       <FlatList
         data={[...messages].reverse()}
         inverted
@@ -347,7 +367,7 @@ export function MessagePane({
         </View>
       ) : null}
       {error ? <Text style={styles.error}>{error}</Text> : null}
-      <View style={[styles.composer, { paddingBottom: Math.max(insets.bottom, 28) }]}>
+      <View style={[styles.composer, { paddingBottom: androidKeyboard > 0 ? 8 : Math.max(insets.bottom, 28) }]}>
         <TextInput
           multiline
           onChangeText={(value) => void onChangeDraft(value)}
