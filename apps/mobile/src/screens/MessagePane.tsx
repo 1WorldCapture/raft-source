@@ -1234,11 +1234,17 @@ export function MessagePane({
             const sendDisabled = uploads.some((file) => file.status !== "ready") || (draft.trim().length === 0 && !uploads.some((file) => file.status === "ready"));
             return (
               <Pressable accessibilityLabel={t("mobile.messages.send")} accessibilityRole="button" disabled={sendDisabled} onPress={() => void send()}>
-                <HardShadow offset={sendDisabled ? 0 : shadowOffset.sm}>
-                  <View style={[styles.send, sendDisabled ? styles.sendDisabled : null]}>
-                    <SendHorizontal color={sendDisabled ? color.muted : color.ink} size={16} strokeWidth={2.5} />
+                {sendDisabled ? (
+                  <View style={[styles.send, styles.sendDisabled]}>
+                    <SendHorizontal color={color.muted} size={16} strokeWidth={2.5} />
                   </View>
-                </HardShadow>
+                ) : (
+                  <HardShadow offset={shadowOffset.sm}>
+                    <View style={styles.send}>
+                      <SendHorizontal color={color.ink} size={16} strokeWidth={2.5} />
+                    </View>
+                  </HardShadow>
+                )}
               </Pressable>
             );
           })()}
@@ -1385,7 +1391,7 @@ const styles = StyleSheet.create({
   box: { borderColor: color.border, borderWidth: 2, height: 16, width: 16 },
   boxOn: { backgroundColor: color.yellow },
   send: { alignItems: "center", backgroundColor: color.pink, borderColor: color.border, borderWidth: 2, height: 32, justifyContent: "center", width: 36 },
-  sendDisabled: { backgroundColor: color.pinkSoft, borderColor: color.muted },
+  sendDisabled: { backgroundColor: color.pinkPale, borderColor: color.muted, marginBottom: shadowOffset.sm, marginRight: shadowOffset.sm },
   toolFace: { alignItems: "center", backgroundColor: color.page, borderColor: color.border, borderWidth: 2, height: 30, justifyContent: "center", width: 30 },
   memberCount: { color: color.ink, fontSize: 13, fontWeight: "700" },
   sendText: { color: color.ink, fontSize: 14, fontWeight: "700" },

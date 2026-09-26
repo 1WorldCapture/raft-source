@@ -20,6 +20,8 @@ export const color = {
   mutedStrong: "rgba(0, 0, 0, 0.5)",
   /** Web `bg-black/[0.05]`: inline code and empty media frames. */
   mutedFill: "rgba(0, 0, 0, 0.05)",
+  /** Opaque pink-20 on white, for disabled pink buttons (a translucent fill would show the hard shadow through). */
+  pinkPale: "#FFE5EE",
   pinkSoft: "rgba(254, 125, 168, 0.2)",
   pinkChip: "rgba(254, 125, 168, 0.3)",
   cyanSoft: "rgba(39, 204, 243, 0.3)",
