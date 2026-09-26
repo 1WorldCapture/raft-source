@@ -974,7 +974,7 @@ export function MessagePane({
     <KeyboardAvoidingView
       behavior={Platform.OS === "ios" ? "padding" : undefined}
       keyboardVerticalOffset={insets.top + 56}
-      style={[styles.page, { paddingTop: insets.top }, androidKeyboard > 0 ? { paddingBottom: androidKeyboard } : null]}
+      style={[styles.page, androidKeyboard > 0 ? { paddingBottom: androidKeyboard } : null]}
     >
       <PanelHeader
         actions={(

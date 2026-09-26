@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Pressable, StyleSheet, View, useWindowDimensions } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ArrowLeft } from "lucide-react-native";
 import { AppText } from "./text";
 import { color, size } from "./tokens";
@@ -10,16 +11,22 @@ export function PanelHeader({
   onBack,
   onTitlePress,
   actions,
+  safeArea = true,
 }: {
   title: string;
   subtitle?: string;
   onBack?: () => void;
   onTitlePress?: () => void;
   actions?: ReactNode;
+  /** Pages without a stack header draw under the status bar unless this is set. */
+  safeArea?: boolean;
 }) {
   const { height } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  const top = safeArea ? insets.top : 0;
+  const bar = height <= 600 ? size.headerCompact : size.header;
   return (
-    <View style={[styles.bar, { height: height <= 600 ? size.headerCompact : size.header }]}>
+    <View style={[styles.bar, { height: bar + top, paddingTop: top }]}>
       {onBack ? (
         <Pressable accessibilityRole="button" onPress={onBack} style={styles.icon}>
           <ArrowLeft color={color.ink} size={18} />

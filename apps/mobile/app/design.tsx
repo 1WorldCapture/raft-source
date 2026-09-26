@@ -16,7 +16,7 @@ export default function DesignScreen() {
   return (
     <View style={styles.page}>
       <ScrollView contentContainerStyle={styles.content}>
-        <PanelHeader subtitle="Space Grotesk" title={t("mobile.design.title")} />
+        <PanelHeader safeArea={false} subtitle="Space Grotesk" title={t("mobile.design.title")} />
         <AppText style={styles.body}>Raft 粗野主义 / Brutal type 0123</AppText>
         <AppText style={styles.mono}>Space Mono 14:32</AppText>
         <View style={styles.row}>
