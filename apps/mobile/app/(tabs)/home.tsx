@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Alert, BackHandler, FlatList, Modal, Pressable, StyleSheet, View, useWindowDimensions } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
 import { Bell, ChevronDown, Hash, Pencil, Search } from "lucide-react-native";
 import { ApiError, StaleRequestError } from "../../src/api/client";
@@ -23,6 +24,9 @@ export default function HomeScreen() {
   const session = useSession();
   const router = useRouter();
   const t = useT();
+  const insets = useSafeAreaInsets();
+  const { height } = useWindowDimensions();
+  const headerHeight = (height <= 600 ? size.headerCompact : size.header) + insets.top;
   const directoryVersion = useRaftStore((state) => state.directoryVersion);
   const channelUnread = useRaftStore((state) => state.channelUnread);
   const liveUnread = useRaftStore((state) => state.liveUnread);
@@ -41,7 +45,6 @@ export default function HomeScreen() {
   tRef.current = t;
 
   const current = servers.find((server) => server.id === session.serverId) ?? null;
-  const { height } = useWindowDimensions();
 
   const loadServers = useCallback(async (preferredId: string | null) => {
     const currentSession = sessionRef.current;
@@ -142,7 +145,7 @@ export default function HomeScreen() {
 
   return (
     <View style={styles.page}>
-      <View style={[styles.header, { height: height <= 600 ? size.headerCompact : size.header }]}>
+      <View style={[styles.header, { height: headerHeight, paddingTop: insets.top }]}>
         <Pressable accessibilityRole="button" onPress={() => setMenu(true)} style={styles.switcher}>
           <AppText numberOfLines={1} style={styles.serverName}>{current?.name || t("mobile.servers.title")}</AppText>
           <ChevronDown color={color.ink} size={16} />
@@ -178,7 +181,7 @@ export default function HomeScreen() {
         }}
       />
       <Modal animationType="fade" transparent visible={menu} onRequestClose={() => setMenu(false)}>
-        <Pressable style={styles.backdrop} onPress={() => setMenu(false)}>
+        <Pressable style={[styles.backdrop, { paddingTop: headerHeight }]} onPress={() => setMenu(false)}>
           <View style={styles.menu}>
             {servers.map((server) => (
               <Pressable key={server.id} onPress={() => {
@@ -260,7 +263,7 @@ const styles = StyleSheet.create({
   unread: { fontWeight: "700" },
   iconGap: { width: 16 },
   dot: { backgroundColor: color.pink, borderRadius: 4, height: 8, width: 8 },
-  backdrop: { backgroundColor: color.muted, flex: 1, justifyContent: "flex-start", paddingTop: 72 },
+  backdrop: { backgroundColor: color.muted, flex: 1, justifyContent: "flex-start" },
   menu: { backgroundColor: color.page, borderColor: color.border, borderWidth: 2, marginHorizontal: 16 },
   menuRow: { alignItems: "center", flexDirection: "row", gap: 8, paddingHorizontal: 12, paddingVertical: 12 },
   menuCurrent: { backgroundColor: color.yellow },
