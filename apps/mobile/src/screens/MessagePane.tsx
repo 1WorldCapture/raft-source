@@ -1,9 +1,8 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useFocusEffect, useNavigation, useRouter } from "expo-router";
 import {
   ActivityIndicator,
   FlatList,
-  Image,
   Keyboard,
   KeyboardAvoidingView,
   Platform,
@@ -23,17 +22,17 @@ import {
   parseMessage,
   parseMessagePage,
   parseThreadSummaries,
-  senderLabel,
   type RaftMessage,
 } from "../model/messages";
 import { mentionsCurrentUser } from "../model/mentions";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useSession } from "../state/session";
 import { useRaftStore } from "../state/store";
-import { RichText } from "../ui/richText";
 import { colors, space } from "../ui/theme";
-import { color } from "../ui/tokens";
 import { useT } from "../i18n/provider";
+import { MessageRow } from "./MessageRow";
+import { computeMessageGrouping } from "./messageGrouping";
+import { formatDayLabel, formatMessageStamp } from "./messageTime";
 
 const PAGE = 50;
 const EMPTY_MESSAGES: RaftMessage[] = [];
@@ -82,6 +81,13 @@ export function MessagePane({
   const summaries = useRaftStore((state) => state.threadSummaries);
   const userId = session.user?.id;
   const t = useT();
+  const grouping = useMemo(() => {
+    const standalone = new Set<string>();
+    for (const message of messages) {
+      if (message.threadId || summaries[message.id]) standalone.add(message.id);
+    }
+    return computeMessageGrouping(messages, { standaloneIds: standalone });
+  }, [messages, summaries]);
   const [loading, setLoading] = useState(true);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [hasMore, setHasMore] = useState(true);
@@ -314,54 +320,34 @@ export function MessagePane({
         ListEmptyComponent={<Text style={styles.note}>{t("mobile.messages.empty")}</Text>}
         renderItem={({ item }) => {
           const summary = summaries[item.id];
-          const mine = item.senderId === userId;
-          const mentioned = mentionsCurrentUser(item.mentions, userId);
+          const group = grouping.get(item.id) ?? { isFirstInGroup: true, showAvatar: item.messageType !== "system", showDayDivider: false, dayKey: "" };
+          const timeOptions = { now: new Date(), yesterdayLabel: t("message.dateDivider.yesterday"), todayLabel: t("message.dateDivider.today") };
+          const threadLabel = !thread && (summary || item.threadId)
+            ? (summary ? t("mobile.messages.replies", { count: summary.replyCount }) : t("mobile.messages.viewThread"))
+            : undefined;
           return (
-            <View style={[styles.item, mentioned && styles.mentioned]}>
-              <View style={[styles.bubble, mine ? styles.mine : styles.other, item.messageType === "system" && styles.system, item.pending === "failed" && styles.failed]}>
-                {item.messageType === "system" ? null : (
-                  <Text style={[styles.sender, mine && styles.senderMine]}>
-                    {senderLabel(item)}{item.senderType === "agent" ? " · Agent" : ""}
-                    {item.createdAt ? `  ${new Date(item.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : ""}
-                  </Text>
-                )}
-                <RichText content={item.content} mentions={item.mentions} mine={mine && item.messageType !== "system"} />
-                {item.attachments?.map((attachment) => (
-                  <View key={attachment.id ?? attachment.filename} style={styles.attachment}>
-                    {attachment.thumbnailUrl ? <Image source={{ uri: attachment.thumbnailUrl }} style={styles.thumb} /> : null}
-                    <Text style={[styles.file, mine && styles.senderMine]}>{attachment.filename}</Text>
-                  </View>
-                ))}
-                {item.reactions && item.reactions.length > 0 ? (
-                  <Text style={[styles.reactions, mine && styles.senderMine]}>
-                    {item.reactions.map((reaction) => `${reaction.emoji} ${reaction.count}`).join("  ")}
-                  </Text>
-                ) : null}
-                {item.pending === "sending" ? <Text style={styles.pending}>{t("mobile.messages.sending")}</Text> : null}
-                {item.pending === "failed" ? (
-                  <View style={styles.retryRow}>
-                    <Pressable onPress={() => void send(item)}><Text style={styles.retry}>{t("mobile.messages.resend")}</Text></Pressable>
-                    <Pressable onPress={() => removeFailed(item)}><Text style={styles.retry}>{t("mobile.messages.delete")}</Text></Pressable>
-                  </View>
-                ) : null}
-              </View>
-              {!thread && (summary || item.threadId) ? (
-                <Pressable
-                  onPress={() => router.push({
-                    pathname: "/thread/[threadId]",
-                    params: {
-                      threadId: summary?.threadChannelId ?? item.threadId ?? "pending-thread",
-                      parentChannelId: channelId,
-                      parentMessageId: item.id,
-                      title: t("message.threadPanel.thread"),
-                    },
-                  })}
-                  style={styles.thread}
-                >
-                  <Text style={styles.threadText}>{summary ? t("mobile.messages.replies", { count: summary.replyCount }) : t("mobile.messages.viewThread")}</Text>
-                </Pressable>
-              ) : null}
-            </View>
+            <MessageRow
+              message={item}
+              group={group}
+              timeLabel={item.createdAt ? formatMessageStamp(item.createdAt, timeOptions) : ""}
+              dayLabel={item.createdAt && group.showDayDivider ? formatDayLabel(item.createdAt, timeOptions) : ""}
+              mentioned={mentionsCurrentUser(item.mentions, userId)}
+              threadLabel={threadLabel}
+              sendingLabel={t("mobile.messages.sending")}
+              resendLabel={t("mobile.messages.resend")}
+              deleteLabel={t("mobile.messages.delete")}
+              onOpenThread={threadLabel ? () => router.push({
+                pathname: "/thread/[threadId]",
+                params: {
+                  threadId: summary?.threadChannelId ?? item.threadId ?? "pending-thread",
+                  parentChannelId: channelId,
+                  parentMessageId: item.id,
+                  title: t("message.threadPanel.thread"),
+                },
+              }) : undefined}
+              onResend={() => void send(item)}
+              onDelete={() => removeFailed(item)}
+            />
           );
         }}
       />
@@ -397,24 +383,6 @@ const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: colors.bg },
   center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: colors.bg },
   list: { padding: space.md },
-  item: { marginBottom: space.sm },
-  mentioned: { backgroundColor: color.yellow, borderRadius: 4 },
-  bubble: { borderRadius: 16, maxWidth: "88%", paddingHorizontal: 12, paddingVertical: 8 },
-  mine: { alignSelf: "flex-end", backgroundColor: colors.mine },
-  other: { alignSelf: "flex-start", backgroundColor: colors.other, borderColor: colors.line, borderWidth: StyleSheet.hairlineWidth },
-  system: { alignSelf: "center", backgroundColor: "transparent" },
-  failed: { borderColor: colors.danger, borderWidth: 1 },
-  sender: { color: colors.muted, fontSize: 12, fontWeight: "600", marginBottom: 2 },
-  senderMine: { color: color.white },
-  attachment: { marginTop: 6 },
-  thumb: { borderRadius: 8, height: 120, width: 160 },
-  file: { color: colors.ink, fontSize: 13, marginTop: 2 },
-  reactions: { color: colors.muted, fontSize: 13, marginTop: 4 },
-  pending: { color: color.white, fontSize: 12, marginTop: 4 },
-  retryRow: { flexDirection: "row", gap: space.md, marginTop: 4 },
-  retry: { color: colors.danger, fontWeight: "700" },
-  thread: { alignSelf: "flex-start", marginLeft: 8, marginTop: 4 },
-  threadText: { color: colors.accent, fontSize: 13, fontWeight: "600" },
   note: { color: colors.muted, padding: space.md, textAlign: "center" },
   error: { color: colors.danger, paddingHorizontal: space.md },
   candidates: { backgroundColor: colors.card, borderTopColor: colors.line, borderTopWidth: StyleSheet.hairlineWidth },
