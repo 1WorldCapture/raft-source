@@ -4,7 +4,7 @@ Expo client for a private Raft deployment. Phase 1 covers sign-in, servers, chan
 
 ## Layout
 
-- `app/` — expo-router screens (login, servers, channels, messages, threads, `/design`)
+- `app/` — expo-router screens. Signed-in navigation is a bottom tab bar (home, tasks, members, settings); channel, thread, activity, saved, and search cover that bar
 - `src/ui/` — design tokens, Space Grotesk / Space Mono, and the shared controls
 - `src/i18n/` — web catalogs plus `mobile.*` strings
 - `src/api/` — fetch client, token refresh, health check

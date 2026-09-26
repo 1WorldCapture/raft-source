@@ -44,6 +44,10 @@ export const mobileEn = {
   "mobile.design.title": "Design",
   "mobile.health.offline": "The network cannot reach this server",
   "mobile.health.notRaft": "This address did not return a Raft health check",
+  "mobile.settings.about": "About",
+  "mobile.settings.english": "English",
+  "mobile.settings.chinese": "中文",
+  "mobile.members.openFailed": "Couldn't open the direct message",
 } as const;
 
 export const mobileZh: Record<keyof typeof mobileEn, string> = {
@@ -88,6 +92,10 @@ export const mobileZh: Record<keyof typeof mobileEn, string> = {
   "mobile.design.title": "设计",
   "mobile.health.offline": "网络不通，确认手机能访问这台服务器",
   "mobile.health.notRaft": "这个地址没有返回 Raft 的健康检查，确认它是 Raft 服务",
+  "mobile.settings.about": "关于",
+  "mobile.settings.english": "English",
+  "mobile.settings.chinese": "中文",
+  "mobile.members.openFailed": "无法打开私信",
 };
 
 export type MobileId = keyof typeof mobileEn;

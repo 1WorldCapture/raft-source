@@ -76,7 +76,11 @@ function AppStack() {
     >
       <Stack.Screen name="index" options={{ headerShown: false }} />
       <Stack.Screen name="login" options={{ title: t("pages.publicServer.signIn") }} />
-      <Stack.Screen name="servers" options={{ title: t("mobile.servers.title"), headerBackVisible: false }} />
+      <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+      <Stack.Screen name="servers" options={{ headerShown: false }} />
+      <Stack.Screen name="activity" options={{ headerShown: false }} />
+      <Stack.Screen name="saved" options={{ headerShown: false }} />
+      <Stack.Screen name="search" options={{ headerShown: false }} />
       <Stack.Screen name="channels/[serverId]" options={{ title: t("mobile.channels.title") }} />
       <Stack.Screen name="messages/[channelId]" options={{ title: t("mobile.messages.title") }} />
       <Stack.Screen name="thread/[threadId]" options={{ title: t("message.threadPanel.thread") }} />

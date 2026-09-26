@@ -68,6 +68,7 @@ export interface RaftChannel {
   peerType?: string | null;
   lastMessageAt?: string | null;
   joined?: boolean;
+  activityMuted?: boolean;
   readState?: ChannelReadState | null;
   threadId?: string | null;
 }
@@ -82,6 +83,7 @@ export interface RaftServer {
   name: string;
   slug: string;
   avatarUrl?: string | null;
+  role?: string | null;
 }
 
 export interface ServerUnread {
@@ -238,6 +240,7 @@ export function parseChannel(value: unknown): RaftChannel | null {
     peerType: typeof value.peerType === "string" ? value.peerType : null,
     lastMessageAt: typeof value.lastMessageAt === "string" ? value.lastMessageAt : null,
     joined: typeof value.joined === "boolean" ? value.joined : undefined,
+    activityMuted: value.activityMuted === true,
     readState,
   };
 }
@@ -258,6 +261,7 @@ export function parseServers(data: unknown): RaftServer[] {
       name: item.name,
       slug: item.slug,
       avatarUrl: typeof item.avatarUrl === "string" ? item.avatarUrl : null,
+      role: typeof item.role === "string" ? item.role : null,
     }];
   });
 }

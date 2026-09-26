@@ -45,6 +45,7 @@ export interface SessionApi {
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   selectServer: (serverId: string) => Promise<void>;
+  updateProfile: (fields: { displayLanguage?: string; preferredMessageBodyFontSize?: "sm" | "md" | "lg" }) => Promise<void>;
   resendVerification: () => Promise<void>;
   markRead: (channelId: string, seq: number) => Promise<void>;
   joinThread: (threadChannelId: string) => void;
@@ -348,6 +349,16 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       } catch {
         // Local sign-out already happened.
       }
+    },
+    updateProfile: async (fields) => {
+      const data = await client.request<unknown>("/auth/me", { method: "PATCH", body: fields });
+      const user = parseUser(data);
+      if (!user) throw new Error("Profile update did not return a user");
+      const tokens = snapshotRef.current.accessToken && snapshotRef.current.refreshToken
+        ? { accessToken: snapshotRef.current.accessToken, refreshToken: snapshotRef.current.refreshToken }
+        : null;
+      if (tokens) await persistTokens(tokens, user);
+      apply({ user });
     },
     selectServer: async (serverId: string) => {
       if (snapshotRef.current.serverId !== serverId) {
