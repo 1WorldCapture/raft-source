@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { channelQuery, parseUploadedAttachmentId, uploadProgressPercent } from "./attachmentUpload";
+import { attachmentIdsForSend, channelQuery, parseUploadedAttachmentId, uploadProgressPercent } from "./attachmentUpload";
 
 test("upload progress stays between 1 and 99 until the request finishes", () => {
   assert.equal(uploadProgressPercent(0, 0), null);
@@ -11,6 +11,12 @@ test("upload progress stays between 1 and 99 until the request finishes", () => 
 test("upload responses yield the first attachment id", () => {
   assert.equal(parseUploadedAttachmentId({ attachments: [{ id: "file-1" }] }), "file-1");
   assert.equal(parseUploadedAttachmentId({ attachments: [] }), null);
+});
+
+test("a failed send retries only the attachment ids stored on that message", () => {
+  assert.deepEqual(attachmentIdsForSend({ retry: true, pendingIds: ["composer-1"], messageIds: ["file-1", "file-2"] }), ["file-1", "file-2"]);
+  assert.deepEqual(attachmentIdsForSend({ retry: true, pendingIds: ["composer-1"], messageIds: [] }), []);
+  assert.deepEqual(attachmentIdsForSend({ retry: false, pendingIds: ["composer-1"], messageIds: [] }), ["composer-1"]);
 });
 
 test("channel query reads the hash at the end of the draft", () => {
