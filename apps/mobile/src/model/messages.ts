@@ -226,7 +226,7 @@ function parseLatestReplies(value: unknown): ThreadReplyPreview[] | undefined {
       senderDisplayName: typeof item.senderDisplayName === "string" ? item.senderDisplayName : undefined,
       senderAvatarUrl: typeof item.senderAvatarUrl === "string" ? item.senderAvatarUrl : null,
       senderType: typeof item.senderType === "string" ? item.senderType : undefined,
-      createdAt: typeof item.createdAt === "string" ? item.createdAt : undefined,
+      createdAt: typeof item.createdAt === "string" ? parseCreatedAt(item.createdAt) : undefined,
     }];
   }).filter((reply) => reply.senderType !== "system").slice(0, 3);
   return replies.length > 0 ? replies : undefined;
