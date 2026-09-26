@@ -11,6 +11,13 @@ export function parseUploadedAttachmentId(data: unknown): string | null {
   return isRecord(first) && typeof first.id === "string" ? first.id : null;
 }
 
+/** A failed send must retry the ids already on the message, not the composer list cleared after send. */
+export function attachmentIdsForSend(pendingIds: readonly string[], failedMessageIds?: readonly (string | undefined)[]): string[] {
+  const stored = (failedMessageIds ?? []).filter((id): id is string => typeof id === "string" && id.length > 0);
+  if (stored.length > 0) return stored;
+  return [...pendingIds];
+}
+
 /** `#` at the end of the draft. `@` and `#` cannot both match. */
 export function channelQuery(draft: string): string | null {
   const match = /(?:^|\s)#([\p{L}\p{N}_-]*)$/u.exec(draft);

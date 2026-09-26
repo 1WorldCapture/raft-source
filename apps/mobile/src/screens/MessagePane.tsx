@@ -49,7 +49,7 @@ import { newerMessageCount } from "./newerMessages";
 import { rankComposerSuggestions } from "../../../../packages/web/src/utils/composerSuggestionSearch";
 import { PanelHeader } from "../ui/PanelHeader";
 import { Sheet } from "../ui/Sheet";
-import { channelQuery, parseUploadedAttachmentId } from "./attachmentUpload";
+import { channelQuery, parseUploadedAttachmentId, attachmentIdsForSend } from "./attachmentUpload";
 import { ChannelSettings } from "./ChannelSettings";
 import { parseChannelMeta, type ChannelMeta } from "./channelMeta";
 import { loadDraft, persistDraft, DraftScheduler } from "./composerDraft";
@@ -523,16 +523,17 @@ export function MessagePane({
   }
 
   async function send(existing?: RaftMessage) {
-    const typed = (existing?.content ?? draft).trim();
+    const storedIds = existing?.attachments?.flatMap((file) => file.id ? [file.id] : []) ?? [];
     const ready = uploads.filter((file) => file.status === "ready" && file.attachmentId);
-    if (uploads.some((file) => file.status !== "ready")) return;
-    const content = typed || (ready.length > 0 ? t("message.composer.attachmentsOnlyBody", { count: ready.length }) : "");
+    if (storedIds.length === 0 && uploads.some((file) => file.status !== "ready")) return;
+    const attachmentIds = attachmentIdsForSend(ready.flatMap((file) => file.attachmentId ? [file.attachmentId] : []), storedIds);
+    const typed = (existing?.content ?? draft).trim();
+    const content = typed || (attachmentIds.length > 0 ? t("message.composer.attachmentsOnlyBody", { count: attachmentIds.length }) : "");
     if (!content) return;
     if (content.length > 32000) {
       setError(t("mobile.messages.tooLong"));
       return;
     }
-    const attachmentIds = ready.flatMap((file) => file.attachmentId ? [file.attachmentId] : []);
     const randomId = existing?.randomId ?? createRandomId();
     const optimisticId = existing?.id ?? `optimistic-${randomId}`;
     const optimistic: RaftMessage = {
@@ -545,6 +546,11 @@ export function MessagePane({
       senderName: session.user?.displayName || session.user?.name || "You",
       createdAt: new Date().toISOString(),
       pending: "sending",
+      attachments: attachmentIds.map((id) => {
+        const pending = ready.find((file) => file.attachmentId === id);
+        const previous = existing?.attachments?.find((file) => file.id === id);
+        return { id, filename: previous?.filename ?? pending?.name ?? id, mimeType: previous?.mimeType ?? pending?.mimeType };
+      }),
     };
     useRaftStore.getState().upsertMessages([optimistic]);
     nearBottom.current = true;
