@@ -37,6 +37,10 @@ export default function HomeScreen() {
   const [activityUnread, setActivityUnread] = useState<Record<string, number>>({});
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [menu, setMenu] = useState(false);
+  const activityTap = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (activityTap.current) clearTimeout(activityTap.current);
+  }, []);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const loadTicket = useRef(0);
@@ -166,7 +170,24 @@ export default function HomeScreen() {
         ListHeaderComponent={
           <View>
             <Entry compact={height <= 600} icon={<Search color={color.ink} size={16} />} label={t("layout.sidebar.search")} onPress={() => router.push("/search")} />
-            <Entry compact={height <= 600} icon={<Activity color={color.ink} size={16} />} label={t("layout.sidebar.activity")} count={activityCount} onPress={() => router.push("/activity")} />
+            <Entry
+              compact={height <= 600}
+              count={activityCount}
+              icon={<Activity color={color.ink} size={16} />}
+              label={t("layout.sidebar.activity")}
+              onPress={() => {
+                if (activityTap.current) {
+                  clearTimeout(activityTap.current);
+                  activityTap.current = null;
+                  router.push({ pathname: "/activity", params: { focus: "first-unread" } });
+                  return;
+                }
+                activityTap.current = setTimeout(() => {
+                  activityTap.current = null;
+                  router.push("/activity");
+                }, 280);
+              }}
+            />
             <Entry compact={height <= 600} icon={<Bookmark color={color.ink} size={16} />} label={t("layout.sidebar.saved")} onPress={() => router.push("/saved")} />
           </View>
         }

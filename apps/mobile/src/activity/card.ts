@@ -1,6 +1,6 @@
 import type { AppMessageId } from "../i18n/catalog";
 import { color } from "../ui/tokens";
-import type { ActivityFilter, ActivityItem } from "./model";
+import { activityKey, type ActivityFilter, type ActivityItem } from "./model";
 
 export type ActivityIconKind = "thread" | "dm" | "channel";
 
@@ -71,6 +71,53 @@ export function taskStatusFill(status: string): string {
 
 export function showMarkAllRead(filter: ActivityFilter, totalUnreadCount: number): boolean {
   return totalUnreadCount > 0 && filter !== "done";
+}
+
+/** Thread opens on the first unread reply; a channel prefers the mention, then the first unread. */
+export function activityTargetMessageId(item: ActivityItem): string | null {
+  if (item.kind === "thread") {
+    return item.unreadCount > 0
+      ? present(item.firstUnreadMessageId) ?? present(item.latestActivityMessageId)
+      : present(item.latestActivityMessageId);
+  }
+  const mention = present(item.firstMentionMessageId);
+  if (mention) return mention;
+  const last = present(item.lastMessageId);
+  if (item.unreadCount > 0) return present(item.firstUnreadMessageId) ?? last;
+  return last;
+}
+
+export type ActivityMenuAction = "read" | "unread" | "done" | "follow" | "unfollow";
+
+/** Unfollowed threads hide read/unread. Follow and unfollow are thread-only. */
+export function activityMenuActions(item: ActivityItem): ActivityMenuAction[] {
+  const actions: ActivityMenuAction[] = [];
+  if (!(item.kind === "thread" && item.isFollowing === false)) {
+    actions.push(item.unreadCount > 0 ? "read" : "unread");
+  }
+  actions.push("done");
+  if (item.kind === "thread") actions.push(item.isFollowing === false ? "follow" : "unfollow");
+  return actions;
+}
+
+/** Title double-tap walks unread rows and wraps to the first. */
+export function nextUnreadKey(items: readonly ActivityItem[], currentKey: string | null): string | null {
+  const unread = items.filter((item) => item.unreadCount > 0);
+  if (unread.length === 0) return null;
+  const current = currentKey ? unread.findIndex((item) => activityKey(item) === currentKey) : -1;
+  const next = unread[(current + 1) % unread.length];
+  return next ? activityKey(next) : null;
+}
+
+/** A changed top row counts as one update only after the list has left the top. */
+export function nextNewUpdateCount(previousTop: string | null, nextTop: string | null, nearTop: boolean, count: number): number {
+  if (nearTop) return 0;
+  if (previousTop && nextTop && previousTop !== nextTop) return count + 1;
+  return count;
+}
+
+function present(value: string | null | undefined): string | null {
+  return value && value.length > 0 ? value : null;
 }
 
 export function activityEmptyCopy(filter: ActivityFilter): { title: AppMessageId; description: AppMessageId } {

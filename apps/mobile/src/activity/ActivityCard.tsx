@@ -2,7 +2,9 @@ import { useState } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 import { AtSign, BellOff, Check, Hash, MessageSquare, Pencil, RotateCcw } from "lucide-react-native";
 import { useT } from "../i18n/provider";
+import { StatusIcon } from "../tasks/TasksView";
 import { HardShadow } from "../ui/shadow";
+import { InlineRichText } from "../ui/richText";
 import { AppText } from "../ui/text";
 import { border, color, shadowOffset } from "../ui/tokens";
 import {
@@ -24,6 +26,8 @@ export function ActivityCard({
   hasDraft,
   onOpen,
   onDone,
+  onLongPress,
+  focused,
 }: {
   item: ActivityItem;
   filter: ActivityFilter;
@@ -31,6 +35,8 @@ export function ActivityCard({
   hasDraft: boolean;
   onOpen: () => void;
   onDone: () => void;
+  onLongPress?: (x: number, y: number) => void;
+  focused?: boolean;
 }) {
   const t = useT();
   const [pressed, setPressed] = useState(false);
@@ -45,9 +51,11 @@ export function ActivityCard({
   const doneLabel = t(restoring ? "activity.current.restore" : "thread.row.markAsDone");
 
   const face = (
-    <View style={[styles.card, pressed ? styles.cardPressed : null]}>
+    <View style={[styles.card, pressed ? styles.cardPressed : null, focused ? styles.cardFocused : null]}>
       <Pressable
         accessibilityRole="button"
+        delayLongPress={400}
+        onLongPress={(event) => onLongPress?.(event.nativeEvent.pageX, event.nativeEvent.pageY)}
         onPress={onOpen}
         onPressIn={() => setPressed(true)}
         onPressOut={() => setPressed(false)}
@@ -59,14 +67,23 @@ export function ActivityCard({
           {iconKind === "dm" ? <AtSign color={color.muted} size={13} strokeWidth={2.5} /> : null}
           {iconKind === "channel" ? <Hash color={color.muted} size={13} strokeWidth={2.5} /> : null}
         </View>
-        <AppText numberOfLines={2} style={[styles.primary, unread ? styles.primaryUnread : styles.primaryRead]}>
-          {activityPrimaryText(item)}
-        </AppText>
+        <InlineRichText
+          content={activityPrimaryText(item)}
+          fontSize={14}
+          numberOfLines={2}
+          style={[styles.primary, unread ? styles.primaryUnread : styles.primaryRead]}
+        />
       </View>
       {senderLabel || preview ? (
         <AppText numberOfLines={2} style={[styles.body, unread ? styles.bodyUnread : styles.bodyRead]}>
           {senderLabel ? <AppText style={styles.sender}>{`${senderLabel}: `}</AppText> : null}
-          {preview ? <AppText style={[styles.body, unread ? styles.bodyUnread : styles.bodyRead]}>{preview}</AppText> : null}
+          {preview ? (
+            <InlineRichText
+              content={preview}
+              fontSize={12}
+              style={[styles.body, unread ? styles.bodyUnread : styles.bodyRead]}
+            />
+          ) : null}
         </AppText>
       ) : null}
       {badges.length > 0 ? (
@@ -94,8 +111,8 @@ export function ActivityCard({
     </View>
   );
 
-  if (!pressed) return face;
-  return <HardShadow offset={shadowOffset.sm}>{face}</HardShadow>;
+  if (!pressed && !focused) return face;
+  return <HardShadow offset={focused ? shadowOffset.md : shadowOffset.sm}>{face}</HardShadow>;
 }
 
 function ActivityBadgeView({ badge }: { badge: ActivityBadge }) {
@@ -103,6 +120,7 @@ function ActivityBadgeView({ badge }: { badge: ActivityBadge }) {
   if (badge.kind === "task") {
     return (
       <View style={[styles.badge, { backgroundColor: taskStatusFill(badge.status) }]}>
+        <StatusIcon size={10} status={badge.status} />
         <AppText style={styles.badgeText}>{badge.text}</AppText>
       </View>
     );
@@ -168,6 +186,7 @@ const styles = StyleSheet.create({
     padding: 12,
   },
   cardPressed: { borderColor: color.border },
+  cardFocused: { backgroundColor: color.cyanHighlight, borderColor: color.border },
   tag: { color: color.muted, fontSize: 11, fontWeight: "700", lineHeight: 14, marginBottom: 2, marginRight: 40 },
   titleRow: { alignItems: "flex-start", flexDirection: "row", marginBottom: 2, marginRight: 40 },
   icon: { marginRight: 6, marginTop: 3 },
