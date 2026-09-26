@@ -37,6 +37,8 @@ export default function HomeScreen() {
   const loadTicket = useRef(0);
   const sessionRef = useRef(session);
   sessionRef.current = session;
+  const tRef = useRef(t);
+  tRef.current = t;
 
   const current = servers.find((server) => server.id === session.serverId) ?? null;
   const { height } = useWindowDimensions();
@@ -87,16 +89,27 @@ export default function HomeScreen() {
       await loadDirectory(selected.id, ticket);
     } catch (caught) {
       if (ticket !== loadTicket.current || caught instanceof StaleRequestError) return;
-      setError(caught instanceof ApiError ? caught.message : t("mobile.channels.loadFailed"));
+      setError(caught instanceof ApiError ? caught.message : tRef.current("mobile.channels.loadFailed"));
     } finally {
       if (ticket === loadTicket.current) setLoading(false);
     }
-  }, [loadDirectory, loadServers, t]);
+  }, [loadDirectory, loadServers]);
 
-  useFocusEffect(useCallback(() => {
+  const loadForRef = useRef(loadFor);
+  loadForRef.current = loadFor;
+
+  // useFocusEffect can miss the first focus on a cold start. Load from session
+  // readiness as well, and keep the focus callback stable so a render does not
+  // cancel the request before the spinner can clear.
+  useEffect(() => {
     if (!session.ready) return;
     void loadFor(session.serverId);
-  }, [loadFor, directoryVersion, session.ready, session.serverId]));
+  }, [loadFor, directoryVersion, session.ready, session.serverId]);
+
+  useFocusEffect(useCallback(() => {
+    if (!sessionRef.current.ready) return;
+    void loadForRef.current(sessionRef.current.serverId);
+  }, []));
 
   useEffect(() => {
     if (!menu) return;
