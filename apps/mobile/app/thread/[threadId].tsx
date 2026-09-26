@@ -8,12 +8,18 @@ import { useSession } from "../../src/state/session";
 import { useRaftStore } from "../../src/state/store";
 import { LoadingScreen, ScreenMessage } from "../../src/ui/screen";
 
+function firstParam(value: string | string[] | undefined): string | undefined {
+  const raw = Array.isArray(value) ? value[0] : value;
+  return raw || undefined;
+}
+
 export default function ThreadScreen() {
   const params = useLocalSearchParams<{
     threadId: string;
     parentChannelId?: string;
     parentMessageId?: string;
     title?: string;
+    targetMessageId?: string;
   }>();
   const session = useSession();
   const t = useT();
@@ -61,6 +67,7 @@ export default function ThreadScreen() {
       parentChannelId={params.parentChannelId}
       parentMessageId={params.parentMessageId}
       thread
+      targetMessageId={firstParam(params.targetMessageId)}
       title={params.title || t("message.threadPanel.thread")}
     />
   );

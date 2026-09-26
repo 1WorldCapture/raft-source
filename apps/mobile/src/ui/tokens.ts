@@ -25,6 +25,8 @@ export const color = {
   pinkSoft: "rgba(254, 125, 168, 0.2)",
   pinkChip: "rgba(254, 125, 168, 0.3)",
   cyanSoft: "rgba(39, 204, 243, 0.3)",
+  /** Web jump highlight: `bg-brutal-cyan/25`. */
+  cyanHighlight: "rgba(39, 204, 243, 0.25)",
   yellowSoft: "rgba(255, 212, 64, 0.4)",
   orangeSoft: "rgba(248, 161, 111, 0.15)",
   inlineCode: "rgba(0, 0, 0, 0.05)",

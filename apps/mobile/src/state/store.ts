@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { useActivityStore } from "../activity/store";
+import { maxSeq } from "../model/messages";
 import { reconcileIncoming } from "../model/reconcile";
 import type { ChannelUnreadEntry, RaftMessage, ThreadSummary } from "../model/messages";
 
@@ -15,6 +16,7 @@ interface RaftDataState {
   senderAvatars: Record<string, string>;
   setSenderAvatars: (avatars: Record<string, string>) => void;
   upsertMessages: (incoming: RaftMessage[]) => void;
+  setChannelMessages: (channelId: string, messages: RaftMessage[]) => void;
   setThreadSummaries: (summaries: Record<string, ThreadSummary>) => void;
   setChannelUnread: (unread: Record<string, ChannelUnreadEntry>) => void;
   bumpLiveUnread: (channelId: string) => void;
@@ -47,6 +49,10 @@ export const useRaftStore = create<RaftDataState>((set) => ({
     }
     return { messagesByChannel, lastSeq };
   }),
+  setChannelMessages: (channelId, messages) => set((state) => ({
+    messagesByChannel: { ...state.messagesByChannel, [channelId]: messages },
+    lastSeq: Math.max(state.lastSeq, maxSeq(messages)),
+  })),
   setThreadSummaries: (summaries) => set((state) => ({
     threadSummaries: { ...state.threadSummaries, ...summaries },
   })),
