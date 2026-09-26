@@ -22,6 +22,14 @@ import { Camera, Hash, ImagePlus, ListChecks, Lock, MessageSquare, Paperclip, Se
 import { ApiError, StaleRequestError } from "../api/client";
 import { createRandomId } from "../api/ids";
 import {
+  applyContextWindow,
+  appendNewerPage,
+  JUMP_VIEW_POSITION,
+  parseMessageContext,
+  shouldRequestContext,
+  visibleInWindow,
+} from "../model/messageWindow";
+import {
   historyLimited,
   isRecord,
   maxSeq,
@@ -121,12 +129,14 @@ export function MessagePane({
   thread,
   parentChannelId,
   parentMessageId,
+  targetMessageId,
 }: {
   channelId: string;
   title: string;
   thread?: boolean;
   parentChannelId?: string;
   parentMessageId?: string;
+  targetMessageId?: string;
 }) {
   const session = useSession();
   const insets = useSafeAreaInsets();
@@ -140,11 +150,17 @@ export function MessagePane({
   const t = useT();
   const timeZone = resolveTimeZone(session.user?.preferredTimezone);
   const hour12 = resolveHour12(session.user?.preferredTimeFormat);
-  const systemHeads = useMemo(() => systemRunHeads(messages), [messages]);
   const body = bodyFont(session.user?.preferredMessageBodyFontSize);
   const [loading, setLoading] = useState(true);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [hasMore, setHasMore] = useState(true);
+  const [hasNewer, setHasNewer] = useState(false);
+  const [loadingNewer, setLoadingNewer] = useState(false);
+  const [windowCeiling, setWindowCeiling] = useState<number | null>(null);
+  const [highlightedId, setHighlightedId] = useState<string | null>(null);
+  const [resolvedTarget, setResolvedTarget] = useState<string | null>(null);
+  const visibleMessages = visibleInWindow(messages, hasNewer, windowCeiling);
+  const systemHeads = useMemo(() => systemRunHeads(visibleMessages), [visibleMessages]);
   const [limited, setLimited] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
@@ -159,6 +175,7 @@ export function MessagePane({
   const suggestGen = useRef(0);
   const [memberCache, setMemberCache] = useState<MentionCandidate[] | null>(null);
   const [unseen, setUnseen] = useState(0);
+  const [showBack, setShowBack] = useState(false);
   const [stickyAt, setStickyAt] = useState<string | null>(null);
   const [collapseLong, setCollapseLong] = useState(true);
   const [dm, setDm] = useState(false);
@@ -197,19 +214,19 @@ export function MessagePane({
   const groupCache = useRef<Map<string, import("./messageGrouping").MessageGroupState> | null>(null);
   const grouping = useMemo(() => {
     const standalone = new Set<string>();
-    for (const message of messages) {
+    for (const message of visibleMessages) {
       if (message.threadId || summaries[message.id] || tasksByMessage.has(message.id)) standalone.add(message.id);
     }
-    const next = retainGroupStates(groupCache.current, computeMessageGrouping(messages, { standaloneIds: standalone, timeZone }));
+    const next = retainGroupStates(groupCache.current, computeMessageGrouping(visibleMessages, { standaloneIds: standalone, timeZone }));
     groupCache.current = next;
     return next;
-  }, [messages, summaries, tasksByMessage, timeZone]);
+  }, [summaries, tasksByMessage, timeZone, visibleMessages]);
   const listRef = useRef<FlatList<RaftMessage>>(null);
   const nearBottom = useRef(true);
   const lastOffset = useRef(0);
   const newestSeq = useRef(0);
   const checkedSaved = useRef(new Set<string>());
-  const hiddenSystems = useMemo(() => hiddenSystemIds(messages, openSystems), [messages, openSystems]);
+  const hiddenSystems = useMemo(() => hiddenSystemIds(visibleMessages, openSystems), [openSystems, visibleMessages]);
 
   useLayoutEffect(() => {
     // setOptions replaces the navigation object. Depending on it retriggers this
@@ -257,6 +274,12 @@ export function MessagePane({
     setChannelHits([]);
     setStickyAt(null);
     newestSeq.current = 0;
+    if (targetMessageId) {
+      nearBottom.current = false;
+      return () => {
+        scrollOffsets.set(channelId, lastOffset.current);
+      };
+    }
     const savedOffset = scrollOffsets.get(channelId) ?? 0;
     lastOffset.current = savedOffset;
     nearBottom.current = savedOffset < 100;
@@ -265,7 +288,7 @@ export function MessagePane({
       cancelAnimationFrame(frame);
       scrollOffsets.set(channelId, lastOffset.current);
     };
-  }, [channelId]);
+  }, [channelId, targetMessageId]);
 
   const draftChannel = useRef(channelId);
   draftChannel.current = channelId;
@@ -296,13 +319,18 @@ export function MessagePane({
     draftScheduler.current.update(draft);
   }, [draft]);
 
+  const hasNewerRef = useRef(hasNewer);
+  hasNewerRef.current = hasNewer;
+  const loadingNewerRef = useRef(false);
+  const jumpedRef = useRef<string | null>(null);
+
   useEffect(() => {
-    const { newest, added } = newerMessageCount(messages, newestSeq.current, userId);
+    const { newest, added } = newerMessageCount(visibleMessages, newestSeq.current, userId);
     newestSeq.current = newest;
     if (added <= 0) return;
     if (nearBottom.current) setUnseen((count) => (count === 0 ? count : 0));
     else setUnseen((count) => count + added);
-  }, [messages, userId]);
+  }, [visibleMessages, userId]);
 
   useEffect(() => {
     if (!settingsChannelId || settingsChannelId === "pending-thread") return;
@@ -357,18 +385,58 @@ export function MessagePane({
       return;
     }
     void (async () => {
-      setLoading((useRaftStore.getState().messagesByChannel[channelId] ?? []).length === 0);
+      const cached = useRaftStore.getState().messagesByChannel[channelId] ?? [];
       setError(null);
+      if (targetMessageId && !shouldRequestContext(cached, targetMessageId)) {
+        setHasNewer(false);
+        setWindowCeiling(null);
+        setLoading(false);
+        return;
+      }
+      setLoading(cached.length === 0 || Boolean(targetMessageId));
+      let missingTarget = false;
       try {
+        if (targetMessageId && shouldRequestContext(cached, targetMessageId)) {
+          try {
+            const data = await sessionRef.current.client.get<unknown>(
+              `/messages/context/${encodeURIComponent(targetMessageId)}?channelId=${encodeURIComponent(channelId)}`,
+            );
+            if (cancelled) return;
+            const page = parseMessageContext(data);
+            const focusId = page?.messages.some((message) => message.id === targetMessageId)
+              ? targetMessageId
+              : page?.targetMessageId;
+            if (!page || !focusId || !page.messages.some((message) => message.id === focusId)) {
+              throw new ApiError("Message not found", 404, null);
+            }
+            setResolvedTarget(focusId);
+            const window = applyContextWindow(cached, page);
+            useRaftStore.getState().setChannelMessages(channelId, window.messages);
+            useRaftStore.getState().setThreadSummaries(parseThreadSummaries(data));
+            setHasMore(window.hasOlder);
+            setHasNewer(window.hasNewer);
+            setWindowCeiling(window.hasNewer ? window.ceilingSeq : null);
+            setLimited(historyLimited(data));
+            if (!window.hasNewer && window.ceilingSeq > 0) void sessionRef.current.markRead(channelId, window.ceilingSeq);
+            return;
+          } catch (caught) {
+            if (cancelled || caught instanceof StaleRequestError) return;
+            missingTarget = true;
+          }
+        }
         const data = await sessionRef.current.client.get<unknown>(`/messages/channel/${channelId}?limit=${PAGE}`);
         if (cancelled) return;
         const page = parseMessagePage(data);
-        useRaftStore.getState().upsertMessages(page);
+        if (missingTarget) useRaftStore.getState().setChannelMessages(channelId, page);
+        else useRaftStore.getState().upsertMessages(page);
         useRaftStore.getState().setThreadSummaries(parseThreadSummaries(data));
         setHasMore(page.length >= PAGE);
+        setHasNewer(false);
+        setWindowCeiling(null);
         setLimited(historyLimited(data));
         const seq = maxSeq(page);
         if (seq > 0) void sessionRef.current.markRead(channelId, seq);
+        if (missingTarget) setError(t("message.chatPanel.messageNotFound"));
       } catch (caught) {
         if (cancelled || caught instanceof StaleRequestError) return;
         setError(sendError(caught, t));
@@ -379,11 +447,11 @@ export function MessagePane({
     return () => {
       cancelled = true;
     };
-  }, [channelId]);
+  }, [channelId, targetMessageId]);
 
   async function loadOlder() {
     if (!hasMore || loadingOlder) return;
-    const before = minSeq(messages);
+    const before = minSeq(visibleMessages);
     if (before === null) return;
     setLoadingOlder(true);
     try {
@@ -398,6 +466,52 @@ export function MessagePane({
     } finally {
       setLoadingOlder(false);
     }
+  }
+
+  async function loadNewer() {
+    const ceiling = windowCeiling;
+    if (!hasNewerRef.current || loadingNewerRef.current || ceiling === null) return;
+    loadingNewerRef.current = true;
+    setLoadingNewer(true);
+    try {
+      const data = await sessionRef.current.client.get<unknown>(`/messages/channel/${channelId}?limit=${PAGE}&after=${ceiling}`);
+      const current = visibleInWindow(useRaftStore.getState().messagesByChannel[channelId] ?? [], true, ceiling);
+      const page = parseMessagePage(data);
+      const next = appendNewerPage(current, page, PAGE);
+      useRaftStore.getState().setChannelMessages(channelId, next.messages);
+      setHasNewer(next.hasNewer);
+      setWindowCeiling(next.hasNewer ? next.ceilingSeq : null);
+      if (!next.hasNewer && next.ceilingSeq > 0) void sessionRef.current.markRead(channelId, next.ceilingSeq);
+    } catch (caught) {
+      if (caught instanceof StaleRequestError) return;
+      setError(sendError(caught, t));
+    } finally {
+      loadingNewerRef.current = false;
+      setLoadingNewer(false);
+    }
+  }
+
+  async function returnToLatest() {
+    setHasNewer(false);
+    setWindowCeiling(null);
+    setHighlightedId(null);
+    nearBottom.current = true;
+    setUnseen(0);
+    setShowBack(false);
+    try {
+      const data = await sessionRef.current.client.get<unknown>(`/messages/channel/${channelId}?limit=${PAGE}`);
+      const page = parseMessagePage(data);
+      useRaftStore.getState().setChannelMessages(channelId, page);
+      useRaftStore.getState().setThreadSummaries(parseThreadSummaries(data));
+      setHasMore(page.length >= PAGE);
+      setLimited(historyLimited(data));
+      const seq = maxSeq(page);
+      if (seq > 0) void sessionRef.current.markRead(channelId, seq);
+    } catch (caught) {
+      if (caught instanceof StaleRequestError) return;
+      setError(sendError(caught, t));
+    }
+    requestAnimationFrame(() => listRef.current?.scrollToOffset({ offset: 0, animated: true }));
   }
 
   async function openAttachment(attachment: MessageAttachment, disposition: "inline" | "attachment") {
@@ -576,6 +690,7 @@ export function MessagePane({
         return { id, filename: previous?.filename ?? pending?.name ?? id, mimeType: previous?.mimeType ?? pending?.mimeType };
       }),
     };
+    if (hasNewerRef.current) await returnToLatest();
     useRaftStore.getState().upsertMessages([optimistic]);
     nearBottom.current = true;
     setUnseen(0);
@@ -695,7 +810,28 @@ export function MessagePane({
     yesterdayLabel: t("message.dateDivider.yesterday"),
     todayLabel: t("message.dateDivider.today"),
   }), [clock, hour12, t, timeZone]);
-  const reversed = useMemo(() => [...messages].reverse(), [messages]);
+  const reversed = useMemo(() => [...visibleMessages].reverse(), [visibleMessages]);
+  const focusMessageId = resolvedTarget ?? targetMessageId ?? null;
+  useEffect(() => {
+    jumpedRef.current = null;
+    setResolvedTarget(null);
+  }, [channelId, targetMessageId]);
+  useEffect(() => {
+    if (!focusMessageId || jumpedRef.current === focusMessageId) return;
+    const index = reversed.findIndex((message) => message.id === focusMessageId);
+    if (index < 0) return;
+    jumpedRef.current = focusMessageId;
+    setHighlightedId(focusMessageId);
+    const frame = requestAnimationFrame(() => {
+      listRef.current?.scrollToIndex({ index, animated: false, viewPosition: JUMP_VIEW_POSITION });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [focusMessageId, reversed]);
+  useEffect(() => {
+    if (!highlightedId) return;
+    const timer = setTimeout(() => setHighlightedId(null), 3400);
+    return () => clearTimeout(timer);
+  }, [highlightedId]);
   const sendRef = useRef(send);
   sendRef.current = send;
   const openThread = useCallback((messageId: string) => {
@@ -1080,19 +1216,32 @@ export function MessagePane({
           data={reversed}
           inverted
           keyExtractor={(item) => item.id}
-          maintainVisibleContentPosition={{ minIndexForVisible: 0, autoscrollToTopThreshold: 100 }}
+          maintainVisibleContentPosition={hasNewer
+            ? { minIndexForVisible: 0 }
+            : { minIndexForVisible: 0, autoscrollToTopThreshold: 100 }}
           onEndReached={() => void loadOlder()}
           onEndReachedThreshold={0.3}
+          onScrollToIndexFailed={(info) => {
+            listRef.current?.scrollToOffset({ offset: Math.max(0, info.averageItemLength * info.index), animated: false });
+            setTimeout(() => {
+              listRef.current?.scrollToIndex({ index: info.index, animated: false, viewPosition: JUMP_VIEW_POSITION });
+            }, 50);
+          }}
           onScroll={(event: NativeSyntheticEvent<NativeScrollEvent>) => {
             const offset = event.nativeEvent.contentOffset.y;
             lastOffset.current = offset;
-            nearBottom.current = offset < 100;
-            if (offset < 100) setUnseen((count) => (count === 0 ? count : 0));
+            const atTail = !hasNewerRef.current && offset < 100;
+            nearBottom.current = atTail;
+            const back = hasNewerRef.current || offset >= 100;
+            setShowBack((current) => current === back ? current : back);
+            if (atTail) setUnseen((count) => (count === 0 ? count : 0));
+            if (hasNewerRef.current && offset < 160 && (!focusMessageId || jumpedRef.current === focusMessageId)) void loadNewer();
           }}
           onViewableItemsChanged={onViewableItemsChanged}
           scrollEventThrottle={32}
           viewabilityConfig={viewabilityConfig}
           contentContainerStyle={styles.list}
+          ListHeaderComponent={loadingNewer ? <ActivityIndicator color={colors.accent} /> : null}
           ListFooterComponent={loadingOlder
             ? <ActivityIndicator color={colors.accent} />
             : limited
@@ -1144,6 +1293,7 @@ export function MessagePane({
                 showDmRead={dm && item.senderType === "user" && item.senderId === userId && dmReadByPeer(peers, item.seq, item.senderId)}
                 showMoreLabel={t("message.content.showMore")}
                 subtitle={item.senderDescription}
+                highlighted={item.id === highlightedId}
                 systemCount={systemCount}
                 systemOpen={openSystems.has(item.id)}
                 systemSummary={systemCount ? t("mobile.messages.systemRun", { count: systemCount }) : undefined}
@@ -1159,16 +1309,22 @@ export function MessagePane({
             <AppText style={styles.stickyText}>{formatDayLabel(stickyAt, timeOptions)}</AppText>
           </View>
         ) : null}
-        {unseen > 0 ? (
+        {showBack || hasNewer || unseen > 0 ? (
           <Pressable
             onPress={() => {
+              if (hasNewerRef.current) {
+                void returnToLatest();
+                return;
+              }
               nearBottom.current = true;
               setUnseen(0);
               listRef.current?.scrollToOffset({ offset: 0, animated: true });
             }}
             style={styles.jump}
           >
-            <AppText style={styles.jumpText}>{`↓ ${t("message.chatPanel.newMessagesCount", { count: unseen })}`}</AppText>
+            <AppText style={styles.jumpText}>{hasNewer || unseen === 0
+              ? t("message.chatPanel.backToBottom")
+              : `↓ ${t("message.chatPanel.newMessagesCount", { count: unseen })}`}</AppText>
           </Pressable>
         ) : null}
       </View>

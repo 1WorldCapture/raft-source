@@ -1,12 +1,13 @@
-import { memo, useEffect, useState } from "react";
-import { Image, Pressable, StyleSheet, View } from "react-native";
+import { memo, useEffect, useRef, useState, type ReactNode } from "react";
+import { Animated, Image, Pressable, StyleSheet, View } from "react-native";
 import type { MessageAttachment, RaftMessage, ThreadReplyPreview } from "../model/messages";
 import { senderLabel } from "../model/messages";
 import { Avatar } from "../ui/Avatar";
 import { useRaftStore } from "../state/store";
 import { AppText } from "../ui/text";
 import { RichText } from "../ui/richText";
-import { color, fontSize, radius } from "../ui/tokens";
+import { HardShadow } from "../ui/shadow";
+import { color, fontSize, radius, shadowOffset } from "../ui/tokens";
 import type { MessageGroupState } from "./messageGrouping";
 import { agentHasRead, type PeerRead } from "./readReceipt";
 
@@ -60,6 +61,7 @@ export const MessageRow = memo(function MessageRow({
   onShowReactors,
   onAddReaction,
   replyTime,
+  highlighted,
 }: {
   message: RaftMessage;
   group: MessageGroupState;
@@ -101,6 +103,7 @@ export const MessageRow = memo(function MessageRow({
   onShowReactors?: (messageId: string, emoji: string) => void;
   onAddReaction?: (messageId: string, x: number, y: number) => void;
   replyTime?: (createdAt: string) => string;
+  highlighted?: boolean;
 }) {
   const [tall, setTall] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -110,6 +113,7 @@ export const MessageRow = memo(function MessageRow({
   const collapsed = collapseLong && tall && !expanded;
   const ownMessage = Boolean(currentUserId && message.senderId === currentUserId && message.senderType === "user");
   return (
+    <JumpHighlight active={highlighted === true}>
     <View>
       {group.showDayDivider && dayLabel ? (
         <View style={styles.divider}>
@@ -254,8 +258,36 @@ export const MessageRow = memo(function MessageRow({
         </View>
       )}
     </View>
+    </JumpHighlight>
   );
 });
+
+function JumpHighlight({ active, children }: { active: boolean; children: ReactNode }) {
+  const opacity = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    if (!active) {
+      opacity.setValue(0);
+      return;
+    }
+    opacity.setValue(1);
+    const timer = setTimeout(() => {
+      Animated.timing(opacity, { toValue: 0, duration: 400, useNativeDriver: true }).start();
+    }, 3000);
+    return () => clearTimeout(timer);
+  }, [active, opacity]);
+  return (
+    <View>
+      {active ? (
+        <Animated.View pointerEvents="none" style={[styles.highlight, { opacity }]}>
+          <HardShadow offset={shadowOffset.md} style={styles.highlightShadow}>
+            <View style={styles.highlightFace} />
+          </HardShadow>
+        </Animated.View>
+      ) : null}
+      {children}
+    </View>
+  );
+}
 
 function isImage(attachment: MessageAttachment): boolean {
   if (attachment.mimeType?.toLowerCase().startsWith("image/")) return true;
@@ -319,6 +351,9 @@ const styles = StyleSheet.create({
   dividerLabel: { ...fontSize.date, color: color.mutedStrong, fontWeight: "700", letterSpacing: 0.8, textAlign: "center", textTransform: "uppercase" },
   system: { ...fontSize.time, color: color.muted, fontFamily: "mono", paddingVertical: 6, textAlign: "center" },
   row: { flexDirection: "row", gap: 12, paddingHorizontal: 8, paddingVertical: 4 },
+  highlight: { bottom: 0, left: 0, position: "absolute", right: 0, top: 0 },
+  highlightShadow: { flex: 1 },
+  highlightFace: { backgroundColor: color.cyanHighlight, borderColor: color.border, borderWidth: 2, flex: 1 },
   failed: { borderColor: color.red, borderWidth: 2 },
   avatar: { width: 36 },
   body: { flex: 1, minWidth: 0 },
