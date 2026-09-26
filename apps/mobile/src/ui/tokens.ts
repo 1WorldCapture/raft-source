@@ -20,8 +20,12 @@ export const color = {
   mutedStrong: "rgba(0, 0, 0, 0.5)",
   /** Read activity body: web `text-black/55`. */
   inkSoft: "rgba(0, 0, 0, 0.55)",
-  /** Activity sender label: web `text-black/70`. */
+  /** Activity sender label and task description: web `text-black/70`. */
   inkLabel: "rgba(0, 0, 0, 0.7)",
+  /** Task card channel name: web `text-black/60`. */
+  inkMid: "rgba(0, 0, 0, 0.6)",
+  /** Task number: web `text-black/35`. */
+  inkFaint: "rgba(0, 0, 0, 0.35)",
   /** Unselected filter chip: web `border-black/20`. */
   borderFaint: "rgba(0, 0, 0, 0.2)",
   /** Resting activity card: web `border-black/30`. */
