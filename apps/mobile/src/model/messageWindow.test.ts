@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { applyContextWindow, appendNewerPage, parseMessageContext, shouldRequestContext, visibleInWindow } from "./messageWindow.ts";
+import { advanceContextWindow, applyContextWindow, appendNewerPage, forgetContextWindow, parseMessageContext, recallContextWindow, rememberContextWindow, shouldRequestContext, visibleInWindow } from "./messageWindow.ts";
 import type { RaftMessage } from "./messages.ts";
 
 function message(id: string, seq: number): RaftMessage {
@@ -51,6 +51,16 @@ test("appendNewerPage stays open until a short page reaches the tail", () => {
   const done = appendNewerPage(full.messages, [message("m4", 4)], 2);
   assert.equal(done.hasNewer, false);
   assert.deepEqual(done.messages.map((item) => item.id), ["m1", "m2", "m3", "m4"]);
+});
+
+test("a remembered window survives until the ceiling row is gone or the channel is cleared", () => {
+  rememberContextWindow("c1", "m1", { ceilingSeq: 10, hasOlder: false });
+  assert.deepEqual(recallContextWindow("c1", "m1", [message("m1", 10)]), { ceilingSeq: 10, hasOlder: false });
+  advanceContextWindow("c1", "m1", 20);
+  assert.equal(recallContextWindow("c1", "m1", [message("m1", 10)])?.ceilingSeq, undefined);
+  assert.equal(recallContextWindow("c1", "m1", [message("m2", 20)])?.ceilingSeq, 20);
+  forgetContextWindow("c1");
+  assert.equal(recallContextWindow("c1", "m1", [message("m2", 20)]), null);
 });
 
 test("visibleInWindow hides live messages past the ceiling while newer history remains", () => {

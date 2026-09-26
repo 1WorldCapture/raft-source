@@ -22,10 +22,14 @@ import { Camera, Hash, ImagePlus, ListChecks, Lock, MessageSquare, Paperclip, Se
 import { ApiError, StaleRequestError } from "../api/client";
 import { createRandomId } from "../api/ids";
 import {
+  advanceContextWindow,
   applyContextWindow,
   appendNewerPage,
+  forgetContextWindow,
   JUMP_VIEW_POSITION,
   parseMessageContext,
+  recallContextWindow,
+  rememberContextWindow,
   shouldRequestContext,
   visibleInWindow,
 } from "../model/messageWindow";
@@ -154,9 +158,17 @@ export function MessagePane({
   const [loading, setLoading] = useState(true);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [hasMore, setHasMore] = useState(true);
-  const [hasNewer, setHasNewer] = useState(false);
+  const [hasNewer, setHasNewer] = useState(() => {
+    if (!targetMessageId) return false;
+    const cached = useRaftStore.getState().messagesByChannel[channelId] ?? [];
+    return recallContextWindow(channelId, targetMessageId, cached) !== null;
+  });
   const [loadingNewer, setLoadingNewer] = useState(false);
-  const [windowCeiling, setWindowCeiling] = useState<number | null>(null);
+  const [windowCeiling, setWindowCeiling] = useState<number | null>(() => {
+    if (!targetMessageId) return null;
+    const cached = useRaftStore.getState().messagesByChannel[channelId] ?? [];
+    return recallContextWindow(channelId, targetMessageId, cached)?.ceilingSeq ?? null;
+  });
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
   const [resolvedTarget, setResolvedTarget] = useState<string | null>(null);
   const visibleMessages = visibleInWindow(messages, hasNewer, windowCeiling);
@@ -321,6 +333,8 @@ export function MessagePane({
 
   const hasNewerRef = useRef(hasNewer);
   hasNewerRef.current = hasNewer;
+  const windowCeilingRef = useRef(windowCeiling);
+  windowCeilingRef.current = windowCeiling;
   const loadingNewerRef = useRef(false);
   const jumpedRef = useRef<string | null>(null);
 
@@ -388,8 +402,15 @@ export function MessagePane({
       const cached = useRaftStore.getState().messagesByChannel[channelId] ?? [];
       setError(null);
       if (targetMessageId && !shouldRequestContext(cached, targetMessageId)) {
-        setHasNewer(false);
-        setWindowCeiling(null);
+        const saved = recallContextWindow(channelId, targetMessageId, cached);
+        if (saved) {
+          setHasNewer(true);
+          setWindowCeiling(saved.ceilingSeq);
+          setHasMore(saved.hasOlder);
+        } else {
+          setHasNewer(false);
+          setWindowCeiling(null);
+        }
         setLoading(false);
         return;
       }
@@ -416,6 +437,8 @@ export function MessagePane({
             setHasMore(window.hasOlder);
             setHasNewer(window.hasNewer);
             setWindowCeiling(window.hasNewer ? window.ceilingSeq : null);
+            if (window.hasNewer) rememberContextWindow(channelId, focusId, { ceilingSeq: window.ceilingSeq, hasOlder: window.hasOlder });
+            else forgetContextWindow(channelId);
             setLimited(historyLimited(data));
             if (!window.hasNewer && window.ceilingSeq > 0) void sessionRef.current.markRead(channelId, window.ceilingSeq);
             return;
@@ -427,6 +450,7 @@ export function MessagePane({
         const data = await sessionRef.current.client.get<unknown>(`/messages/channel/${channelId}?limit=${PAGE}`);
         if (cancelled) return;
         const page = parseMessagePage(data);
+        forgetContextWindow(channelId);
         if (missingTarget) useRaftStore.getState().setChannelMessages(channelId, page);
         else useRaftStore.getState().upsertMessages(page);
         useRaftStore.getState().setThreadSummaries(parseThreadSummaries(data));
@@ -469,7 +493,7 @@ export function MessagePane({
   }
 
   async function loadNewer() {
-    const ceiling = windowCeiling;
+    const ceiling = windowCeilingRef.current;
     if (!hasNewerRef.current || loadingNewerRef.current || ceiling === null) return;
     loadingNewerRef.current = true;
     setLoadingNewer(true);
@@ -481,6 +505,9 @@ export function MessagePane({
       useRaftStore.getState().setChannelMessages(channelId, next.messages);
       setHasNewer(next.hasNewer);
       setWindowCeiling(next.hasNewer ? next.ceilingSeq : null);
+      const focusId = focusMessageId;
+      if (focusId && next.hasNewer) advanceContextWindow(channelId, focusId, next.ceilingSeq);
+      else forgetContextWindow(channelId);
       if (!next.hasNewer && next.ceilingSeq > 0) void sessionRef.current.markRead(channelId, next.ceilingSeq);
     } catch (caught) {
       if (caught instanceof StaleRequestError) return;
@@ -492,6 +519,7 @@ export function MessagePane({
   }
 
   async function returnToLatest() {
+    forgetContextWindow(channelId);
     setHasNewer(false);
     setWindowCeiling(null);
     setHighlightedId(null);

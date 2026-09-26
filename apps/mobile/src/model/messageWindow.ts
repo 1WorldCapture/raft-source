@@ -64,6 +64,45 @@ export function appendNewerPage(existing: readonly RaftMessage[], incoming: read
   };
 }
 
+export interface RememberedWindow {
+  ceilingSeq: number;
+  hasOlder: boolean;
+}
+
+const rememberedWindows = new Map<string, RememberedWindow>();
+
+function windowKey(channelId: string, targetMessageId: string): string {
+  return `${channelId}\0${targetMessageId}`;
+}
+
+/** Keep a context slice across a remount. A fresh mount otherwise treats a cached target as the latest page. */
+export function rememberContextWindow(channelId: string, targetMessageId: string, window: RememberedWindow): void {
+  rememberedWindows.set(windowKey(channelId, targetMessageId), window);
+}
+
+export function recallContextWindow(
+  channelId: string,
+  targetMessageId: string,
+  messages: readonly { seq?: number }[],
+): RememberedWindow | null {
+  const saved = rememberedWindows.get(windowKey(channelId, targetMessageId));
+  if (!saved) return null;
+  if (!messages.some((message) => message.seq === saved.ceilingSeq)) return null;
+  return saved;
+}
+
+export function advanceContextWindow(channelId: string, targetMessageId: string, ceilingSeq: number): void {
+  const saved = rememberedWindows.get(windowKey(channelId, targetMessageId));
+  if (!saved) return;
+  rememberedWindows.set(windowKey(channelId, targetMessageId), { ...saved, ceilingSeq });
+}
+
+export function forgetContextWindow(channelId: string): void {
+  for (const key of rememberedWindows.keys()) {
+    if (key.startsWith(`${channelId}\0`)) rememberedWindows.delete(key);
+  }
+}
+
 /** Hide messages past the loaded slice so a live tail cannot pull an older window. */
 export function visibleInWindow(messages: readonly RaftMessage[], hasNewer: boolean, ceilingSeq: number | null): RaftMessage[] {
   if (!hasNewer || ceilingSeq === null) return messages as RaftMessage[];
