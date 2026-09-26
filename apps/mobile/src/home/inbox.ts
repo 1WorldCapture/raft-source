@@ -2,9 +2,12 @@ import { isRecord } from "../model/messages";
 
 export interface InboxRow {
   id: string;
+  kind: "channel" | "dm" | "thread" | "mention_action";
   title: string;
   channelId: string;
   channelName: string;
+  parentChannelId?: string;
+  parentMessageId?: string;
 }
 
 export function parseInbox(data: unknown): { totalUnreadCount: number; rows: InboxRow[] } {
@@ -17,29 +20,35 @@ export function parseInbox(data: unknown): { totalUnreadCount: number; rows: Inb
 }
 
 function parseInboxItem(item: unknown): InboxRow[] {
-  if (!isRecord(item) || typeof item.kind !== "string") return [];
-  if (item.kind === "thread") {
+  if (!isRecord(item)) return [];
+  const kind = typeof item.kind === "string" ? item.kind : typeof item.type === "string" ? item.type : "";
+  if (kind === "thread") {
     if (typeof item.threadChannelId !== "string") return [];
     return [{
       id: item.threadChannelId,
+      kind: "thread",
       title: text(item.latestActivityPreview) || text(item.parentChannelName) || item.threadChannelId,
       channelId: item.threadChannelId,
       channelName: text(item.parentChannelName) || "",
+      parentChannelId: typeof item.parentChannelId === "string" ? item.parentChannelId : undefined,
+      parentMessageId: typeof item.parentMessageId === "string" ? item.parentMessageId : undefined,
     }];
   }
-  if (item.kind === "mention_action") {
+  if (kind === "mention_action") {
     if (typeof item.channelId !== "string" || typeof item.id !== "string") return [];
     return [{
       id: item.id,
+      kind: "mention_action",
       title: text(item.messagePreview) || text(item.channelName) || item.channelId,
       channelId: item.channelId,
       channelName: text(item.channelName) || "",
     }];
   }
-  if (item.kind !== "channel" && item.kind !== "dm") return [];
+  if (kind !== "channel" && kind !== "dm") return [];
   if (typeof item.channelId !== "string") return [];
   return [{
     id: item.channelId,
+    kind,
     title: text(item.lastMessagePreview) || text(item.channelName) || item.channelId,
     channelId: item.channelId,
     channelName: text(item.channelName) || "",

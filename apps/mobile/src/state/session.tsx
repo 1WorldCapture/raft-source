@@ -370,7 +370,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       apply({ serverId });
       // Android release builds can leave this write pending. The home load
       // must not wait on it; the in-memory server id is already applied.
-      void SecureStore.setItemAsync(SERVER, serverId);
+      void SecureStore.setItemAsync(SERVER, serverId).catch(() => {});
       realtime.reset();
       realtime.connect();
     },
