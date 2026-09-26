@@ -6,4 +6,5 @@ test("older history is not counted as new messages", () => {
   assert.deepEqual(newerMessageCount([{ seq: 1 }, { seq: 50 }], 0), { newest: 50, added: 0 });
   assert.deepEqual(newerMessageCount([{ seq: 1 }, { seq: 40 }, { seq: 51 }], 50), { newest: 51, added: 1 });
   assert.deepEqual(newerMessageCount([{ seq: 10 }, { seq: 20 }], 50), { newest: 50, added: 0 });
+  assert.deepEqual(newerMessageCount([{ seq: 51, senderId: "me" }, { seq: 52, senderId: "them" }], 50, "me"), { newest: 52, added: 1 });
 });

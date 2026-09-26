@@ -2,6 +2,8 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useFocusEffect, useNavigation, useRouter } from "expo-router";
 import {
   ActivityIndicator,
+  Alert,
+  BackHandler,
   FlatList,
   Image,
   Keyboard,
@@ -17,6 +19,7 @@ import {
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from "react-native";
+import { Search, Settings } from "lucide-react-native";
 import { ApiError, StaleRequestError } from "../api/client";
 import { createRandomId } from "../api/ids";
 import {
@@ -26,7 +29,9 @@ import {
   minSeq,
   parseMessage,
   parseMessagePage,
+  parseServers,
   parseThreadSummaries,
+  senderLabel,
   type MessageAttachment,
   type RaftMessage,
 } from "../model/messages";
@@ -40,6 +45,16 @@ import { MessageRow, type LinkedTaskChip } from "./MessageRow";
 import { computeMessageGrouping, hiddenSystemIds, retainGroupStates, systemRunHeads } from "./messageGrouping";
 import { formatDayLabel, formatMessageStamp, resolveHour12, resolveTimeZone } from "./messageTime";
 import { newerMessageCount } from "./newerMessages";
+import { PanelHeader } from "../ui/PanelHeader";
+import { Sheet } from "../ui/Sheet";
+import { ChannelSettings } from "./ChannelSettings";
+import { parseChannelMeta, type ChannelMeta } from "./channelMeta";
+import { MessageMenu } from "./MessageMenu";
+import { ProfileCard } from "./ProfileCard";
+import { messagePermalink } from "./messageLink";
+import { convertMessageToTask, leaveChannel, openDirectMessage, setActivityMuted, setCollapseLongMessages, setMessageReaction, setMessageSaved, setTaskStatus, setThreadFollow } from "./messageCommands";
+import { applyReaction, actorNames } from "./reactions";
+import { copyText, tapFeedback } from "./messageFeedback";
 import { dmReadByPeer, parsePeerReads, type PeerRead } from "./readReceipt";
 
 const PAGE = 50;
@@ -69,6 +84,7 @@ function linkedTasks(data: unknown): Map<string, LinkedTaskChip> {
     if (!isRecord(item) || typeof item.messageId !== "string" || typeof item.taskNumber !== "number") continue;
     tasks.set(item.messageId, {
       taskNumber: item.taskNumber,
+      taskId: typeof item.id === "string" ? item.id : undefined,
       claimedByName: typeof item.claimedByName === "string" ? item.claimedByName : null,
       status: typeof item.status === "string" ? item.status : undefined,
     });
@@ -127,6 +143,16 @@ export function MessagePane({
   const [tasksByMessage, setTasksByMessage] = useState<Map<string, LinkedTaskChip>>(new Map());
   const [openSystems, setOpenSystems] = useState<Set<string>>(new Set());
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [meta, setMeta] = useState<ChannelMeta | null>(null);
+  const [followedIds, setFollowedIds] = useState<Set<string>>(new Set());
+  const [threadByParent, setThreadByParent] = useState<Record<string, string>>({});
+  const [menu, setMenu] = useState<{ messageId: string; x: number; y: number; openedAt: number; reactionsOnly?: boolean } | null>(null);
+  const [profile, setProfile] = useState<RaftMessage | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [memberNames, setMemberNames] = useState<string[]>([]);
+  const slugRef = useRef<string | null>(null);
+  const reactionFlight = useRef(new Set<string>());
+  const settingsChannelId = thread && parentChannelId ? parentChannelId : thread ? null : channelId;
   const groupCache = useRef<Map<string, import("./messageGrouping").MessageGroupState> | null>(null);
   const grouping = useMemo(() => {
     const standalone = new Set<string>();
@@ -147,7 +173,7 @@ export function MessagePane({
   useLayoutEffect(() => {
     // setOptions replaces the navigation object. Depending on it retriggers this
     // effect and overflows the update depth as soon as a channel opens.
-    navigation.setOptions({ title: title || (thread ? t("message.threadPanel.thread") : t("mobile.messages.title")) });
+    navigation.setOptions({ headerShown: false });
   }, [thread, title, t]);
 
   useEffect(() => {
@@ -178,6 +204,11 @@ export function MessagePane({
     setSavedIds(new Set());
     setPeers([]);
     setDm(false);
+    setMeta(null);
+    setMenu(null);
+    setProfile(null);
+    setSettingsOpen(false);
+    setMemberNames([]);
     setCollapseLong(true);
     setOpenSystems(new Set());
     setUnseen(0);
@@ -194,22 +225,35 @@ export function MessagePane({
   }, [channelId]);
 
   useEffect(() => {
-    const { newest, added } = newerMessageCount(messages, newestSeq.current);
+    const { newest, added } = newerMessageCount(messages, newestSeq.current, userId);
     newestSeq.current = newest;
     if (added <= 0) return;
     if (nearBottom.current) setUnseen((count) => (count === 0 ? count : 0));
     else setUnseen((count) => count + added);
-  }, [messages]);
+  }, [messages, userId]);
 
   useEffect(() => {
-    if (channelId === "pending-thread") return;
+    if (!settingsChannelId || settingsChannelId === "pending-thread") return;
     let cancelled = false;
-    void sessionRef.current.client.get<unknown>(`/channels/${channelId}`).then((data) => {
+    void sessionRef.current.client.get<unknown>(`/channels/${settingsChannelId}`).then((data) => {
       if (cancelled || !isRecord(data)) return;
-      setDm(data.type === "dm");
+      setDm(!thread && data.type === "dm");
+      setMeta(parseChannelMeta(data));
       if (typeof data.collapseLongMessages === "boolean") setCollapseLong(data.collapseLongMessages);
-      const nextPeers = parsePeerReads(data);
+      const nextPeers = !thread ? parsePeerReads(data) : null;
       if (nextPeers) setPeers(nextPeers);
+    }).catch(() => undefined);
+    void sessionRef.current.client.get<unknown>("/channels/threads/followed").then((data) => {
+      if (cancelled || !isRecord(data) || !Array.isArray(data.threads)) return;
+      const ids = new Set<string>();
+      const map: Record<string, string> = {};
+      for (const threadRow of data.threads) {
+        if (!isRecord(threadRow) || typeof threadRow.parentMessageId !== "string" || typeof threadRow.threadChannelId !== "string") continue;
+        ids.add(threadRow.parentMessageId);
+        map[threadRow.parentMessageId] = threadRow.threadChannelId;
+      }
+      setFollowedIds(ids);
+      setThreadByParent((current) => ({ ...current, ...map }));
     }).catch(() => undefined);
     void sessionRef.current.client.get<unknown>("/tasks/server?detail=summary").then((data) => {
       if (!cancelled) setTasksByMessage(linkedTasks(data));
@@ -217,7 +261,7 @@ export function MessagePane({
     return () => {
       cancelled = true;
     };
-  }, [channelId]);
+  }, [settingsChannelId, thread]);
 
   useEffect(() => {
     const ids = messages.map((message) => message.id).filter((id) => !id.startsWith("optimistic-") && !checkedSaved.current.has(id));
@@ -402,6 +446,9 @@ export function MessagePane({
       pending: "sending",
     };
     useRaftStore.getState().upsertMessages([optimistic]);
+    nearBottom.current = true;
+    setUnseen(0);
+    requestAnimationFrame(() => listRef.current?.scrollToOffset({ offset: 0, animated: true }));
     if (!existing) {
       setDraft("");
       setMentions([]);
@@ -481,16 +528,302 @@ export function MessagePane({
   }, []);
   const replyTime = useCallback((createdAt: string) => formatMessageStamp(createdAt, timeOptions), [timeOptions]);
 
-  if (loading && messages.length === 0) {
-    return <View style={styles.center}><ActivityIndicator color={colors.accent} /></View>;
+  useEffect(() => {
+    const serverId = session.serverId;
+    if (!serverId) return;
+    let cancelled = false;
+    void sessionRef.current.client.get<unknown>("/servers", { server: false }).then((data) => {
+      if (cancelled) return;
+      slugRef.current = parseServers(data).find((server) => server.id === serverId)?.slug ?? null;
+    }).catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [session.serverId]);
+
+  useEffect(() => {
+    if (!settingsOpen || !settingsChannelId || settingsChannelId === "pending-thread") return;
+    let cancelled = false;
+    void sessionRef.current.client.get<unknown>(`/channels/${settingsChannelId}/members`).then((data) => {
+      if (cancelled || !isRecord(data)) return;
+      const names: string[] = [];
+      for (const key of ["humans", "agents", "externalMembers"] as const) {
+        const list = data[key];
+        if (!Array.isArray(list)) continue;
+        for (const item of list) {
+          if (!isRecord(item)) continue;
+          const name = typeof item.displayName === "string" && item.displayName
+            ? item.displayName
+            : typeof item.name === "string" ? item.name : "";
+          if (name) names.push(name);
+        }
+      }
+      setMemberNames(names);
+    }).catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [settingsChannelId, settingsOpen]);
+
+  useEffect(() => {
+    if (!menu && !profile && !settingsOpen) return;
+    const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
+      if (menu) setMenu(null);
+      else if (profile) setProfile(null);
+      else setSettingsOpen(false);
+      return true;
+    });
+    return () => subscription.remove();
+  }, [menu, profile, settingsOpen]);
+
+  const storedMessage = useCallback((messageId: string) => (
+    (useRaftStore.getState().messagesByChannel[channelId] ?? []).find((item) => item.id === messageId)
+  ), [channelId]);
+
+  const reactTo = useCallback((messageId: string, emoji: string) => {
+    const key = `${messageId}:${emoji}`;
+    if (reactionFlight.current.has(key)) return;
+    const message = storedMessage(messageId);
+    if (!message || message.id.startsWith("optimistic-") || message.messageType === "system") return;
+    const mine = message.reactions?.some((reaction) => reaction.emoji === emoji && (reaction.reactedByMe || Boolean(userId && reaction.userIds?.includes(userId)))) ?? false;
+    reactionFlight.current.add(key);
+    useRaftStore.getState().upsertMessages([applyReaction(message, emoji, !mine, userId)]);
+    void setMessageReaction(sessionRef.current.client, messageId, emoji, !mine).then(() => {
+      reactionFlight.current.delete(key);
+    }).catch((caught: unknown) => {
+      reactionFlight.current.delete(key);
+      const latest = storedMessage(messageId);
+      if (latest) useRaftStore.getState().upsertMessages([applyReaction(latest, emoji, mine, userId)]);
+      if (!(caught instanceof StaleRequestError)) setError(t("mobile.messages.actionFailed"));
+    });
+  }, [storedMessage, t, userId]);
+
+  const showReactors = useCallback((messageId: string, emoji: string) => {
+    void sessionRef.current.client.get<unknown>(`/messages/${messageId}/reactions/actors?emoji=${encodeURIComponent(emoji)}`).then((data) => {
+      const names = actorNames(data);
+      Alert.alert(emoji, names.length > 0 ? names.join("\n") : "—");
+    }).catch((caught: unknown) => {
+      if (!(caught instanceof StaleRequestError)) setError(t("mobile.messages.actionFailed"));
+    });
+  }, [t]);
+
+  const longPressMessage = useCallback((messageId: string, x: number, y: number, reactionsOnly?: boolean) => {
+    void tapFeedback();
+    setMenu({ messageId, x, y, openedAt: Date.now(), reactionsOnly });
+  }, []);
+
+  const pressSender = useCallback((messageId: string) => {
+    const message = storedMessage(messageId);
+    if (message) setProfile(message);
+  }, [storedMessage]);
+
+  const mentionSender = useCallback((messageId: string) => {
+    const message = storedMessage(messageId);
+    if (!message?.senderId) return;
+    void loadMembers().then((members) => {
+      const candidate = members.find((member) => member.id === message.senderId);
+      if (!candidate?.name) return;
+      setDraft((current) => `${current}${current.length > 0 && !current.endsWith(" ") ? " " : ""}@${candidate.name} `);
+      setMentions((current) => current.some((item) => item.id === candidate.id) ? current : [...current, candidate]);
+    }).catch(() => setError(t("mobile.messages.actionFailed")));
+  }, [storedMessage, t]);
+
+  async function toggleSaved(messageId: string) {
+    const saved = savedIds.has(messageId);
+    setSavedIds((current) => {
+      const next = new Set(current);
+      if (saved) next.delete(messageId);
+      else next.add(messageId);
+      return next;
+    });
+    try {
+      await setMessageSaved(sessionRef.current.client, messageId, !saved);
+    } catch (caught) {
+      setSavedIds((current) => {
+        const next = new Set(current);
+        if (saved) next.add(messageId);
+        else next.delete(messageId);
+        return next;
+      });
+      if (!(caught instanceof StaleRequestError)) setError(t("mobile.messages.actionFailed"));
+    }
   }
+
+  async function toggleFollow(parentId: string, threadChannelId: string | undefined, follow: boolean) {
+    if (!follow && !threadChannelId) return;
+    setFollowedIds((current) => {
+      const next = new Set(current);
+      if (follow) next.add(parentId);
+      else next.delete(parentId);
+      return next;
+    });
+    try {
+      const data = await setThreadFollow(sessionRef.current.client, parentId, threadChannelId, follow);
+      if (follow && isRecord(data) && typeof data.threadChannelId === "string") {
+        setThreadByParent((current) => ({ ...current, [parentId]: data.threadChannelId as string }));
+      }
+    } catch (caught) {
+      setFollowedIds((current) => {
+        const next = new Set(current);
+        if (follow) next.delete(parentId);
+        else next.add(parentId);
+        return next;
+      });
+      if (!(caught instanceof StaleRequestError)) setError(t("mobile.messages.actionFailed"));
+    }
+  }
+
+  async function toggleTask(messageId: string) {
+    const task = tasksByMessage.get(messageId);
+    try {
+      if (!task?.taskId) {
+        await convertMessageToTask(sessionRef.current.client, messageId);
+        const data = await sessionRef.current.client.get<unknown>("/tasks/server?detail=summary");
+        setTasksByMessage(linkedTasks(data));
+        return;
+      }
+      const status = task.status === "done" ? "todo" : "done";
+      await setTaskStatus(sessionRef.current.client, task.taskId, status);
+      setTasksByMessage((current) => {
+        const next = new Map(current);
+        const existing = next.get(messageId);
+        if (existing) next.set(messageId, { ...existing, status });
+        return next;
+      });
+    } catch (caught) {
+      if (!(caught instanceof StaleRequestError)) setError(t("mobile.messages.actionFailed"));
+    }
+  }
+
+  async function copyMessage(messageId: string) {
+    const message = storedMessage(messageId);
+    if (!message) return;
+    try {
+      await copyText(message.content);
+    } catch {
+      setError(t("mobile.messages.actionFailed"));
+    }
+  }
+
+  async function copyLink(messageId: string) {
+    const origin = sessionRef.current.origin;
+    const slug = slugRef.current;
+    const linkChannelId = thread ? parentChannelId : channelId;
+    if (!origin || !slug || !linkChannelId) {
+      setError(t("mobile.messages.actionFailed"));
+      return;
+    }
+    try {
+      await copyText(messagePermalink(origin, slug, linkChannelId, messageId, {
+        dm: meta?.type === "dm",
+        threadParentMessageId: thread ? parentMessageId : null,
+      }));
+    } catch {
+      setError(t("mobile.messages.actionFailed"));
+    }
+  }
+
+  async function changeMuted(muted: boolean) {
+    if (!settingsChannelId) return;
+    setMeta((current) => current ? { ...current, activityMuted: muted } : current);
+    try {
+      await setActivityMuted(sessionRef.current.client, settingsChannelId, muted);
+    } catch (caught) {
+      setMeta((current) => current ? { ...current, activityMuted: !muted } : current);
+      if (!(caught instanceof StaleRequestError)) setError(t("mobile.messages.actionFailed"));
+    }
+  }
+
+  async function changeCollapse(collapse: boolean) {
+    if (!settingsChannelId) return;
+    setCollapseLong(collapse);
+    try {
+      await setCollapseLongMessages(sessionRef.current.client, settingsChannelId, collapse);
+    } catch (caught) {
+      setCollapseLong(!collapse);
+      if (!(caught instanceof StaleRequestError)) setError(t("mobile.messages.actionFailed"));
+    }
+  }
+
+  async function leave() {
+    try {
+      if (!settingsChannelId) return;
+      await leaveChannel(sessionRef.current.client, settingsChannelId);
+      setSettingsOpen(false);
+      router.back();
+    } catch (caught) {
+      if (!(caught instanceof StaleRequestError)) setError(t("mobile.messages.actionFailed"));
+    }
+  }
+
+  async function messageProfile() {
+    if (!profile?.senderId) return;
+    try {
+      const data = await openDirectMessage(sessionRef.current.client, { id: profile.senderId, type: profile.senderType });
+      const id = isRecord(data) && typeof data.id === "string" ? data.id : null;
+      if (!id) throw new Error("missing");
+      setProfile(null);
+      router.push({ pathname: "/messages/[channelId]", params: { channelId: id, name: senderLabel(profile) } });
+    } catch (caught) {
+      if (!(caught instanceof StaleRequestError)) setError(t("mobile.messages.actionFailed"));
+    }
+  }
+
+  const headerTitle = thread
+    ? `${t("message.threadPanel.thread")} — #${meta?.name || title}`
+    : meta?.type === "dm" ? (meta.peerName || title) : (meta?.name || title);
+  const headerSubtitle = [
+    meta?.archived ? t("mobile.messages.archived") : "",
+    meta?.activityMuted ? t("message.chatPanel.mutedBadge") : "",
+    meta?.type === "dm" ? "" : (meta?.description ?? ""),
+  ].filter(Boolean).join(" · ") || undefined;
+  const menuMessage = menu ? storedMessage(menu.messageId) : undefined;
+  const menuTask = menuMessage ? tasksByMessage.get(menuMessage.id) : undefined;
+  const visibilityLabel = meta?.visibility === "private"
+    ? t("mobile.messages.private")
+    : meta?.visibility === "joint" ? t("mobile.messages.joint") : t("mobile.messages.public");
 
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === "ios" ? "padding" : undefined}
-      keyboardVerticalOffset={88}
-      style={[styles.page, androidKeyboard > 0 ? { paddingBottom: androidKeyboard } : null]}
+      keyboardVerticalOffset={insets.top + 56}
+      style={[styles.page, { paddingTop: insets.top }, androidKeyboard > 0 ? { paddingBottom: androidKeyboard } : null]}
     >
+      <PanelHeader
+        actions={(
+          <>
+            {thread && parentMessageId ? (
+              <Pressable
+                onPress={() => {
+                  const threadChannelId = channelId === "pending-thread" ? threadByParent[parentMessageId] : channelId;
+                  if (followedIds.has(parentMessageId) && !threadChannelId) return;
+                  void toggleFollow(parentMessageId, threadChannelId, !followedIds.has(parentMessageId));
+                }}
+                style={styles.headerAction}
+              >
+                <Text style={styles.headerActionText}>
+                  {followedIds.has(parentMessageId) ? t("message.messageItem.unfollowThread") : t("message.messageItem.followThread")}
+                </Text>
+              </Pressable>
+            ) : null}
+            <View accessibilityLabel={t("message.chatPanel.searchChannel")} style={styles.headerAction}>
+              <Search color={color.ink} size={18} />
+            </View>
+            {settingsChannelId ? (
+              <Pressable accessibilityRole="button" onPress={() => setSettingsOpen(true)} style={styles.headerAction}>
+                <Settings color={color.ink} size={18} />
+              </Pressable>
+            ) : null}
+          </>
+        )}
+        onBack={() => router.back()}
+        onTitlePress={thread ? () => listRef.current?.scrollToEnd({ animated: true }) : undefined}
+        subtitle={headerSubtitle}
+        title={headerTitle}
+      />
+      {loading && messages.length === 0 ? (
+        <View style={styles.center}><ActivityIndicator color={colors.accent} /></View>
+      ) : (
       <View style={styles.timeline}>
         <FlatList
           ref={listRef}
@@ -538,10 +871,17 @@ export function MessagePane({
                 group={group}
                 linkedTask={tasksByMessage.get(item.id)}
                 message={item}
+                onAddReaction={(messageId, x, y) => longPressMessage(messageId, x, y, true)}
                 onDelete={deleteMessage}
+                onLongPressMessage={longPressMessage}
+                onLongPressSender={mentionSender}
                 onOpenAttachment={openAttachmentStable}
                 onOpenThread={threadCountLabel ? openThread : undefined}
+                onPressMessage={thread ? undefined : openThread}
+                onPressSender={pressSender}
                 onResend={resendMessage}
+                onShowReactors={showReactors}
+                onToggleReaction={reactTo}
                 onToggleSystem={toggleSystem}
                 peers={peers}
                 readLabel={t("message.messageItem.read")}
@@ -581,6 +921,7 @@ export function MessagePane({
           </Pressable>
         ) : null}
       </View>
+      )}
       {query !== null && candidates.length > 0 ? (
         <View style={styles.candidates}>
           {candidates.map((candidate) => (
@@ -610,6 +951,89 @@ export function MessagePane({
           {previewUrl ? <Image resizeMode="contain" source={{ uri: previewUrl }} style={styles.preview} /> : null}
         </Pressable>
       </Modal>
+      {menu && menuMessage ? (
+        <MessageMenu
+          following={followedIds.has(menuMessage.id)}
+          labels={{
+            copy: t("message.messageItem.copyMarkdown"),
+            link: t("message.messageItem.copyLink"),
+            thread: t("message.messageItem.openThread"),
+            save: t("message.messageItem.saveMessage"),
+            unsave: t("mobile.messages.unsave"),
+            follow: t("message.messageItem.followThread"),
+            unfollow: t("message.messageItem.unfollowThread"),
+          }}
+          onClose={() => setMenu(null)}
+          onCopy={() => {
+            setMenu(null);
+            void copyMessage(menuMessage.id);
+          }}
+          onCopyLink={() => {
+            setMenu(null);
+            void copyLink(menuMessage.id);
+          }}
+          onFollow={thread ? undefined : (() => {
+            const threadChannelId = threadByParent[menuMessage.id] ?? useRaftStore.getState().threadSummaries[menuMessage.id]?.threadChannelId ?? menuMessage.threadId ?? undefined;
+            if (!threadChannelId) return undefined;
+            return () => {
+              setMenu(null);
+              void toggleFollow(menuMessage.id, threadChannelId, !followedIds.has(menuMessage.id));
+            };
+          })()}
+          onReact={(emoji) => {
+            setMenu(null);
+            reactTo(menuMessage.id, emoji);
+          }}
+          onSave={() => {
+            setMenu(null);
+            void toggleSaved(menuMessage.id);
+          }}
+          onTask={() => {
+            setMenu(null);
+            void toggleTask(menuMessage.id);
+          }}
+          onThread={thread ? undefined : () => {
+            setMenu(null);
+            openThread(menuMessage.id);
+          }}
+          openedAt={menu.openedAt}
+          reactionsOnly={menu.reactionsOnly}
+          saved={savedIds.has(menuMessage.id)}
+          taskLabel={thread ? null : (menuTask?.taskId
+            ? (menuTask.status === "done" ? t("message.messageItem.reopenTask") : t("message.messageItem.markAsDone"))
+            : t("message.messageItem.convertToTask"))}
+          x={menu.x}
+          y={menu.y}
+        />
+      ) : null}
+      {profile ? (
+        <ProfileCard
+          avatarUrl={profile.senderAvatarUrl}
+          description={profile.senderDescription}
+          dmLabel={t("mobile.messages.dm")}
+          kind={profile.senderType === "agent" ? "agent" : "human"}
+          name={senderLabel(profile)}
+          onClose={() => setProfile(null)}
+          onMessage={() => void messageProfile()}
+        />
+      ) : null}
+      {meta && settingsChannelId ? (
+        <Sheet onClose={() => setSettingsOpen(false)} open={settingsOpen} title={t("message.channelSettings.title")}>
+          <ChannelSettings
+            collapse={collapseLong}
+            collapseLabel={t("message.channelSettings.collapseLongMessagesTitle")}
+            leaveLabel={t("mobile.messages.leave")}
+            memberLabel={t("mobile.messages.members")}
+            members={memberNames}
+            meta={meta}
+            muteLabel={t("message.channelSettings.muteActivityTitle")}
+            onCollapse={(collapse) => void changeCollapse(collapse)}
+            onLeave={() => void leave()}
+            onMute={(muted) => void changeMuted(muted)}
+            visibilityLabel={visibilityLabel}
+          />
+        </Sheet>
+      ) : null}
     </KeyboardAvoidingView>
   );
 }
@@ -623,6 +1047,8 @@ const styles = StyleSheet.create({
   stickyText: { color: color.ink, fontSize: 10, fontWeight: "700", letterSpacing: 0.8, textTransform: "uppercase" },
   jump: { backgroundColor: color.yellow, borderColor: color.border, borderWidth: 2, bottom: 12, paddingHorizontal: 10, paddingVertical: 6, position: "absolute", right: 12 },
   jumpText: { color: color.ink, fontSize: 13, fontWeight: "700" },
+  headerAction: { alignItems: "center", justifyContent: "center", minHeight: 32, paddingHorizontal: 4 },
+  headerActionText: { color: color.ink, fontSize: 12, fontWeight: "700" },
   scrim: { alignItems: "center", backgroundColor: color.scrim, flex: 1, justifyContent: "center" },
   preview: { height: "80%", width: "100%" },
   note: { color: colors.muted, padding: space.md, textAlign: "center" },

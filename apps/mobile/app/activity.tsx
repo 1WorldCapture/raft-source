@@ -44,7 +44,21 @@ export default function ActivityScreen() {
           keyExtractor={(row) => row.id}
           ListEmptyComponent={<AppText style={styles.empty}>{t("thread.empty.defaultTitle")}</AppText>}
           renderItem={({ item }) => (
-            <Pressable onPress={() => router.push({ pathname: "/messages/[channelId]", params: { channelId: item.channelId, name: item.channelName } })} style={styles.row}>
+            <Pressable onPress={() => {
+              if (item.kind === "thread") {
+                router.push({
+                  pathname: "/thread/[threadId]",
+                  params: {
+                    threadId: item.channelId,
+                    parentChannelId: item.parentChannelId ?? "",
+                    parentMessageId: item.parentMessageId ?? "",
+                    title: t("message.threadPanel.thread"),
+                  },
+                });
+                return;
+              }
+              router.push({ pathname: "/messages/[channelId]", params: { channelId: item.channelId, name: item.channelName } });
+            }} style={styles.row}>
               <AppText style={styles.title}>{item.title}</AppText>
             </Pressable>
           )}
