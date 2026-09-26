@@ -619,17 +619,14 @@ export function MessagePane({
 
   const mentionSender = useCallback((messageId: string) => {
     const message = storedMessage(messageId);
-    const handle = message?.senderName;
-    if (!message?.senderId || !handle) return;
-    const candidate: MentionCandidate = {
-      id: message.senderId,
-      name: handle,
-      type: message.senderType === "agent" ? "agent" : "user",
-      label: senderLabel(message),
-    };
-    setDraft((current) => `${current}${current.length > 0 && !current.endsWith(" ") ? " " : ""}@${handle} `);
-    setMentions((current) => current.some((item) => item.id === candidate.id) ? current : [...current, candidate]);
-  }, [storedMessage]);
+    if (!message?.senderId) return;
+    void loadMembers().then((members) => {
+      const candidate = members.find((member) => member.id === message.senderId);
+      if (!candidate?.name) return;
+      setDraft((current) => `${current}${current.length > 0 && !current.endsWith(" ") ? " " : ""}@${candidate.name} `);
+      setMentions((current) => current.some((item) => item.id === candidate.id) ? current : [...current, candidate]);
+    }).catch(() => setError(t("mobile.messages.actionFailed")));
+  }, [storedMessage, t]);
 
   async function toggleSaved(messageId: string) {
     const saved = savedIds.has(messageId);
