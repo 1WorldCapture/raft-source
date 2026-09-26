@@ -40,6 +40,8 @@ import { MessageRow, type LinkedTaskChip } from "./MessageRow";
 import { computeMessageGrouping, hiddenSystemIds, retainGroupStates, systemRunHeads } from "./messageGrouping";
 import { formatDayLabel, formatMessageStamp, resolveHour12, resolveTimeZone } from "./messageTime";
 import { newerMessageCount } from "./newerMessages";
+import { ListChecks } from "lucide-react-native";
+import { loadDraft, persistDraft, DraftScheduler } from "./composerDraft";
 import { dmReadByPeer, parsePeerReads, type PeerRead } from "./readReceipt";
 
 const PAGE = 50;
@@ -114,6 +116,7 @@ export function MessagePane({
   const [limited, setLimited] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
+  const [asTask, setAsTask] = useState(false);
   const [androidKeyboard, setAndroidKeyboard] = useState(0);
   const [mentions, setMentions] = useState<MentionCandidate[]>([]);
   const [candidates, setCandidates] = useState<MentionCandidate[]>([]);
@@ -192,6 +195,35 @@ export function MessagePane({
       scrollOffsets.set(channelId, lastOffset.current);
     };
   }, [channelId]);
+
+  const draftChannel = useRef(channelId);
+  draftChannel.current = channelId;
+  const draftScheduler = useRef(new DraftScheduler((value) => {
+    void persistDraft(draftChannel.current, value);
+  }));
+  const draftReady = useRef(false);
+  const draftDirty = useRef(false);
+  useEffect(() => {
+    draftReady.current = false;
+    draftDirty.current = false;
+    let cancelled = false;
+    void loadDraft(channelId).then((value) => {
+      if (cancelled || draftDirty.current) {
+        draftReady.current = true;
+        return;
+      }
+      setDraft(value);
+      draftReady.current = true;
+    });
+    return () => {
+      cancelled = true;
+      draftScheduler.current.dispose();
+    };
+  }, [channelId]);
+  useEffect(() => {
+    if (!draftReady.current) return;
+    draftScheduler.current.update(draft);
+  }, [draft]);
 
   useEffect(() => {
     const { newest, added } = newerMessageCount(messages, newestSeq.current);
@@ -329,6 +361,7 @@ export function MessagePane({
   }
 
   async function onChangeDraft(value: string) {
+    draftDirty.current = true;
     setDraft(value);
     const query = mentionQuery(value);
     if (query === null) {
@@ -368,6 +401,7 @@ export function MessagePane({
         content,
         randomId,
         mentions: activeMentions.map((mention) => ({ type: mention.type, id: mention.id, name: mention.name })),
+        asTask: asTask || undefined,
       });
       const record = isRecord(data) ? data : null;
       const message = parseMessage(record?.message) ?? parseMessage(data);
@@ -404,8 +438,10 @@ export function MessagePane({
     useRaftStore.getState().upsertMessages([optimistic]);
     if (!existing) {
       setDraft("");
+      setAsTask(false);
       setMentions([]);
       setCandidates([]);
+      void persistDraft(channelId, "");
     }
     await deliver(content, randomId, optimisticId);
   }
@@ -592,18 +628,27 @@ export function MessagePane({
         </View>
       ) : null}
       {error ? <Text style={styles.error}>{error}</Text> : null}
-      <View style={[styles.composer, { paddingBottom: androidKeyboard > 0 ? 8 : Math.max(insets.bottom, 28) }]}>
+      <View style={[styles.composer, { paddingBottom: androidKeyboard > 0 ? 8 : Math.max(insets.bottom, 12) }]}>
         <TextInput
+          blurOnSubmit={false}
           multiline
           onChangeText={(value) => void onChangeDraft(value)}
-          placeholder={thread ? t("mobile.messages.replyPlaceholder") : t("mobile.messages.placeholder")}
+          placeholder={t("message.composer.messagePlaceholder", { channel: title || (thread ? t("message.threadPanel.thread") : "") })}
           placeholderTextColor={colors.muted}
           style={styles.input}
+          submitBehavior="newline"
           value={draft}
         />
-        <Pressable disabled={draft.trim().length === 0} onPress={() => void send()} style={styles.send}>
-          <Text style={styles.sendText}>{t("mobile.messages.send")}</Text>
-        </Pressable>
+        <View style={styles.toolbar}>
+          <Pressable accessibilityRole="checkbox" accessibilityState={{ checked: asTask }} onPress={() => setAsTask((current) => !current)} style={styles.taskToggle}>
+            <ListChecks color={color.ink} size={16} />
+            <Text style={styles.taskLabel}>{t("message.composer.asTask")}</Text>
+            <View style={[styles.box, asTask ? styles.boxOn : null]} />
+          </Pressable>
+          <Pressable disabled={draft.trim().length === 0} onPress={() => void send()} style={styles.send}>
+            <Text style={styles.sendText}>{t("mobile.messages.send")}</Text>
+          </Pressable>
+        </View>
       </View>
       <Modal animationType="fade" onRequestClose={() => setPreviewUrl(null)} transparent visible={previewUrl !== null}>
         <Pressable onPress={() => setPreviewUrl(null)} style={styles.scrim}>
@@ -632,15 +677,20 @@ const styles = StyleSheet.create({
   candidateName: { color: colors.ink, fontWeight: "600" },
   candidateLabel: { color: colors.muted, fontSize: 12 },
   composer: {
-    alignItems: "flex-end",
-    backgroundColor: colors.card,
-    borderTopColor: colors.line,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    flexDirection: "row",
-    gap: space.sm,
-    padding: space.sm,
+    backgroundColor: color.page,
+    borderColor: color.border,
+    borderWidth: 2,
+    gap: 8,
+    marginBottom: 8,
+    marginHorizontal: 12,
+    padding: 8,
   },
-  input: { color: colors.ink, flex: 1, fontSize: 16, maxHeight: 120, paddingHorizontal: space.sm, paddingVertical: 8 },
-  send: { paddingHorizontal: space.sm, paddingVertical: 10 },
-  sendText: { color: colors.accent, fontSize: 16, fontWeight: "700" },
+  input: { color: color.ink, fontSize: 16, maxHeight: 128, minHeight: 24, paddingHorizontal: 4, paddingVertical: 4 },
+  toolbar: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
+  taskToggle: { alignItems: "center", flexDirection: "row", gap: 6 },
+  taskLabel: { color: color.ink, fontSize: 12, fontWeight: "700" },
+  box: { borderColor: color.border, borderWidth: 2, height: 16, width: 16 },
+  boxOn: { backgroundColor: color.yellow },
+  send: { backgroundColor: color.pink, borderColor: color.border, borderWidth: 2, paddingHorizontal: 12, paddingVertical: 8 },
+  sendText: { color: color.ink, fontSize: 14, fontWeight: "700" },
 });
