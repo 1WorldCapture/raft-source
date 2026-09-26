@@ -525,8 +525,12 @@ export function MessagePane({
   async function send(existing?: RaftMessage) {
     const storedIds = existing?.attachments?.flatMap((file) => file.id ? [file.id] : []) ?? [];
     const ready = uploads.filter((file) => file.status === "ready" && file.attachmentId);
-    if (storedIds.length === 0 && uploads.some((file) => file.status !== "ready")) return;
-    const attachmentIds = attachmentIdsForSend(ready.flatMap((file) => file.attachmentId ? [file.attachmentId] : []), storedIds);
+    if (!existing && uploads.some((file) => file.status !== "ready")) return;
+    const attachmentIds = attachmentIdsForSend({
+      retry: Boolean(existing),
+      pendingIds: ready.flatMap((file) => file.attachmentId ? [file.attachmentId] : []),
+      messageIds: storedIds,
+    });
     const typed = (existing?.content ?? draft).trim();
     const content = typed || (attachmentIds.length > 0 ? t("message.composer.attachmentsOnlyBody", { count: attachmentIds.length }) : "");
     if (!content) return;
