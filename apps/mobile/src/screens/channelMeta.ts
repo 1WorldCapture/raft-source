@@ -7,6 +7,7 @@ export interface ChannelMeta {
   visibility: "public" | "private" | "joint";
   archived: boolean;
   activityMuted: boolean;
+  activityMuteSupported: boolean;
   peerName: string | null;
   peerAvatarUrl: string | null;
   peerId: string | null;
@@ -30,6 +31,7 @@ export function parseChannelMeta(data: unknown): ChannelMeta | null {
     visibility,
     archived: data.archived === true || typeof data.archivedAt === "string",
     activityMuted: data.activityMuted === true,
+    activityMuteSupported: data.activityMuteSupported !== false,
     peerName: text(data.peerDisplayName) || text(data.peerName) || text(peer?.displayName) || text(peer?.name),
     peerAvatarUrl: text(data.peerAvatarUrl) || text(peer?.avatarUrl),
     peerId,

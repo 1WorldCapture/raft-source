@@ -43,9 +43,9 @@ export function MessageMenu({
   onReact: (emoji: string) => void;
   onCopy: () => void;
   onCopyLink: () => void;
-  onThread: () => void;
+  onThread?: () => void;
   onSave: () => void;
-  onFollow: () => void;
+  onFollow?: () => void;
   onTask: () => void;
 }) {
   const { width, height } = useWindowDimensions();
@@ -70,9 +70,9 @@ export function MessageMenu({
             <View>
               <Item label={labels.copy} onPress={() => press(onCopy)} />
               <Item label={labels.link} onPress={() => press(onCopyLink)} />
-              <Item label={labels.thread} onPress={() => press(onThread)} />
+              {onThread ? <Item label={labels.thread} onPress={() => press(onThread)} /> : null}
               <Item label={saved ? labels.unsave : labels.save} onPress={() => press(onSave)} />
-              <Item label={following ? labels.unfollow : labels.follow} onPress={() => press(onFollow)} />
+              {onFollow ? <Item label={following ? labels.unfollow : labels.follow} onPress={() => press(onFollow)} /> : null}
               {taskLabel ? <Item label={taskLabel} onPress={() => press(onTask)} /> : null}
             </View>
           )}

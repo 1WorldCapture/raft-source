@@ -145,11 +145,14 @@ export function MessagePane({
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [meta, setMeta] = useState<ChannelMeta | null>(null);
   const [followedIds, setFollowedIds] = useState<Set<string>>(new Set());
+  const [threadByParent, setThreadByParent] = useState<Record<string, string>>({});
   const [menu, setMenu] = useState<{ messageId: string; x: number; y: number; openedAt: number; reactionsOnly?: boolean } | null>(null);
   const [profile, setProfile] = useState<RaftMessage | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [memberNames, setMemberNames] = useState<string[]>([]);
   const slugRef = useRef<string | null>(null);
+  const reactionFlight = useRef(new Set<string>());
+  const settingsChannelId = thread && parentChannelId ? parentChannelId : thread ? null : channelId;
   const groupCache = useRef<Map<string, import("./messageGrouping").MessageGroupState> | null>(null);
   const grouping = useMemo(() => {
     const standalone = new Set<string>();
@@ -230,20 +233,27 @@ export function MessagePane({
   }, [messages, userId]);
 
   useEffect(() => {
-    if (channelId === "pending-thread") return;
+    if (!settingsChannelId || settingsChannelId === "pending-thread") return;
     let cancelled = false;
-    void sessionRef.current.client.get<unknown>(`/channels/${channelId}`).then((data) => {
+    void sessionRef.current.client.get<unknown>(`/channels/${settingsChannelId}`).then((data) => {
       if (cancelled || !isRecord(data)) return;
-      setDm(data.type === "dm");
+      setDm(!thread && data.type === "dm");
       setMeta(parseChannelMeta(data));
       if (typeof data.collapseLongMessages === "boolean") setCollapseLong(data.collapseLongMessages);
-      const nextPeers = parsePeerReads(data);
+      const nextPeers = !thread ? parsePeerReads(data) : null;
       if (nextPeers) setPeers(nextPeers);
     }).catch(() => undefined);
     void sessionRef.current.client.get<unknown>("/channels/threads/followed").then((data) => {
       if (cancelled || !isRecord(data) || !Array.isArray(data.threads)) return;
-      const ids = data.threads.flatMap((threadRow) => isRecord(threadRow) && typeof threadRow.parentMessageId === "string" ? [threadRow.parentMessageId] : []);
-      setFollowedIds(new Set(ids));
+      const ids = new Set<string>();
+      const map: Record<string, string> = {};
+      for (const threadRow of data.threads) {
+        if (!isRecord(threadRow) || typeof threadRow.parentMessageId !== "string" || typeof threadRow.threadChannelId !== "string") continue;
+        ids.add(threadRow.parentMessageId);
+        map[threadRow.parentMessageId] = threadRow.threadChannelId;
+      }
+      setFollowedIds(ids);
+      setThreadByParent((current) => ({ ...current, ...map }));
     }).catch(() => undefined);
     void sessionRef.current.client.get<unknown>("/tasks/server?detail=summary").then((data) => {
       if (!cancelled) setTasksByMessage(linkedTasks(data));
@@ -251,7 +261,7 @@ export function MessagePane({
     return () => {
       cancelled = true;
     };
-  }, [channelId]);
+  }, [settingsChannelId, thread]);
 
   useEffect(() => {
     const ids = messages.map((message) => message.id).filter((id) => !id.startsWith("optimistic-") && !checkedSaved.current.has(id));
@@ -532,9 +542,9 @@ export function MessagePane({
   }, [session.serverId]);
 
   useEffect(() => {
-    if (!settingsOpen || channelId === "pending-thread") return;
+    if (!settingsOpen || !settingsChannelId || settingsChannelId === "pending-thread") return;
     let cancelled = false;
-    void sessionRef.current.client.get<unknown>(`/channels/${channelId}/members`).then((data) => {
+    void sessionRef.current.client.get<unknown>(`/channels/${settingsChannelId}/members`).then((data) => {
       if (cancelled || !isRecord(data)) return;
       const names: string[] = [];
       for (const key of ["humans", "agents", "externalMembers"] as const) {
@@ -553,7 +563,7 @@ export function MessagePane({
     return () => {
       cancelled = true;
     };
-  }, [channelId, settingsOpen]);
+  }, [settingsChannelId, settingsOpen]);
 
   useEffect(() => {
     if (!menu && !profile && !settingsOpen) return;
@@ -571,12 +581,19 @@ export function MessagePane({
   ), [channelId]);
 
   const reactTo = useCallback((messageId: string, emoji: string) => {
+    const key = `${messageId}:${emoji}`;
+    if (reactionFlight.current.has(key)) return;
     const message = storedMessage(messageId);
     if (!message || message.id.startsWith("optimistic-") || message.messageType === "system") return;
     const mine = message.reactions?.some((reaction) => reaction.emoji === emoji && (reaction.reactedByMe || Boolean(userId && reaction.userIds?.includes(userId)))) ?? false;
+    reactionFlight.current.add(key);
     useRaftStore.getState().upsertMessages([applyReaction(message, emoji, !mine, userId)]);
-    void setMessageReaction(sessionRef.current.client, messageId, emoji, !mine).catch((caught: unknown) => {
-      useRaftStore.getState().upsertMessages([message]);
+    void setMessageReaction(sessionRef.current.client, messageId, emoji, !mine).then(() => {
+      reactionFlight.current.delete(key);
+    }).catch((caught: unknown) => {
+      reactionFlight.current.delete(key);
+      const latest = storedMessage(messageId);
+      if (latest) useRaftStore.getState().upsertMessages([applyReaction(latest, emoji, mine, userId)]);
       if (!(caught instanceof StaleRequestError)) setError(t("mobile.messages.actionFailed"));
     });
   }, [storedMessage, t, userId]);
@@ -602,9 +619,16 @@ export function MessagePane({
 
   const mentionSender = useCallback((messageId: string) => {
     const message = storedMessage(messageId);
-    if (!message) return;
-    const name = senderLabel(message);
-    setDraft((current) => `${current}${current.length > 0 && !current.endsWith(" ") ? " " : ""}@${name} `);
+    const handle = message?.senderName;
+    if (!message?.senderId || !handle) return;
+    const candidate: MentionCandidate = {
+      id: message.senderId,
+      name: handle,
+      type: message.senderType === "agent" ? "agent" : "user",
+      label: senderLabel(message),
+    };
+    setDraft((current) => `${current}${current.length > 0 && !current.endsWith(" ") ? " " : ""}@${handle} `);
+    setMentions((current) => current.some((item) => item.id === candidate.id) ? current : [...current, candidate]);
   }, [storedMessage]);
 
   async function toggleSaved(messageId: string) {
@@ -629,6 +653,7 @@ export function MessagePane({
   }
 
   async function toggleFollow(parentId: string, threadChannelId: string | undefined, follow: boolean) {
+    if (!follow && !threadChannelId) return;
     setFollowedIds((current) => {
       const next = new Set(current);
       if (follow) next.add(parentId);
@@ -636,7 +661,10 @@ export function MessagePane({
       return next;
     });
     try {
-      await setThreadFollow(sessionRef.current.client, parentId, threadChannelId, follow);
+      const data = await setThreadFollow(sessionRef.current.client, parentId, threadChannelId, follow);
+      if (follow && isRecord(data) && typeof data.threadChannelId === "string") {
+        setThreadByParent((current) => ({ ...current, [parentId]: data.threadChannelId as string }));
+      }
     } catch (caught) {
       setFollowedIds((current) => {
         const next = new Set(current);
@@ -683,12 +711,13 @@ export function MessagePane({
   async function copyLink(messageId: string) {
     const origin = sessionRef.current.origin;
     const slug = slugRef.current;
-    if (!origin || !slug) {
+    const linkChannelId = thread ? parentChannelId : channelId;
+    if (!origin || !slug || !linkChannelId) {
       setError(t("mobile.messages.actionFailed"));
       return;
     }
     try {
-      await copyText(messagePermalink(origin, slug, channelId, messageId, {
+      await copyText(messagePermalink(origin, slug, linkChannelId, messageId, {
         dm: meta?.type === "dm",
         threadParentMessageId: thread ? parentMessageId : null,
       }));
@@ -698,9 +727,10 @@ export function MessagePane({
   }
 
   async function changeMuted(muted: boolean) {
+    if (!settingsChannelId) return;
     setMeta((current) => current ? { ...current, activityMuted: muted } : current);
     try {
-      await setActivityMuted(sessionRef.current.client, channelId, muted);
+      await setActivityMuted(sessionRef.current.client, settingsChannelId, muted);
     } catch (caught) {
       setMeta((current) => current ? { ...current, activityMuted: !muted } : current);
       if (!(caught instanceof StaleRequestError)) setError(t("mobile.messages.actionFailed"));
@@ -708,9 +738,10 @@ export function MessagePane({
   }
 
   async function changeCollapse(collapse: boolean) {
+    if (!settingsChannelId) return;
     setCollapseLong(collapse);
     try {
-      await setCollapseLongMessages(sessionRef.current.client, channelId, collapse);
+      await setCollapseLongMessages(sessionRef.current.client, settingsChannelId, collapse);
     } catch (caught) {
       setCollapseLong(!collapse);
       if (!(caught instanceof StaleRequestError)) setError(t("mobile.messages.actionFailed"));
@@ -719,7 +750,8 @@ export function MessagePane({
 
   async function leave() {
     try {
-      await leaveChannel(sessionRef.current.client, channelId);
+      if (!settingsChannelId) return;
+      await leaveChannel(sessionRef.current.client, settingsChannelId);
       setSettingsOpen(false);
       router.back();
     } catch (caught) {
@@ -765,7 +797,11 @@ export function MessagePane({
           <>
             {thread && parentMessageId ? (
               <Pressable
-                onPress={() => void toggleFollow(parentMessageId, channelId === "pending-thread" ? undefined : channelId, !followedIds.has(parentMessageId))}
+                onPress={() => {
+                  const threadChannelId = channelId === "pending-thread" ? threadByParent[parentMessageId] : channelId;
+                  if (followedIds.has(parentMessageId) && !threadChannelId) return;
+                  void toggleFollow(parentMessageId, threadChannelId, !followedIds.has(parentMessageId));
+                }}
                 style={styles.headerAction}
               >
                 <Text style={styles.headerActionText}>
@@ -776,9 +812,11 @@ export function MessagePane({
             <View accessibilityLabel={t("message.chatPanel.searchChannel")} style={styles.headerAction}>
               <Search color={color.ink} size={18} />
             </View>
-            <Pressable accessibilityRole="button" onPress={() => setSettingsOpen(true)} style={styles.headerAction}>
-              <Settings color={color.ink} size={18} />
-            </Pressable>
+            {settingsChannelId ? (
+              <Pressable accessibilityRole="button" onPress={() => setSettingsOpen(true)} style={styles.headerAction}>
+                <Settings color={color.ink} size={18} />
+              </Pressable>
+            ) : null}
           </>
         )}
         onBack={() => router.back()}
@@ -937,11 +975,14 @@ export function MessagePane({
             setMenu(null);
             void copyLink(menuMessage.id);
           }}
-          onFollow={() => {
-            const summary = useRaftStore.getState().threadSummaries[menuMessage.id];
-            setMenu(null);
-            void toggleFollow(menuMessage.id, summary?.threadChannelId ?? menuMessage.threadId, !followedIds.has(menuMessage.id));
-          }}
+          onFollow={thread ? undefined : (() => {
+            const threadChannelId = threadByParent[menuMessage.id] ?? useRaftStore.getState().threadSummaries[menuMessage.id]?.threadChannelId ?? menuMessage.threadId ?? undefined;
+            if (!threadChannelId) return undefined;
+            return () => {
+              setMenu(null);
+              void toggleFollow(menuMessage.id, threadChannelId, !followedIds.has(menuMessage.id));
+            };
+          })()}
           onReact={(emoji) => {
             setMenu(null);
             reactTo(menuMessage.id, emoji);
@@ -954,16 +995,16 @@ export function MessagePane({
             setMenu(null);
             void toggleTask(menuMessage.id);
           }}
-          onThread={() => {
+          onThread={thread ? undefined : () => {
             setMenu(null);
             openThread(menuMessage.id);
           }}
           openedAt={menu.openedAt}
           reactionsOnly={menu.reactionsOnly}
           saved={savedIds.has(menuMessage.id)}
-          taskLabel={menuTask?.taskId
+          taskLabel={thread ? null : (menuTask?.taskId
             ? (menuTask.status === "done" ? t("message.messageItem.reopenTask") : t("message.messageItem.markAsDone"))
-            : t("message.messageItem.convertToTask")}
+            : t("message.messageItem.convertToTask"))}
           x={menu.x}
           y={menu.y}
         />
@@ -979,7 +1020,7 @@ export function MessagePane({
           onMessage={() => void messageProfile()}
         />
       ) : null}
-      {meta ? (
+      {meta && settingsChannelId ? (
         <Sheet onClose={() => setSettingsOpen(false)} open={settingsOpen} title={t("message.channelSettings.title")}>
           <ChannelSettings
             collapse={collapseLong}

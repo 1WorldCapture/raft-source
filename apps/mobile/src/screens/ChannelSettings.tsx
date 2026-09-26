@@ -35,7 +35,7 @@ export function ChannelSettings({
       {meta.description ? <AppText style={styles.body}>{meta.description}</AppText> : null}
       <AppText style={styles.section}>{memberLabel}</AppText>
       {members.map((name, index) => <AppText key={`${name}-${index}`} style={styles.body}>{name}</AppText>)}
-      <Toggle label={muteLabel} on={meta.activityMuted} onPress={() => onMute(!meta.activityMuted)} />
+      {meta.activityMuteSupported ? <Toggle label={muteLabel} on={meta.activityMuted} onPress={() => onMute(!meta.activityMuted)} /> : null}
       <Toggle label={collapseLabel} on={collapse} onPress={() => onCollapse(!collapse)} />
       {meta.type === "dm" ? null : (
         <Pressable onPress={onLeave} style={styles.leave}>

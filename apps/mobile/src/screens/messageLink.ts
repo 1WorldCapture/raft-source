@@ -1,4 +1,4 @@
-/** Same path the web client copies: `/s/:slug/:kind/:channelId?msg=:messageId`. */
+/** Web permalink. A thread reply uses the parent channel for both the path and `thread=`. */
 export function messagePermalink(
   origin: string,
   serverSlug: string,
