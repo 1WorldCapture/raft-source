@@ -52,6 +52,14 @@ export function TaskDetailView({
   const [historyOpen, setHistoryOpen] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [lineCount, setLineCount] = useState(0);
+  const [measured, setMeasured] = useState(false);
+  const [measuredFor, setMeasuredFor] = useState(description);
+  if (measuredFor !== description) {
+    setMeasuredFor(description);
+    setMeasured(false);
+    setLineCount(0);
+    setExpanded(false);
+  }
   const [assigneeOpen, setAssigneeOpen] = useState(false);
   const description = task.description?.trim() ?? "";
   const collapsible = lineCount > 3;
@@ -74,8 +82,12 @@ export function TaskDetailView({
         {description ? (
           <View style={styles.descriptionBlock}>
             <AppText
-              numberOfLines={expanded ? undefined : 3}
-              onTextLayout={(event) => setLineCount((current) => Math.max(current, event.nativeEvent.lines.length))}
+              numberOfLines={measured && !expanded ? 3 : undefined}
+              onTextLayout={(event) => {
+                if (measured && !expanded) return;
+                setLineCount(event.nativeEvent.lines.length);
+                setMeasured(true);
+              }}
               style={styles.description}
             >
               {description}
