@@ -154,8 +154,8 @@ export function TaskStatusButton({
           onPressOut={() => setPressed(false)}
         >
           <View style={[styles.statusButton, pressed ? styles.cardPressed : null, { backgroundColor: taskStatusFill(status) }]}>
-            <Pencil color={color.ink} size={10} strokeWidth={2.5} />
             <AppText style={styles.statusButtonText}>{t(STATUS_LABEL[status])}</AppText>
+            <Pencil color={color.ink} size={10} strokeWidth={2.5} />
           </View>
         </Pressable>
       )}

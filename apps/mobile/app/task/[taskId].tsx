@@ -8,7 +8,7 @@ import { MessagePane } from "../../src/screens/MessagePane";
 import { resolveHour12, resolveTimeZone } from "../../src/screens/messageTime";
 import { useSession } from "../../src/state/session";
 import { useServerRole } from "../../src/home/serverRole";
-import { TaskDetailView } from "../../src/tasks/TaskDetail";
+import { TaskDetailBar, TaskDetailView } from "../../src/tasks/TaskDetail";
 import { assigneePeople, parseTaskHistory, visibleTaskHistory, type AssigneePerson, type TaskHistoryEvent } from "../../src/tasks/history";
 import { useTaskStore } from "../../src/tasks/store";
 import type { TaskAssignee, TaskStatus } from "../../src/tasks/model";
@@ -115,33 +115,43 @@ export default function TaskScreen() {
     void useTaskStore.getState().setAssignee(session.client, task.id, assignee);
   };
 
+  const detail = (
+    <TaskDetailView
+      fill={task.isLegacy}
+      history={history}
+      historyError={historyError}
+      hour12={resolveHour12(session.user?.preferredTimeFormat)}
+      notice={notice}
+      onAssignee={changeAssignee}
+      onBack={() => router.back()}
+      onStatus={changeStatus}
+      people={people}
+      role={role}
+      task={task}
+      timeZone={resolveTimeZone(session.user?.preferredTimezone)}
+      variant={task.isLegacy ? "page" : threadReady ? "header" : "scroll"}
+    />
+  );
+
   return (
     <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ backgroundColor: color.page, flex: 1 }}>
-      <TaskDetailView
-        fill={task.isLegacy}
-        history={history}
-        historyError={historyError}
-        hour12={resolveHour12(session.user?.preferredTimeFormat)}
-        notice={notice}
-        onAssignee={changeAssignee}
-        onBack={() => router.back()}
-        onStatus={changeStatus}
-        people={people}
-        role={role}
-        task={task}
-        timeZone={resolveTimeZone(session.user?.preferredTimezone)}
-      />
-      {task.isLegacy || !threadReady ? null : (
-        <View style={{ flex: 1 }}>
-          <MessagePane
-            channelId={threadId ?? "pending-thread"}
-            embedded
-            parentChannelId={task.channelId}
-            parentMessageId={task.messageId}
-            thread
-            title={task.title}
-          />
-        </View>
+      {task.isLegacy ? detail : (
+        <>
+          <TaskDetailBar onBack={() => router.back()} task={task} />
+          {threadReady ? (
+            <View style={{ flex: 1 }}>
+              <MessagePane
+                channelId={threadId ?? "pending-thread"}
+                embedded
+                listHeader={detail}
+                parentChannelId={task.channelId}
+                parentMessageId={task.messageId}
+                thread
+                title={task.title}
+              />
+            </View>
+          ) : detail}
+        </>
       )}
     </KeyboardAvoidingView>
   );

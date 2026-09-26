@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { Modal, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { ArrowLeft, ChevronDown, ChevronRight } from "lucide-react-native";
+import { ArrowLeft, ChevronDown, ChevronRight, Pencil } from "lucide-react-native";
 import type { AppMessageId } from "../i18n/catalog";
 import { useT } from "../i18n/provider";
 import { formatMessageStamp } from "../screens/messageTime";
@@ -32,6 +32,7 @@ export function TaskDetailView({
   onStatus,
   onAssignee,
   fill,
+  variant = "page",
 }: {
   task: RaftTask;
   role: string | null;
@@ -46,9 +47,11 @@ export function TaskDetailView({
   onAssignee: (assignee: TaskAssignee | null) => void;
   /** Legacy tasks have no thread, so the head uses the rest of the screen. */
   fill?: boolean;
+  /** `header` sits in the thread list. `scroll` is the body alone while the thread loads. */
+  variant?: "page" | "header" | "scroll";
 }) {
   const t = useT();
-  const insets = useSafeAreaInsets();
+  const description = task.description?.trim() ?? "";
   const [historyOpen, setHistoryOpen] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [lineCount, setLineCount] = useState(0);
@@ -61,23 +64,12 @@ export function TaskDetailView({
     setExpanded(false);
   }
   const [assigneeOpen, setAssigneeOpen] = useState(false);
-  const description = task.description?.trim() ?? "";
   const collapsible = lineCount > 3;
   const assignee = personLabel(people, task.claimedByType, task.claimedById, task.claimedByName, t("task.properties.unassigned"), t("task.properties.unknown"));
   const creator = personLabel(people, task.createdByType, task.createdById, task.createdByName, t("task.properties.unknown"), t("task.properties.unknown"));
   const guest = taskStatusOptions(task.status, role).length === 0;
-  return (
-    <View style={[styles.page, fill ? styles.pageFill : null]}>
-      <View style={[styles.bar, { paddingTop: insets.top + 8 }]}>
-        <Pressable accessibilityLabel={t("task.modal.close")} accessibilityRole="button" onPress={onBack} style={styles.back}>
-          <ArrowLeft color={color.ink} size={14} strokeWidth={2.5} />
-        </Pressable>
-        <View style={styles.barText}>
-          <AppText numberOfLines={1} style={styles.channel}>{channelLabel(task.channelName || t("task.properties.unknownChannel"))}</AppText>
-          <AppText numberOfLines={1} style={styles.taskLabel}>{t("task.modal.taskWithNumber", { taskNumber: task.taskNumber })}</AppText>
-        </View>
-      </View>
-      <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
+  const body = (
+    <View style={styles.body}>
         <AppText numberOfLines={3} style={styles.title}>{task.title}</AppText>
         {description ? (
           <View style={styles.descriptionBlock}>
@@ -120,6 +112,7 @@ export function TaskDetailView({
             {guest ? <AppText style={styles.fact}>{assignee}</AppText> : (
               <Pressable accessibilityRole="button" onPress={() => setAssigneeOpen(true)} style={styles.assignee}>
                 <AppText numberOfLines={1} style={styles.assigneeText}>{assignee}</AppText>
+                <Pencil color={color.ink} size={10} strokeWidth={2.5} />
               </Pressable>
             )}
           </Property>
@@ -128,18 +121,50 @@ export function TaskDetailView({
           </Property>
         </View>
         {notice ? <AppText style={styles.notice}>{notice}</AppText> : null}
+    </View>
+  );
+  const sheet = assigneeOpen ? (
+    <AssigneeSheet
+      currentId={task.claimedByType && task.claimedById ? `${task.claimedByType}:${task.claimedById}` : "unassign"}
+      onClose={() => setAssigneeOpen(false)}
+      onSelect={(person) => {
+        setAssigneeOpen(false);
+        onAssignee(person);
+      }}
+      people={people}
+    />
+  ) : null;
+  if (variant === "header") {
+    return (
+      <View>
+        {body}
+        {sheet}
+      </View>
+    );
+  }
+  return (
+    <View style={[styles.page, fill || variant === "scroll" ? styles.pageFill : null]}>
+      {variant === "scroll" ? null : <TaskDetailBar onBack={onBack} task={task} />}
+      <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+        {body}
       </ScrollView>
-      {assigneeOpen ? (
-        <AssigneeSheet
-          currentId={task.claimedByType && task.claimedById ? `${task.claimedByType}:${task.claimedById}` : "unassign"}
-          onClose={() => setAssigneeOpen(false)}
-          onSelect={(person) => {
-            setAssigneeOpen(false);
-            onAssignee(person);
-          }}
-          people={people}
-        />
-      ) : null}
+      {sheet}
+    </View>
+  );
+}
+
+export function TaskDetailBar({ onBack, task }: { onBack: () => void; task: RaftTask }) {
+  const t = useT();
+  const insets = useSafeAreaInsets();
+  return (
+    <View style={[styles.bar, { paddingTop: insets.top + 8 }]}>
+      <Pressable accessibilityLabel={t("task.modal.close")} accessibilityRole="button" onPress={onBack} style={styles.back}>
+        <ArrowLeft color={color.ink} size={14} strokeWidth={2.5} />
+      </Pressable>
+      <View style={styles.barText}>
+        <AppText numberOfLines={1} style={styles.channel}>{channelLabel(task.channelName || t("task.properties.unknownChannel"))}</AppText>
+        <AppText numberOfLines={1} style={styles.taskLabel}>{t("task.modal.taskWithNumber", { taskNumber: task.taskNumber })}</AppText>
+      </View>
     </View>
   );
 }
@@ -319,8 +344,8 @@ function isStatus(value: unknown): value is TaskStatus {
 }
 
 const styles = StyleSheet.create({
-  page: { backgroundColor: color.page, flexShrink: 0, maxHeight: "48%" },
-  pageFill: { flex: 1, maxHeight: "100%" },
+  page: { backgroundColor: color.page, flexShrink: 0 },
+  pageFill: { flex: 1 },
   bar: {
     alignItems: "center",
     backgroundColor: color.page,
@@ -343,6 +368,7 @@ const styles = StyleSheet.create({
   barText: { flex: 1, minWidth: 0 },
   channel: { color: color.inkMid, fontSize: 12, fontWeight: "700", lineHeight: 16 },
   taskLabel: { color: color.ink, fontSize: 14, fontWeight: "700", lineHeight: 18 },
+  scroll: { flexGrow: 1 },
   body: { paddingBottom: 12, paddingHorizontal: 16, paddingTop: 12 },
   title: { color: color.ink, fontSize: 18, fontWeight: "700", lineHeight: 24 },
   descriptionBlock: { marginTop: 8 },
@@ -368,7 +394,7 @@ const styles = StyleSheet.create({
   property: { alignItems: "center", flexDirection: "row", gap: 8, maxWidth: "100%" },
   propertyLabel: { color: color.ink, fontSize: 12, fontWeight: "700", lineHeight: 16 },
   fact: { color: color.ink, flexShrink: 1, fontSize: 14, lineHeight: 18 },
-  assignee: { backgroundColor: color.page, borderColor: color.border, borderWidth: border.strong, paddingHorizontal: 8, paddingVertical: 4 },
+  assignee: { alignItems: "center", backgroundColor: color.page, borderColor: color.border, borderWidth: border.strong, flexDirection: "row", gap: 4, paddingHorizontal: 8, paddingVertical: 4 },
   assigneeText: { color: color.ink, fontSize: 12, fontWeight: "700", lineHeight: 16, maxWidth: 160 },
   notice: { color: color.red, fontSize: 12, lineHeight: 16, marginTop: 8 },
   modal: { flex: 1, justifyContent: "flex-end" },
