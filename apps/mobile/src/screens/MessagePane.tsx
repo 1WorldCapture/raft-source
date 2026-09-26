@@ -460,7 +460,16 @@ export function MessagePane({
         setLimited(historyLimited(data));
         const seq = maxSeq(page);
         if (seq > 0) void sessionRef.current.markRead(channelId, seq);
-        if (missingTarget) setError(t("message.chatPanel.messageNotFound"));
+        if (missingTarget) {
+          setError(t("message.chatPanel.messageNotFound"));
+          nearBottom.current = true;
+          setUnseen(0);
+          setShowBack(false);
+          setTimeout(() => {
+            if (cancelled) return;
+            listRef.current?.scrollToOffset({ offset: 0, animated: false });
+          }, 50);
+        }
       } catch (caught) {
         if (cancelled || caught instanceof StaleRequestError) return;
         setError(sendError(caught, t));
