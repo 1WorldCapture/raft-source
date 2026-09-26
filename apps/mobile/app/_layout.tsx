@@ -2,10 +2,18 @@ import "react-native-gesture-handler";
 import { useEffect, useState } from "react";
 import { Stack, useRouter, useSegments } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { Pressable, Text, View } from "react-native";
+import { useFonts } from "expo-font";
+import * as SplashScreen from "expo-splash-screen";
+import { Pressable, View } from "react-native";
+import { LocaleProvider, useT } from "../src/i18n/provider";
+import { fontAssets } from "../src/ui/fonts";
 import { SessionProvider, useSession } from "../src/state/session";
 import { useRaftStore } from "../src/state/store";
+import { AppText } from "../src/ui/text";
 import { colors } from "../src/ui/theme";
+import { color } from "../src/ui/tokens";
+
+SplashScreen.preventAutoHideAsync().catch(() => {});
 
 function SessionRedirect() {
   const session = useSession();
@@ -15,6 +23,7 @@ function SessionRedirect() {
   useEffect(() => {
     if (!session.ready) return;
     const top = segments[0];
+    if (top === "design") return;
     if (!session.origin) {
       if (top) router.replace("/");
       return;
@@ -30,47 +39,66 @@ function SessionRedirect() {
 function AccountNotice() {
   const notice = useRaftStore((state) => state.notice);
   const session = useSession();
+  const t = useT();
   const [sending, setSending] = useState(false);
   if (!notice) return null;
   const profile = notice === "profile-setup";
   return (
-    <View style={{ backgroundColor: "#fff7ed", paddingHorizontal: 16, paddingVertical: 10 }}>
-      <Text style={{ color: "#9a3412" }}>
-        {profile ? "请先在 Web 端完成资料设置，然后再回到 App。" : "请先在 Web 端完成邮箱验证。"}
-      </Text>
+    <View style={{ backgroundColor: color.yellow, paddingHorizontal: 16, paddingVertical: 10 }}>
+      <AppText style={{ color: color.ink }}>
+        {profile ? t("mobile.account.profile") : t("mobile.account.verify")}
+      </AppText>
       {profile ? null : (
         <Pressable disabled={sending} onPress={() => {
           setSending(true);
           void session.resendVerification().finally(() => setSending(false));
         }}>
-          <Text style={{ color: colors.accent, fontWeight: "700", marginTop: 6 }}>{sending ? "发送中…" : "重新发送验证邮件"}</Text>
+          <AppText style={{ color: colors.accent, fontWeight: "700", marginTop: 6 }}>
+            {sending ? t("mobile.account.sending") : t("mobile.account.resend")}
+          </AppText>
         </Pressable>
       )}
     </View>
   );
 }
 
+function AppStack() {
+  const t = useT();
+  return (
+    <Stack
+      screenOptions={{
+        headerShadowVisible: false,
+        headerTintColor: colors.accent,
+        headerStyle: { backgroundColor: color.yellow },
+        headerTitleStyle: { fontFamily: "SpaceGrotesk-700" },
+        contentStyle: { backgroundColor: colors.bg },
+      }}
+    >
+      <Stack.Screen name="index" options={{ headerShown: false }} />
+      <Stack.Screen name="login" options={{ title: t("pages.publicServer.signIn") }} />
+      <Stack.Screen name="servers" options={{ title: t("mobile.servers.title"), headerBackVisible: false }} />
+      <Stack.Screen name="channels/[serverId]" options={{ title: t("mobile.channels.title") }} />
+      <Stack.Screen name="messages/[channelId]" options={{ title: t("mobile.messages.title") }} />
+      <Stack.Screen name="thread/[threadId]" options={{ title: t("message.threadPanel.thread") }} />
+      <Stack.Screen name="design" options={{ title: t("mobile.design.title") }} />
+    </Stack>
+  );
+}
+
 export default function RootLayout() {
+  const [loaded] = useFonts(fontAssets);
+  useEffect(() => {
+    if (loaded) void SplashScreen.hideAsync();
+  }, [loaded]);
+  if (!loaded) return null;
   return (
     <SessionProvider>
-      <StatusBar style="dark" />
-      <SessionRedirect />
-      <AccountNotice />
-      <Stack
-        screenOptions={{
-          headerShadowVisible: false,
-          headerTintColor: colors.accent,
-          headerStyle: { backgroundColor: colors.bg },
-          contentStyle: { backgroundColor: colors.bg },
-        }}
-      >
-        <Stack.Screen name="index" options={{ headerShown: false }} />
-        <Stack.Screen name="login" options={{ title: "Sign in" }} />
-        <Stack.Screen name="servers" options={{ title: "Servers", headerBackVisible: false }} />
-        <Stack.Screen name="channels/[serverId]" options={{ title: "Channels" }} />
-        <Stack.Screen name="messages/[channelId]" options={{ title: "Messages" }} />
-        <Stack.Screen name="thread/[threadId]" options={{ title: "Thread" }} />
-      </Stack>
+      <LocaleProvider>
+        <StatusBar style="dark" />
+        <SessionRedirect />
+        <AccountNotice />
+        <AppStack />
+      </LocaleProvider>
     </SessionProvider>
   );
 }

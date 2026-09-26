@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useLocalSearchParams } from "expo-router";
 import { ApiError, StaleRequestError } from "../../src/api/client";
+import { useT } from "../../src/i18n/provider";
 import { isRecord } from "../../src/model/messages";
 import { MessagePane } from "../../src/screens/MessagePane";
 import { useSession } from "../../src/state/session";
@@ -15,6 +16,7 @@ export default function ThreadScreen() {
     title?: string;
   }>();
   const session = useSession();
+  const t = useT();
   const createdThreadId = useRaftStore((state) => (
     params.parentMessageId ? state.threadSummaries[params.parentMessageId]?.threadChannelId : undefined
   ));
@@ -42,7 +44,7 @@ export default function ThreadScreen() {
           setThreadChannelId(null);
           return;
         }
-        setError(caught instanceof Error ? caught.message : "Couldn't open the thread");
+        setError(caught instanceof Error ? caught.message : t("mobile.thread.openFailed"));
       }
     })();
     return () => {
@@ -50,7 +52,7 @@ export default function ThreadScreen() {
     };
   }, [params.parentChannelId, params.parentMessageId, session]);
 
-  if (error) return <ScreenMessage title="Couldn't open the thread" body={error} />;
+  if (error) return <ScreenMessage title={t("mobile.thread.openFailed")} body={error} />;
   const resolvedThreadId = threadChannelId ?? createdThreadId ?? null;
   if (!resolvedThreadId && !missing) return <LoadingScreen />;
   return (
@@ -59,7 +61,7 @@ export default function ThreadScreen() {
       parentChannelId={params.parentChannelId}
       parentMessageId={params.parentMessageId}
       thread
-      title={params.title || "Thread"}
+      title={params.title || t("message.threadPanel.thread")}
     />
   );
 }

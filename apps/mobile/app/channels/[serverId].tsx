@@ -2,9 +2,10 @@ import { useCallback, useLayoutEffect, useState } from "react";
 import { useFocusEffect, useLocalSearchParams, useNavigation, useRouter } from "expo-router";
 import { FlatList, Image, Pressable, RefreshControl, StyleSheet, Text, View } from "react-native";
 import { ApiError, StaleRequestError } from "../../src/api/client";
+import { useT } from "../../src/i18n/provider";
 import { channelLabel, parseChannelUnread, parseChannels, type RaftChannel } from "../../src/model/messages";
-import { useSession } from "../../src/state/session";
 import { useRaftStore } from "../../src/state/store";
+import { useSession } from "../../src/state/session";
 import { LoadingScreen, ScreenMessage } from "../../src/ui/screen";
 import { colors, space } from "../../src/ui/theme";
 
@@ -25,15 +26,16 @@ export default function ChannelsScreen() {
   const directoryVersion = useRaftStore((state) => state.directoryVersion);
   const channelUnread = useRaftStore((state) => state.channelUnread);
   const liveUnread = useRaftStore((state) => state.liveUnread);
+  const t = useT();
 
   useLayoutEffect(() => {
-    navigation.setOptions({ title: name || "Channels" });
-  }, [name, navigation]);
+    navigation.setOptions({ title: name || t("mobile.channels.title") });
+  }, [name, navigation, t]);
 
   const load = useCallback(async () => {
     if (session.serverId !== serverId) {
       setLoading(false);
-      setError("Open this server from the server list so requests use the right server.");
+      setError(t("mobile.channels.wrongServer"));
       return;
     }
     setError(null);
@@ -48,25 +50,25 @@ export default function ChannelsScreen() {
       useRaftStore.getState().setChannelUnread(parseChannelUnread(unreadData));
     } catch (caught) {
       if (caught instanceof StaleRequestError) return;
-      if (caught instanceof ApiError && caught.status === 0) setError("网络不通。恢复后下拉刷新。");
-      else setError(caught instanceof ApiError ? caught.error : "Couldn't load channels");
+      if (caught instanceof ApiError && caught.status === 0) setError(t("mobile.network.retry"));
+      else setError(caught instanceof ApiError ? caught.error : t("mobile.channels.loadFailed"));
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [serverId, session.client, session.serverId]);
+  }, [serverId, session.client, session.serverId, t]);
 
   useFocusEffect(useCallback(() => {
     void load();
   }, [load, directoryVersion]));
 
   const rows = [
-    ...channels.map((channel) => ({ ...channel, section: "Channels" })),
-    ...dms.map((channel) => ({ ...channel, section: "Direct messages" })),
+    ...channels.map((channel) => ({ ...channel, section: t("agent.detail.channels") })),
+    ...dms.map((channel) => ({ ...channel, section: t("mobile.channels.direct") })),
   ];
 
   if (loading) return <LoadingScreen />;
-  if (error) return <ScreenMessage title="Couldn't load channels" body={error} />;
+  if (error) return <ScreenMessage title={t("mobile.channels.loadFailed")} body={error} />;
 
   return (
     <FlatList
@@ -74,7 +76,7 @@ export default function ChannelsScreen() {
       keyExtractor={(item) => item.id}
       style={styles.list}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); void load(); }} />}
-      ListEmptyComponent={<Text style={styles.empty}>No channels yet.</Text>}
+      ListEmptyComponent={<Text style={styles.empty}>{t("mobile.channels.empty")}</Text>}
       contentContainerStyle={rows.length === 0 ? styles.emptyWrap : undefined}
       renderItem={({ item, index }) => {
         const showHeader = index === 0 || rows[index - 1]?.section !== item.section;
@@ -130,16 +132,16 @@ const styles = StyleSheet.create({
   },
   hash: { color: colors.muted, fontSize: 16, width: 16 },
   avatar: { borderRadius: 12, height: 24, width: 24 },
-  mentionBadge: { backgroundColor: "#c2410c" },
+  mentionBadge: { backgroundColor: colors.accentSoft },
   name: { color: colors.ink, flex: 1, fontSize: 16 },
   badge: {
     backgroundColor: colors.accent,
-    borderRadius: 9,
+    borderRadius: 4,
     height: 18,
     minWidth: 18,
     paddingHorizontal: 5,
   },
-  badgeText: { color: "#fff", fontSize: 11, fontWeight: "700", lineHeight: 18, textAlign: "center" },
+  badgeText: { color: colors.mineText, fontSize: 11, fontWeight: "700", lineHeight: 18, textAlign: "center" },
   emptyWrap: { flex: 1, justifyContent: "center" },
   empty: { color: colors.muted, textAlign: "center" },
 });

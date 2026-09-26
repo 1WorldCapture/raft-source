@@ -3,6 +3,8 @@ export interface RaftUser {
   email?: string | null;
   name?: string | null;
   displayName?: string | null;
+  displayLanguage?: string | null;
+  preferredMessageBodyFontSize?: string | null;
 }
 
 export interface MessageMention {
@@ -98,12 +100,14 @@ export function parseUser(value: unknown): RaftUser | null {
     email: typeof value.email === "string" ? value.email : null,
     name: typeof value.name === "string" ? value.name : null,
     displayName: typeof value.displayName === "string" ? value.displayName : null,
+    displayLanguage: typeof value.displayLanguage === "string" ? value.displayLanguage : null,
+    preferredMessageBodyFontSize: typeof value.preferredMessageBodyFontSize === "string" ? value.preferredMessageBodyFontSize : null,
   };
 }
 
 export function userLabel(user: RaftUser | null): string {
-  if (!user) return "Signed in";
-  return user.displayName || user.name || user.email || "Signed in";
+  if (!user) return "";
+  return user.displayName || user.name || user.email || "";
 }
 
 /** Server timestamps can be `YYYY-MM-DD HH:mm:ss.ffffff-07`. Hermes rejects that shape. */
