@@ -2,8 +2,11 @@ export type MarkdownPiece =
   | { type: "text"; text: string }
   | { type: "bold"; text: string }
   | { type: "code"; text: string }
+  | { type: "codeBlock"; text: string }
   | { type: "link"; text: string; url: string }
-  | { type: "list"; text: string };
+  | { type: "list"; text: string }
+  | { type: "heading"; level: number; text: string }
+  | { type: "quote"; text: string };
 
 const INLINE = /(\*\*([^*]+)\*\*|`([^`]+)`|\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)|(https?:\/\/[^\s]+))/g;
 
@@ -15,10 +18,20 @@ export function markdownPieces(content: string): MarkdownPiece[] {
     if (index % 2 === 1) {
       const newline = block.indexOf("\n");
       const code = newline === -1 ? block : block.slice(newline + 1);
-      pieces.push({ type: "code", text: code.replace(/\n$/, "") });
+      pieces.push({ type: "codeBlock", text: code.replace(/\n$/, "") });
       return;
     }
     for (const line of block.split("\n")) {
+      const heading = /^(#{1,6})\s+(.*)$/.exec(line);
+      if (heading) {
+        pieces.push({ type: "heading", level: heading[1]?.length ?? 1, text: heading[2] ?? "" });
+        continue;
+      }
+      const quote = /^>\s?(.*)$/.exec(line);
+      if (quote) {
+        pieces.push({ type: "quote", text: quote[1] ?? "" });
+        continue;
+      }
       const list = /^(?:[-*]|\d+\.)\s+(.*)$/.exec(line);
       if (list) {
         pieces.push({ type: "list", text: list[1] ?? "" });

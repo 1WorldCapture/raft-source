@@ -57,3 +57,45 @@ function sameSender(a: GroupableMessage, b: GroupableMessage): boolean {
 function isSystem(message: GroupableMessage): boolean {
   return message.messageType === "system";
 }
+
+export function hiddenSystemIds(
+  messages: readonly { id: string; messageType?: string }[],
+  expanded: ReadonlySet<string>,
+): Set<string> {
+  const hidden = new Set<string>();
+  let index = 0;
+  while (index < messages.length) {
+    if (messages[index]?.messageType !== "system") {
+      index += 1;
+      continue;
+    }
+    let end = index + 1;
+    while (messages[end]?.messageType === "system") end += 1;
+    const head = messages[index];
+    if (head && end - index > 1 && !expanded.has(head.id)) {
+      for (let cursor = index + 1; cursor < end; cursor += 1) {
+        const id = messages[cursor]?.id;
+        if (id) hidden.add(id);
+      }
+    }
+    index = end;
+  }
+  return hidden;
+}
+
+export function systemRunHeads(messages: readonly { id: string; messageType?: string }[]): Map<string, number> {
+  const heads = new Map<string, number>();
+  let index = 0;
+  while (index < messages.length) {
+    if (messages[index]?.messageType !== "system") {
+      index += 1;
+      continue;
+    }
+    let end = index + 1;
+    while (messages[end]?.messageType === "system") end += 1;
+    const count = end - index;
+    if (count > 1) heads.set(messages[index].id, count);
+    index = end;
+  }
+  return heads;
+}
