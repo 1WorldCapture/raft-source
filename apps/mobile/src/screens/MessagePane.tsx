@@ -486,7 +486,7 @@ export function MessagePane({
     setCandidates([]);
   }
 
-  async function deliver(content: string, randomId: string, optimisticId: string) {
+  async function deliver(content: string, randomId: string, optimisticId: string, attachmentIds: string[]) {
     const activeMentions = mentions.filter((mention) => content.includes(`@${mention.name}`));
     try {
       let targetChannelId = channelId;
@@ -507,7 +507,7 @@ export function MessagePane({
         content,
         randomId,
         mentions: activeMentions.map((mention) => ({ type: mention.type, id: mention.id, name: mention.name })),
-        attachmentIds: uploads.flatMap((file) => file.status === "ready" && file.attachmentId ? [file.attachmentId] : []),
+        attachmentIds,
         asTask: asTask || undefined,
       });
       const record = isRecord(data) ? data : null;
@@ -523,14 +523,16 @@ export function MessagePane({
   }
 
   async function send(existing?: RaftMessage) {
-    const content = (existing?.content ?? draft).trim();
+    const typed = (existing?.content ?? draft).trim();
     const ready = uploads.filter((file) => file.status === "ready" && file.attachmentId);
     if (uploads.some((file) => file.status !== "ready")) return;
-    if (!content && ready.length === 0) return;
+    const content = typed || (ready.length > 0 ? t("message.composer.attachmentsOnlyBody", { count: ready.length }) : "");
+    if (!content) return;
     if (content.length > 32000) {
       setError(t("mobile.messages.tooLong"));
       return;
     }
+    const attachmentIds = ready.flatMap((file) => file.attachmentId ? [file.attachmentId] : []);
     const randomId = existing?.randomId ?? createRandomId();
     const optimisticId = existing?.id ?? `optimistic-${randomId}`;
     const optimistic: RaftMessage = {
@@ -557,7 +559,8 @@ export function MessagePane({
       setChannelHits([]);
       void persistDraft(channelId, "");
     }
-    await deliver(content, randomId, optimisticId);
+    setError(null);
+    await deliver(content, randomId, optimisticId, attachmentIds);
   }
 
   function focusComposer() {
