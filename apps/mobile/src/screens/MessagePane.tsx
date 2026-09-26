@@ -26,12 +26,14 @@ import {
   type RaftMessage,
 } from "../model/messages";
 import { mentionsCurrentUser } from "../model/mentions";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useSession } from "../state/session";
 import { useRaftStore } from "../state/store";
 import { RichText } from "../ui/richText";
 import { colors, space } from "../ui/theme";
 
 const PAGE = 50;
+const EMPTY_MESSAGES: RaftMessage[] = [];
 
 interface MentionCandidate {
   id: string;
@@ -68,11 +70,12 @@ export function MessagePane({
   parentMessageId?: string;
 }) {
   const session = useSession();
+  const insets = useSafeAreaInsets();
   const sessionRef = useRef(session);
   sessionRef.current = session;
   const navigation = useNavigation();
   const router = useRouter();
-  const messages = useRaftStore((state) => state.messagesByChannel[channelId] ?? []);
+  const messages = useRaftStore((state) => state.messagesByChannel[channelId] ?? EMPTY_MESSAGES);
   const summaries = useRaftStore((state) => state.threadSummaries);
   const userId = session.user?.id;
   const [loading, setLoading] = useState(true);
@@ -86,8 +89,10 @@ export function MessagePane({
   const [memberCache, setMemberCache] = useState<MentionCandidate[] | null>(null);
 
   useLayoutEffect(() => {
+    // setOptions replaces the navigation object. Depending on it retriggers this
+    // effect and overflows the update depth as soon as a channel opens.
     navigation.setOptions({ title: title || (thread ? "Thread" : "Messages") });
-  }, [navigation, thread, title]);
+  }, [thread, title]);
 
   useEffect(() => {
     sessionRef.current.setFocusedChannelId(channelId);
@@ -342,7 +347,7 @@ export function MessagePane({
         </View>
       ) : null}
       {error ? <Text style={styles.error}>{error}</Text> : null}
-      <View style={styles.composer}>
+      <View style={[styles.composer, { paddingBottom: Math.max(insets.bottom, 28) }]}>
         <TextInput
           multiline
           onChangeText={(value) => void onChangeDraft(value)}

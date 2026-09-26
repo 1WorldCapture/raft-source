@@ -12,7 +12,8 @@
     },
     "android": {
       "package": "build.raft.mobile",
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "usesCleartextTraffic": true
     },
     "plugins": [
       "expo-router",

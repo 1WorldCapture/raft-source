@@ -180,9 +180,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let cancelled = false;
-    // SecureStore reads started in this effect never settle on Android release builds.
-    // Open the first screen immediately, then hydrate on the next turn.
-    apply({ ready: true });
+    // SecureStore calls in this effect's first turn never settle on Android
+    // release builds. A state update, then a read on the next turn, does.
+    apply({ ready: false });
     const timer = setTimeout(() => {
       void (async () => {
         try {
@@ -195,7 +195,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           let installationId = storedInstallation && /^ari_[0-9a-f]{32}$/.test(storedInstallation)
             ? storedInstallation
             : createInstallationId();
-          if (installationId !== storedInstallation) await SecureStore.setItemAsync(INSTALLATION, installationId);
           if (cancelled) return;
           apply({
             origin,
@@ -206,6 +205,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             serverId,
             ready: true,
           });
+          if (installationId !== storedInstallation) {
+            void SecureStore.setItemAsync(INSTALLATION, installationId);
+          }
           if (!accessToken) return;
           try {
             const me = parseUser(await client.get("/auth/me"));
@@ -222,7 +224,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             }
           }
         } catch {
-          if (!cancelled) apply({ ready: true, installationId: snapshotRef.current.installationId ?? createInstallationId() });
+          if (!cancelled) apply({ ready: true });
         }
       })();
     }, 0);
