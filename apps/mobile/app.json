@@ -1,0 +1,25 @@
+{
+  "expo": {
+    "name": "Raft",
+    "slug": "raft-mobile",
+    "scheme": "raft",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "build.raft.mobile"
+    },
+    "android": {
+      "package": "build.raft.mobile",
+      "predictiveBackGestureEnabled": false
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store"
+    ],
+    "experiments": {
+      "typedRoutes": false
+    }
+  }
+}

@@ -1,0 +1,76 @@
+import { create } from "zustand";
+import { reconcileIncoming } from "../model/reconcile";
+import type { ChannelUnreadEntry, RaftMessage, ThreadSummary } from "../model/messages";
+
+interface RaftDataState {
+  messagesByChannel: Record<string, RaftMessage[]>;
+  threadSummaries: Record<string, ThreadSummary>;
+  channelUnread: Record<string, ChannelUnreadEntry>;
+  liveUnread: Record<string, number>;
+  lastSeq: number;
+  directoryVersion: number;
+  notice: "verify-email" | "profile-setup" | null;
+  upsertMessages: (incoming: RaftMessage[]) => void;
+  setThreadSummaries: (summaries: Record<string, ThreadSummary>) => void;
+  setChannelUnread: (unread: Record<string, ChannelUnreadEntry>) => void;
+  bumpLiveUnread: (channelId: string) => void;
+  clearLiveUnread: (channelId: string) => void;
+  clearChannelUnread: (channelId: string) => void;
+  noteSeq: (seq: number) => void;
+  bumpDirectory: () => void;
+  setNotice: (notice: RaftDataState["notice"]) => void;
+  clearServerData: () => void;
+}
+
+export const useRaftStore = create<RaftDataState>((set) => ({
+  messagesByChannel: {},
+  threadSummaries: {},
+  channelUnread: {},
+  liveUnread: {},
+  lastSeq: 0,
+  directoryVersion: 0,
+  notice: null,
+  upsertMessages: (incoming) => set((state) => {
+    const messagesByChannel = { ...state.messagesByChannel };
+    let lastSeq = state.lastSeq;
+    for (const message of incoming) {
+      const bucket = messagesByChannel[message.channelId] ?? [];
+      messagesByChannel[message.channelId] = reconcileIncoming(bucket, message);
+      if (typeof message.seq === "number") lastSeq = Math.max(lastSeq, message.seq);
+    }
+    return { messagesByChannel, lastSeq };
+  }),
+  setThreadSummaries: (summaries) => set((state) => ({
+    threadSummaries: { ...state.threadSummaries, ...summaries },
+  })),
+  setChannelUnread: (unread) => set({ channelUnread: unread }),
+  bumpLiveUnread: (channelId) => set((state) => ({
+    liveUnread: { ...state.liveUnread, [channelId]: (state.liveUnread[channelId] ?? 0) + 1 },
+  })),
+  clearLiveUnread: (channelId) => set((state) => {
+    if (!state.liveUnread[channelId]) return state;
+    const liveUnread = { ...state.liveUnread };
+    delete liveUnread[channelId];
+    return { liveUnread };
+  }),
+  clearChannelUnread: (channelId) => set((state) => {
+    const current = state.channelUnread[channelId];
+    if (!current || (current.unreadCount === 0 && !current.hasMention)) return state;
+    return {
+      channelUnread: {
+        ...state.channelUnread,
+        [channelId]: { unreadCount: 0, hasMention: false },
+      },
+    };
+  }),
+  noteSeq: (seq) => set((state) => ({ lastSeq: Math.max(state.lastSeq, seq) })),
+  bumpDirectory: () => set((state) => ({ directoryVersion: state.directoryVersion + 1 })),
+  setNotice: (notice) => set({ notice }),
+  clearServerData: () => set({
+    messagesByChannel: {},
+    threadSummaries: {},
+    channelUnread: {},
+    liveUnread: {},
+    lastSeq: 0,
+  }),
+}));
