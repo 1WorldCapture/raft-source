@@ -33,8 +33,8 @@ export const fontSize = {
   bodySm: { fontSize: 12, lineHeight: 16 },
   bodyMd: { fontSize: 14, lineHeight: 20 },
   bodyLg: { fontSize: 16, lineHeight: 24 },
-  /** Home and list labels. Web sidebar text is `text-sm` (14px); the measured mobile row reads closer to 16px with a ~55px row. */
-  list: { fontSize: 16, lineHeight: 22 },
+  /** Sidebar row: `text-sm font-medium` (14/20, weight 500), `py-2` + `border-2` = 40px, `mb-1` = 4px. */
+  list: { fontSize: 14, lineHeight: 20 },
   sender: { fontSize: 14, lineHeight: 18 },
   time: { fontSize: 12, lineHeight: 16 },
   panelTitle: { fontSize: 16, lineHeight: 20 },

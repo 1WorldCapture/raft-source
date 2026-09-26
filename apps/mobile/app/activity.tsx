@@ -70,7 +70,7 @@ export default function ActivityScreen() {
 
 const styles = StyleSheet.create({
   page: { backgroundColor: color.page, flex: 1 },
-  row: { justifyContent: "center", minHeight: 55, paddingHorizontal: 16 },
+  row: { borderColor: "transparent", borderWidth: 2, justifyContent: "center", marginBottom: 4, paddingHorizontal: 16, paddingVertical: 8 },
   title: { ...fontSize.list, color: color.ink, fontWeight: "500" },
   empty: { color: color.muted, padding: 16, textAlign: "center" },
 });
