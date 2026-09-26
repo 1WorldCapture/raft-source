@@ -35,23 +35,30 @@ export default function HomeScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const loadTicket = useRef(0);
+  const sessionRef = useRef(session);
+  sessionRef.current = session;
+  const tRef = useRef(t);
+  tRef.current = t;
 
   const current = servers.find((server) => server.id === session.serverId) ?? null;
   const { height } = useWindowDimensions();
 
   const loadServers = useCallback(async (preferredId: string | null) => {
+    const currentSession = sessionRef.current;
     const [serverData, unreadData] = await Promise.all([
-      session.client.get<unknown>("/servers", { server: false }),
-      session.client.get<unknown>("/servers/unread-summary", { server: false }),
+      currentSession.client.get<unknown>("/servers", { server: false }),
+      currentSession.client.get<unknown>("/servers/unread-summary", { server: false }),
     ]);
     const next = parseServers(serverData);
     setServers(next);
     setServerUnread(parseUnreadSummary(unreadData));
     const selected = next.find((server) => server.id === preferredId) ?? next[0] ?? null;
     setCurrentServerRole(selected?.role ?? null);
-    if (selected && selected.id !== session.serverId) await session.selectServer(selected.id);
+    // Use the id this load was given, not a serverId closed over from an earlier render.
+    const activeId = preferredId ?? sessionRef.current.serverId;
+    if (selected && selected.id !== activeId) await sessionRef.current.selectServer(selected.id);
     return selected;
-  }, [session]);
+  }, []);
 
   const loadDirectory = useCallback(async (serverId: string, ticket: number) => {
     const [channelData, dmData, unreadData, orderData, inboxData] = await Promise.all([
@@ -82,15 +89,27 @@ export default function HomeScreen() {
       await loadDirectory(selected.id, ticket);
     } catch (caught) {
       if (ticket !== loadTicket.current || caught instanceof StaleRequestError) return;
-      setError(caught instanceof ApiError ? caught.message : t("mobile.channels.loadFailed"));
+      setError(caught instanceof ApiError ? caught.message : tRef.current("mobile.channels.loadFailed"));
     } finally {
       if (ticket === loadTicket.current) setLoading(false);
     }
-  }, [loadDirectory, loadServers, t]);
+  }, [loadDirectory, loadServers]);
+
+  const loadForRef = useRef(loadFor);
+  loadForRef.current = loadFor;
+
+  // useFocusEffect can miss the first focus on a cold start. Load from session
+  // readiness as well, and keep the focus callback stable so a render does not
+  // cancel the request before the spinner can clear.
+  useEffect(() => {
+    if (!session.ready) return;
+    void loadFor(session.serverId);
+  }, [loadFor, directoryVersion, session.ready, session.serverId]);
 
   useFocusEffect(useCallback(() => {
-    void loadFor(session.serverId);
-  }, [loadFor, directoryVersion, session.serverId]));
+    if (!sessionRef.current.ready) return;
+    void loadForRef.current(sessionRef.current.serverId);
+  }, []));
 
   useEffect(() => {
     if (!menu) return;

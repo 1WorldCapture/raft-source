@@ -368,7 +368,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         useRaftStore.getState().clearServerData();
       }
       apply({ serverId });
-      await SecureStore.setItemAsync(SERVER, serverId);
+      // Android release builds can leave this write pending. The home load
+      // must not wait on it; the in-memory server id is already applied.
+      void SecureStore.setItemAsync(SERVER, serverId);
       realtime.reset();
       realtime.connect();
     },
