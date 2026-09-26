@@ -22,7 +22,7 @@ export default function LoginScreen() {
     setSubmitting(true);
     try {
       await session.login(email.trim(), password);
-      router.replace("/servers");
+      router.replace("/home");
     } catch (caught) {
       if (caught instanceof ApiError && caught.status === 0) setError(t("mobile.network.offline"));
       else if (caught instanceof ApiError && caught.status === 429) setError(t("mobile.auth.tooMany"));
