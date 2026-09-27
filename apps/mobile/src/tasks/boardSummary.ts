@@ -4,8 +4,8 @@
 // system actors have no name, zh vs en punctuation — are unit-testable while
 // the component stays a thin render.
 
-import { formatRelativeTime } from "../../../../packages/web/src/utils/relativeTime";
 import type { TaskActivity } from "./board";
+import { formatRelativeTime } from "./relativeTime";
 
 export interface BoardSummaryStrings {
   /** Summary text for task events, which carry eventType but no snippet. */
