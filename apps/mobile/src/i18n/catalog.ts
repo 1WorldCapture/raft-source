@@ -66,6 +66,7 @@ export const mobileEn = {
   "mobile.preview.share": "Share",
   "mobile.preview.unsupported": "This file can't be previewed. Share it to open in another app.",
   "mobile.preview.placeholder": "Preview will show here.",
+  "mobile.preview.truncated": "This file is large, so only the beginning is shown. Share it to another app to see the rest.",
 } as const;
 
 export const mobileZh: Record<keyof typeof mobileEn, string> = {
@@ -132,6 +133,7 @@ export const mobileZh: Record<keyof typeof mobileEn, string> = {
   "mobile.preview.share": "分享",
   "mobile.preview.unsupported": "无法预览，可分享到其它 App 打开",
   "mobile.preview.placeholder": "预览内容会显示在这里。",
+  "mobile.preview.truncated": "文件较大，只显示了开头部分，完整内容请分享到其它 App 查看",
 };
 
 export type MobileId = keyof typeof mobileEn;
