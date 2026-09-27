@@ -15,6 +15,21 @@ export function shouldShowComputerUpgradeIndicator(machine: {
   return machine.isComputer === true && machine.computerUpgradeAvailable === true;
 }
 
+/**
+ * A Computer embedded in the desktop app ships with the desktop release, so it
+ * has no upgrade of its own. The server policy (`app_managed`) is the
+ * authority; `hostKind` covers a response that lacks the policy projection.
+ */
+export function isAppManagedComputer(machine: {
+  isComputer?: boolean;
+  hostKind?: string | null;
+  computerBroadcastPolicy?: { reasonCode: string } | null;
+}): boolean {
+  if (machine.isComputer !== true) return false;
+  return machine.computerBroadcastPolicy?.reasonCode === "app_managed"
+    || machine.hostKind === "desktop_app";
+}
+
 export type ComputerAttentionStatus = "upgrade" | "offline" | "none";
 export type ComputerRowDotStatus = "upgrade" | "offline" | "online";
 

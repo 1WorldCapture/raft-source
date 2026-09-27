@@ -15442,6 +15442,7 @@ test("MachineMeta INV-CC-FRESH: non-owner read pulls computerVersion from the Re
     version: "0.0.61",
     observedAt: "2026-07-24T05:00:00.000Z",
     provenance: "replica_meta",
+    hostKind: "standalone",
   });
 
   replicaB.shutdown();
@@ -15481,6 +15482,7 @@ test("MachineMeta on disconnect clears the meta mirror so non-owner replicas don
     version: "0.0.61",
     observedAt: (await store.getMachineMeta("machine-1"))?.computerVersionObservedAt,
     provenance: "owner_connection",
+    hostKind: "standalone",
   });
 
   // Drop the connection (clearMachineConnection is the private cleanup
@@ -15521,8 +15523,50 @@ test("MachineMeta heartbeat gives owner and replica reads the same Computer-vers
     version: "0.0.61",
     observedAt: meta?.computerVersionObservedAt,
     provenance: "owner_connection",
+    hostKind: "standalone",
   });
 
+  orchestrator.shutdown();
+});
+
+test("MachineMeta hostKind: ready hostKind travels on the owner fact and the replica mirror; unknown values fall back to standalone", async () => {
+  const store = new InMemoryReplicaStateStore();
+  const clock = new IncrementingNowClock();
+  const orchestrator = new DeterministicAgentOrchestrator(store, clock);
+  seedMachineConnection(orchestrator, "machine-1", makeFakeWs());
+  await orchestrator.handleMachineMessage("machine-1", {
+    type: "ready",
+    runtimes: [],
+    runningAgents: [],
+    daemonVersion: "0.55.5",
+    computerVersion: "1.0.28",
+    hostKind: "desktop_app",
+  } as MachineToServerMessage);
+  await flushMicrotasks();
+  assert.equal((await orchestrator.getMachineComputerVersionFact("machine-1"))?.hostKind, "desktop_app");
+  assert.equal((await store.getMachineMeta("machine-1"))?.computerHostKind, "desktop_app");
+
+  await orchestrator.handleMachineMessage("machine-1", { type: "pong" } as MachineToServerMessage);
+  await flushMicrotasks();
+  assert.equal((await store.getMachineMeta("machine-1"))?.computerHostKind, "desktop_app",
+    "heartbeat meta upsert must keep the host kind");
+
+  const replicaB = new DeterministicAgentOrchestrator(store);
+  assert.equal((await replicaB.getMachineComputerVersionFact("machine-1"))?.hostKind, "desktop_app");
+
+  await orchestrator.handleMachineMessage("machine-1", {
+    type: "ready",
+    runtimes: [],
+    runningAgents: [],
+    daemonVersion: "0.55.5",
+    computerVersion: "1.0.28",
+    hostKind: "something_new",
+  } as unknown as MachineToServerMessage);
+  await flushMicrotasks();
+  assert.equal((await orchestrator.getMachineComputerVersionFact("machine-1"))?.hostKind, "standalone");
+  assert.equal((await replicaB.getMachineComputerVersionFact("machine-1"))?.hostKind, "standalone");
+
+  replicaB.shutdown();
   orchestrator.shutdown();
 });
 

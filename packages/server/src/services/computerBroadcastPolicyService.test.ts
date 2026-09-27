@@ -119,6 +119,27 @@ test("unknown source/platform is rejected before fetching", async () => {
   }
 });
 
+test("desktop-app embedded Computer is app_managed and never eligible, before fetching", async () => {
+  const source = { version: "1.0.23", observedAt: null, provenance: "owner_connection" as const, hostKind: "desktop_app" as const };
+  const result = await evaluateBroadcastPolicy(input({ source }), { fetchFn: async () => { assert.fail("must not fetch"); } });
+  assert.equal(result.eligibility, "no_broadcast");
+  assert.equal(result.reasonCode, "app_managed");
+  assert.equal(result.targetVersion, null);
+  const requested = await evaluateBroadcastPolicy(input({ source, requestedTargetVersion: "1.0.31" }), { fetchFn: respond() });
+  assert.equal(requested.reasonCode, "app_managed");
+});
+
+test("standalone or unreported host kind keeps normal upgrade eligibility", async () => {
+  for (const hostKind of ["standalone", undefined] as const) {
+    const result = await evaluateBroadcastPolicy(
+      input({ source: { version: "1.0.23", observedAt: null, provenance: "owner_connection", hostKind } }),
+      { fetchFn: respond() },
+    );
+    assert.equal(result.eligibility, "eligible", String(hostKind));
+    assert.equal(result.reasonCode, "eligible");
+  }
+});
+
 test("queued dispatch preserves exact release identity, rejects old matrix receipts and changed assets", async () => {
   const original = await evaluateBroadcastPolicy(input(), { fetchFn: respond() });
   const next = { ...original, sourceObservedAt: "2026-09-10T01:00:00Z" };

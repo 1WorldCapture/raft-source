@@ -1333,6 +1333,8 @@ export interface MachineMeta {
   // Freshness of the live Computer-version fact. The owner rewrites this on
   // ready and every pong while the same connection/session remains live.
   computerVersionObservedAt?: string | null;
+  // Self-reported ComputerHostKind from `ready`; normalized on read.
+  computerHostKind?: string | null;
   daemonVersion?: string | null;
   /** JSON-encoded Record<runtimeId, version>; Redis hash values are strings. */
   runtimeVersions?: string | null;

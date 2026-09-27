@@ -1,8 +1,10 @@
 import type { AgentOrchestrator } from "./agentOrchestrator.js";
 import type {
+  ComputerSourceFact,
   ComputerSourceFactProvenance,
 } from "./computerBroadcastPolicyService.js";
 
+import { DEFAULT_COMPUTER_HOST_KIND, type ComputerHostKind } from "@botiverse/raft-shared";
 type MachineReadModelInput = {
   id: string;
   serverId: string;
@@ -32,6 +34,8 @@ export type MachineReadModel = MachineReadModelInput & {
   // machines route projects the closed policy decision instead.
   computerVersionObservedAt: string | null;
   computerVersionProvenance: ComputerSourceFactProvenance | null;
+  // Where the Computer runs (self-reported). Null when no live Computer fact.
+  hostKind: ComputerHostKind | null;
   // Run-kind: true when this machine row is presented by an attached
   // managed Computer (an active `computers` row links to it via
   // `computers.machineId`); false for a raw `@slock-ai/daemon` machine.
@@ -65,7 +69,7 @@ export async function buildMachineReadModel(
   // call is now async so cross-replica REST reads can fall back to the
   // Redis meta mirror when this replica doesn't own the machine connection
   // (#wg-raft-computer task #95).
-  const liveComputerFactPromise = agentOrchestrator.getMachineComputerVersionFact
+  const liveComputerFactPromise: Promise<ComputerSourceFact | null> = agentOrchestrator.getMachineComputerVersionFact
     ? agentOrchestrator.getMachineComputerVersionFact(machine.id)
     : agentOrchestrator.getMachineComputerVersion
       ? agentOrchestrator.getMachineComputerVersion(machine.id).then((version) => ({
@@ -96,6 +100,7 @@ export async function buildMachineReadModel(
     computerVersion: liveComputerFact?.version ?? null,
     computerVersionObservedAt: liveComputerFact?.observedAt ?? null,
     computerVersionProvenance: liveComputerFact?.provenance ?? null,
+    hostKind: liveComputerFact ? liveComputerFact.hostKind ?? DEFAULT_COMPUTER_HOST_KIND : null,
     isComputer: opts?.isComputer ?? false,
     computerAttachedByCurrentUser: opts?.computerAttachedByCurrentUser ?? false,
     agentCount: opts?.agentCount ?? 0,
