@@ -5,7 +5,7 @@
 // grouping, ordering, staleness, and the local-timezone "today" boundary are
 // unit-testable without a server.
 
-import { isTaskStatus, parseTask, type RaftTask, type TaskStatus } from "./model";
+import { parseTask, type RaftTask, type TaskStatus } from "./model";
 import { isRecord } from "../model/messages";
 
 /** The server caps nothing; the badge renders "99+" beyond this. */
