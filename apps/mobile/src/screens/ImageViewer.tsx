@@ -86,8 +86,7 @@ export function ImageViewer({
 
   return (
     <Modal animationType="fade" onRequestClose={onClose} statusBarTranslucent visible>
-      <View style={styles.screen}>
-        <View style={styles.header}>
+      <View style={styles.screen}>        <View style={styles.header}>
           <Pressable accessibilityLabel="Back" hitSlop={8} onPress={onClose} style={styles.headerButton}>
             <ArrowLeft color={color.white} size={22} strokeWidth={2.5} />
           </Pressable>
@@ -364,7 +363,7 @@ function initialUri(attachment: MessageAttachment, origin: string | null): strin
 }
 
 const styles = StyleSheet.create({
-  screen: { backgroundColor: "#000000", flex: 1 },
+  screen: { backgroundColor: color.viewerBlack, flex: 1 },
   header: {
     alignItems: "center",
     flexDirection: "row",
@@ -381,7 +380,7 @@ const styles = StyleSheet.create({
   pagerHost: { flex: 1 },
   pager: { flex: 1 },
   page: { flex: 1 },
-  backdrop: { backgroundColor: "#000000" },
+  backdrop: { backgroundColor: color.viewerBlack },
   pageContent: { flex: 1 },
   imageHost: { flex: 1 },
   image: { flex: 1 },
@@ -405,7 +404,7 @@ const styles = StyleSheet.create({
   retryText: { color: color.white, fontSize: 14, fontWeight: "700" },
   indicator: {
     alignSelf: "center",
-    backgroundColor: "rgba(0,0,0,0.55)",
+    backgroundColor: color.viewerChip,
     borderRadius: 12,
     bottom: 24,
     paddingHorizontal: 10,
