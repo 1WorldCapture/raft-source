@@ -67,6 +67,11 @@ export const mobileEn = {
   "mobile.preview.unsupported": "This file can't be previewed. Share it to open in another app.",
   "mobile.preview.placeholder": "Preview will show here.",
   "mobile.preview.truncated": "This file is large, so only the beginning is shown. Share it to another app to see the rest.",
+  "mobile.board.row.mayBeStuck": "May be stuck",
+  "mobile.board.row.updatedTask": "updated the task",
+  "mobile.board.row.createdAgo": "Created {time}",
+  "mobile.board.row.unclaimed": "Unassigned",
+  "mobile.board.row.system": "System",
 } as const;
 
 export const mobileZh: Record<keyof typeof mobileEn, string> = {
@@ -134,6 +139,11 @@ export const mobileZh: Record<keyof typeof mobileEn, string> = {
   "mobile.preview.unsupported": "无法预览，可分享到其它 App 打开",
   "mobile.preview.placeholder": "预览内容会显示在这里。",
   "mobile.preview.truncated": "文件较大，只显示了开头部分，完整内容请分享到其它 App 查看",
+  "mobile.board.row.mayBeStuck": "可能卡住",
+  "mobile.board.row.updatedTask": "更新了任务",
+  "mobile.board.row.createdAgo": "创建于 {time}",
+  "mobile.board.row.unclaimed": "未认领",
+  "mobile.board.row.system": "系统",
 };
 
 export type MobileId = keyof typeof mobileEn;
