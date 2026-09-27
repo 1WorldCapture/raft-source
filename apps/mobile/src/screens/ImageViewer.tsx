@@ -14,6 +14,7 @@ import Animated, {
 import { scheduleOnRN } from "react-native-worklets";
 import { StaleRequestError } from "../api/client";
 import { attachmentDownloadUrl, rewriteAttachmentUrl } from "../api/attachmentUrl";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   clampOffset,
   clampZoom,
@@ -55,6 +56,7 @@ export function ImageViewer({
   onClose: () => void;
 }) {
   const t = useT();
+  const insets = useSafeAreaInsets();
   const { width: pagerWidth } = useWindowDimensions();
   const [current, setCurrent] = useState(index);
   const [zoomed, setZoomed] = useState(false);
@@ -91,7 +93,9 @@ export function ImageViewer({
   return (
     <Modal animationType="fade" onRequestClose={onClose} statusBarTranslucent visible>
       {/* RNGH gestures never attach inside a Modal without its own root view. */}
-      <GestureHandlerRootView style={styles.screen}>        <View style={styles.header}>
+      {/* Header buttons sit below the status bar: translucent-status-bar touches
+          in that strip never reach the app. */}
+      <GestureHandlerRootView style={styles.screen}>        <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
           <Pressable accessibilityLabel="Back" hitSlop={8} onPress={onClose} style={styles.headerButton}>
             <ArrowLeft color={color.white} size={22} strokeWidth={2.5} />
           </Pressable>
