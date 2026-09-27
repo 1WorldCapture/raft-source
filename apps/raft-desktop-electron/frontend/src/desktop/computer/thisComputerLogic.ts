@@ -27,6 +27,35 @@ export interface ComputerStatusReport {
   servers?: { serverId: string; serverSlug: string | null }[];
   service?: ServiceState;
   upgrade?: UpgradeRecord | null;
+  /** Mirror of the main-process ConvergeState (src/app/convergeState.ts). */
+  converge?: { ok: boolean; code?: string; message?: string };
+}
+
+/** What the card should show about a failed host takeover, and the single
+ *  recovery action it offers. Derived purely from the converge state. */
+export interface ConvergeNotice {
+  message: string;
+  action: "recycle" | "start" | "retry-converge" | null;
+}
+
+const VERSION_SKEW_CODES = new Set(["SERVICE_VERSION_SKEW", "SERVICE_VERSION_SKEW_SUSPECT"]);
+
+export function deriveConvergeNotice(converge: ComputerStatusReport["converge"]): ConvergeNotice | null {
+  if (!converge || converge.ok) return null;
+  const code = converge.code ?? "CONVERGE_FAILED";
+  const message = converge.message ?? "Local Computer service takeover failed.";
+  if (VERSION_SKEW_CODES.has(code)) {
+    // A resident from a different install refuses adoption; only a real
+    // stop→start recycle replaces it (the card's Restart clears degraded
+    // state only). The card confirms before recycling — it offlines every
+    // agent on this machine.
+    return { message: `Local service not hosted by this app — ${message}`, action: "recycle" };
+  }
+  if (code === "RECYCLE_START_FAILED") {
+    // The old service is already stopped; retry must be start-only.
+    return { message, action: "start" };
+  }
+  return { message, action: "retry-converge" };
 }
 
 /** Numeric dotted-version compare: is `a` strictly newer than `b`? */

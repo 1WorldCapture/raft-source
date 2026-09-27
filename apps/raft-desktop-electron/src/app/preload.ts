@@ -93,6 +93,12 @@ contextBridge.exposeInMainWorld("raftDesktop", {
     start: (): Promise<void> => ipcRenderer.invoke("computer:start"),
     stop: (): Promise<void> => ipcRenderer.invoke("computer:stop"),
     restart: (): Promise<void> => ipcRenderer.invoke("computer:restart"),
+    // Real stop→start recycle for a version-skewed resident. Disruptive (all
+    // agents on this machine briefly go offline) — the renderer confirms
+    // with the user before invoking this.
+    recycle: (): Promise<void> => ipcRenderer.invoke("computer:recycle"),
+    // Re-run the startup host converge (generic failure retry path).
+    retryConverge: (): Promise<void> => ipcRenderer.invoke("computer:retry-converge"),
     // The latest Computer version on the CDN — the renderer compares it to the
     // running service version to decide whether to offer a local update.
     getUpgradeInfo: (): Promise<{ latestVersion: string | null }> => ipcRenderer.invoke("computer:upgrade-info"),

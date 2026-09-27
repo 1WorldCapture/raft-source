@@ -252,6 +252,11 @@ function registerComputerIpc(host: ComputerHost): void {
   ipcMain.handle("computer:start", () => monitor.afterOperation(() => host.start()));
   ipcMain.handle("computer:stop", () => monitor.afterOperation(() => host.stop()));
   ipcMain.handle("computer:restart", () => monitor.afterOperation(() => host.restart()));
+  // Real stop→start recycle for a version-skewed resident (see computerHost).
+  // The renderer confirms with the user first: it briefly offlines every agent
+  // on this machine.
+  ipcMain.handle("computer:recycle", () => monitor.afterOperation(() => host.recycleService()));
+  ipcMain.handle("computer:retry-converge", () => monitor.afterOperation(() => host.retryConverge()));
   ipcMain.handle("computer:upgrade-info", () => host.getUpgradeInfo());
   ipcMain.handle("computer:upgrade", () => monitor.afterOperation(() => host.upgrade()));
   ipcMain.handle("computer:upgrade-fresh-install", (_e, version: unknown) =>
