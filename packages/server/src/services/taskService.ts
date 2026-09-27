@@ -838,7 +838,7 @@ export interface ServerTaskSummary {
   descriptionBytes: number;
 }
 
-function toServerTaskSummary(task: ServerTaskListItem): ServerTaskSummary {
+export function toServerTaskSummary(task: ServerTaskListItem): ServerTaskSummary {
   const descriptionBytes = task.description ? Buffer.byteLength(task.description, "utf8") : 0;
   return {
     id: task.id,
@@ -973,7 +973,7 @@ export async function listServerTasksPage(
  * Keying it on the table instead would have flipped every new v1.4 task to the
  * LEGACY badge / read-only CLI marker / LegacyTaskPanel.
  */
-async function enrichTaskRows(
+export async function enrichTaskRows(
   rows: (typeof tasks.$inferSelect)[],
   executor: DatabaseExecutor = getDb(),
 ) {
