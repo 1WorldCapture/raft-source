@@ -35,3 +35,4 @@ server {
     location = /desktop-manifest.json { default_type application/json; add_header Cache-Control "no-cache, must-revalidate"; try_files $uri =404; }
     location / { add_header Cache-Control "no-cache"; try_files $uri $uri/ /index.html; }
 }
+@@REDIRECT_SERVERS@@

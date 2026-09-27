@@ -12,7 +12,7 @@ RAFT_OPS_ENV=${RAFT_OPS_ENV:-$OPS_DIR/env.local}
 # shellcheck disable=SC1090
 source "$RAFT_OPS_ENV"
 : "${RAFT_ROOT:?}" "${RAFT_OPS_HOME:?}" "${RAFT_WEB_RELEASES:?}" "${RAFT_WEB_CURRENT:?}" "${RAFT_SERVER_PORT:?}"
-export PATH="$NODE_BIN_DIR:$PATH"
+export PATH="$NODE_BIN_DIR:/usr/local/sbin:/usr/sbin:/sbin:$PATH"   # nginx lives in /usr/sbin
 ENVF=$RAFT_ROOT/packages/server/.env
 STATE=$RAFT_OPS_HOME/state
 mkdir -p "$RAFT_OPS_HOME"/{state,backups,logs,build}

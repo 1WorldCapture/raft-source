@@ -88,7 +88,7 @@ tr '\0' '\n' < /proc/$(pgrep -f "PM2 v" | head -1)/environ | cut -d= -f1
 
 ```
    Web 浏览器 / 手机 App / 桌面端 / 其他机器上的 daemon
-                     │  http(s)://raft.example.internal:3001   （可再加一个兼容端口，如 5173）
+                     │  http(s)://raft.example.internal:3001   （唯一入口；旧端口只做 301 跳转）
                      ▼
             ┌──────────────────┐
             │  nginx (pm2)     │  gzip、WebSocket 升级、长连接、上传大小、静态缓存
@@ -196,7 +196,7 @@ ELECTRON_SKIP_BINARY_DOWNLOAD=1 pnpm install --frozen-lockfile
 | `HOST` | 否 | 绑定地址。放在 nginx 后面时设为 `127.0.0.1`，外部就无法绕过 nginx 直连 | `127.0.0.1` |
 | `TRUST_PROXY` | 否* | 信任几层反向代理的 `X-Forwarded-For`（跳数、true/false 或地址列表）。**放在 nginx 后面时必须设置**，否则所有请求的来源 IP 都是 127.0.0.1，限流会把所有用户算成同一个人 | `1` |
 | `SERVER_URL` | 是 | 服务端对外地址：daemon 回连、OAuth 回调默认值、分享页都用它。填**公开地址**（nginx 的端口），不是内部端口 | `http://raft.example.internal:3001` |
-| `APP_URL` | 是 | 用户访问 Web 的地址：邮件链接、设备登录、推送链接等都用它 | `http://raft.example.internal:3001` |
+| `APP_URL` | 是 | 用户访问 Web 的地址：邮件链接、设备登录、推送链接等都用它。**必须是唯一的 Web 入口**（和 `SERVER_URL` 同一个来源），见第 9 节 | `http://raft.example.internal:3001` |
 | `CORS_ORIGIN` | 是 | 允许的浏览器来源，逗号分隔。Web 从哪些地址打开，就都列上 | `http://raft.example.internal:3001` |
 | `NODE_ENV` | 否 | 自托管保持不设或 `development`。设为 `production` 会改变原生推送的证明校验、翻译服务、Slack Bridge 本地运行时等行为，需要单独评估 | — |
 | `REDIS_URL` | 否 | 启用 Redis（多副本能力） | `redis://127.0.0.1:6379` |
@@ -365,7 +365,18 @@ proxy_request_buffering off;
 - **缓存**：`/assets/` 下的文件名带内容哈希，设为一年 immutable；`index.html`、`sw.js`、`desktop-manifest.json` 不缓存，保证发布新版本后客户端能拿到新入口。
 - **真实 IP**：nginx 追加 `X-Forwarded-For`，服务端要设 `TRUST_PROXY=1` 才会采信（第 5 节）。
 - **IPv6**：同时监听 `[::]`。如果客户端通过只发布 AAAA 记录的名字（例如某些 VPN 的 MagicDNS）访问，只监听 IPv4 会连不上。
-- 要保留一个旧端口（例如以前 Web 开发服务器用的 `5173`）给老客户端，把它加到 `RAFT_PUBLIC_PORTS` 即可，两个端口提供同一个站点；并把对应的来源加进 `CORS_ORIGIN`。
+- **Web 只用一个入口（一个来源）。** 不要让同一个站点在两个端口上都可用：浏览器把不同端口视为不同来源，而服务端（helmet 默认）给所有响应加了 `Cross-Origin-Resource-Policy: same-origin`；附件地址又是用 `SERVER_URL`（公开端口）拼出来的。结果是从另一个端口打开的页面里，附件图片会被浏览器拦截、显示不出来。旧端口（例如以前 Web 开发服务器用的 `5173`）如果还要保留给老书签，就放进 `RAFT_REDIRECT_PORTS`，nginx 为它生成一个单独的 server 段，把所有请求 `301` 跳转到第一个公开端口的同一路径和参数：
+
+  ```nginx
+  server {
+      listen 5173;      listen [::]:5173;
+      server_name _;
+      access_log logs/access.log raft;
+      return 301 $scheme://$host:3001$request_uri;
+  }
+  ```
+
+  同时把 `APP_URL` 设为统一入口的地址。切换后，原来在旧端口登录的 Web 用户需要重新登录一次（登录状态按来源分开保存）；手机和桌面端不受影响。桌面端的页面来源是 `app://`，本身就是跨来源，附件图片能否显示取决于附件响应是否允许跨来源（`Cross-Origin-Resource-Policy: cross-origin`）。
 
 ## 10. pm2
 
@@ -525,6 +536,7 @@ ops/self-host/rollback.sh <backup-dir>      # 回到指定备份
 | 空库迁移却显示 `AT_TARGET_NOOP` | 连错了库：当前环境继承了别的 `DATABASE_URL`（第 5 节） |
 | 大文件上传失败（413） | `client_max_body_size` 太小 |
 | 某个响应没有 gzip | 小于 1KB，或是图片/二进制，属于正常；用访问日志的 `gz=` 核对 |
+| Web 上**附件图片显示不出来**（浏览器控制台有 `ERR_BLOCKED_BY_RESPONSE.NotSameOrigin`） | 页面的来源和附件地址（`SERVER_URL`）不同，例如从另一个端口打开了 Web。统一入口：旧端口放进 `RAFT_REDIRECT_PORTS` 做 301 跳转，`APP_URL` 改成统一入口（第 9 节） |
 | 从外部能直接访问内部端口 | `.env` 没有 `HOST=127.0.0.1` |
 | Agent 的环境里能看到 `DATABASE_URL` 等 | daemon 是从带着这些变量的 shell 启动的：用干净环境 `pm2 delete` + `pm2 start --only raft-daemon`，再 `pm2 save`（第 10 节）。考虑轮换泄漏的密钥 |
 | 手机 App 连不上 `http://` 地址 | Android 默认禁止明文 http（第 16 节） |
