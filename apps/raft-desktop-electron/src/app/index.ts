@@ -36,6 +36,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { loadWindowState, trackWindowState } from "../main/windowState.js";
 import { MenubarResident, shouldHideOnClose } from "../main/menubarResident.js";
+import { isHiddenLaunch } from "../main/loginItem.js";
 import { armOAuthLoopback, cancelOAuthLoopback, isAllowedAuthorizationUrl } from "./oauthLoopback.js";
 import { buildApiOrigins, isOfficialApiBuild } from "./configuredApiOrigin.js";
 import { createOAuthCoordinator } from "./oauthCoordinator.js";
@@ -701,6 +702,10 @@ if (headlessMode?.mode === "__service") {
       }
     }
 
+    // Task #7 login start: the LaunchAgent opens the app with --hidden — the
+    // tray is installed (always) but the window is not; every reveal path
+    // (tray click, Dock, open -a, activate) creates it on demand.
+    const hiddenStart = isHiddenLaunch(process.argv);
     appReady = true;
     // Menubar presence first: the window may be hidden on purpose (user closed
     // it earlier this session / login-item starts hidden in a later task), and
@@ -711,6 +716,7 @@ if (headlessMode?.mode === "__service") {
     });
     menubarResident.install();
     // createMainWindow wires its own per-window did-finish-load → flushDeepLinks.
-    createMainWindow();
+    if (!hiddenStart) createMainWindow();
+    else console.log("[raft-desktop] login start: hidden to menu bar (--hidden)");
   });
 }

@@ -15,7 +15,7 @@
 // that session via `ensureUsableUserSession` — just works, with no second login.
 
 import { execFile } from "node:child_process";
-import { mkdir, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { app } from "electron";
 import {
@@ -33,6 +33,7 @@ import {
   type ComputerStatusReport,
 } from "@botiverse/raft-computer/lib";
 import { createUpgradeInfoReader } from "../main/upgradeInfo.js";
+import { cleanupLegacyLoginAgents, getLoginItemAtLogin, setLoginItemAtLogin } from "../main/loginItem.js";
 import { isValidEnableInput, type EnableComputerInput } from "./enableInput.js";
 import { reduceConvergeFailure, type ConvergeState } from "./convergeState.js";
 import { runServiceRecycle } from "./serviceRecycle.js";
@@ -92,15 +93,35 @@ class ComputerHost {
    */
   async converge(): Promise<{ ok: boolean; error?: string }> {
     try {
+      // Task #7 login item: on macOS the login start is OUR LaunchAgent
+      // running `open -a "Raft Desktop" --args --hidden` (the OS-native
+      // setLoginItemSettings cannot carry args there, and wasOpenedAtLogin is
+      // unverifiable without a real login). Also sweeps away the legacy
+      // headless-service login items the old carrier registered.
+      if (process.platform === "darwin") {
+        const cleanup = await cleanupLegacyLoginAgents((dir) => readdir(dir), {
+          readFile,
+          rm,
+          ownExecutablePath: process.execPath,
+          ownSlockHome: this.slockHome,
+        });
+        for (const skipped of cleanup.skipped) {
+          console.warn(`[raft-desktop] left foreign login item ${skipped.label} alone: ${skipped.reason}`);
+        }
+      }
       const lifecycle = await convergeAppHostLifecycle(
         this.slockHome,
-        app.getLoginItemSettings().openAtLogin,
+        process.platform === "darwin" ? await getLoginItemAtLogin() : app.getLoginItemSettings().openAtLogin,
         {
           // The stable app-bundle executable is the dispatcher: the `__service`/
           // `__run` re-exec relaunches this binary and the argv guard routes it.
           dispatcherPath: process.execPath,
-          setOpenAtLogin: (enabled: boolean) => app.setLoginItemSettings({ openAtLogin: enabled }),
-          getOpenAtLogin: () => app.getLoginItemSettings().openAtLogin,
+          setOpenAtLogin: process.platform === "darwin"
+            ? (enabled: boolean) => setLoginItemAtLogin(enabled)
+            : (enabled: boolean) => app.setLoginItemSettings({ openAtLogin: enabled }),
+          getOpenAtLogin: process.platform === "darwin"
+            ? () => getLoginItemAtLogin()
+            : () => app.getLoginItemSettings().openAtLogin,
         },
       );
       if (lifecycle.enabled) {
