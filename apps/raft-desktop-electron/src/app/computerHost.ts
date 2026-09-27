@@ -142,11 +142,16 @@ class ComputerHost {
     // Boot (or converge) the detached service so the just-attached server gets a
     // running daemon child.
     await this.api.start({ serverId: attached.serverId, serverLabel: input.serverSlug });
+    this.convergeState = { ok: true };
     return attached;
   }
 
   async start(): Promise<void> {
     await this.api.start({ serverId: null, serverLabel: null });
+    // Any action that leaves the local service running clears a stale
+    // converge/recycle failure notice (e.g. the start-only retry offered after
+    // RECYCLE_START_FAILED) — otherwise the notice would linger until restart.
+    this.convergeState = { ok: true };
   }
 
   async stop(): Promise<void> {

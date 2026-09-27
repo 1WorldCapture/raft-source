@@ -6,9 +6,6 @@ export type ConvergeState =
   | { ok: true }
   | { ok: false; code: string; message: string };
 
-/** Never-complete sentinel while the startup converge is still in flight. */
-export const CONVERGE_PENDING: unique symbol = Symbol("converge-pending");
-
 /**
  * Reduce a caught converge/recycle error to a stable {code, message} the
  * renderer can branch on. ComputerServiceError codes (e.g.

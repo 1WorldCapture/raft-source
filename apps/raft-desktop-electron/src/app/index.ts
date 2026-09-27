@@ -256,7 +256,7 @@ function registerComputerIpc(host: ComputerHost): void {
   // The renderer confirms with the user first: it briefly offlines every agent
   // on this machine.
   ipcMain.handle("computer:recycle", () => monitor.afterOperation(() => host.recycleService()));
-  ipcMain.handle("computer:retry-converge", () => host.retryConverge());
+  ipcMain.handle("computer:retry-converge", () => monitor.afterOperation(() => host.retryConverge()));
   ipcMain.handle("computer:upgrade-info", () => host.getUpgradeInfo());
   ipcMain.handle("computer:upgrade", () => monitor.afterOperation(() => host.upgrade()));
   ipcMain.handle("computer:upgrade-fresh-install", (_e, version: unknown) =>

@@ -244,7 +244,7 @@ export default function ThisComputerCard() {
                           runAction("recycle", () => bridge.recycle!());
                         }}
                       >
-                        {actionLabel("recycle", "Restart service")}
+                        {actionLabel("recycle", "Replace old service")}
                       </Button>
                       <Button size="xs" disabled={busy != null} onClick={() => setConfirmRecycle(false)}>
                         Cancel
@@ -252,7 +252,7 @@ export default function ThisComputerCard() {
                     </div>
                   ) : (
                     <Button tone="orange" size="xs" disabled={busy != null} className="mt-1" onClick={() => setConfirmRecycle(true)}>
-                      {actionLabel("recycle", "Restart service")}
+                      {actionLabel("recycle", "Replace old service")}
                     </Button>
                   )
                 ) : notice.action === "start" ? (
