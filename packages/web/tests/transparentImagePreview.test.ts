@@ -69,16 +69,22 @@ test("image lightbox backdrop and empty image stage close without making image c
   assert.match(source, /data-testid="image-lightbox-image"/);
 });
 
-test("SVG attachments use raster previews instead of inline SVG URLs", () => {
+test("SVG attachments render inline: safe raster first, same-origin blob for raster-less files", () => {
   const imageFallback = readSource("src/components/message/urlImageFallback.ts");
   const messageInput = readSource("src/components/message/MessageInput.tsx");
   const lightbox = readSource("src/components/ImageLightbox.tsx");
 
-  assert.match(imageFallback, /mimeType === "image\/svg\+xml"[\s\S]*?thumbnailUrl \|\| att\.rasterPreviewUrl/);
+  // Oversize SVGs stay attachment chips (a huge file can stall the decoder).
+  assert.match(imageFallback, /mimeType === "image\/svg\+xml"[\s\S]*?SVG_NATIVE_RENDER_MAX_BYTES/);
   assert.match(messageInput, /mimeType !== "image\/svg\+xml"/);
-  assert.match(lightbox, /const isRasterOnlyPreview = currentMimeType === "image\/svg\+xml"/);
+  // With a CDN raster/thumbnail, the lightbox previews it without fetching.
+  assert.match(lightbox, /const isRasterOnlyPreview = isSvgAttachment/);
   assert.match(lightbox, /if \(isRasterOnlyPreview\)[\s\S]*?current\.rasterPreviewUrl \|\| current\.thumbnailUrl \|\| current\.localPreviewUrl/);
   assert.match(lightbox, /setFullUrl\(safeRasterUrl \?\? null\)/);
+  // Without a raster, the raw file loads as a same-origin blob — the
+  // attachment responses' CORP header blocks a cross-origin presigned URL
+  // inside `<img>`.
+  assert.match(lightbox, /if \(isSvgAttachment && !hasSafeRaster\)[\s\S]*?fetchAttachmentBlobUrl\(current\.id\)/);
 });
 
 test("image lightbox falls back to local draft previews when the signed URL image fails", () => {

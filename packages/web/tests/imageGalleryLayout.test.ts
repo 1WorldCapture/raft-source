@@ -162,7 +162,11 @@ test("image attachments without thumbnails fetch an inline URL for direct galler
   // requested once instead of once per rendered tile (an attachment-dense
   // channel was tripping the 120/min download limiter and rendering broken
   // images). The gallery must route through it; the URL lives in the cache.
-  assert.match(source, /fetchInlineAttachmentUrls\(attachmentIds\)/);
+  // SVG tiles are the exception: their raw bytes resolve through the
+  // same-origin blob pipeline because the attachment responses' CORP header
+  // blocks a cross-origin presigned URL inside `<img>`.
+  assert.match(source, /fetchInlineAttachmentUrls\(signedIds\)/);
+  assert.match(source, /svgIds\.map\(\(id\) => fetchAttachmentBlobUrl\(id\)\.then\(\(url\) => \[id, url\] as const\)\)/);
   assert.match(
     readFileSync(resolve(repoRoot, "src/components/message/inlineAttachmentUrlCache.ts"), "utf8"),
     /`\/attachments\/\$\{attachmentId\}\/url\?disposition=inline`/,

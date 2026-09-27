@@ -4,6 +4,8 @@ import { X, ChevronLeft, ChevronRight, Download, ImageOff, MessageSquareMore } f
 import { useImageLightboxStore } from "../store/imageLightboxStore";
 import { transparentImageBackgroundClass } from "../utils/imagePreviewStyles";
 import api from "../api/client";
+import { fetchAttachmentBlobUrl } from "./message/attachmentBlobUrl";
+import { SVG_NATIVE_RENDER_MAX_BYTES } from "./message/urlImageFallback";
 import Spinner from "./ui/Spinner";
 import Lightbox from "./ui/Lightbox";
 import Button from "./ui/Button";
@@ -47,7 +49,16 @@ export default function ImageLightbox() {
   const isFirst = currentIndex === 0;
   const isLast = currentIndex === images.length - 1;
   const currentMimeType = current?.mimeType.split(";")[0]?.trim().toLowerCase();
-  const isRasterOnlyPreview = currentMimeType === "image/svg+xml"
+  const isSvgAttachment = currentMimeType === "image/svg+xml";
+  // Oversize SVGs never enter the gallery (urlImageFallback cap) — the guard
+  // below is a defensive backstop for direct lightbox opens.
+  const isOversizeSvg = isSvgAttachment
+    && typeof current?.sizeBytes === "number"
+    && current.sizeBytes > SVG_NATIVE_RENDER_MAX_BYTES;
+  // SVG previews from its safe CDN raster/thumbnail when one exists; the raw
+  // file only loads (as a same-origin blob) when no raster was generated.
+  const hasSafeRaster = Boolean(current?.thumbnailUrl || current?.rasterPreviewUrl || current?.localPreviewUrl);
+  const isRasterOnlyPreview = isSvgAttachment
     || currentMimeType === "image/heic"
     || currentMimeType === "image/heif"
     || currentMimeType === "image/heic-sequence"
@@ -73,6 +84,44 @@ export default function ImageLightbox() {
       setLoading(false);
       setError(!safeRasterUrl);
       setFullUrl(safeRasterUrl ?? null);
+      return;
+    }
+
+    if (isOversizeSvg) {
+      setLoading(false);
+      setError(true);
+      setFullUrl(null);
+      return;
+    }
+
+    // SVG with no CDN raster/thumbnail: fetch the raw bytes through the
+    // app's own API origin as a blob object URL. The presigned URL lives on
+    // the API origin, whose `CORP: same-origin` response header blocks a
+    // cross-origin `<img src>` embed (ERR_BLOCKED_BY_RESPONSE). SVGs WITH a
+    // safe raster skip this branch and preview from it without any fetch.
+    if (isSvgAttachment && !hasSafeRaster) {
+      setLoading(true);
+      setFullUrl(null);
+      setError(false);
+      const cached = imageUrlCache[current.id];
+      if (cached?.url.startsWith("blob:")) {
+        setLoading(false);
+        setFullUrl(cached.url);
+        return;
+      }
+      fetchAttachmentBlobUrl(current.id)
+        .then((url) => {
+          if (cancelled) return;
+          if (!url) {
+            setError(true);
+          } else {
+            cacheImageUrl(current.id, { url, expiresAt: null });
+            setFullUrl(url);
+          }
+        })
+        .finally(() => {
+          if (!cancelled) setLoading(false);
+        });
       return;
     }
 
@@ -108,7 +157,7 @@ export default function ImageLightbox() {
     return () => {
       cancelled = true;
     };
-  }, [cacheImageUrl, current, imageUrlCache, isRasterOnlyPreview]);
+  }, [cacheImageUrl, current, imageUrlCache, isOversizeSvg, isRasterOnlyPreview, isSvgAttachment, hasSafeRaster]);
 
   // Keyboard navigation (Lightbox primitive handles ESC; we add ArrowLeft/Right
   // + zoom shortcuts). When the user is zoomed, ArrowLeft/Right pan instead of
