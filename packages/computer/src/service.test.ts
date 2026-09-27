@@ -281,6 +281,20 @@ test("__run / runResident: loads THAT server's attachment, constructs core with 
   });
 });
 
+test("__run / runResident: forwards the adapter's hostKind to the core factory; CLI leaves it unset", async () => {
+  await withHome(async (home) => {
+    await writeAttach(home, SERVER_A);
+    const seen: Array<string | undefined> = [];
+    const coreFactory = (creds: { hostKind?: string }) => {
+      seen.push(creds.hostKind);
+      return { start: () => {}, stop: () => {} };
+    };
+    await runResident(SERVER_A, { coreFactory, hostKind: "desktop_app" });
+    await runResident(SERVER_A, { coreFactory });
+    assert.deepEqual(seen, ["desktop_app", undefined]);
+  });
+});
+
 test("__run / runResident: no attachment for that server → fail-closed NO_ATTACHMENT", async () => {
   await withHome(async () => {
     const cap = captureOut();

@@ -555,7 +555,9 @@ if (headlessMode?.mode === "__service") {
     process.stderr.write("[raft-desktop] __run requires a serverId\n");
     process.exit(2);
   } else {
-    void runResident(serverId).catch((error: unknown) => {
+    // This Computer ships with the desktop app; tell the server so it never
+    // offers a standalone upgrade for it.
+    void runResident(serverId, { hostKind: "desktop_app" }).catch((error: unknown) => {
       process.stderr.write(`[raft-desktop] __run failed: ${String(error)}\n`);
       process.exit(1);
     });

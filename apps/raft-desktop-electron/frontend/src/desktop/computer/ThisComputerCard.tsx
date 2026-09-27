@@ -144,7 +144,13 @@ export default function ThisComputerCard() {
   // ComputerRow (clickable → detail), with a "This device" badge and hover-in
   // local controls.
   if (selfMachine) {
-    const dotTone = getComputerRowDotTone(getComputerRowDotStatus(selfMachine));
+    // App-embedded: never show the upgrade dot, even if the server row (e.g. an
+    // older server) still claims an upgrade.
+    const dotTone = getComputerRowDotTone(
+      management === "app"
+        ? selfMachine.status === "online" ? "online" : "offline"
+        : getComputerRowDotStatus(selfMachine),
+    );
     // All the control-visibility decisions (running/upgrading/updateAvailable),
     // incl. the local-version compare, the "Updating…" staleness bound, and the
     // rolled-back-version guard, live in the pure `deriveControls` (ablation-tested).
@@ -153,6 +159,7 @@ export default function ThisComputerCard() {
       upgrade: status?.upgrade,
       latestVersion,
       serverVersion: selfMachine.computerVersion ?? null,
+      managementModel: management,
     });
     const openDetail = () => nav.toComputer(selfMachine.id);
 
@@ -277,6 +284,11 @@ export default function ThisComputerCard() {
             </div>
           ) : (
             <div className="flex flex-wrap items-center gap-1.5">
+              {management === "app" ? (
+                <span className="text-[11px] text-black/50" data-testid="this-computer-updates-with-app">
+                  Updates with the desktop app
+                </span>
+              ) : null}
               {updateAction === "remote" && bridge.upgrade ? (
                 <Button
                   tone="orange"
