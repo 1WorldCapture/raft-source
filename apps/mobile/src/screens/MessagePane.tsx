@@ -8,7 +8,6 @@ import {
   Image,
   Keyboard,
   KeyboardAvoidingView,
-  Linking,
   Modal,
   Platform,
   Pressable,
@@ -19,7 +18,9 @@ import {
   type NativeSyntheticEvent,
 } from "react-native";
 import { Camera, Hash, ImagePlus, ListChecks, Lock, MessageSquare, Paperclip, Search, SendHorizontal, Settings, Users } from "lucide-react-native";
+import { attachmentDownloadUrl, rewriteAttachmentUrl } from "../api/attachmentUrl";
 import { ApiError, StaleRequestError } from "../api/client";
+import { downloadAndShareAttachment } from "./attachmentFile";
 import { createRandomId } from "../api/ids";
 import {
   advanceContextWindow,
@@ -202,6 +203,8 @@ export function MessagePane({
   const [tasksByMessage, setTasksByMessage] = useState<Map<string, LinkedTaskChip>>(new Map());
   const [openSystems, setOpenSystems] = useState<Set<string>>(new Set());
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [downloadingAttachmentId, setDownloadingAttachmentId] = useState<string | null>(null);
+  const downloadingRef = useRef<string | null>(null);
   const [meta, setMeta] = useState<ChannelMeta | null>(null);
   const [followedIds, setFollowedIds] = useState<Set<string>>(new Set());
   const [threadByParent, setThreadByParent] = useState<Record<string, string>>({});
@@ -563,12 +566,41 @@ export function MessagePane({
 
   async function openAttachment(attachment: MessageAttachment, disposition: "inline" | "attachment") {
     if (!attachment.id) return;
+    if (disposition === "attachment") {
+      if (downloadingRef.current) return;
+      const sessionNow = sessionRef.current;
+      if (!sessionNow.origin) {
+        setError(t("mobile.attachments.failed"));
+        return;
+      }
+      downloadingRef.current = attachment.id;
+      setDownloadingAttachmentId(attachment.id);
+      try {
+        await downloadAndShareAttachment({
+          url: attachmentDownloadUrl(sessionNow.origin, attachment.id),
+          getAccessToken: () => sessionRef.current.client.getAccessToken(),
+          getHeaders: () => sessionRef.current.client.authHeaders(),
+          refreshTokens: async () => {
+            await sessionRef.current.client.refreshTokens();
+          },
+          filename: attachment.filename,
+          mimeType: attachment.mimeType,
+        });
+      } catch (caught) {
+        if (caught instanceof StaleRequestError) return;
+        setError(t("mobile.attachments.failed"));
+      } finally {
+        downloadingRef.current = null;
+        setDownloadingAttachmentId(null);
+      }
+      return;
+    }
     try {
       const data = await sessionRef.current.client.get<unknown>(`/attachments/${attachment.id}/url?disposition=${disposition}`);
-      const url = isRecord(data) && typeof data.url === "string" ? data.url : null;
+      const raw = isRecord(data) && typeof data.url === "string" ? data.url : null;
+      const url = raw ? rewriteAttachmentUrl(raw, sessionRef.current.origin) : null;
       if (!url) return;
-      if (disposition === "inline") setPreviewUrl(url);
-      else await Linking.openURL(url);
+      setPreviewUrl(url);
     } catch (caught) {
       if (caught instanceof StaleRequestError) return;
       setError(sendError(caught, t));
@@ -914,12 +946,16 @@ export function MessagePane({
     });
   }, []);
   const imageUrls = useRef(new Map<string, Promise<string | null>>());
-  const resolveImageUrl = useCallback((attachment: MessageAttachment): Promise<string | null> => {
+  const resolveImageUrl = useCallback((attachment: MessageAttachment, options?: { refresh?: boolean }): Promise<string | null> => {
     if (!attachment.id) return Promise.resolve(null);
+    if (options?.refresh) imageUrls.current.delete(attachment.id);
     const cached = imageUrls.current.get(attachment.id);
     if (cached) return cached;
     const pending = sessionRef.current.client.get<unknown>(`/attachments/${attachment.id}/url?disposition=inline`)
-      .then((data) => (isRecord(data) && typeof data.url === "string" ? data.url : null))
+      .then((data) => {
+        const raw = isRecord(data) && typeof data.url === "string" ? data.url : null;
+        return raw ? rewriteAttachmentUrl(raw, sessionRef.current.origin) : null;
+      })
       .catch(() => {
         imageUrls.current.delete(attachment.id as string);
         return null;
@@ -1333,6 +1369,8 @@ export function MessagePane({
                 currentUserId={userId}
                 dayLabel={item.createdAt && group.showDayDivider ? formatDayLabel(item.createdAt, timeOptions) : ""}
                 deleteLabel={t("mobile.messages.delete")}
+                downloadingAttachmentId={downloadingAttachmentId}
+                downloadingLabel={t("mobile.attachments.downloading")}
                 group={group}
                 linkedTask={tasksByMessage.get(item.id)}
                 message={item}

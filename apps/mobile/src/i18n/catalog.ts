@@ -58,6 +58,8 @@ export const mobileEn = {
   "mobile.messages.private": "Private",
   "mobile.messages.joint": "Joint",
   "mobile.messages.actionFailed": "That didn't work. Try again.",
+  "mobile.attachments.downloading": "Downloading…",
+  "mobile.attachments.failed": "Couldn't download this file. Tap it to try again.",
 } as const;
 
 export const mobileZh: Record<keyof typeof mobileEn, string> = {
@@ -116,6 +118,8 @@ export const mobileZh: Record<keyof typeof mobileEn, string> = {
   "mobile.messages.private": "私有",
   "mobile.messages.joint": "联合",
   "mobile.messages.actionFailed": "操作失败，请再试一次",
+  "mobile.attachments.downloading": "正在下载…",
+  "mobile.attachments.failed": "下载失败，点一下再试。",
 };
 
 export type MobileId = keyof typeof mobileEn;
