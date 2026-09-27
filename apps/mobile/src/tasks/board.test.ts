@@ -160,6 +160,15 @@ test("BOARD_SECTIONS lists exactly the TaskBoard keys in display order", async (
   assert.deepEqual([...BOARD_SECTIONS], ["needsMe", "inProgress", "doneToday", "todo"]);
 });
 
+test("sectionHighlighted glows only for a non-empty needsMe", async () => {
+  const { sectionHighlighted } = await import("./board.ts");
+  assert.equal(sectionHighlighted("needsMe", 1), true);
+  assert.equal(sectionHighlighted("needsMe", 0), false, "empty needsMe must not glow");
+  assert.equal(sectionHighlighted("inProgress", 5), false);
+  assert.equal(sectionHighlighted("doneToday", 3), false);
+  assert.equal(sectionHighlighted("todo", 2), false);
+});
+
 test("a mention only lifts unfinished tasks; done stays in doneToday, closed stays hidden", () => {
   const board = buildBoard(
     [

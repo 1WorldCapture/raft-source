@@ -4,7 +4,7 @@ import type { AppMessageId } from "../i18n/catalog";
 import { useT } from "../i18n/provider";
 import { AppText } from "../ui/text";
 import { border, color } from "../ui/tokens";
-import type { BoardSection } from "./board";
+import { sectionHighlighted, type BoardSection } from "./board";
 
 export const BOARD_SECTION_LABEL: Record<BoardSection, AppMessageId> = {
   needsMe: "mobile.board.section.needsMe",
@@ -29,7 +29,7 @@ export function BoardSectionHeader({
   onPress?: () => void;
 }) {
   const t = useT();
-  const highlighted = section === "needsMe";
+  const highlighted = sectionHighlighted(section, count);
   const body = (
     <View style={styles.header}>
       <View style={[styles.pill, highlighted ? styles.pillHot : styles.pillPlain]}>

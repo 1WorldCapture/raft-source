@@ -64,6 +64,14 @@ export type BoardSection = keyof TaskBoard;
 export const BOARD_SECTIONS: readonly BoardSection[] = ["needsMe", "inProgress", "doneToday", "todo"];
 
 /**
+ * True when a section header should use the action highlight: needsMe with at
+ * least one task in it. An empty needsMe must not glow — there is nothing to do.
+ */
+export function sectionHighlighted(section: BoardSection, count: number): boolean {
+  return section === "needsMe" && count > 0;
+}
+
+/**
  * Adapt plain tasks (old API rows or fixtures) into BoardTasks with neutral
  * board defaults — the transition path while the board endpoint lands.
  */
