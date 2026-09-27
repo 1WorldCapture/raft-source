@@ -9,8 +9,10 @@ import { Menu, Tray, app, nativeImage } from "electron";
 import type { MenuItemConstructorOptions } from "electron";
 
 export interface TrayStatus {
-  /** Attached servers whose daemon is live and connected — "N agents". */
-  readonly runningAgents: number;
+  /** Attached servers whose runner daemon is live and connected. The status
+   * report counts servers, not individual agents — the label must not claim
+   * agent numbers it does not have (task #7's quit dialog needs those). */
+  readonly connectedServers: number;
 }
 
 /** Pure: should a window `close` event be intercepted as hide-to-menubar?
@@ -22,27 +24,26 @@ export function shouldHideOnClose(input: { quitting: boolean; platform: NodeJS.P
 }
 
 /** Pure: count attached servers with a live, connected daemon. Tolerates
- * unknown/legacy reports (missing rows count as not running). */
-export function runningAgentsFromStatusReport(
+ * unknown/legacy reports (missing rows count as not connected). */
+export function connectedServersFromStatusReport(
   report: { servers?: ReadonlyArray<{ serverConnected?: boolean }> } | null | undefined,
 ): number {
   return (report?.servers ?? []).filter((row) => row.serverConnected === true).length;
 }
 
 /** Pure: the tray context-menu template. Wording mirrors the native app
- * menu's English strings; the agent row is informational (disabled). */
+ * menu's English strings; the servers row is informational (disabled). */
 export function buildTrayMenuTemplate(input: {
   appName: string;
   status: TrayStatus;
   onShow(): void;
 }): MenuItemConstructorOptions[] {
   const { appName, status, onShow } = input;
-  const agentWord = status.runningAgents === 1 ? "agent" : "agents";
   return [
     { label: `Show ${appName}`, click: onShow },
     { type: "separator" },
     {
-      label: `Local ${agentWord} running: ${status.runningAgents}`,
+      label: `Connected servers: ${status.connectedServers}`,
       enabled: false,
     },
     { type: "separator" },
@@ -53,9 +54,15 @@ export function buildTrayMenuTemplate(input: {
 }
 
 /**
- * Owns the Tray icon and its menu. Agent counts are fed from the existing
+ * Owns the Tray icon and its menu. Server counts are fed from the existing
  * 5s computer-status poll (no new IPC): whoever broadcasts the report also
  * calls {@link setStatusReport}.
+ *
+ * Click behavior (review requirement): a plain left click always reveals the
+ * window, so no context menu is installed via setContextMenu — once one is,
+ * macOS makes left-click open the menu and the click event unreliable. The
+ * menu pops up on right-click via popUpContextMenu, with "Show" kept as the
+ * fallback entry.
  *
  * The icon is rendered as a template image so macOS re-colors it for both
  * light and dark menu bars. `iconPath` is a 16px base; an adjacent
@@ -63,7 +70,8 @@ export function buildTrayMenuTemplate(input: {
  */
 export class MenubarResident {
   private tray: Tray | null = null;
-  private status: TrayStatus = { runningAgents: 0 };
+  private status: TrayStatus = { connectedServers: 0 };
+  private menu: Menu | null = null;
 
   constructor(
     private readonly deps: {
@@ -81,35 +89,36 @@ export class MenubarResident {
     if (!icon2x.isEmpty()) icon.addRepresentation({ scaleFactor: 2, buffer: icon2x.toPNG() });
     icon.setTemplateImage(true);
     this.tray = new Tray(icon);
-    // Bare tray click behaves like the Dock icon: show the window. On macOS
-    // a click also toggles the context menu by default — bind explicitly so
-    // both gestures do something predictable.
+    // Left click reveals the window; right click opens the menu (see class
+    // doc: setContextMenu would hijack the left click on macOS).
     this.tray.on("click", () => this.deps.reveal());
+    this.tray.on("right-click", () => {
+      if (this.menu) this.tray?.popUpContextMenu(this.menu);
+    });
     this.refreshMenu();
   }
 
   setStatusReport(report: { servers?: ReadonlyArray<{ serverConnected?: boolean }> } | null | undefined): void {
-    this.status = { runningAgents: runningAgentsFromStatusReport(report) };
+    this.status = { connectedServers: connectedServersFromStatusReport(report) };
     this.refreshMenu();
   }
 
   private refreshMenu(): void {
     const tray = this.tray;
     if (!tray) return;
-    tray.setContextMenu(
-      Menu.buildFromTemplate(
-        buildTrayMenuTemplate({
-          appName: app.getName(),
-          status: this.status,
-          onShow: () => this.deps.reveal(),
-        }),
-      ),
+    this.menu = Menu.buildFromTemplate(
+      buildTrayMenuTemplate({
+        appName: app.getName(),
+        status: this.status,
+        onShow: () => this.deps.reveal(),
+      }),
     );
-    tray.setToolTip(`Raft Desktop — ${this.status.runningAgents} local agent(s) running`);
+    tray.setToolTip(`Raft Desktop — ${this.status.connectedServers} server(s) connected`);
   }
 
   destroy(): void {
     this.tray?.destroy();
     this.tray = null;
+    this.menu = null;
   }
 }
