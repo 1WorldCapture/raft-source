@@ -2,6 +2,7 @@
 
 import { makeIsMember } from "./typeGuards.js";
 import { currentDate } from "./clock.js";
+import type { ComputerHostKind } from "./computerHostKind.js";
 import {
   PI_BUILTIN_PROVIDER_API_KEY_ENV_KEYS_GENERATED,
   PI_BUILTIN_PROVIDER_BLOCKED_HOST_ENV_KEYS_GENERATED,
@@ -190,6 +191,7 @@ export interface AgentMessage {
 }
 
 export * from "./activityMute.js";
+export * from "./computerHostKind.js";
 export * from "./channelPermissions.js";
 export * from "./raftPermalinks.js";
 export * from "./raftRefs.js";
@@ -900,7 +902,7 @@ export type MachineToServerMessage =
    */
   | { type: "computer:upgrade:progress"; requestId: string; phase: "downloading" | "verifying" | "applying" | "restarting"; message?: string; percent?: number; fromVersion?: string; targetVersion?: string }
   | { type: "computer:upgrade:done"; requestId: string; ok: boolean; newVersion?: string; rolledBack?: boolean; error?: string }
-  | { type: "ready"; capabilities?: string[]; runtimes: string[]; runtimeVersions?: Record<string, string>; runningAgents: string[]; hostname?: string; os?: string; daemonVersion?: string; computerVersion?: string; migrationTransport?: AgentMigrationTransportReady; lifecycleAcks?: ComputerLifecycleExecutionAck[] };
+  | { type: "ready"; capabilities?: string[]; runtimes: string[]; runtimeVersions?: Record<string, string>; runningAgents: string[]; hostname?: string; os?: string; daemonVersion?: string; computerVersion?: string; hostKind?: ComputerHostKind; migrationTransport?: AgentMigrationTransportReady; lifecycleAcks?: ComputerLifecycleExecutionAck[] };
 
 export type MachineShutdownReason =
   | "computer_stop"

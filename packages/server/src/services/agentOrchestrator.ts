@@ -64,6 +64,9 @@ import {
   type WikiWorkspaceEnsureReceipt,
   type RuntimeAccountUsageProvider,
   type RuntimeErrorActivityDiagnostic,
+  type ComputerHostKind,
+  DEFAULT_COMPUTER_HOST_KIND,
+  normalizeComputerHostKind,
 } from "@botiverse/raft-shared";
 import {
   appConfigTraceAttrs,
@@ -240,6 +243,8 @@ interface MachineConnection {
   // Managed-Computer bundle version (`@botiverse/raft-computer`), reported in
   // `ready` when this connection is a Computer; null for a raw daemon.
   computerVersion: string | null;
+  // Where the Computer runs, from `ready`. Defaults to standalone.
+  computerHostKind: ComputerHostKind;
 }
 
 // Daemon-reported capabilities we persist then reflect to the client card. Held
@@ -4752,6 +4757,7 @@ export class AgentOrchestrator extends EventEmitter {
         migrationTransport: null,
         shutdownIntent: null,
         computerVersion: null,
+        computerHostKind: DEFAULT_COMPUTER_HOST_KIND,
         traceContext,
       };
 
@@ -5010,6 +5016,7 @@ export class AgentOrchestrator extends EventEmitter {
         version: local.computerVersion ?? null,
         observedAt: new Date(local.lastIngressAt).toISOString(),
         provenance: "owner_connection",
+        hostKind: local.computerHostKind,
       };
     }
     if (!this.replicaStateStore.isAvailable()) return null;
@@ -5022,6 +5029,7 @@ export class AgentOrchestrator extends EventEmitter {
         version: meta.computerVersion ?? null,
         observedAt: meta.computerVersionObservedAt ?? null,
         provenance: "replica_meta",
+        hostKind: normalizeComputerHostKind(meta.computerHostKind),
       };
     } catch {
       return null;
@@ -6183,6 +6191,7 @@ export class AgentOrchestrator extends EventEmitter {
             .setMachineMeta(machineId, {
               computerVersion: conn.computerVersion ?? null,
               computerVersionObservedAt: new Date(ingressAtMs).toISOString(),
+              computerHostKind: conn.computerHostKind,
               daemonVersion: conn.daemonVersion ?? null,
               runtimeVersions: JSON.stringify(conn.runtimeVersions ?? {}),
               ...machineMetaFromMigrationTransport(conn.migrationTransport),
@@ -6361,6 +6370,7 @@ export class AgentOrchestrator extends EventEmitter {
             conn.daemonVersion = msg.daemonVersion ?? null;
             conn.capabilities = new Set((msg.capabilities ?? []).filter((capability) => typeof capability === "string" && capability.trim()));
             conn.computerVersion = msg.computerVersion ?? null;
+            conn.computerHostKind = normalizeComputerHostKind(msg.hostKind);
             conn.migrationTransport = migrationTransport;
             void this.dispatchPendingComputerLifecycleOperations().catch(() => {});
           }
@@ -6377,6 +6387,7 @@ export class AgentOrchestrator extends EventEmitter {
               .setMachineMeta(machineId, {
                 computerVersion: msg.computerVersion ?? null,
                 computerVersionObservedAt: new Date(readyCapturedAtMs).toISOString(),
+                computerHostKind: normalizeComputerHostKind(msg.hostKind),
                 daemonVersion: msg.daemonVersion ?? null,
                 runtimeVersions: JSON.stringify(runtimeVersions),
                 hostname: msg.hostname ?? null,
