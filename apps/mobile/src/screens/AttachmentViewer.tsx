@@ -7,6 +7,7 @@ import { attachmentPreviewCache } from "../attachments/previewSession";
 import { useT } from "../i18n/provider";
 import type { MessageAttachment } from "../model/messages";
 import { downloadAndShareAttachment } from "./attachmentFile";
+import { TextPreview } from "./TextPreview";
 import { AppText } from "../ui/text";
 import { HeaderIconButton, PanelHeader } from "../ui/PanelHeader";
 import { HardShadow } from "../ui/shadow";
@@ -54,6 +55,7 @@ export function AttachmentViewer({
   const [attempt, setAttempt] = useState(0);
   const [sharing, setSharing] = useState(false);
   const [shareError, setShareError] = useState(false);
+  const [preview, setPreview] = useState<AttachmentPreviewResponse | null>(null);
   const id = attachment.id;
   const loadPreviewRef = useRef(loadPreview);
   loadPreviewRef.current = loadPreview;
@@ -65,13 +67,19 @@ export function AttachmentViewer({
     }
     let cancelled = false;
     setPhase("loading");
+    setPreview(null);
     void attachmentPreviewCache.load(id, async (attachmentId) => {
       const data = await loadPreviewRef.current(attachmentId);
       if (!isPreview(data)) throw new Error("preview payload");
       return data;
-    }).then((preview) => {
+    }).then((loaded) => {
       if (cancelled) return;
-      setPhase(preview.status === "ok" ? "ready" : "unsupported");
+      if (loaded.status !== "ok" || (loaded.data.kind === "text" && loaded.data.text.length === 0)) {
+        setPhase("unsupported");
+        return;
+      }
+      setPreview(loaded);
+      setPhase("ready");
     }).catch((error: unknown) => {
       if (cancelled || error instanceof StaleRequestError) return;
       setPhase("error");
@@ -101,6 +109,10 @@ export function AttachmentViewer({
     }
   }
 
+  const textPreview = preview?.status === "ok" && preview.data.kind === "text"
+    ? { text: preview.data.text, truncated: preview.truncated === true }
+    : null;
+
   const shareButton = (
     <HeaderIconButton accessibilityLabel={t("mobile.preview.share")} onPress={() => void share()} wide>
       <AppText style={styles.shareLabel}>{sharing ? t("mobile.attachments.downloading") : t("mobile.preview.share")}</AppText>
@@ -116,7 +128,7 @@ export function AttachmentViewer({
           subtitle={formatAttachmentSize(attachment.sizeBytes)}
           title={attachment.filename}
         />
-        <View style={styles.body}>
+        <View style={[styles.body, textPreview ? styles.bodyText : null]}>
           {shareError ? <AppText style={styles.shareError}>{t("mobile.attachments.failed")}</AppText> : null}
           {phase === "loading" ? (
             <View style={styles.center}>
@@ -143,7 +155,10 @@ export function AttachmentViewer({
               {shareButton}
             </View>
           ) : null}
-          {phase === "ready" ? (
+          {phase === "ready" && textPreview ? (
+            <TextPreview text={textPreview.text} truncated={textPreview.truncated} />
+          ) : null}
+          {phase === "ready" && !textPreview ? (
             <View style={styles.placeholder}>
               <AppText style={styles.note}>{t("mobile.preview.placeholder")}</AppText>
             </View>
@@ -157,6 +172,7 @@ export function AttachmentViewer({
 const styles = StyleSheet.create({
   screen: { backgroundColor: color.page, flex: 1 },
   body: { flex: 1, padding: 16 },
+  bodyText: { padding: 0 },
   center: { alignItems: "center", flex: 1, gap: 12, justifyContent: "center" },
   note: { color: color.mutedStrong, fontSize: 14 },
   reason: { color: color.ink, fontSize: 16, fontWeight: "700", textAlign: "center" },

@@ -44,6 +44,8 @@ export const color = {
   inlineCode: "rgba(0, 0, 0, 0.05)",
   quoteBorder: "rgba(0, 0, 0, 0.4)",
   previewSurface: "rgba(0, 0, 0, 0.03)",
+  /** Web text preview canvas: `bg-brutal-cream/45` on white. */
+  previewCream: "rgba(255, 250, 239, 0.45)",
   scrim: "rgba(0, 0, 0, 0.9)",
 } as const;
 
