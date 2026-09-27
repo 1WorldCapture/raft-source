@@ -167,7 +167,9 @@ export async function listBoardTasks(
 
   const db = getDb();
   // Ranking pass over every visible task: only index-backed "latest reply"
-  // lookups, so it stays cheap; the heavier stats run for the page only.
+  // lookups (messages(channel_id, seq)), so it stays cheap; the heavier stats
+  // run for the page only. The latest reply is the highest seq; its
+  // created_at is what lastActivityAt reports.
   const ranked = (await db.execute(sql`
     SELECT
       r.id::text AS "id",
@@ -195,7 +197,7 @@ export async function listBoardTasks(
         FROM messages m
         WHERE m.channel_id = thr.id
           AND m.message_type <> 'system'
-        ORDER BY m.created_at DESC
+        ORDER BY m.seq DESC
         LIMIT 1
       ) lr ON thr.id IS NOT NULL
       WHERE ${sql.join(conditions, sql` AND `)}
@@ -240,7 +242,7 @@ export async function listBoardTasks(
       SELECT m.created_at, m.sender_type, m.sender_id, left(m.content, 4000) AS content
       FROM messages m
       WHERE m.channel_id = p.thread_id AND m.message_type <> 'system'
-      ORDER BY m.created_at DESC, m.seq DESC
+      ORDER BY m.seq DESC
       LIMIT 1
     ) lr ON p.thread_id IS NOT NULL
     LEFT JOIN user_channel_read_cursors rc
