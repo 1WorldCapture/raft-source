@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { AttachmentPreviewResponse } from "@botiverse/raft-shared";
+import type { AttachmentPreviewResponse } from "@botiverse/raft-shared/src/attachmentPreview.ts";
 import { createPreviewCache, createPreviewGate } from "./previewSession.ts";
 
 test("a failed preview flag stays enabled and is not requested again", async () => {

@@ -1,4 +1,4 @@
-import { isTextPreviewCandidate } from "@botiverse/raft-shared";
+import { isTextPreviewCandidate } from "@botiverse/raft-shared/src/attachmentPreview.ts";
 
 export type AttachmentViewKind = "image" | "markdown" | "text" | "none";
 

@@ -1,4 +1,4 @@
-import type { AttachmentPreviewResponse } from "@botiverse/raft-shared";
+import type { AttachmentPreviewResponse } from "@botiverse/raft-shared/src/attachmentPreview.ts";
 
 export interface PreviewGate {
   load(fetchEnabled: () => Promise<unknown>): Promise<boolean>;

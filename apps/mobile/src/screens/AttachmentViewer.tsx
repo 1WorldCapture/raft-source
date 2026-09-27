@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Modal, Pressable, StyleSheet, View } from "react-native";
-import type { AttachmentPreviewResponse } from "@botiverse/raft-shared";
+import type { AttachmentPreviewResponse } from "@botiverse/raft-shared/src/attachmentPreview.ts";
 import { attachmentDownloadUrl } from "../api/attachmentUrl";
 import { StaleRequestError } from "../api/client";
 import { attachmentPreviewCache } from "../attachments/previewSession";
