@@ -3,8 +3,16 @@
 // in unbundled contexts (tests, tsx) the identifier is undefined and the
 // official default applies — the same fallback shape packages/computer's
 // version.ts uses for its baked identifiers.
+//
+// The official origins and their default come from the build config itself —
+// the single source of truth — so the build-time widening decisions and the
+// runtime allowlists can never drift apart.
+
+import { DEFAULT_API_ORIGIN, OFFICIAL_API_ORIGINS } from "../../buildConfig.mjs";
 
 declare const __RAFT_DESKTOP_API_ORIGIN__: string | undefined;
+
+export { DEFAULT_API_ORIGIN, OFFICIAL_API_ORIGINS };
 
 // `typeof` keeps the undeclared identifier safe in unbundled contexts (tests,
 // tsx): it evaluates to "undefined" instead of throwing, exactly like the
@@ -12,13 +20,6 @@ declare const __RAFT_DESKTOP_API_ORIGIN__: string | undefined;
 function readBakedApiOrigin(): unknown {
   return typeof __RAFT_DESKTOP_API_ORIGIN__ === "string" ? __RAFT_DESKTOP_API_ORIGIN__ : undefined;
 }
-
-export const OFFICIAL_API_ORIGINS: ReadonlySet<string> = new Set([
-  "https://api.raft.build",
-  "https://api-aws-staging.botiverse.dev",
-]);
-
-export const DEFAULT_API_ORIGIN = "https://api.raft.build";
 
 export function readConfiguredApiOrigin(baked: unknown = readBakedApiOrigin()): string {
   return typeof baked === "string" && baked.length > 0 ? baked : DEFAULT_API_ORIGIN;
