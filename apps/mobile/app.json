@@ -39,7 +39,8 @@
       "expo-font",
       "expo-splash-screen",
       "expo-localization",
-      "expo-sharing"
+      "expo-sharing",
+      "expo-image"
     ],
     "experiments": {
       "typedRoutes": false

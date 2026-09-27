@@ -60,6 +60,12 @@ export const mobileEn = {
   "mobile.messages.actionFailed": "That didn't work. Try again.",
   "mobile.attachments.downloading": "Downloading…",
   "mobile.attachments.failed": "Couldn't download this file. Tap it to try again.",
+  "mobile.preview.loading": "Loading…",
+  "mobile.preview.failed": "Couldn't load a preview.",
+  "mobile.preview.retry": "Try again",
+  "mobile.preview.share": "Share",
+  "mobile.preview.unsupported": "This file can't be previewed. Share it to open in another app.",
+  "mobile.preview.placeholder": "Preview will show here.",
 } as const;
 
 export const mobileZh: Record<keyof typeof mobileEn, string> = {
@@ -120,6 +126,12 @@ export const mobileZh: Record<keyof typeof mobileEn, string> = {
   "mobile.messages.actionFailed": "操作失败，请再试一次",
   "mobile.attachments.downloading": "正在下载…",
   "mobile.attachments.failed": "下载失败，点一下再试。",
+  "mobile.preview.loading": "加载中…",
+  "mobile.preview.failed": "预览加载失败。",
+  "mobile.preview.retry": "重试",
+  "mobile.preview.share": "分享",
+  "mobile.preview.unsupported": "无法预览，可分享到其它 App 打开",
+  "mobile.preview.placeholder": "预览内容会显示在这里。",
 };
 
 export type MobileId = keyof typeof mobileEn;

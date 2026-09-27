@@ -18,8 +18,11 @@ import {
   type NativeSyntheticEvent,
 } from "react-native";
 import { Camera, Hash, ImagePlus, ListChecks, Lock, MessageSquare, Paperclip, Search, SendHorizontal, Settings, Users } from "lucide-react-native";
+import { attachmentPreviewGate } from "../attachments/previewSession";
+import { viewKind } from "../attachments/viewKind";
 import { attachmentDownloadUrl, rewriteAttachmentUrl } from "../api/attachmentUrl";
 import { ApiError, StaleRequestError } from "../api/client";
+import { AttachmentViewer } from "./AttachmentViewer";
 import { downloadAndShareAttachment } from "./attachmentFile";
 import { createRandomId } from "../api/ids";
 import {
@@ -203,6 +206,7 @@ export function MessagePane({
   const [tasksByMessage, setTasksByMessage] = useState<Map<string, LinkedTaskChip>>(new Map());
   const [openSystems, setOpenSystems] = useState<Set<string>>(new Set());
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [fileViewer, setFileViewer] = useState<MessageAttachment | null>(null);
   const [downloadingAttachmentId, setDownloadingAttachmentId] = useState<string | null>(null);
   const downloadingRef = useRef<string | null>(null);
   const [meta, setMeta] = useState<ChannelMeta | null>(null);
@@ -567,6 +571,18 @@ export function MessagePane({
   async function openAttachment(attachment: MessageAttachment, disposition: "inline" | "attachment") {
     if (!attachment.id) return;
     if (disposition === "attachment") {
+      const kind = viewKind(attachment.filename, attachment.mimeType);
+      if (kind === "text" || kind === "markdown") {
+        try {
+          const enabled = await attachmentPreviewGate.load(() => sessionRef.current.client.get<unknown>("/messages/attachment-preview/enabled"));
+          if (enabled) {
+            setFileViewer(attachment);
+            return;
+          }
+        } catch (caught) {
+          if (caught instanceof StaleRequestError) return;
+        }
+      }
       if (downloadingRef.current) return;
       const sessionNow = sessionRef.current;
       if (!sessionNow.origin) {
@@ -1512,6 +1528,19 @@ export function MessagePane({
           })()}
         </View>
       </View>
+      {fileViewer ? (
+        <AttachmentViewer
+          attachment={fileViewer}
+          getAccessToken={() => sessionRef.current.client.getAccessToken()}
+          getHeaders={() => sessionRef.current.client.authHeaders()}
+          loadPreview={(id) => sessionRef.current.client.get<unknown>(`/attachments/${id}/preview`)}
+          onClose={() => setFileViewer(null)}
+          origin={session.origin}
+          refreshTokens={async () => {
+            await sessionRef.current.client.refreshTokens();
+          }}
+        />
+      ) : null}
       <Modal animationType="fade" onRequestClose={() => setPreviewUrl(null)} transparent visible={previewUrl !== null}>
         <Pressable onPress={() => setPreviewUrl(null)} style={styles.scrim}>
           {previewUrl ? <Image resizeMode="contain" source={{ uri: previewUrl }} style={styles.preview} /> : null}
