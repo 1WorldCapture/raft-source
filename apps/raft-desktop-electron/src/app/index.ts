@@ -434,8 +434,12 @@ if (headlessMode) {
   // hijack). dock.hide() only hides the icon; it does not make the process
   // un-activatable. "prohibited" does: the child can never become the
   // foreground representative, so activation always routes to (or spawns) a
-  // real GUI. macOS-only API; called before app-ready for effect.
-  if (process.platform === "darwin") app.setActivationPolicy("prohibited");
+  // real GUI. macOS-only API; set before app-ready AND re-set once ready,
+  // because Electron may restore the default policy on launch completion.
+  if (process.platform === "darwin") {
+    app.setActivationPolicy("prohibited");
+    void app.whenReady().then(() => app.setActivationPolicy("prohibited"));
+  }
 }
 if (headlessMode?.mode === "__service") {
   // Detached supervisor process — run the service, then exit. No GUI, no lock.
