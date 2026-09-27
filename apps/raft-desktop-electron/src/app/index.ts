@@ -30,7 +30,7 @@ import { INITIAL_LIFECYCLE_STATE, reduceLifecycle } from "../main/lifecycle.js";
 import type { LifecycleEvent } from "../main/lifecycle.js";
 import { loadQuitNoConfirm, loadZoomLevel, saveQuitNoConfirm, saveZoomLevel } from "../main/viewPrefs.js";
 import { runQuitFlow } from "../main/quitFlow.js";
-import { pidAlive, readPidFile, runShutdownTree, scanAgentPids } from "../main/shutdown.js";
+import { collectTreeSurvivors, parsePsTable, readPidFile, runShutdownTree } from "../main/shutdown.js";
 import { readFile, readdir } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -434,12 +434,14 @@ function revealMainWindow(): void {
 }
 
 // Task #7: stop request through the card's Stop path, then the escalation
-// ladder from shutdown.ts. Survivors come from the service/runner pidfiles
-// plus a ps scan for agent runtimes (their command lines embed the
-// ~/.slock/agents workspace path). Signals go to the whole process group
-// (negative pid) so agent children can never survive their runner.
+// ladder from shutdown.ts. Survivors are the TRUSTED pidfile roots (service,
+// per-server runners) plus everything the ps table shows under them — their
+// descendant closure and their process groups. Nothing is matched by command
+// line: the user's own editor/tail inside ~/.slock/agents must never be a
+// target. Signals go to whole process groups (negative pid) so agent children
+// can never survive their runner.
 const execFileAsync = promisify(execFile);
-async function orchestrateQuitShutdown(): Promise<void> {
+async function orchestrateQuitShutdown(systemShutdown: boolean): Promise<void> {
   const slockHome = computerHost?.slockHome;
   if (!slockHome) return;
   try {
@@ -449,9 +451,7 @@ async function orchestrateQuitShutdown(): Promise<void> {
   }
   const runDir = path.join(slockHome, "computer", "run");
   const serversDir = path.join(slockHome, "computer", "servers");
-  const agentsDir = path.join(slockHome, "agents");
   await runShutdownTree({
-    slockHome,
     now: () => Date.now(),
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     signal: (pid, signal) => {
@@ -466,33 +466,30 @@ async function orchestrateQuitShutdown(): Promise<void> {
       }
     },
     survivors: async () => {
+      const rootPids: number[] = [];
       const servicePid = await readPidFile({ readFile }, path.join(runDir, "service.pid"));
-      const runnerPids: number[] = [];
+      if (servicePid) rootPids.push(servicePid);
       try {
         for (const entry of await readdir(serversDir, { withFileTypes: true })) {
           if (!entry.isDirectory()) continue;
           const pid = await readPidFile({ readFile }, path.join(serversDir, entry.name, "runner.pid"));
-          if (pid) runnerPids.push(pid);
+          if (pid) rootPids.push(pid);
         }
       } catch {
-        // No servers directory — nothing to read.
+        // No servers directory — service pidfile still covers the tree root.
       }
-      let agentPids: number[] = [];
+      let psTable = "";
       try {
-        const { stdout } = await execFileAsync("ps", ["-axo", "pid=,command="]);
-        agentPids = scanAgentPids(stdout, agentsDir);
+        const { stdout } = await execFileAsync("ps", ["-axo", "pid=,ppid=,pgid=,command="]);
+        psTable = stdout;
       } catch {
-        // ps unavailable — pidfiles still cover the tree itself.
+        // ps unavailable: an empty table makes the roots themselves the only
+        // known survivors — the ladder still clears them.
       }
-      const alive = (pid: number | null) => pidAlive((p, s) => process.kill(p, s), pid);
-      return {
-        servicePid: alive(servicePid) ? servicePid : null,
-        runnerPids: runnerPids.filter(alive),
-        agentPids: agentPids.filter(alive),
-      };
+      return { rootPids, psTable };
     },
     logFile: path.join(runDir, "shutdown.log"),
-    systemShutdown: false, // quitFlow passes OS-shutdown timing through dialog skip; ladder default is fine
+    systemShutdown,
   });
 }
 
@@ -600,21 +597,34 @@ if (headlessMode?.mode === "__service") {
           const status = computerStatusMonitor ? await computerStatusMonitor.read() : null;
           return Boolean(status?.service?.running || (status?.servers?.length ?? 0) > 0);
         },
-        // Live scan, not a cached file: the dialog names what is actually
-        // running at confirm time (each ps hit is one agent runtime process).
+        // Live count, not a cached file: agent runtimes alive under the
+        // service/runner roots right now (tree closure minus the roots
+        // themselves). Returns null when the roots cannot be read.
         agentCount: async () => {
           const home = computerHost?.slockHome;
           if (!home) return null;
+          const rootPids: number[] = [];
+          const servicePid = await readPidFile({ readFile }, path.join(home, "computer", "run", "service.pid"));
+          if (servicePid) rootPids.push(servicePid);
           try {
-            const { stdout } = await execFileAsync("ps", ["-axo", "pid=,command="]);
-            return scanAgentPids(stdout, path.join(home, "agents")).length;
+            for (const entry of await readdir(path.join(home, "computer", "servers"), { withFileTypes: true })) {
+              if (!entry.isDirectory()) continue;
+              const pid = await readPidFile({ readFile }, path.join(home, "computer", "servers", entry.name, "runner.pid"));
+              if (pid) rootPids.push(pid);
+            }
+          } catch { /* no servers dir */ }
+          if (rootPids.length === 0) return null;
+          try {
+            const { stdout } = await execFileAsync("ps", ["-axo", "pid=,ppid=,pgid=,command="]);
+            const survivors = collectTreeSurvivors(parsePsTable(stdout), rootPids);
+            return survivors.pids.length - survivors.roots.length;
           } catch {
             return null;
           }
         },
         prefs: () => ({ quitNoConfirm: loadQuitNoConfirm() }),
         savePrefs: (prefs) => saveQuitNoConfirm(prefs.quitNoConfirm),
-        orchestrateShutdown: () => orchestrateQuitShutdown(),
+        orchestrateShutdown: (systemShutdown) => orchestrateQuitShutdown(systemShutdown),
         quit: () => app.quit(),
       });
       if (!proceed) {

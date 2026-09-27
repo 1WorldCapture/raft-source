@@ -52,8 +52,10 @@ export interface QuitFlowDeps {
   agentCount(): number | null | Promise<number | null>;
   prefs(): QuitConfirmPrefs;
   savePrefs(prefs: QuitConfirmPrefs): void;
-  /** The shutdown ladder: IPC stop already issued + escalation to group kills. */
-  orchestrateShutdown(): Promise<void>;
+  /** The shutdown ladder: IPC stop already issued + escalation to group
+   * kills. Receives the OS-shutdown flag so timeouts compress when logout
+   * must not stall. */
+  orchestrateShutdown(systemShutdown: boolean): Promise<void>;
   quit(): void;
 }
 
@@ -82,7 +84,7 @@ export async function runQuitFlow(deps: QuitFlowDeps): Promise<boolean> {
     if (choice.checkboxChecked) deps.savePrefs({ quitNoConfirm: true });
   }
   if (anythingRunning || osShuttingDown) {
-    await deps.orchestrateShutdown();
+    await deps.orchestrateShutdown(osShuttingDown);
   }
   return true;
 }
