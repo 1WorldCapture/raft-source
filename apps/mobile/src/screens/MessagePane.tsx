@@ -5,10 +5,8 @@ import {
   Alert,
   BackHandler,
   FlatList,
-  Image,
   Keyboard,
   KeyboardAvoidingView,
-  Modal,
   Platform,
   Pressable,
   StyleSheet,
@@ -24,6 +22,7 @@ import { attachmentDownloadUrl, rewriteAttachmentUrl } from "../api/attachmentUr
 import { ApiError, StaleRequestError } from "../api/client";
 import { AttachmentViewer } from "./AttachmentViewer";
 import { downloadAndShareAttachment } from "./attachmentFile";
+import { ImageViewer } from "./ImageViewer";
 import { createRandomId } from "../api/ids";
 import {
   advanceContextWindow,
@@ -205,7 +204,7 @@ export function MessagePane({
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
   const [tasksByMessage, setTasksByMessage] = useState<Map<string, LinkedTaskChip>>(new Map());
   const [openSystems, setOpenSystems] = useState<Set<string>>(new Set());
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [imageViewer, setImageViewer] = useState<{ images: MessageAttachment[]; index: number } | null>(null);
   const [fileViewer, setFileViewer] = useState<MessageAttachment | null>(null);
   const [downloadingAttachmentId, setDownloadingAttachmentId] = useState<string | null>(null);
   const downloadingRef = useRef<string | null>(null);
@@ -568,9 +567,9 @@ export function MessagePane({
     });
   }
 
-  async function openAttachment(attachment: MessageAttachment, disposition: "inline" | "attachment") {
+  async function openAttachment(attachment: MessageAttachment) {
     if (!attachment.id) return;
-    if (disposition === "attachment") {
+    {
       const kind = viewKind(attachment.filename, attachment.mimeType);
       if (kind === "text" || kind === "markdown") {
         try {
@@ -611,16 +610,24 @@ export function MessagePane({
       }
       return;
     }
-    try {
-      const data = await sessionRef.current.client.get<unknown>(`/attachments/${attachment.id}/url?disposition=${disposition}`);
-      const raw = isRecord(data) && typeof data.url === "string" ? data.url : null;
-      const url = raw ? rewriteAttachmentUrl(raw, sessionRef.current.origin) : null;
-      if (!url) return;
-      setPreviewUrl(url);
-    } catch (caught) {
-      if (caught instanceof StaleRequestError) return;
-      setError(sendError(caught, t));
+  }
+
+  /** SVG needs either the server raster preview or the generic viewer. */
+  function isSvgAttachment(attachment: MessageAttachment): boolean {
+    if (attachment.mimeType?.toLowerCase() === "image/svg+xml") return true;
+    return attachment.filename.toLowerCase().endsWith(".svg");
+  }
+
+  /** Opens the fullscreen image viewer for a message's image group. SVGs
+   *  without a server raster preview fall to the generic viewer's
+   *  unsupported state instead (expo-image cannot draw SVG). */
+  function openImageGroup(images: MessageAttachment[], index: number) {
+    const tapped = images[index];
+    if (tapped && isSvgAttachment(tapped) && !tapped.rasterPreviewUrl) {
+      setFileViewer(tapped);
+      return;
     }
+    setImageViewer({ images, index });
   }
 
   async function loadMembers() {
@@ -981,8 +988,13 @@ export function MessagePane({
   }, []);
   const openAttachmentRef = useRef(openAttachment);
   openAttachmentRef.current = openAttachment;
-  const openAttachmentStable = useCallback((attachment: MessageAttachment, disposition: "inline" | "attachment") => {
-    void openAttachmentRef.current(attachment, disposition);
+  const openAttachmentStable = useCallback((attachment: MessageAttachment) => {
+    void openAttachmentRef.current(attachment);
+  }, []);
+  const openImageGroupRef = useRef(openImageGroup);
+  openImageGroupRef.current = openImageGroup;
+  const openImageGroupStable = useCallback((images: MessageAttachment[], index: number) => {
+    openImageGroupRef.current(images, index);
   }, []);
   const replyTime = useCallback((createdAt: string) => formatMessageStamp(createdAt, timeOptions), [timeOptions]);
 
@@ -1395,6 +1407,7 @@ export function MessagePane({
                 onLongPressMessage={longPressMessage}
                 onLongPressSender={mentionSender}
                 onOpenAttachment={openAttachmentStable}
+                onOpenImage={openImageGroupStable}
                 resolveImageUrl={resolveImageUrl}
                 onOpenThread={threadCountLabel ? openThread : undefined}
                 onPressMessage={thread ? undefined : openThread}
@@ -1541,11 +1554,20 @@ export function MessagePane({
           }}
         />
       ) : null}
-      <Modal animationType="fade" onRequestClose={() => setPreviewUrl(null)} transparent visible={previewUrl !== null}>
-        <Pressable onPress={() => setPreviewUrl(null)} style={styles.scrim}>
-          {previewUrl ? <Image resizeMode="contain" source={{ uri: previewUrl }} style={styles.preview} /> : null}
-        </Pressable>
-      </Modal>
+      {imageViewer ? (
+        <ImageViewer
+          getAccessToken={() => sessionRef.current.client.getAccessToken()}
+          getHeaders={() => sessionRef.current.client.authHeaders()}
+          images={imageViewer.images}
+          index={imageViewer.index}
+          onClose={() => setImageViewer(null)}
+          origin={session.origin}
+          refreshTokens={async () => {
+            await sessionRef.current.client.refreshTokens();
+          }}
+          resolve={resolveImageUrl}
+        />
+      ) : null}
       {menu && menuMessage ? (
         <MessageMenu
           following={followedIds.has(menuMessage.id)}
@@ -1658,8 +1680,6 @@ const styles = StyleSheet.create({
   jumpText: { color: color.ink, fontSize: 13, fontWeight: "700" },
   headerAction: { alignItems: "center", justifyContent: "center", minHeight: 32, paddingHorizontal: 4 },
   headerActionText: { color: color.ink, fontSize: 12, fontWeight: "700" },
-  scrim: { alignItems: "center", backgroundColor: color.scrim, flex: 1, justifyContent: "center" },
-  preview: { height: "80%", width: "100%" },
   note: { color: colors.muted, padding: space.md, textAlign: "center" },
   error: { color: colors.danger, paddingHorizontal: space.md },
   candidates: { backgroundColor: colors.card, borderTopColor: colors.line, borderTopWidth: StyleSheet.hairlineWidth },

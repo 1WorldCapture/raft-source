@@ -47,6 +47,9 @@ export const color = {
   /** Web text preview canvas: `bg-brutal-cream/45` on white. */
   previewCream: "rgba(255, 250, 239, 0.45)",
   scrim: "rgba(0, 0, 0, 0.9)",
+  /** Full-screen image viewer: opaque black stage and translucent page chip. */
+  viewerBlack: "#000000",
+  viewerChip: "rgba(0, 0, 0, 0.55)",
 } as const;
 
 export const fontSize = {
