@@ -1,4 +1,5 @@
 import express, { type Express, type Request, type RequestHandler } from "express";
+import { resolveTrustProxy } from "./config/trustProxy.js";
 import helmet from "helmet";
 import cors from "cors";
 import rateLimit, { ipKeyGenerator } from "express-rate-limit";
@@ -157,8 +158,9 @@ export function createApp(options: CreateAppOptions = {}): Express {
   const rateLimitValidate = isTestEnv ? false : undefined;
   const slackBridgeHandlers = createSlackBridgeRouteHandlers(options.slackBridge);
 
-  if (process.env.NODE_ENV === "production") {
-    app.set("trust proxy", 1);
+  const trustProxy = resolveTrustProxy();
+  if (trustProxy !== undefined) {
+    app.set("trust proxy", trustProxy);
   }
 
   // Configure Helmet with CSP that allows CDN images (for thumbnails served via CDN_BASE_URL)
