@@ -28,7 +28,12 @@ import {
 } from "../main/autoUpdater.js";
 import { INITIAL_LIFECYCLE_STATE, reduceLifecycle } from "../main/lifecycle.js";
 import type { LifecycleEvent } from "../main/lifecycle.js";
-import { loadZoomLevel, saveZoomLevel } from "../main/viewPrefs.js";
+import { loadQuitNoConfirm, loadZoomLevel, saveQuitNoConfirm, saveZoomLevel } from "../main/viewPrefs.js";
+import { runQuitFlow } from "../main/quitFlow.js";
+import { parsePsTable, readPidFile, resolveSurvivors, runShutdownTree } from "../main/shutdown.js";
+import { readFile, readdir } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { loadWindowState, trackWindowState } from "../main/windowState.js";
 import { MenubarResident, shouldHideOnClose } from "../main/menubarResident.js";
 import { armOAuthLoopback, cancelOAuthLoopback, isAllowedAuthorizationUrl } from "./oauthLoopback.js";
@@ -428,6 +433,66 @@ function revealMainWindow(): void {
   }
 }
 
+// Task #7: stop request through the card's Stop path, then the escalation
+// ladder from shutdown.ts. Survivors are the TRUSTED pidfile roots (service,
+// per-server runners) plus everything the ps table shows under them — their
+// descendant closure and their process groups. Nothing is matched by command
+// line: the user's own editor/tail inside ~/.slock/agents must never be a
+// target. Signals go to whole process groups (negative pid) so agent children
+// can never survive their runner.
+const execFileAsync = promisify(execFile);
+async function orchestrateQuitShutdown(systemShutdown: boolean): Promise<void> {
+  const slockHome = computerHost?.slockHome;
+  if (!slockHome) return;
+  try {
+    await computerHost?.stop();
+  } catch {
+    // The ladder escalates regardless of how the stop request lands.
+  }
+  const runDir = path.join(slockHome, "computer", "run");
+  const serversDir = path.join(slockHome, "computer", "servers");
+  await runShutdownTree({
+    now: () => Date.now(),
+    sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    signal: (pid, signal) => {
+      try {
+        process.kill(-pid, signal); // process group: runner + its agents
+      } catch {
+        try {
+          process.kill(pid, signal); // not a group leader — fall back
+        } catch {
+          // Already gone between probe and signal.
+        }
+      }
+    },
+    survivors: async () => {
+      const rootPids: number[] = [];
+      const servicePid = await readPidFile({ readFile }, path.join(runDir, "service.pid"));
+      if (servicePid) rootPids.push(servicePid);
+      try {
+        for (const entry of await readdir(serversDir, { withFileTypes: true })) {
+          if (!entry.isDirectory()) continue;
+          const pid = await readPidFile({ readFile }, path.join(serversDir, entry.name, "runner.pid"));
+          if (pid) rootPids.push(pid);
+        }
+      } catch {
+        // No servers directory — service pidfile still covers the tree root.
+      }
+      let psTable = "";
+      try {
+        const { stdout } = await execFileAsync("ps", ["-axo", "pid=,ppid=,pgid=,lstart=,command="]);
+        psTable = stdout;
+      } catch {
+        // ps unavailable: an empty table makes the roots themselves the only
+        // known survivors — the ladder still clears them.
+      }
+      return { rootPids, psTable };
+    },
+    logFile: path.join(runDir, "shutdown.log"),
+    systemShutdown,
+  });
+}
+
 function zoom(direction: "in" | "out" | "reset"): void {
   const window = focusedWindow();
   if (!window) return;
@@ -517,10 +582,60 @@ if (headlessMode?.mode === "__service") {
     if (link) deliverDeepLink(link);
   });
 
-  app.on("before-quit", () => {
-    menubarResident?.destroy();
-    computerStatusMonitor?.setActive(false);
-    applyLifecycle({ type: "before-quit" });
+  // Task #7: a real quit stops the whole local background tree first. The
+  // first before-quit is intercepted (confirm → orchestrate), the second —
+  // re-entered by our own app.quit() once the tree is down — runs the
+  // original teardown. powerMonitor-driven OS shutdown skips the dialog.
+  let quitFlowStarted = false;
+  app.on("before-quit", (event) => {
+    if (quitFlowStarted) return;
+    event.preventDefault();
+    quitFlowStarted = true;
+    void (async () => {
+      const proceed = await runQuitFlow({
+        anythingRunning: async () => {
+          const status = computerStatusMonitor ? await computerStatusMonitor.read() : null;
+          return Boolean(status?.service?.running || (status?.servers?.length ?? 0) > 0);
+        },
+        // Live count, not a cached file: agent runtimes alive under the
+        // service/runner roots right now (tree closure minus the roots
+        // themselves). Returns null when the roots cannot be read.
+        agentCount: async () => {
+          const home = computerHost?.slockHome;
+          if (!home) return null;
+          const rootPids: number[] = [];
+          const servicePid = await readPidFile({ readFile }, path.join(home, "computer", "run", "service.pid"));
+          if (servicePid) rootPids.push(servicePid);
+          try {
+            for (const entry of await readdir(path.join(home, "computer", "servers"), { withFileTypes: true })) {
+              if (!entry.isDirectory()) continue;
+              const pid = await readPidFile({ readFile }, path.join(home, "computer", "servers", entry.name, "runner.pid"));
+              if (pid) rootPids.push(pid);
+            }
+          } catch { /* no servers dir */ }
+          if (rootPids.length === 0) return null;
+          try {
+            const { stdout } = await execFileAsync("ps", ["-axo", "pid=,ppid=,pgid=,lstart=,command="]);
+            const survivors = await resolveSurvivors(parsePsTable(stdout), rootPids);
+            return survivors.pids.length - survivors.roots.length;
+          } catch {
+            return null;
+          }
+        },
+        prefs: () => ({ quitNoConfirm: loadQuitNoConfirm() }),
+        savePrefs: (prefs) => saveQuitNoConfirm(prefs.quitNoConfirm),
+        orchestrateShutdown: (systemShutdown) => orchestrateQuitShutdown(systemShutdown),
+        quit: () => app.quit(),
+      });
+      if (!proceed) {
+        quitFlowStarted = false;
+        return;
+      }
+      menubarResident?.destroy();
+      computerStatusMonitor?.setActive(false);
+      applyLifecycle({ type: "before-quit" });
+      app.quit();
+    })();
   });
   app.on("window-all-closed", () => applyLifecycle({ type: "window-all-closed" }));
   // activate (Dock icon / app re-focus) reveals the window. This replaces the

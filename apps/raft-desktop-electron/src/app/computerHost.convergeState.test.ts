@@ -37,6 +37,8 @@ test("start() success clears a failed converge notice; enable() does too", async
     connectService: async () => { throw new Error("unused"); },
     convergeAppHostLifecycle: async () => ({ owner: "app", enabled: true, status: "converged", label: null, definitionPath: null, definition: null }),
     createComputerApi: () => api,
+    readProcessStartTime: async () => null,
+    rebindParentEvidence: async () => {},
     DEFAULT_UPGRADE_BASE_URL: "https://example.invalid/computer",
     fetchCdnLatestVersion: async () => null,
     resolveRaftHome: () => "/tmp/raft-host-test",
