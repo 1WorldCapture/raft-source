@@ -2667,6 +2667,7 @@ serverRouter.get("/:id/machines", async (req, res) => {
       if (!machine.isComputer) {
         return {
           ...publicMachine,
+          hostKind: null,
           computerUpgradeAvailable: null,
           computerBroadcastPolicy: null,
         };
@@ -2677,6 +2678,7 @@ serverRouter.get("/:id/machines", async (req, res) => {
           version: machine.computerVersion,
           observedAt: computerVersionObservedAt,
           provenance: computerVersionProvenance,
+          hostKind: machine.hostKind ?? undefined,
         },
         platform: normalizeComputerPlatform(machine.os),
         now: policyNow,

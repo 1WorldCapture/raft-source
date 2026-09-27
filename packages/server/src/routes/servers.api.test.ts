@@ -4763,13 +4763,16 @@ test("GET /api/servers/:id/machines projects one source-aware policy decision pe
           version,
           observedAt: new Date().toISOString(),
           provenance: "owner_connection",
+          ...(machineId === currentComputer.id ? { hostKind: "desktop_app" as const } : {}),
         };
       },
       sendComputerControl: async () => {
         throw new Error("no-broadcast machine must never reach relay");
       },
     });
+    const evaluatedHostKinds = new Map<string | null | undefined, string | undefined>();
     app.app.set("computerBroadcastPolicyEvaluator", (input: EvaluateComputerBroadcastPolicyInput) => {
+      evaluatedHostKinds.set(input.source?.version, input.source?.hostKind);
       if (input.source?.version === "1.0.4") {
         return testBroadcastPolicyDecision(input, {
           eligibility: "eligible",
@@ -4808,6 +4811,7 @@ test("GET /api/servers/:id/machines projects one source-aware policy decision pe
     const body = await res.json() as {
       machines: Array<{
         id: string;
+        hostKind: string | null;
         computerUpgradeAvailable: boolean | null;
         computerBroadcastPolicy: {
           eligibility: string;
@@ -4822,6 +4826,12 @@ test("GET /api/servers/:id/machines projects one source-aware policy decision pe
     assert.equal(body.machines.find((machine) => machine.id === oldComputer.id)?.computerUpgradeAvailable, true);
     assert.equal(body.machines.find((machine) => machine.id === currentComputer.id)?.computerUpgradeAvailable, false);
     assert.equal(body.machines.find((machine) => machine.id === rawDaemon.id)?.computerUpgradeAvailable, null);
+    // hostKind is projected for diagnosis and forwarded to the policy; raw
+    // daemons are not Computers and carry none.
+    assert.equal(body.machines.find((machine) => machine.id === oldComputer.id)?.hostKind, "standalone");
+    assert.equal(body.machines.find((machine) => machine.id === currentComputer.id)?.hostKind, "desktop_app");
+    assert.equal(body.machines.find((machine) => machine.id === rawDaemon.id)?.hostKind, null);
+    assert.equal(evaluatedHostKinds.get("1.0.5"), "desktop_app");
     assert.deepEqual(
       body.machines.find((machine) => machine.id === oldComputer.id)?.computerBroadcastPolicy,
       {

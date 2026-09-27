@@ -42,6 +42,9 @@ export interface Machine {
   // reported by the Computer and shown instead of the underlying daemon
   // version. Null/absent until reported.
   computerVersion?: string | null;
+  // Where the Computer runs (self-reported): "desktop_app" when embedded in the
+  // desktop app. Null for raw daemons; absent on older server responses.
+  hostKind?: "desktop_app" | "standalone" | null;
   // Compatibility projection of the closed server policy decision.
   // true is the only broadcastable state; false means policy denied.
   computerUpgradeAvailable?: boolean | null;

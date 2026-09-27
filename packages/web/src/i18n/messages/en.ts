@@ -1509,6 +1509,7 @@ export const en = {
   "machine.detail.computerVersion": "Computer Version",
   "machine.detail.daemonVersion": "Daemon Version",
   "machine.detail.updateAvailableParenthetical": "(update available)",
+  "machine.detail.updatesWithDesktopApp": "Updates with the desktop app",
   "machine.detail.detectedRuntimes": "Detected Runtimes",
   "machine.detail.created": "Created",
   "machine.detail.migrateToComputer": "Migrate to Computer{platform}",
@@ -1565,6 +1566,8 @@ export const en = {
   "machine.detail.restartLatestVersion": "Restart the Computer service; it is already on the latest version.",
   "machine.detail.restartAvailableUpgradeIneligible":
     "Restart remains available; this source is not currently eligible for an upgrade.",
+  "machine.detail.restartUpdatesWithDesktopApp":
+    "Restart the Computer service. This Computer updates with the desktop app.",
   "machine.detail.restartIfUnresponsive": "If this Computer looks online but stops responding, restart it.",
   "machine.detail.restartComputerService": "Restart the Computer service",
   "machine.detail.restart": "Restart",

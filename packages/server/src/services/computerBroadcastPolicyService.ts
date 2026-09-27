@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { isDeepStrictEqual } from "node:util";
-import { clearClockTimeout, setClockTimeout } from "@botiverse/raft-shared";
+import { clearClockTimeout, setClockTimeout, type ComputerHostKind } from "@botiverse/raft-shared";
 
 // Keep the existing response/snapshot field names for older Web/Computer clients.
 // They describe a Hands release selection now, not a Server-maintained allowlist.
@@ -13,6 +13,9 @@ export interface ComputerSourceFact {
   version: string | null;
   observedAt: string | null;
   provenance: ComputerSourceFactProvenance | null;
+  // Self-reported by the Computer's `ready`. Absent means standalone. Only
+  // ever used to withhold upgrades, never to admit one.
+  hostKind?: ComputerHostKind;
 }
 export interface ComputerHandsReleaseIdentity {
   releaseId: string;
@@ -28,6 +31,8 @@ export interface ComputerBroadcastPolicyDecision {
   reasonCode: "eligible" | "source_missing" | "source_unparseable" | "platform_unknown"
     | "hands_unavailable" | "hands_response_invalid" | "hands_artifact_missing"
     | "already_current" | "requested_target_mismatch"
+    // Embedded in the desktop app: its version ships with the desktop release.
+    | "app_managed"
     // Historical reason codes remain readable in stored receipts and clients.
     | "policy_row_missing" | "policy_expired";
   policyRevision: string | null;
@@ -153,6 +158,7 @@ export async function evaluateBroadcastPolicy(
     sourceProvenance: input.source?.provenance ?? null,
     platform: input.platform, targetVersion: null, targetRole: null, migrationClass: null, policyRow: null,
   };
+  if (input.source?.hostKind === "desktop_app") return { ...decision, reasonCode: "app_managed" };
   if (!input.source?.version) return { ...decision, reasonCode: "source_missing" };
   if (!versionSchema.safeParse(input.source.version).success) return { ...decision, reasonCode: "source_unparseable" };
   if (!input.platform) return { ...decision, reasonCode: "platform_unknown" };

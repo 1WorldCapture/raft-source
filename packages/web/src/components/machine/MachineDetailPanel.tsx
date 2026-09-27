@@ -20,6 +20,7 @@ import { getServerUrl } from "../../utils/server";
 import { formatRelativeTime } from "../../utils/relativeTime";
 import { getComputerCommands, getDaemonConnectCommand } from "../../utils/computerSetupCommand";
 import { canViewMachineRuntimeAccountUsage } from "../../utils/machineRuntimeUsageVisibility";
+import { isAppManagedComputer } from "../../utils/computerUpgradeIndicator";
 import ConfirmDialog from "../ConfirmDialog";
 import CreateAgentDialog from "../agent/CreateAgentDialog";
 import ComputerCommandGuide from "./ComputerCommandGuide";
@@ -805,6 +806,9 @@ export default function MachineDetailPanel({
     }
   };
 
+  // Embedded in the desktop app: no standalone upgrade; show "updates with desktop app".
+  const appManagedComputer = isAppManagedComputer(machine);
+
   // Remote Computer controls (managed Computer only). The server relays
   // a command to the machine's live connection, which forwards it to the
   // Computer service IPC (restart = restart-service, upgrade = upgrade-start).
@@ -1188,6 +1192,11 @@ export default function MachineDetailPanel({
                       {machine.computerUpgradeAvailable === true && (
                         <span className="text-xs text-brutal-orange font-bold">
                           {formatMessage({ id: "machine.detail.updateAvailableParenthetical" })}
+                        </span>
+                      )}
+                      {appManagedComputer && (
+                        <span className="text-xs text-black/40" data-testid="computer-updates-with-desktop-app">
+                          {formatMessage({ id: "machine.detail.updatesWithDesktopApp" })}
                         </span>
                       )}
                     </div>
@@ -1614,8 +1623,11 @@ export default function MachineDetailPanel({
                       const policyDenied = policy?.eligibility === "no_broadcast";
                       const legacyKnownNoUpgrade = !policy && machine.computerUpgradeAvailable === false;
                       const upgradeDisabled = !upgradeAvailable;
+                      // The desktop app ships this Computer; a standalone
+                      // reinstall would fight the app, so offer neither.
                       const showFreshInstallUpgradePath = Boolean(
                         machine.computerVersion
+                        && !appManagedComputer
                         && !upgradeAvailable
                         && !legacyKnownNoUpgrade
                         && computerFreshInstall
@@ -1640,6 +1652,8 @@ export default function MachineDetailPanel({
                           <p className="text-xs text-black/60 mb-3">
                             {!machine.computerVersion
                               ? formatMessage({ id: "machine.detail.versionStillSyncing" })
+                              : appManagedComputer
+                                ? formatMessage({ id: "machine.detail.restartUpdatesWithDesktopApp" })
                               : upgradeAvailable && controlledMigration
                                 ? formatMessage(
                                     { id: "machine.detail.restartOrControlledMigration" },
@@ -1666,24 +1680,26 @@ export default function MachineDetailPanel({
                               <RotateCcw size={14} />
                               {formatMessage({ id: "machine.detail.restart" })}
                             </button>
-                            <button
-                              onClick={() => handleComputerControl("upgrade")}
-                              disabled={upgradeDisabled}
-                              className="btn-brutal bg-brutal-pink px-3 py-2 text-sm font-bold flex items-center gap-1.5 disabled:opacity-40"
-                              title={upgradeTitle}
-                            >
-                              {legacyKnownNoUpgrade ? <CheckCircle size={14} /> : <Play size={14} />}
-                              {legacyKnownNoUpgrade
-                                ? formatMessage({ id: "machine.detail.upToDate" })
-                                : policyDenied
-                                  ? formatMessage({ id: "machine.detail.unavailable" })
-                                  : controlledMigration
-                                    ? formatMessage({ id: "machine.detail.migrate" })
-                                    : formatMessage({ id: "machine.detail.upgrade" })}
-                              {upgradeAvailable && policyTargetVersion && (
-                                <span className="text-xs font-normal">(v{policyTargetVersion})</span>
-                              )}
-                            </button>
+                            {!appManagedComputer && (
+                              <button
+                                onClick={() => handleComputerControl("upgrade")}
+                                disabled={upgradeDisabled}
+                                className="btn-brutal bg-brutal-pink px-3 py-2 text-sm font-bold flex items-center gap-1.5 disabled:opacity-40"
+                                title={upgradeTitle}
+                              >
+                                {legacyKnownNoUpgrade ? <CheckCircle size={14} /> : <Play size={14} />}
+                                {legacyKnownNoUpgrade
+                                  ? formatMessage({ id: "machine.detail.upToDate" })
+                                  : policyDenied
+                                    ? formatMessage({ id: "machine.detail.unavailable" })
+                                    : controlledMigration
+                                      ? formatMessage({ id: "machine.detail.migrate" })
+                                      : formatMessage({ id: "machine.detail.upgrade" })}
+                                {upgradeAvailable && policyTargetVersion && (
+                                  <span className="text-xs font-normal">(v{policyTargetVersion})</span>
+                                )}
+                              </button>
+                            )}
                           </div>
                           {showFreshInstallUpgradePath && computerFreshInstall && computerInstallRestartCommand && (
                             <div
