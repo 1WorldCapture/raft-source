@@ -19,7 +19,7 @@
     "dist:mac": "pnpm run build && electron-builder --mac --config electron-builder.yml --publish never",
     "dist:mac:release": "pnpm run build && electron-builder --mac --config electron-builder.release.yml --publish never",
     "verify": "pnpm run typecheck && pnpm run test:unit && pnpm run test:runtime && pnpm run test:updater",
-    "test:runtime": "node --experimental-test-module-mocks --experimental-strip-types --test src/main/appProtocol.test.ts src/main/statusMonitor.test.ts src/main/desktopAssets.test.ts src/main/statusMonitorLifecycle.test.ts src/main/upgradeInfo.test.ts",
+    "test:runtime": "node --experimental-test-module-mocks --experimental-strip-types --test src/main/appProtocol.test.ts src/main/statusMonitor.test.ts src/main/desktopAssets.test.ts src/main/statusMonitorLifecycle.test.ts src/main/upgradeInfo.test.ts src/main/embeddedComputerVersion.test.ts",
     "test:updater": "node --experimental-test-module-mocks --experimental-strip-types --test src/main/autoUpdater.test.ts"
   },
   "dependencies": {

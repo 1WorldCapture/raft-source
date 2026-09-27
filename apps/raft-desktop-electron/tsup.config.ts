@@ -1,4 +1,5 @@
 import { defineConfig } from "tsup";
+import { embeddedComputerVersionDefines } from "../../packages/computer/scripts/embeddedVersionDefines.mjs";
 
 export default defineConfig([
   {
@@ -14,6 +15,9 @@ export default defineConfig([
     // own bundle leaves shared/trace external, so Electron would otherwise try to
     // load raw .ts. Same requirement as apps/raft-computer-app.
     noExternal: ["@botiverse/raft-computer", "@botiverse/raft-shared", "@botiverse/raft-trace-client"],
+    // The inlined Computer must report its own version, not this app's
+    // package.json version (see embeddedVersionDefines.mjs).
+    define: embeddedComputerVersionDefines(),
     // raft-computer's service.ts uses createRequire(import.meta.url); provide it
     // in the ESM bundle banner.
     banner: {
