@@ -2,13 +2,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Modal, Pressable, StyleSheet, View, useWindowDimensions } from "react-native";
 import { Image } from "expo-image";
 import { ArrowLeft, Download } from "lucide-react-native";
-import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import { Gesture, GestureDetector, GestureHandlerRootView } from "react-native-gesture-handler";
 import Animated, {
-  runOnJS,
   useAnimatedStyle,
   useSharedValue,
   withTiming,
 } from "react-native-reanimated";
+// scheduleOnRN is a module-level host function so the worklet compiler keeps it
+// intact. The reanimated runOnJS gets captured into the worklet closure and
+// remote-unpacked, and calling it there crashes the app at runtime.
+import { scheduleOnRN } from "react-native-worklets";
 import { StaleRequestError } from "../api/client";
 import { attachmentDownloadUrl, rewriteAttachmentUrl } from "../api/attachmentUrl";
 import {
@@ -52,9 +55,11 @@ export function ImageViewer({
   onClose: () => void;
 }) {
   const t = useT();
+  const { width: pagerWidth } = useWindowDimensions();
   const [current, setCurrent] = useState(index);
   const [zoomed, setZoomed] = useState(false);
   const [sharing, setSharing] = useState(false);
+  const [shareError, setShareError] = useState(false);
   const listRef = useRef<Animated.FlatList<ViewerPageData> | null>(null);
   const pages = useMemo<ViewerPageData[]>(() => images.map((attachment) => ({ attachment })), [images]);
 
@@ -66,6 +71,7 @@ export function ImageViewer({
     const attachment = images[current];
     if (!attachment.id || !origin || sharing) return;
     setSharing(true);
+    setShareError(false);
     try {
       await downloadAndShareAttachment({
         url: attachmentDownloadUrl(origin, attachment.id),
@@ -76,9 +82,7 @@ export function ImageViewer({
         mimeType: attachment.mimeType,
       });
     } catch (error) {
-      if (!(error instanceof StaleRequestError)) {
-        // The share sheet failing is non-fatal inside the viewer; keep it open.
-      }
+      if (!(error instanceof StaleRequestError)) setShareError(true);
     } finally {
       setSharing(false);
     }
@@ -86,7 +90,8 @@ export function ImageViewer({
 
   return (
     <Modal animationType="fade" onRequestClose={onClose} statusBarTranslucent visible>
-      <View style={styles.screen}>        <View style={styles.header}>
+      {/* RNGH gestures never attach inside a Modal without its own root view. */}
+      <GestureHandlerRootView style={styles.screen}>        <View style={styles.header}>
           <Pressable accessibilityLabel="Back" hitSlop={8} onPress={onClose} style={styles.headerButton}>
             <ArrowLeft color={color.white} size={22} strokeWidth={2.5} />
           </Pressable>
@@ -101,8 +106,10 @@ export function ImageViewer({
           <Animated.FlatList
             ref={listRef}
             data={pages}
+            getItemLayout={(_, i) => ({ index: i, length: pagerWidth, offset: pagerWidth * i })}
             horizontal
             initialNumToRender={Math.min(pages.length, index + 2)}
+            initialScrollIndex={Math.min(index, pages.length - 1)}
             keyExtractor={(item, i) => item.attachment.id ?? `${i}-${item.attachment.filename}`}
             onMomentumScrollEnd={(event) => {
               const next = Math.round(event.nativeEvent.contentOffset.x / event.nativeEvent.layoutMeasurement.width);
@@ -131,8 +138,13 @@ export function ImageViewer({
               </AppText>
             </View>
           ) : null}
+          {shareError ? (
+            <View pointerEvents="none" style={styles.shareErrorHost}>
+              <AppText style={styles.shareError}>{t("mobile.attachments.failed")}</AppText>
+            </View>
+          ) : null}
         </View>
-      </View>
+      </GestureHandlerRootView>
     </Modal>
   );
 }
@@ -221,9 +233,9 @@ function ViewerPage({
     .onEnd(() => {
       "worklet";
       if (scale.value <= 1.01) {
-        runOnJS(setZoomed)(false);
+        scheduleOnRN(setZoomed, false);
       } else {
-        runOnJS(setZoomed)(true);
+        scheduleOnRN(setZoomed, true);
       }
     });
 
@@ -236,7 +248,7 @@ function ViewerPage({
       scale.value = withTiming(target);
       translateX.value = withTiming(0);
       translateY.value = withTiming(0);
-      runOnJS(setZoomed)(target > 1);
+      scheduleOnRN(setZoomed, target > 1);
     });
 
   // Drag while zoomed: pan the over-scroll rectangle, clamped to the edges.
@@ -284,7 +296,7 @@ function ViewerPage({
       "worklet";
       if (isDismissSwipe(event.translationX, event.translationY)) {
         backdrop.value = withTiming(0);
-        runOnJS(onClose)();
+        scheduleOnRN(onClose);
         return;
       }
       dragY.value = withTiming(0);
@@ -306,7 +318,9 @@ function ViewerPage({
   }));
 
   return (
-    <View style={styles.page}>
+    // Horizontal pagers size items by content, so the page needs an explicit
+    // viewport width or the cell collapses to zero and renders nothing.
+    <View style={[styles.page, { width: viewportWidth }]}>
       <Animated.View style={[StyleSheet.absoluteFill, styles.backdrop, backdropStyle]} />
       <GestureDetector gesture={gesture}>
         <Animated.View style={styles.pageContent}>
@@ -407,6 +421,21 @@ const styles = StyleSheet.create({
     backgroundColor: color.viewerChip,
     borderRadius: 12,
     bottom: 24,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    position: "absolute",
+  },
+  shareError: {
+    color: color.red,
+    fontSize: 13,
+    fontWeight: "600",
+    textAlign: "center",
+  },
+  shareErrorHost: {
+    alignSelf: "center",
+    backgroundColor: color.viewerChip,
+    borderRadius: 12,
+    bottom: 56,
     paddingHorizontal: 10,
     paddingVertical: 4,
     position: "absolute",
