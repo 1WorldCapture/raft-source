@@ -1510,13 +1510,18 @@ attachmentPublicRouter.get("/:id", async (req, res) => {
     }
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Content-Disposition", contentDisposition);
+    // Helmet defaults CORP to same-origin, which makes browsers refuse these
+    // bytes in cross-origin pages (the desktop app's app:// origin, or a web
+    // app on another port) when files are served from local storage. Match the
+    // S3 presigned-URL path, which carries no CORP. Access is still enforced
+    // by the ACL/token checks above.
+    res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
     if (useInlinePreviewDisposition) {
       // Helmet's default SAMEORIGIN header blocks local API-origin PDFs from
       // being framed by the web app during development. Inline preview URLs are
       // still ACL/token scoped; downloads continue to use attachment disposition.
       res.removeHeader("X-Frame-Options");
       res.setHeader("Content-Security-Policy", buildAttachmentInlinePreviewContentSecurityPolicy());
-      res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
       res.setHeader("Referrer-Policy", "no-referrer");
     }
     await streamStorageResponse(stream, res);
