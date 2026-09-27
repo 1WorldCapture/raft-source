@@ -24,7 +24,8 @@ import { clearResidentConnectedMarker, readResidentConnectedMarker, writeResiden
 import { residentCoreIdentity } from "./residentCoreIdentity.js";
 import { mkdir, readFile, writeFile, open, stat, unlink } from "node:fs/promises";
 import { dirname, join as joinPath } from "node:path";
-import {resolveRaftHome,
+import {
+  resolveRaftHome,
   serviceRunDir,
   servicePidPath,
   serviceLogPath,
@@ -32,7 +33,7 @@ import {resolveRaftHome,
   serverRunnerLogPath,
   assertValidServerId,
   serverConnectedMarkerPath,
-    serviceVersionPath,
+  serviceVersionPath,
 } from "./paths.js";
 import {
   listManagedServerIds,
