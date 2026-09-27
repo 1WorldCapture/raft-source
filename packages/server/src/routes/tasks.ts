@@ -8,6 +8,15 @@ import type { Server as SocketServer } from "socket.io";
 import type { AgentOrchestrator } from "../services/agentOrchestrator.js";
 import { authorizeTaskAction, isTaskStatus, type ServerId, type TaskAction, type TaskStatus } from "@botiverse/raft-shared";
 import { UUID_RE } from "../lib/messageId.js";
+import {
+  decodeTaskBoardCursor,
+  encodeTaskBoardCursor,
+  listBoardTasks,
+  TASK_BOARD_DEFAULT_LIMIT,
+  TASK_BOARD_MAX_IDS,
+  TASK_BOARD_MAX_LIMIT,
+  type TaskBoardCursor,
+} from "../services/taskBoardService.js";
 import { emitTaskCreated, emitTaskDeleted, emitTaskMessageNew, emitTaskUpdated } from "../services/taskRealtimeEvents.js";
 import { actorHasServerCapabilityInServer, getActorServerRoleInServer } from "../lib/actorPermissions.js";
 import {
@@ -114,9 +123,91 @@ function decodeServerTasksCursor(raw: string): { channelId: string; taskNumber: 
   }
 }
 
+/**
+ * `view=board`: tasks ordered by latest activity with thread facts for the
+ * mobile progress board. Returns false when the request is not a board read.
+ * Contract: #mobile-tasks-ux task #1 (msg 57421634 + addenda 2c1c8061).
+ */
+async function handleBoardView(req: Request, res: Response): Promise<boolean> {
+  if (req.query.view === undefined) return false;
+  if (req.query.view !== "board") {
+    res.status(400).json({ error: "Invalid view value" });
+    return true;
+  }
+  const one = (value: unknown): string | undefined | null =>
+    value === undefined ? undefined : typeof value === "string" ? value : null;
+
+  const statusRaw = one(req.query.status);
+  let statuses: TaskStatus[] | undefined;
+  if (statusRaw === null) {
+    res.status(400).json({ error: "Invalid status value" });
+    return true;
+  }
+  if (statusRaw !== undefined) {
+    const parts = statusRaw.split(",").map((part) => part.trim()).filter(Boolean);
+    if (parts.length === 0 || !parts.every(isTaskStatus)) {
+      res.status(400).json({ error: "Invalid status value" });
+      return true;
+    }
+    statuses = [...new Set(parts)] as TaskStatus[];
+  }
+
+  const sortRaw = one(req.query.sort);
+  if (sortRaw !== undefined && sortRaw !== "activity") {
+    res.status(400).json({ error: "Invalid sort value" });
+    return true;
+  }
+
+  const limitRaw = one(req.query.limit);
+  let limit = TASK_BOARD_DEFAULT_LIMIT;
+  if (limitRaw !== undefined) {
+    if (limitRaw === null || !/^\d+$/.test(limitRaw) || Number(limitRaw) < 1 || Number(limitRaw) > TASK_BOARD_MAX_LIMIT) {
+      res.status(400).json({ error: "Invalid limit value" });
+      return true;
+    }
+    limit = Number(limitRaw);
+  }
+
+  const cursorRaw = one(req.query.cursor);
+  let cursor: TaskBoardCursor | null = null;
+  if (cursorRaw !== undefined) {
+    cursor = cursorRaw === null ? null : decodeTaskBoardCursor(cursorRaw);
+    if (!cursor) {
+      res.status(400).json({ error: "Invalid cursor" });
+      return true;
+    }
+  }
+
+  const completedAfterRaw = one(req.query.completedAfter);
+  let completedAfter: Date | null = null;
+  if (completedAfterRaw !== undefined) {
+    completedAfter = completedAfterRaw === null ? null : new Date(completedAfterRaw);
+    if (!completedAfter || Number.isNaN(completedAfter.getTime())) {
+      res.status(400).json({ error: "Invalid completedAfter value" });
+      return true;
+    }
+  }
+
+  const idsRaw = one(req.query.ids);
+  let ids: string[] | null = null;
+  if (idsRaw !== undefined) {
+    const parts = idsRaw === null ? [] : [...new Set(idsRaw.split(",").map((part) => part.trim()).filter(Boolean))];
+    if (parts.length === 0 || parts.length > TASK_BOARD_MAX_IDS || !parts.every((id) => UUID_RE.test(id))) {
+      res.status(400).json({ error: "Invalid ids value" });
+      return true;
+    }
+    ids = parts;
+  }
+
+  const page = await listBoardTasks(req.serverId!, req.userId!, { statuses, limit, cursor, completedAfter, ids });
+  res.json({ tasks: page.tasks, next_cursor: page.nextCursor ? encodeTaskBoardCursor(page.nextCursor) : null });
+  return true;
+}
+
 // List all channel tasks for the current server
 taskRouter.get("/server", async (req, res) => {
   try {
+    if (await handleBoardView(req, res)) return;
     // Validate + narrow the optional ?status filter (was an `as TaskStatus` cast).
     const statusParam = req.query.status;
     let statusFilter: TaskStatus | undefined;
