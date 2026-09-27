@@ -59,7 +59,7 @@ const markedStyles: MarkedStyles = {
  *  HTML as inert text. Mermaid fences degrade to ordinary code blocks. */
 class AttachmentMarkdownRenderer extends Renderer {
   override link(children: string | ReactNode[], href: string, styles?: TextStyle, title?: string) {
-    if (!isHttpUrl(href)) return this.text(children, styles);
+    if (!isHttpUrl(href)) return this.text(children, markedStyles.text);
     return super.link(children, href, styles, title);
   }
 
