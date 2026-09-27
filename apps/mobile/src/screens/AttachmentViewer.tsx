@@ -7,6 +7,7 @@ import { attachmentPreviewCache } from "../attachments/previewSession";
 import { useT } from "../i18n/provider";
 import type { MessageAttachment } from "../model/messages";
 import { downloadAndShareAttachment } from "./attachmentFile";
+import { MarkdownPreview } from "./MarkdownPreview";
 import { TextPreview } from "./TextPreview";
 import { AppText } from "../ui/text";
 import { HeaderIconButton, PanelHeader } from "../ui/PanelHeader";
@@ -74,7 +75,8 @@ export function AttachmentViewer({
       return data;
     }).then((loaded) => {
       if (cancelled) return;
-      if (loaded.status !== "ok" || (loaded.data.kind === "text" && loaded.data.text.length === 0)) {
+      if (loaded.status !== "ok" || (loaded.data.kind === "text" && loaded.data.text.length === 0)
+        || (loaded.data.kind === "markdown" && loaded.data.markdown.length === 0)) {
         setPhase("unsupported");
         return;
       }
@@ -113,6 +115,10 @@ export function AttachmentViewer({
     ? { text: preview.data.text, truncated: preview.truncated === true }
     : null;
 
+  const markdownPreview = preview?.status === "ok" && preview.data.kind === "markdown"
+    ? { markdown: preview.data.markdown, truncated: preview.truncated === true }
+    : null;
+
   const shareButton = (
     <HeaderIconButton accessibilityLabel={t("mobile.preview.share")} onPress={() => void share()} wide>
       <AppText style={styles.shareLabel}>{sharing ? t("mobile.attachments.downloading") : t("mobile.preview.share")}</AppText>
@@ -128,7 +134,7 @@ export function AttachmentViewer({
           subtitle={formatAttachmentSize(attachment.sizeBytes)}
           title={attachment.filename}
         />
-        <View style={[styles.body, textPreview ? styles.bodyText : null]}>
+        <View style={[styles.body, textPreview || markdownPreview ? styles.bodyText : null]}>
           {shareError ? <AppText style={styles.shareError}>{t("mobile.attachments.failed")}</AppText> : null}
           {phase === "loading" ? (
             <View style={styles.center}>
@@ -157,6 +163,9 @@ export function AttachmentViewer({
           ) : null}
           {phase === "ready" && textPreview ? (
             <TextPreview text={textPreview.text} truncated={textPreview.truncated} />
+          ) : null}
+          {phase === "ready" && markdownPreview ? (
+            <MarkdownPreview markdown={markdownPreview.markdown} truncated={markdownPreview.truncated} />
           ) : null}
           {phase === "ready" && !textPreview ? (
             <View style={styles.placeholder}>
