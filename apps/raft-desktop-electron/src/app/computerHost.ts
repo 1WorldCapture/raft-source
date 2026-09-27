@@ -32,6 +32,8 @@ import {
 } from "@botiverse/raft-computer/lib";
 import { createUpgradeInfoReader } from "../main/upgradeInfo.js";
 import { isValidEnableInput, type EnableComputerInput } from "./enableInput.js";
+import { reduceConvergeFailure, type ConvergeState } from "./convergeState.js";
+import { runServiceRecycle } from "./serviceRecycle.js";
 
 // Mirrors `paths.ts` CURRENT_SCHEMA_VERSION (readers tolerate a missing value,
 // but we stamp it like login.ts does).
@@ -69,13 +71,21 @@ class ComputerHost {
     () => fetchCdnLatestVersion(DEFAULT_UPGRADE_BASE_URL),
   );
   private lastStatus: ComputerStatusReport | null = null;
+  /**
+   * Outcome of the app-ready host converge (and of later recycle attempts),
+   * surfaced through getStatus() so the renderer can explain WHY the local
+   * Computer isn't hosted by this app — e.g. a version-skewed resident that
+   * start() refuses to adopt. null until the first converge settles.
+   */
+  private convergeState: ConvergeState | null = null;
 
   /**
    * Converge the app-owned host lifecycle (this app becomes the login item that
    * owns "launch at login"; any CLI-owned launchd carrier is removed), then, if
    * launch-at-login is on and there is already an attachment, boot the detached
    * service. Called once at app-ready. Failures are returned, not thrown, so a
-   * lifecycle hiccup never blocks the chat app from starting.
+   * lifecycle hiccup never blocks the chat app from starting — but they ARE
+   * recorded in convergeState for the renderer.
    */
   async converge(): Promise<{ ok: boolean; error?: string }> {
     try {
@@ -97,16 +107,21 @@ class ComputerHost {
           await this.api.start({ serverId: null, serverLabel: null });
         }
       }
+      this.convergeState = { ok: true };
       return { ok: true };
     } catch (error) {
-      return { ok: false, error: messageOf(error) };
+      const failure = reduceConvergeFailure("Local Computer service takeover failed: ", error);
+      this.convergeState = { ok: false, ...failure };
+      return { ok: false, error: failure.message };
     }
   }
 
-  async getStatus(): Promise<ComputerStatusReport> {
+  async getStatus(): Promise<ComputerStatusReport & { converge?: ConvergeState }> {
     const status = await this.api.getStatus();
     this.lastStatus = status;
-    return status;
+    // converge rides the existing status snapshot — no new IPC channel. It is
+    // omitted while null so pre-converge frames look exactly like before.
+    return this.convergeState === null ? status : { ...status, converge: this.convergeState };
   }
 
   /**
@@ -141,6 +156,45 @@ class ComputerHost {
   /** Bring a degraded service back (the reference app's "restart"). */
   async restart(): Promise<void> {
     await this.api.resetService();
+  }
+
+  /**
+   * Recycle the local service for real: stop it, confirm it exited, then start
+   * it from THIS app — the remedy for a version-skewed resident that
+   * converge/start refuses to adopt (the card's "Restart" only clears
+   * degraded state and never restarts the process). Disruptive: agents on this
+   * machine go offline briefly; the renderer confirms before invoking.
+   * Failures surface through the same convergeState channel (a failed start
+   * leaves the machine stopped, so the retry must be start-only).
+   */
+  async recycleService(): Promise<void> {
+    await runServiceRecycle({
+      stop: async () => {
+        await this.api.stop();
+      },
+      start: async () => {
+        await this.api.start({ serverId: null, serverLabel: null });
+      },
+      isCleared: async () => {
+        try {
+          const status = await this.api.getStatus();
+          return status.service?.running !== true;
+        } catch {
+          // An unreachable service reports nothing — treat as cleared; start()
+          // will surface any real problem.
+          return true;
+        }
+      },
+      delay: (ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
+      settle: (state) => {
+        this.convergeState = state;
+      },
+    });
+  }
+
+  /** Re-run the startup host converge (the generic failure retry path). */
+  async retryConverge(): Promise<void> {
+    await this.converge();
   }
 
   /** The latest Computer version on the CDN (null if unreachable). The renderer

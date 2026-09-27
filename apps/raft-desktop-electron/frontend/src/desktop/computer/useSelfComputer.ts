@@ -32,6 +32,10 @@ export interface ComputerBridge {
   start: () => Promise<void>;
   stop: () => Promise<void>;
   restart: () => Promise<void>;
+  /** Real stop→start recycle (version-skew remedy); disruptive — confirm first. */
+  recycle?: () => Promise<void>;
+  /** Re-run the startup host converge (generic failure retry path). */
+  retryConverge?: () => Promise<void>;
   getUpgradeInfo?: () => Promise<{ latestVersion: string | null }>;
   upgrade?: () => Promise<void>;
   upgradeViaFreshInstall?: (version: string) => Promise<void>;
@@ -45,6 +49,8 @@ export function getComputerBridge(): ComputerBridge | null {
 
 interface LocalStatusShape {
   servers?: { machineId?: string | null }[];
+  /** Mirror of the main-process ConvergeState (see src/app/convergeState.ts). */
+  converge?: { ok: boolean; code?: string; message?: string };
 }
 
 /**

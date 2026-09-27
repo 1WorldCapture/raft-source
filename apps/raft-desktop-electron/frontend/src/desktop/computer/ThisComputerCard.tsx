@@ -28,6 +28,7 @@ import StatusDot from "@web/components/ui/StatusDot";
 import { MachineRunLabel } from "@web/components/machine/MachineRunLabel";
 import { getComputerBridge, useSelfMachine } from "./useSelfComputer";
 import {
+  deriveConvergeNotice,
   deriveControls,
   freshInstallCommand,
   routeUpdateAction,
@@ -35,7 +36,7 @@ import {
   type ManagementModel,
 } from "./thisComputerLogic";
 
-type Operation = "start" | "stop" | "restart" | "upgrade" | "enable";
+type Operation = "start" | "stop" | "restart" | "upgrade" | "enable" | "recycle" | "retry";
 
 /** Turn a raw error (incl. Electron IPC strings) into one short, human line. */
 function friendlyError(raw: string): string {
@@ -56,6 +57,10 @@ export default function ThisComputerCard() {
   const [latestVersion, setLatestVersion] = useState<string | null>(null);
   const [management, setManagement] = useState<ManagementModel>("unknown");
   const [confirmFresh, setConfirmFresh] = useState(false);
+  // Recycle confirmation mirrors confirmFresh: recycling the local Computer
+  // service offlines every agent on this machine, so it never fires on the
+  // first click.
+  const [confirmRecycle, setConfirmRecycle] = useState(false);
   const [manualCmd, setManualCmd] = useState<string | null>(null);
   const [busy, setBusy] = useState<Operation | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -216,6 +221,55 @@ export default function ThisComputerCard() {
           {error ? (
             <div className="mb-1 text-[11px] font-medium text-brutal-orange">{friendlyError(error)}</div>
           ) : null}
+          {(() => {
+            // Why isn't this app hosting the local Computer? (e.g. a
+            // version-skewed resident it refuses to adopt — invisible before
+            // this surfaced.) One recovery action, per deriveConvergeNotice.
+            const notice = deriveConvergeNotice(status?.converge);
+            if (!notice) return null;
+            return (
+              <div className="mb-1 text-[11px] font-medium text-brutal-orange">
+                <div>{notice.message}</div>
+                {notice.action === "recycle" && bridge.recycle ? (
+                  confirmRecycle ? (
+                    <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                      <span className="text-black/60">Agents on this Mac will briefly go offline.</span>
+                      <Button
+                        tone="orange"
+                        size="xs"
+                        disabled={busy != null}
+                        title="Stop the current local service and start it from this app"
+                        onClick={() => {
+                          setConfirmRecycle(false);
+                          runAction("recycle", () => bridge.recycle!());
+                        }}
+                      >
+                        {actionLabel("recycle", "Restart service")}
+                      </Button>
+                      <Button size="xs" disabled={busy != null} onClick={() => setConfirmRecycle(false)}>
+                        Cancel
+                      </Button>
+                    </div>
+                  ) : (
+                    <Button tone="orange" size="xs" disabled={busy != null} className="mt-1" onClick={() => setConfirmRecycle(true)}>
+                      {actionLabel("recycle", "Restart service")}
+                    </Button>
+                  )
+                ) : notice.action === "start" ? (
+                  <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                    <span className="text-black/60">The old service is already stopped.</span>
+                    <Button size="xs" disabled={busy != null} onClick={() => runAction("start", () => bridge.start())}>
+                      {actionLabel("start", "Start")}
+                    </Button>
+                  </div>
+                ) : notice.action === "retry-converge" && bridge.retryConverge ? (
+                  <Button size="xs" disabled={busy != null} className="mt-1" onClick={() => runAction("retry", () => bridge.retryConverge!())}>
+                    {actionLabel("retry", "Retry")}
+                  </Button>
+                ) : null}
+              </div>
+            );
+          })()}
           {upgrading ? (
             <div className="text-[11px] font-medium text-brutal-orange">
               Updating… {upgrading.phase}
