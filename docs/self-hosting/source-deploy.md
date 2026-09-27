@@ -197,7 +197,7 @@ ELECTRON_SKIP_BINARY_DOWNLOAD=1 pnpm install --frozen-lockfile
 | `TRUST_PROXY` | 否* | 信任几层反向代理的 `X-Forwarded-For`（跳数、true/false 或地址列表）。**放在 nginx 后面时必须设置**，否则所有请求的来源 IP 都是 127.0.0.1，限流会把所有用户算成同一个人 | `1` |
 | `SERVER_URL` | 是 | 服务端对外地址：daemon 回连、OAuth 回调默认值、分享页都用它。填**公开地址**（nginx 的端口），不是内部端口 | `http://raft.example.internal:3001` |
 | `APP_URL` | 是 | 用户访问 Web 的地址：邮件链接、设备登录、推送链接等都用它。**必须是唯一的 Web 入口**（和 `SERVER_URL` 同一个来源），见第 9 节 | `http://raft.example.internal:3001` |
-| `CORS_ORIGIN` | 是 | 允许的浏览器来源，逗号分隔。Web 从哪些地址打开，就都列上 | `http://raft.example.internal:3001` |
+| `CORS_ORIGIN` | 是 | 允许的浏览器来源，逗号分隔。Web 的入口地址要列上；**有桌面端用户时必须加上桌面端的页面来源 `app://raft`**，否则桌面端登录（`/api/auth/login` 的预检）会被浏览器拦下。已登录的桌面端只做 token 刷新时可能暂时看不出问题，直到需要重新登录 | `http://raft.example.internal:3001,app://raft` |
 | `NODE_ENV` | 否 | 自托管保持不设或 `development`。设为 `production` 会改变原生推送的证明校验、翻译服务、Slack Bridge 本地运行时等行为，需要单独评估 | — |
 | `REDIS_URL` | 否 | 启用 Redis（多副本能力） | `redis://127.0.0.1:6379` |
 | `SCOPE_ATTESTATION_SECRET` | 否 | 给外部 worker（trace 上传）签发证明的密钥，必须和 worker 一致 | `<随机串>` |
@@ -537,6 +537,7 @@ ops/self-host/rollback.sh <backup-dir>      # 回到指定备份
 | 大文件上传失败（413） | `client_max_body_size` 太小 |
 | 某个响应没有 gzip | 小于 1KB，或是图片/二进制，属于正常；用访问日志的 `gz=` 核对 |
 | Web 上**附件图片显示不出来**（浏览器控制台有 `ERR_BLOCKED_BY_RESPONSE.NotSameOrigin`） | 页面的来源和附件地址（`SERVER_URL`）不同，例如从另一个端口打开了 Web。统一入口：旧端口放进 `RAFT_REDIRECT_PORTS` 做 301 跳转，`APP_URL` 改成统一入口（第 9 节） |
+| 桌面端登录报 `blocked by CORS policy`（来源 `app://raft`） | `CORS_ORIGIN` 缺少 `app://raft`。加上后重启服务端，用 `curl -si -X OPTIONS <公开地址>/api/auth/login -H 'Origin: app://raft' -H 'Access-Control-Request-Method: POST'` 确认响应带 `Access-Control-Allow-Origin: app://raft` |
 | 从外部能直接访问内部端口 | `.env` 没有 `HOST=127.0.0.1` |
 | Agent 的环境里能看到 `DATABASE_URL` 等 | daemon 是从带着这些变量的 shell 启动的：用干净环境 `pm2 delete` + `pm2 start --only raft-daemon`，再 `pm2 save`（第 10 节）。考虑轮换泄漏的密钥 |
 | 手机 App 连不上 `http://` 地址 | Android 默认禁止明文 http（第 16 节） |
