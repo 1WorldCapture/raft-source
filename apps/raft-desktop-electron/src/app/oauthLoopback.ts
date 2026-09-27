@@ -19,6 +19,7 @@
 import { createServer } from "node:http";
 import type { Server } from "node:http";
 import { AddressInfo } from "node:net";
+import { CONFIGURED_API_ORIGIN, isOfficialApiBuild } from "./configuredApiOrigin.js";
 
 const DONE_PATH = "/auth/done";
 const TIMEOUT_MS = 5 * 60 * 1000; // the user has 5 minutes to finish in the browser
@@ -49,7 +50,10 @@ const HANDOFF_HTML = `<!doctype html><html><head><meta charset="utf-8"><title>Ra
 // The value crosses the IPC/renderer trust boundary, so it is validated in the
 // main process against known OAuth provider hosts (+ the API hosts, for any
 // API-hosted authorize intermediate) — never a bare "is a string" check.
-const AUTHORIZATION_HOSTS: ReadonlySet<string> = new Set([
+// Self-hosted builds additionally trust the configured API origin: its host
+// over https like any allowlisted host, plus the exact origin itself even over
+// http (an http self-hosted server can only host its authorize page over http).
+const BASE_AUTHORIZATION_HOSTS: ReadonlySet<string> = new Set([
   "accounts.google.com",
   "github.com",
   "appleid.apple.com",
@@ -57,7 +61,21 @@ const AUTHORIZATION_HOSTS: ReadonlySet<string> = new Set([
   "api-aws-staging.botiverse.dev",
 ]);
 
-export function isAllowedAuthorizationUrl(raw: unknown): boolean {
+function authorizationHosts(configuredOrigin: string): ReadonlySet<string> {
+  const hosts = new Set<string>(BASE_AUTHORIZATION_HOSTS);
+  if (!isOfficialApiBuild(configuredOrigin)) {
+    try {
+      hosts.add(new URL(configuredOrigin).hostname);
+    } catch {
+      // An unparseable configured origin contributes no extra trust; the
+      // official hosts keep working. (Build config validation makes this
+      // unreachable for real builds; parameterized tests may pass anything.)
+    }
+  }
+  return hosts;
+}
+
+export function isAllowedAuthorizationUrl(raw: unknown, configuredOrigin: string = CONFIGURED_API_ORIGIN): boolean {
   if (typeof raw !== "string") return false;
   let url: URL;
   try {
@@ -65,9 +83,13 @@ export function isAllowedAuthorizationUrl(raw: unknown): boolean {
   } catch {
     return false;
   }
-  if (url.protocol !== "https:") return false;
   if (url.username || url.password) return false;
-  return AUTHORIZATION_HOSTS.has(url.hostname);
+  // The configured origin is trusted exactly as configured — scheme, host and
+  // port — so a self-hosted http backend may serve its own authorize URLs over
+  // http, while no other origin gains an http allowance.
+  if (url.origin === configuredOrigin) return true;
+  if (url.protocol !== "https:") return false;
+  return authorizationHosts(configuredOrigin).has(url.hostname);
 }
 
 interface Attempt {

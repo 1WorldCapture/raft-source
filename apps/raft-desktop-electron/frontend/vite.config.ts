@@ -2,12 +2,18 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
+import { raftCspPlugin, resolveBuildApiConfig } from "../buildConfig.mjs";
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
 
+// Single source (buildConfig.mjs): the API origin from VITE_API_URL, defaulting
+// to the official production backend. Self-hosted builds additionally widen the
+// index.html CSP by exactly the configured origin via raftCspPlugin.
+const apiConfig = resolveBuildApiConfig();
+
 export default defineConfig({
   root: dir,
-  plugins: [react()],
+  plugins: [react(), raftCspPlugin(apiConfig)],
   // Bundle the web app's static assets (brand icons, etc.) so components that
   // reference /brand/... resolve under the app:// origin.
   publicDir: path.resolve(dir, "../../../packages/web/public"),
@@ -29,10 +35,8 @@ export default defineConfig({
     },
   },
   define: {
-    // The bundled frontend talks directly to the production backend.
-    "import.meta.env.VITE_API_URL": JSON.stringify(
-      process.env.VITE_API_URL ?? "https://api.raft.build",
-    ),
+    // The bundled frontend talks directly to the backend baked at build time.
+    "import.meta.env.VITE_API_URL": JSON.stringify(apiConfig.apiOrigin),
     // The reused web version util reads this; provide the desktop app version.
     "import.meta.env.VITE_APP_VERSION": JSON.stringify(
       process.env.VITE_APP_VERSION ?? "0.1.0-desktop",

@@ -32,6 +32,14 @@ export type UpdateStatus =
 
 interface UpdaterDeps {
   markQuitting(): void;
+  /**
+   * False for self-hosted builds (VITE_API_URL configured to a non-official
+   * origin): this feed publishes the official app, and applying an update
+   * would replace a self-hosted build with an official one pointed at the
+   * official backend. Injected by the caller (src/app/index.ts) so this
+   * module stays free of build-config imports. Defaults to true.
+   */
+  updaterAllowed?: boolean;
 }
 
 type ElectronUpdater = typeof import("electron-updater")["autoUpdater"];
@@ -46,7 +54,8 @@ let lastProgressAt = 0;
 let lastProgressPct = -1;
 const listeners = new Set<(status: UpdateStatus) => void>();
 
-function hasUpdateConfig(): boolean {
+function hasUpdateConfig(deps: UpdaterDeps): boolean {
+  if (deps.updaterAllowed === false) return false;
   // Packaged builds ship app-update.yml next to the app resources; a dev
   // override can live at the repo root as dev-app-update.yml.
   if (app.isPackaged) {
@@ -144,7 +153,7 @@ function wireEvents(autoUpdater: ElectronUpdater, deps: UpdaterDeps): void {
 export function initializeAutoUpdater(deps: UpdaterDeps): void {
   if (started) return;
   started = true;
-  if (!hasUpdateConfig()) {
+  if (!hasUpdateConfig(deps)) {
     setStatus({ state: "unsupported" });
     return;
   }
@@ -165,7 +174,7 @@ export function initializeAutoUpdater(deps: UpdaterDeps): void {
  * outcomes so the menu item always gives feedback; automatic checks stay silent.
  */
 export async function checkForUpdatesManually(deps: UpdaterDeps): Promise<void> {
-  if (!hasUpdateConfig()) {
+  if (!hasUpdateConfig(deps)) {
     dialog.showMessageBox({
       type: "info",
       message: "Updates are not available in this build",
@@ -217,7 +226,7 @@ export function applyDownloadedUpdate(deps: UpdaterDeps): boolean {
  * flows through the status stream (no native dialogs, unlike the menu item).
  */
 export async function triggerBackgroundCheck(deps: UpdaterDeps): Promise<void> {
-  if (!hasUpdateConfig()) return;
+  if (!hasUpdateConfig(deps)) return;
   const autoUpdater = await loadInstance(deps);
   await autoUpdater?.checkForUpdates().catch(() => {});
 }

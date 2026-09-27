@@ -31,6 +31,7 @@ import type { LifecycleEvent } from "../main/lifecycle.js";
 import { loadZoomLevel, saveZoomLevel } from "../main/viewPrefs.js";
 import { loadWindowState, trackWindowState } from "../main/windowState.js";
 import { armOAuthLoopback, cancelOAuthLoopback, isAllowedAuthorizationUrl } from "./oauthLoopback.js";
+import { buildApiOrigins, isOfficialApiBuild } from "./configuredApiOrigin.js";
 import { createOAuthCoordinator } from "./oauthCoordinator.js";
 import { ComputerHost } from "./computerHost.js";
 import { installStatusMonitorLifecycle } from "../main/statusMonitorLifecycle.js";
@@ -133,10 +134,10 @@ function flushDeepLinks(): void {
 // own backend, inject permissive CORS headers onto the API's responses so the
 // browser accepts them (this is the standard Electron approach for a bundled
 // first-party client; it does not weaken the API itself).
-const API_ORIGINS = new Set([
-  "https://api.raft.build",
-  "https://api-aws-staging.botiverse.dev",
-]);
+// Self-hosted builds (VITE_API_URL configured to a non-official origin) bridge
+// exactly that one extra origin — never bare http:, and look-alike hosts stay
+// rejected by the parsed-origin matching below (see configuredApiOrigin.ts).
+const API_ORIGINS = buildApiOrigins();
 
 function installApiCorsBridge(): void {
   session.defaultSession.webRequest.onHeadersReceived({ urls: [...API_ORIGINS].map((origin) => `${origin}/*`) }, (details, callback) => {
@@ -268,7 +269,7 @@ function broadcastAppUpdateStatus(status: unknown): void {
   }
 }
 
-function registerAppUpdateIpc(deps: { markQuitting(): void }): void {
+function registerAppUpdateIpc(deps: { markQuitting(): void; updaterAllowed?: boolean }): void {
   ipcMain.handle("app-update:status", () => getUpdateStatus());
   ipcMain.on("app-update:check", () => void triggerBackgroundCheck(deps));
   ipcMain.on("app-update:restart", () => applyDownloadedUpdate(deps));
@@ -504,14 +505,17 @@ if (headlessMode?.mode === "__service") {
         });
         app.showAboutPanel();
       },
-      checkForUpdates: () => void checkForUpdatesManually({ markQuitting }),
+      checkForUpdates: () => void checkForUpdatesManually({ markQuitting, updaterAllowed: isOfficialApiBuild() }),
       reload: () => focusedWindow()?.webContents.reload(),
       zoom,
       focusedServerWindow: () => focusedWindow(),
     });
 
-    initializeAutoUpdater({ markQuitting });
-    registerAppUpdateIpc({ markQuitting });
+    // Self-hosted builds (VITE_API_URL → non-official origin) must not pull
+    // official updates over a self-hosted install (see autoUpdater.ts).
+    const updaterDeps = { markQuitting, updaterAllowed: isOfficialApiBuild() };
+    initializeAutoUpdater(updaterDeps);
+    registerAppUpdateIpc(updaterDeps);
 
     // Become the OS-supervised host of the local Computer service. The heavy
     // __service/__run tree stays detached and login-item supervised, so quitting
