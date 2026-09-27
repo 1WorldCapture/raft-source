@@ -5,8 +5,9 @@
 // activate — funnels through the same `reveal` callback. Quitting stays an
 // explicit act and keeps its current behavior; stopping the background
 // service on quit is task #7.
-import { Menu, Tray, app, nativeImage } from "electron";
+import { Menu, Tray, nativeImage } from "electron";
 import type { MenuItemConstructorOptions } from "electron";
+import { PRODUCT_NAME } from "./productName.js";
 
 export interface TrayStatus {
   /** Attached servers whose runner daemon is live and connected. The status
@@ -108,12 +109,12 @@ export class MenubarResident {
     if (!tray) return;
     this.menu = Menu.buildFromTemplate(
       buildTrayMenuTemplate({
-        appName: app.getName(),
+        appName: PRODUCT_NAME,
         status: this.status,
         onShow: () => this.deps.reveal(),
       }),
     );
-    tray.setToolTip(`Raft Desktop — ${this.status.connectedServers} server(s) connected`);
+    tray.setToolTip(`${PRODUCT_NAME} — ${this.status.connectedServers} server(s) connected`);
   }
 
   destroy(): void {

@@ -2,7 +2,8 @@
 // Edit/View/Window roles and app-level shortcuts; without it even Cmd+C in a
 // web input can be unreliable and the app "feels like a webpage".
 
-import { Menu, app, shell } from "electron";
+import { Menu, shell } from "electron";
+import { PRODUCT_NAME } from "./productName.js";
 import type { BrowserWindow, MenuItemConstructorOptions } from "electron";
 
 export interface AppMenuActions {
@@ -14,7 +15,7 @@ export interface AppMenuActions {
 }
 
 export function installApplicationMenu(actions: AppMenuActions): void {
-  const appName = app.getName();
+  const appName = PRODUCT_NAME;
 
   const template: MenuItemConstructorOptions[] = [
     {
