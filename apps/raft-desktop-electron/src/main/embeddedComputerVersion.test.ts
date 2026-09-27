@@ -5,6 +5,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import tsupConfig from "../../tsup.config.ts";
+import { resolveBuildApiConfig } from "../../buildConfig.mjs";
 import { embeddedComputerVersions } from "../../../../packages/computer/scripts/embeddedVersionDefines.mjs";
 
 // REGRESSION pin: this desktop app inlines @botiverse/raft-computer. Without
@@ -28,6 +29,7 @@ test("main bundle bakes the Computer, daemon and CLI package versions", async ()
     __RAFT_COMPUTER_VERSION__: JSON.stringify(versions.computer),
     __RAFT_DAEMON_VERSION__: JSON.stringify(versions.daemon),
     __RAFT_CLI_VERSION__: JSON.stringify(versions.cli),
+    __RAFT_DESKTOP_API_ORIGIN__: JSON.stringify(resolveBuildApiConfig().apiOrigin),
   });
   const computerPkg = await readJson(join(APP_ROOT, "..", "..", "packages", "computer", "package.json"));
   assert.equal(versions.computer, computerPkg.version);

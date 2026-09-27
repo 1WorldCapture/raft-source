@@ -52,6 +52,34 @@ test("isAllowedAuthorizationUrl allows only https provider/API hosts", () => {
   }
 });
 
+test("isAllowedAuthorizationUrl trusts exactly the configured self-hosted origin", () => {
+  const configured = "http://raft.internal.example:3001";
+  // The configured origin itself, over its own http scheme.
+  assert.equal(isAllowedAuthorizationUrl("http://raft.internal.example:3001/api/auth/google/start", configured), true);
+  // The configured host over https behaves like any allowlisted host.
+  assert.equal(isAllowedAuthorizationUrl("https://raft.internal.example:3001/api/auth/google/start", configured), true);
+  // Official hosts keep working in a self-hosted build.
+  assert.equal(isAllowedAuthorizationUrl("https://github.com/login/oauth/authorize?client_id=x", configured), true);
+  for (const bad of [
+    "http://raft.internal.example:3002/api/auth/google/start", // http is only for the exact configured origin
+    "http://api.raft.build/api/auth/google/start", // official host must stay https-only
+    "http://accounts.google.com/x", // providers must stay https-only
+    "https://raft.internal.example.evil.com:3001/x", // look-alike host
+    "http://user:pw@raft.internal.example:3001/x", // userinfo
+  ]) {
+    assert.equal(isAllowedAuthorizationUrl(bad, configured), false, bad);
+  }
+  // The configured HOST is allowlisted like any known host, so https on a
+  // different port of that host is accepted (https is the safe scheme).
+  assert.equal(isAllowedAuthorizationUrl("https://raft.internal.example:3002/x", configured), true);
+});
+
+test("isAllowedAuthorizationUrl defaults to the official-only allowlist (no configured self-host)", () => {
+  // In unbundled tests the baked origin is the official default, so an http
+  // URL is never allowed, even on a host an official build knows.
+  assert.equal(isAllowedAuthorizationUrl("http://api.raft.build/api/auth/google/start"), false);
+});
+
 test("GET /auth/done serves the handoff page", async () => {
   const { port, code } = await armOAuthLoopback(NONCE);
   try {
