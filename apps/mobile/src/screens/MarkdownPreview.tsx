@@ -22,7 +22,7 @@ const markedStyles: MarkedStyles = {
   h4: { color: color.ink, fontFamily: "SpaceGrotesk-700", fontSize: 17, lineHeight: 24, marginBottom: 6, marginTop: 14 },
   h5: { color: color.ink, fontFamily: "SpaceGrotesk-700", fontSize: 15, lineHeight: 22, marginBottom: 4, marginTop: 12 },
   h6: { color: color.inkSoft, fontFamily: "SpaceGrotesk-700", fontSize: 14, lineHeight: 20, marginBottom: 4, marginTop: 12 },
-  blockquote: { borderLeftColor: color.quoteBorder, borderLeftWidth: 2, marginBottom: 10, paddingLeft: 12 },
+  blockquote: { borderLeftColor: color.quoteBorder, borderLeftWidth: 4, marginBottom: 10, paddingLeft: 12 },
   codespan: {
     backgroundColor: color.inlineCode,
     color: color.ink,

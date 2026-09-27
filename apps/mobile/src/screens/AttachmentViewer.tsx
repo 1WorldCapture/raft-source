@@ -167,7 +167,7 @@ export function AttachmentViewer({
           {phase === "ready" && markdownPreview ? (
             <MarkdownPreview markdown={markdownPreview.markdown} truncated={markdownPreview.truncated} />
           ) : null}
-          {phase === "ready" && !textPreview ? (
+          {phase === "ready" && !textPreview && !markdownPreview ? (
             <View style={styles.placeholder}>
               <AppText style={styles.note}>{t("mobile.preview.placeholder")}</AppText>
             </View>
