@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { FlatList, StyleSheet, View } from "react-native";
 import { chunkTextLines } from "../attachments/textChunks";
 import { useT } from "../i18n/provider";
@@ -7,12 +8,13 @@ import { border, color, shadowOffset } from "../ui/tokens";
 
 export function TextPreview({ text, truncated }: { text: string; truncated: boolean }) {
   const t = useT();
+  const chunks = useMemo(() => chunkTextLines(text), [text]);
   return (
     <View style={styles.canvas}>
       {truncated ? <AppText style={styles.banner}>{t("mobile.preview.truncated")}</AppText> : null}
       <HardShadow offset={shadowOffset.sm} style={styles.shadow}>
         <FlatList
-          data={chunkTextLines(text)}
+          data={chunks}
           keyExtractor={(_item, index) => String(index)}
           renderItem={({ item }) => (
             <AppText selectable style={styles.line}>{item.length > 0 ? item : "\u00a0"}</AppText>
