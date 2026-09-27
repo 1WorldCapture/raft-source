@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { resolveListenHost } from "./config/trustProxy.js";
 
 // Safety net: log unhandled rejections instead of crashing the process
 process.on("unhandledRejection", (reason, promise) => {
@@ -205,10 +206,13 @@ async function bootstrap() {
   startMetricsServer();
 
   // Start server
-  server.listen(PORT, () => {
+  const listenHost = resolveListenHost();
+  const onListening = () => {
     slackBridge?.start();
-    console.log(`[Slock] Server listening on http://localhost:${PORT}`);
-  });
+    console.log(`[Slock] Server listening on http://${listenHost ?? "localhost"}:${PORT}`);
+  };
+  if (listenHost) server.listen(PORT, listenHost, onListening);
+  else server.listen(PORT, onListening);
 
   // Graceful shutdown — close WebSocket connections before exiting
   let shuttingDown = false;
