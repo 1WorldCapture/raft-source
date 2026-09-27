@@ -600,7 +600,16 @@ if (headlessMode?.mode === "__service") {
           const status = computerStatusMonitor ? await computerStatusMonitor.read() : null;
           return Boolean(status?.service?.running || (status?.servers?.length ?? 0) > 0);
         },
-        agentCount: () => null, // daemon-side count reporter lands in a follow-up PR
+        // Live scan, not a cached file: the dialog names what is actually
+        // running at confirm time (each ps hit is one agent runtime process).
+        agentCount: async () => {
+          try {
+            const { stdout } = await execFileAsync("ps", ["-axo", "pid=,command="]);
+            return scanAgentPids(stdout, path.join(computerHost.slockHome, "agents")).length;
+          } catch {
+            return null;
+          }
+        },
         prefs: () => ({ quitNoConfirm: loadQuitNoConfirm() }),
         savePrefs: (prefs) => saveQuitNoConfirm(prefs.quitNoConfirm),
         orchestrateShutdown: () => orchestrateQuitShutdown(),
