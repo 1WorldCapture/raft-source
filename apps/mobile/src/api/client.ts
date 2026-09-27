@@ -1,3 +1,4 @@
+import { attachmentAuthHeaders } from "./attachmentUrl";
 import { createRefreshAttemptId } from "./ids";
 
 export class ApiError extends Error {
@@ -257,6 +258,7 @@ export function createApiClient(options: ApiClientOptions) {
   return {
     request,
     refreshTokens,
+    authHeaders: () => attachmentAuthHeaders(options.getAccessToken() ?? "", options.getServerId()),
     get: <T = unknown>(path: string, init?: Omit<RequestOptions, "method" | "body">) =>
       request<T>(path, { ...init, method: "GET" }),
     post: <T = unknown>(path: string, body?: unknown, init?: Omit<RequestOptions, "method" | "body">) =>

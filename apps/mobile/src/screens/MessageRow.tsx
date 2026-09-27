@@ -43,6 +43,8 @@ export const MessageRow = memo(function MessageRow({
   sendingLabel,
   resendLabel,
   deleteLabel,
+  downloadingAttachmentId,
+  downloadingLabel,
   showMoreLabel,
   collapseLabel,
   savedLabel,
@@ -84,6 +86,8 @@ export const MessageRow = memo(function MessageRow({
   sendingLabel: string;
   resendLabel: string;
   deleteLabel: string;
+  downloadingAttachmentId?: string | null;
+  downloadingLabel?: string;
   showMoreLabel: string;
   collapseLabel: string;
   savedLabel: string;
@@ -191,12 +195,24 @@ export const MessageRow = memo(function MessageRow({
                 ))}
               </View>
             ) : null}
-            {files.map((attachment) => (
-              <Pressable key={attachment.id ?? attachment.filename} onPress={() => onOpenAttachment?.(attachment, "attachment")} style={styles.fileCard}>
-                <AppText style={styles.file}>{attachment.filename}</AppText>
-                {attachment.sizeBytes ? <AppText style={styles.fileMeta}>{formatFileSize(attachment.sizeBytes)}</AppText> : null}
-              </Pressable>
-            ))}
+            {files.map((attachment) => {
+              const downloading = Boolean(attachment.id && downloadingAttachmentId === attachment.id);
+              return (
+                <Pressable
+                  key={attachment.id ?? attachment.filename}
+                  disabled={downloading}
+                  onPress={() => onOpenAttachment?.(attachment, "attachment")}
+                  style={styles.fileCard}
+                >
+                  <AppText style={styles.file}>{attachment.filename}</AppText>
+                  {downloading ? (
+                    <AppText style={styles.fileMeta}>{downloadingLabel}</AppText>
+                  ) : attachment.sizeBytes ? (
+                    <AppText style={styles.fileMeta}>{formatFileSize(attachment.sizeBytes)}</AppText>
+                  ) : null}
+                </Pressable>
+              );
+            })}
             <View style={styles.footer}>
               {linkedTask ? (
                 <View style={[styles.capsule, styles.taskChip]}>

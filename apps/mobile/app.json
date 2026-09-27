@@ -38,7 +38,8 @@
       "./plugins/withCleartext",
       "expo-font",
       "expo-splash-screen",
-      "expo-localization"
+      "expo-localization",
+      "expo-sharing"
     ],
     "experiments": {
       "typedRoutes": false
