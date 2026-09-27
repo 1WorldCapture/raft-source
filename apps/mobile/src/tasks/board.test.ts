@@ -1,0 +1,156 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import type { RaftTask, TaskStatus } from "./model";
+import {
+  boardFromTasks,
+  buildBoard,
+  isDoneToday,
+  parseBoardTask,
+  STALE_MS,
+  type BoardTask,
+} from "./board.ts";
+
+function boardTask(id: string, overrides: Partial<BoardTask> = {}): BoardTask {
+  return {
+    id,
+    messageId: id,
+    channelId: "c1",
+    channelName: "all",
+    channelType: "channel",
+    taskNumber: Number(id.replace(/\D/g, "")) || 1,
+    title: `Task ${id}`,
+    description: null,
+    status: "in_progress",
+    createdByType: "user",
+    createdById: "u1",
+    createdByName: "Lyon",
+    claimedByType: "agent",
+    claimedById: "a1",
+    claimedByName: "Dev",
+    createdAt: "2026-09-27T08:00:00.000Z",
+    updatedAt: "2026-09-27T08:00:00.000Z",
+    revision: 1,
+    isLegacy: false,
+    completedAt: null,
+    threadChannelId: null,
+    lastActivityAt: "2026-09-27T10:00:00.000Z",
+    latestActivity: null,
+    replyCount: 0,
+    unreadCount: 0,
+    mentionsMe: false,
+    ...overrides,
+  };
+}
+
+const NOW = new Date("2026-09-27T12:00:00.000Z");
+
+test("buildBoard groups into the four sections and drops closed", () => {
+  const board = buildBoard(
+    [
+      boardTask("t1", { status: "in_review" }),
+      boardTask("t2", { status: "in_progress" }),
+      boardTask("t3", { status: "done", completedAt: new Date(2026, 8, 27, 9, 0).toISOString() }), // local today
+      boardTask("t4", { status: "todo" }),
+      boardTask("t5", { status: "closed" }),
+      boardTask("t6", { status: "done", completedAt: new Date(2026, 8, 26, 9, 0).toISOString() }), // yesterday local → hidden
+    ],
+    NOW,
+  );
+  assert.deepEqual(board.needsMe.map((r) => r.task.id), ["t1"]);
+  assert.deepEqual(board.inProgress.map((r) => r.task.id), ["t2"]);
+  assert.deepEqual(board.doneToday.map((r) => r.task.id), ["t3"]);
+  assert.deepEqual(board.todo.map((r) => r.task.id), ["t4"]);
+});
+
+test("needsMe wins once per task; pagination duplicates dedup by id", () => {
+  const inReviewAndMentioned = boardTask("t1", { status: "in_review", mentionsMe: true });
+  const board = buildBoard([inReviewAndMentioned, { ...inReviewAndMentioned }, boardTask("t2", { mentionsMe: true })], NOW);
+  assert.equal(board.needsMe.length, 2, "mentioned task joins in_review task; the duplicated row counts once");
+  assert.equal(board.inProgress.length, 0, "nothing leaks into inProgress");
+});
+
+test("inProgress orders by lastActivityAt desc, taskNumber breaks ties (all fresh)", () => {
+  const board = buildBoard(
+    [
+      boardTask("t1", { taskNumber: 1, lastActivityAt: "2026-09-27T11:45:00.000Z" }),
+      boardTask("t2", { taskNumber: 2, lastActivityAt: "2026-09-27T11:35:00.000Z" }),
+      boardTask("t3", { taskNumber: 3, lastActivityAt: "2026-09-27T11:35:00.000Z" }),
+    ],
+    NOW,
+  );
+  assert.deepEqual(board.inProgress.map((r) => r.task.id), ["t1", "t3", "t2"], "newest first; tie → higher taskNumber");
+});
+
+test("stale: strictly beyond STALE_MS flags and pins to top, longest-stuck first", () => {
+  const board = buildBoard(
+    [
+      boardTask("fresh", { lastActivityAt: new Date(NOW.getTime() - STALE_MS).toISOString() }), // exactly 30min → not stale
+      boardTask("justStale", { lastActivityAt: new Date(NOW.getTime() - STALE_MS - 1).toISOString() }),
+      boardTask("veryStale", { lastActivityAt: new Date(NOW.getTime() - STALE_MS * 10).toISOString() }),
+      boardTask("active", { lastActivityAt: new Date(NOW.getTime() - 60_000).toISOString() }),
+    ],
+    NOW,
+  );
+  const ids = board.inProgress.map((r) => r.task.id);
+  assert.deepEqual(ids, ["veryStale", "justStale", "active", "fresh"]);
+  assert.deepEqual(board.inProgress.map((r) => r.stale), [true, true, false, false]);
+});
+
+test("doneToday uses the LOCAL calendar day boundaries", () => {
+  const localNow = new Date(2026, 8, 28, 0, 30); // local Sep 28 00:30
+  assert.equal(isDoneToday(new Date(2026, 8, 28, 0, 0).toISOString(), localNow), true, "local midnight counts");
+  assert.equal(isDoneToday(new Date(2026, 8, 27, 23, 59).toISOString(), localNow), false, "yesterday 23:59 does not");
+  assert.equal(isDoneToday(null, localNow), false);
+  assert.equal(isDoneToday("not-a-date", localNow), false);
+});
+
+test("boardFromTasks fills neutral board defaults from plain tasks", () => {
+  const plain: RaftTask = {
+    id: "r1",
+    messageId: "r1",
+    channelId: "c",
+    channelName: "all",
+    channelType: "channel",
+    taskNumber: 7,
+    title: "T",
+    description: "d",
+    status: "todo",
+    createdByType: "user",
+    createdById: "u",
+    createdByName: null,
+    claimedByType: null,
+    claimedById: null,
+    claimedByName: null,
+    createdAt: "2026-09-27T07:00:00.000Z",
+    updatedAt: "2026-09-27T07:30:00.000Z",
+    revision: 0,
+    isLegacy: false,
+  };
+  const [adapted] = boardFromTasks([plain]);
+  assert.equal(adapted.lastActivityAt, "2026-09-27T07:30:00.000Z", "falls back to updatedAt");
+  assert.equal(adapted.mentionsMe, false);
+  assert.equal(adapted.unreadCount, 0);
+  assert.equal(adapted.latestActivity, null);
+  assert.equal(adapted.threadChannelId, null);
+});
+
+test("parseBoardTask validates the contract payload", () => {
+  const base = boardTask("p1");
+  const parsed = parseBoardTask({ ...base, latestActivity: { kind: "reply", at: base.lastActivityAt, actorType: "agent", actorId: "a", actorName: "Dev", snippet: "done", eventType: null }, unreadCount: 120 });
+  assert.ok(parsed);
+  assert.equal(parsed.unreadCount, 120);
+  assert.equal(parsed.latestActivity?.kind, "reply");
+  assert.equal(parsed.latestActivity?.snippet, "done");
+  assert.equal(parseBoardTask({ ...base, lastActivityAt: undefined }), null, "lastActivityAt is required");
+  assert.equal(parseBoardTask({ ...base, status: "bogus" }), null, "invalid status rejected");
+  const negative = parseBoardTask({ ...base, unreadCount: -3, replyCount: 1.5 });
+  assert.ok(negative);
+  assert.equal(negative.unreadCount, 0, "negative clamps to 0");
+  assert.equal(negative.replyCount, 1, "fractional floors");
+});
+
+test("board status query covers todo..done but never closed", async () => {
+  const { BOARD_QUERY_STATUSES, boardStatusParam } = await import("./board.ts");
+  assert.equal(boardStatusParam(), "todo,in_progress,in_review,done");
+  assert.ok(!BOARD_QUERY_STATUSES.includes("closed" as TaskStatus));
+});
