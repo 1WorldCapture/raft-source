@@ -10,6 +10,7 @@ import { AppText } from "../ui/text";
 import { border, color, shadowOffset } from "../ui/tokens";
 import type { BoardRow } from "./board";
 import { boardSummaryLine } from "./boardSummary";
+import { relativeTimeStrings } from "./relativeTime";
 import { channelLabel } from "./list";
 
 /** Live presence for the claimed agent, resolved from /agents by the screen. */
@@ -39,11 +40,17 @@ export function BoardTaskRow({
   const { locale } = useIntl();
   const { task, stale } = row;
   const touch = useRef({ x: 0, y: 0 });
-  const summary = boardSummaryLine(task.latestActivity, task.createdAt, locale, {
-    updatedTask: t("mobile.board.row.updatedTask"),
-    createdAgo: (time) => t("mobile.board.row.createdAgo", { time }),
-    systemActor: t("mobile.board.row.system"),
-  });
+  const summary = boardSummaryLine(
+    task.latestActivity,
+    task.createdAt,
+    locale,
+    {
+      updatedTask: t("mobile.board.row.updatedTask"),
+      createdAgo: (time) => t("mobile.board.row.createdAgo", { time }),
+      systemActor: t("mobile.board.row.system"),
+    },
+    relativeTimeStrings(t),
+  );
   const claimedKind = task.claimedByType === "agent" ? "agent" : task.claimedByType === "user" ? "human" : null;
   const claimerName = task.claimedByName ?? t("mobile.board.row.unclaimed");
   return (

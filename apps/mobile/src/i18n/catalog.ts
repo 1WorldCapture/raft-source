@@ -82,6 +82,10 @@ export const mobileEn = {
   "mobile.board.approveCancel": "Cancel",
   "mobile.board.approveConfirm": "Approve",
   "mobile.board.approveFailed": "Could not approve. Try again.",
+  "mobile.time.justNow": "just now",
+  "mobile.time.minutesAgo": "{n, plural, one {# minute ago} other {# minutes ago}}",
+  "mobile.time.hoursAgo": "{n, plural, one {# hour ago} other {# hours ago}}",
+  "mobile.time.daysAgo": "{n, plural, one {# day ago} other {# days ago}}",
 } as const;
 
 export const mobileZh: Record<keyof typeof mobileEn, string> = {
@@ -164,6 +168,10 @@ export const mobileZh: Record<keyof typeof mobileEn, string> = {
   "mobile.board.approveCancel": "取消",
   "mobile.board.approveConfirm": "通过",
   "mobile.board.approveFailed": "通过失败，请重试。",
+  "mobile.time.justNow": "刚刚",
+  "mobile.time.minutesAgo": "{n} 分钟前",
+  "mobile.time.hoursAgo": "{n} 小时前",
+  "mobile.time.daysAgo": "{n} 天前",
 };
 
 export type MobileId = keyof typeof mobileEn;

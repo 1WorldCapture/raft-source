@@ -1,43 +1,46 @@
 // Mobile-local relative-time formatter (task #2 board rows).
 //
-// Deliberately NOT imported from packages/web: the web helper pulls the
+// Deliberately NOT imported from packages/web (the web helper pulls the
 // @botiverse/raft-shared package ROOT, whose `.js`-suffixed imports the
-// mobile expo export cannot resolve (mobile only ever imports specific
-// shared files — see apps/mobile/tsconfig.json paths). Same output contract
-// as the web helper: minute/hour/day buckets via Intl.RelativeTimeFormat
-// with numeric:"auto", plus the 盘古之白 rule — a space between ASCII digits
-// and CJK in zh ("5分钟前" → "5 分钟前"). `now` is injectable for tests.
+// mobile expo export cannot resolve), and deliberately NOT using
+// Intl.RelativeTimeFormat: Hermes on Android implements only Collator,
+// DateTimeFormat, and NumberFormat, so the RTF constructor would throw and
+// take the whole tasks page down. Instead the strings come from the i18n
+// catalog through react-intl's ICU plural (PluralRules is polyfilled in
+// apps/mobile/index.js), injected as a plain object so unit tests and the
+// device run the exact same path.
+
+export interface RelativeTimeStrings {
+  /** Future timestamps and anything under a minute (also absorbs clock skew). */
+  justNow: string;
+  minutesAgo: (n: number) => string;
+  hoursAgo: (n: number) => string;
+  daysAgo: (n: number) => string;
+}
+
+/** Build the strings from any intl-style `format(id, values)` (react-intl's t). */
+export function relativeTimeStrings<T extends string>(format: (id: T, values?: Record<string, string | number>) => string): RelativeTimeStrings {
+  return {
+    justNow: format("mobile.time.justNow" as T),
+    minutesAgo: (n) => format("mobile.time.minutesAgo" as T, { n }),
+    hoursAgo: (n) => format("mobile.time.hoursAgo" as T, { n }),
+    daysAgo: (n) => format("mobile.time.daysAgo" as T, { n }),
+  };
+}
 
 export function formatRelativeTime(
   value: string | null | undefined,
-  locale: string | string[],
+  strings: RelativeTimeStrings,
   now: () => Date = () => new Date(Date.now()),
 ): string | null {
   if (!value) return null;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return null;
-  const diffMs = date.getTime() - now().getTime();
-  const absMs = Math.abs(diffMs);
-  const rtf = new Intl.RelativeTimeFormat(locale, { numeric: "auto" });
-
-  const minute = 60_000;
-  const hour = 60 * minute;
-  const day = 24 * hour;
-
-  let rendered: string;
-  if (absMs < hour) rendered = rtf.format(Math.round(diffMs / minute), "minute");
-  else if (absMs < day) rendered = rtf.format(Math.round(diffMs / hour), "hour");
-  else rendered = rtf.format(Math.round(diffMs / day), "day");
-  return isZhLocale(locale) ? zhMixedScriptSpacing(rendered) : rendered;
-}
-
-function isZhLocale(locale: string | string[]): boolean {
-  return (Array.isArray(locale) ? locale : [locale]).some((l) => String(l).toLowerCase().startsWith("zh"));
-}
-
-/** Insert a space between ASCII digits and CJK ("5分钟后" -> "5 分钟后"). */
-function zhMixedScriptSpacing(value: string): string {
-  return value
-    .replace(/(\d)\s*([一-鿿㐀-䶿])/g, "$1 $2")
-    .replace(/([一-鿿㐀-䶿])\s*(\d)/g, "$1 $2");
+  const diffMs = now().getTime() - date.getTime();
+  if (diffMs < 60_000) return strings.justNow;
+  const minutes = Math.round(diffMs / 60_000);
+  if (minutes < 60) return strings.minutesAgo(minutes);
+  const hours = Math.round(diffMs / 3_600_000);
+  if (hours < 24) return strings.hoursAgo(hours);
+  return strings.daysAgo(Math.round(diffMs / 86_400_000));
 }
