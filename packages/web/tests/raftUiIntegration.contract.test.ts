@@ -29,18 +29,22 @@ test("web app installs raft-ui global CSS and providers", () => {
 
 test("web typography keeps Space Grotesk while routing only the neutral straight quote through Hanken", () => {
   const css = read("src/index.css");
-
-  assert.match(css, /@import "\.\/assets\/fonts\/fonts\.css"/);
   const localFonts = read("src/assets/fonts/fonts.css");
+
+  // Typography is a JS-graph css module imported by each app entry — a css
+  // @import inside index.css would let the Tailwind v4 pipeline inline it
+  // without rebasing url()s, so no font binaries would be emitted.
+  assert.doesNotMatch(css, /@import "\.\/assets\/fonts\/fonts\.css"/);
+  assert.match(read("src/main.tsx"), /import "\.\/assets\/fonts\/fonts\.css";/);
   assert.match(localFonts, /font-family: 'Space Grotesk'/);
   assert.match(localFonts, /font-family: 'Space Mono'/);
   assert.doesNotMatch(css + localFonts, /https:\/\/fonts\.(?:googleapis|gstatic)\.com/);
   assert.match(
-    css,
-    /@font-face\s*\{[\s\S]*?font-family:\s*'Raft Quote Glyphs';[\s\S]*?font-weight:\s*400 700;[\s\S]*?src:\s*url\('\.\/assets\/fonts\/hanken-grotesk-quotes\.woff2'\)\s*format\('woff2'\);[\s\S]*?unicode-range:\s*U\+0022;[\s\S]*?\}/,
+    localFonts,
+    /@font-face\s*\{[\s\S]*?font-family:\s*'Raft Quote Glyphs';[\s\S]*?font-weight:\s*400 700;[\s\S]*?src:\s*url\('\.\/hanken-grotesk-quotes\.woff2'\)\s*format\('woff2'\);[\s\S]*?unicode-range:\s*U\+0022;[\s\S]*?\}/,
   );
   assert.doesNotMatch(
-    css,
+    css + localFonts,
     /unicode-range:[^;]*(?:U\+201C|U\+201D|U\+201C-201D)/i,
     "curly quotes must remain owned by Space Grotesk",
   );

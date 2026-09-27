@@ -9,6 +9,11 @@ import { LocaleProvider } from "./i18n/LocaleProvider";
 import { IntlProviderWrapper } from "./i18n/IntlProviderWrapper";
 import App from "./App";
 import ServiceWorkerNavigationBridge from "./components/pwa/ServiceWorkerNavigationBridge";
+// Typography must be a JS-graph css module, not a css @import inside
+// index.css: the Tailwind v4 pipeline inlines css imports without rebasing
+// url() references, so bundler-managed font assets require a module import
+// (see the note in index.css and apps' sibling imports).
+import "./assets/fonts/fonts.css";
 import "./index.css";
 import { isDynamicImportFailure } from "./utils/dynamicImportRecovery";
 import {
