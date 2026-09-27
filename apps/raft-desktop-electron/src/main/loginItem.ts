@@ -73,16 +73,17 @@ export function isHiddenLaunch(argv: ReadonlyArray<string>): boolean {
  */
 export async function setLoginItemAtLogin(enabled: boolean): Promise<void> {
   if (enabled) {
+    // File only — deliberately NOT `launchctl bootstrap`: with RunAtLoad the
+    // bootstrap would immediately run our `open` and pop the window of the
+    // already-running app. The plist takes effect at next login on its own.
     const { mkdir } = await import("node:fs/promises");
     await mkdir(launchAgentsDir(), { recursive: true });
     const tmp = `${loginAgentPlistPath()}.tmp`;
     await writeFile(tmp, buildLoginAgentPlist({ appName: PRODUCT_NAME }));
     await (await import("node:fs/promises")).rename(tmp, loginAgentPlistPath());
-    // bootstrap loads the agent now; a failed bootstrap (e.g. already loaded)
-    // is fine — the file is what counts at next login.
-    await tryRun("launchctl", ["bootstrap", `gui/${process.getuid?.() ?? 0}`, loginAgentPlistPath()]);
-    await tryRun("launchctl", ["enable", `gui/${process.getuid?.() ?? 0}/${LOGIN_AGENT_LABEL}`]);
   } else {
+    // Our own job never holds a resident process (the open exits right
+    // away), so bootout here cannot stop anything of ours.
     await tryRun("launchctl", ["bootout", `gui/${process.getuid?.() ?? 0}/${LOGIN_AGENT_LABEL}`]);
     await rm(loginAgentPlistPath(), { force: true });
   }
@@ -93,28 +94,78 @@ export async function getLoginItemAtLogin(): Promise<boolean> {
   return existsSync(loginAgentPlistPath());
 }
 
+/** Pure: extract the <string> values inside a plist's ProgramArguments. */
+export function parseProgramArguments(plistXml: string): string[] {
+  const args: string[] = [];
+  const argsBlock = plistXml.match(/<key>ProgramArguments<\/key>\s*<array>([\s\S]*?)<\/array>/);
+  if (!argsBlock) return args;
+  for (const match of argsBlock[1].matchAll(/<string>([\s\S]*?)<\/string>/g)) {
+    args.push(unescapeXml(match[1].trim()));
+  }
+  return args;
+}
+
+function unescapeXml(value: string): string {
+  return value.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+}
+
+export interface LegacyCleanupResult {
+  removed: string[];
+  /** Foreign login items we deliberately left alone (standalone Computer
+   * installs, other machines' homes) — logged by the caller. */
+  skipped: Array<{ label: string; reason: string }>;
+}
+
 /**
- * Remove legacy headless-service login items (label prefix from the old
- * macosLoginCarrier). Idempotent: missing files or already-booted-out labels
- * are success. Never touches running processes.
+ * Remove legacy headless-service login items that belong to THIS app only.
+ *
+ * Two safety gates, both review-mandated:
+ *  1. Ownership: the plist's ProgramArguments[0] (the old carrier's
+ *     dispatcher) must point inside THIS app bundle, and its `--slock-home`
+ *     must match ours. A standalone `raft-computer` install owns login items
+ *     under the same label prefix — deleting those would break it.
+ *  2. No bootout, ever: a loaded RunAtLoad job gets SIGTERMed by bootout,
+ *     which — if the running background tree was started by that job —
+ *     would stop the service and every agent. Deleting the file alone is
+ *     enough: launchd will not load the job at the next login.
  */
-export async function cleanupLegacyLoginAgents(listDir: (dir: string) => Promise<string[]>): Promise<string[]> {
-  const removed: string[] = [];
+export async function cleanupLegacyLoginAgents(
+  listDir: (dir: string) => Promise<string[]>,
+  deps: { readFile: typeof readFile; rm: typeof rm; ownExecutablePath: string; ownSlockHome: string },
+): Promise<LegacyCleanupResult> {
+  const result: LegacyCleanupResult = { removed: [], skipped: [] };
   let entries: string[];
   try {
     entries = await listDir(launchAgentsDir());
   } catch {
-    return removed; // no LaunchAgents directory — nothing to clean
+    return result; // no LaunchAgents directory — nothing to clean
   }
   for (const entry of entries) {
     if (!entry.startsWith(LEGACY_LOGIN_LABEL_PREFIX) || !entry.endsWith(".plist")) continue;
     const file = path.join(launchAgentsDir(), entry);
     const label = entry.replace(/\.plist$/, "");
-    await tryRun("launchctl", ["bootout", `gui/${process.getuid?.() ?? 0}/${label}`]);
-    await rm(file, { force: true });
-    removed.push(label);
+    let xml = "";
+    try {
+      xml = await deps.readFile(file, "utf8");
+    } catch {
+      result.skipped.push({ label, reason: "unreadable plist" });
+      continue;
+    }
+    const argv = parseProgramArguments(xml);
+    const dispatcher = argv[0] ?? "";
+    const slockHome = argv[argv.indexOf("--slock-home") + 1] ?? "";
+    if (!dispatcher.startsWith(path.dirname(deps.ownExecutablePath)) && !dispatcher.startsWith(deps.ownExecutablePath)) {
+      result.skipped.push({ label, reason: `dispatcher outside this app bundle: ${dispatcher}` });
+      continue;
+    }
+    if (slockHome !== deps.ownSlockHome) {
+      result.skipped.push({ label, reason: `different slock home: ${slockHome}` });
+      continue;
+    }
+    await deps.rm(file, { force: true });
+    result.removed.push(label);
   }
-  return removed;
+  return result;
 }
 
 async function tryRun(command: string, args: string[]): Promise<void> {

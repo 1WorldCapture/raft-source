@@ -33,41 +33,52 @@ test("login item: plist shape, hidden-launch detection, legacy cleanup", async (
     assert.equal(isHiddenLaunch([]), false);
   });
 
-  await t.test("cleanupLegacyLoginAgents removes only legacy plists, tolerates errors", async () => {
-    const booted: string[] = [];
-    const removedFiles: string[] = [];
-    // Fake filesystem: listDir returns a mixed set; rm/bootout are simulated
-    // by monkey-patching the module's collaborators through the injected
-    // listDir plus observing via a stubbed fs — here we assert the pure
-    // selection logic by feeding a directory listing and a rm spy via
-    // dynamic re-import with a tmp LaunchAgents layout.
+  await t.test("cleanupLegacyLoginAgents removes only THIS app's legacy plists; standalone installs stay", async () => {
     const os = await import("node:os");
     const path = await import("node:path");
     const fs = await import("node:fs/promises");
     const home = await fs.mkdtemp(path.join(os.tmpdir(), "raft-loginitem-"));
     const agentsDir = path.join(home, "Library", "LaunchAgents");
     await fs.mkdir(agentsDir, { recursive: true });
-    const legacy = path.join(agentsDir, `${LEGACY_LOGIN_LABEL_PREFIX}abcdef12.plist`);
-    const legacy2 = path.join(agentsDir, `${LEGACY_LOGIN_LABEL_PREFIX}deadbeef.plist`);
-    const ours = path.join(agentsDir, `${LOGIN_AGENT_LABEL}.plist`);
+    const ownExe = "/Applications/Raft Desktop.app/Contents/MacOS/Raft Desktop";
+    const ownHome = "/Users/tester/.slock";
+    const carrier = (dispatcher: string, slockHome: string) => [
+      "<?xml version=\"1.0\"?><plist version=\"1.0\"><dict><key>Label</key><string>x</string>",
+      "<key>ProgramArguments</key><array>",
+      `<string>${dispatcher}</string>`,
+      "<string>__service</string>",
+      "<string>--slock-home</string>",
+      `<string>${slockHome}</string>`,
+      "</array></dict></plist>",
+    ].join("");
+    const oursA = path.join(agentsDir, `${LEGACY_LOGIN_LABEL_PREFIX}abcdef12.plist`);
+    const standalone = path.join(agentsDir, `${LEGACY_LOGIN_LABEL_PREFIX}deadbeef.plist`); // CLI raft-computer's
+    const otherHome = path.join(agentsDir, `${LEGACY_LOGIN_LABEL_PREFIX}cafe1234.plist`); // ours, different SLOCK_HOME
     const stranger = path.join(agentsDir, "com.example.other.plist");
-    await fs.writeFile(legacy, "x");
-    await fs.writeFile(legacy2, "x");
-    await fs.writeFile(ours, "x");
+    await fs.writeFile(oursA, carrier(ownExe, ownHome));
+    await fs.writeFile(standalone, carrier("/usr/local/bin/raft-computer", "/Users/tester/.slock"));
+    await fs.writeFile(otherHome, carrier(ownExe, "/Users/other/.slock"));
     await fs.writeFile(stranger, "x");
 
-    // The cleanup resolves paths from the REAL homedir — point HOME at the
-    // sandbox via a temporarily swapped env for this subtest.
     const realHome = process.env.HOME;
     process.env.HOME = home;
     try {
-      const removed = await cleanupLegacyLoginAgents(async (dir) => fs.readdir(dir));
-      assert.deepEqual([...removed].sort(), [
-        `${LEGACY_LOGIN_LABEL_PREFIX}abcdef12`,
+      const result = await cleanupLegacyLoginAgents(async (dir) => fs.readdir(dir), {
+        readFile: fs.readFile,
+        rm: fs.rm,
+        ownExecutablePath: ownExe,
+        ownSlockHome: ownHome,
+      });
+      assert.deepEqual(result.removed, [`${LEGACY_LOGIN_LABEL_PREFIX}abcdef12`]);
+      assert.deepEqual(result.skipped.map((s) => s.label).sort(), [
+        `${LEGACY_LOGIN_LABEL_PREFIX}cafe1234`,
         `${LEGACY_LOGIN_LABEL_PREFIX}deadbeef`,
-      ].sort());
-      assert.equal((await fs.readdir(agentsDir)).sort().join(","), ["build.raft.desktop.login.plist", "com.example.other.plist"].sort().join(","), "ours and strangers stay");
-      void booted; void removedFiles;
+      ].sort(), "standalone installs and other homes are left alone (and logged)");
+      // Deletion is file-only by construction (deps inject rm; no launchctl
+      // in the cleanup path), so a running job can never be SIGTERMed.
+      const left = (await fs.readdir(agentsDir)).sort();
+      assert.ok(left.includes(`${LEGACY_LOGIN_LABEL_PREFIX}deadbeef.plist`));
+      assert.ok(!left.includes(`${LEGACY_LOGIN_LABEL_PREFIX}abcdef12.plist`));
     } finally {
       process.env.HOME = realHome;
       await fs.rm(home, { recursive: true, force: true });
@@ -82,8 +93,13 @@ test("login item: plist shape, hidden-launch detection, legacy cleanup", async (
     const realHome = process.env.HOME;
     process.env.HOME = home;
     try {
-      const removed = await cleanupLegacyLoginAgents(async (dir) => fs.readdir(dir));
-      assert.deepEqual(removed, []);
+      const result = await cleanupLegacyLoginAgents(async (dir) => fs.readdir(dir), {
+        readFile: fs.readFile,
+        rm: fs.rm,
+        ownExecutablePath: "/opt/x",
+        ownSlockHome: "/Users/x/.slock",
+      });
+      assert.deepEqual(result, { removed: [], skipped: [] });
     } finally {
       process.env.HOME = realHome;
       await fs.rm(home, { recursive: true, force: true });

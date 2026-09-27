@@ -15,7 +15,7 @@
 // that session via `ensureUsableUserSession` — just works, with no second login.
 
 import { execFile } from "node:child_process";
-import { mkdir, readdir, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { app } from "electron";
 import {
@@ -99,7 +99,15 @@ class ComputerHost {
       // unverifiable without a real login). Also sweeps away the legacy
       // headless-service login items the old carrier registered.
       if (process.platform === "darwin") {
-        await cleanupLegacyLoginAgents((dir) => readdir(dir));
+        const cleanup = await cleanupLegacyLoginAgents((dir) => readdir(dir), {
+          readFile,
+          rm,
+          ownExecutablePath: process.execPath,
+          ownSlockHome: this.slockHome,
+        });
+        for (const skipped of cleanup.skipped) {
+          console.warn(`[raft-desktop] left foreign login item ${skipped.label} alone: ${skipped.reason}`);
+        }
       }
       const lifecycle = await convergeAppHostLifecycle(
         this.slockHome,
