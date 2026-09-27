@@ -153,7 +153,24 @@ npm i -g pm2
 - **不要在部署目录里手改源码。** 部署脚本要求部署目录里没有已修改的受版本控制文件，否则拒绝执行。
 - 线上跑的是哪个提交，可以随时用 `GET /api/version` 查看（见第 5 节的 `RAFT_RELEASE_*`）。
 
-<!-- TODO(Firstmate): 补充 main → dev → deploy 的流转细节、cherry-pick 规范（-x 标注来源）、什么时候整体把 deploy 追上 dev。 -->
+### 3.1 代码怎么从开发流到线上
+
+```
+上游 ──同步──▶ main ──合并（不 rebase）──▶ dev ◀── 功能/修复 PR
+                 │                         │
+                 └──────▶ deploy ◀── cherry-pick -x（或整体合并 dev）
+                              │
+                              └──▶ 部署目录（只 checkout，不改）
+```
+
+1. **main 跟上游**：同步上游时直接快进或合并到 `main`，不在 `main` 上做自己的改动。
+2. **main 进 dev 用合并，不用 rebase**：`dev` 上的提交已经被 PR 引用，改写历史会让 PR 和部署记录对不上。
+3. **所有改动先进 dev**：功能和修复都发 PR 到 `dev`，审查合并后才考虑上线。不允许直接往 `deploy` 提交新代码。
+4. **进入 deploy 的两种方式**：
+   - **挑选单个修复**（常用）：`git cherry-pick -x <dev 上的提交>`。`-x` 会在提交信息里记下来源提交，之后对账时能知道 `deploy` 上的每个改动来自 `dev` 的哪次合并。只挑选服务端或 Web 需要的提交；只改桌面端、手机端或 CLI 的提交不需要进 `deploy`。
+   - **整体追上 dev**：当 `deploy` 上挑选的提交越来越多、冲突变多，或者 `dev` 上有需要上线的大改动（例如 daemon、computer 包的变更）时，把 `deploy` 重置为 `dev` 的某个提交（在 `deploy` 上合并 `dev`，或者重建 `deploy` 分支）。这会同时带上 daemon 的改动，按第 12 节，要安排在有人值守的时间，并单独评估是否需要重启 daemon。
+5. **谁负责**：开发侧负责更新 `deploy` 分支并说明本次上线包含哪些提交、是否需要重启 daemon、是否有数据库迁移；运维只从 `deploy` 拉代码部署，部署完用 `GET /api/version` 核对 `sha` 和 `branch`。
+6. **上线前的检查**：`git log --oneline main..deploy` 看清楚本次比 `main` 多了哪些提交；`git diff <上次部署的 sha> <本次 sha> --stat` 看改到了哪些目录（`packages/server`、`packages/web` 需要重启 server 或重新构建 Web；`packages/daemon`、`packages/computer`、`packages/cli` 需要评估是否重启 daemon；`migrations` 需要先跑迁移）。
 
 ## 4. 拉代码和安装依赖
 
@@ -431,7 +448,28 @@ node packages/daemon/dist/raft-daemon.js --server-url <公开地址> --api-key-f
 - 重启前通知在这台机器上工作的人；
 - 如果执行重启的正是跑在这个 daemon 上的 Agent，要用脱离当前进程树的后台脚本执行（`setsid nohup ...`），脚本里做健康检查、失败时回退到旧配置，并事先设好提醒，恢复后回来核对结果。
 
-<!-- TODO(Firstmate): 补充 daemon 和 Computer 的版本号关系、桌面端退出即全退对运维的影响。 -->
+### 12.1 daemon、Computer 和 CLI 的版本号
+
+同一台机器上报给服务端的有两个版本号，在 Web 的「计算机」页面能看到：
+
+- **daemon 版本**（`packages/daemon/package.json`）：真正连接服务器、运行 Agent 的进程。像本文这样直接运行 `raft-daemon.js` 的机器，页面上显示为「守护进程 v…」。
+- **Computer 版本**（`packages/computer/package.json`）：外面包着 daemon 的宿主程序，负责后台服务、开机自启、升级等。独立安装的 `raft-computer` 和**桌面端内置**的 Computer 会上报这个版本。桌面端和菜单栏 App 打包时会把 Computer、daemon、CLI 的真实版本写死进包里（`packages/computer/scripts/embeddedVersionDefines.mjs`），不会报成 App 自己的版本号。
+
+服务端拿 Computer 版本和官方发布渠道的最新版比较，决定是否提示「有可用更新」。几点注意：
+
+- **桌面端内置的 Computer 跟随桌面端一起更新，不能单独升级。** 它的升级提示不应该出现（正在修改，服务端会识别「桌面端内置」并不再提示）；需要更新时，重新打桌面端包安装。
+- **官方渠道的最新版可能比我们 fork 里的版本新**，所以独立安装的 Computer 显示「有可用更新」是正常的；是否跟进官方版本，由开发侧决定，不要直接在机器上执行升级。
+- 看线上服务端本身的版本，用 `GET /api/version`（和 daemon、Computer 版本无关）。
+
+### 12.2 桌面端对运维的影响
+
+本机如果运行着桌面端（例如某台 Mac），它的 Computer 后台服务是由桌面端管理的：
+
+- **关闭窗口不会停服务**：桌面端退到菜单栏，后台服务和 Agent 继续运行。
+- **退出桌面端会停掉这台机器上的所有 Agent**：菜单栏「退出」、Cmd+Q、Dock 右键退出，都会先弹确认框，然后优雅地停掉后台服务、daemon 以及它们启动的全部 Agent 进程；桌面端崩溃或被强杀时，后台进程会在约 10 秒内自行退出，不留孤儿进程。所以在这类机器上，「退出桌面端」就等于让这台机器上的 Agent 全部下线，需要提前通知。
+- **开机自启**：桌面端登录时以菜单栏形式启动，再由它拉起后台服务。
+- 桌面端连哪个服务器是在**打包时**决定的（见第 16 节），服务器地址变了要重新打包。
+- 退出后怀疑有残留进程时，按第 0 节的方法检查进程，只看是否存在，不要输出环境变量的值。
 
 ## 13. 升级
 
@@ -493,11 +531,18 @@ ops/self-host/rollback.sh <backup-dir>      # 回到指定备份
 
 ## 16. 客户端怎么连接自托管服务器
 
-<!-- TODO(Firstmate): 这一节由开发侧补充和校对。以下是从源码核实的要点。 -->
+三种客户端里，只有 Web 和服务器同源；手机 App 和桌面端的服务器地址都是**打包时写死**的，服务器地址（域名、端口、http/https）一旦变化，这两个都要重新打包。所以对外地址要尽量固定，本文把 nginx 放在原来的端口上，就是为了让已经发出去的 App 不用重新打包。
 
 - **Web**：直接访问公开地址，和 API 同源，无需额外配置。
 - **手机 App**（`apps/mobile`，Expo）：服务器地址在**构建时**通过 `EXPO_PUBLIC_RAFT_SERVER_URL` 写入，没有默认值，也没有在 App 内修改地址的界面。Android 默认禁止明文 http：`apps/mobile/plugins/withCleartext.js` 生成的网络安全配置只对少数主机放开明文（本机地址、模拟器地址和特定的 VPN 域名后缀）。自托管用 `http://` 时，要把你的主机加进这个插件的 `domain-config`，然后重新 `expo prebuild`（手改 `android/` 目录会被下次 prebuild 覆盖）；或者直接给服务端配上 HTTPS。
+  - 打包示例：`EXPO_PUBLIC_RAFT_SERVER_URL=http://<公开地址> pnpm --filter ./apps/mobile ...`（具体命令见 `apps/mobile` 的说明）。**不要用裸 IP**：插件只能按主机名放开明文，裸 IP 会被系统拦截。
+  - 安卓模拟器访问宿主机用 `10.0.2.2`，这个地址已经在白名单里；真机要用上面放开的主机名。
+  - 用 `adb` 安装到真机前，先执行 `adb reverse --remove-all`，否则调试时设置的端口转发可能让 App 实际连到了开发机，而不是服务器。
+  - Gradle 只在代码内容变化时才重新生成 JS bundle。只改了环境变量重新打包时，要让 bundle 真正重新生成（例如加 `--rerun-tasks`），否则新地址不会写进去；打包后可以解包检查 bundle 里的地址。
 - **桌面端**（`apps/raft-desktop-electron`）：服务器地址在构建时通过 `VITE_API_URL` 写入（默认是官方地址）。非官方地址需要构建配置同时放开 CSP 和 CORS 白名单，这部分在 `dev` 分支的 `buildConfig.mjs` 里处理；Web 发布里的 `/desktop-manifest.json` 是桌面端的兼容性清单。
+  - 打包示例：`VITE_API_URL=http://<公开地址> pnpm --filter @botiverse/raft-desktop-electron dist:mac`。不设置 `VITE_API_URL` 就会连官方生产服务器，一定要设置。
+  - 这个值只接受 `http(s)://主机[:端口]`，非法值会让打包直接失败；用非官方地址打的包会自动关闭自动更新，避免被官方版本覆盖。
+  - 包里的 App 名称和本地数据目录保持不变，重新安装不会丢失登录状态。
 
 ## 17. 备份
 
