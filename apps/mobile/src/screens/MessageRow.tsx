@@ -98,7 +98,7 @@ export const MessageRow = memo(function MessageRow({
   onToggleSystem?: (messageId: string) => void;
   onOpenAttachment?: (attachment: MessageAttachment, disposition: "inline" | "attachment") => void;
   /** Signed inline URL for image attachments that have no CDN thumbnail. */
-  resolveImageUrl?: (attachment: MessageAttachment) => Promise<string | null>;
+  resolveImageUrl?: (attachment: MessageAttachment, options?: { refresh?: boolean }) => Promise<string | null>;
   onPressMessage?: (messageId: string) => void;
   onLongPressMessage?: (messageId: string, x: number, y: number) => void;
   onPressSender?: (messageId: string) => void;
@@ -323,20 +323,22 @@ function AttachmentImage({
 }: {
   attachment: MessageAttachment;
   count: number;
-  resolve?: (attachment: MessageAttachment) => Promise<string | null>;
+  resolve?: (attachment: MessageAttachment, options?: { refresh?: boolean }) => Promise<string | null>;
 }) {
   const [uri, setUri] = useState<string | null>(attachment.thumbnailUrl ?? null);
+  const [attempt, setAttempt] = useState(0);
   const [failed, setFailed] = useState(false);
   useEffect(() => {
-    if (uri || !resolve) return;
+    if (attempt === 0 && attachment.thumbnailUrl) return;
+    if (!resolve) return;
     let cancelled = false;
-    void resolve(attachment).then((url) => {
+    void resolve(attachment, { refresh: attempt > 0 }).then((url) => {
       if (!cancelled) setUri(url);
     });
     return () => {
       cancelled = true;
     };
-  }, [attachment, resolve, uri]);
+  }, [attachment, attempt, resolve]);
   // Web caps gallery images at min(22rem, 100vw - 7rem); two or more share the row.
   const width = count > 1 ? 132 : 240;
   const ratio = attachment.width && attachment.height ? attachment.height / attachment.width : 0.75;
@@ -346,7 +348,19 @@ function AttachmentImage({
   }
   return (
     <View style={[styles.imageFrame, { width, height }]}>
-      <Image onError={() => setFailed(true)} resizeMode="cover" source={{ uri }} style={{ width: "100%", height: "100%" }} />
+      <Image
+        onError={() => {
+          if (attempt >= 1) {
+            setFailed(true);
+            return;
+          }
+          setUri(null);
+          setAttempt(1);
+        }}
+        resizeMode="cover"
+        source={{ uri }}
+        style={{ width: "100%", height: "100%" }}
+      />
     </View>
   );
 }

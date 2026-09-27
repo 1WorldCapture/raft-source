@@ -258,6 +258,7 @@ export function createApiClient(options: ApiClientOptions) {
   return {
     request,
     refreshTokens,
+    getAccessToken: () => options.getAccessToken() ?? "",
     authHeaders: () => attachmentAuthHeaders(options.getAccessToken() ?? "", options.getServerId()),
     get: <T = unknown>(path: string, init?: Omit<RequestOptions, "method" | "body">) =>
       request<T>(path, { ...init, method: "GET" }),

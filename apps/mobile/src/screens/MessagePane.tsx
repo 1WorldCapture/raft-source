@@ -569,8 +569,7 @@ export function MessagePane({
     if (disposition === "attachment") {
       if (downloadingRef.current) return;
       const sessionNow = sessionRef.current;
-      const headers = sessionNow.client.authHeaders();
-      if (!sessionNow.origin || !headers.Authorization) {
+      if (!sessionNow.origin) {
         setError(t("mobile.attachments.failed"));
         return;
       }
@@ -579,7 +578,11 @@ export function MessagePane({
       try {
         await downloadAndShareAttachment({
           url: attachmentDownloadUrl(sessionNow.origin, attachment.id),
-          headers,
+          getAccessToken: () => sessionRef.current.client.getAccessToken(),
+          getHeaders: () => sessionRef.current.client.authHeaders(),
+          refreshTokens: async () => {
+            await sessionRef.current.client.refreshTokens();
+          },
           filename: attachment.filename,
           mimeType: attachment.mimeType,
         });
@@ -943,8 +946,9 @@ export function MessagePane({
     });
   }, []);
   const imageUrls = useRef(new Map<string, Promise<string | null>>());
-  const resolveImageUrl = useCallback((attachment: MessageAttachment): Promise<string | null> => {
+  const resolveImageUrl = useCallback((attachment: MessageAttachment, options?: { refresh?: boolean }): Promise<string | null> => {
     if (!attachment.id) return Promise.resolve(null);
+    if (options?.refresh) imageUrls.current.delete(attachment.id);
     const cached = imageUrls.current.get(attachment.id);
     if (cached) return cached;
     const pending = sessionRef.current.client.get<unknown>(`/attachments/${attachment.id}/url?disposition=inline`)
