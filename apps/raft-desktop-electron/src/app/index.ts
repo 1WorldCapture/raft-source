@@ -603,9 +603,11 @@ if (headlessMode?.mode === "__service") {
         // Live scan, not a cached file: the dialog names what is actually
         // running at confirm time (each ps hit is one agent runtime process).
         agentCount: async () => {
+          const home = computerHost?.slockHome;
+          if (!home) return null;
           try {
             const { stdout } = await execFileAsync("ps", ["-axo", "pid=,command="]);
-            return scanAgentPids(stdout, path.join(computerHost.slockHome, "agents")).length;
+            return scanAgentPids(stdout, path.join(home, "agents")).length;
           } catch {
             return null;
           }
