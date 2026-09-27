@@ -233,6 +233,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     },
     onConnect: () => {
       void useTaskStore.getState().catchUp(client);
+      // Events emitted while disconnected were lost — the board cannot be
+      // fixed up incrementally, so reload it from page 1.
+      const board = useBoardStore.getState();
+      if (board.loaded) void board.load(client);
     },
     onDisconnect: () => {
       useTaskStore.getState().markStale();

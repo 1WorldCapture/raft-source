@@ -72,6 +72,10 @@ function fakeClient(responder: (path: string) => { tasks: unknown[]; next_cursor
       calls.push(path);
       return responder(path) as T;
     },
+    async patch<T>(path: string): Promise<T> {
+      calls.push(path);
+      return responder(path) as unknown as T;
+    },
   };
 }
 
@@ -204,4 +208,62 @@ test("bumpTick advances the tick counter for relative-time rerenders", () => {
   const before = store.getState().tick;
   store.getState().bumpTick();
   assert.equal(store.getState().tick, before + 1);
+});
+
+test("approveTask moves the row into done optimistically, server truth wins", async () => {
+  const fakeNow = new Date(2026, 8, 27, 12, 0);
+  const timers = manualTimers();
+  const store = createBoardStore({ ...timers.deps, now: () => fakeNow });
+  const t1 = boardTask("t1", { status: "in_review" });
+  const serverDone = { ...t1, status: "done", completedAt: new Date(2026, 8, 27, 11, 58).toISOString(), title: "Server title" };
+  const client = fakeClient((path) => (path.includes("/status") ? { task: serverDone } : { tasks: [t1], next_cursor: null }));
+  await store.getState().load(client);
+  const ok = await store.getState().approveTask(client, "t1");
+  assert.equal(ok, true);
+  const row = store.getState().tasks[0];
+  assert.equal(row.status, "done");
+  assert.equal(row.completedAt, serverDone.completedAt, "server completedAt replaces the optimistic one");
+  assert.equal(row.title, "Server title", "server base fields merge into the board row");
+  assert.ok(client.calls.some((path) => path.includes("/tasks/t1/status")), "PATCH hit the status endpoint");
+});
+
+test("approveTask reverts the row and reports failure when the PATCH fails", async () => {
+  const fakeNow = new Date(2026, 8, 27, 12, 0);
+  const timers = manualTimers();
+  const store = createBoardStore({ ...timers.deps, now: () => fakeNow });
+  const t1 = boardTask("t1", { status: "in_review" });
+  const client = fakeClient((path) => {
+    if (path.includes("/status")) throw new Error("conflict");
+    return { tasks: [t1], next_cursor: null };
+  });
+  await store.getState().load(client);
+  const ok = await store.getState().approveTask(client, "t1");
+  assert.equal(ok, false);
+  const row = store.getState().tasks[0];
+  assert.equal(row.status, "in_review", "row reverts to its original section");
+  assert.equal(row.completedAt, null);
+});
+
+test("bumpTick reloads with the new midnight after the calendar day rolls over", async () => {
+  let fakeNow = new Date(2026, 8, 27, 23, 59);
+  const timers = manualTimers();
+  const store = createBoardStore({ ...timers.deps, now: () => fakeNow });
+  const t1 = boardTask("t1", { status: "done", completedAt: new Date(2026, 8, 27, 9, 0).toISOString() });
+  const client = fakeClient(() => ({ tasks: [t1], next_cursor: null }));
+  await store.getState().load(client);
+  assert.equal(client.calls.length, 1);
+  const beforeCompletedAfter = new URLSearchParams(client.calls[0].split("?")[1]).get("completedAfter");
+
+  fakeNow = new Date(2026, 8, 28, 0, 1); // next local day
+  store.getState().bumpTick(client);
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(client.calls.length, 2, "day rollover triggers a reload from page 1");
+  const afterCompletedAfter = new URLSearchParams(client.calls[1].split("?")[1]).get("completedAfter");
+  assert.notEqual(afterCompletedAfter, beforeCompletedAfter, "completedAfter moved to the new midnight");
+
+  store.getState().bumpTick(client); // same day now — no extra fetch
+  await Promise.resolve();
+  assert.equal(client.calls.length, 2, "ticks within the same day do not reload");
 });

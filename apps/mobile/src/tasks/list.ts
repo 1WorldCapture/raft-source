@@ -22,9 +22,9 @@ export function hasTaskFilter(filters: TaskFilters): boolean {
   return filters.channels.length > 0 || filters.creators.length > 0 || filters.assignees.length > 0;
 }
 
-/** Chips combine with AND. Values inside one chip combine with OR. */
-export function filterTasks(tasks: readonly RaftTask[], filters: TaskFilters): RaftTask[] {
-  let result: RaftTask[] = [...tasks];
+/** Chips combine with AND. Values inside one chip combine with OR. Generic so board rows keep their view fields through a filter. */
+export function filterTasks<T extends RaftTask>(tasks: readonly T[], filters: TaskFilters): T[] {
+  let result: T[] = [...tasks];
   if (filters.channels.length > 0) {
     const selected = new Set(filters.channels);
     result = result.filter((task) => selected.has(task.channelId));
