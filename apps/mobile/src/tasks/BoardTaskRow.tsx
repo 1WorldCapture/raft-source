@@ -86,7 +86,7 @@ export function BoardTaskRow({
                   <AppText style={styles.staleTagText}>{t("mobile.board.row.mayBeStuck")}</AppText>
                 </View>
               ) : null}
-              {onApprove ? <BoardApproveButton onApprove={onApprove} /> : null}
+              {onApprove ? <BoardApproveButton taskNumber={task.taskNumber} onApprove={onApprove} /> : null}
             </View>
           ) : null}
         </View>
@@ -95,12 +95,12 @@ export function BoardTaskRow({
   );
 }
 
-function BoardApproveButton({ onApprove }: { onApprove: () => void }) {
+function BoardApproveButton({ taskNumber, onApprove }: { taskNumber: number; onApprove: () => void }) {
   const t = useT();
   const [pressed, setPressed] = useState(false);
   const confirm = () => {
     Alert.alert(
-      t("mobile.board.approveTitle"),
+      t("mobile.board.approveTitle", { number: taskNumber }),
       t("mobile.board.approveBody"),
       [
         { text: t("mobile.board.approveCancel"), style: "cancel" },
