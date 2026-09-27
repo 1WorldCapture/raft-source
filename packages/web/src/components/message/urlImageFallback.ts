@@ -2,10 +2,18 @@ import type { MessageAttachment } from "../../store/messageStore";
 
 type ImageGalleryPreviewSource = Pick<MessageAttachment, "id" | "localPreviewUrl" | "thumbnailUrl" | "rasterPreviewUrl">;
 
+/** Native `<img>` SVG rendering cap: browsers render SVG in a sandboxed image
+ *  context (no script execution, no external loads), but huge or malformed
+ *  files can still stall decode, so oversize SVGs stay attachment chips. */
+export const SVG_NATIVE_RENDER_MAX_BYTES = 2 * 1024 * 1024;
+
 export function isPreviewableImageAttachment(att: MessageAttachment): boolean {
   const mimeType = att.mimeType.split(";")[0].trim().toLowerCase();
   if (mimeType === "image/svg+xml") {
-    return Boolean(att.thumbnailUrl || att.rasterPreviewUrl);
+    // `<img>` falls back to the authenticated original file when no CDN
+    // thumbnail/raster exists; oversize SVGs stay chips.
+    if (att.sizeBytes != null && att.sizeBytes > SVG_NATIVE_RENDER_MAX_BYTES) return false;
+    return true;
   }
   return mimeType.startsWith("image/");
 }

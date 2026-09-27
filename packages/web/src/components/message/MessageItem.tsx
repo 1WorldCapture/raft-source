@@ -129,6 +129,7 @@ import {
   hydrateReactionViewerSnapshot,
 } from "../../store/reactionViewerReadModel";
 import { AttachmentCommentRefChip } from "./AttachmentCommentRefChip";
+import { fetchSvgPngPreviewUrl } from "./svgPngPreview";
 import { shouldShowGroupedMessageHeader } from "./messageGrouping";
 import type { MessageGroupState } from "./messageGrouping";
 import { MessageHoverToolbar } from "./MessageHoverToolbar";
@@ -1280,9 +1281,14 @@ const EMPTY_IMAGE_INLINE_FALLBACK_URLS: Record<string, string> = {};
 
 function ImageInlineFallbackLoader({
   fallbackKey,
+  blobIds,
   children,
 }: {
   fallbackKey: string;
+  /** Attachments that must resolve through the same-origin blob pipeline
+   *  (SVG has no CDN raster; a cross-origin presigned URL in `<img src>` is
+   *  blocked by the attachment responses' CORP header). */
+  blobIds: ReadonlySet<string>;
   children: (fallbackUrls: Record<string, string>) => ReactNode;
 }) {
   // The parent seam must keep empty keys off this state/effect-bearing path.
@@ -1304,11 +1310,23 @@ function ImageInlineFallbackLoader({
     // oxlint-disable-next-line react-doctor/no-adjust-state-on-prop-change
     setFallbackUrls((current) => retainImageInlineFallbackUrls(current, attachmentIds));
 
-    // One request for the whole gallery instead of one per image.
-    void fetchInlineAttachmentUrls(attachmentIds)
-      .then((urls) => {
+    // SVG tiles resolve through the same-origin blob pipeline (CORP blocks a
+    // cross-origin presigned URL inside `<img>`); every other image keeps the
+    // one-batch presigned resolution.
+    const svgIds = attachmentIds.filter((id) => blobIds.has(id));
+    const signedIds = attachmentIds.filter((id) => !blobIds.has(id));
+    void Promise.all([
+      Promise.all(svgIds.map((id) => fetchSvgPngPreviewUrl(id).then((url) => [id, url] as const))),
+      fetchInlineAttachmentUrls(signedIds),
+    ])
+      .then(([blobEntries, urls]) => {
         if (cancelled) return;
-        for (const attachmentId of attachmentIds) {
+        for (const [attachmentId, url] of blobEntries) {
+          setFallbackUrls((current) => url
+            ? setImageInlineFallbackUrl(current, attachmentId, url)
+            : removeImageInlineFallbackUrl(current, attachmentId));
+        }
+        for (const attachmentId of signedIds) {
           const url = urls.get(attachmentId);
           setFallbackUrls((current) => url
             ? setImageInlineFallbackUrl(current, attachmentId, url)
@@ -1320,7 +1338,7 @@ function ImageInlineFallbackLoader({
       cancelled = true;
       controller.abort();
     };
-  }, [fallbackKey]);
+  }, [blobIds, fallbackKey]);
   // Stryker restore all
 
   return children(fallbackUrls);
@@ -1328,10 +1346,11 @@ function ImageInlineFallbackLoader({
 
 function renderWithImageInlineFallback(
   fallbackKey: string,
+  blobIds: ReadonlySet<string>,
   children: (fallbackUrls: Record<string, string>) => ReactNode,
 ) {
   if (!fallbackKey) return children(EMPTY_IMAGE_INLINE_FALLBACK_URLS);
-  return <ImageInlineFallbackLoader fallbackKey={fallbackKey}>{children}</ImageInlineFallbackLoader>;
+  return <ImageInlineFallbackLoader fallbackKey={fallbackKey} blobIds={blobIds}>{children}</ImageInlineFallbackLoader>;
 }
 
 export function AttachmentMetaText({
@@ -2955,6 +2974,17 @@ const MessageItem = memo(function MessageItem({ message, mentionMap, channels, p
   // use sites while the focused mutation oracle avoids full MessageItem DOM.
   const imageFallbackKey = useMemo(() => buildImageInlineFallbackKey(message.attachments), [message.attachments]);
   // Stryker restore all
+  // SVG without a CDN raster/thumbnail cannot embed its cross-origin presigned
+  // URL in `<img src>` (attachment responses send `CORP: same-origin`); those
+  // tiles resolve their bytes through the same-origin blob pipeline instead.
+  const svgBlobIds = useMemo(() => new Set(
+    (message.attachments ?? [])
+      .filter((att) => isPreviewableImageAttachment(att)
+        && att.mimeType.split(";")[0].trim().toLowerCase() === "image/svg+xml"
+        && !att.thumbnailUrl
+        && !att.rasterPreviewUrl)
+      .map((att) => att.id),
+  ), [message.attachments]);
 
   const followedThread = canShowThreadFollowAction
     ? followedThreads.find((thread) => thread.parentMessageId === message.id)
@@ -4467,7 +4497,7 @@ const MessageItem = memo(function MessageItem({ message, mentionMap, channels, p
         </CollapsibleMessageContent>
         {/* Attached files */}
         {!forwardedBundleMetadata && message.attachments && message.attachments.length > 0 && (() => {
-          return renderWithImageInlineFallback(imageFallbackKey, (imageFallbackUrls) => {
+          return renderWithImageInlineFallback(imageFallbackKey, svgBlobIds, (imageFallbackUrls) => {
             // Stryker disable all: pre-existing attachment classification moved under the fallback seam.
             if (!message.attachments) return null;
             const imageAttachments = message.attachments.filter((att) => isPreviewableImageAttachment(att));
