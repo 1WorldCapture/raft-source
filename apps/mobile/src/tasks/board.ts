@@ -99,7 +99,8 @@ function isStale(task: BoardTask, now: Date): boolean {
 
 /**
  * Group board tasks. A task appears in exactly one section — needsMe wins
- * over everything, stale in-progress rows float to the top of inProgress,
+ * over everything (but a mention only LIFTS an unfinished task: done stays
+ * in doneToday, closed never shows), stale flags apply to in_progress only,
  * closed tasks are dropped entirely, and done tasks outside today are
  * dropped (the server already filters via completedAfter; this is the
  * client-side guarantee).
@@ -110,20 +111,20 @@ export function buildBoard(tasks: readonly BoardTask[], now: Date, _me?: BoardVi
   for (const task of tasks) {
     if (seen.has(task.id)) continue; // pagination overlap dedup (contract §3)
     seen.add(task.id);
-    const stale = isStale(task, now);
-    if (task.status === "in_review" || task.mentionsMe) {
-      board.needsMe.push(row(task, stale));
+    const mentionLifts = task.mentionsMe && (task.status === "todo" || task.status === "in_progress");
+    if (task.status === "in_review" || mentionLifts) {
+      board.needsMe.push(row(task, false));
       continue;
     }
     switch (task.status) {
       case "in_progress":
-        board.inProgress.push(row(task, stale));
+        board.inProgress.push(row(task, isStale(task, now)));
         break;
       case "done":
-        if (isDoneToday(task.completedAt, now)) board.doneToday.push(row(task, stale));
+        if (isDoneToday(task.completedAt, now)) board.doneToday.push(row(task, false));
         break;
       case "todo":
-        board.todo.push(row(task, stale));
+        board.todo.push(row(task, false));
         break;
       case "closed":
         break; // in_review never reaches the switch — handled above
@@ -138,7 +139,11 @@ export function buildBoard(tasks: readonly BoardTask[], now: Date, _me?: BoardVi
     return byActivityDesc(left, right);
   });
   board.needsMe.sort(byActivityDesc);
-  board.doneToday.sort(byActivityDesc);
+  // Done-today order follows completion time — thread replies arriving after
+  // completion must not reshuffle the section.
+  board.doneToday.sort(
+    (left, right) => compareDesc(left.task.completedAt ?? "", right.task.completedAt ?? "") || right.task.taskNumber - left.task.taskNumber,
+  );
   board.todo.sort(byActivityDesc);
   return board;
 }
@@ -201,6 +206,27 @@ export function boardStatusParam(): string {
   return BOARD_QUERY_STATUSES.join(",");
 }
 
-export function isBoardStatus(value: string): value is TaskStatus {
-  return isTaskStatus(value);
+/**
+ * Realtime recalibration (contract §ids): replace/insert the freshly fetched
+ * rows, and REMOVE every requested id the server did not return — with the
+ * board's status filter still applied server-side, a missing id means the
+ * task left the board (e.g. it was closed) and its row must not linger.
+ */
+export function reconcileByIds(
+  current: readonly BoardTask[],
+  fetched: readonly BoardTask[],
+  requestedIds: readonly string[],
+): BoardTask[] {
+  const fetchedById = new Map(fetched.map((task) => [task.id, task]));
+  const next = new Map<string, BoardTask>();
+  for (const task of current) {
+    if (requestedIds.includes(task.id)) continue; // its fate is decided below
+    next.set(task.id, task);
+  }
+  for (const id of requestedIds) {
+    const fresh = fetchedById.get(id);
+    if (fresh) next.set(id, fresh); // returned → updated row
+    // not returned → dropped from the board entirely
+  }
+  return [...next.values()];
 }

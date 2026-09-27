@@ -154,3 +154,62 @@ test("board status query covers todo..done but never closed", async () => {
   assert.equal(boardStatusParam(), "todo,in_progress,in_review,done");
   assert.ok(!BOARD_QUERY_STATUSES.includes("closed" as TaskStatus));
 });
+
+test("a mention only lifts unfinished tasks; done stays in doneToday, closed stays hidden", () => {
+  const board = buildBoard(
+    [
+      boardTask("t1", { status: "done", mentionsMe: true, completedAt: new Date(2026, 8, 27, 9, 0).toISOString() }),
+      boardTask("t2", { status: "closed", mentionsMe: true }),
+      boardTask("t3", { status: "todo", mentionsMe: true, lastActivityAt: "2026-09-27T11:00:00.000Z" }),
+      boardTask("t4", { status: "in_progress", mentionsMe: true, lastActivityAt: "2026-09-27T10:30:00.000Z" }),
+    ],
+    NOW,
+  );
+  assert.deepEqual(board.needsMe.map((r) => r.task.id), ["t3", "t4"], "only todo/in_progress mentions lift");
+  assert.deepEqual(board.doneToday.map((r) => r.task.id), ["t1"], "done+mention lands in doneToday, not needsMe");
+  assert.equal(board.todo.length, 0);
+  assert.equal(board.inProgress.length, 0);
+});
+
+test("stale flags apply to in_progress rows only", () => {
+  const old = "2026-09-27T06:00:00.000Z"; // 6h before NOW
+  const board = buildBoard(
+    [
+      boardTask("t1", { status: "in_progress", lastActivityAt: old }),
+      boardTask("t2", { status: "in_review", lastActivityAt: old }),
+      boardTask("t3", { status: "todo", lastActivityAt: old }),
+      boardTask("t4", { status: "done", completedAt: new Date(2026, 8, 27, 9, 0).toISOString(), lastActivityAt: old }),
+    ],
+    NOW,
+  );
+  assert.equal(board.inProgress[0].stale, true);
+  assert.equal(board.needsMe[0].stale, false, "in_review rows never flag stale");
+  assert.equal(board.todo[0].stale, false);
+  assert.equal(board.doneToday[0].stale, false);
+});
+
+test("doneToday orders by completedAt desc, immune to later thread replies", () => {
+  const board = buildBoard(
+    [
+      boardTask("early", { status: "done", completedAt: new Date(2026, 8, 27, 9, 0).toISOString(), lastActivityAt: "2026-09-27T11:55:00.000Z" }),
+      boardTask("late", { status: "done", completedAt: new Date(2026, 8, 27, 10, 0).toISOString(), lastActivityAt: "2026-09-27T08:00:00.000Z" }),
+    ],
+    NOW,
+  );
+  assert.deepEqual(board.doneToday.map((r) => r.task.id), ["late", "early"], "completion time rules, not activity");
+});
+
+test("reconcileByIds updates returned rows and drops requested-but-missing ids", async () => {
+  const { reconcileByIds } = await import("./board.ts");
+  const t1 = boardTask("t1");
+  const t2 = boardTask("t2");
+  const t3 = boardTask("t3");
+  const t2Updated = { ...t2, status: "done" as const, completedAt: new Date(2026, 8, 27, 9, 0).toISOString() };
+  const next = reconcileByIds([t1, t2, t3], [t2Updated], ["t2", "t3"]);
+  assert.deepEqual(
+    next.map((task) => task.id).sort(),
+    ["t1", "t2"],
+    "t3 was requested but not returned (closed) → removed; untouched t1 stays",
+  );
+  assert.equal(next.find((task) => task.id === "t2")?.status, "done", "returned row is the fresh one");
+});
