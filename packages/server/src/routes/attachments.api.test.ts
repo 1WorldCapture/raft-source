@@ -479,6 +479,8 @@ test("GET /api/attachments/:id rejects missing X-Server-Id header", async ({ app
   });
   // requireServerForFlex rejects missing scope before the resource lookup.
   assert.equal(res.status, 400, `expected 400, got ${res.status}`);
+  // Only served file bytes relax CORP; error responses keep Helmet's default.
+  assert.equal(res.headers.get("cross-origin-resource-policy"), "same-origin");
 });
 
 test("GET /api/attachments/:id rejects X-Server-Id the user is not a member of", async ({ app }) => {
@@ -687,11 +689,14 @@ test("GET /api/attachments/:id serves both image and pdf attachments from local 
     assert.equal(imageRes.status, 200);
     assert.equal(imageRes.headers.get("content-type"), "image/jpeg");
     assert.match(imageRes.headers.get("content-disposition") ?? "", /^inline;/);
+    // Cross-origin pages (desktop app://, other web ports) must be able to embed it.
+    assert.equal(imageRes.headers.get("cross-origin-resource-policy"), "cross-origin");
     assert.deepEqual(Buffer.from(await imageRes.arrayBuffer()), imageBuffer);
 
     assert.equal(pdfRes.status, 200);
     assert.equal(pdfRes.headers.get("content-type"), "application/pdf");
     assert.match(pdfRes.headers.get("content-disposition") ?? "", /^attachment;/);
+    assert.equal(pdfRes.headers.get("cross-origin-resource-policy"), "cross-origin");
     assert.deepEqual(Buffer.from(await pdfRes.arrayBuffer()), pdfBuffer);
   } finally {
     await app.close();
