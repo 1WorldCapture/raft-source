@@ -6,7 +6,7 @@
 // unit-testable without a server.
 
 import { parseTask, taskStatusOptions, type RaftTask, type TaskStatus } from "./model";
-import { isRecord } from "../model/messages";
+import { isRecord, type RaftMessage } from "../model/messages";
 
 /** The server caps nothing; the badge renders "99+" beyond this. */
 export const UNREAD_CAP = 99;
@@ -97,6 +97,63 @@ export function boardFromTasks(tasks: readonly RaftTask[]): BoardTask[] {
     unreadCount: 0,
     mentionsMe: false,
   }));
+}
+
+/** True when this board task owns the thread the socket event talks about. */
+export function taskMatchesThread(
+  task: Pick<BoardTask, "threadChannelId" | "messageId">,
+  event: { threadChannelId: string | null; parentMessageId: string },
+): boolean {
+  return (event.threadChannelId !== null && task.threadChannelId === event.threadChannelId) || task.messageId === event.parentMessageId;
+}
+
+/** Snippet mirror of the server's projection: first line, whitespace folded, ≤120 chars. */
+function snippetFromContent(content: string | undefined): string | null {
+  const line = (content ?? "").split("\n").map((part) => part.trim()).filter(Boolean)[0] ?? "";
+  const folded = line.replace(/\s+/g, " ").trim();
+  return folded ? folded.slice(0, 120) : null;
+}
+
+export interface ThreadActivityEvent {
+  threadChannelId: string | null;
+  parentMessageId: string;
+  /** The live socket's latestReply (parsed); absent on older servers. */
+  latestReply?: RaftMessage | null;
+}
+
+/**
+ * Optimistic realtime patch (task #2 step 6): apply a thread:updated event to
+ * a matching board task so the row reacts instantly — bump unread for replies
+ * from others, refresh latestActivity/lastActivityAt, and clear mentionsMe
+ * once the viewer themselves replied (the contract's clear-on-my-reply rule).
+ * The debounced ids recalibration then replaces this with exact server truth.
+ * Out-of-order (older) events leave the task untouched.
+ */
+export function applyThreadActivityToTask(
+  task: BoardTask,
+  event: ThreadActivityEvent,
+  me: BoardViewer | null,
+): BoardTask {
+  const reply = event.latestReply;
+  if (!reply?.createdAt) return task;
+  if (new Date(reply.createdAt).getTime() <= new Date(task.lastActivityAt).getTime()) return task;
+  const mine = me !== null && reply.senderType === me.type && reply.senderId === me.id;
+  const actorType = reply.senderType === "user" || reply.senderType === "agent" ? reply.senderType : "system";
+  return {
+    ...task,
+    lastActivityAt: reply.createdAt,
+    latestActivity: {
+      kind: "reply",
+      at: reply.createdAt,
+      actorType,
+      actorId: reply.senderId ?? null,
+      actorName: reply.senderDisplayName || reply.senderName || null,
+      snippet: snippetFromContent(reply.content),
+      eventType: null,
+    },
+    unreadCount: mine ? task.unreadCount : task.unreadCount + 1,
+    mentionsMe: mine ? false : task.mentionsMe,
+  };
 }
 
 function row(task: BoardTask, stale: boolean): BoardRow {

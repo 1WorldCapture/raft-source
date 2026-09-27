@@ -238,3 +238,39 @@ test("reconcileByIds updates returned rows and drops requested-but-missing ids",
   );
   assert.equal(next.find((task) => task.id === "t2")?.status, "done", "returned row is the fresh one");
 });
+
+test("applyThreadActivityToTask folds the reply snippet and falls back through actor names", async () => {
+  const { applyThreadActivityToTask, taskMatchesThread } = await import("./board.ts");
+  const t1 = boardTask("t1", { threadChannelId: "thread-t1", lastActivityAt: "2026-09-27T10:00:00.000Z" });
+  assert.equal(taskMatchesThread(t1, { threadChannelId: "thread-t1", parentMessageId: "other" }), true, "thread id matches");
+  assert.equal(taskMatchesThread(t1, { threadChannelId: null, parentMessageId: "t1" }), true, "parent message fallback");
+  assert.equal(taskMatchesThread(t1, { threadChannelId: "nope", parentMessageId: "other" }), false);
+  const patched = applyThreadActivityToTask(
+    t1,
+    {
+      threadChannelId: "thread-t1",
+      parentMessageId: "t1",
+      latestReply: {
+        id: "m2",
+        channelId: "thread-t1",
+        senderType: "agent",
+        senderId: "a1",
+        senderName: "Dev",
+        senderDisplayName: "Dev-Anna",
+        content: `${"word ".repeat(40)}\nsecond line ignored`,
+        createdAt: "2026-09-27T10:05:00.000Z",
+      },
+    },
+    { type: "user", id: "u1" },
+  );
+  assert.equal(patched.lastActivityAt, "2026-09-27T10:05:00.000Z");
+  assert.equal(patched.latestActivity?.actorName, "Dev-Anna", "display name wins");
+  assert.equal(patched.latestActivity?.snippet.length <= 120, true, "snippet folds to one line and caps at 120");
+  assert.equal(patched.unreadCount, 1);
+  const viaSenderName = applyThreadActivityToTask(
+    t1,
+    { threadChannelId: "thread-t1", parentMessageId: "t1", latestReply: { id: "m3", channelId: "thread-t1", senderType: "user", senderId: "u9", senderName: "Lyon", content: "hi", createdAt: "2026-09-27T10:06:00.000Z" } },
+    { type: "user", id: "u1" },
+  );
+  assert.equal(viaSenderName.latestActivity?.actorName, "Lyon", "senderName when no display name");
+});

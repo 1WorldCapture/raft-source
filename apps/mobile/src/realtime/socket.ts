@@ -161,11 +161,17 @@ export function createRealtime(options: RealtimeOptions) {
     created.on("thread:updated", (payload: unknown) => {
       if (!isRecord(payload) || typeof payload.parentMessageId !== "string" || typeof payload.threadChannelId !== "string") return;
       const replyCount = Number(payload.replyCount);
+      // Keep latestReply: the task board (task #2) uses it to update a row's
+      // latestActivity and unread count instantly; dropping it (as before)
+      // forces every thread event into a full refetch for content the socket
+      // already delivered.
+      const latestReply = parseMessage(payload.latestReply);
       options.onThreadUpdated({
         parentMessageId: payload.parentMessageId,
         threadChannelId: payload.threadChannelId,
         replyCount: Number.isFinite(replyCount) ? replyCount : 0,
         lastReplyAt: typeof payload.lastReplyAt === "string" ? payload.lastReplyAt : null,
+        ...(latestReply ? { latestReply } : {}),
       });
     });
     created.on("read_state:updated", (payload: unknown) => {
