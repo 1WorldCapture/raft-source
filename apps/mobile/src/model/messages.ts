@@ -19,6 +19,8 @@ export interface MessageAttachment {
   id?: string;
   filename: string;
   thumbnailUrl?: string | null;
+  /** Server-rendered raster stand-in for formats the client cannot draw (SVG). */
+  rasterPreviewUrl?: string | null;
   mimeType?: string;
   sizeBytes?: number;
   width?: number;

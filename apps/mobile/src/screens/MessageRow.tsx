@@ -1,5 +1,6 @@
 import { memo, useEffect, useRef, useState, type ReactNode } from "react";
-import { Animated, Image, Pressable, StyleSheet, View } from "react-native";
+import { Animated, Pressable, StyleSheet, View } from "react-native";
+import { Image } from "expo-image";
 import type { MessageAttachment, RaftMessage, ThreadReplyPreview } from "../model/messages";
 import { senderLabel } from "../model/messages";
 import { Avatar } from "../ui/Avatar";
@@ -54,6 +55,7 @@ export const MessageRow = memo(function MessageRow({
   onDelete,
   onToggleSystem,
   onOpenAttachment,
+  onOpenImage,
   resolveImageUrl,
   onPressMessage,
   onLongPressMessage,
@@ -96,7 +98,9 @@ export const MessageRow = memo(function MessageRow({
   onResend?: (messageId: string) => void;
   onDelete?: (messageId: string) => void;
   onToggleSystem?: (messageId: string) => void;
-  onOpenAttachment?: (attachment: MessageAttachment, disposition: "inline" | "attachment") => void;
+  onOpenAttachment?: (attachment: MessageAttachment) => void;
+  /** Opens the image viewer with every image of the message and the tapped index. */
+  onOpenImage?: (images: MessageAttachment[], index: number) => void;
   /** Signed inline URL for image attachments that have no CDN thumbnail. */
   resolveImageUrl?: (attachment: MessageAttachment, options?: { refresh?: boolean }) => Promise<string | null>;
   onPressMessage?: (messageId: string) => void;
@@ -188,8 +192,8 @@ export const MessageRow = memo(function MessageRow({
             ) : null}
             {images.length > 0 ? (
               <View style={styles.grid}>
-                {images.map((attachment) => (
-                  <Pressable key={attachment.id ?? attachment.filename} onPress={() => onOpenAttachment?.(attachment, "inline")}>
+                {images.map((attachment, index) => (
+                  <Pressable key={attachment.id ?? attachment.filename} onPress={() => onOpenImage?.(images, index)}>
                     <AttachmentImage attachment={attachment} count={images.length} resolve={resolveImageUrl} />
                   </Pressable>
                 ))}
@@ -201,7 +205,7 @@ export const MessageRow = memo(function MessageRow({
                 <Pressable
                   key={attachment.id ?? attachment.filename}
                   disabled={downloading}
-                  onPress={() => onOpenAttachment?.(attachment, "attachment")}
+                  onPress={() => onOpenAttachment?.(attachment)}
                   style={styles.fileCard}
                 >
                   <AppText style={styles.file}>{attachment.filename}</AppText>
@@ -349,6 +353,7 @@ function AttachmentImage({
   return (
     <View style={[styles.imageFrame, { width, height }]}>
       <Image
+        contentFit="cover"
         onError={() => {
           if (attempt >= 1) {
             setFailed(true);
@@ -357,7 +362,6 @@ function AttachmentImage({
           setUri(null);
           setAttempt(1);
         }}
-        resizeMode="cover"
         source={{ uri }}
         style={{ width: "100%", height: "100%" }}
       />
