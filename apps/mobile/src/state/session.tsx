@@ -350,10 +350,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       backgroundAt.current = null;
       if (away > BACKGROUND_DISCONNECT_MS) realtime.reset();
       realtime.connect();
+      // The socket may have stayed up in the background, so onConnect can miss
+      // the foreground return — reload the board the same way (load dedupes).
+      const board = useBoardStore.getState();
+      if (board.loaded) void board.load(client);
       void flushReads();
     });
     return () => subscription.remove();
-  }, [realtime]);
+  }, [realtime, client]);
 
   async function flushReads() {
     for (const [channelId, seq] of pendingReads.current) {
