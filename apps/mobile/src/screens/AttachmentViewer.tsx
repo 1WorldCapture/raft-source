@@ -9,7 +9,8 @@ import type { MessageAttachment } from "../model/messages";
 import { downloadAndShareAttachment } from "./attachmentFile";
 import { AppText } from "../ui/text";
 import { HeaderIconButton, PanelHeader } from "../ui/PanelHeader";
-import { color } from "../ui/tokens";
+import { HardShadow } from "../ui/shadow";
+import { border, color, shadowOffset } from "../ui/tokens";
 
 type Phase = "loading" | "error" | "unsupported" | "ready";
 
@@ -52,6 +53,7 @@ export function AttachmentViewer({
   const [phase, setPhase] = useState<Phase>("loading");
   const [attempt, setAttempt] = useState(0);
   const [sharing, setSharing] = useState(false);
+  const [shareError, setShareError] = useState(false);
   const id = attachment.id;
   const loadPreviewRef = useRef(loadPreview);
   loadPreviewRef.current = loadPreview;
@@ -82,6 +84,7 @@ export function AttachmentViewer({
   async function share() {
     if (!id || !origin || sharing) return;
     setSharing(true);
+    setShareError(false);
     try {
       await downloadAndShareAttachment({
         url: attachmentDownloadUrl(origin, id),
@@ -92,7 +95,7 @@ export function AttachmentViewer({
         mimeType: attachment.mimeType,
       });
     } catch (error) {
-      if (!(error instanceof StaleRequestError)) setPhase("error");
+      if (!(error instanceof StaleRequestError)) setShareError(true);
     } finally {
       setSharing(false);
     }
@@ -114,6 +117,7 @@ export function AttachmentViewer({
           title={attachment.filename}
         />
         <View style={styles.body}>
+          {shareError ? <AppText style={styles.shareError}>{t("mobile.attachments.failed")}</AppText> : null}
           {phase === "loading" ? (
             <View style={styles.center}>
               <ActivityIndicator color={color.ink} />
@@ -123,8 +127,12 @@ export function AttachmentViewer({
           {phase === "error" ? (
             <View style={styles.center}>
               <AppText style={styles.reason}>{t("mobile.preview.failed")}</AppText>
-              <Pressable onPress={() => setAttempt((current) => current + 1)} style={styles.retry}>
-                <AppText style={styles.retryLabel}>{t("mobile.preview.retry")}</AppText>
+              <Pressable onPress={() => setAttempt((current) => current + 1)}>
+                <HardShadow offset={shadowOffset.sm}>
+                  <View style={styles.retry}>
+                    <AppText style={styles.retryLabel}>{t("mobile.preview.retry")}</AppText>
+                  </View>
+                </HardShadow>
               </Pressable>
               {shareButton}
             </View>
@@ -152,7 +160,14 @@ const styles = StyleSheet.create({
   center: { alignItems: "center", flex: 1, gap: 12, justifyContent: "center" },
   note: { color: color.mutedStrong, fontSize: 14 },
   reason: { color: color.ink, fontSize: 16, fontWeight: "700", textAlign: "center" },
-  retry: { borderColor: color.border, borderWidth: 2, paddingHorizontal: 12, paddingVertical: 8 },
+  shareError: { color: color.ink, fontSize: 14, fontWeight: "700", textAlign: "center" },
+  retry: {
+    backgroundColor: color.page,
+    borderColor: color.border,
+    borderWidth: border.strong,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
   retryLabel: { color: color.ink, fontWeight: "700" },
   shareLabel: { color: color.ink, fontSize: 12, fontWeight: "700" },
   placeholder: {
