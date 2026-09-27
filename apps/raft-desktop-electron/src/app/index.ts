@@ -30,6 +30,7 @@ import { INITIAL_LIFECYCLE_STATE, reduceLifecycle } from "../main/lifecycle.js";
 import type { LifecycleEvent } from "../main/lifecycle.js";
 import { loadZoomLevel, saveZoomLevel } from "../main/viewPrefs.js";
 import { loadWindowState, trackWindowState } from "../main/windowState.js";
+import { MenubarResident, shouldHideOnClose } from "../main/menubarResident.js";
 import { armOAuthLoopback, cancelOAuthLoopback, isAllowedAuthorizationUrl } from "./oauthLoopback.js";
 import { buildApiOrigins, isOfficialApiBuild } from "./configuredApiOrigin.js";
 import { createOAuthCoordinator } from "./oauthCoordinator.js";
@@ -100,6 +101,7 @@ if (!process.env.RAFT_COMPUTER_CLI_PATH) {
 const headlessMode = findHeadlessMode(process.argv);
 
 let computerHost: ComputerHost | null = null;
+let menubarResident: MenubarResident | null = null;
 let mainWindow: BrowserWindow | null = null;
 let lifecycle = INITIAL_LIFECYCLE_STATE;
 let appReady = false;
@@ -230,6 +232,8 @@ const COMPUTER_STATUS_POLL_MS = 5_000;
 let computerStatusMonitor: ReturnType<typeof createStatusMonitor<ComputerStatusReport>> | null = null;
 
 function broadcastComputerStatus(status: ComputerStatusReport): void {
+  // The tray's "N agents running" row rides the same 5s poll — no extra IPC.
+  menubarResident?.setStatusReport(status);
   for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed()) win.webContents.send("computer:status-update", status);
   }
@@ -376,6 +380,18 @@ function createMainWindow(): BrowserWindow {
   window.on("focus", () => window.webContents.send("app:focus-state", true));
   window.on("blur", () => window.webContents.send("app:focus-state", false));
 
+  // Menubar residency: closing the window (red button / Cmd+W) hides it and
+  // the Dock icon instead of quitting — the Tray icon is the remaining
+  // presence, and every re-open path funnels through revealMainWindow().
+  // A real quit (Cmd+Q / Quit menu) runs with lifecycle.quitting=true and
+  // must close for real, or the app could never exit.
+  window.on("close", (event) => {
+    if (!shouldHideOnClose({ quitting: lifecycle.quitting, platform: process.platform })) return;
+    event.preventDefault();
+    window.hide();
+    app.dock?.hide();
+  });
+
   // Flush any deep links buffered before this window was ready. Wired per
   // window (not just the first) so a raft:// link that arrives while the app is
   // running windowless — the macOS "closed but resident" state — is delivered
@@ -394,6 +410,22 @@ function createMainWindow(): BrowserWindow {
 
 function focusedWindow(): BrowserWindow | null {
   return mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+}
+
+// One funnel for every "show me the window" path: tray click / tray menu,
+// second-instance (Dock / Spotlight / `open -a`), and activate. Brings the
+// Dock icon back, then restores the existing window (maximized/fullscreen
+// state survives hide) or recreates it from persisted state.
+function revealMainWindow(): void {
+  if (process.platform === "darwin") app.dock?.show();
+  const window = focusedWindow();
+  if (window) {
+    if (window.isMinimized()) window.restore();
+    window.show();
+    window.focus();
+  } else {
+    createMainWindow();
+  }
 }
 
 function zoom(direction: "in" | "out" | "reset"): void {
@@ -426,9 +458,20 @@ function markQuitting(): void {
 }
 
 if (headlessMode) {
-  // A headless service/runner child re-launched this bundle. It has no GUI, so
-  // keep it off the Dock (it would otherwise show a spurious second icon).
-  if (process.platform === "darwin") app.dock?.hide();
+  // A headless service/runner child re-launched this bundle. It shares the
+  // GUI's executable and bundle id, so macOS LaunchServices would otherwise
+  // treat it as just another instance of the app — and once the GUI quits,
+  // the headless child becomes the bundle's activation target: clicking the
+  // Dock icon then "activates" a process with no window (the no-window
+  // hijack). dock.hide() only hides the icon; it does not make the process
+  // un-activatable. "prohibited" does: the child can never become the
+  // foreground representative, so activation always routes to (or spawns) a
+  // real GUI. macOS-only API; set before app-ready AND re-set once ready,
+  // because Electron may restore the default policy on launch completion.
+  if (process.platform === "darwin") {
+    app.setActivationPolicy("prohibited");
+    void app.whenReady().then(() => app.setActivationPolicy("prohibited"));
+  }
 }
 if (headlessMode?.mode === "__service") {
   // Detached supervisor process — run the service, then exit. No GUI, no lock.
@@ -466,24 +509,25 @@ if (headlessMode?.mode === "__service") {
   if (coldStartLink) pendingDeepLinks.push(coldStartLink);
 
   app.on("second-instance", (_event, commandLine) => {
-    const window = focusedWindow();
-    if (window) {
-      if (window.isMinimized()) window.restore();
-      window.show();
-      window.focus();
-    }
+    // Defense in depth: a forwarded activation must never silently no-op —
+    // revealMainWindow restores the window or recreates it, so "click the
+    // Dock icon" always yields a window.
+    revealMainWindow();
     const link = commandLine.find((a) => a.startsWith(`${DEEP_LINK_SCHEME}://`));
     if (link) deliverDeepLink(link);
   });
 
   app.on("before-quit", () => {
+    menubarResident?.destroy();
     computerStatusMonitor?.setActive(false);
     applyLifecycle({ type: "before-quit" });
   });
   app.on("window-all-closed", () => applyLifecycle({ type: "window-all-closed" }));
-  app.on("activate", () =>
-    applyLifecycle({ type: "activate", hasServerWindows: mainWindow !== null }),
-  );
+  // activate (Dock icon / app re-focus) reveals the window. This replaces the
+  // reducer's old activate→reboot wiring: with hide-to-menubar the window is
+  // usually alive-but-hidden, and revealMainWindow covers both that case and
+  // the recreate case in one place.
+  app.on("activate", () => revealMainWindow());
   for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
     process.on(signal, () => app.quit());
   }
@@ -543,6 +587,14 @@ if (headlessMode?.mode === "__service") {
     }
 
     appReady = true;
+    // Menubar presence first: the window may be hidden on purpose (user closed
+    // it earlier this session / login-item starts hidden in a later task), and
+    // the tray icon must exist before anything can hide the window.
+    menubarResident = new MenubarResident({
+      iconPath: path.join(app.getAppPath(), "build", "tray-icon.png"),
+      reveal: revealMainWindow,
+    });
+    menubarResident.install();
     // createMainWindow wires its own per-window did-finish-load → flushDeepLinks.
     createMainWindow();
   });

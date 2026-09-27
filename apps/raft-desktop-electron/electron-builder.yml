@@ -16,6 +16,10 @@ directories:
 files:
   - dist/**
   - package.json
+  # Tray template icon (16px + @2x) for menubar residency — must ship inside
+  # the asar so the packaged app can load it via app.getAppPath().
+  - build/tray-icon.png
+  - build/tray-icon@2x.png
   - "!**/*.map"
 # The bundled `raft` CLI the detached __run daemon child hands to each agent
 # runtime as slockCliPath (RAFT_COMPUTER_CLI_PATH → <resources>/cli/index.js).
