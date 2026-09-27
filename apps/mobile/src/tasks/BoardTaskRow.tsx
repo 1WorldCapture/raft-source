@@ -1,6 +1,7 @@
-import { useRef } from "react";
-import { StyleSheet, View } from "react-native";
+import { useRef, useState } from "react";
+import { Alert, Pressable, StyleSheet, View } from "react-native";
 import { useIntl } from "react-intl";
+import { Check } from "lucide-react-native";
 import { useT } from "../i18n/provider";
 import { Avatar } from "../ui/Avatar";
 import { Badge } from "../ui/Badge";
@@ -20,14 +21,19 @@ export interface BoardAssigneeInfo {
 // A progress-board row (task #2). Named BoardTaskRow, not BoardRow, to avoid
 // clashing with the BoardRow data type from board.ts when both are imported
 // into the tasks screen.
+// onApprove (step 5) is passed only when canApproveFrom allows it; the button
+// confirms via Alert and hands back to the screen's setStatus path, after
+// which buildBoard moves the task into doneToday on the next render.
 export function BoardTaskRow({
   row,
   assignee,
   onPress,
+  onApprove,
 }: {
   row: BoardRow;
   assignee?: BoardAssigneeInfo | null;
   onPress?: () => void;
+  onApprove?: () => void;
 }) {
   const t = useT();
   const { locale } = useIntl();
@@ -73,14 +79,48 @@ export function BoardTaskRow({
           </View>
           <AppText numberOfLines={2} style={styles.title}>{task.title}</AppText>
           {summary ? <AppText numberOfLines={1} style={styles.summary}>{summary}</AppText> : null}
-          {stale ? (
-            <View style={styles.staleTag}>
-              <AppText style={styles.staleTagText}>{t("mobile.board.row.mayBeStuck")}</AppText>
+          {stale || onApprove ? (
+            <View style={styles.footer}>
+              {stale ? (
+                <View style={styles.staleTag}>
+                  <AppText style={styles.staleTagText}>{t("mobile.board.row.mayBeStuck")}</AppText>
+                </View>
+              ) : null}
+              {onApprove ? <BoardApproveButton onApprove={onApprove} /> : null}
             </View>
           ) : null}
         </View>
       </View>
     </HardShadow>
+  );
+}
+
+function BoardApproveButton({ onApprove }: { onApprove: () => void }) {
+  const t = useT();
+  const [pressed, setPressed] = useState(false);
+  const confirm = () => {
+    Alert.alert(
+      t("mobile.board.approveTitle"),
+      t("mobile.board.approveBody"),
+      [
+        { text: t("mobile.board.approveCancel"), style: "cancel" },
+        { text: t("mobile.board.approveConfirm"), onPress: onApprove },
+      ],
+      { cancelable: true },
+    );
+  };
+  return (
+    <Pressable
+      accessibilityRole="button"
+      onPress={confirm}
+      onPressIn={() => setPressed(true)}
+      onPressOut={() => setPressed(false)}
+    >
+      <View style={[styles.approveButton, pressed ? styles.pressed : null]}>
+        <Check color={color.ink} size={12} strokeWidth={2.5} />
+        <AppText style={styles.approveText}>{t("mobile.board.approve")}</AppText>
+      </View>
+    </Pressable>
   );
 }
 
@@ -93,14 +133,26 @@ const styles = StyleSheet.create({
   number: { color: color.inkFaint, fontFamily: "mono", fontSize: 11, lineHeight: 14 },
   title: { color: color.ink, fontSize: 14, fontWeight: "700", lineHeight: 20, marginTop: 6, paddingRight: 8 },
   summary: { color: color.inkLabel, fontSize: 12, lineHeight: 16, marginTop: 2 },
+  footer: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 6 },
   staleTag: {
     alignSelf: "flex-start",
     backgroundColor: color.orangeSoft,
     borderColor: color.orange,
     borderWidth: border.hairline,
-    marginTop: 6,
     paddingHorizontal: 6,
     paddingVertical: 2,
   },
   staleTagText: { color: color.ink, fontSize: 10, fontWeight: "700", lineHeight: 12, textTransform: "uppercase" },
+  approveButton: {
+    alignItems: "center",
+    backgroundColor: color.lime,
+    borderColor: color.border,
+    borderWidth: border.strong,
+    flexDirection: "row",
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  approveText: { color: color.ink, fontSize: 12, fontWeight: "700", lineHeight: 16 },
+  pressed: { transform: [{ translateX: 1 }, { translateY: 1 }] },
 });

@@ -5,7 +5,7 @@
 // grouping, ordering, staleness, and the local-timezone "today" boundary are
 // unit-testable without a server.
 
-import { parseTask, type RaftTask, type TaskStatus } from "./model";
+import { parseTask, taskStatusOptions, type RaftTask, type TaskStatus } from "./model";
 import { isRecord } from "../model/messages";
 
 /** The server caps nothing; the badge renders "99+" beyond this. */
@@ -69,6 +69,17 @@ export const BOARD_SECTIONS: readonly BoardSection[] = ["needsMe", "inProgress",
  */
 export function sectionHighlighted(section: BoardSection, count: number): boolean {
   return section === "needsMe" && count > 0;
+}
+
+/**
+ * True when the viewer may move this task to done — the approve button's
+ * visibility rule. Delegates to taskStatusOptions so the board can never offer
+ * a transition the detail sheet would reject (guests see nothing; members get
+ * legal transitions only — notably todo → done is NOT legal for them).
+ */
+export function canApproveFrom(status: TaskStatus, role: string | null | undefined): boolean {
+  if (status === "done") return false;
+  return taskStatusOptions(status, role).some((option) => option.id === "done");
 }
 
 /**

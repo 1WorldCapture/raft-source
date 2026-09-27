@@ -169,6 +169,17 @@ test("sectionHighlighted glows only for a non-empty needsMe", async () => {
   assert.equal(sectionHighlighted("todo", 2), false);
 });
 
+test("canApproveFrom mirrors taskStatusOptions permission per role", async () => {
+  const { canApproveFrom } = await import("./board.ts");
+  assert.equal(canApproveFrom("in_review", "member"), true, "member can approve a review");
+  assert.equal(canApproveFrom("in_review", null), true, "default (member-like) can approve a review");
+  assert.equal(canApproveFrom("in_review", "guest"), false, "guest is read-only");
+  assert.equal(canApproveFrom("todo", "member"), false, "todo → done is not a member transition");
+  assert.equal(canApproveFrom("todo", "admin"), true, "admins force any status");
+  assert.equal(canApproveFrom("in_progress", "owner"), true);
+  assert.equal(canApproveFrom("done", "member"), false, "already done — nothing to approve");
+});
+
 test("a mention only lifts unfinished tasks; done stays in doneToday, closed stays hidden", () => {
   const board = buildBoard(
     [

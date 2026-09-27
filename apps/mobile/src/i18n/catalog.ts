@@ -76,6 +76,11 @@ export const mobileEn = {
   "mobile.board.section.inProgress": "In progress",
   "mobile.board.section.doneToday": "Done today",
   "mobile.board.section.todo": "To start",
+  "mobile.board.approve": "Approve",
+  "mobile.board.approveTitle": "Approve this task?",
+  "mobile.board.approveBody": "The task will be marked done and move to Done today.",
+  "mobile.board.approveCancel": "Cancel",
+  "mobile.board.approveConfirm": "Approve",
 } as const;
 
 export const mobileZh: Record<keyof typeof mobileEn, string> = {
@@ -152,6 +157,11 @@ export const mobileZh: Record<keyof typeof mobileEn, string> = {
   "mobile.board.section.inProgress": "进行中",
   "mobile.board.section.doneToday": "今天完成",
   "mobile.board.section.todo": "待开始",
+  "mobile.board.approve": "通过",
+  "mobile.board.approveTitle": "通过这个任务？",
+  "mobile.board.approveBody": "任务将标记为完成，移入「今天完成」。",
+  "mobile.board.approveCancel": "取消",
+  "mobile.board.approveConfirm": "通过",
 };
 
 export type MobileId = keyof typeof mobileEn;
