@@ -17,6 +17,7 @@ import {
 } from "react-native";
 import { Camera, Hash, ImagePlus, ListChecks, Lock, MessageSquare, Paperclip, Search, SendHorizontal, Settings, Users } from "lucide-react-native";
 import { attachmentPreviewGate } from "../attachments/previewSession";
+import { canRenderSvgNatively, isSvgAttachment } from "../attachments/svgRender";
 import { viewKind } from "../attachments/viewKind";
 import { attachmentDownloadUrl, rewriteAttachmentUrl } from "../api/attachmentUrl";
 import { ApiError, StaleRequestError } from "../api/client";
@@ -569,6 +570,12 @@ export function MessagePane({
 
   async function openAttachment(attachment: MessageAttachment) {
     if (!attachment.id) return;
+    if (canRenderSvgNatively(attachment) && !attachment.rasterPreviewUrl) {
+      // SVGs that reached the file-card path (e.g. no mime type, only the
+      // .svg suffix) render in the same native viewer as the image grid.
+      setImageViewer({ images: [attachment], index: 0 });
+      return;
+    }
     {
       const kind = viewKind(attachment.filename, attachment.mimeType);
       if (kind === "text" || kind === "markdown") {
@@ -612,18 +619,12 @@ export function MessagePane({
     }
   }
 
-  /** SVG needs either the server raster preview or the generic viewer. */
-  function isSvgAttachment(attachment: MessageAttachment): boolean {
-    if (attachment.mimeType?.toLowerCase() === "image/svg+xml") return true;
-    return attachment.filename.toLowerCase().endsWith(".svg");
-  }
-
-  /** Opens the fullscreen image viewer for a message's image group. SVGs
-   *  without a server raster preview fall to the generic viewer's
-   *  unsupported state instead (expo-image cannot draw SVG). */
+  /** SVG renders natively in the image viewer (expo-image parses SVG in
+   *  image mode: no scripts, no external loads); oversize files fall to the
+   *  generic viewer's unsupported state so a huge SVG cannot stall decode. */
   function openImageGroup(images: MessageAttachment[], index: number) {
     const tapped = images[index];
-    if (tapped && isSvgAttachment(tapped) && !tapped.rasterPreviewUrl) {
+    if (tapped && isSvgAttachment(tapped) && !tapped.rasterPreviewUrl && !canRenderSvgNatively(tapped)) {
       setFileViewer(tapped);
       return;
     }
