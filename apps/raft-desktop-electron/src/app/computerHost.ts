@@ -67,7 +67,8 @@ export interface ComputerHostSnapshot {
 }
 
 class ComputerHost {
-  private readonly slockHome = resolveRaftHome();
+  /** Shared with the quit orchestration (task #7) to locate pidfiles. */
+  readonly slockHome = resolveRaftHome();
   private readonly api: ComputerApi = createComputerApi(this.slockHome, { hostLifecycleOwner: "app" });
   private readonly readUpgradeInfo = createUpgradeInfoReader(
     () => fetchCdnLatestVersion(DEFAULT_UPGRADE_BASE_URL),
