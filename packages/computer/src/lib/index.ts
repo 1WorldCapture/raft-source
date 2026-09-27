@@ -284,3 +284,10 @@ export { DEFAULT_UPGRADE_BASE_URL, fetchCdnLatestVersion } from "../computerRele
 // silently re-launch the GUI instead of starting the supervisor.
 // (#wg-raft-computer:f2a02081 BUG 5.)
 export { runService, runResident } from "../service.js";
+
+// Parent-binding maintenance for desktop-hosted trees (task #7 anti-orphan):
+// the GUI host rebinds the adopted tree to its own pid + start time right
+// after converge, and the tree's watchdog (wired inside runService/runResident)
+// exits gracefully when that binding stops matching — so a crashed or
+// force-quit GUI can never leave the background processes orphaned.
+export { rebindParentEvidence, readProcessStartTime } from "../parentWatchdog.js";

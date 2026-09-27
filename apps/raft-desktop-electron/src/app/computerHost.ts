@@ -21,6 +21,8 @@ import { app } from "electron";
 import {
   connectService,
   convergeAppHostLifecycle,
+  rebindParentEvidence,
+  readProcessStartTime,
   createComputerApi,
   DEFAULT_UPGRADE_BASE_URL,
   fetchCdnLatestVersion,
@@ -105,6 +107,21 @@ class ComputerHost {
         this.lastStatus = status;
         if (status.servers.length > 0) {
           await this.api.start({ serverId: null, serverLabel: null });
+        }
+        // Task #7 anti-orphan: whether we spawned the tree or adopted an
+        // existing one, its watchdog binding must name THIS GUI — the recorded
+        // parent of an adopted tree still points at the previous GUI pid, and
+        // without this rewrite the tree's own watchdog would kill it. Best
+        // effort: a failed rebind never blocks the chat app.
+        if (status.service.running) {
+          try {
+            const startedAt = await readProcessStartTime(process.pid);
+            if (startedAt) {
+              await rebindParentEvidence(this.slockHome, { parentPid: process.pid, parentStartedAt: startedAt });
+            }
+          } catch {
+            // Missing evidence file or a busy rename — next converge retries.
+          }
         }
       }
       this.convergeState = { ok: true };

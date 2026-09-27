@@ -22,10 +22,9 @@ import { createRequire } from "node:module";
 import { COMPUTER_VERSION } from "./version.js";
 import { clearResidentConnectedMarker, readResidentConnectedMarker, writeResidentConnectedMarker } from "./residentConnectionMarker.js";
 import { residentCoreIdentity } from "./residentCoreIdentity.js";
-import { mkdir, writeFile, open, stat, unlink } from "node:fs/promises";
+import { mkdir, readFile, writeFile, open, stat, unlink } from "node:fs/promises";
 import { dirname, join as joinPath } from "node:path";
-import {
-  resolveRaftHome,
+import {resolveRaftHome,
   serviceRunDir,
   servicePidPath,
   serviceLogPath,
@@ -33,6 +32,7 @@ import {
   serverRunnerLogPath,
   assertValidServerId,
   serverConnectedMarkerPath,
+    serviceVersionPath,
 } from "./paths.js";
 import {
   listManagedServerIds,
@@ -78,6 +78,7 @@ import { currentDate } from "@botiverse/raft-shared";
 import type { DaemonCoreOptions } from "@botiverse/raft-daemon/core";
 import { enqueueLifecycleOperation } from "./lifecycleOperations.js";
 import { shutdownService } from "./lib/serviceShutdown.js";
+import { parentStillAlive, readParentBindingFromFile, startParentWatchdog } from "./parentWatchdog.js";
 import { createReplacementHandoff, type ReplacementHandoffRequest } from "./lib/replacementHandoff.js";
 import {
   clearPendingRestartMarker,
@@ -745,6 +746,15 @@ export async function runResident(
   };
   process.on("SIGTERM", () => void shutdown());
   process.on("SIGINT", () => void shutdown());
+  // Anti-orphan watchdog (task #7): when the desktop GUI that owns this tree
+  // dies, exit through the same graceful path as SIGTERM. Disarmed on legacy
+  // evidence without a parent binding.
+  const watchdog = startParentWatchdog({
+    readBinding: async () => readParentBindingFromFile(slockHome),
+    isAlive: parentStillAlive,
+    onParentLost: () => void shutdown(),
+  });
+  void watchdog;
   await core.start();
   // A contender that loses the core.start() machine lock cannot overwrite the owner's evidence.
   await writeRunnerVersionEvidence(slockHome, serverId);
@@ -1018,6 +1028,25 @@ export async function runService(deps: RunServiceDeps = {}): Promise<void> {
       }
     }
   };
+
+  // Anti-orphan watchdog (task #7): when the desktop GUI that owns this tree
+  // dies (crash, force-quit), stop every runner through the normal SIGTERM
+  // path and then exit — the supervisor must never outlive its GUI. Disarmed
+  // while the evidence file carries no parent binding (legacy trees).
+  const parentLossShutdown = (): void => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    for (const rec of runners.values()) killChild(rec);
+    // Grace window for the daemons' own shutdown, then go regardless.
+    const exitTimer = setTimeout(() => process.exit(0), 5_000);
+    exitTimer.unref?.();
+  };
+  const watchdog = startParentWatchdog({
+    readBinding: () => readParentBindingFromFile(slockHome),
+    isAlive: parentStillAlive,
+    onParentLost: parentLossShutdown,
+  });
+  void watchdog;
 
   const reconcile = async (): Promise<void> => {
     if (shuttingDown) return;
