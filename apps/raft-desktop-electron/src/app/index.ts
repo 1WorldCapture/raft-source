@@ -426,9 +426,16 @@ function markQuitting(): void {
 }
 
 if (headlessMode) {
-  // A headless service/runner child re-launched this bundle. It has no GUI, so
-  // keep it off the Dock (it would otherwise show a spurious second icon).
-  if (process.platform === "darwin") app.dock?.hide();
+  // A headless service/runner child re-launched this bundle. It shares the
+  // GUI's executable and bundle id, so macOS LaunchServices would otherwise
+  // treat it as just another instance of the app — and once the GUI quits,
+  // the headless child becomes the bundle's activation target: clicking the
+  // Dock icon then "activates" a process with no window (the no-window
+  // hijack). dock.hide() only hides the icon; it does not make the process
+  // un-activatable. "prohibited" does: the child can never become the
+  // foreground representative, so activation always routes to (or spawns) a
+  // real GUI. macOS-only API; called before app-ready for effect.
+  if (process.platform === "darwin") app.setActivationPolicy("prohibited");
 }
 if (headlessMode?.mode === "__service") {
   // Detached supervisor process — run the service, then exit. No GUI, no lock.
@@ -471,6 +478,11 @@ if (headlessMode?.mode === "__service") {
       if (window.isMinimized()) window.restore();
       window.show();
       window.focus();
+    } else {
+      // Defense in depth: a forwarded activation must never silently no-op.
+      // If the window is gone (closed while the app kept running), recreate
+      // it so "click the Dock icon" always yields a window.
+      createMainWindow();
     }
     const link = commandLine.find((a) => a.startsWith(`${DEEP_LINK_SCHEME}://`));
     if (link) deliverDeepLink(link);
