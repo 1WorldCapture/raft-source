@@ -15,7 +15,12 @@ const markedStyles: MarkedStyles = {
   strong: { fontFamily: "SpaceGrotesk-700" },
   em: { fontStyle: "italic" },
   strikethrough: { textDecorationLine: "line-through" },
-  link: { color: color.link, textDecorationLine: "underline" },
+  link: {
+    color: color.link,
+    fontFamily: "SpaceGrotesk-400",
+    fontStyle: "normal",
+    textDecorationLine: "underline",
+  },
   h1: { color: color.ink, fontFamily: "SpaceGrotesk-700", fontSize: 28, lineHeight: 34, marginBottom: 8, marginTop: 24 },
   h2: { color: color.ink, fontFamily: "SpaceGrotesk-700", fontSize: 24, lineHeight: 30, marginBottom: 8, marginTop: 20 },
   h3: { color: color.ink, fontFamily: "SpaceGrotesk-700", fontSize: 20, lineHeight: 26, marginBottom: 6, marginTop: 16 },
@@ -28,6 +33,7 @@ const markedStyles: MarkedStyles = {
     color: color.ink,
     fontFamily: "SpaceMono-400",
     fontSize: 14,
+    fontStyle: "normal",
   },
   code: {
     backgroundColor: color.mutedFill,
@@ -39,6 +45,7 @@ const markedStyles: MarkedStyles = {
     color: color.ink,
     fontFamily: "SpaceMono-400",
     fontSize: 13,
+    fontStyle: "normal",
     lineHeight: 20,
   },
   hr: {
