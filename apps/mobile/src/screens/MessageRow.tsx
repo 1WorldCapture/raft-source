@@ -3,6 +3,7 @@ import { Animated, Pressable, StyleSheet, View } from "react-native";
 import { Image } from "expo-image";
 import type { MessageAttachment, RaftMessage, ThreadReplyPreview } from "../model/messages";
 import { senderLabel } from "../model/messages";
+import { canRenderSvgNatively } from "../attachments/svgRender";
 import { Avatar } from "../ui/Avatar";
 import { useRaftStore } from "../state/store";
 import { AppText } from "../ui/text";
@@ -310,7 +311,13 @@ function JumpHighlight({ active, children }: { active: boolean; children: ReactN
 }
 
 function isImage(attachment: MessageAttachment): boolean {
-  if (attachment.mimeType?.toLowerCase().startsWith("image/")) return true;
+  const mimeType = attachment.mimeType?.toLowerCase();
+  // SVG only takes a grid cell when a raster preview exists or it fits the
+  // native render cap; oversize SVGs stay file cards ("cannot preview").
+  if (mimeType === "image/svg+xml") {
+    return Boolean(attachment.rasterPreviewUrl || attachment.thumbnailUrl) || canRenderSvgNatively(attachment);
+  }
+  if (mimeType?.startsWith("image/")) return true;
   return !attachment.mimeType && Boolean(attachment.thumbnailUrl);
 }
 
