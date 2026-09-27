@@ -41,3 +41,20 @@
   font-display: swap;
   src: url(./space-mono-5.ttf) format('truetype');
 }
+
+/*
+ * Space Grotesk keeps Raft's established typography, but its straight double
+ * quote is visually too close to the closing curly quote. This face reuses
+ * Hanken Grotesk only for the neutral straight-quote code point. Curly quotes
+ * remain owned by Space Grotesk. The browser
+ * selects it per glyph through unicode-range; DOM text, copy/paste, search,
+ * wrapping ownership, and accessibility content remain unchanged.
+ */
+@font-face {
+  font-family: 'Raft Quote Glyphs';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('./hanken-grotesk-quotes.woff2') format('woff2');
+  unicode-range: U+0022;
+}

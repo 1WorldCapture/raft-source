@@ -11,9 +11,10 @@ test("shared typography has local font assets and no Google Fonts requests", asy
   const fonts = new URL("./assets/fonts/fonts.css", entry);
   const faces = await readFile(fonts, "utf8");
   assert.doesNotMatch(faces, /https?:/);
+  // Every url() in fonts.css must resolve against fonts.css itself (the
+  // bundler can only emit what it can resolve from the css module).
   const sources = [...faces.matchAll(/url\(['"]?([^)'"\s]+)['"]?\)/g)].map((m) => new URL(m[1], fonts));
-  sources.push(new URL("./assets/fonts/hanken-grotesk-quotes.woff2", entry));
-  assert.ok(sources.length >= 3);
+  assert.ok(sources.length >= 7, "six text faces plus the straight-quote fallback");
   for (const source of sources) {
     const data = await readFile(source);
     assert.ok(data.length > 0, source.pathname);

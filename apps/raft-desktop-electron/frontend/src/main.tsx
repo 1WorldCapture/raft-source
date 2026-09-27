@@ -35,6 +35,10 @@ import { DesktopSelfComputerMount } from "./desktop/computer/DesktopSelfComputer
 import { DesktopOnboardingComputerMount } from "./desktop/computer/DesktopOnboardingComputerMount";
 import { initSkin } from "./desktop/skins";
 import { installDesktopOAuth } from "./desktop/desktopOAuth";
+// Typography as a JS-graph css module so the bundler rewrites the font urls
+// and emits the binaries (a css @import through the Tailwind v4 pipeline
+// would drop them — see the note in @web/index.css).
+import "@web/assets/fonts/fonts.css";
 import "./index.css";
 
 // The desktop shell: a unified top toolbar (only when signed in — the login
