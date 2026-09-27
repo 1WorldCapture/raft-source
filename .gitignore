@@ -33,3 +33,6 @@ scripts/app-name-ratchet-baseline.txt.mutating
 # Written by scripts/source-available/export-snapshot.mjs into exported snapshots only;
 # tests skip private-layout contracts when it exists.
 /RELEASE_SOURCE
+
+# Self-hosting: machine-specific ops config (see docs/self-hosting/source-deploy.md)
+ops/self-host/env.local
