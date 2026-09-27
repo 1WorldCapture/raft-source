@@ -30,7 +30,7 @@ import { INITIAL_LIFECYCLE_STATE, reduceLifecycle } from "../main/lifecycle.js";
 import type { LifecycleEvent } from "../main/lifecycle.js";
 import { loadQuitNoConfirm, loadZoomLevel, saveQuitNoConfirm, saveZoomLevel } from "../main/viewPrefs.js";
 import { runQuitFlow } from "../main/quitFlow.js";
-import { collectTreeSurvivors, parsePsTable, readPidFile, runShutdownTree } from "../main/shutdown.js";
+import { parsePsTable, readPidFile, resolveSurvivors, runShutdownTree } from "../main/shutdown.js";
 import { readFile, readdir } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -480,7 +480,7 @@ async function orchestrateQuitShutdown(systemShutdown: boolean): Promise<void> {
       }
       let psTable = "";
       try {
-        const { stdout } = await execFileAsync("ps", ["-axo", "pid=,ppid=,pgid=,command="]);
+        const { stdout } = await execFileAsync("ps", ["-axo", "pid=,ppid=,pgid=,lstart=,command="]);
         psTable = stdout;
       } catch {
         // ps unavailable: an empty table makes the roots themselves the only
@@ -615,8 +615,8 @@ if (headlessMode?.mode === "__service") {
           } catch { /* no servers dir */ }
           if (rootPids.length === 0) return null;
           try {
-            const { stdout } = await execFileAsync("ps", ["-axo", "pid=,ppid=,pgid=,command="]);
-            const survivors = collectTreeSurvivors(parsePsTable(stdout), rootPids);
+            const { stdout } = await execFileAsync("ps", ["-axo", "pid=,ppid=,pgid=,lstart=,command="]);
+            const survivors = await resolveSurvivors(parsePsTable(stdout), rootPids);
             return survivors.pids.length - survivors.roots.length;
           } catch {
             return null;

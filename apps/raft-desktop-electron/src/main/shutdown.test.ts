@@ -2,17 +2,21 @@
 // request, then SIGTERM to whole process groups, then SIGKILL; everything
 // gone at any tick completes without escalating; SIGKILL-exhausted reports
 // the stragglers instead of claiming success; the OS-shutdown mode uses the
-// compressed timeouts. Survivor identification is TRUSTED-ROOTS-ONLY: the
-// pidfile roots' descendant closure and process groups — never a command-line
-// match, so the user's own editor/tail inside ~/.slock/agents cannot be hit.
+// compressed timeouts. Survivor identification is TRUSTED-ROOTS-ONLY: live
+// roots are pinned by pid + start time (a reused pid can never pass as a
+// root), the descendant closure runs from live roots alone, dead runners'
+// launchd-adopted orphans (ppid 1) are counted only after a Raft-identity
+// check, and nothing is ever matched by command line.
 import assert from "node:assert/strict";
 import test from "node:test";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+const LS = (n: number) => `Mon Sep 27 1${n}:00:00 2026`;
+
 test("shutdown ladder: graceful → group SIGTERM → group SIGKILL → complete/incomplete", async (t) => {
-  const { tuningFor, nextShutdownAction, parsePsTable, collectTreeSurvivors, pidAlive, readPidFile, runShutdownTree } =
+  const { tuningFor, nextShutdownAction, parsePsTable, collectSurvivorPlan, resolveSurvivors, pidAlive, readPidFile, runShutdownTree } =
     await import("./shutdown.ts");
 
   await t.test("tuning shrinks for system shutdown", () => {
@@ -42,51 +46,74 @@ test("shutdown ladder: graceful → group SIGTERM → group SIGKILL → complete
     step = nextShutdownAction({ state, tuning, anyAlive: true });
     assert.equal(step.action, "sigkill-group");
     assert.equal(step.state.phase, "force-kill");
-    // SIGKILL window exhausted with survivors → "incomplete" (never a loop,
-    // never a false "complete").
     state = { phase: "force-kill", phaseElapsedMs: 500 };
     step = nextShutdownAction({ state, tuning, anyAlive: true });
     assert.equal(step.action, "incomplete");
-    // Processes gone right after SIGKILL → clean complete.
     step = nextShutdownAction({ state, tuning, anyAlive: false });
     assert.equal(step.action, "complete");
   });
 
-  await t.test("parsePsTable parses pid/ppid/pgid/command rows and skips junk", () => {
+  await t.test("parsePsTable parses pid/ppid/pgid/lstart/command and skips junk", () => {
     const ps = [
-      "  9001     1  9001 /Applications/Raft Desktop.app/Contents/MacOS/Raft Desktop __service",
-      "  9002  9001  9002 /Applications/Raft Desktop.app/Contents/MacOS/Raft Desktop __run abc",
-      "  9003  9002  9002 /usr/local/bin/claude --cwd somewhere",
-      "  9100   420   420 vim /Users/x/.slock/agents/107a1ceb/MEMORY.md",
+      `  9001     1  9001 ${LS(0)} Raft Desktop __service`,
       "not a ps row",
       "",
     ].join("\n");
     const rows = parsePsTable(ps);
-    assert.equal(rows.length, 4);
-    assert.deepEqual(rows[0], { pid: 9001, ppid: 1, pgid: 9001, command: "/Applications/Raft Desktop.app/Contents/MacOS/Raft Desktop __service" });
+    assert.equal(rows.length, 1);
+    assert.deepEqual(rows[0], { pid: 9001, ppid: 1, pgid: 9001, lstart: LS(0), command: "Raft Desktop __service" });
   });
 
-  await t.test("collectTreeSurvivors: roots' closure and groups only — user processes never matched", () => {
-    // Layout: service(9001, group 9001) → runner(9002, group 9002) →
-    // claude agent(9003, same group 9002) and a detached agent child(9004,
-    // own group 9004 — caught by the descendant closure). The user's vim
-    // (9100) edits an agents-workspace file but is NOT ours; so is a
-    // same-named binary (9101) outside the tree.
+  await t.test("survivor plan: pinned live roots; recycled pid degrades to dead root; orphans are candidates only", () => {
+    // Layout: service(9001) → runner(9002, group 9002) → claude agent(9003,
+    // group 9002) and a detached agent child(9004, own group 9004 — caught by
+    // the closure). DEAD runner 8000: its agent child(8001) was adopted by
+    // launchd (ppid 1) and still sits in group 8000 → candidate. pid 8000 was
+    // REUSED by a stranger (same pid, DIFFERENT lstart) whose own child(8002)
+    // must never be matched. The user's vim(9100) edits an agents-workspace
+    // file but is not ours.
     const rows = parsePsTable([
-      "  9001     1  9001 Raft Desktop __service",
-      "  9002  9001  9002 Raft Desktop __run abc",
-      "  9003  9002  9002 /usr/local/bin/claude --cwd x",
-      "  9004  9002  9004 node detached-child-of-runner",
-      "  9100   420   420 vim /Users/x/.slock/agents/107a1ceb/MEMORY.md",
-      "  9101   420   420 /Applications/Raft Desktop.app --args=unrelated-copy",
+      `  9001     1  9001 ${LS(0)} Raft Desktop __service`,
+      `  9002  9001  9002 ${LS(1)} Raft Desktop __run abc`,
+      `  9003  9002  9002 ${LS(2)} /usr/local/bin/claude --cwd x`,
+      `  9004  9002  9004 ${LS(3)} node detached-child-of-runner`,
+      `  9100   420   420 ${LS(4)} vim /Users/x/.slock/agents/107a1ceb/MEMORY.md`,
+      `  8001     1  8000 ${LS(5)} /usr/local/bin/claude --cwd orphan-after-runner-died`,
+      `  8000   420   420 ${LS(9)} /usr/bin/unrelated-reused-pid`,
+      `  8002  8000   420 ${LS(9)} child-of-the-stranger`,
     ].join("\n"));
-    const survivors = collectTreeSurvivors(rows, [9001]);
-    assert.deepEqual([...survivors.pids].sort(), [9001, 9002, 9003, 9004]);
-    assert.deepEqual(survivors.groups, [9001], "groups come from the live roots' own pgids");
-    // Dead root: nothing collected under it even if children linger.
-    const stale = collectTreeSurvivors(rows, [7777]);
-    assert.deepEqual(stale.pids, []);
-    assert.deepEqual(stale.groups, []);
+    const pin = new Map([
+      [9001, LS(0)],
+      [9002, LS(1)],
+      // 8000 was recorded with ITS OWN old lstart; the current table shows a
+      // different one → reused pid → dead root, never a live root.
+      [8000, LS(6)],
+    ]);
+    const plan = collectSurvivorPlan(rows, [9001, 9002, 8000], pin);
+    assert.deepEqual([...plan.owned].sort((a, b) => a - b), [9001, 9002, 9003, 9004]);
+    assert.deepEqual(plan.groups, [9001, 9002]);
+    assert.deepEqual(plan.orphanCandidates.map((row) => row.pid), [8001], "ppid-1 process in the dead root's group is a candidate");
+    assert.ok(!plan.owned.includes(8000), "reused pid itself is not owned");
+    assert.ok(!plan.owned.includes(8002), "the stranger's child is not owned");
+  });
+
+  await t.test("resolveSurvivors: candidates count only with a Raft identity; unreadable fails closed", async () => {
+    const rows = parsePsTable([
+      `  8001     1  8000 ${LS(5)} /usr/local/bin/claude --cwd orphan`,
+      `  8005     1  8000 ${LS(7)} /usr/local/bin/someone-else-in-recycled-group`,
+    ].join("\n"));
+    const verified: number[] = [];
+    const survivors = await resolveSurvivors(rows, [8000], async (row) => {
+      verified.push(row.pid);
+      return row.pid === 8001; // only the first carries SLOCK_AGENT_ID
+    });
+    assert.deepEqual(verified, [8001, 8005], "every candidate is checked");
+    assert.deepEqual(survivors.orphanPids, [8001]);
+    assert.deepEqual(survivors.pids, [8001]);
+    const closed = await resolveSurvivors(rows, [8000], async () => {
+      throw new Error("ps eww failed");
+    });
+    assert.deepEqual(closed.orphanPids, [], "fail closed on unreadable identity");
   });
 
   await t.test("pidAlive and readPidFile tolerate races and malformed input", async () => {
@@ -111,34 +138,39 @@ test("shutdown ladder: graceful → group SIGTERM → group SIGKILL → complete
     assert.equal(await readPidFile({ readFile: fsReadFile }, path.join(dir, "missing.pid")), null);
   });
 
-  await t.test("runShutdownTree escalates through groups, logs stragglers on SIGKILL exhaustion", async (t2) => {
+  await t.test("runShutdownTree: SIGTERM root, SIGKILL verified orphan; stragglers logged on exhaustion", async (t2) => {
     const dir = await mkdtemp(path.join(tmpdir(), "raft-shutdown-run-"));
     t2.after(() => rm(dir, { recursive: true, force: true }));
     const logFile = path.join(dir, "shutdown.log");
     const signaled: Array<[number, string]> = [];
-    // Tree: runner root dies after SIGTERM; an unkillable agent child stays.
-    const psOf = (runnerAlive: boolean, agentAlive: boolean) => [
-      runnerAlive ? "  9002     1  9002 runner" : "",
-      agentAlive ? "  9003  9002  9002 unkillable-agent" : "",
-    ].filter(Boolean).join("\n");
+    // Root runner 9002 dies after SIGTERM. Its agent child 9003 is then
+    // launchd-adopted (ppid 1) but stays in group 9002 — the real orphan
+    // shape — and ignores SIGKILL (D-state stand-in).
+    const psOf = (runnerAlive: boolean, agentAlive: boolean) =>
+      [
+        runnerAlive ? `  9002     1  9002 ${LS(1)} runner` : "",
+        agentAlive ? `  9003     1  9002 ${LS(2)} /usr/local/bin/claude orphan-agent` : "",
+      ]
+        .filter(Boolean)
+        .join("\n");
     let runnerAlive = true;
-    let agentAlive = true;
+    const agentAlive = true;
     await runShutdownTree({
       now: () => Date.now(),
-      sleep: async () => {}, // no real waiting: phaseElapsed advances per tick
+      sleep: async () => {}, // phaseElapsed advances per tick, no real waiting
       signal: (pid, signal) => {
         signaled.push([pid, signal]);
         if (signal === "SIGTERM" && pid === 9002) runnerAlive = false;
-        // 9003 ignores everything (D-state stand-in).
       },
       survivors: async () => ({ rootPids: [9002], psTable: psOf(runnerAlive, agentAlive) }),
+      verifyOrphan: async (row) => row.pid === 9003, // carries SLOCK_AGENT_ID
       logFile,
       systemShutdown: true, // compressed timeouts so the ladder runs fast
     });
     assert.ok(signaled.some(([pid, sig]) => pid === 9002 && sig === "SIGTERM"));
-    assert.ok(signaled.some(([pid, sig]) => pid === 9003 && sig === "SIGKILL"), "agent child escalated to SIGKILL");
+    assert.ok(signaled.some(([pid, sig]) => pid === 9003 && sig === "SIGKILL"), "verified orphan escalated to SIGKILL");
     const log = await readFile(logFile, "utf8");
     assert.ok(log.includes("sigterm-group"), "timeline records the escalation");
-    assert.match(log, /INCOMPLETE: could not terminate \[9002, 9003\]|INCOMPLETE: could not terminate \[9003\]/, "stragglers are named, never claimed clean");
+    assert.match(log, /INCOMPLETE: could not terminate \[9003\]/, "stragglers named, never claimed clean");
   });
 });

@@ -12,6 +12,10 @@
 // The phase transition is a pure function (unit-tested); `runShutdownTree`
 // wires it to pidfile liveness, the ps-based tree scan, and group signals.
 import { appendFile, readFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
 
 export type ShutdownPhase = "stopping" | "force-term" | "force-kill" | "done";
 
@@ -86,48 +90,74 @@ export interface PsRow {
   pid: number;
   ppid: number;
   pgid: number;
+  /** Process start time (`ps lstart=`, 7 words). Roots carry an expected
+   * lstart so a REUSED pid can never pass as a live root. */
+  lstart: string;
   command: string;
 }
 
-/** Parse `ps -axo pid=,ppid=,pgid=,command=` output. Pure. */
+/** Parse `ps -axo pid=,ppid=,pgid=,lstart=,command=` output. Pure. */
 export function parsePsTable(psOutput: string): PsRow[] {
   const rows: PsRow[] = [];
   for (const line of psOutput.split("\n")) {
     if (!line.trim()) continue;
-    const match = line.trim().match(/^(\d+)\s+(\d+)\s+(\d+)\s+(.*)$/);
+    const match = line.trim().match(/^(\d+)\s+(\d+)\s+(\d+)\s+(\w{3} \w{3} \d{1,2} \d{2}:\d{2}:\d{2} \d{4})\s+(.*)$/);
     if (!match) continue;
-    rows.push({ pid: Number(match[1]), ppid: Number(match[2]), pgid: Number(match[3]), command: match[4] });
+    rows.push({ pid: Number(match[1]), ppid: Number(match[2]), pgid: Number(match[3]), lstart: match[4], command: match[5] });
   }
   return rows;
 }
 
 export interface TreeSurvivors {
-  /** Every descendant of a live root (runners' daemons, agent runtimes, …). */
+  /** Everything Raft owns: live-root descendants/groups + verified orphans. */
   pids: number[];
   /** Root pids that are still alive. */
   roots: number[];
-  /** Root process groups — escalation targets for kill(-pgid). */
+  /** Live-root process groups — escalation targets for kill(-pgid). */
   groups: number[];
+  /** Orphans of DEAD roots, individually verified as Raft's. Signal these
+   * one pid at a time — never by group: the dead root's pgid may by now be
+   * reused by an unrelated process. */
+  orphanPids: number[];
 }
 
 /**
- * Given the trusted pidfile roots and a parsed ps table, collect everything
- * Raft actually owns. The descendant closure starts from the roots WHETHER
- * OR NOT a root is still alive — a dead runner's orphaned agent children are
- * exactly the stragglers the ladder exists to clear, so they must stay
- * owned. Group signals, however, only target the LIVE roots' groups: a dead
- * root's pgid may already be reused by an unrelated process. The user's own
- * processes — an editor or tail opened inside ~/.slock/agents — are NOT
- * descendants of our roots and NOT in our groups, so they can never be
- * matched. Pure.
+ * Pure planning step. From the trusted pidfile roots and a parsed ps table:
+ *  - the descendant closure runs from the LIVE roots only — a dead root's
+ *    pid may already be reused by an unrelated process, and orphans are
+ *    re-parented to launchd (ppid 1) anyway, so a dead-root closure would
+ *    find nothing real and could match a stranger's subtree;
+ *  - group members are processes in a LIVE root's pgid;
+ *  - candidates for dead roots' orphaned agents: `pgid` equals a dead root's
+ *    pid AND `ppid === 1` (post-adoption shape). Each candidate still needs
+ *    an out-of-band Raft identity check (see resolveSurvivors) before it
+ *    counts — group id alone is not ownership.
+ * The user's own processes are never descendants of our roots, never in our
+ * groups, and never carry our identity markers.
  */
-export function collectTreeSurvivors(rows: ReadonlyArray<PsRow>, rootPids: ReadonlyArray<number>): TreeSurvivors {
+export function collectSurvivorPlan(
+  rows: ReadonlyArray<PsRow>,
+  rootPids: ReadonlyArray<number>,
+  expectedRootLstart?: ReadonlyMap<number, string>,
+): { owned: number[]; liveRoots: number[]; groups: number[]; orphanCandidates: PsRow[] } {
   const byPid = new Map(rows.map((row) => [row.pid, row]));
   const rootSet = new Set(rootPids);
-  const liveRoots = rootPids.filter((pid) => byPid.has(pid));
+  // A root is LIVE only when its pid exists in the table AND — when we have
+  // recorded a start time for it — that time still matches. Without the
+  // lstart check, a pid that died and got reused by an unrelated process
+  // would pass as a live root and drag the stranger's whole subtree into
+  // the kill set.
+  const isLiveRoot = (pid: number): boolean => {
+    const row = byPid.get(pid);
+    if (!row) return false;
+    const expected = expectedRootLstart?.get(pid);
+    return expected === undefined || expected === row.lstart;
+  };
+  const liveRoots = rootPids.filter(isLiveRoot);
+  const deadRootPids = rootPids.filter((pid) => !liveRoots.includes(pid));
   const rootGroups = new Set(liveRoots.map((pid) => byPid.get(pid)!.pgid));
-  // Descendant closure from ALL roots (live or dead — orphans stay owned).
-  const owned = new Set<number>(rootSet);
+  // Descendant closure from LIVE roots only.
+  const owned = new Set<number>(liveRoots);
   let grew = true;
   while (grew) {
     grew = false;
@@ -143,9 +173,57 @@ export function collectTreeSurvivors(rows: ReadonlyArray<PsRow>, rootPids: Reado
   for (const row of rows) {
     if (rootGroups.has(row.pgid)) owned.add(row.pid);
   }
-  // Dead roots are gone, not survivors — keep their orphans, drop themselves.
-  const survivors = [...owned].filter((pid) => byPid.has(pid));
-  return { pids: survivors, roots: liveRoots, groups: [...rootGroups] };
+  // Dead-root orphan candidates: adopted by launchd, still in the dead
+  // root's process group.
+  const orphanCandidates = rows.filter(
+    (row) => !owned.has(row.pid) && row.ppid === 1 && deadRootPids.includes(row.pgid),
+  );
+  return { owned: [...owned], liveRoots, groups: [...rootGroups], orphanCandidates };
+}
+
+/**
+ * Full survivor resolution: plan (pure) + identity verification of the
+ * dead-root orphan candidates. A candidate counts only when the verifier
+ * recognizes it as ours — by default `ps eww` shows the process environment,
+ * where every Raft-managed agent runtime carries SLOCK_AGENT_ID. When the
+ * environment cannot be read, the candidate is skipped (fail-closed on the
+ * kill decision): better to leave one pid for the acceptance check to catch
+ * than to kill a stranger that happened into a recycled pgid.
+ */
+export async function resolveSurvivors(
+  rows: ReadonlyArray<PsRow>,
+  rootPids: ReadonlyArray<number>,
+  verifyOrphan: (row: PsRow) => Promise<boolean> = defaultVerifyOrphan,
+  expectedRootLstart?: ReadonlyMap<number, string>,
+): Promise<TreeSurvivors> {
+  const plan = collectSurvivorPlan(rows, rootPids, expectedRootLstart);
+  const orphanPids: number[] = [];
+  for (const candidate of plan.orphanCandidates) {
+    let isOurs = false;
+    try {
+      isOurs = await verifyOrphan(candidate);
+    } catch {
+      isOurs = false; // unreadable → not verified → not a target
+    }
+    if (isOurs) orphanPids.push(candidate.pid);
+  }
+  return {
+    pids: [...plan.owned, ...orphanPids],
+    roots: plan.liveRoots,
+    groups: plan.groups,
+    orphanPids,
+  };
+}
+
+/** Default identity check: SLOCK_AGENT_ID in the process environment
+ * (`ps eww` prints the environment after the command). Unreadable → false. */
+export async function defaultVerifyOrphan(row: PsRow): Promise<boolean> {
+  try {
+    const { stdout } = await execFileAsync("ps", ["eww", "-o", "command=", "-p", String(row.pid)]);
+    return stdout.includes("SLOCK_AGENT_ID=");
+  } catch {
+    return false;
+  }
 }
 
 // ─── liveness inputs ─────────────────────────────────────────────────────────
@@ -181,6 +259,8 @@ export interface ShutdownDeps {
   signal(pgidOrPid: number, signal: NodeJS.Signals): void;
   /** Live roots + their owned tree, from pidfiles and the current ps table. */
   survivors(): Promise<{ rootPids: number[]; psTable: string }>;
+  /** Identity check for dead-root orphan candidates (default: ps eww env). */
+  verifyOrphan?: (row: PsRow) => Promise<boolean>;
   logFile: string;
   systemShutdown: boolean;
 }
@@ -190,6 +270,13 @@ export interface ShutdownDeps {
  * then the state machine's escalation ladder. Writes a timeline to the log
  * file; resolves once every owned process is gone, or reports the stragglers
  * when even SIGKILL did not clear them.
+ *
+ * Root-identity pinning: the first tick records every root's lstart from the
+ * ps table; later ticks treat a root as live only when the recorded time
+ * still matches. A root that dies mid-ladder and has its pid reused by a
+ * stranger therefore degrades to a DEAD root — its "children" can never be
+ * matched via ppid (orphans are re-parented to 1 anyway) and the recycled
+ * pgid is never signaled.
  */
 export async function runShutdownTree(deps: ShutdownDeps): Promise<void> {
   const tuning = tuningFor(deps.systemShutdown);
@@ -204,9 +291,17 @@ export async function runShutdownTree(deps: ShutdownDeps): Promise<void> {
   let state: ShutdownState = { phase: "stopping", phaseElapsedMs: 0 };
   let guard = 0;
   let lastSurvivorPids: number[] = [];
+  const pinnedRootLstart = new Map<number, string>();
   while (state.phase !== "done" && guard++ < 200) {
     const { rootPids, psTable } = await deps.survivors();
-    const survivors = collectTreeSurvivors(parsePsTable(psTable), rootPids);
+    const rows = parsePsTable(psTable);
+    for (const root of rootPids) {
+      if (!pinnedRootLstart.has(root)) {
+        const row = rows.find((candidate) => candidate.pid === root);
+        if (row) pinnedRootLstart.set(root, row.lstart);
+      }
+    }
+    const survivors = await resolveSurvivors(rows, rootPids, deps.verifyOrphan, pinnedRootLstart);
     lastSurvivorPids = survivors.pids;
     const step = nextShutdownAction({
       state,
@@ -216,9 +311,10 @@ export async function runShutdownTree(deps: ShutdownDeps): Promise<void> {
     state = step.state;
     if (step.action === "sigterm-group" || step.action === "sigkill-group") {
       const signal: NodeJS.Signals = step.action === "sigterm-group" ? "SIGTERM" : "SIGKILL";
-      await log(`${step.action}: roots=[${survivors.roots}] groups=[${survivors.groups}] pids=[${survivors.pids}]`);
-      // Groups first (one signal covers the whole group), then any owned pid
-      // that escaped into its own group.
+      await log(`${step.action}: roots=[${survivors.roots}] groups=[${survivors.groups}] orphans=[${survivors.orphanPids}] pids=[${survivors.pids}]`);
+      // Groups first (one signal covers the whole group), then every owned
+      // pid individually — verified orphans are signaled by pid only, never
+      // by their recycled dead-root pgid.
       const targets = new Set<number>(survivors.groups);
       for (const pid of survivors.pids) targets.add(pid);
       for (const target of targets) deps.signal(target, signal);
