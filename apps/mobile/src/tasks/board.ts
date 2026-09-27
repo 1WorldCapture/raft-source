@@ -58,6 +58,11 @@ export interface TaskBoard {
   todo: BoardRow[];
 }
 
+/** The four board sections; BOARD_SECTIONS is the screen's display order. */
+export type BoardSection = keyof TaskBoard;
+
+export const BOARD_SECTIONS: readonly BoardSection[] = ["needsMe", "inProgress", "doneToday", "todo"];
+
 /**
  * Adapt plain tasks (old API rows or fixtures) into BoardTasks with neutral
  * board defaults — the transition path while the board endpoint lands.

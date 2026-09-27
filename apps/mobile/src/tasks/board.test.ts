@@ -155,6 +155,11 @@ test("board status query covers todo..done but never closed", async () => {
   assert.ok(!BOARD_QUERY_STATUSES.includes("closed" as TaskStatus));
 });
 
+test("BOARD_SECTIONS lists exactly the TaskBoard keys in display order", async () => {
+  const { BOARD_SECTIONS } = await import("./board.ts");
+  assert.deepEqual([...BOARD_SECTIONS], ["needsMe", "inProgress", "doneToday", "todo"]);
+});
+
 test("a mention only lifts unfinished tasks; done stays in doneToday, closed stays hidden", () => {
   const board = buildBoard(
     [

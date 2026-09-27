@@ -72,6 +72,10 @@ export const mobileEn = {
   "mobile.board.row.createdAgo": "Created {time}",
   "mobile.board.row.unclaimed": "Unassigned",
   "mobile.board.row.system": "System",
+  "mobile.board.section.needsMe": "Needs me",
+  "mobile.board.section.inProgress": "In progress",
+  "mobile.board.section.doneToday": "Done today",
+  "mobile.board.section.todo": "To start",
 } as const;
 
 export const mobileZh: Record<keyof typeof mobileEn, string> = {
@@ -144,6 +148,10 @@ export const mobileZh: Record<keyof typeof mobileEn, string> = {
   "mobile.board.row.createdAgo": "创建于 {time}",
   "mobile.board.row.unclaimed": "未认领",
   "mobile.board.row.system": "系统",
+  "mobile.board.section.needsMe": "需要我处理",
+  "mobile.board.section.inProgress": "进行中",
+  "mobile.board.section.doneToday": "今天完成",
+  "mobile.board.section.todo": "待开始",
 };
 
 export type MobileId = keyof typeof mobileEn;
