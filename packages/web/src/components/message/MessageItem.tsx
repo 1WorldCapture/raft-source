@@ -129,7 +129,7 @@ import {
   hydrateReactionViewerSnapshot,
 } from "../../store/reactionViewerReadModel";
 import { AttachmentCommentRefChip } from "./AttachmentCommentRefChip";
-import { fetchAttachmentBlobUrl } from "./attachmentBlobUrl";
+import { fetchSvgPngPreviewUrl } from "./svgPngPreview";
 import { shouldShowGroupedMessageHeader } from "./messageGrouping";
 import type { MessageGroupState } from "./messageGrouping";
 import { MessageHoverToolbar } from "./MessageHoverToolbar";
@@ -1316,7 +1316,7 @@ function ImageInlineFallbackLoader({
     const svgIds = attachmentIds.filter((id) => blobIds.has(id));
     const signedIds = attachmentIds.filter((id) => !blobIds.has(id));
     void Promise.all([
-      Promise.all(svgIds.map((id) => fetchAttachmentBlobUrl(id).then((url) => [id, url] as const))),
+      Promise.all(svgIds.map((id) => fetchSvgPngPreviewUrl(id).then((url) => [id, url] as const))),
       fetchInlineAttachmentUrls(signedIds),
     ])
       .then(([blobEntries, urls]) => {

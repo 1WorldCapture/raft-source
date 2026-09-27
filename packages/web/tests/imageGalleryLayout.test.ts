@@ -166,7 +166,7 @@ test("image attachments without thumbnails fetch an inline URL for direct galler
   // same-origin blob pipeline because the attachment responses' CORP header
   // blocks a cross-origin presigned URL inside `<img>`.
   assert.match(source, /fetchInlineAttachmentUrls\(signedIds\)/);
-  assert.match(source, /svgIds\.map\(\(id\) => fetchAttachmentBlobUrl\(id\)\.then\(\(url\) => \[id, url\] as const\)\)/);
+  assert.match(source, /svgIds\.map\(\(id\) => fetchSvgPngPreviewUrl\(id\)\.then\(\(url\) => \[id, url\] as const\)\)/);
   assert.match(
     readFileSync(resolve(repoRoot, "src/components/message/inlineAttachmentUrlCache.ts"), "utf8"),
     /`\/attachments\/\$\{attachmentId\}\/url\?disposition=inline`/,

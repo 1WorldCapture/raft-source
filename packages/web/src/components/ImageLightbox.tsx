@@ -4,7 +4,7 @@ import { X, ChevronLeft, ChevronRight, Download, ImageOff, MessageSquareMore } f
 import { useImageLightboxStore } from "../store/imageLightboxStore";
 import { transparentImageBackgroundClass } from "../utils/imagePreviewStyles";
 import api from "../api/client";
-import { fetchAttachmentBlobUrl } from "./message/attachmentBlobUrl";
+import { fetchSvgPngPreviewUrl } from "./message/svgPngPreview";
 import { SVG_NATIVE_RENDER_MAX_BYTES } from "./message/urlImageFallback";
 import Spinner from "./ui/Spinner";
 import Lightbox from "./ui/Lightbox";
@@ -109,7 +109,7 @@ export default function ImageLightbox() {
         setFullUrl(cached.url);
         return;
       }
-      fetchAttachmentBlobUrl(current.id)
+      fetchSvgPngPreviewUrl(current.id)
         .then((url) => {
           if (cancelled) return;
           if (!url) {

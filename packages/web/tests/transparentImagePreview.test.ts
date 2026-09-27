@@ -73,6 +73,7 @@ test("SVG attachments render inline: safe raster first, same-origin blob for ras
   const imageFallback = readSource("src/components/message/urlImageFallback.ts");
   const messageInput = readSource("src/components/message/MessageInput.tsx");
   const lightbox = readSource("src/components/ImageLightbox.tsx");
+  const svgPngPreview = readSource("src/components/message/svgPngPreview.ts");
 
   // Oversize SVGs stay attachment chips (a huge file can stall the decoder).
   assert.match(imageFallback, /mimeType === "image\/svg\+xml"[\s\S]*?SVG_NATIVE_RENDER_MAX_BYTES/);
@@ -84,7 +85,16 @@ test("SVG attachments render inline: safe raster first, same-origin blob for ras
   // Without a raster, the raw file loads as a same-origin blob — the
   // attachment responses' CORP header blocks a cross-origin presigned URL
   // inside `<img>`.
-  assert.match(lightbox, /if \(isSvgAttachment && !hasSafeRaster\)[\s\S]*?fetchAttachmentBlobUrl\(current\.id\)/);
+  assert.match(lightbox, /if \(isSvgAttachment && !hasSafeRaster\)[\s\S]*?fetchSvgPngPreviewUrl\(current\.id\)/);
+  // The rasterized preview is exported as PNG (never an svg blob URL, whose
+  // origin-pinned navigation would execute SVG scripts on our origin), and
+  // the raw SVG object URL is revoked before callers see anything.
+  assert.match(svgPngPreview, /canvasToPngBlob\(canvas\)/);
+  assert.match(svgPngPreview, /canvas\.toBlob\(\(blob\) => resolve\(blob\), "image\/png"\)/);
+  assert.match(svgPngPreview, /URL\.revokeObjectURL\(svgUrl\)/);
+  // The lightbox download keeps pulling the ORIGINAL file via the server's
+  // attachment disposition, never the rasterized PNG.
+  assert.match(lightbox, /url\?disposition=attachment/);
 });
 
 test("image lightbox falls back to local draft previews when the signed URL image fails", () => {
