@@ -22,6 +22,7 @@ import {
   RUNTIMES,
   WIKI_WORKSPACE_PACK_CAPABILITY,
   type AgentConfig,
+  type ComputerHostKind,
   type ComputerLifecycleExecutionAck,
   type AgentMigrationTransportLeaseMessage,
   type AgentMigrationTransferSummary,
@@ -980,6 +981,8 @@ export interface DaemonCoreOptions {
   apiKey: string;
   daemonVersion?: string;
   computerVersion?: string | null;
+  /** Where the managed Computer runs; reported in `ready` alongside computerVersion. */
+  computerHostKind?: ComputerHostKind;
   slockCliPath?: string;
   dataDir?: string;
   /** Test/embedded override; production resolves the canonical Raft home. */
@@ -4235,6 +4238,9 @@ export class DaemonCore {
       os: this.options.osDescription ?? `${os.platform()} ${os.arch()}`,
       daemonVersion: this.daemonVersion,
       ...(this.computerVersion ? { computerVersion: this.computerVersion } : {}),
+      ...(this.computerVersion && this.options.computerHostKind
+        ? { hostKind: this.options.computerHostKind }
+        : {}),
       migrationTransport: this.getMigrationTransportReady(),
       ...((this.options.getComputerLifecycleAcks || this.options.getComputerLifecycleReadyAcks)
         ? { lifecycleAcks }

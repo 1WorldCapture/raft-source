@@ -67,6 +67,11 @@ test("main.ts dispatches __service / __run BEFORE app.whenReady() (BUG 5 regress
     /runResident\s*\(\s*serverId/,
     "main.ts must call runResident(serverId) in the __run branch (BUG 5: spawned re-exec needs the per-server runner entry)",
   );
+  assert.match(
+    src,
+    /runResident\s*\(\s*serverId\s*,\s*\{\s*hostKind:\s*["']desktop_app["']\s*\}\s*\)/,
+    "main.ts must report the app-embedded host kind so the server never offers a standalone upgrade",
+  );
 });
 
 test("main.ts answers --version before booting Electron or resolving resident runtime dependencies", async () => {

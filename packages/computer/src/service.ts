@@ -75,7 +75,7 @@ import {
   ServiceClientError,
 } from "./lib/types.js";
 import { resetService, resetRunner } from "./reset.js";
-import { currentDate } from "@botiverse/raft-shared";
+import { currentDate, type ComputerHostKind } from "@botiverse/raft-shared";
 import type { DaemonCoreOptions } from "@botiverse/raft-daemon/core";
 import { enqueueLifecycleOperation } from "./lifecycleOperations.js";
 import { shutdownService } from "./lib/serviceShutdown.js";
@@ -327,6 +327,7 @@ export type ResidentCoreFactory = (creds: {
   serverMachineId: string;
   apiKey: string;
   serverUrl: string;
+  hostKind?: ComputerHostKind;
 }) => ResidentCore | Promise<ResidentCore>;
 
 /**
@@ -718,7 +719,11 @@ export async function handleRunnerExitForSupervisor({
  */
 export async function runResident(
   serverId: string,
-  deps: { coreFactory?: ResidentCoreFactory } = {},
+  deps: {
+    coreFactory?: ResidentCoreFactory;
+    /** The desktop app passes "desktop_app"; the CLI leaves it unset (standalone). */
+    hostKind?: ComputerHostKind;
+  } = {},
 ): Promise<void> {
   assertValidServerId(serverId);
   const slockHome = resolveRaftHome();
@@ -734,6 +739,7 @@ export async function runResident(
     serverMachineId: a.serverMachineId,
     apiKey: a.apiKey,
     serverUrl: a.serverUrl,
+    ...(deps.hostKind ? { hostKind: deps.hostKind } : {}),
   });
   let stopping = false;
   const shutdown = async () => {

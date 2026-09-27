@@ -1899,6 +1899,48 @@ test("DaemonCore scopes daemon traces with daemon and computer versions", async 
   }
 });
 
+test("DaemonCore reports the Computer host kind in ready only for managed Computers", async () => {
+  const readyFor = async (options: Partial<ConstructorParameters<typeof DaemonCore>[0]>) => {
+    const dataDir = await mkdtemp(path.join(os.tmpdir(), "slock-daemon-host-kind-test-"));
+    const sockets: FakeWebSocket[] = [];
+    const core = new DaemonCore({
+      serverUrl: "https://daemon.example.com",
+      apiKey: "sk_machine_test",
+      dataDir,
+      runtimeDetector: () => ({ ids: [], versions: {} }),
+      connectionOptions: {
+        wsFactory: (_url: string, _options?: Parameters<NonNullable<ConnectionOptions["wsFactory"]>>[1]) => {
+          const socket = new FakeWebSocket();
+          sockets.push(socket);
+          return socket;
+        },
+      },
+      ...options,
+    });
+    try {
+      core.start();
+      const socket = sockets[0];
+      assert.ok(socket, "wsFactory should create a websocket");
+      socket.emitOpen();
+      for (let i = 0; i < 20 && !socket.sent.some((m) => (m as { type?: string })?.type === "ready"); i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+      const ready = socket.sent.find((m) => (m as { type?: string })?.type === "ready") as Record<string, unknown> | undefined;
+      assert.ok(ready, "ready should be sent");
+      return ready;
+    } finally {
+      await core.stop();
+      await rm(dataDir, { recursive: true, force: true });
+    }
+  };
+
+  assert.equal((await readyFor({ computerVersion: "1.0.28", computerHostKind: "desktop_app" })).hostKind, "desktop_app");
+  assert.equal((await readyFor({ computerVersion: "1.0.28", computerHostKind: "standalone" })).hostKind, "standalone");
+  assert.equal("hostKind" in (await readyFor({ computerVersion: "1.0.28" })), false);
+  assert.equal("hostKind" in (await readyFor({ computerHostKind: "desktop_app" })), false,
+    "a raw daemon (no computerVersion) is not a Computer and reports no host kind");
+});
+
 test("DaemonCore sends a machine shutdown notice before disconnecting", async () => {
   const dataDir = await mkdtemp(path.join(os.tmpdir(), "slock-daemon-shutdown-notice-test-"));
   const sockets: FakeWebSocket[] = [];

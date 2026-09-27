@@ -115,6 +115,9 @@ export interface ControlsInput {
   upgrade?: UpgradeRecord | null;
   latestVersion: string | null;
   serverVersion: string | null;
+  // "app": the Computer ships with this app, so a newer standalone release is
+  // never an update for it.
+  managementModel?: ManagementModel;
 }
 
 export interface AblationFlags {
@@ -192,6 +195,7 @@ export function deriveControls(input: ControlsInput, now: number = Date.now(), a
       ? false
       : upgrade?.outcome === "rolled-back" && upgrade.targetVersion === latestVersion;
 
-  const updateAvailable = !upgrading && !rolledBackToLatest && isNewer(latestVersion, localVersion);
+  const appManaged = input.managementModel === "app";
+  const updateAvailable = !appManaged && !upgrading && !rolledBackToLatest && isNewer(latestVersion, localVersion);
   return { running, upgrading, updateAvailable, localVersion };
 }
