@@ -54,6 +54,19 @@ const apps = [
   },
 ];
 
+if (cfg.RAFT_BACKUP_CRON) {
+  apps.push({
+    ...BASE,
+    // Daily backup (backup.sh). pm2 also runs it once when the app is (re)started.
+    name: "raft-backup",
+    script: path.join(__dirname, "backup.sh"),
+    interpreter: "bash",
+    cron_restart: cfg.RAFT_BACKUP_CRON,
+    autorestart: false,
+    env: { PATH: PATH_ENV, HOME },
+  });
+}
+
 if (fs.existsSync(path.join(ROOT, "packages/trace-upload-worker/.env"))) {
   apps.push({
     // Optional. The worker has no dotenv import; Node loads its .env.
