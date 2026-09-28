@@ -107,3 +107,11 @@ test("drainAfterPages pages until a short page and caps runaway loops", async ()
   assert.equal(empty.lastSeq, 7);
   assert.equal(empty.hitCap, false);
 });
+
+test("hydrateCachedMessages coerces legacy string seqs in stored bodies", () => {
+  const out = hydrateCachedMessages([
+    { seq: 3, overlay: null as unknown as undefined, raw: { id: "m3", seq: "3", channelId: "c1", content: "legacy", senderId: "u", senderType: "user", createdAt: "t" } } as never,
+  ]);
+  assert.equal(out.length, 1);
+  assert.equal(out[0]!.seq, 3, "string bodyRaw seq is coerced, not dropped");
+});

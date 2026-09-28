@@ -40,6 +40,11 @@ export function hydrateCachedMessages(rows: readonly CachedMessage[]): RaftMessa
   const out: RaftMessage[] = [];
   for (const row of rows) {
     const merged = { ...row.raw, ...row.overlay } as Record<string, unknown>;
+    // Legacy rows may carry a string seq inside the stored body (the gap-sync
+    // fetcher used to persist the raw payload as-is). parseMessage drops
+    // string seqs, which silently killed the pane's seq-based logic — coerce
+    // before parsing so old caches keep working.
+    if (typeof merged.seq === "string" && /^\d+$/.test(merged.seq)) merged.seq = Number(merged.seq);
     const parsed = parseMessage(merged);
     if (parsed) out.push(parsed);
   }
