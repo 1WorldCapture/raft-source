@@ -37,6 +37,7 @@ import type {
 } from "./readStateSync";
 import type { InboxScopeReadFrontier } from "@botiverse/raft-shared";
 import { useServerStore } from "./serverStore";
+import { useServerUnreadSummaryStore } from "./serverUnreadSummaryStore";
 import { useThreadStore } from "./threadStore";
 import { applyTaskToInboxItems } from "../utils/taskMetadata";
 import type { TaskMetadataUpdate } from "../utils/taskMetadata";
@@ -772,21 +773,24 @@ export const useInboxStore = create<InboxState>((set, get) => ({
   pendingFocusKind: null,
   setFilter: (filter) => {
     if (get().filter === filter) return;
-    set({ filter, items: [], acceptedWindowGeneration: "", loaded: false, hasMore: true, totalCount: 0, totalUnreadCount: 0, scrollTop: 0 });
+    // Clear activeUnreadCount too: leaving the previous filter's value while
+    // totalUnreadCount resets showed a lit Activity dot next to an empty
+    // "unread" count until the reload landed.
+    set({ filter, items: [], acceptedWindowGeneration: "", loaded: false, hasMore: true, totalCount: 0, totalUnreadCount: 0, activeUnreadCount: 0, scrollTop: 0 });
     void get().loadInbox({ reset: true });
   },
 
   setChannelFilterId: (channelFilterId) => {
     if (get().channelFilterId === channelFilterId) return;
     inboxUnfollowedLoadGeneration += 1;
-    set({ channelFilterId, items: [], acceptedWindowGeneration: "", unfollowedItems: [], unfollowedLoading: false, unfollowedLoaded: false, unfollowedWindowGeneration: null, loaded: false, hasMore: true, totalCount: 0, totalUnreadCount: 0, scrollTop: 0 });
+    set({ channelFilterId, items: [], acceptedWindowGeneration: "", unfollowedItems: [], unfollowedLoading: false, unfollowedLoaded: false, unfollowedWindowGeneration: null, loaded: false, hasMore: true, totalCount: 0, totalUnreadCount: 0, activeUnreadCount: 0, scrollTop: 0 });
     void get().loadInbox({ reset: true });
   },
 
   setSortDirection: (sortDirection) => {
     if (get().sortDirection === sortDirection) return;
     inboxUnfollowedLoadGeneration += 1;
-    set({ sortDirection, items: [], acceptedWindowGeneration: "", unfollowedItems: [], unfollowedLoading: false, unfollowedLoaded: false, unfollowedWindowGeneration: null, loaded: false, hasMore: true, totalCount: 0, totalUnreadCount: 0, scrollTop: 0 });
+    set({ sortDirection, items: [], acceptedWindowGeneration: "", unfollowedItems: [], unfollowedLoading: false, unfollowedLoaded: false, unfollowedWindowGeneration: null, loaded: false, hasMore: true, totalCount: 0, totalUnreadCount: 0, activeUnreadCount: 0, scrollTop: 0 });
     void get().loadInbox({ reset: true });
   },
 
@@ -1186,6 +1190,9 @@ export const useInboxStore = create<InboxState>((set, get) => ({
             marker: inboxItemLatestMarker(readItem),
             unreadCount: 0,
           }, traceCycleId);
+          // The server's Activity totals moved; the shared cross-server
+          // summary (rail dots, switcher badges) must follow the read.
+          useServerUnreadSummaryStore.getState().noteReadActivity();
         }
       } catch (err) {
         console.error(err);
@@ -1223,6 +1230,7 @@ export const useInboxStore = create<InboxState>((set, get) => ({
         useMessageStore.getState().loadUnreadCounts(),
         useThreadStore.getState().loadFollowedThreads(),
       ]);
+      useServerUnreadSummaryStore.getState().noteReadActivity();
       await get().refreshInbox({ background: true });
     } catch (err) {
       console.error(err);
@@ -1346,6 +1354,7 @@ export const useInboxStore = create<InboxState>((set, get) => ({
         await get().refreshInbox();
         forgetInboxLocalDoneSuppression(item);
         releaseInboxDoneGeneration(item, doneGeneration);
+        useServerUnreadSummaryStore.getState().noteReadActivity();
       } catch (err) {
         console.error("Failed to mark inbox thread as done:", err);
         if (!isCurrentInboxDoneGeneration(item, doneGeneration)) return;
@@ -1370,6 +1379,7 @@ export const useInboxStore = create<InboxState>((set, get) => ({
         await get().refreshInbox();
         forgetInboxLocalDoneSuppression(item);
         releaseInboxDoneGeneration(item, doneGeneration);
+        useServerUnreadSummaryStore.getState().noteReadActivity();
       } catch (err) {
         console.error("Failed to mark inbox item as done:", err);
         if (!isCurrentInboxDoneGeneration(item, doneGeneration)) return;

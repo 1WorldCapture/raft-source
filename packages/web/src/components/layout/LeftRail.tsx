@@ -27,12 +27,10 @@ import { useMessageStore } from "../../store/messageStore";
 import { useInboxStore } from "../../store/inboxStore";
 import { useChannelStore } from "../../store/channelStore";
 import { useMachineStore } from "../../store/machineStore";
-import { SERVER_NOTIFICATION_PREFS_UPDATED_EVENT } from "../../store/events/notificationPrefsEvents";
-import api from "../../api/client";
+import { useServerUnreadSummaryStore } from "../../store/serverUnreadSummaryStore";
 import { useRailMode } from "../../hooks/useSidebarTab";
 import { trackActivityOpen } from "../../analytics/activity";
-import { hasOtherServerActivityUnread, parseServerUnreadSummaryRows } from "../../utils/serverUnreadSummary";
-import type { ServerUnreadSummary } from "../../utils/serverUnreadSummary";
+import { hasOtherServerActivityUnread } from "../../utils/serverUnreadSummary";
 import { countMachinesNeedingAttention } from "../../utils/computerUpgradeIndicator";
 import AttentionDot from "../ui/AttentionDot";
 import { AvatarImageWithFallback } from "../ui/AvatarSlot";
@@ -138,7 +136,7 @@ export function LeftRail({ hidden, workspaceModeAvailable = false, side = "left"
 
   const [showServerMenu, setShowServerMenu] = useState(false);
   const [showHelpMenu, setShowHelpMenu] = useState(false);
-  const [serverUnreadCounts, setServerUnreadCounts] = useState<Record<string, ServerUnreadSummary>>({});
+  const serverUnreadCounts = useServerUnreadSummaryStore((s) => s.byServer);
   const suppressRailClickRef = useRef(false);
 
   // One-shot "there is a mobile app now" dot. Read from storage rather than
@@ -172,32 +170,16 @@ export function LeftRail({ hidden, workspaceModeAvailable = false, side = "left"
 
   const _pathBase = useMemo(() => (server ? `/s/${server.slug}` : ""), [server]);
 
+  // The cross-server unread summary lives in the shared
+  // serverUnreadSummaryStore (one copy for LeftRail, Sidebar and the server
+  // switcher, refreshed by poll/focus/read-actions/socket events). Retaining
+  // it here keeps the poll alive for as long as this rail is mounted.
   useEffect(() => {
-    if (side !== "left") return;
-    let cancelled = false;
-    const load = async () => {
-      try {
-        const { data } = await api.get("/servers/unread-summary");
-        if (cancelled) return;
-        setServerUnreadCounts(parseServerUnreadSummaryRows(data));
-      } catch {
-        // best-effort badge; ignore failures
-      }
-    };
-    const handleNotificationPrefsUpdated = () => {
-      void load();
-    };
-    void load();
-    window.addEventListener(SERVER_NOTIFICATION_PREFS_UPDATED_EVENT, handleNotificationPrefsUpdated);
+    useServerUnreadSummaryStore.getState().retain();
     return () => {
-      cancelled = true;
-      window.removeEventListener(SERVER_NOTIFICATION_PREFS_UPDATED_EVENT, handleNotificationPrefsUpdated);
+      useServerUnreadSummaryStore.getState().release();
     };
-    // Refresh the cross-server unread summary when local unread *appears or
-    // clears* (flip), not on every inbound message. Local per-message churn was
-    // never a precise signal for other servers' badges anyway — this is the same
-    // best-effort trigger, minus the redundant per-message refetches.
-  }, [hasLocalChatUnread, side]);
+  }, []);
 
   const hasOtherServerUnread = useMemo(
     () => hasOtherServerActivityUnread(servers, server, serverUnreadCounts),

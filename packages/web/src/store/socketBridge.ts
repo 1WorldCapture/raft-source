@@ -79,6 +79,7 @@ import type {
 import { useReadReceiptStore } from "./readReceiptStore";
 import { useSavedStore } from "./savedStore";
 import { useServerStore } from "./serverStore";
+import { useServerUnreadSummaryStore } from "./serverUnreadSummaryStore";
 import { registerTaskRealtimeHandlers } from "./taskRealtimeSync";
 import { handleThreadUpdatedForReplies } from "./threadRepliesSocket";
 import {
@@ -151,6 +152,7 @@ export const MAIN_LAYOUT_SOCKET_EVENT_NAMES = [
   "scope_read:updated",
   "read_state:updated",
   "read_state:updated_bulk",
+  "unread_summary:changed",
   "agent:activity",
   "agent:session",
   "dm:new",
@@ -987,6 +989,15 @@ export function buildMainLayoutSocketBindings(
     },
     { event: "read_state:updated", handler: readStateUpdated },
     { event: "read_state:updated_bulk", handler: readStateUpdatedBulk },
+    {
+      // Server-side signal that the Activity unread totals moved (read, Done,
+      // new inbox row — contract in #unread-badges task #4). The payload only
+      // names the server; the client refetches the summary. Servers without
+      // the event still work: the store's poll/focus refreshes stay as the
+      // fallback.
+      event: "unread_summary:changed",
+      handler: (payload) => useServerUnreadSummaryStore.getState().applyUnreadSummaryChanged(payload),
+    },
     { event: "agent:activity", handler: agentActivity },
     { event: "agent:session", handler: agentSession },
     ...createChannelRealtimeBindings(socket, scheduleInboxRefresh),
