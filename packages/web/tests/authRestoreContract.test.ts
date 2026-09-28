@@ -174,3 +174,28 @@ test("auth restore timeout only applies to restorable sessions", () => {
     false,
   );
 });
+
+// #desktop-session-restore task #1 — error shape mapping for lastRestoreError.
+import { describeRestoreError } from "../src/utils/authRestoreMachine.js";
+
+test("an axios-shaped error with a response maps to kind=http with the status", () => {
+  const described = describeRestoreError(
+    Object.assign(new Error("Request failed"), { response: { status: 502 } }),
+    1_000,
+  );
+  assert.deepEqual(described, { kind: "http", status: 502, at: 1_000 });
+});
+
+test("errors without a response status map to kind=network", () => {
+  assert.deepEqual(describeRestoreError(new Error("Network Error"), 2_000), { kind: "network", at: 2_000 });
+  assert.deepEqual(describeRestoreError(undefined, 3_000), { kind: "network", at: 3_000 });
+  assert.deepEqual(describeRestoreError(null, 4_000), { kind: "network", at: 4_000 });
+});
+
+test("a non-numeric response status is not mistaken for an HTTP error", () => {
+  const described = describeRestoreError(
+    Object.assign(new Error("weird"), { response: { status: "502" } }),
+    5_000,
+  );
+  assert.equal(described.kind, "network");
+});

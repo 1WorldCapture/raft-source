@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { getRestoreTimeoutAction } from "../src/utils/restoreTimeoutPolicy";
+import { getRestoreTimeoutAction, nextRestoreRetryDelayMs } from "../src/utils/restoreTimeoutPolicy";
 import { MAX_AUTH_RESTORE_MS } from "../src/utils/authRestoreMachine";
 import type { AuthRestoreState } from "../src/utils/authRestoreMachine";
 
@@ -94,4 +94,31 @@ test("no timed-out restore with a stored session ever resolves to logout (contra
     });
     assert.notEqual(action, "logout", `elapsedMs=${elapsedMs} with a stored session must not logout`);
   }
+});
+
+// ── Retry cadence after degradation (#desktop-session-restore task #1) ──
+// Before the timeout the cadence is unchanged (1.5s fixed interval); after it
+// each further retry backs off along 3s → 6s → 12s → 15s (cap).
+
+test("retry delay stays at the legacy 1.5s while the restore has not timed out", () => {
+  for (const degradedRetryCount of [0, 3, 99]) {
+    assert.equal(
+      nextRestoreRetryDelayMs({ elapsedMs: UNDER, degradedRetryCount }),
+      1_500,
+      `pre-timeout delay must ignore degradedRetryCount (${degradedRetryCount})`,
+    );
+  }
+});
+
+test("post-timeout retry delay walks the 3s→6s→12s→15s ladder and caps at 15s", () => {
+  assert.equal(nextRestoreRetryDelayMs({ elapsedMs: OVER, degradedRetryCount: 0 }), 3_000);
+  assert.equal(nextRestoreRetryDelayMs({ elapsedMs: OVER, degradedRetryCount: 1 }), 6_000);
+  assert.equal(nextRestoreRetryDelayMs({ elapsedMs: OVER, degradedRetryCount: 2 }), 12_000);
+  assert.equal(nextRestoreRetryDelayMs({ elapsedMs: OVER, degradedRetryCount: 3 }), 15_000);
+  assert.equal(nextRestoreRetryDelayMs({ elapsedMs: OVER, degradedRetryCount: 47 }), 15_000, "ladder caps at 15s");
+});
+
+test("custom maxElapsedMs shifts the timeout boundary for the delay ladder", () => {
+  assert.equal(nextRestoreRetryDelayMs({ elapsedMs: 5_000, maxElapsedMs: 10_000, degradedRetryCount: 0 }), 1_500);
+  assert.equal(nextRestoreRetryDelayMs({ elapsedMs: 10_000, maxElapsedMs: 10_000, degradedRetryCount: 0 }), 3_000);
 });

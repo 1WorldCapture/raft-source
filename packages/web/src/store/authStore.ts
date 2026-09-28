@@ -21,12 +21,14 @@ import { clearSlockdevManualLogout, markSlockdevManualLogout } from "../utils/de
 import { useServerStore } from "./serverStore";
 import {
   deriveInitialAuthRestoreState,
+  describeRestoreError,
   nextAuthRestoreState,
   nextAuthRestoreStateAfterExternalTokenSync,
 } from "../utils/authRestoreMachine";
 import type {
   AuthRestoreState,
   AuthRestoreEvent,
+  LastRestoreError,
 } from "../utils/authRestoreMachine";
 import { updateAuthRuntimeSnapshot } from "../utils/authSessionRuntime";
 import { emitHostEvent } from "../embed/hostBridge";
@@ -86,6 +88,8 @@ interface AuthState {
   loading: boolean;
   initialized: boolean;
   restoreState: AuthRestoreState;
+  /** Last transient failure of the bootstrap restore loop; null once a restore succeeds. */
+  lastRestoreError: LastRestoreError | null;
 
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string, legalAcceptance: { acceptTerms: boolean; termsVersion: string; privacyVersion: string; legalAcceptanceSource?: "signup" | "invite" }) => Promise<void>;
@@ -223,6 +227,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   restoreState: deriveInitialAuthRestoreState(
     !!(localStorage.getItem("slock_access_token") && localStorage.getItem("slock_refresh_token")),
   ),
+  lastRestoreError: null,
 
   login: async (email, password) => {
     set({ loading: true });
@@ -338,6 +343,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       refreshToken: null,
       initialized: true,
       restoreState: transitionRestore(get().restoreState, { type: "LOGOUT" }),
+      lastRestoreError: null,
     });
     // Signal a host-embedded WebView, if any, that the user COMPLETED logout.
     //
@@ -379,6 +385,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         user: data,
         initialized: true,
         restoreState: transitionRestore(get().restoreState, { type: "RESTORE_SUCCEEDED" }),
+        lastRestoreError: null,
       });
       reportBrowserTimezoneObservation(data);
     } catch (err: any) {
@@ -392,6 +399,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
             type: "RESTORE_TRANSIENT_FAILURE",
             hasStoredSession,
           }),
+          lastRestoreError: describeRestoreError(err),
         });
         return;
       }
@@ -404,6 +412,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
             type: "RESTORE_TRANSIENT_FAILURE",
             hasStoredSession,
           }),
+          lastRestoreError: describeRestoreError(err),
         });
         return;
       }
@@ -419,6 +428,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
               user: data,
               initialized: true,
               restoreState: transitionRestore(get().restoreState, { type: "RESTORE_SUCCEEDED" }),
+              lastRestoreError: null,
             });
             reportBrowserTimezoneObservation(data);
           } catch (meErr: any) {
@@ -436,6 +446,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
                   type: "RESTORE_TRANSIENT_FAILURE",
                   hasStoredSession: !!(get().accessToken && get().refreshToken),
                 }),
+                lastRestoreError: describeRestoreError(meErr),
               });
             }
           }
@@ -445,7 +456,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           // produce repeated /auth/me -> /auth/refresh 401s for 30s.
           get().logout("terminal_verdict");
         }
-      } catch {
+      } catch (refreshErr) {
         // Transient refresh failure — keep session and let later calls retry.
         set({
           initialized: true,
@@ -453,6 +464,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
             type: "RESTORE_TRANSIENT_FAILURE",
             hasStoredSession: !!(get().accessToken && get().refreshToken),
           }),
+          lastRestoreError: describeRestoreError(refreshErr),
         });
       }
     }

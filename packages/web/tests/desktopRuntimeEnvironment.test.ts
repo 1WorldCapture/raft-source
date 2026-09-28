@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   INVALID_DESKTOP_RUNTIME_ENVIRONMENT,
+  absoluteApiBase,
   applyDesktopEnvironmentGeneration,
   assertValidDesktopRuntimeEnvironment,
   deriveRuntimeEndpoints,
@@ -296,4 +297,18 @@ describe("native Desktop runtime environment", () => {
       "RUNTIME_API_ORIGIN.includes(",
     ], 1);
   });
+});
+
+// #desktop-session-restore task #1 review — the degraded-restore card must
+// show an absolute address even when the web build compiled a relative "/api".
+test("absoluteApiBase resolves the relative web base against the page origin", () => {
+  assert.equal(absoluteApiBase("/api", "http://localhost:5173"), "http://localhost:5173/api");
+  assert.equal(absoluteApiBase("/api", "https://app.raft.build"), "https://app.raft.build/api");
+});
+
+test("absoluteApiBase passes an already-absolute desktop base through", () => {
+  assert.equal(
+    absoluteApiBase("http://127.0.0.1:5999/api", "app://raft"),
+    "http://127.0.0.1:5999/api",
+  );
 });

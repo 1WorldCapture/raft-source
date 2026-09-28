@@ -142,6 +142,15 @@ export function deriveRuntimeEndpoints(
 
 const runtimeEndpoints = deriveRuntimeEndpoints(DESKTOP_RUNTIME_ENVIRONMENT);
 export const RUNTIME_API_BASE = runtimeEndpoints.apiBase;
+
+// Display form of the API base for the degraded-restore card
+// (#desktop-session-restore task #1 review): on the web build RUNTIME_API_BASE
+// is the RELATIVE "/api" (compiled origin and page origin are the same), so
+// showing it raw would render a bare "/api". Resolve it against the page
+// origin; an already-absolute desktop base passes through unchanged.
+export function absoluteApiBase(apiBase: string, pageOrigin: string): string {
+  return new URL(apiBase, pageOrigin).toString();
+}
 export const RUNTIME_API_ORIGIN = runtimeEndpoints.apiOrigin;
 export const RUNTIME_SOCKET_ORIGIN = runtimeEndpoints.socketOrigin;
 export const RUNTIME_DESKTOP_ENVIRONMENT_ERROR = runtimeEndpoints.desktopRuntimeError;
