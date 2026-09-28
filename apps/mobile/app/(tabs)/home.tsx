@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Alert, FlatList, Pressable, RefreshControl, StyleSheet, View, useWindowDimensions } from "react-native";
+import { ActivityIndicator, Alert, AppState, FlatList, Pressable, RefreshControl, StyleSheet, View, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
 import { Activity, Bookmark, Search } from "lucide-react-native";
@@ -57,12 +57,15 @@ export default function HomeScreen() {
     if (directoryTimer.current) clearTimeout(directoryTimer.current);
   }, []);
 
-  const loadServers = useCallback(async (preferredId: string | null) => {
+  const loadServers = useCallback(async (preferredId: string | null, ticket: number) => {
     const currentSession = sessionRef.current;
     const [serverData, unreadData] = await Promise.all([
       currentSession.client.get<unknown>("/servers", { server: false }),
       currentSession.client.get<unknown>("/servers/unread-summary", { server: false }),
     ]);
+    // A rapid A→B server switch invalidates A's in-flight responses; applying
+    // them anyway would restore A's role and badges on top of B's session.
+    if (ticket !== loadTicket.current) return null;
     const next = parseServers(serverData);
     setServers(next);
     setServerUnread(parseUnreadSummary(unreadData));
@@ -92,7 +95,7 @@ export default function HomeScreen() {
     const ticket = ++loadTicket.current;
     setError(null);
     try {
-      const selected = await loadServers(preferredId);
+      const selected = await loadServers(preferredId, ticket);
       if (ticket !== loadTicket.current) return;
       if (!selected) {
         useRaftStore.getState().setConversations([]);
@@ -138,7 +141,10 @@ export default function HomeScreen() {
   // Returning to the tab no longer reloads the list, but the header badges
   // (activity count, other-server dots) would sit stale until the next full
   // reload — refresh just the unread summary instead (review point on #52).
-  useFocusEffect(useCallback(() => {
+  // The realtime socket only connects to the active server, so events from
+  // other servers never arrive live; this fetch is the only cross-server
+  // unread source besides pull-to-refresh.
+  const refreshBadges = useCallback(() => {
     const startedTicket = loadTicket.current;
     const currentSession = sessionRef.current;
     if (!currentSession.ready) return;
@@ -149,7 +155,16 @@ export default function HomeScreen() {
         setActivityUnread(activityUnreadByServer(data));
       })
       .catch(() => {});
-  }, []));
+  }, []);
+  useFocusEffect(useCallback(() => refreshBadges(), [refreshBadges]));
+  useEffect(() => {
+    // Coming back from the background keeps the tab technically focused, so
+    // useFocusEffect alone would leave the rail dots stale.
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") refreshBadges();
+    });
+    return () => subscription.remove();
+  }, [refreshBadges]);
 
   const markRead = useCallback((channel: RaftChannel) => {
     Alert.alert(channelLabel(channel), undefined, [
