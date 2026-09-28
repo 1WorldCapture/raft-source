@@ -11,9 +11,9 @@ patchedDependencies:
   '@botiverse/k-carrier@0.1.8':
     hash: 13117bc98923d3c5a7b99d69c5ec688f6006e9f5e139f9d7d8c24702a74dc132
     path: patches/@botiverse__k-carrier@0.1.8.patch
-  react-native-screens:
+  react-native-screens@4.26.2:
     hash: 05af4cdc9cc9799b2649a099232e371e9fa39c4a8ec5504b6eca4034827df14c
-    path: patches/react-native-screens.patch
+    path: patches/react-native-screens@4.26.2.patch
 
 importers:
 
