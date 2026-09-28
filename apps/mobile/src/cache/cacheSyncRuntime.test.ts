@@ -92,3 +92,34 @@ test("noteReadState writes server-provided values only while a scope is attached
   assert.deepEqual(getCacheRuntime().repo.getReadStates(runtime.scopeId!), {},
     "no scope attached — the write is dropped, wiped data stays wiped");
 });
+
+test("fetchSyncPage persists rows with string seqs from the live /messages/sync shape", async () => {
+  // Device postmortem: the server's /messages/sync returns a BARE array
+  // (unlike /messages/channel) and serializes seq as a JSON string (pg
+  // bigserial via the raw row path). Both shapes must persist — the old
+  // parseMessage-based path silently dropped every row and the gap sync
+  // converged at cursor maxSeq=0 with zero messages cached.
+  const runtime = freshRuntime();
+  // One page mixing the live bare-array shape with string seqs and a
+  // numeric seq, plus the {messages:[...]} wrapper shape seen in fixtures —
+  // all must land. (A short page ends the loop, so everything rides one response.)
+  const page: unknown[] = [
+    { seq: "7", id: "m7", channelId: "c1", senderId: "u", senderType: "user", createdAt: "t", content: "bare-string" },
+    { seq: 8, id: "m8", channelId: "c1", senderId: "u", senderType: "user", createdAt: "t", content: "number" },
+    { seq: "not-a-number", id: "m9", channelId: "c1", senderId: "u", senderType: "user", createdAt: "t", content: "junk" },
+  ];
+  const client: FakeClient = {
+    syncCalls: 0,
+    get: (path: string) => {
+      if (!path.startsWith("/messages/sync")) return Promise.resolve({});
+      client.syncCalls += 1;
+      return Promise.resolve(client.syncCalls === 1 ? page : []);
+    },
+  };
+  await runCacheGapSync(client as unknown as ApiClient);
+  const scopeId = runtime.scopeId!;
+  const rows = runtime.repo.getLatestMessages(scopeId, "c1", 10);
+  assert.deepEqual(rows.map((r) => r.seq), [8, 7], "string seq 7, number seq 8 land; junk seq dropped");
+  const cursor = runtime.repo.getKv(scopeId, "syncCursor");
+  assert.match(JSON.stringify(cursor), /"maxSeq":8/, "cursor advances to the normalized max");
+});

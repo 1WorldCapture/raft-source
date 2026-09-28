@@ -117,6 +117,8 @@ export interface RaftServer {
   slug: string;
   avatarUrl?: string | null;
   role?: string | null;
+  /** Server plan ("free" | "pro" | …) — drives the local history-prune window (#client-data-cache #4). */
+  plan?: string | null;
 }
 
 export interface ServerUnread {
@@ -347,6 +349,7 @@ export function parseServers(data: unknown): RaftServer[] {
       slug: item.slug,
       avatarUrl: typeof item.avatarUrl === "string" ? item.avatarUrl : null,
       role: typeof item.role === "string" ? item.role : null,
+      plan: typeof item.plan === "string" ? item.plan : null,
     }];
   });
 }

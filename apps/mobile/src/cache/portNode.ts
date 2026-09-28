@@ -15,22 +15,31 @@ export function openNodeSqliteDb(path: string): SqliteDb {
     const result = db.prepare(sql).run(...(params ?? []));
     return { changes: Number(result?.changes ?? 0) };
   };
+  // Serialized write queue: a second write() call while one transaction is
+  // still awaiting its body would otherwise BEGIN inside the open
+  // transaction ("cannot start a transaction within a transaction"). This
+  // mirrors the queue the repo needs regardless of adapter.
+  let writeChain: Promise<void> = Promise.resolve();
   return {
     exec: (sql) => db.exec(sql),
     all: (sql, params) => db.prepare(sql).all(...(params ?? [])) as SqliteRow[],
     run: syncRun,
-    write: async (fn) => {
-      const tx: WriteTx = {
-        run: async (sql, params) => syncRun(sql, params),
-      };
-      db.exec("BEGIN");
-      try {
-        await fn(tx);
-        db.exec("COMMIT");
-      } catch (error) {
-        db.exec("ROLLBACK");
-        throw error;
-      }
+    write: (fn: (tx: WriteTx) => Promise<void>) => {
+      const run = writeChain.then(async () => {
+        const tx: WriteTx = {
+          run: async (sql, params) => syncRun(sql, params),
+        };
+        db.exec("BEGIN");
+        try {
+          await fn(tx);
+          db.exec("COMMIT");
+        } catch (error) {
+          db.exec("ROLLBACK");
+          throw error;
+        }
+      });
+      writeChain = run.catch(() => {});
+      return run;
     },
   };
 }

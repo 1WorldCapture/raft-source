@@ -13,6 +13,7 @@ import { useServerRail } from "../../src/home/useServerRail";
 import { formatRelativeTime, relativeTimeStrings } from "../../src/tasks/relativeTime";
 import { useT } from "../../src/i18n/provider";
 import { seedConversations } from "../../src/cache/boot";
+import { pruneToHistoryLimit, reconcileAfterChannelRefresh } from "../../src/cache/cacheCleanup";
 import { getCacheRuntime } from "../../src/cache/runtime";
 import { channelLabel, parseChannelUnread, parseChannels, type RaftChannel, type RaftServer } from "../../src/model/messages";
 import { useSession } from "../../src/state/session";
@@ -69,23 +70,40 @@ export default function HomeScreen() {
     useRaftStore.getState().setConversations([...channels, ...dms]);
     // Persist the directory to the local cache (#client-data-cache task #2):
     // two type-scoped batches so dropMissing never crosses lists (#4).
+    // AWAITED in order: fire-and-forget writes let the reconcile's own
+    // db.write open while a putChannels transaction is still running —
+    // sqlite rejects the nested transaction and the delete silently dies.
     try {
       const runtime = getCacheRuntime();
       const scope = runtime.scopeFor(serverId);
       if (scope === null) return;
-      void runtime.repo.putChannels(scope, channels.map((channel) => ({
+      await runtime.repo.putChannels(scope, channels.map((channel) => ({
         id: channel.id,
         type: channel.type || "channel",
         lastMessageAt: channel.lastMessageAt ?? null,
         raw: channel as unknown as Record<string, unknown>,
       })));
-      void runtime.repo.putChannels(scope, dms.map((channel) => ({
+      await runtime.repo.putChannels(scope, dms.map((channel) => ({
         id: channel.id,
         type: "dm",
         lastMessageAt: channel.lastMessageAt ?? null,
         raw: channel as unknown as Record<string, unknown>,
       })));
-      void runtime.repo.putKv(scope, "channelUnread", parseChannelUnread(unreadData) as unknown as Record<string, unknown>);
+      await runtime.repo.putKv(scope, "channelUnread", parseChannelUnread(unreadData) as unknown as Record<string, unknown>);
+      // Channel reconcile (#client-data-cache task #4): both lists are in
+      // hand here — Promise.all above means /channels AND /channels/dm both
+      // succeeded (any throw skips this block entirely). stillActive drops
+      // the sweep when the identity was wiped mid-flight (logout / origin
+      // change makes scopeFor return a different id).
+      await reconcileAfterChannelRefresh(
+        runtime.repo,
+        scope,
+        async () => ({
+          channels: channels.map((channel) => ({ id: channel.id, archivedAt: channel.archivedAt })),
+          dms: dms.map((channel) => ({ id: channel.id, archivedAt: channel.archivedAt })),
+        }),
+        { stillActive: () => runtime.scopeFor(serverId) === scope },
+      );
     } catch {
       // Cache unavailable — directory still works from the network.
     }
@@ -128,6 +146,16 @@ export default function HomeScreen() {
         return;
       }
       setCurrentServerRole(selected.role ?? null);
+      // Plan-driven history prune (#client-data-cache task #4): the plan now
+      // rides on GET /servers; free servers keep 30 days locally, mirroring
+      // the server-side cutoff. Idempotent DELETE — safe on every load.
+      try {
+        const runtime = getCacheRuntime();
+        const scope = runtime.scopeFor(selected.id);
+        if (scope !== null) await pruneToHistoryLimit(runtime.repo, scope, selected.plan);
+      } catch {
+        // Cache unavailable — the server-side limit still applies.
+      }
       // Use the id this load was given, not a serverId closed over from an earlier render.
       const activeId = preferredId ?? sessionRef.current.serverId;
       if (selected.id !== activeId) await sessionRef.current.selectServer(selected.id);
