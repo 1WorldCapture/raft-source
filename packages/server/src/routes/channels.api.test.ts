@@ -112,12 +112,15 @@ test("GET /api/channels records restore-list phases and constant query shape", a
     [
       "channels.external_bridges_by_channels",
       "channels.last_messages_by_channels",
+      "channels.last_messages_by_channels.preview_attachments",
+      "channels.last_messages_by_channels.preview_senders",
       "channels.list_by_server",
       "channels.memberships_by_user",
     ],
   );
-  assert.equal(dbEvents.length, 4);
-  assert.ok(dbEvents.length <= 4, "channel list query count should stay constant for common restore path");
+  // The two preview queries are batched by id, so the count stays constant.
+  assert.equal(dbEvents.length, 6);
+  assert.ok(dbEvents.length <= 6, "channel list query count should stay constant for common restore path");
 
   const dbEventByQuery = new Map(dbEvents.map((event) => [event.attrs?.query_name, event]));
   assert.equal(dbEventByQuery.get("channels.list_by_server")?.attrs?.phase, "channels.loaded");
