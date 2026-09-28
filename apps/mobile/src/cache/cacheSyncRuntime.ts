@@ -10,6 +10,7 @@
 // that: cleared on disconnect, cleared again on connect, set once
 // runGapSync completes for the currently attached scope.
 
+import { create } from "zustand";
 import type { ApiClient } from "../api/client";
 import { parseMessage, parseMessagePage, type RaftMessage } from "../model/messages";
 import { getCacheRuntime } from "./runtime";
@@ -109,6 +110,9 @@ export function cancelCacheSync(): void {
 let gapInFlight: Promise<void> | null = null;
 let gapRerunRequested = false;
 
+/** Whether a gap sync round is running — drives the "updating" hint (#5). */
+export const useCacheSyncStatus = create<{ syncing: boolean }>(() => ({ syncing: false }));
+
 /**
  * Post-(re)connect / foreground-return gap sync, single-flight: while one
  * round is running, further calls join it and request (at most) one more
@@ -119,6 +123,7 @@ export function runCacheGapSync(client: ApiClient): Promise<void> {
     gapRerunRequested = true;
     return gapInFlight;
   }
+  useCacheSyncStatus.setState({ syncing: true });
   gapInFlight = (async () => {
     for (;;) {
       gapRerunRequested = false;
@@ -140,6 +145,7 @@ export function runCacheGapSync(client: ApiClient): Promise<void> {
     }
   })().finally(() => {
     gapInFlight = null;
+    useCacheSyncStatus.setState({ syncing: false });
   });
   return gapInFlight;
 }

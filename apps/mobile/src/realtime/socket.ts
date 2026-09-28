@@ -24,6 +24,8 @@ export interface RealtimeOptions {
   onUnreadSummaryChanged: () => void;
   onConnect: () => void;
   onDisconnect: () => void;
+  /** A handshake failed (network down or server unreachable); auth failures are handled here. */
+  onConnectError?: () => void;
   onTaskCreated: (payload: unknown) => void;
   onTaskUpdated: (payload: unknown) => void;
   onTaskDeleted: (payload: unknown) => void;
@@ -239,7 +241,10 @@ export function createRealtime(options: RealtimeOptions) {
       options.onCatchUp(messages, payload.hasMore === true);
     });
     created.on("connect_error", (error: Error) => {
-      if (!looksLikeAuthFailure(error.message)) return;
+      if (!looksLikeAuthFailure(error.message)) {
+        options.onConnectError?.();
+        return;
+      }
       if (refreshInFlight) return;
       void refreshAuthBeforeHandshake(created, true).then((ok) => {
         if (socket !== created) return;
