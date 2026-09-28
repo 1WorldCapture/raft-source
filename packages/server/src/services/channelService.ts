@@ -10404,6 +10404,9 @@ async function getInboxItemsFromServingRows(
          AND mention_suppression.target_kind = 'public_channel_mention'
          AND mention_suppression.target_channel_id = mm.channel_id
         WHERE mention_channel.server_id = ${serverId}
+          -- Same Done frontier as the Activity totals batch, so the list
+          -- never shows an unread mention the total does not count.
+          AND mm.message_seq > COALESCE(mention_suppression.done_through_seq, 0)
           AND mention_channel.type IN ('channel', 'private', 'joint', 'dm')
           AND mention_channel.deleted_at IS NULL
           AND mention_channel.archived_at IS NULL
@@ -10512,6 +10515,7 @@ async function getInboxItemsFromServingRows(
          AND mention_suppression.target_kind = 'public_thread_mention'
          AND mention_suppression.target_channel_id = mm.channel_id
         WHERE thread_channel.server_id = ${serverId}
+          AND mm.message_seq > COALESCE(mention_suppression.done_through_seq, 0)
           AND thread_channel.type = 'thread'
           AND thread_channel.deleted_at IS NULL
           AND parent_channel.archived_at IS NULL
@@ -11890,6 +11894,29 @@ export async function getActivityUnreadTotalsBatch(
     return new Map();
   }
   const serverIdArray = `{${uniqueInputs.map((input) => input.serverId).join(",")}}`;
+  // Guests may only count rows from channels they can read — the same policy
+  // the Activity list applies (guestInboxChannelIds / guestInboxAccessSql).
+  // Roles for every server come from one query; readable-channel sets are
+  // resolved only for servers where this user is a guest.
+  const guestServerRoles = await db
+    .select({ serverId: serverMembers.serverId, role: serverMembers.role })
+    .from(serverMembers)
+    .where(and(
+      eq(serverMembers.userId, userId),
+      inArray(serverMembers.serverId, uniqueInputs.map((input) => input.serverId)),
+      eq(serverMembers.role, "guest"),
+    ));
+  const guestAccessByServer = new Map<string, string[]>();
+  for (const { serverId } of guestServerRoles) {
+    guestAccessByServer.set(serverId, await guestInboxChannelIds(serverId, userId, db) ?? []);
+  }
+  const guestRowFilterSql = (serverIdCol: SQL, channelIdCol: SQL): SQL => {
+    if (guestAccessByServer.size === 0) return sql``;
+    const perServer = [...guestAccessByServer.entries()].map(([serverId, ids]) =>
+      sql`(${serverIdCol} = ${serverId}::uuid AND ${guestInboxAccessSql(ids, channelIdCol)})`);
+    const guestServers = sql.join([...guestAccessByServer.keys()].map((id) => sql`${id}::uuid`), sql`, `);
+    return sql`AND (${serverIdCol} NOT IN (${guestServers}) OR ${sql.join(perServer, sql` OR `)})`;
+  };
   const inputValuesSql = sql.join(
     uniqueInputs.map((input) =>
       sql`(${input.serverId}::uuid, ${input.historyCutoff ?? null}::timestamptz)`),
@@ -12343,6 +12370,7 @@ export async function getActivityUnreadTotalsBatch(
         ON v.server_id = avr.server_id
       WHERE avr.last_activity_at IS NOT NULL
         AND (v.history_cutoff IS NULL OR avr.last_activity_at > v.history_cutoff)
+        ${guestRowFilterSql(sql`avr.server_id`, sql`avr.source_channel_id`)}
       GROUP BY avr.server_id
     ),
     filtered AS (
@@ -12352,6 +12380,7 @@ export async function getActivityUnreadTotalsBatch(
         ON v.server_id = avr.server_id
       WHERE avr.last_activity_at IS NOT NULL
         AND (v.history_cutoff IS NULL OR avr.last_activity_at > v.history_cutoff)
+        ${guestRowFilterSql(sql`avr.server_id`, sql`avr.source_channel_id`)}
     ),
     faceted AS (
       SELECT
@@ -14850,7 +14879,35 @@ export async function markUnread(userId: string, channelId: string): Promise<Rea
 /** Get unread message counts for all channels in a server for a user.
  *  Two-step approach: first identify channels with any unread via EXISTS (short-circuits),
  *  then count only in those channels. Avoids scanning messages in fully-read channels. */
+/**
+ * Readable channel ids for a guest (channels plus threads under readable
+ * parents), or null for ordinary members. Same policy as the Activity list.
+ */
+async function guestReadableChannelSet(serverId: string, userId: string): Promise<Set<string> | null> {
+  const ids = await guestInboxChannelIds(serverId, userId, getDb());
+  return ids === null ? null : new Set(ids);
+}
+
+/**
+ * Per-channel unread counts. Guests only ever see counts for channels they can
+ * read; ordinary members are unaffected. The filter runs on the result so the
+ * RisingWave and Postgres paths share it.
+ */
 export async function getUnreadCounts(
+  serverId: string,
+  userId: string,
+  historyCutoff?: Date,
+  opts?: UnreadCountOptions,
+): Promise<Record<string, number>> {
+  const [counts, guestReadable] = await Promise.all([
+    getUnreadCountsUnscoped(serverId, userId, historyCutoff, opts),
+    guestReadableChannelSet(serverId, userId),
+  ]);
+  if (guestReadable === null) return counts;
+  return Object.fromEntries(Object.entries(counts).filter(([channelId]) => guestReadable.has(channelId)));
+}
+
+async function getUnreadCountsUnscoped(
   serverId: string,
   userId: string,
   historyCutoff?: Date,
@@ -15030,6 +15087,7 @@ export async function getUnreadSummary(
 ): Promise<Record<string, ChannelUnreadSummaryEntry>> {
   const traceQuery = opts?.traceQuery ?? untracedDbQuery;
   const counts = await getUnreadCounts(serverId, userId, historyCutoff, { traceQuery });
+  const guestReadable = await guestReadableChannelSet(serverId, userId);
   const db = getDb();
   const mentionRows = await traceQuery(
     "channels.unread_summary_mentions_by_user",
@@ -15067,6 +15125,7 @@ export async function getUnreadSummary(
   for (const row of mentionRows.rows as Array<{ channelId: string; unreadMentionCount: number; hasAnyMention: boolean }>) {
     if (row.unreadMentionCount <= 0 && row.hasAnyMention !== true) continue;
     const channelId = row.channelId;
+    if (guestReadable && !guestReadable.has(channelId)) continue;
     const existing = summary[channelId];
     summary[channelId] = {
       unreadCount: existing?.unreadCount ?? 0,
