@@ -4,9 +4,10 @@ import * as SecureStore from "expo-secure-store";
 import { ApiError, createApiClient, shouldLogoutAfterRefresh, type ApiClient, type TokenPair } from "../api/client";
 import { createInstallationId } from "../api/ids";
 import { syncSince } from "../api/sync";
-import { parseChannelUnread, parseUser, type RaftUser } from "../model/messages";
+import { isRecord, parseChannelUnread, parseUser, type RaftUser } from "../model/messages";
 import { useActivityStore } from "../activity/store";
 import { useTaskStore } from "../tasks/store";
+import { useBoardStore } from "../tasks/boardStore";
 import { createRealtime, type Realtime } from "../realtime/socket";
 import { BUNDLED_SERVER_ORIGIN } from "../session/origin";
 import { shouldApplyServerResponse, shouldCommitTokens, shouldMarkVisibleRead, catchUpPlan, releaseFocus } from "./sessionPolicy";
@@ -204,6 +205,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         [summary.parentMessageId]: summary,
       });
       useActivityStore.getState().scheduleRefresh(client);
+      const viewerId = snapshotRef.current.user?.id;
+      useBoardStore.getState().noteThreadActivity(
+        client,
+        { threadChannelId: summary.threadChannelId, parentMessageId: summary.parentMessageId, latestReply: summary.latestReply },
+        viewerId ? { type: "user", id: viewerId } : null,
+      );
     },
     onReadState: (channelId) => {
       useRaftStore.getState().clearChannelUnread(channelId);
@@ -226,18 +233,28 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     },
     onConnect: () => {
       void useTaskStore.getState().catchUp(client);
+      // Events emitted while disconnected were lost — the board cannot be
+      // fixed up incrementally, so reload it from page 1.
+      const board = useBoardStore.getState();
+      if (board.loaded) void board.load(client);
     },
     onDisconnect: () => {
       useTaskStore.getState().markStale();
     },
     onTaskCreated: (payload) => {
       useTaskStore.getState().applyCreated(payload);
+      const board = useBoardStore.getState();
+      if (board.loaded) for (const id of taskIdsFromEvent(payload)) board.noteTaskActivity(client, id);
     },
     onTaskUpdated: (payload) => {
       useTaskStore.getState().applyUpdated(payload);
+      const board = useBoardStore.getState();
+      if (board.loaded) for (const id of taskIdsFromEvent(payload)) board.noteTaskActivity(client, id);
     },
     onTaskDeleted: (payload) => {
       useTaskStore.getState().applyDeleted(payload);
+      const board = useBoardStore.getState();
+      if (board.loaded) for (const id of taskIdsFromEvent(payload)) board.noteTaskActivity(client, id);
     },
   }), [client]);
   realtimeRef.current = realtime;
@@ -333,10 +350,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       backgroundAt.current = null;
       if (away > BACKGROUND_DISCONNECT_MS) realtime.reset();
       realtime.connect();
+      // The socket may have stayed up in the background, so onConnect can miss
+      // the foreground return — reload the board the same way (load dedupes).
+      const board = useBoardStore.getState();
+      if (board.loaded) void board.load(client);
       void flushReads();
     });
     return () => subscription.remove();
-  }, [realtime]);
+  }, [realtime, client]);
 
   async function flushReads() {
     for (const [channelId, seq] of pendingReads.current) {
@@ -436,4 +457,15 @@ export function useSession(): SessionApi {
   const value = useContext(SessionContext);
   if (!value) throw new Error("useSession must be used inside SessionProvider");
   return value;
+}
+
+/** Task ids from a task:created/updated/deleted payload, for board recalibration. */
+function taskIdsFromEvent(payload: unknown): string[] {
+  if (!isRecord(payload)) return [];
+  if (typeof payload.taskId === "string") return [payload.taskId];
+  if (isRecord(payload.task) && typeof payload.task.id === "string") return [payload.task.id];
+  if (Array.isArray(payload.tasks)) {
+    return payload.tasks.flatMap((task) => (isRecord(task) && typeof task.id === "string" ? [task.id] : []));
+  }
+  return [];
 }

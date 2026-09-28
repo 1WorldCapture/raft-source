@@ -71,6 +71,8 @@ export interface ThreadSummary {
   unreadCount?: number;
   lastReplyAt?: string | null;
   latestReplies?: ThreadReplyPreview[];
+  /** Live socket only (thread:updated): the newest reply as a full message. */
+  latestReply?: RaftMessage;
 }
 
 export interface ChannelReadState {
