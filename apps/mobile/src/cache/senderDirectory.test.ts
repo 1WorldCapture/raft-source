@@ -6,7 +6,7 @@ import test from "node:test";
 import { openNodeSqliteDb } from "./portNode.ts";
 import { createCacheRepo } from "./repo.ts";
 import { readSenderDirectory, writeSenderDirectory } from "./senderDirectory.ts";
-import { collectSenderDirectory } from "../screens/senderAvatars.ts";
+import { collectSenderDirectory, senderDirectoryStep } from "../screens/senderAvatars.ts";
 
 function repoWithScope() {
   const repo = createCacheRepo({ db: openNodeSqliteDb(":memory:") });
@@ -56,4 +56,34 @@ test("collectSenderDirectory merges agents (id) and members (userId), skipping d
   );
   assert.deepEqual(directory.avatars, { "agent-1": "pixel:random:1" }, "deleted agents and empty urls dropped");
   assert.deepEqual(directory.names, { "agent-1": "Firstmate", "user-1": "Lyon", "user-2": "Anna" }, "displayName preferred over name");
+});
+
+test("the directory gate re-seeds and refetches after clearServerData (logout / server switch)", async () => {
+  const { useRaftStore } = await import("../state/store.ts");
+  const resetGate = () => useRaftStore.getState().clearServerData();
+
+  // Fresh process: seed + fetch on the first channel open.
+  assert.deepEqual(senderDirectoryStep({ seededServer: null, freshServer: null }, "srv-a"), { seed: true, fetch: true });
+  // Seeded but network not yet answered: no double seed, fetch still due.
+  assert.deepEqual(senderDirectoryStep({ seededServer: "srv-a", freshServer: null }, "srv-a"), { seed: false, fetch: true });
+  // Fresh network load: nothing more to do this process.
+  assert.deepEqual(senderDirectoryStep({ seededServer: "srv-a", freshServer: "srv-a" }, "srv-a"), { seed: false, fetch: false });
+  // Another server (switch): seed + fetch for it, old server's marks irrelevant.
+  assert.deepEqual(senderDirectoryStep({ seededServer: "srv-a", freshServer: "srv-a" }, "srv-b"), { seed: true, fetch: true });
+
+  // The store fields drive the gate and clearServerData resets them — the
+  // re-login-on-same-server bug the review caught.
+  useRaftStore.getState().markSenderDirectory("seeded", "srv-a");
+  useRaftStore.getState().markSenderDirectory("fresh", "srv-a");
+  useRaftStore.getState().setSenderAvatars({ a: "pixel:x" });
+  assert.equal(useRaftStore.getState().senderDirectoryFreshServer, "srv-a");
+  resetGate();
+  assert.equal(useRaftStore.getState().senderAvatars.a, undefined, "logout clears the painted avatars");
+  assert.equal(useRaftStore.getState().senderDirectorySeededServer, null, "seed gate cleared");
+  assert.equal(useRaftStore.getState().senderDirectoryFreshServer, null, "fresh gate cleared");
+  const gate = {
+    seededServer: useRaftStore.getState().senderDirectorySeededServer,
+    freshServer: useRaftStore.getState().senderDirectoryFreshServer,
+  };
+  assert.deepEqual(senderDirectoryStep(gate, "srv-a"), { seed: true, fetch: true }, "re-login on the same server reseeds and refetches");
 });

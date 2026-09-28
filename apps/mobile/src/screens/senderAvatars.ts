@@ -47,3 +47,22 @@ export function collectSenderDirectory(agents: unknown, members: unknown): { ava
     names: collectSenderNames(agents, members),
   };
 }
+
+/** Per-process seed/fresh milestones for one server's sender directory. */
+export interface SenderDirectoryGate {
+  seededServer: string | null;
+  freshServer: string | null;
+}
+
+/**
+ * What the loader should do for this server under the current gate: seed the
+ * cached avatars (once per process unless the gate was cleared — logout /
+ * server switch via clearServerData), and fetch from the network unless a
+ * fresh load already landed for this server.
+ */
+export function senderDirectoryStep(gate: SenderDirectoryGate, serverId: string): { seed: boolean; fetch: boolean } {
+  return {
+    seed: gate.seededServer !== serverId && gate.freshServer !== serverId,
+    fetch: gate.freshServer !== serverId,
+  };
+}

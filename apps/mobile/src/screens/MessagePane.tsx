@@ -63,7 +63,7 @@ import { colors, space } from "../ui/theme";
 import { AppText } from "../ui/text";
 import { bodyFont, color, shadowOffset } from "../ui/tokens";
 import { Avatar } from "../ui/Avatar";
-import { collectSenderDirectory } from "./senderAvatars";
+import { collectSenderDirectory, senderDirectoryStep } from "./senderAvatars";
 import { useT } from "../i18n/provider";
 import { MessageRow, type LinkedTaskChip } from "./MessageRow";
 import { computeMessageGrouping, hiddenSystemIds, retainGroupStates, systemRunHeads } from "./messageGrouping";
@@ -142,13 +142,11 @@ function mentionQuery(draft: string): string | null {
   return match ? match[1] ?? "" : null;
 }
 
-// Per-boot sender-directory bookkeeping (#desktop-data-cache task #3): the
-// store holds one server's directory at a time. `seededDirectoryServer` marks
-// which server the cache seed has painted (once per boot — it must never
-// suppress the network fetch); `freshDirectoryServer` marks a server with a
-// successful network load, the only state that skips refetching.
-let seededDirectoryServer: string | null = null;
-let freshDirectoryServer: string | null = null;
+// Per-boot sender-directory bookkeeping (#desktop-data-cache task #3) lives
+// in useRaftStore (`senderDirectorySeededServer` / `senderDirectoryFreshServer`)
+// so clearServerData — logout and server switches — resets the gate; module
+// vars here would survive a re-login on the same server and skip both the
+// seed and the fetch until an app restart.
 
 export function MessagePane({
   channelId,
@@ -1138,24 +1136,29 @@ export function MessagePane({
     let cancelled = false;
     // Cold-start fast path (#desktop-data-cache task #3): paint the cached
     // sender directory (agent/member avatar urls) before the network answers
-    // so offline message rows show real avatars instead of letters. Reseeded
-    // on server switches — the directory is per-server, and the old guard
-    // (non-empty map skips) kept the previous server's map forever.
-    if (seededDirectoryServer !== serverId) {
-      seededDirectoryServer = serverId;
-      if (freshDirectoryServer !== serverId) {
-        let avatars: Record<string, string> = {};
-        try {
-          const runtime = getCacheRuntime();
-          const scope = runtime.scopeFor(serverId);
-          if (scope !== null) avatars = readSenderDirectory(runtime.repo, scope)?.avatars ?? {};
-        } catch {
-          // Cache unavailable — fetch-only path below.
-        }
-        useRaftStore.getState().setSenderAvatars(avatars);
+    // so offline message rows show real avatars instead of letters. The gate
+    // lives in useRaftStore — clearServerData (logout / server switch) resets
+    // it, so a re-login on the same server reseeds and refetches.
+    const { seed, fetch } = senderDirectoryStep(
+      {
+        seededServer: useRaftStore.getState().senderDirectorySeededServer,
+        freshServer: useRaftStore.getState().senderDirectoryFreshServer,
+      },
+      serverId,
+    );
+    if (seed) {
+      let avatars: Record<string, string> = {};
+      try {
+        const runtime = getCacheRuntime();
+        const scope = runtime.scopeFor(serverId);
+        if (scope !== null) avatars = readSenderDirectory(runtime.repo, scope)?.avatars ?? {};
+      } catch {
+        // Cache unavailable — fetch-only path below.
       }
+      useRaftStore.getState().setSenderAvatars(avatars);
     }
-    if (freshDirectoryServer === serverId) return;
+    useRaftStore.getState().markSenderDirectory("seeded", serverId);
+    if (!fetch) return;
     void Promise.all([
       sessionRef.current.client.get<unknown>("/agents").catch(() => null),
       sessionRef.current.client.get<unknown>(`/servers/${serverId}/members`).catch(() => null),
@@ -1164,7 +1167,7 @@ export function MessagePane({
       // Total failure (offline): keep the seed on screen and let the next
       // channel open retry — unlike a half-failure, nothing new was learned.
       if (agents === null && members === null) return;
-      freshDirectoryServer = serverId;
+      useRaftStore.getState().markSenderDirectory("fresh", serverId);
       const directory = collectSenderDirectory(agents, members);
       useRaftStore.getState().setSenderAvatars(directory.avatars);
       try {

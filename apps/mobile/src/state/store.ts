@@ -14,6 +14,17 @@ interface RaftDataState {
   liveUnread: Record<string, number>;
   lastSeq: number;
   directoryVersion: number;
+  /**
+   * Sender-directory gate (#desktop-data-cache task #3, review fix): which
+   * server the cached seed has painted this process, and which server has a
+   * FRESH network load. Store state (not module vars) so clearServerData —
+   * logout and server switches — resets them; otherwise a re-login on the
+   * same server would skip both the seed and the fetch until app restart.
+   */
+  senderDirectorySeededServer: string | null;
+  senderDirectoryFreshServer: string | null;
+  /** Record a seed/fresh milestone for the sender-directory gate. */
+  markSenderDirectory: (kind: "seeded" | "fresh", serverId: string) => void;
   notice: "verify-email" | "profile-setup" | null;
   /** Sender id → avatar URL from `/agents` and server members; messages do not carry avatars. */
   senderAvatars: Record<string, string>;
@@ -47,6 +58,11 @@ export const useRaftStore = create<RaftDataState>((set) => ({
   directoryVersion: 0,
   notice: null,
   senderAvatars: {},
+  senderDirectorySeededServer: null,
+  senderDirectoryFreshServer: null,
+  markSenderDirectory: (kind, serverId) => set(kind === "seeded"
+    ? { senderDirectorySeededServer: serverId }
+    : { senderDirectoryFreshServer: serverId }),
   conversations: [],
   conversationChannelIds: new Set<string>(),
   setSenderAvatars: (avatars) => set({ senderAvatars: avatars }),
@@ -126,6 +142,8 @@ export const useRaftStore = create<RaftDataState>((set) => ({
       liveUnread: {},
       lastSeq: 0,
       senderAvatars: {},
+      senderDirectorySeededServer: null,
+      senderDirectoryFreshServer: null,
       conversations: [],
       conversationChannelIds: new Set<string>(),
     });
