@@ -1,8 +1,10 @@
-import { Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { useEffect, useRef, useState } from "react";
+import { Pressable, ScrollView, StyleSheet, View, type LayoutChangeEvent, type NativeScrollEvent, type NativeSyntheticEvent } from "react-native";
 import type { RaftServer } from "../model/messages";
 import { HardShadow } from "../ui/shadow";
 import { AppText } from "../ui/text";
 import { border, color, shadowOffset } from "../ui/tokens";
+import { railOverflow, railScrollTargetY } from "./railScroll";
 import { serverInitial } from "./serverInitial";
 
 export const SERVER_RAIL_WIDTH = 64;
@@ -11,9 +13,12 @@ const TILE = 44;
 const COMPACT_RAIL_WIDTH = 52;
 const COMPACT_TILE = 36;
 
-// Discord-style server rail for the message-list home (task #10): one square
-// tile per server, the current one highlighted, a pink dot when another server
-// has unread messages. Presentational — the screen owns switching.
+// Discord-style server rail (home task #10; scrolling task #3 in
+// #mobile-server-rail): one square tile per server, the current one
+// highlighted, a pink dot when another server has unread messages. When the
+// list is taller than the rail, edge bars show there is more above/below and
+// the current server is scrolled into view. Presentational — the screen owns
+// switching.
 export function ServerRail({
   servers,
   currentId,
@@ -27,9 +32,43 @@ export function ServerRail({
   unreadByServer: Record<string, number>;
   onSelect: (server: RaftServer) => void;
 }) {
+  const scrollRef = useRef<ScrollView>(null);
+  const slotLayouts = useRef<Record<string, { y: number; height: number }>>({});
+  const offsetRef = useRef(0);
+  const [viewport, setViewport] = useState(0);
+  const [contentHeight, setContentHeight] = useState(0);
+  const [offset, setOffset] = useState(0);
+  const overflow = railOverflow({ offset, viewport, contentHeight });
+
+  // Keep the current server visible after mount, a server switch, or a
+  // reorder that moved it off-screen. The scroll offset is read from a ref so
+  // the user's own scrolling never triggers a snap back.
+  useEffect(() => {
+    if (!currentId || viewport === 0) return;
+    const slot = slotLayouts.current[currentId];
+    if (!slot) return;
+    const target = railScrollTargetY({ slot, offset: offsetRef.current, viewport, contentHeight });
+    if (target !== null) scrollRef.current?.scrollTo({ y: target, animated: true });
+  }, [currentId, viewport, contentHeight, servers]);
+
+  const onScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    offsetRef.current = event.nativeEvent.contentOffset.y;
+    setOffset(offsetRef.current);
+  };
+
   return (
-    <View style={[styles.rail, compact ? styles.railCompact : null]}>
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+    <View
+      onLayout={(event: LayoutChangeEvent) => setViewport(event.nativeEvent.layout.height)}
+      style={[styles.rail, compact ? styles.railCompact : null]}
+    >
+      <ScrollView
+        contentContainerStyle={styles.content}
+        onContentSizeChange={(_width, height) => setContentHeight(height)}
+        onScroll={onScroll}
+        ref={scrollRef}
+        scrollEventThrottle={32}
+        showsVerticalScrollIndicator={false}
+      >
         {servers.map((server) => {
           const selected = server.id === currentId;
           const unread = !selected && (unreadByServer[server.id] ?? 0) > 0;
@@ -39,6 +78,10 @@ export function ServerRail({
               accessibilityRole="button"
               accessibilityState={{ selected }}
               key={server.id}
+              onLayout={(event: LayoutChangeEvent) => {
+                const { y, height } = event.nativeEvent.layout;
+                slotLayouts.current[server.id] = { y, height };
+              }}
               onPress={() => onSelect(server)}
               style={[styles.slot, compact ? styles.slotCompact : null]}
             >
@@ -57,9 +100,13 @@ export function ServerRail({
           );
         })}
       </ScrollView>
+      {overflow.above ? <View pointerEvents="none" style={[styles.edge, styles.edgeTop]} /> : null}
+      {overflow.below ? <View pointerEvents="none" style={[styles.edge, styles.edgeBottom]} /> : null}
     </View>
   );
 }
+
+const EDGE = 10;
 
 const styles = StyleSheet.create({
   rail: {
@@ -72,7 +119,7 @@ const styles = StyleSheet.create({
   slotCompact: { width: COMPACT_RAIL_WIDTH },
   indicatorCompact: { height: 22, left: -(COMPACT_RAIL_WIDTH - COMPACT_TILE) / 2 },
   tileCompact: { height: COMPACT_TILE, width: COMPACT_TILE },
-  content: { alignItems: "center", gap: 12, paddingVertical: 12 },
+  content: { alignItems: "center", gap: 12, paddingBottom: 24, paddingTop: 12 },
   slot: { alignItems: "center", width: SERVER_RAIL_WIDTH },
   slotInner: { alignItems: "center", justifyContent: "center" },
   indicator: {
@@ -105,4 +152,15 @@ const styles = StyleSheet.create({
     top: -3,
     width: 10,
   },
+  // "More above/below" cue: a hard ink rule plus a faint band, in keeping with
+  // the brutalist style (no gradients).
+  edge: {
+    backgroundColor: color.borderFaint,
+    height: EDGE,
+    left: 0,
+    position: "absolute",
+    right: 0,
+  },
+  edgeTop: { borderTopColor: color.ink, borderTopWidth: border.strong, top: 0 },
+  edgeBottom: { borderBottomColor: color.ink, borderBottomWidth: border.strong, bottom: 0 },
 });
