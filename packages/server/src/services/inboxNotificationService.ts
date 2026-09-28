@@ -1,4 +1,5 @@
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { notifyUnreadSummaryChanged } from "./unreadSummaryNotifier.js";
 
 import { getDb, type DatabaseExecutor } from "../db/index.js";
 import {
@@ -417,5 +418,26 @@ export async function recordInboxNotificationFacts(
     sourceChannelId: fact.sourceChannelId,
   })), executor);
   await enqueueMobilePushForInboxFacts(filteredFacts, executor);
+  notifyActivityUnreadChanged(filteredFacts);
   return filteredFacts.length;
+}
+
+/**
+ * New inbox facts can raise a user's Activity count: tell their clients to
+ * re-fetch the unread summary (rate-limited, and always emitted after the
+ * caller's transaction by the notifier's timers). Born-read facts (the
+ * sender's own messages) never change the count and are skipped.
+ */
+function notifyActivityUnreadChanged(facts: readonly InboxNotificationFactInput[]): void {
+  const usersByServer = new Map<string, Set<string>>();
+  for (const fact of facts) {
+    if (fact.receiverType !== "user" || !fact.serverId) continue;
+    if (fact.unreadEligible === false && fact.personalMention !== true) continue;
+    const users = usersByServer.get(fact.serverId) ?? new Set<string>();
+    users.add(fact.receiverId);
+    usersByServer.set(fact.serverId, users);
+  }
+  for (const [serverId, userIds] of usersByServer) {
+    notifyUnreadSummaryChanged({ userIds, serverId, reason: "activity" });
+  }
 }

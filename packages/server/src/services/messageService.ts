@@ -1,4 +1,5 @@
 import { serializeErrorForLog } from "../tracing/safeErrorLog.js";
+import { withUnreadSummaryCadence } from "./unreadSummaryNotifier.js";
 import { randomUUID } from "node:crypto";
 import { eq, desc, gt, gte, lt, and, inArray, isNull, isNotNull, not, sql, or } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
@@ -2640,9 +2641,9 @@ async function emitPersistedMessageToFrontend(
           { reactivateUnfollowed: true },
         );
         if (senderType === "user") {
-          await awaitPostPersistReadMutation(
+          await awaitPostPersistReadMutation(withUnreadSummaryCadence("activity", () =>
             channelService.markReadLatest(senderId, senderProjection.localThreadChannelId),
-          );
+          ));
         }
       }
 
@@ -2750,7 +2751,8 @@ async function emitPersistedMessageToFrontend(
         { reactivateUnfollowed: true },
       );
       if (senderType === "user") {
-        await awaitPostPersistReadMutation(channelService.markReadLatest(senderId, channelId));
+        await awaitPostPersistReadMutation(withUnreadSummaryCadence("activity", () =>
+          channelService.markReadLatest(senderId, channelId)));
       }
     }
 
@@ -8737,7 +8739,7 @@ export async function broadcastAndDeliver(
 
   // 4. Advance sender's legacy read-ish cursor so their own message isn't counted as unread
   const senderReadMutation = senderType === "user"
-    ? deps.markRead(senderId, channelId, message.seq)
+    ? withUnreadSummaryCadence("activity", () => deps.markRead(senderId, channelId, message.seq))
     : deps.markAgentLegacyRead(senderId, channelId, message.seq);
   const sourceServerId = requestedChannel?.serverId ?? channel?.serverId;
   if (sourceServerId) {
