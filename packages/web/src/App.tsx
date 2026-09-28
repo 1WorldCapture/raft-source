@@ -38,11 +38,12 @@ import MainLayout from "./components/layout/MainLayout";
 import ThreadWindowRoute from "./components/window/ThreadWindowRoute";
 import MessageSelectionShortcut from "./components/message/MessageSelectionShortcut";
 import {
-  MAX_AUTH_RESTORE_MS,
   getAuthBootstrapView,
   shouldRetryAuthRestore,
 } from "./utils/authRestoreMachine";
-import { getRestoreTimeoutAction } from "./utils/restoreTimeoutPolicy";
+import type { LastRestoreError } from "./utils/authRestoreMachine";
+import { getRestoreTimeoutAction, nextRestoreRetryDelayMs } from "./utils/restoreTimeoutPolicy";
+import { RUNTIME_API_BASE, absoluteApiBase } from "./desktopRuntimeEnvironment";
 import { shouldRecoverAuthOnBrowserSignal } from "./utils/browserRecoveryPolicy";
 import { PENDING_INVITE_STORAGE_KEY, takePendingInviteRedirectPath } from "./utils/socialAuth";
 import { requiresAccountProfileSetup } from "./utils/accountProfileSetup";
@@ -781,6 +782,64 @@ export function AuthBootstrapStatus({ view }: { view: "loading" | "restoring" })
   );
 }
 
+/**
+ * Degraded restore chrome (#desktop-session-restore task #1). Replaces the
+ * bare "Restoring session…" line once the restore loop exceeds
+ * MAX_AUTH_RESTORE_MS while credentials are still stored — the user can then
+ * see WHY the app cannot reach the server and choose to retry or sign out.
+ */
+export function DegradedRestoreStatus({
+  lastRestoreError,
+  onRetry,
+  onLogout,
+}: {
+  lastRestoreError: LastRestoreError | null;
+  onRetry: () => void;
+  onLogout: () => void;
+}) {
+  const { formatMessage } = useIntl();
+  const serverUrl = absoluteApiBase(RUNTIME_API_BASE, window.location.origin);
+  const errorText = lastRestoreError?.kind === "http"
+    ? formatMessage({ id: "auth.bootstrap.errorHttp" }, { status: lastRestoreError.status ?? 0 })
+    : lastRestoreError?.kind === "network"
+      ? formatMessage({ id: "auth.bootstrap.errorNetwork" })
+      : formatMessage({ id: "auth.bootstrap.errorUnknown" });
+  return (
+    <div className="flex min-h-0 flex-1 items-center justify-center bg-brutal-cream p-6 font-display safe-top">
+      <div className="w-full max-w-md border-2 border-black bg-white p-6 shadow-brutal">
+        <h1 className="text-xl font-bold">{formatMessage({ id: "auth.bootstrap.degradedTitle" })}</h1>
+        <div className="mt-4 space-y-1 text-sm">
+          <div>
+            <span className="font-bold">{formatMessage({ id: "auth.bootstrap.serverLabel" })}</span>{" "}
+            <span className="font-mono break-all">{serverUrl}</span>
+          </div>
+          <div>
+            <span className="font-bold">{formatMessage({ id: "auth.bootstrap.lastErrorLabel" })}</span>{" "}
+            <span className="font-mono">{errorText}</span>
+          </div>
+        </div>
+        <p className="mt-4 text-sm text-neutral-700">{formatMessage({ id: "auth.bootstrap.degradedHint" })}</p>
+        <div className="mt-6 flex gap-3">
+          <button
+            type="button"
+            className="border-2 border-black bg-brutal-lime px-4 py-2 text-sm font-bold shadow-brutal-sm active:translate-x-[1px] active:translate-y-[1px] active:shadow-brutal-active"
+            onClick={onRetry}
+          >
+            {formatMessage({ id: "auth.bootstrap.retryNow" })}
+          </button>
+          <button
+            type="button"
+            className="border-2 border-black bg-white px-4 py-2 text-sm font-bold shadow-brutal-sm active:translate-x-[1px] active:translate-y-[1px] active:shadow-brutal-active"
+            onClick={onLogout}
+          >
+            {formatMessage({ id: "auth.bootstrap.signOut" })}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function AppShell() {
   const { formatMessage } = useIntl();
   const user = useAuthStore((s) => s.user);
@@ -834,6 +893,12 @@ export function AppShell() {
   const hasStoredSession = !!(accessToken && refreshToken);
   const authBootstrapView = getAuthBootstrapView({ initialized, restoreState });
   const authRestoreStartedAtRef = useRef<number | null>(null);
+  // Degraded-restore chrome (#desktop-session-restore task #1): flips on once
+  // the restore loop has timed out with credentials still stored, and back off
+  // when a later retry succeeds (see the restore retry effect below).
+  const [restoreDegraded, setRestoreDegraded] = useState(false);
+  const degradedRetryCountRef = useRef(0);
+  const lastRestoreError = useAuthStore((s) => s.lastRestoreError);
 
   useEffect(() => {
     if (!shouldAutoLoginSlockdev({
@@ -873,15 +938,24 @@ export function AppShell() {
   //
   // Restore timeout policy (Auth Session Contract, #2494 / restoreTimeoutPolicy
   // #2497): a timer alone is TRANSIENT evidence and must never sign a user out
-  // who still has a stored session. All three timer-only branches below
-  // (initial check, retry-interval check, setTimeout fallback) route through
-  // `getRestoreTimeoutAction()`: only `"logout"` calls `logout()`; the
+  // who still has a stored session. Every timer-only branch below routes
+  // through `getRestoreTimeoutAction()`: only `"logout"` calls `logout()`; the
   // stored-session timeout case returns `"degraded_retry"` so retry continues
   // without clearing the token. Terminal logout is the loadUser /
   // getAuthVerdict path's authority alone.
+  //
+  // Degraded-restore upgrade (#desktop-session-restore task #1): once past
+  // MAX_AUTH_RESTORE_MS the loop (a) flips the bootstrap chrome to
+  // DegradedRestoreStatus so the user sees the server address, the last error,
+  // and retry / sign-out actions, and (b) backs the retry cadence off along
+  // 3s → 6s → 12s → 15s instead of hammering every 1.5s. The chain
+  // reschedules itself (loadUser's state writes do not re-run this effect) and
+  // any dependency change cancels the pending timer via the cleanup.
   useEffect(() => {
     if (!shouldRetryAuthRestore({ initialized, restoreState, hasStoredSession })) {
       authRestoreStartedAtRef.current = null;
+      degradedRetryCountRef.current = 0;
+      setRestoreDegraded(false);
       return;
     }
 
@@ -889,36 +963,43 @@ export function AppShell() {
       authRestoreStartedAtRef.current = Date.now();
     }
 
-    const elapsedMs = Date.now() - authRestoreStartedAtRef.current;
-    const initialAction = getRestoreTimeoutAction({ initialized, restoreState, hasStoredSession, elapsedMs });
-    if (initialAction === "logout") {
-      logout("restore_timeout");
-      return;
-    }
-
-    const retryInterval = window.setInterval(() => {
-      const retryElapsedMs = authRestoreStartedAtRef.current === null
+    let cancelled = false;
+    let timer: number | undefined;
+    const scheduleNextRetry = () => {
+      const elapsedMs = authRestoreStartedAtRef.current === null
         ? 0
         : Date.now() - authRestoreStartedAtRef.current;
-      const retryAction = getRestoreTimeoutAction({ initialized, restoreState, hasStoredSession, elapsedMs: retryElapsedMs });
-      if (retryAction === "logout") {
+      const action = getRestoreTimeoutAction({ initialized, restoreState, hasStoredSession, elapsedMs });
+      if (action === "logout") {
         logout("restore_timeout");
         return;
       }
-      loadUser();
-    }, 1500);
-    const timeout = window.setTimeout(() => {
-      const timeoutElapsedMs = authRestoreStartedAtRef.current === null
-        ? MAX_AUTH_RESTORE_MS
-        : Date.now() - authRestoreStartedAtRef.current;
-      const timeoutAction = getRestoreTimeoutAction({ initialized, restoreState, hasStoredSession, elapsedMs: timeoutElapsedMs });
-      if (timeoutAction === "logout") {
-        logout("restore_timeout");
-      }
-    }, Math.max(0, MAX_AUTH_RESTORE_MS - elapsedMs));
+      const delay = nextRestoreRetryDelayMs({
+        elapsedMs,
+        degradedRetryCount: degradedRetryCountRef.current,
+      });
+      timer = window.setTimeout(() => {
+        if (cancelled) return;
+        const retryElapsedMs = authRestoreStartedAtRef.current === null
+          ? 0
+          : Date.now() - authRestoreStartedAtRef.current;
+        const retryAction = getRestoreTimeoutAction({ initialized, restoreState, hasStoredSession, elapsedMs: retryElapsedMs });
+        if (retryAction === "logout") {
+          logout("restore_timeout");
+          return;
+        }
+        if (retryAction === "degraded_retry") {
+          setRestoreDegraded(true);
+          degradedRetryCountRef.current += 1;
+        }
+        void loadUser();
+        scheduleNextRetry();
+      }, delay);
+    };
+    scheduleNextRetry();
     return () => {
-      window.clearInterval(retryInterval);
-      window.clearTimeout(timeout);
+      cancelled = true;
+      if (timer !== undefined) window.clearTimeout(timer);
     };
   }, [initialized, restoreState, hasStoredSession, loadUser, logout]);
 
@@ -997,6 +1078,14 @@ export function AppShell() {
 
   if (urlParams.authCallback === "social") {
     content = <SocialAuthCallbackPage />;
+  } else if (authBootstrapView === "restoring" && restoreDegraded) {
+    content = (
+      <DegradedRestoreStatus
+        lastRestoreError={lastRestoreError}
+        onRetry={() => void loadUser()}
+        onLogout={() => logout("explicit_user_logout")}
+      />
+    );
   } else if (authBootstrapView === "loading" || authBootstrapView === "restoring") {
     content = <AuthBootstrapStatus view={authBootstrapView} />;
   } else if (urlParams.resetToken && !user) {

@@ -15,6 +15,23 @@ export type AuthRestoreEvent =
 
 export const MAX_AUTH_RESTORE_MS = 30_000;
 
+// Last failure seen by the bootstrap restore loop (#desktop-session-restore
+// task #1). The degraded UI shows it so the user can tell "the server said
+// 502" from "nothing is reachable at all" — the two outages need different
+// fixes (proxy/VPN vs credentials).
+export interface LastRestoreError {
+  kind: "network" | "http";
+  status?: number;
+  at: number;
+}
+
+/** Map an axios-shaped error onto the displayable LastRestoreError shape. */
+export function describeRestoreError(err: unknown, now: number = Date.now()): LastRestoreError {
+  const status = (err as { response?: { status?: unknown } } | null | undefined)?.response?.status;
+  if (typeof status === "number") return { kind: "http", status, at: now };
+  return { kind: "network", at: now };
+}
+
 export function deriveInitialAuthRestoreState(hasStoredSession: boolean): AuthRestoreState {
   return hasStoredSession ? "restoring_auth" : "booting";
 }

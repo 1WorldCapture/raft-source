@@ -2330,8 +2330,10 @@ test("real corpus: structural, catalog-id, and template-glue filters remove audi
   // `variant="accent"`; it is not user-visible copy and must not be cataloged.
   // The Dev tools header intentionally removed its inline hyphen/space when
   // the environment and signed-in identity became separate rows, reducing
-  // this audited structural total by two.
-  assert.equal(filteredKeys, 73, `audited structural key count; got ${filteredKeys}`);
+  // this audited structural total by two. DegradedRestoreStatus
+  // (#desktop-session-restore task #1) adds one more cataloged formatMessage
+  // id (auth.bootstrap.errorHttp takes {status} values).
+  assert.equal(filteredKeys, 74, `audited structural key count; got ${filteredKeys}`);
   assert.ok(filteredHits > 100, `hits must exceed prior 100; got ${filteredHits}`);
   assert.equal(
     glueFilteredOut.length,

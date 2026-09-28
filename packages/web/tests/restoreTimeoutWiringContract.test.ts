@@ -29,10 +29,11 @@ const appSource = readFileSync(resolve(repoRoot, "src/App.tsx"), "utf8");
 test("App.tsx imports getRestoreTimeoutAction from restoreTimeoutPolicy", () => {
   // The oracle must be imported. If this fails, the restore effect almost
   // certainly is using the old `hasAuthRestoreTimedOut` + bare `logout()`
-  // path instead of routing through the policy.
+  // path instead of routing through the policy. The named-import list may
+  // grow (#desktop-session-restore task #1 added nextRestoreRetryDelayMs).
   assert.match(
     appSource,
-    /import\s*\{\s*getRestoreTimeoutAction\s*\}\s*from\s*["']\.\/utils\/restoreTimeoutPolicy["']/,
+    /import\s*\{[^}]*getRestoreTimeoutAction[^}]*\}\s*from\s*["']\.\/utils\/restoreTimeoutPolicy["']/,
   );
 });
 
@@ -62,11 +63,16 @@ test("App.tsx restore effect routes all timer-only logout() calls through getRes
     .map((line) => line.replace(/\/\/.*$/, ""))
     .join("\n");
 
-  // 1. Three timer branches each call getRestoreTimeoutAction(...).
+  // 1. Every timer branch calls getRestoreTimeoutAction(...). Since the
+  // #desktop-session-restore task #1 rework the effect reschedules itself as a
+  // setTimeout chain, so the two evaluations per cycle are: schedule time
+  // (decides delay + immediate logout branch) and fire time (decides the
+  // action right before loadUser()). The old fixed-interval shape had a third
+  // standalone timeout fallback; the chain makes that redundant.
   const oracleCalls = effectBody.match(/getRestoreTimeoutAction\(/g) ?? [];
   assert.ok(
-    oracleCalls.length >= 3,
-    `Restore effect must call getRestoreTimeoutAction at least 3 times (initial, retry, setTimeout); found ${oracleCalls.length}`,
+    oracleCalls.length >= 2,
+    `Restore effect must call getRestoreTimeoutAction at least 2 times (schedule + fire); found ${oracleCalls.length}`,
   );
 
   // 2. Every `logout(...)` in the effect must be gated by an `action === "logout"`
