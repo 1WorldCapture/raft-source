@@ -94,6 +94,28 @@ export default function HomeScreen() {
   const loadFor = useCallback(async (preferredId: string | null) => {
     const ticket = ++loadTicket.current;
     setError(null);
+    // Cold-start fast path (#client-data-cache task #2): paint the cached
+    // directory BEFORE any network call — offline cold starts still show the
+    // conversation list. Only seeds an empty store; the network response
+    // below overwrites without flicker.
+    try {
+      const runtime = getCacheRuntime();
+      const seedServerId = preferredId ?? sessionRef.current.serverId ?? "";
+      // Child effects run before the provider's attach effect on cold start,
+      // so attach here first (idempotent) — otherwise scopeFor is null.
+      if (runtime.scopeId === null && sessionRef.current.origin && sessionRef.current.user && seedServerId) {
+        runtime.attach(sessionRef.current.origin, sessionRef.current.user.id, seedServerId);
+      }
+      const scope = runtime.scopeFor(seedServerId);
+      if (scope !== null && useRaftStore.getState().conversations.length === 0) {
+        const seeded = seedConversations(runtime.repo.getChannels(scope));
+        if (seeded.length > 0) useRaftStore.getState().setConversations(seeded);
+        const cachedUnread = runtime.repo.getKv(scope, "channelUnread");
+        if (cachedUnread) useRaftStore.getState().setChannelUnread(cachedUnread as unknown as Record<string, { unreadCount: number; hasMention: boolean }>);
+      }
+    } catch {
+      // Cache unavailable or not yet initialized.
+    }
     try {
       // The rail store's own ticket drops a stale switch's server/badge
       // writes; this screen's ticket guards the directory below.
@@ -109,22 +131,6 @@ export default function HomeScreen() {
       // Use the id this load was given, not a serverId closed over from an earlier render.
       const activeId = preferredId ?? sessionRef.current.serverId;
       if (selected.id !== activeId) await sessionRef.current.selectServer(selected.id);
-      // Cold-start fast path (#client-data-cache task #2): paint the cached
-      // directory before the network answers. Only seeds an empty store, so
-      // server switches show that server's cache instantly, and the network
-      // response below overwrites without flicker.
-      try {
-        const runtime = getCacheRuntime();
-        const scope = runtime.scopeFor(selected.id);
-        if (scope !== null && useRaftStore.getState().conversations.length === 0) {
-          const seeded = seedConversations(runtime.repo.getChannels(scope));
-          if (seeded.length > 0) useRaftStore.getState().setConversations(seeded);
-        }
-        const cachedUnread = scope !== null ? runtime.repo.getKv(scope, "channelUnread") : null;
-        if (cachedUnread) useRaftStore.getState().setChannelUnread(cachedUnread as unknown as Record<string, { unreadCount: number; hasMention: boolean }>);
-      } catch {
-        // Cache unavailable or not yet initialized.
-      }
       await loadDirectory(selected.id, ticket);
     } catch (caught) {
       if (ticket !== loadTicket.current || caught instanceof StaleRequestError) return;
