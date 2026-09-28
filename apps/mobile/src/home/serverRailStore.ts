@@ -35,14 +35,22 @@ export function orderServersByStoredIds(servers: RaftServer[], storedIds: Readon
   return ordered;
 }
 
+/** loadServers result: `stale` (a newer load owns the state — callers must do nothing) vs. a real answer. */
+export interface LoadServersResult {
+  stale: boolean;
+  server: RaftServer | null;
+}
+
 interface ServerRailState {
   servers: RaftServer[];
   serverUnread: Record<string, number>;
   activityUnread: Record<string, number>;
-  /** Bumped by every load; responses from an earlier ticket are dropped. */
+  /** Bumped by loadServers; responses from an earlier ticket are dropped. */
   loadTicket: number;
-  /** Fetch the ordered server list + unread summary; null when stale or empty. */
-  loadServers: (client: ServerRailClient, preferredId: string | null) => Promise<RaftServer | null>;
+  /** Separate ticket for badge refreshes — a badge refresh must never invalidate an in-flight load (and vice versa, a load supersedes older badge responses). */
+  badgeTicket: number;
+  /** Fetch the ordered server list + unread summary. */
+  loadServers: (client: ServerRailClient, preferredId: string | null) => Promise<LoadServersResult>;
   /** Refresh only the unread summary (tab focus, return from background). */
   refreshBadges: (client: ServerRailClient) => Promise<void>;
   /** Apply a `server_order:updated` payload (own optimistic reorder or another client's). */
@@ -55,29 +63,35 @@ export const useServerRailStore = create<ServerRailState>((set, get) => ({
   serverUnread: {},
   activityUnread: {},
   loadTicket: 0,
+  badgeTicket: 0,
 
   loadServers: async (client, preferredId) => {
     const ticket = get().loadTicket + 1;
-    set({ loadTicket: ticket });
+    // Also supersede any badge response still in flight, so it cannot
+    // overwrite the fresher full-load data below — strictly greater than the
+    // current badgeTicket, which may already outrun the load ticket.
+    set({ loadTicket: ticket, badgeTicket: get().badgeTicket + 1 });
     const [serverData, unreadData] = await Promise.all([
       client.get("/servers", { server: false }),
       client.get("/servers/unread-summary", { server: false }),
     ]);
-    if (get().loadTicket !== ticket) return null;
+    if (get().loadTicket !== ticket) return { stale: true, server: null };
     const next = parseServers(serverData);
     set({
       servers: next,
       serverUnread: parseUnreadSummary(unreadData),
       activityUnread: activityUnreadByServer(unreadData),
     });
-    return next.find((server) => server.id === preferredId) ?? next[0] ?? null;
+    return { stale: false, server: next.find((server) => server.id === preferredId) ?? next[0] ?? null };
   },
 
   refreshBadges: async (client) => {
-    const ticket = get().loadTicket + 1;
-    set({ loadTicket: ticket });
+    // Only the badge ticket moves: a badge refresh must not invalidate an
+    // in-flight loadServers (that would blank the home list on cold start).
+    const ticket = get().badgeTicket + 1;
+    set({ badgeTicket: ticket });
     const data = await client.get("/servers/unread-summary", { server: false });
-    if (get().loadTicket !== ticket) return;
+    if (get().badgeTicket !== ticket) return;
     set({
       serverUnread: parseUnreadSummary(data),
       activityUnread: activityUnreadByServer(data),
@@ -90,5 +104,5 @@ export const useServerRailStore = create<ServerRailState>((set, get) => ({
     set((state) => ({ servers: orderServersByStoredIds(state.servers, ids) }));
   },
 
-  reset: () => set({ servers: [], serverUnread: {}, activityUnread: {}, loadTicket: 0 }),
+  reset: () => set({ servers: [], serverUnread: {}, activityUnread: {}, loadTicket: 0, badgeTicket: 0 }),
 }));

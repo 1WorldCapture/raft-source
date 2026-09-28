@@ -65,8 +65,9 @@ test("loadServers applies the ordered list and selects the preferred server", as
   const selectedPromise = useServerRailStore.getState().loadServers(fake.client, "b");
   fake.respond(0, [{ id: "a", name: "A", slug: "a" }, { id: "b", name: "B", slug: "b" }]);
   fake.respond(1, [{ serverId: "a", unreadCount: 3 }, { serverId: "b", unreadCount: 0 }]);
-  const selected = await selectedPromise;
-  assert.equal(selected?.id, "b");
+  const result = await selectedPromise;
+  assert.equal(result.stale, false);
+  assert.equal(result.server?.id, "b");
   const state = useServerRailStore.getState();
   assert.deepEqual(state.servers.map((s) => s.id), ["a", "b"]);
   assert.equal(state.serverUnread.a, 3);
@@ -83,14 +84,45 @@ test("a stale loadServers response is dropped entirely (rapid A→B switch)", as
   // B resolves first; A's responses land afterwards and must be discarded.
   fakeB.respond(0, [{ id: "b", name: "B", slug: "b" }]);
   fakeB.respond(1, [{ serverId: "b", unreadCount: 7 }]);
-  assert.equal((await promiseB)?.id, "b");
+  assert.equal((await promiseB).server?.id, "b");
   fakeA.respond(0, [{ id: "a", name: "A", slug: "a" }]);
   fakeA.respond(1, [{ serverId: "a", unreadCount: 99 }]);
-  assert.equal(await promiseA, null, "stale load resolves to null");
+  assert.deepEqual(await promiseA, { stale: true, server: null }, "stale load reports stale, not empty");
   const state = useServerRailStore.getState();
   assert.deepEqual(state.servers.map((s) => s.id), ["b"]);
   assert.equal(state.serverUnread.a, undefined);
   assert.equal(state.serverUnread.b, 7);
+});
+
+test("a badge refresh during an in-flight load does not invalidate it (cold-start race)", async () => {
+  resetStore();
+  const load = deferredClient();
+  const loadPromise = useServerRailStore.getState().loadServers(load.client, "a");
+  const badges = deferredClient();
+  const badgePromise = useServerRailStore.getState().refreshBadges(badges.client);
+  // The badge response lands first; the load must still apply.
+  badges.respond(0, [{ serverId: "a", unreadCount: 4 }]);
+  await badgePromise;
+  load.respond(0, [{ id: "a", name: "A", slug: "a" }]);
+  load.respond(1, [{ serverId: "a", unreadCount: 1 }]);
+  const result = await loadPromise;
+  assert.equal(result.stale, false, "mount-time focus badge refresh cannot stale the initial load");
+  assert.equal(result.server?.id, "a");
+  assert.equal(useServerRailStore.getState().serverUnread.a, 1, "load's fresher summary wins over the badge response");
+});
+
+test("a load supersedes an older in-flight badge response", async () => {
+  resetStore();
+  const badges = deferredClient();
+  const badgePromise = useServerRailStore.getState().refreshBadges(badges.client);
+  const load = deferredClient();
+  const loadPromise = useServerRailStore.getState().loadServers(load.client, null);
+  load.respond(0, [{ id: "a", name: "A", slug: "a" }]);
+  load.respond(1, [{ serverId: "a", unreadCount: 2 }]);
+  await loadPromise;
+  badges.respond(0, [{ serverId: "a", unreadCount: 8 }]);
+  await badgePromise;
+  assert.equal(useServerRailStore.getState().serverUnread.a, 2, "the older badge response is dropped");
 });
 
 test("refreshBadges updates unread only and the later call wins", async () => {

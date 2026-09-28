@@ -73,8 +73,10 @@ export default function HomeScreen() {
     try {
       // The rail store's own ticket drops a stale switch's server/badge
       // writes; this screen's ticket guards the directory below.
-      const selected = await loadServers(sessionRef.current.client, preferredId);
+      const result = await loadServers(sessionRef.current.client, preferredId);
       if (ticket !== loadTicket.current) return;
+      if (result.stale) return;
+      const selected = result.server;
       if (!selected) {
         useRaftStore.getState().setConversations([]);
         return;
