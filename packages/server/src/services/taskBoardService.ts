@@ -3,7 +3,7 @@ import type { ServerId, TaskStatus } from "@botiverse/raft-shared";
 import { getDb } from "../db/index.js";
 import { agents, channels, tasks, users } from "../db/schema.js";
 import { canUserAccessChannel } from "./channelService.js";
-import { toNotificationPlainText } from "./pushDisplay.js";
+import { buildMessageSnippet } from "@botiverse/raft-shared/src/messageSnippet.js";
 import { resolveTaskChannelSurface, type TaskSurfaceChannel } from "./taskChannelSurface.js";
 import {
   enrichTaskRows,
@@ -66,18 +66,9 @@ export interface TaskBoardOptions {
   ids?: string[] | null;
 }
 
-/**
- * Plain-text, single-line preview of a reply: Markdown and code fences are
- * stripped (shared with push notifications), angle mention refs become
- * `@name`, whitespace collapses, and truncation counts code points so a
- * surrogate pair (emoji) is never cut in half.
- */
+/** Plain-text, single-line reply preview (shared `buildMessageSnippet`). */
 export function buildTaskActivitySnippet(content: string, maxChars = TASK_BOARD_SNIPPET_MAX_CHARS): string {
-  const withMentions = content.replace(/\\?<@([\p{L}\p{N}_-]+)>/gu, "@$1");
-  const plain = toNotificationPlainText(withMentions).replace(/\s+/g, " ").trim();
-  const chars = Array.from(plain);
-  if (chars.length <= maxChars) return plain;
-  return `${chars.slice(0, maxChars - 1).join("")}…`;
+  return buildMessageSnippet(content, maxChars);
 }
 
 type BoardSurface = { storageChannelId: string; localChannel: TaskSurfaceChannel };
