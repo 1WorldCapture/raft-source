@@ -209,7 +209,7 @@ export default function HomeScreen() {
         </View>
       </View>
       <View style={styles.body}>
-        <ServerRail currentId={session.serverId} onSelect={selectServer} servers={servers} unreadByServer={serverUnread} />
+        <ServerRail compact={compact} currentId={session.serverId} onSelect={selectServer} servers={servers} unreadByServer={serverUnread} />
         {loading && conversations.length === 0 ? (
           <View style={styles.centered}><ActivityIndicator color={color.ink} /></View>
         ) : error && conversations.length === 0 ? (

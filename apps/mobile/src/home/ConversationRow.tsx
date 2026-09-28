@@ -17,6 +17,7 @@ export interface ConversationPresence {
 }
 
 const ICON_BOX = 36;
+const ICON_BOX_COMPACT = 30;
 
 // One card of the message-list home (task #5, card styling task #9): avatar or
 // boxed channel icon, name, latest-message summary, relative time, unread
@@ -55,7 +56,7 @@ export function ConversationRow({
   // System notices never outrank people: no bold, secondary colour even when unread.
   const systemPreview = preview?.kind === "system";
   return (
-    <Pressable delayLongPress={500} onLongPress={onLongPress} onPress={onPress} style={styles.outer}>
+    <Pressable delayLongPress={500} onLongPress={onLongPress} onPress={onPress} style={[styles.outer, compact ? styles.outerCompact : null]}>
       {({ pressed }) => (
         <HardShadow offset={pressed ? shadowOffset.pressed : shadowOffset.sm} style={pressed ? styles.pressedShift : null}>
           <View style={[styles.card, compact ? styles.cardCompact : null, unread ? styles.cardUnread : null]}>
@@ -64,11 +65,11 @@ export function ConversationRow({
                 avatarUrl={agentPeer ? (presence?.avatarUrl ?? channel.peerAvatarUrl) : channel.peerAvatarUrl}
                 kind={agentPeer ? "agent" : "human"}
                 name={channelLabel(channel)}
-                size={ICON_BOX}
+                size={compact ? ICON_BOX_COMPACT : ICON_BOX}
                 status={agentPeer && presence ? presence.status : undefined}
               />
             ) : (
-              <View style={styles.iconBox}>
+              <View style={[styles.iconBox, compact ? styles.iconBoxCompact : null]}>
                 {channel.type === "private" ? <Lock color={color.ink} size={18} /> : <Hash color={color.ink} size={18} />}
               </View>
             )}
@@ -104,6 +105,7 @@ export function ConversationRow({
 
 const styles = StyleSheet.create({
   outer: { marginBottom: 8, marginHorizontal: 12 },
+  outerCompact: { marginBottom: 6, marginHorizontal: 8 },
   pressedShift: { transform: [{ translateX: pressShift / 2 }, { translateY: pressShift / 2 }] },
   card: {
     alignItems: "center",
@@ -116,7 +118,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
-  cardCompact: { gap: 10, minHeight: 56, paddingVertical: 6 },
+  cardCompact: { gap: 8, minHeight: 56, paddingHorizontal: 8, paddingVertical: 6 },
   cardUnread: { backgroundColor: color.yellowPale },
   iconBox: {
     alignItems: "center",
@@ -127,6 +129,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     width: ICON_BOX,
   },
+  iconBoxCompact: { height: ICON_BOX_COMPACT, width: ICON_BOX_COMPACT },
   main: { flex: 1, gap: 2, minWidth: 0 },
   titleLine: { alignItems: "center", flexDirection: "row", gap: 4 },
   jointMark: { flexShrink: 0 },
