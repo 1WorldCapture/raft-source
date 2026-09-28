@@ -24,6 +24,7 @@ import { useRaftStore } from "./store";
 import { useServerRailStore } from "../home/serverRailStore";
 import { getCacheRuntime, initCacheRuntime } from "../cache/runtime";
 import { cancelCacheSync } from "../cache/cacheSyncRuntime";
+import { useOfflineStore } from "../cache/cacheCleanup";
 import { openExpoSqliteDb } from "../cache/portExpo";
 
 // Cache runtime is initialized once per process. The lazy flag keeps tests
@@ -294,6 +295,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       useServerRailStore.getState().applyServerOrder(serverIds);
     },
     onConnect: () => {
+      useOfflineStore.getState().setOffline(false);
       void runCacheGapSync(client);
       void useTaskStore.getState().catchUp(client);
       // Events emitted while disconnected were lost — the board cannot be
@@ -303,6 +305,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     },
     onDisconnect: () => {
       markCacheSocketDisconnected();
+      // Offline banner feed (#client-data-cache task #4 → #5's UI): the
+      // socket is the connectivity truth; "network" vs "server" cannot be
+      // told apart from a bare disconnect, so default the cause.
+      useOfflineStore.getState().setOffline(true, "network");
       useTaskStore.getState().markStale();
     },
     onTaskCreated: (payload) => {
