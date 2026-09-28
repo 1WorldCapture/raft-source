@@ -40,6 +40,8 @@ export const color = {
   /** Web jump highlight: `bg-brutal-cyan/25`. */
   cyanHighlight: "rgba(39, 204, 243, 0.25)",
   yellowSoft: "rgba(255, 212, 64, 0.4)",
+  /** Opaque yellow-25 on white: unread conversation card (a translucent fill would show the hard shadow through). */
+  yellowPale: "#FFF4CF",
   orangeSoft: "rgba(248, 161, 111, 0.15)",
   inlineCode: "rgba(0, 0, 0, 0.05)",
   quoteBorder: "rgba(0, 0, 0, 0.4)",
