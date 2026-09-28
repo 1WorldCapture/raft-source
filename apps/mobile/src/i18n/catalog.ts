@@ -86,6 +86,14 @@ export const mobileEn = {
   "mobile.time.minutesAgo": "{n, plural, one {# minute ago} other {# minutes ago}}",
   "mobile.time.hoursAgo": "{n, plural, one {# hour ago} other {# hours ago}}",
   "mobile.time.daysAgo": "{n, plural, one {# day ago} other {# days ago}}",
+  "mobile.conversations.unknownSender": "Unknown user",
+  "mobile.conversations.senderBody": "{sender}: {body}",
+  "mobile.conversations.image": "Photo",
+  "mobile.conversations.imageCount": "{n, plural, one {# photo} other {# photos}}",
+  "mobile.conversations.attachment": "File",
+  "mobile.conversations.attachmentCount": "{n, plural, one {# file} other {# files}}",
+  "mobile.conversations.taskLabel": "Task #{n}",
+  "mobile.conversations.noMessages": "No messages yet",
 } as const;
 
 export const mobileZh: Record<keyof typeof mobileEn, string> = {
@@ -172,6 +180,14 @@ export const mobileZh: Record<keyof typeof mobileEn, string> = {
   "mobile.time.minutesAgo": "{n} 分钟前",
   "mobile.time.hoursAgo": "{n} 小时前",
   "mobile.time.daysAgo": "{n} 天前",
+  "mobile.conversations.unknownSender": "未知用户",
+  "mobile.conversations.senderBody": "{sender}：{body}",
+  "mobile.conversations.image": "[图片]",
+  "mobile.conversations.imageCount": "[图片]×{n}",
+  "mobile.conversations.attachment": "[附件]",
+  "mobile.conversations.attachmentCount": "[附件]×{n}",
+  "mobile.conversations.taskLabel": "任务 #{n}",
+  "mobile.conversations.noMessages": "暂无消息",
 };
 
 export type MobileId = keyof typeof mobileEn;
