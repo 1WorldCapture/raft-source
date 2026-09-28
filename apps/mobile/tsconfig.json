@@ -8,7 +8,8 @@
     "paths": {
       "@botiverse/raft-shared/src/raftRefs.ts": ["../../packages/shared/src/raftRefs.ts"],
       "@botiverse/raft-shared/src/timeFormatPreference.ts": ["../../packages/shared/src/timeFormatPreference.ts"],
-      "@botiverse/raft-shared/src/attachmentPreview.ts": ["../../packages/shared/src/attachmentPreview.ts"]
+      "@botiverse/raft-shared/src/attachmentPreview.ts": ["../../packages/shared/src/attachmentPreview.ts"],
+      "@botiverse/raft-shared/src/messageSnippet.ts": ["../../packages/shared/src/messageSnippet.ts"]
     }
   },
   "include": [
