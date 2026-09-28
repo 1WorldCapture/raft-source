@@ -31,11 +31,25 @@ function ensureCacheSync(client: ApiClient): CacheSync | null {
     repo: getCacheRuntime().repo,
     fetchSyncPage: async (sinceSeq, limit) => {
       const data = await client.get<unknown>(`/messages/sync?since_seq=${sinceSeq}&limit=${limit}`);
-      return parseMessagePage(data).flatMap((message) => (
-        typeof message.seq === "number"
-          ? [{ seq: message.seq, id: message.id, channelId: message.channelId, raw: message as unknown as RawRecord }]
-          : []
-      ));
+      // The /messages/sync endpoint serializes seq as a JSON string (pg
+      // bigserial through the raw row path), unlike /messages/channel which
+      // sends a number. parseMessage drops string seqs to undefined, so
+      // normalize here or the whole gap sync silently persists zero rows.
+      const rows = Array.isArray(data)
+        ? data
+        : typeof data === "object" && data !== null && Array.isArray((data as { messages?: unknown }).messages)
+          ? (data as { messages: unknown[] }).messages
+          : [];
+      return rows.flatMap((row): Array<{ seq: number; id: string; channelId: string; raw: RawRecord }> => {
+        if (typeof row !== "object" || row === null) return [];
+        const record = row as Record<string, unknown>;
+        const seq =
+          typeof record.seq === "number" ? record.seq
+          : typeof record.seq === "string" && /^\d+$/.test(record.seq) ? Number(record.seq)
+          : null;
+        if (seq === null || typeof record.id !== "string" || typeof record.channelId !== "string") return [];
+        return [{ seq, id: record.id, channelId: record.channelId, raw: record as RawRecord }];
+      });
     },
     fetchOverlayPage: async (channelId, fromSeq) => {
       const data = await client.get<unknown>(
