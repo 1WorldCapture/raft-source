@@ -37,8 +37,17 @@ export interface BoardStore {
   loaded: boolean;
   tick: number;
   error: string | null;
+  /** The server the current tasks belong to; null when the board is empty. */
+  serverId: string | null;
   /** Full reload from page 1 — initial load, pull-to-refresh, reconnect. */
   load: (client: ApiClient) => Promise<void>;
+  /**
+   * Load the board unless it is already loaded for this server. Server
+   * switches (A→B→A) always reload: the tasks on screen must never outlive
+   * the server they came from. Supersedes any load still in flight for a
+   * different server — the newest request wins.
+   */
+  ensureLoadedForServer: (client: ApiClient, serverId: string) => Promise<void>;
   /**
    * Advance the tick so rows recompute relative times and staleness. When the
    * local calendar day rolled over since the last load and a client is given,
@@ -93,6 +102,10 @@ export function createBoardStore(deps: BoardStoreDeps = {}) {
   const now = deps.now ?? (() => new Date());
   // Debounce state lives outside zustand: it is transport machinery, not UI state.
   let pendingIds = new Set<string>();
+  // Loads are last-writer-wins: a load started for another server (or before
+  // a reset) must never write its rows back. Every load captures the current
+  // ticket and drops its result if a newer load (or reset) has started since.
+  let loadTicket = 0;
   let recalibrateTimer: unknown = null;
   let recalibrateClient: ApiClient | null = null;
   let loadedDay: string | null = null;
@@ -131,9 +144,13 @@ export function createBoardStore(deps: BoardStoreDeps = {}) {
     loaded: false,
     tick: 0,
     error: null,
+    serverId: null,
 
     async load(client) {
-      if (useBoardStore.getState().loading) return;
+      // No in-flight guard on purpose: a load for a newly selected server
+      // must supersede (not wait behind) one still in flight for the old
+      // server; the ticket check below makes that safe.
+      const ticket = ++loadTicket;
       set({ loading: true, error: null });
       try {
         let cursor: string | null = null;
@@ -146,11 +163,20 @@ export function createBoardStore(deps: BoardStoreDeps = {}) {
           if (!parsed.nextCursor) break;
           cursor = parsed.nextCursor;
         }
+        if (ticket !== loadTicket) return;
         loadedDay = dayKeyOf(now());
         set({ tasks, loading: false, loaded: true, error: null });
       } catch (caught) {
+        if (ticket !== loadTicket) return;
         set({ loading: false, error: caught instanceof Error && caught.message ? caught.message : "Request failed" });
       }
+    },
+
+    async ensureLoadedForServer(client, serverId) {
+      const state = get();
+      if (state.loaded && state.serverId === serverId) return;
+      set({ serverId });
+      await get().load(client);
     },
 
     bumpTick(client) {
@@ -202,7 +228,10 @@ export function createBoardStore(deps: BoardStoreDeps = {}) {
       recalibrateTimer = null;
       recalibrateClient = null;
       loadedDay = null;
-      set({ tasks: [], loading: false, loaded: false, tick: 0, error: null });
+      // Any load still in flight belongs to the pre-reset board; its rows
+      // must not land in the freshly cleared one.
+      loadTicket += 1;
+      set({ tasks: [], loading: false, loaded: false, tick: 0, error: null, serverId: null });
     },
   }));
 
