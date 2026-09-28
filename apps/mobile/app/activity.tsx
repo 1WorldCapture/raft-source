@@ -16,6 +16,7 @@ import {
 } from "../src/activity/card";
 import { activityKey, activityScopeId, type ActivityFilter, type ActivityItem } from "../src/activity/model";
 import { useActivityStore } from "../src/activity/store";
+import { adjustActivityUnread, useServerRailStore } from "../src/home/serverRailStore";
 import { useT } from "../src/i18n/provider";
 import { loadDraft } from "../src/screens/composerDraft";
 import { collectSenderNames } from "../src/screens/senderAvatars";
@@ -143,6 +144,15 @@ export default function ActivityScreen() {
     void useActivityStore.getState().load(session.client, next);
   };
 
+  // Reading Activity items should dim the home header's Activity badge right
+  // away (optimistic, clamped at 0) instead of waiting for the next
+  // focus/pull refresh of /servers/unread-summary.
+  const clearActivityBadge = (readCount: number) => {
+    const serverId = session.serverId;
+    if (!serverId) return;
+    useServerRailStore.setState((state) => ({ activityUnread: adjustActivityUnread(state.activityUnread, serverId, readCount) }));
+  };
+
   const refresh = async () => {
     setRefreshing(true);
     const state = useActivityStore.getState();
@@ -152,7 +162,10 @@ export default function ActivityScreen() {
   };
 
   const open = (item: ActivityItem) => {
-    if (item.unreadCount > 0) void useActivityStore.getState().markRead(session.client, item);
+    if (item.unreadCount > 0) {
+      void useActivityStore.getState().markRead(session.client, item);
+      clearActivityBadge(item.unreadCount);
+    }
     const targetMessageId = activityTargetMessageId(item);
     const target = targetMessageId ? { targetMessageId } : {};
     if (item.kind === "thread") {
@@ -177,7 +190,10 @@ export default function ActivityScreen() {
   const runMenu = (item: ActivityItem, action: ActivityMenuAction) => {
     setMenu(null);
     const state = useActivityStore.getState();
-    if (action === "read") void state.markRead(session.client, item);
+    if (action === "read") {
+      void state.markRead(session.client, item);
+      clearActivityBadge(item.unreadCount);
+    }
     else if (action === "unread") void state.markUnread(session.client, item);
     else if (action === "done") void state.markDone(session.client, item);
     else if (action === "follow") void state.setFollowing(session.client, item, true);
@@ -236,7 +252,10 @@ export default function ActivityScreen() {
           <Pressable
             accessibilityLabel={t("thread.markAllRead.title")}
             accessibilityRole="button"
-            onPress={() => void useActivityStore.getState().markAllRead(session.client)}
+            onPress={() => {
+              void useActivityStore.getState().markAllRead(session.client);
+              clearActivityBadge(useActivityStore.getState().totalUnreadCount);
+            }}
             style={styles.markAll}
           >
             <HardShadow offset={shadowOffset.sm}>

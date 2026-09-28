@@ -20,6 +20,8 @@ export interface RealtimeOptions {
   onDirectoryChanged: (joinChannelId?: string) => void;
   onRoomsJoined: () => void;
   onServerOrderUpdated: (serverIds: unknown) => void;
+  /** Server push that the Activity unread totals moved; refetch the summary. */
+  onUnreadSummaryChanged: () => void;
   onConnect: () => void;
   onDisconnect: () => void;
   onTaskCreated: (payload: unknown) => void;
@@ -193,6 +195,13 @@ export function createRealtime(options: RealtimeOptions) {
     created.on("server_order:updated", (payload: unknown) => {
       if (!isRecord(payload) || !Array.isArray(payload.serverIds)) return;
       options.onServerOrderUpdated(payload.serverIds);
+    });
+    // Contract (#unread-badges task #4): payload is { serverId }; the client
+    // refetches /servers/unread-summary. Malformed payloads are ignored — the
+    // focus/poll refreshes stay as the fallback.
+    created.on("unread_summary:changed", (payload: unknown) => {
+      if (!isRecord(payload) || typeof payload.serverId !== "string" || !payload.serverId) return;
+      options.onUnreadSummaryChanged();
     });
     created.on("dm:new", (payload: unknown) => {
       const channelId = channelIdFrom(payload);
