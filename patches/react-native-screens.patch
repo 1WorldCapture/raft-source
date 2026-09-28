@@ -1,0 +1,17 @@
+diff --git a/android/src/main/java/com/swmansion/rnscreens/ScreenStackFragment.kt b/android/src/main/java/com/swmansion/rnscreens/ScreenStackFragment.kt
+index b9e6e2e908172d0e0366b54a8e272c2918ec802d..cf3fc8252f0c8c037817ee6f43e68c91da01d683 100644
+--- a/android/src/main/java/com/swmansion/rnscreens/ScreenStackFragment.kt
++++ b/android/src/main/java/com/swmansion/rnscreens/ScreenStackFragment.kt
+@@ -500,7 +500,11 @@ class ScreenStackFragment :
+ 
+     override fun canNavigateBack(): Boolean {
+         val container: ScreenContainer? = screen.container
+-        check(container is ScreenStack) { "ScreenStackFragment added into a non-stack container" }
++        // Upstream https://github.com/software-mansion/react-native-screens/issues/4429:
++        // a header update can land while this fragment is being detached from its
++        // stack (e.g. replace() on a header-visible screen). There is no stack to
++        // navigate back to in that state, so answer false instead of crashing.
++        if (container == null || container !is ScreenStack) return false
+         return if (container.rootScreen == screen) {
+             // this screen is the root of the container, if it is nested we can check parent container
+             // if it is also a root or not
