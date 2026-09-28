@@ -58,10 +58,11 @@ export async function drainAfterPages<T>(
   fetchPage: (after: number) => Promise<readonly T[]>,
   isFull: (page: readonly T[]) => boolean,
   maxPages = 40,
-): Promise<{ pages: T[][]; lastSeq: number }> {
+): Promise<{ pages: T[][]; lastSeq: number; hitCap: boolean }> {
   const pages: T[][] = [];
   let after = startAfter;
   let lastSeq = startAfter;
+  let hitCap = false;
   for (let fetched = 0; fetched < maxPages; fetched += 1) {
     const page = await fetchPage(after);
     if (page.length === 0) break;
@@ -72,8 +73,12 @@ export async function drainAfterPages<T>(
     }
     if (!isFull(page)) break;
     after = lastSeq;
+    hitCap = fetched + 1 >= maxPages;
   }
-  return { pages, lastSeq };
+  // hitCap: the loop ended on a FULL page at the cap — newer messages may
+  // still exist beyond it; callers must surface that (hasNewer=true) instead
+  // of silently claiming the tail is current.
+  return { pages, lastSeq, hitCap };
 }
 
 type RawPageLike = {

@@ -99,9 +99,11 @@ test("drainAfterPages pages until a short page and caps runaway loops", async ()
   }, (p) => p.length >= 50, 5);
   assert.equal(result.pages.length, 5);
   assert.equal(endless, 5);
+  assert.equal(result.hitCap, true);
 
-  // Empty first page: nothing pulled.
+  // Empty first page: nothing pulled, cap not hit.
   const empty = await drainAfterPages(7, async () => [], (p) => p.length >= 50);
   assert.deepEqual(empty.pages, []);
   assert.equal(empty.lastSeq, 7);
+  assert.equal(empty.hitCap, false);
 });

@@ -522,8 +522,11 @@ export function MessagePane({
           // A short after-page does not mean history ends: the seeded tail
           // may itself fill a page.
           setHasMore(cached.length >= PAGE || drained.pages.some((p) => p.length >= PAGE));
-          setHasNewer(false);
-          setWindowCeiling(null);
+          // Hitting the drain cap means even more newer messages may exist —
+          // surface "newer available" instead of silently stopping (review
+          // follow-up known-issue fix).
+          setHasNewer(drained.hitCap);
+          setWindowCeiling(drained.hitCap ? drained.lastSeq : null);
           const seq = maxSeq(useRaftStore.getState().messagesByChannel[channelId] ?? []);
           if (seq > 0) void sessionRef.current.markRead(channelId, seq);
           // Review fix #4: the pane showed cached (possibly stale) dynamic
