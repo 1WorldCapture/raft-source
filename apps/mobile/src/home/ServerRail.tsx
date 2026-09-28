@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { PanResponder, Pressable, ScrollView, StyleSheet, View, type LayoutChangeEvent, type NativeScrollEvent, type NativeSyntheticEvent } from "react-native";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Pressable, ScrollView, StyleSheet, View, type LayoutChangeEvent, type NativeScrollEvent, type NativeSyntheticEvent } from "react-native";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import type { RaftServer } from "../model/messages";
 import { HardShadow } from "../ui/shadow";
 import { AppText } from "../ui/text";
@@ -12,9 +13,8 @@ const TILE = 44;
 /** Short screens keep more width for the list: narrower rail, smaller tiles. */
 const COMPACT_RAIL_WIDTH = 52;
 const COMPACT_TILE = 36;
-/** Long-press dwell before a tile can be dragged (task #4). */
-const DRAG_ARM_MS = 350;
-const DRAG_CLAIM_SLOP = 3;
+/** Hold time before a tile starts following the finger (task #4). */
+const DRAG_ACTIVATE_MS = 350;
 
 // Discord-style server rail (home task #10; scrolling task #3, drag reorder
 // task #4 in #mobile-server-rail): one square tile per server, the current one
@@ -156,8 +156,8 @@ export function ServerRail({
   );
 }
 
-// One rail tile. Long-press arms the drag; the pan responder only claims the
-// gesture once armed, so plain taps and the rail scroll keep working.
+// One rail tile. A pan that activates after a long press (350ms) implements
+// the drag, so plain taps and the rail scroll keep working untouched.
 function RailSlot({
   server,
   currentId,
@@ -183,45 +183,40 @@ function RailSlot({
   onDragEnd: () => void;
   onLayout: (event: LayoutChangeEvent) => void;
 }) {
-  const armed = useRef(false);
   const id = server.id;
-  const panHandlers = useMemo(() => PanResponder.create({
-    onStartShouldSetPanResponder: () => false,
-    onMoveShouldSetPanResponder: (_event, gesture) => armed.current && Math.abs(gesture.dy) > DRAG_CLAIM_SLOP,
-    onPanResponderGrant: () => onBeginDrag(id),
-    onPanResponderMove: (_event, gesture) => onDragMove(id, gesture.dy),
-    onPanResponderRelease: onDragEnd,
-    onPanResponderTerminate: onDragEnd,
-    onPanResponderTerminationRequest: () => false,
-  }), [id, onBeginDrag, onDragMove, onDragEnd]);
+  const dragGesture = Gesture.Pan()
+    .activateAfterLongPress(DRAG_ACTIVATE_MS)
+    .runOnJS(true)
+    .onStart(() => onBeginDrag(id))
+    .onUpdate((event) => onDragMove(id, event.translationY))
+    .onFinalize(() => onDragEnd());
   return (
-    <Pressable
-      {...panHandlers.panHandlers}
-      accessibilityLabel={server.name}
-      accessibilityRole="button"
-      accessibilityState={{ selected: server.id === currentId }}
-      onLayout={onLayout}
-      onLongPress={() => { armed.current = true; }}
-      onPress={() => onSelect(server)}
-      onPressOut={() => { armed.current = false; }}
-      style={[
-        styles.slot,
-        compact ? styles.slotCompact : null,
-        dragging ? { opacity: 0.85, transform: [{ translateY: dragDy }], zIndex: 1, elevation: 2 } : null,
-      ]}
-    >
-      {({ pressed }) => (
-        <View style={styles.slotInner}>
-          {server.id === currentId ? <View style={[styles.indicator, compact ? styles.indicatorCompact : null]} /> : null}
-          <HardShadow offset={server.id === currentId && !pressed ? shadowOffset.sm : shadowOffset.pressed}>
-            <View style={[styles.tile, compact ? styles.tileCompact : null, server.id === currentId ? styles.tileSelected : null, dragging ? styles.tileDragging : null]}>
-              <AppText numberOfLines={1} style={[styles.initial, compact ? styles.initialCompact : null]}>{serverInitial(server.name)}</AppText>
-            </View>
-          </HardShadow>
-          {unread ? <View style={styles.dot} /> : null}
-        </View>
-      )}
-    </Pressable>
+    <GestureDetector gesture={dragGesture}>
+      <Pressable
+        accessibilityLabel={server.name}
+        accessibilityRole="button"
+        accessibilityState={{ selected: server.id === currentId }}
+        onLayout={onLayout}
+        onPress={() => onSelect(server)}
+        style={[
+          styles.slot,
+          compact ? styles.slotCompact : null,
+          dragging ? { opacity: 0.85, transform: [{ translateY: dragDy }], zIndex: 1, elevation: 2 } : null,
+        ]}
+      >
+        {({ pressed }) => (
+          <View style={styles.slotInner}>
+            {server.id === currentId ? <View style={[styles.indicator, compact ? styles.indicatorCompact : null]} /> : null}
+            <HardShadow offset={server.id === currentId && !pressed ? shadowOffset.sm : shadowOffset.pressed}>
+              <View style={[styles.tile, compact ? styles.tileCompact : null, server.id === currentId ? styles.tileSelected : null, dragging ? styles.tileDragging : null]}>
+                <AppText numberOfLines={1} style={[styles.initial, compact ? styles.initialCompact : null]}>{serverInitial(server.name)}</AppText>
+              </View>
+            </HardShadow>
+            {unread ? <View style={styles.dot} /> : null}
+          </View>
+        )}
+      </Pressable>
+    </GestureDetector>
   );
 }
 
