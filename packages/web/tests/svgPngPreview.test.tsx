@@ -14,14 +14,6 @@ const originalApiGet = api.get;
  * "decodes" from a blob URL with fixed intrinsic size, and a canvas whose
  * 2d context draws nothing and toBlob yields a PNG blob.
  */
-type FakeImage = {
-  src: string;
-  naturalWidth: number;
-  naturalHeight: number;
-  onload: (() => void) | null;
-  onerror: (() => void) | null;
-};
-
 let fakeImageDecodeFailures = 0;
 let lastSvgObjectUrl = "";
 
