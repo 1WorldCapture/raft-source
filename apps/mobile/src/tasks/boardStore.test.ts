@@ -368,7 +368,7 @@ test("noteThreadRead clears the row's unread lift for the matching thread only",
   store.getState().noteThreadRead("thread-t1");
   const tasks = store.getState().tasks;
   assert.equal(tasks[0].unreadCount, 0, "read thread clears its unread count");
-  assert.equal(tasks[0].mentionsMe, false, "reading also clears the mention lift");
+  assert.equal(tasks[0].mentionsMe, true, "mentionsMe survives a read (server contract: only a reply clears it)");
   assert.equal(tasks[1].unreadCount, 1, "other rows untouched");
 });
 

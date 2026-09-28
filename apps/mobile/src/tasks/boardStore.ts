@@ -211,11 +211,15 @@ export function createBoardStore(deps: BoardStoreDeps = {}) {
       const state = get();
       // Bail before map(): a no-op read must keep the tasks reference stable
       // so untouched boards don't re-render.
-      if (!state.tasks.some((task) => task.threadChannelId === threadChannelId && (task.unreadCount > 0 || task.mentionsMe))) return;
+      if (!state.tasks.some((task) => task.threadChannelId === threadChannelId && task.unreadCount > 0)) return;
+      // Clear only unreadCount: per the server contract (task #1), mentionsMe
+      // means "I was mentioned and have not replied since" — reading does not
+      // clear it, and a local false would flicker back on the next
+      // recalibration.
       set({
         tasks: state.tasks.map((task) => (
           task.threadChannelId === threadChannelId
-            ? { ...task, unreadCount: 0, mentionsMe: false }
+            ? { ...task, unreadCount: 0 }
             : task
         )),
       });
