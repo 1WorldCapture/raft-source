@@ -256,6 +256,7 @@ ops/self-host/migrate.sh
 | `rollback.sh [backup-dir]` | 回滚到上一次部署前的状态（第 14 节） |
 | `render-nginx.sh [--reload]` | 用模板生成 nginx 配置并校验（第 9 节） |
 | `nginx-logrotate.sh` | nginx 日志轮转，保留 14 天 |
+| `backup.sh [--now]` | 数据库、附件、配置密钥的定时备份（第 17 节） |
 | `ecosystem.config.cjs` | pm2 进程定义，所有机器相关的值都从 `env.local` 读取 |
 | `nginx/` | nginx 配置模板 |
 
@@ -386,7 +387,8 @@ proxy_request_buffering off;
 |---|---|
 | `raft-server` | `node <root>/node_modules/tsx/dist/cli.mjs src/server.ts`，工作目录 `packages/server` |
 | `raft-nginx` | `nginx -p $RAFT_OPS_HOME/nginx -c nginx.conf -g 'daemon off;'` |
-| `raft-nginx-logrotate` | 每天 UTC 04:00 由 pm2 `cron_restart` 触发一次日志轮转 |
+| `raft-nginx-logrotate` | 每天 04:00（**主机本地时区**）由 pm2 `cron_restart` 触发一次日志轮转 |
+| `raft-backup` | 可选；设置了 `RAFT_BACKUP_CRON` 时启用，每天在 `RAFT_BACKUP_UTC_HOUR` 备份一次（第 17 节） |
 | `raft-trace-upload-worker` | 可选；存在 `packages/trace-upload-worker/.env` 时才启用 |
 | `raft-daemon` | 可选；`env.local` 里设置了 `RAFT_DAEMON_KEY_FILE` 时才启用（第 12 节） |
 
@@ -559,8 +561,74 @@ ops/self-host/rollback.sh <backup-dir>      # 回到指定备份
 
 ## 17. 备份
 
-需要备份的只有三样，代码和 Web 构建都能从 git 重新生成：
+需要备份的是三样东西，代码和 Web 构建都能从 git 重新生成：数据库、附件目录、不入库的配置和密钥。`ops/self-host/backup.sh` 把它们打成一个带校验的备份目录，供另一台机器定期拉取做异地保存。
 
-1. **PostgreSQL**：`pg_dump -Fc "$DATABASE_URL" > raft-$(date +%F).dump`（在干净环境里执行，确认连的是正确的库）。
-2. **附件**：本地存储时是 `UPLOADS_DIR`（默认 `packages/server/uploads`）；用 S3/R2 时由对象存储负责。
-3. **不入库的配置和密钥**：`packages/server/.env`、`ops/self-host/env.local`、daemon 密钥文件、trace worker 的 `.env`。这些要存放在安全的位置，不要放进 git 或聊天记录。
+### 17.1 备份内容和目录结构
+
+```
+$RAFT_BACKUP_DIR/
+├── 2026-01-01T210000Z/
+│   ├── db.dump          # pg_dump -Fc（压缩格式），用 pg_restore 恢复
+│   ├── uploads.tar.gz   # 本地附件目录（UPLOADS_DIR，默认 packages/server/uploads）
+│   ├── secrets.tar.gz   # RAFT_BACKUP_EXTRA 列出的文件：.env、daemon 密钥等
+│   ├── MANIFEST         # 时间、线上提交、表数量、迁移数量、各文件大小
+│   ├── SHA256SUMS
+│   └── DONE             # 最后写入；没有 DONE 的目录是不完整的，不要拉取
+└── latest -> 2026-01-01T210000Z
+```
+
+- 数据库连接串从 `packages/server/.env` 显式读取，不用调用者环境里的值，也不会打印出来（第 0 节）。
+- 每次备份后用 `pg_restore -l` 检查 dump 可读、确实包含表数据，失败时不会生成 `DONE`，也不会更新 `latest`。
+- 保留最新的 `RAFT_BACKUP_KEEP` 份（默认 7），更早的自动删除。
+- **备份里可能含有密钥**（`secrets.tar.gz`），目录权限为 `700`、文件为 `600`，拉取和异地保存时要按密钥的标准保管；如果异地存储不完全受你控制，应该先加密再存。
+- 附件如果放在 S3/R2，由对象存储负责，不需要这里备份。
+
+### 17.2 配置和定时
+
+`env.local`：
+
+```bash
+RAFT_BACKUP_DIR=/var/lib/raft-backups
+RAFT_BACKUP_KEEP=7
+RAFT_BACKUP_CRON="0 * * * *"
+RAFT_BACKUP_UTC_HOUR=21
+RAFT_BACKUP_EXTRA="packages/server/.env packages/trace-upload-worker/.env ops/self-host/env.local"
+```
+
+设置了 `RAFT_BACKUP_CRON` 后，`ecosystem.config.cjs` 会多一个 `raft-backup` 进程。注意 **pm2 的 cron 用的是主机的本地时区**，还会受夏令时影响；所以这里让 pm2 每小时触发一次，由脚本判断当前 UTC 小时是否等于 `RAFT_BACKUP_UTC_HOUR`，不是就立即退出。这样备份时间固定在 UTC，不受主机时区影响。`pm2 ls` 里它平时显示为 `stopped`，这是正常的。
+
+手动立即备份：
+
+```bash
+ops/self-host/backup.sh --now
+```
+
+### 17.3 异地拉取
+
+在另一台机器上用 SSH 密钥访问备份目录（建议走 Tailscale 地址，不对公网开放）：
+
+```bash
+SRC=deploy@raft.example.internal:/var/lib/raft-backups
+DEST=/backups/raft/$(date +%F)
+mkdir -p "$DEST"
+ssh deploy@raft.example.internal test -f /var/lib/raft-backups/latest/DONE || { echo "latest backup not complete"; exit 1; }
+scp -p "$SRC/latest/*" "$DEST/"          # 或 rsync -a（服务器上需要安装 rsync）
+(cd "$DEST" && sha256sum -c SHA256SUMS)
+```
+
+如果想限制这个密钥只能读备份目录，可以给它单独建一个用户，并在 `authorized_keys` 里用 `rrsync` 或 `command=` 限制。
+
+### 17.4 恢复
+
+```bash
+# 数据库（先在临时库演练，确认无误再恢复到正式库）
+createdb raft_restore_test
+pg_restore --no-owner -d raft_restore_test db.dump
+psql -d raft_restore_test -Atc 'select count(*) from drizzle.__drizzle_migrations'
+# 附件
+tar -xzf uploads.tar.gz -C packages/server/        # 解出 uploads/
+# 配置和密钥（解出的是绝对路径，先 tar -tzPf 看一眼再决定放到哪里）
+tar -tzPf secrets.tar.gz
+```
+
+建议每个月做一次恢复演练：把最新备份恢复到临时库，核对迁移数量和几张主要表的行数与线上一致，然后删除临时库。
