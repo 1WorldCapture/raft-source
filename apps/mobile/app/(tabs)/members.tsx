@@ -5,6 +5,8 @@ import { ApiError, StaleRequestError } from "../../src/api/client";
 import { useT } from "../../src/i18n/provider";
 import { isRecord } from "../../src/model/messages";
 import { useSession } from "../../src/state/session";
+import { RailLayout } from "../../src/home/RailLayout";
+import { useServerRail } from "../../src/home/useServerRail";
 import { Avatar } from "../../src/ui/Avatar";
 import { LoadingScreen, ScreenMessage } from "../../src/ui/screen";
 import { PanelHeader } from "../../src/ui/PanelHeader";
@@ -22,6 +24,7 @@ interface Person {
 
 export default function MembersScreen() {
   const session = useSession();
+  const { current: currentServer } = useServerRail();
   const router = useRouter();
   const t = useT();
   const [people, setPeople] = useState<Person[]>([]);
@@ -67,23 +70,25 @@ export default function MembersScreen() {
 
   return (
     <View style={styles.page}>
-      <PanelHeader tone="yellow" title={t("layout.mobileTabBar.members")} />
-      <FlatList
-        data={people}
-        keyExtractor={(person) => `${person.kind}:${person.id}`}
-        renderItem={({ item, index }) => {
-          const showHeader = index === 0 || people[index - 1]?.section !== item.section;
-          return (
-            <View>
-              {showHeader ? <AppText style={styles.section}>{t(item.section)}</AppText> : null}
-              <Pressable onPress={() => void open(item)} style={styles.row}>
-                <Avatar name={item.name} kind={item.kind} avatarUrl={item.avatarUrl} status={item.status} size={28} />
-                <AppText style={styles.name}>{item.name}</AppText>
-              </Pressable>
-            </View>
-          );
-        }}
-      />
+      <PanelHeader subtitle={t("layout.mobileTabBar.members")} tone="yellow" title={currentServer?.name || t("layout.mobileTabBar.members")} />
+      <RailLayout>
+        <FlatList
+          data={people}
+          keyExtractor={(person) => `${person.kind}:${person.id}`}
+          renderItem={({ item, index }) => {
+            const showHeader = index === 0 || people[index - 1]?.section !== item.section;
+            return (
+              <View>
+                {showHeader ? <AppText style={styles.section}>{t(item.section)}</AppText> : null}
+                <Pressable onPress={() => void open(item)} style={styles.row}>
+                  <Avatar name={item.name} kind={item.kind} avatarUrl={item.avatarUrl} status={item.status} size={28} />
+                  <AppText style={styles.name}>{item.name}</AppText>
+                </Pressable>
+              </View>
+            );
+          }}
+        />
+      </RailLayout>
     </View>
   );
 }

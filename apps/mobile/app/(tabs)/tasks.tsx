@@ -8,6 +8,8 @@ import { useT } from "../../src/i18n/provider";
 import { parseChannels, isRecord } from "../../src/model/messages";
 import { useSession } from "../../src/state/session";
 import { useServerRole } from "../../src/home/serverRole";
+import { RailLayout } from "../../src/home/RailLayout";
+import { useServerRail } from "../../src/home/useServerRail";
 import {
   channelChoices,
   EMPTY_TASK_FILTERS,
@@ -63,6 +65,7 @@ function agentStatusOf(item: Record<string, unknown>): AgentPresence["status"] {
 export default function TasksScreen() {
   const router = useRouter();
   const session = useSession();
+  const { current: currentServer } = useServerRail();
   const role = useServerRole();
   const t = useT();
   const insets = useSafeAreaInsets();
@@ -161,75 +164,77 @@ export default function TasksScreen() {
 
   return (
     <View style={styles.page}>
-      <PanelHeader actions={filterButton} subtitle={subtitle} title={t("task.panel.heading")} tone="yellow" />
-      {error && loaded ? <AppText style={styles.error}>{error}</AppText> : null}
-      {loading && !loaded ? (
-        <View style={styles.list}>
-          {Array.from({ length: 5 }, (_, index) => <TaskSkeleton key={index} />)}
-        </View>
-      ) : error && !loaded ? (
-        <ScreenMessage body={error} title={t("mobile.channels.loadFailed")} />
-      ) : (
-        <ScrollView
-          contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + 24 }, filtered.length === 0 ? styles.listEmpty : null]}
-          refreshControl={<RefreshControl colors={[color.ink]} onRefresh={() => void refresh()} refreshing={refreshing} tintColor={color.ink} />}
-        >
-          {filtered.length === 0 ? (
-            <View style={styles.empty}>
-              <CheckSquare color={color.ink} size={36} strokeWidth={2.25} />
-              <AppText style={styles.emptyTitle}>{t(filtering ? "emptyState.noTasksFiltered" : "emptyState.noTasksTitle")}</AppText>
-              <AppText style={styles.emptyBody}>{t(filtering ? "task.filter.noMatchHint" : "task.panel.serverWideExcluded")}</AppText>
-            </View>
-          ) : sections.map(({ section, rows }) => (
-            <View key={section} style={styles.group}>
-              {section !== "todo" || rows.length > 0 ? (
-                <BoardSectionHeader
-                  collapsed={todoCollapsed}
-                  count={rows.length}
-                  onPress={section === "todo" ? () => setTodoCollapsed((current) => !current) : undefined}
-                  section={section}
-                />
-              ) : null}
-              {section === "todo" && todoCollapsed
-                ? null
-                : rows.map((row) => (
-                  <BoardTaskRow
-                    assignee={assigneeInfoOf(row.task, presence)}
-                    key={row.task.id}
-                    onApprove={section === "needsMe" && canApproveFrom(row.task.status, role)
-                      ? () => void approve(row.task.id)
-                      : undefined}
-                    onPress={() => router.push({ pathname: "/task/[taskId]", params: { taskId: row.task.id } })}
-                    row={row}
+      <PanelHeader actions={filterButton} subtitle={`${t("task.panel.heading")} · ${subtitle}`} title={currentServer?.name || t("task.panel.heading")} tone="yellow" />
+      <RailLayout>
+        {error && loaded ? <AppText style={styles.error}>{error}</AppText> : null}
+        {loading && !loaded ? (
+          <View style={styles.list}>
+            {Array.from({ length: 5 }, (_, index) => <TaskSkeleton key={index} />)}
+          </View>
+        ) : error && !loaded ? (
+          <ScreenMessage body={error} title={t("mobile.channels.loadFailed")} />
+        ) : (
+          <ScrollView
+            contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + 24 }, filtered.length === 0 ? styles.listEmpty : null]}
+            refreshControl={<RefreshControl colors={[color.ink]} onRefresh={() => void refresh()} refreshing={refreshing} tintColor={color.ink} />}
+          >
+            {filtered.length === 0 ? (
+              <View style={styles.empty}>
+                <CheckSquare color={color.ink} size={36} strokeWidth={2.25} />
+                <AppText style={styles.emptyTitle}>{t(filtering ? "emptyState.noTasksFiltered" : "emptyState.noTasksTitle")}</AppText>
+                <AppText style={styles.emptyBody}>{t(filtering ? "task.filter.noMatchHint" : "task.panel.serverWideExcluded")}</AppText>
+              </View>
+            ) : sections.map(({ section, rows }) => (
+              <View key={section} style={styles.group}>
+                {section !== "todo" || rows.length > 0 ? (
+                  <BoardSectionHeader
+                    collapsed={todoCollapsed}
+                    count={rows.length}
+                    onPress={section === "todo" ? () => setTodoCollapsed((current) => !current) : undefined}
+                    section={section}
                   />
-                ))}
-            </View>
-          ))}
-        </ScrollView>
-      )}
-      {filterMenu ? (
-        <FilterMenu
-          filters={filters}
-          onClose={() => setFilterMenu(false)}
-          onClear={() => updateFilters(EMPTY_TASK_FILTERS)}
-          onOpenSheet={setSheet}
-        />
-      ) : null}
-      {sheet ? (
-        <FilterSheet
-          choices={sheetChoices}
-          onClose={() => setSheet(null)}
-          onToggle={(id) => updateFilters({
-            ...filters,
-            channels: sheet === "channel" ? toggleChoice(filters.channels, id) : filters.channels,
-            creators: sheet === "creator" ? toggleChoice(filters.creators, id) : filters.creators,
-            assignees: sheet === "assignee" ? toggleChoice(filters.assignees, id) : filters.assignees,
-          })}
-          pinned={pinned}
-          selected={selected}
-          title={t(sheet === "channel" ? "task.filter.channels" : sheet === "creator" ? "task.filter.creator" : "task.filter.assignee")}
-        />
-      ) : null}
+                ) : null}
+                {section === "todo" && todoCollapsed
+                  ? null
+                  : rows.map((row) => (
+                    <BoardTaskRow
+                      assignee={assigneeInfoOf(row.task, presence)}
+                      key={row.task.id}
+                      onApprove={section === "needsMe" && canApproveFrom(row.task.status, role)
+                        ? () => void approve(row.task.id)
+                        : undefined}
+                      onPress={() => router.push({ pathname: "/task/[taskId]", params: { taskId: row.task.id } })}
+                      row={row}
+                    />
+                  ))}
+              </View>
+            ))}
+          </ScrollView>
+        )}
+        {filterMenu ? (
+          <FilterMenu
+            filters={filters}
+            onClose={() => setFilterMenu(false)}
+            onClear={() => updateFilters(EMPTY_TASK_FILTERS)}
+            onOpenSheet={setSheet}
+          />
+        ) : null}
+        {sheet ? (
+          <FilterSheet
+            choices={sheetChoices}
+            onClose={() => setSheet(null)}
+            onToggle={(id) => updateFilters({
+              ...filters,
+              channels: sheet === "channel" ? toggleChoice(filters.channels, id) : filters.channels,
+              creators: sheet === "creator" ? toggleChoice(filters.creators, id) : filters.creators,
+              assignees: sheet === "assignee" ? toggleChoice(filters.assignees, id) : filters.assignees,
+            })}
+            pinned={pinned}
+            selected={selected}
+            title={t(sheet === "channel" ? "task.filter.channels" : sheet === "creator" ? "task.filter.creator" : "task.filter.assignee")}
+          />
+        ) : null}
+      </RailLayout>
     </View>
   );
 }
