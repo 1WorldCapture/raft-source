@@ -1,18 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Alert, AppState, FlatList, Pressable, RefreshControl, StyleSheet, View, useWindowDimensions } from "react-native";
+import { ActivityIndicator, Alert, FlatList, Pressable, RefreshControl, StyleSheet, View, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useFocusEffect, useRouter } from "expo-router";
+import { useRouter } from "expo-router";
 import { Activity, Bookmark, Search } from "lucide-react-native";
 import { ApiError, StaleRequestError } from "../../src/api/client";
 import { ConversationRow } from "../../src/home/ConversationRow";
 import { ServerRail } from "../../src/home/ServerRail";
 import { channelHasDraft } from "../../src/home/drafts";
 import { conversationUnreadCount, filterUnreadConversations } from "../../src/home/conversations";
-import { activityUnreadByServer } from "../../src/activity/model";
 import { setCurrentServerRole } from "../../src/home/serverRole";
+import { useServerRail } from "../../src/home/useServerRail";
 import { formatRelativeTime, relativeTimeStrings } from "../../src/tasks/relativeTime";
 import { useT } from "../../src/i18n/provider";
-import { channelLabel, parseChannelUnread, parseChannels, parseServers, parseUnreadSummary, type RaftChannel, type RaftServer } from "../../src/model/messages";
+import { channelLabel, parseChannelUnread, parseChannels, type RaftChannel, type RaftServer } from "../../src/model/messages";
 import { useSession } from "../../src/state/session";
 import { useRaftStore } from "../../src/state/store";
 import { Badge } from "../../src/ui/Badge";
@@ -36,9 +36,7 @@ export default function HomeScreen() {
   const channelUnread = useRaftStore((state) => state.channelUnread);
   const liveUnread = useRaftStore((state) => state.liveUnread);
   const directoryVersion = useRaftStore((state) => state.directoryVersion);
-  const [servers, setServers] = useState<RaftServer[]>([]);
-  const [serverUnread, setServerUnread] = useState<Record<string, number>>({});
-  const [activityUnread, setActivityUnread] = useState<Record<string, number>>({});
+  const { servers, serverUnread, activityUnread, current, switchServer, loadServers } = useServerRail();
   const [unreadOnly, setUnreadOnly] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -50,32 +48,10 @@ export default function HomeScreen() {
   const tRef = useRef(t);
   tRef.current = t;
 
-  const current = servers.find((server) => server.id === session.serverId) ?? null;
   const activityCount = activityUnread[session.serverId ?? ""] ?? 0;
 
   useEffect(() => () => {
     if (directoryTimer.current) clearTimeout(directoryTimer.current);
-  }, []);
-
-  const loadServers = useCallback(async (preferredId: string | null, ticket: number) => {
-    const currentSession = sessionRef.current;
-    const [serverData, unreadData] = await Promise.all([
-      currentSession.client.get<unknown>("/servers", { server: false }),
-      currentSession.client.get<unknown>("/servers/unread-summary", { server: false }),
-    ]);
-    // A rapid A→B server switch invalidates A's in-flight responses; applying
-    // them anyway would restore A's role and badges on top of B's session.
-    if (ticket !== loadTicket.current) return null;
-    const next = parseServers(serverData);
-    setServers(next);
-    setServerUnread(parseUnreadSummary(unreadData));
-    setActivityUnread(activityUnreadByServer(unreadData));
-    const selected = next.find((server) => server.id === preferredId) ?? next[0] ?? null;
-    setCurrentServerRole(selected?.role ?? null);
-    // Use the id this load was given, not a serverId closed over from an earlier render.
-    const activeId = preferredId ?? sessionRef.current.serverId;
-    if (selected && selected.id !== activeId) await sessionRef.current.selectServer(selected.id);
-    return selected;
   }, []);
 
   const loadDirectory = useCallback(async (serverId: string, ticket: number) => {
@@ -95,12 +71,18 @@ export default function HomeScreen() {
     const ticket = ++loadTicket.current;
     setError(null);
     try {
-      const selected = await loadServers(preferredId, ticket);
+      // The rail store's own ticket drops a stale switch's server/badge
+      // writes; this screen's ticket guards the directory below.
+      const selected = await loadServers(sessionRef.current.client, preferredId);
       if (ticket !== loadTicket.current) return;
       if (!selected) {
         useRaftStore.getState().setConversations([]);
         return;
       }
+      setCurrentServerRole(selected.role ?? null);
+      // Use the id this load was given, not a serverId closed over from an earlier render.
+      const activeId = preferredId ?? sessionRef.current.serverId;
+      if (selected.id !== activeId) await sessionRef.current.selectServer(selected.id);
       await loadDirectory(selected.id, ticket);
     } catch (caught) {
       if (ticket !== loadTicket.current || caught instanceof StaleRequestError) return;
@@ -138,33 +120,8 @@ export default function HomeScreen() {
     }, DIRECTORY_REFRESH_DEBOUNCE_MS);
   }, [directoryVersion]);
 
-  // Returning to the tab no longer reloads the list, but the header badges
-  // (activity count, other-server dots) would sit stale until the next full
-  // reload — refresh just the unread summary instead (review point on #52).
-  // The realtime socket only connects to the active server, so events from
-  // other servers never arrive live; this fetch is the only cross-server
-  // unread source besides pull-to-refresh.
-  const refreshBadges = useCallback(() => {
-    const startedTicket = loadTicket.current;
-    const currentSession = sessionRef.current;
-    if (!currentSession.ready) return;
-    void currentSession.client.get<unknown>("/servers/unread-summary", { server: false })
-      .then((data) => {
-        if (startedTicket !== loadTicket.current) return;
-        setServerUnread(parseUnreadSummary(data));
-        setActivityUnread(activityUnreadByServer(data));
-      })
-      .catch(() => {});
-  }, []);
-  useFocusEffect(useCallback(() => refreshBadges(), [refreshBadges]));
-  useEffect(() => {
-    // Coming back from the background keeps the tab technically focused, so
-    // useFocusEffect alone would leave the rail dots stale.
-    const subscription = AppState.addEventListener("change", (state) => {
-      if (state === "active") refreshBadges();
-    });
-    return () => subscription.remove();
-  }, [refreshBadges]);
+  // Badge refresh on tab focus and on returning from the background now live
+  // in useServerRail / the session provider (task #1) — shared by every tab.
 
   const markRead = useCallback((channel: RaftChannel) => {
     Alert.alert(channelLabel(channel), undefined, [
@@ -181,8 +138,7 @@ export default function HomeScreen() {
     setLoading(true);
     setError(null);
     useRaftStore.getState().setConversations([]);
-    setCurrentServerRole(server.role ?? null);
-    void session.selectServer(server.id).then(() => loadFor(server.id));
+    void switchServer(server).then(() => loadFor(server.id));
   };
 
   const unreadConversations = filterUnreadConversations(conversations, channelUnread, liveUnread);
