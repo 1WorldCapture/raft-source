@@ -1,25 +1,28 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { Alert, BackHandler, FlatList, Modal, Pressable, StyleSheet, View, useWindowDimensions } from "react-native";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Alert, BackHandler, FlatList, Modal, Pressable, RefreshControl, StyleSheet, View, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
-import { Activity, Bell, Bookmark, ChevronDown, ChevronRight, Hash, Lock, Pencil, Search } from "lucide-react-native";
+import { Activity, Bookmark, ChevronDown, Search } from "lucide-react-native";
 import { ApiError, StaleRequestError } from "../../src/api/client";
-import { groupHasUnread, groupHomeChannels, pinnedChannelIds, type HomeGroups } from "../../src/home/directory";
-import { activityUnreadByServer } from "../../src/activity/model";
+import { ConversationRow } from "../../src/home/ConversationRow";
 import { channelHasDraft } from "../../src/home/drafts";
+import { conversationUnreadCount, filterUnreadConversations } from "../../src/home/conversations";
+import { activityUnreadByServer } from "../../src/activity/model";
 import { setCurrentServerRole } from "../../src/home/serverRole";
+import { formatRelativeTime, relativeTimeStrings } from "../../src/tasks/relativeTime";
 import { useT } from "../../src/i18n/provider";
 import { channelLabel, parseChannelUnread, parseChannels, parseServers, parseUnreadSummary, type RaftChannel, type RaftServer } from "../../src/model/messages";
 import { useSession } from "../../src/state/session";
 import { useRaftStore } from "../../src/state/store";
-import { Avatar } from "../../src/ui/Avatar";
-import { Badge, MentionMark } from "../../src/ui/Badge";
+import { Badge } from "../../src/ui/Badge";
 import { LoadingScreen, ScreenMessage } from "../../src/ui/screen";
 import { HardShadow } from "../../src/ui/shadow";
 import { AppText } from "../../src/ui/text";
 import { border, color, fontSize, shadowOffset, size } from "../../src/ui/tokens";
 
-const EMPTY_GROUPS: HomeGroups = { pinned: [], joint: [], channels: [], dms: [] };
+// Directory bumps (socket catch-up, a live message for a never-listed channel)
+// coalesce into one full reload behind this delay.
+const DIRECTORY_REFRESH_DEBOUNCE_MS = 1500;
 
 export default function HomeScreen() {
   const session = useSession();
@@ -27,23 +30,22 @@ export default function HomeScreen() {
   const t = useT();
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
-  const headerHeight = (height <= 600 ? size.headerCompact : size.header) + insets.top;
-  const directoryVersion = useRaftStore((state) => state.directoryVersion);
+  const compact = height <= 600;
+  const headerHeight = (compact ? size.headerCompact : size.header) + insets.top;
+  const conversations = useRaftStore((state) => state.conversations);
   const channelUnread = useRaftStore((state) => state.channelUnread);
   const liveUnread = useRaftStore((state) => state.liveUnread);
+  const directoryVersion = useRaftStore((state) => state.directoryVersion);
   const [servers, setServers] = useState<RaftServer[]>([]);
   const [serverUnread, setServerUnread] = useState<Record<string, number>>({});
-  const [groups, setGroups] = useState<HomeGroups>(EMPTY_GROUPS);
   const [activityUnread, setActivityUnread] = useState<Record<string, number>>({});
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const [unreadOnly, setUnreadOnly] = useState(false);
   const [menu, setMenu] = useState(false);
-  const activityTap = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => () => {
-    if (activityTap.current) clearTimeout(activityTap.current);
-  }, []);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const loadTicket = useRef(0);
+  const directoryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sessionRef = useRef(session);
   sessionRef.current = session;
   const tRef = useRef(t);
@@ -51,6 +53,10 @@ export default function HomeScreen() {
 
   const current = servers.find((server) => server.id === session.serverId) ?? null;
   const activityCount = activityUnread[session.serverId ?? ""] ?? 0;
+
+  useEffect(() => () => {
+    if (directoryTimer.current) clearTimeout(directoryTimer.current);
+  }, []);
 
   const loadServers = useCallback(async (preferredId: string | null) => {
     const currentSession = sessionRef.current;
@@ -71,17 +77,16 @@ export default function HomeScreen() {
   }, []);
 
   const loadDirectory = useCallback(async (serverId: string, ticket: number) => {
-    const [channelData, dmData, unreadData, orderData] = await Promise.all([
+    const [channelData, dmData, unreadData] = await Promise.all([
       session.client.get<unknown>("/channels?archived=exclude"),
       session.client.get<unknown>("/channels/dm"),
       session.client.get<unknown>("/channels/unread?summary=1"),
-      optionalGet(session.client, `/servers/${serverId}/sidebar-order`),
     ]);
     if (ticket !== loadTicket.current) return;
     const channels = parseChannels(channelData).filter((channel) => channel.type !== "dm");
     const dms = parseChannels(dmData).map((channel) => ({ ...channel, type: channel.type || "dm" }));
     useRaftStore.getState().setChannelUnread(parseChannelUnread(unreadData));
-    setGroups(groupHomeChannels([...channels, ...dms], pinnedChannelIds(orderData)));
+    useRaftStore.getState().setConversations([...channels, ...dms]);
   }, [session.client]);
 
   const loadFor = useCallback(async (preferredId: string | null) => {
@@ -91,7 +96,7 @@ export default function HomeScreen() {
       const selected = await loadServers(preferredId);
       if (ticket !== loadTicket.current) return;
       if (!selected) {
-        setGroups(EMPTY_GROUPS);
+        useRaftStore.getState().setConversations([]);
         return;
       }
       await loadDirectory(selected.id, ticket);
@@ -99,25 +104,37 @@ export default function HomeScreen() {
       if (ticket !== loadTicket.current || caught instanceof StaleRequestError) return;
       setError(caught instanceof ApiError ? caught.message : tRef.current("mobile.channels.loadFailed"));
     } finally {
-      if (ticket === loadTicket.current) setLoading(false);
+      if (ticket === loadTicket.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, [loadDirectory, loadServers]);
 
   const loadForRef = useRef(loadFor);
   loadForRef.current = loadFor;
 
-  // useFocusEffect can miss the first focus on a cold start. Load from session
-  // readiness as well, and keep the focus callback stable so a render does not
-  // cancel the request before the spinner can clear.
+  // Initial load and server switches load immediately. Tab focus does NOT
+  // reload: realtime events keep the list fresh and pull-to-refresh is the
+  // explicit escape hatch (task #2/#6).
   useEffect(() => {
     if (!session.ready) return;
     void loadFor(session.serverId);
-  }, [loadFor, directoryVersion, session.ready, session.serverId]);
+  }, [loadFor, session.ready, session.serverId]);
 
-  useFocusEffect(useCallback(() => {
+  // Directory bumps reload the list after a debounce, so a burst of bumps
+  // (catch-up after reconnect, several new conversations at once) coalesces.
+  const seenDirectoryVersion = useRef(directoryVersion);
+  useEffect(() => {
+    if (seenDirectoryVersion.current === directoryVersion) return;
+    seenDirectoryVersion.current = directoryVersion;
     if (!sessionRef.current.ready) return;
-    void loadForRef.current(sessionRef.current.serverId);
-  }, []));
+    if (directoryTimer.current) clearTimeout(directoryTimer.current);
+    directoryTimer.current = setTimeout(() => {
+      directoryTimer.current = null;
+      void loadForRef.current(sessionRef.current.serverId);
+    }, DIRECTORY_REFRESH_DEBOUNCE_MS);
+  }, [directoryVersion]);
 
   useEffect(() => {
     if (!menu) return;
@@ -127,6 +144,22 @@ export default function HomeScreen() {
     });
     return () => subscription.remove();
   }, [menu]);
+
+  // Returning to the tab no longer reloads the list, but the header badges
+  // (activity count, other-server dots) would sit stale until the next full
+  // reload — refresh just the unread summary instead (review point on #52).
+  useFocusEffect(useCallback(() => {
+    const startedTicket = loadTicket.current;
+    const currentSession = sessionRef.current;
+    if (!currentSession.ready) return;
+    void currentSession.client.get<unknown>("/servers/unread-summary", { server: false })
+      .then((data) => {
+        if (startedTicket !== loadTicket.current) return;
+        setServerUnread(parseUnreadSummary(data));
+        setActivityUnread(activityUnreadByServer(data));
+      })
+      .catch(() => {});
+  }, []));
 
   const markRead = useCallback((channel: RaftChannel) => {
     Alert.alert(channelLabel(channel), undefined, [
@@ -138,15 +171,11 @@ export default function HomeScreen() {
     ]);
   }, [session.client, t]);
 
-  if (loading) return <LoadingScreen />;
-  if (error) return <ScreenMessage title={t("mobile.channels.loadFailed")} body={error} />;
+  if (loading && conversations.length === 0) return <LoadingScreen />;
+  if (error && conversations.length === 0) return <ScreenMessage title={t("mobile.channels.loadFailed")} body={error} />;
 
-  const sections = [
-    { id: "pinned", title: t("layout.sidebar.pinned"), channels: groups.pinned, empty: t("layout.sidebar.pinnedEmptyHint") },
-    { id: "joint", title: t("layout.sidebar.jointChannels"), channels: groups.joint, empty: t("layout.sidebar.jointChannelsEmpty") },
-    { id: "channels", title: t("layout.sidebar.channels"), channels: groups.channels, empty: null },
-    { id: "dms", title: t("layout.sidebar.directMessages"), channels: groups.dms, empty: null },
-  ];
+  const visible = unreadOnly ? filterUnreadConversations(conversations, channelUnread, liveUnread) : conversations;
+  const timeStrings = relativeTimeStrings(t);
 
   return (
     <View style={styles.page}>
@@ -160,54 +189,60 @@ export default function HomeScreen() {
           </HardShadow>
           {servers.some((server) => server.id !== current?.id && (serverUnread[server.id] ?? 0) > 0) ? <View style={styles.switcherDot} /> : null}
         </Pressable>
-        <Pressable accessibilityRole="button" onPress={() => router.push("/activity")} style={styles.icon}>
-          <Bell color={color.ink} size={18} />
-        </Pressable>
+        <View style={styles.headerIcons}>
+          <Pressable accessibilityRole="button" onPress={() => router.push("/search")} style={styles.icon}>
+            <Search color={color.ink} size={18} />
+          </Pressable>
+          <Pressable accessibilityRole="button" onPress={() => router.push("/activity")} style={styles.icon}>
+            <Activity color={color.ink} size={18} />
+            <View style={styles.activityBadge}>
+              <Badge count={activityCount} />
+            </View>
+          </Pressable>
+          <Pressable accessibilityRole="button" onPress={() => router.push("/saved")} style={styles.icon}>
+            <Bookmark color={color.ink} size={18} />
+          </Pressable>
+        </View>
       </View>
       <FlatList
-        data={sections}
-        keyExtractor={(section) => section.id}
+        data={visible}
+        keyExtractor={(entry) => entry.channel.id}
         ListHeaderComponent={
-          <View>
-            <Entry compact={height <= 600} icon={<Search color={color.ink} size={16} />} label={t("layout.sidebar.search")} onPress={() => router.push("/search")} />
-            <Entry
-              compact={height <= 600}
-              count={activityCount}
-              icon={<Activity color={color.ink} size={16} />}
-              label={t("layout.sidebar.activity")}
-              onPress={() => {
-                if (activityTap.current) {
-                  clearTimeout(activityTap.current);
-                  activityTap.current = null;
-                  router.push({ pathname: "/activity", params: { focus: "first-unread" } });
-                  return;
-                }
-                activityTap.current = setTimeout(() => {
-                  activityTap.current = null;
-                  router.push("/activity");
-                }, 280);
-              }}
-            />
-            <Entry compact={height <= 600} icon={<Bookmark color={color.ink} size={16} />} label={t("layout.sidebar.saved")} onPress={() => router.push("/saved")} />
-          </View>
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => setUnreadOnly((value) => !value)}
+            style={[styles.unreadToggle, unreadOnly ? styles.unreadToggleActive : null]}
+          >
+            <AppText style={styles.unreadToggleLabel}>{t("mobile.conversations.unreadOnly")}</AppText>
+          </Pressable>
         }
-        renderItem={({ item }) => {
-          const closed = collapsed[item.id] === true;
-          return (
-            <View>
-              <Pressable accessibilityRole="button" onPress={() => setCollapsed((state) => ({ ...state, [item.id]: !closed }))} style={styles.section}>
-                {closed ? <ChevronRight color={color.ink} size={14} strokeWidth={2.5} /> : <ChevronDown color={color.ink} size={14} strokeWidth={2.5} />}
-                <AppText style={styles.sectionTitle}>{item.title}</AppText>
-                <AppText style={styles.sectionCount}>{String(item.channels.length)}</AppText>
-                {closed && groupHasUnread(item.channels, channelUnread, liveUnread) ? <View style={styles.dot} /> : null}
-              </Pressable>
-              {!closed && item.channels.length === 0 && item.empty ? <AppText style={styles.sectionEmpty}>{item.empty}</AppText> : null}
-              {closed ? null : item.channels.map((channel) => (
-                <ChannelRow compact={height <= 600} key={channel.id} channel={channel} onOpen={() => router.push({ pathname: "/messages/[channelId]", params: { channelId: channel.id, name: channelLabel(channel) } })} onLongPress={() => markRead(channel)} />
-              ))}
-            </View>
-          );
-        }}
+        ListEmptyComponent={
+          <AppText style={styles.empty}>
+            {unreadOnly ? t("mobile.conversations.unreadEmpty") : t("mobile.channels.empty")}
+          </AppText>
+        }
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => {
+              setRefreshing(true);
+              void loadFor(sessionRef.current.serverId);
+            }}
+          />
+        }
+        renderItem={({ item }) => (
+          <ConversationRow
+            channel={item.channel}
+            compact={compact}
+            hasDraft={channelHasDraft(item.channel.id)}
+            hasMention={channelUnread[item.channel.id]?.hasMention === true}
+            onLongPress={() => markRead(item.channel)}
+            onPress={() => router.push({ pathname: "/messages/[channelId]", params: { channelId: item.channel.id, name: channelLabel(item.channel) } })}
+            preview={item.preview}
+            timeText={formatRelativeTime(item.channel.lastMessageAt, timeStrings)}
+            unreadCount={conversationUnreadCount(item.channel.id, channelUnread, liveUnread)}
+          />
+        )}
       />
       <Modal animationType="fade" transparent visible={menu} onRequestClose={() => setMenu(false)}>
         <Pressable style={[styles.backdrop, { paddingTop: headerHeight }]} onPress={() => setMenu(false)}>
@@ -216,9 +251,9 @@ export default function HomeScreen() {
               <Pressable key={server.id} onPress={() => {
                 setMenu(false);
                 if (server.id === session.serverId) return;
-                setGroups(EMPTY_GROUPS);
                 setLoading(true);
                 setError(null);
+                useRaftStore.getState().setConversations([]);
                 setCurrentServerRole(server.role ?? null);
                 void session.selectServer(server.id).then(() => loadFor(server.id));
               }} style={[styles.menuRow, server.id === current?.id ? styles.menuCurrent : null]}>
@@ -233,42 +268,6 @@ export default function HomeScreen() {
   );
 }
 
-function Entry({ icon, label, count, onPress, compact }: { icon?: ReactNode; label: string; count?: number; onPress: () => void; compact?: boolean }) {
-  return (
-    <Pressable onPress={onPress} style={[styles.row, compact ? styles.rowCompact : null]}>
-      {icon ?? <View style={styles.iconGap} />}
-      <AppText style={styles.name}>{label}</AppText>
-      <Badge count={count ?? 0} />
-    </Pressable>
-  );
-}
-
-function ChannelRow({ channel, onOpen, onLongPress, compact }: { channel: RaftChannel; onOpen: () => void; onLongPress: () => void; compact?: boolean }) {
-  const unread = useRaftStore((state) => state.channelUnread[channel.id]);
-  const live = useRaftStore((state) => state.liveUnread[channel.id] ?? 0);
-  const count = (unread?.unreadCount ?? 0) + live;
-  const bold = count > 0 || unread?.hasMention === true;
-  const dm = channel.type === "dm";
-  return (
-    <Pressable delayLongPress={500} onLongPress={onLongPress} onPress={onOpen} style={[styles.row, compact ? styles.rowCompact : null]}>
-      {dm ? <Avatar name={channelLabel(channel)} kind={channel.peerType === "agent" ? "agent" : "human"} avatarUrl={channel.peerAvatarUrl} size={18} /> : channel.type === "private" ? <Lock color={color.ink} size={16} /> : <Hash color={color.ink} size={16} />}
-      <AppText numberOfLines={1} style={[styles.name, bold ? styles.unread : null]}>{channelLabel(channel)}</AppText>
-      <Badge count={count} quiet={channel.activityMuted} />
-      {unread?.hasMention ? <MentionMark /> : null}
-      {channelHasDraft(channel.id) ? <Pencil color={color.ink} size={14} /> : null}
-    </Pressable>
-  );
-}
-
-async function optionalGet(client: { get: (path: string) => Promise<unknown> }, path: string): Promise<unknown> {
-  try {
-    return await client.get(path);
-  } catch (caught) {
-    if (caught instanceof StaleRequestError) throw caught;
-    return {};
-  }
-}
-
 const styles = StyleSheet.create({
   page: { backgroundColor: color.page, flex: 1 },
   header: {
@@ -281,21 +280,27 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     paddingHorizontal: 12,
   },
-  switcherWrap: { maxWidth: "75%" },
+  switcherWrap: { maxWidth: "60%" },
   switcher: { alignItems: "center", backgroundColor: color.ink, borderColor: color.border, borderWidth: border.strong, flexDirection: "row", gap: 8, paddingHorizontal: 14, paddingVertical: 7 },
   switcherName: { color: color.yellow, fontSize: 18, fontWeight: "700", lineHeight: 22 },
   switcherDot: { backgroundColor: color.pink, borderColor: color.border, borderRadius: 5, borderWidth: 1, height: 10, position: "absolute", right: -2, top: -2, width: 10 },
-  serverName: { color: color.ink, fontSize: 14, fontWeight: "700" },
+  headerIcons: { alignItems: "center", flexDirection: "row", gap: 4 },
   icon: { alignItems: "center", height: size.iconButton, justifyContent: "center", width: size.iconButton },
-  section: { alignItems: "center", flexDirection: "row", gap: 4, height: 24, marginBottom: 4, marginTop: 16, paddingHorizontal: 16 },
-  sectionTitle: { ...fontSize.group, color: color.ink, fontWeight: "700", letterSpacing: 1.2, textTransform: "uppercase" },
-  sectionCount: { ...fontSize.group, color: color.muted, fontFamily: "mono", marginLeft: 2 },
-  sectionEmpty: { ...fontSize.group, color: color.muted, paddingBottom: 4, paddingHorizontal: 16 },
-  row: { alignItems: "center", borderColor: "transparent", borderWidth: 2, flexDirection: "row", gap: 10, marginBottom: 4, paddingHorizontal: 16, paddingVertical: 8 },
-  rowCompact: { paddingVertical: 4 },
-  name: { ...fontSize.list, color: color.ink, flex: 1, fontWeight: "500" },
-  unread: { fontWeight: "700" },
-  iconGap: { width: 16 },
+  activityBadge: { position: "absolute", right: 0, top: 2 },
+  unreadToggle: {
+    alignSelf: "flex-start",
+    borderColor: color.border,
+    borderWidth: border.strong,
+    marginBottom: 4,
+    marginLeft: 16,
+    marginTop: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  unreadToggleActive: { backgroundColor: color.yellow },
+  unreadToggleLabel: { ...fontSize.group, color: color.ink, fontWeight: "700", textTransform: "uppercase", letterSpacing: 1.2 },
+  empty: { ...fontSize.list, color: color.muted, padding: 16 },
+  serverName: { color: color.ink, fontSize: 14, fontWeight: "700" },
   dot: { backgroundColor: color.pink, borderRadius: 4, height: 8, width: 8 },
   backdrop: { backgroundColor: color.muted, flex: 1, justifyContent: "flex-start" },
   menu: { backgroundColor: color.page, borderColor: color.border, borderWidth: 2, marginHorizontal: 16 },

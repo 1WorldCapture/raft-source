@@ -56,6 +56,8 @@ export interface RaftMessage {
   reactions?: MessageReaction[];
   /** Task-host messages only; live previews use it for the "task" kind. */
   taskNumber?: number;
+  /** `conversationContext.channelType` from message:new: channel/private/joint/dm/thread. Missing on older servers. */
+  conversationChannelType?: string;
   pending?: "sending" | "failed";
 }
 
@@ -181,6 +183,9 @@ export function parseMessage(value: unknown): RaftMessage | null {
     threadId: typeof value.threadId === "string" ? value.threadId : value.threadId === null ? null : undefined,
     createdAt: typeof value.createdAt === "string" ? parseCreatedAt(value.createdAt) : undefined,
     taskNumber: typeof value.taskNumber === "number" ? value.taskNumber : undefined,
+    conversationChannelType: isRecord(value.conversationContext) && typeof value.conversationContext.channelType === "string"
+      ? value.conversationContext.channelType
+      : undefined,
   };
 }
 

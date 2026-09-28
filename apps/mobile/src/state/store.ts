@@ -3,7 +3,7 @@ import { useActivityStore } from "../activity/store";
 import { useTaskStore } from "../tasks/store";
 import { maxSeq } from "../model/messages";
 import { reconcileIncoming } from "../model/reconcile";
-import { applyLiveMessage, replaceConversations, type ConversationEntry } from "../home/conversations";
+import { applyLiveMessage, replaceConversations, shouldRefreshForUnknownChannel, type ConversationEntry } from "../home/conversations";
 import type { ChannelUnreadEntry, RaftChannel, RaftMessage, ThreadSummary } from "../model/messages";
 
 interface RaftDataState {
@@ -18,6 +18,8 @@ interface RaftDataState {
   senderAvatars: Record<string, string>;
   /** Message-list home: merged channels+DMs sorted by latest activity (task #2). */
   conversations: ConversationEntry[];
+  /** Every channel id the last full load listed (threads are never listed); unknown-channel detection. */
+  conversationChannelIds: ReadonlySet<string>;
   setSenderAvatars: (avatars: Record<string, string>) => void;
   setConversations: (freshChannels: RaftChannel[]) => void;
   applyLiveToConversations: (message: RaftMessage) => void;
@@ -45,13 +47,20 @@ export const useRaftStore = create<RaftDataState>((set) => ({
   notice: null,
   senderAvatars: {},
   conversations: [],
+  conversationChannelIds: new Set<string>(),
   setSenderAvatars: (avatars) => set({ senderAvatars: avatars }),
   setConversations: (freshChannels) => set((state) => ({
     conversations: replaceConversations(state.conversations, freshChannels),
+    conversationChannelIds: new Set(freshChannels.map((channel) => channel.id)),
   })),
   applyLiveToConversations: (message) => set((state) => {
     const result = applyLiveMessage(state.conversations, message);
-    return result.changed ? { conversations: result.entries } : state;
+    if (result.changed) return { conversations: result.entries };
+    // A message for a never-listed, non-thread channel means the directory
+    // changed (new DM peer, newly joined channel): bump so the home screen's
+    // debounced reload picks the conversation up.
+    if (!shouldRefreshForUnknownChannel(message, state.conversationChannelIds)) return state;
+    return { directoryVersion: state.directoryVersion + 1 };
   }),
   upsertMessages: (incoming) => set((state) => {
     const messagesByChannel = { ...state.messagesByChannel };
@@ -114,6 +123,7 @@ export const useRaftStore = create<RaftDataState>((set) => ({
       lastSeq: 0,
       senderAvatars: {},
       conversations: [],
+      conversationChannelIds: new Set<string>(),
     });
   },
 }));

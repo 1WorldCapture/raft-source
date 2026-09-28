@@ -8,6 +8,7 @@ import {
   conversationUnreadCount,
   filterUnreadConversations,
   replaceConversations,
+  shouldRefreshForUnknownChannel,
 } from "./conversations.ts";
 
 function channel(overrides: Partial<RaftChannel> = {}): RaftChannel {
@@ -175,4 +176,19 @@ test("replaceConversations treats a full refresh as authoritative", () => {
     channel({ id: "new", lastMessageAt: "2026-09-28T05:00:00.000Z" }),
   ]);
   assert.deepEqual(fresh.map((entry) => entry.channel.id), ["new", "kept"], "re-sorted, stale row dropped");
+});
+
+test("unknown-channel refresh only fires for listed-conversation types the list has never seen", () => {
+  const listed = new Set(["c1"]);
+  // Thread replies must never trigger a refresh (the list never contains threads).
+  assert.equal(shouldRefreshForUnknownChannel({ channelId: "thread-1", conversationChannelType: "thread" }, listed), false);
+  // Missing conversationContext (older server): conservative, no refresh.
+  assert.equal(shouldRefreshForUnknownChannel({ channelId: "dm-new", conversationChannelType: undefined }, listed), false);
+  // A brand-new DM/channel/joint conversation is unknown and refreshable.
+  assert.equal(shouldRefreshForUnknownChannel({ channelId: "dm-new", conversationChannelType: "dm" }, listed), true);
+  assert.equal(shouldRefreshForUnknownChannel({ channelId: "ch-new", conversationChannelType: "channel" }, listed), true);
+  assert.equal(shouldRefreshForUnknownChannel({ channelId: "j-new", conversationChannelType: "joint" }, listed), true);
+  assert.equal(shouldRefreshForUnknownChannel({ channelId: "p-new", conversationChannelType: "private" }, listed), true);
+  // Already-listed channels never trigger it, whatever the type says.
+  assert.equal(shouldRefreshForUnknownChannel({ channelId: "c1", conversationChannelType: "channel" }, listed), false);
 });
