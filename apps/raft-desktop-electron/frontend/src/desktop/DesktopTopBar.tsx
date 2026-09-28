@@ -12,6 +12,7 @@
 import { useEffect, useState } from "react";
 import { useIntl } from "react-intl";
 import { useServerStore } from "@web/store/serverStore";
+import { useServerUnreadSummaryStore } from "@web/store/serverUnreadSummaryStore";
 import { useAuthStore } from "@web/store/authStore";
 import { useAppNavigate } from "@web/hooks/useAppNavigate";
 import { AvatarImageWithFallback } from "@web/components/ui/AvatarSlot";
@@ -143,6 +144,10 @@ export function DesktopTopBar() {
   const { formatMessage } = useIntl();
   const server = useServerStore((s) => s.current);
   const user = useAuthStore((s) => s.user);
+  // Real cross-server unread for the switcher (was hardcoded empty — the
+  // desktop top-bar switcher never showed badges). Shared store, same data as
+  // the web sidebar's switcher (#unread-badges task #5/#7).
+  const serverUnreadCounts = useServerUnreadSummaryStore((s) => s.byServer);
   const nav = useAppNavigate();
   const [serverMenuOpen, setServerMenuOpen] = useState(false);
 
@@ -223,7 +228,7 @@ export function DesktopTopBar() {
         <ServerSwitcherMenu
           open={serverMenuOpen}
           onClose={() => setServerMenuOpen(false)}
-          serverUnreadCounts={{}}
+          serverUnreadCounts={serverUnreadCounts}
           className="absolute right-0 top-full mt-2 w-64 max-h-[calc(100dvh-16px)]"
         />
       </div>

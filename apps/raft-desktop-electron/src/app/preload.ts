@@ -3,6 +3,7 @@
 // (no capability gating needed — it's not untrusted remote content).
 
 import { contextBridge, ipcRenderer } from "electron";
+import { ELECTRON_IPC_CHANNELS } from "@raft/desktop-contract";
 
 function subscribe<T>(channel: string, handler: (value: T) => void): () => void {
   const wrapped = (_event: unknown, value: T) => handler(value);
@@ -37,15 +38,15 @@ contextBridge.exposeInMainWorld("raftDesktop", {
   },
 
   // Native focus state (reliable substitute for document.hasFocus()).
-  isFocused: (): Promise<boolean> => ipcRenderer.invoke("app:is-focused"),
+  isFocused: (): Promise<boolean> => ipcRenderer.invoke(ELECTRON_IPC_CHANNELS.isFocused),
   onFocusChange: (handler: (focused: boolean) => void) =>
-    subscribe<boolean>("app:focus-state", handler),
+    subscribe<boolean>(ELECTRON_IPC_CHANNELS.focusState, handler),
 
   // Dock unread badge (0 clears it).
-  setBadgeCount: (count: number) => ipcRenderer.send("app:set-badge", count),
+  setBadgeCount: (count: number) => ipcRenderer.send(ELECTRON_IPC_CHANNELS.setBadge, count),
 
   // Bring the window forward (e.g. when an OS notification is clicked).
-  focusWindow: () => ipcRenderer.send("app:focus-window"),
+  focusWindow: () => ipcRenderer.send(ELECTRON_IPC_CHANNELS.focusWindow),
 
   // Desktop OAuth (native half). The renderer owns PKCE + the /start & /complete
   // HTTPS calls; this bridges the loopback + system browser only.
