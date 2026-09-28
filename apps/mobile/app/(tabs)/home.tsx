@@ -12,6 +12,8 @@ import { setCurrentServerRole } from "../../src/home/serverRole";
 import { useServerRail } from "../../src/home/useServerRail";
 import { formatRelativeTime, relativeTimeStrings } from "../../src/tasks/relativeTime";
 import { useT } from "../../src/i18n/provider";
+import { seedConversations } from "../../src/cache/boot";
+import { getCacheRuntime } from "../../src/cache/runtime";
 import { channelLabel, parseChannelUnread, parseChannels, type RaftChannel, type RaftServer } from "../../src/model/messages";
 import { useSession } from "../../src/state/session";
 import { useRaftStore } from "../../src/state/store";
@@ -65,11 +67,55 @@ export default function HomeScreen() {
     const dms = parseChannels(dmData).map((channel) => ({ ...channel, type: channel.type || "dm" }));
     useRaftStore.getState().setChannelUnread(parseChannelUnread(unreadData));
     useRaftStore.getState().setConversations([...channels, ...dms]);
+    // Persist the directory to the local cache (#client-data-cache task #2):
+    // two type-scoped batches so dropMissing never crosses lists (#4).
+    try {
+      const runtime = getCacheRuntime();
+      const scope = runtime.scopeFor(serverId);
+      if (scope === null) return;
+      void runtime.repo.putChannels(scope, channels.map((channel) => ({
+        id: channel.id,
+        type: channel.type || "channel",
+        lastMessageAt: channel.lastMessageAt ?? null,
+        raw: channel as unknown as Record<string, unknown>,
+      })));
+      void runtime.repo.putChannels(scope, dms.map((channel) => ({
+        id: channel.id,
+        type: "dm",
+        lastMessageAt: channel.lastMessageAt ?? null,
+        raw: channel as unknown as Record<string, unknown>,
+      })));
+      void runtime.repo.putKv(scope, "channelUnread", parseChannelUnread(unreadData) as unknown as Record<string, unknown>);
+    } catch {
+      // Cache unavailable — directory still works from the network.
+    }
   }, [session.client]);
 
   const loadFor = useCallback(async (preferredId: string | null) => {
     const ticket = ++loadTicket.current;
     setError(null);
+    // Cold-start fast path (#client-data-cache task #2): paint the cached
+    // directory BEFORE any network call — offline cold starts still show the
+    // conversation list. Only seeds an empty store; the network response
+    // below overwrites without flicker.
+    try {
+      const runtime = getCacheRuntime();
+      const seedServerId = preferredId ?? sessionRef.current.serverId ?? "";
+      // Child effects run before the provider's attach effect on cold start,
+      // so attach here first (idempotent) — otherwise scopeFor is null.
+      if (runtime.scopeId === null && sessionRef.current.origin && sessionRef.current.user && seedServerId) {
+        runtime.attach(sessionRef.current.origin, sessionRef.current.user.id, seedServerId);
+      }
+      const scope = runtime.scopeFor(seedServerId);
+      if (scope !== null && useRaftStore.getState().conversations.length === 0) {
+        const seeded = seedConversations(runtime.repo.getChannels(scope));
+        if (seeded.length > 0) useRaftStore.getState().setConversations(seeded);
+        const cachedUnread = runtime.repo.getKv(scope, "channelUnread");
+        if (cachedUnread) useRaftStore.getState().setChannelUnread(cachedUnread as unknown as Record<string, { unreadCount: number; hasMention: boolean }>);
+      }
+    } catch {
+      // Cache unavailable or not yet initialized.
+    }
     try {
       // The rail store's own ticket drops a stale switch's server/badge
       // writes; this screen's ticket guards the directory below.

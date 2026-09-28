@@ -52,6 +52,9 @@ import {
   type RaftMessage,
 } from "../model/messages";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { drainAfterPages, hydrateCachedMessages, messageFetchPlan, rawPageForCache } from "../cache/boot";
+import { refreshOverlayPageOncePerBoot } from "../cache/cacheSyncRuntime";
+import { getCacheRuntime } from "../cache/runtime";
 import { useSession } from "../state/session";
 import { useRaftStore } from "../state/store";
 import { colors, space } from "../ui/theme";
@@ -82,6 +85,12 @@ import { copyText, tapFeedback } from "./messageFeedback";
 import { dmReadByPeer, parsePeerReads, type PeerRead } from "./readReceipt";
 
 const PAGE = 50;
+
+/** Raw enriched message → cache row shape (boot.rawPageForCache input). */
+function messageToCacheRow(item: unknown) {
+  if (!isRecord(item) || typeof item.id !== "string" || typeof item.seq !== "number") return null;
+  return { seq: item.seq, id: item.id, raw: item as Record<string, unknown> };
+}
 const EMPTY_MESSAGES: RaftMessage[] = [];
 const scrollOffsets = new Map<string, number>();
 
@@ -412,8 +421,30 @@ export function MessagePane({
       return;
     }
     void (async () => {
-      const cached = useRaftStore.getState().messagesByChannel[channelId] ?? [];
+      let cached = useRaftStore.getState().messagesByChannel[channelId] ?? [];
       setError(null);
+      // Cold-start fast path (#client-data-cache task #2): seed the pane from
+      // the local cache so it paints before the network answers, then fetch
+      // only what the coverage says is missing (after=tail). Context-window
+      // opens (targetMessageId) keep their own recall logic untouched.
+      let cacheScope: number | null = null;
+      if (!targetMessageId) {
+        try {
+          const runtime = getCacheRuntime();
+          cacheScope = runtime.scopeFor(sessionRef.current.serverId ?? "");
+          if (cached.length === 0 && cacheScope !== null) {
+            const rows = runtime.repo.getLatestMessages(cacheScope, channelId, PAGE);
+            if (rows.length > 0) {
+              // getLatestMessages is newest-first; the store is chronological.
+              const hydrated = hydrateCachedMessages(rows).reverse();
+              useRaftStore.getState().setChannelMessages(channelId, hydrated);
+              cached = hydrated;
+            }
+          }
+        } catch {
+          cacheScope = null;
+        }
+      }
       if (targetMessageId && !shouldRequestContext(cached, targetMessageId)) {
         const saved = recallContextWindow(channelId, targetMessageId, cached);
         if (saved) {
@@ -460,19 +491,69 @@ export function MessagePane({
             missingTarget = true;
           }
         }
-        const data = await sessionRef.current.client.get<unknown>(`/messages/channel/${channelId}?limit=${PAGE}`);
-        if (cancelled) return;
-        const page = parseMessagePage(data);
-        forgetContextWindow(channelId);
-        if (missingTarget) useRaftStore.getState().setChannelMessages(channelId, page);
-        else useRaftStore.getState().upsertMessages(page);
-        useRaftStore.getState().setThreadSummaries(parseThreadSummaries(data));
-        setHasMore(page.length >= PAGE);
-        setHasNewer(false);
-        setWindowCeiling(null);
-        setLimited(historyLimited(data));
-        const seq = maxSeq(page);
-        if (seq > 0) void sessionRef.current.markRead(channelId, seq);
+        // With local coverage, continue from the tail instead of re-pulling
+        // the whole page (#client-data-cache task #2).
+        const plan = cacheScope !== null
+          ? messageFetchPlan(getCacheRuntime().repo.getCoverage(cacheScope, channelId))
+          : ({ latest: true } as const);
+        if ("after" in plan && !missingTarget) {
+          // Review fix #1: a FULL after-page means more newer messages exist
+          // beyond it — drain until a short page so a >PAGE offline gap
+          // still lands on the newest tail (each page is cached as it
+          // arrives; thread summaries merge across the drain).
+          const mergedSummaries: Record<string, ReturnType<typeof parseThreadSummaries>[string]> = {};
+          const drained = await drainAfterPages(
+            plan.after,
+            async (after) => {
+              const data = await sessionRef.current.client.get<unknown>(`/messages/channel/${channelId}?limit=${PAGE}&after=${after}`);
+              const parsed = parseMessagePage(data);
+              if (cacheScope !== null) {
+                void getCacheRuntime().repo.appendPage(cacheScope, channelId, rawPageForCache(data, messageToCacheRow));
+              }
+              Object.assign(mergedSummaries, parseThreadSummaries(data));
+              return parsed;
+            },
+            (p) => p.length >= PAGE,
+          );
+          if (cancelled) return;
+          forgetContextWindow(channelId);
+          for (const p of drained.pages) useRaftStore.getState().upsertMessages(p);
+          if (Object.keys(mergedSummaries).length > 0) useRaftStore.getState().setThreadSummaries(mergedSummaries);
+          // A short after-page does not mean history ends: the seeded tail
+          // may itself fill a page.
+          setHasMore(cached.length >= PAGE || drained.pages.some((p) => p.length >= PAGE));
+          setHasNewer(false);
+          setWindowCeiling(null);
+          const seq = maxSeq(useRaftStore.getState().messagesByChannel[channelId] ?? []);
+          if (seq > 0) void sessionRef.current.markRead(channelId, seq);
+          // Review fix #4: the pane showed cached (possibly stale) dynamic
+          // data — refresh the visible page's overlay once per boot.
+          if (cacheScope !== null && cached.length > 0) {
+            const visible = useRaftStore.getState().messagesByChannel[channelId] ?? [];
+            const from = minSeq(visible);
+            const through = maxSeq(visible);
+            if (from !== null && through !== null) {
+              void refreshOverlayPageOncePerBoot(sessionRef.current.client, channelId, from, through);
+            }
+          }
+        } else {
+          const data = await sessionRef.current.client.get<unknown>(`/messages/channel/${channelId}?limit=${PAGE}`);
+          if (cancelled) return;
+          const page = parseMessagePage(data);
+          forgetContextWindow(channelId);
+          if (missingTarget) useRaftStore.getState().setChannelMessages(channelId, page);
+          else useRaftStore.getState().upsertMessages(page);
+          useRaftStore.getState().setThreadSummaries(parseThreadSummaries(data));
+          setHasMore(page.length >= PAGE);
+          setHasNewer(false);
+          setWindowCeiling(null);
+          setLimited(historyLimited(data));
+          if (cacheScope !== null) {
+            void getCacheRuntime().repo.appendPage(cacheScope, channelId, rawPageForCache(data, messageToCacheRow));
+          }
+          const seq = maxSeq(page);
+          if (seq > 0) void sessionRef.current.markRead(channelId, seq);
+        }
         if (missingTarget) {
           setError(t("message.chatPanel.messageNotFound"));
           nearBottom.current = true;
@@ -507,6 +588,16 @@ export function MessagePane({
       useRaftStore.getState().upsertMessages(page);
       setHasMore(page.length >= PAGE);
       setLimited((current) => current || historyLimited(data));
+      // History pages extend the cached coverage downwards (#2).
+      try {
+        const runtime = getCacheRuntime();
+        const scope = runtime.scopeFor(sessionRef.current.serverId ?? "");
+        if (scope !== null) {
+          void runtime.repo.appendPage(scope, channelId, rawPageForCache(data, messageToCacheRow));
+        }
+      } catch {
+        // Cache unavailable.
+      }
     } catch (caught) {
       if (caught instanceof StaleRequestError) return;
       setError(sendError(caught, t));
