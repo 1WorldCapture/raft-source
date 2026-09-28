@@ -1,3 +1,5 @@
+import type { MessagePreview } from "@botiverse/raft-shared/src/messageSnippet.ts";
+
 export interface RaftUser {
   id: string;
   email?: string | null;
@@ -52,6 +54,8 @@ export interface RaftMessage {
   createdAt?: string;
   attachments?: MessageAttachment[];
   reactions?: MessageReaction[];
+  /** Task-host messages only; live previews use it for the "task" kind. */
+  taskNumber?: number;
   pending?: "sending" | "failed";
 }
 
@@ -92,6 +96,8 @@ export interface RaftChannel {
   peerAvatarUrl?: string | null;
   peerType?: string | null;
   lastMessageAt?: string | null;
+  /** Structured latest-message summary from /channels and /channels/dm (null when the channel has no messages). */
+  lastMessagePreview?: MessagePreview | null;
   joined?: boolean;
   activityMuted?: boolean;
   readState?: ChannelReadState | null;
@@ -174,6 +180,7 @@ export function parseMessage(value: unknown): RaftMessage | null {
     })) : undefined,
     threadId: typeof value.threadId === "string" ? value.threadId : value.threadId === null ? null : undefined,
     createdAt: typeof value.createdAt === "string" ? parseCreatedAt(value.createdAt) : undefined,
+    taskNumber: typeof value.taskNumber === "number" ? value.taskNumber : undefined,
   };
 }
 
@@ -271,6 +278,25 @@ function parseReactions(value: unknown): MessageReaction[] | undefined {
   return reactions.length > 0 ? reactions : undefined;
 }
 
+const PREVIEW_KINDS: ReadonlySet<string> = new Set(["text", "image", "attachment", "task", "system"]);
+const PREVIEW_SENDER_TYPES: ReadonlySet<string> = new Set(["user", "agent", "system", "external_projection"]);
+
+/** Defensive parse of the `lastMessagePreview` row field; anything malformed becomes null. */
+export function parseMessagePreview(value: unknown): MessagePreview | null {
+  if (!isRecord(value) || typeof value.messageId !== "string") return null;
+  const kind = (typeof value.kind === "string" && PREVIEW_KINDS.has(value.kind) ? value.kind : "text") as MessagePreview["kind"];
+  return {
+    messageId: value.messageId,
+    kind,
+    text: typeof value.text === "string" ? value.text : "",
+    senderType: (typeof value.senderType === "string" && PREVIEW_SENDER_TYPES.has(value.senderType) ? value.senderType : "user") as MessagePreview["senderType"],
+    senderId: typeof value.senderId === "string" ? value.senderId : null,
+    senderName: typeof value.senderName === "string" && value.senderName.trim() ? value.senderName : null,
+    attachmentCount: typeof value.attachmentCount === "number" && Number.isFinite(value.attachmentCount) ? Math.max(0, Math.trunc(value.attachmentCount)) : 0,
+    taskNumber: typeof value.taskNumber === "number" && Number.isFinite(value.taskNumber) ? value.taskNumber : null,
+  };
+}
+
 export function parseChannel(value: unknown): RaftChannel | null {
   if (!isRecord(value) || typeof value.id !== "string" || typeof value.name !== "string") return null;
   const readState = isRecord(value.readState) ? {
@@ -292,6 +318,7 @@ export function parseChannel(value: unknown): RaftChannel | null {
     peerAvatarUrl: typeof value.peerAvatarUrl === "string" ? value.peerAvatarUrl : null,
     peerType: typeof value.peerType === "string" ? value.peerType : null,
     lastMessageAt: typeof value.lastMessageAt === "string" ? value.lastMessageAt : null,
+    lastMessagePreview: parseMessagePreview(value.lastMessagePreview),
     joined: typeof value.joined === "boolean" ? value.joined : undefined,
     activityMuted: value.activityMuted === true,
     readState,

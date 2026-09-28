@@ -3,7 +3,8 @@ import { useActivityStore } from "../activity/store";
 import { useTaskStore } from "../tasks/store";
 import { maxSeq } from "../model/messages";
 import { reconcileIncoming } from "../model/reconcile";
-import type { ChannelUnreadEntry, RaftMessage, ThreadSummary } from "../model/messages";
+import { applyLiveMessage, replaceConversations, type ConversationEntry } from "../home/conversations";
+import type { ChannelUnreadEntry, RaftChannel, RaftMessage, ThreadSummary } from "../model/messages";
 
 interface RaftDataState {
   messagesByChannel: Record<string, RaftMessage[]>;
@@ -15,7 +16,11 @@ interface RaftDataState {
   notice: "verify-email" | "profile-setup" | null;
   /** Sender id → avatar URL from `/agents` and server members; messages do not carry avatars. */
   senderAvatars: Record<string, string>;
+  /** Message-list home: merged channels+DMs sorted by latest activity (task #2). */
+  conversations: ConversationEntry[];
   setSenderAvatars: (avatars: Record<string, string>) => void;
+  setConversations: (freshChannels: RaftChannel[]) => void;
+  applyLiveToConversations: (message: RaftMessage) => void;
   upsertMessages: (incoming: RaftMessage[]) => void;
   setChannelMessages: (channelId: string, messages: RaftMessage[]) => void;
   setThreadSummaries: (summaries: Record<string, ThreadSummary>) => void;
@@ -39,7 +44,15 @@ export const useRaftStore = create<RaftDataState>((set) => ({
   directoryVersion: 0,
   notice: null,
   senderAvatars: {},
+  conversations: [],
   setSenderAvatars: (avatars) => set({ senderAvatars: avatars }),
+  setConversations: (freshChannels) => set((state) => ({
+    conversations: replaceConversations(state.conversations, freshChannels),
+  })),
+  applyLiveToConversations: (message) => set((state) => {
+    const result = applyLiveMessage(state.conversations, message);
+    return result.changed ? { conversations: result.entries } : state;
+  }),
   upsertMessages: (incoming) => set((state) => {
     const messagesByChannel = { ...state.messagesByChannel };
     let lastSeq = state.lastSeq;
@@ -100,6 +113,7 @@ export const useRaftStore = create<RaftDataState>((set) => ({
       liveUnread: {},
       lastSeq: 0,
       senderAvatars: {},
+      conversations: [],
     });
   },
 }));
