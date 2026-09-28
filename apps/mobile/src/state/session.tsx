@@ -22,8 +22,8 @@ import { BUNDLED_SERVER_ORIGIN } from "../session/origin";
 import { shouldApplyServerResponse, shouldCommitTokens, shouldMarkVisibleRead, catchUpPlan, releaseFocus } from "./sessionPolicy";
 import { useRaftStore } from "./store";
 import { useServerRailStore } from "../home/serverRailStore";
-import { cancelCacheSync, getCacheRuntime, initCacheRuntime } from "../cache/runtime";
-import { setCacheSyncClient } from "../cache/appSync";
+import { getCacheRuntime, initCacheRuntime } from "../cache/runtime";
+import { cancelCacheSync } from "../cache/cacheSyncRuntime";
 import { openExpoSqliteDb } from "../cache/portExpo";
 
 // Cache runtime is initialized once per process. The lazy flag keeps tests
@@ -416,7 +416,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     try {
       ensureCacheRuntime();
       getCacheRuntime().attach(snapshot.origin, snapshot.user.id, snapshot.serverId);
-      setCacheSyncClient(client);
     } catch {
       // Cache unavailable (e.g. storage failure) — the app works without it.
     }

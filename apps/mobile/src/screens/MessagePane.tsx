@@ -53,7 +53,7 @@ import {
 } from "../model/messages";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { drainAfterPages, hydrateCachedMessages, messageFetchPlan, rawPageForCache } from "../cache/boot";
-import { getAppCacheSync } from "../cache/appSync";
+import { refreshOverlayPageOncePerBoot } from "../cache/cacheSyncRuntime";
 import { getCacheRuntime } from "../cache/runtime";
 import { useSession } from "../state/session";
 import { useRaftStore } from "../state/store";
@@ -532,9 +532,8 @@ export function MessagePane({
             const visible = useRaftStore.getState().messagesByChannel[channelId] ?? [];
             const from = minSeq(visible);
             const through = maxSeq(visible);
-            const sync = getAppCacheSync();
-            if (sync && from !== null && through !== null) {
-              void sync.refreshOverlayPageOncePerBoot(cacheScope, channelId, from, through);
+            if (from !== null && through !== null) {
+              void refreshOverlayPageOncePerBoot(sessionRef.current.client, channelId, from, through);
             }
           }
         } else {
