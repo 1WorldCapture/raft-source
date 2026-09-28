@@ -56,13 +56,14 @@ import { drainAfterPages, hydrateCachedMessages, messageFetchPlan, rawPageForCac
 import { refreshOverlayIntoStore } from "../cache/cacheSyncRuntime";
 import { useOfflineStore } from "../cache/cacheCleanup";
 import { getCacheRuntime } from "../cache/runtime";
+import { readSenderDirectory, writeSenderDirectory } from "../cache/senderDirectory";
 import { useSession } from "../state/session";
 import { useRaftStore } from "../state/store";
 import { colors, space } from "../ui/theme";
 import { AppText } from "../ui/text";
 import { bodyFont, color, shadowOffset } from "../ui/tokens";
 import { Avatar } from "../ui/Avatar";
-import { collectSenderAvatars } from "./senderAvatars";
+import { collectSenderDirectory } from "./senderAvatars";
 import { useT } from "../i18n/provider";
 import { MessageRow, type LinkedTaskChip } from "./MessageRow";
 import { computeMessageGrouping, hiddenSystemIds, retainGroupStates, systemRunHeads } from "./messageGrouping";
@@ -140,6 +141,14 @@ function mentionQuery(draft: string): string | null {
   const match = /(?:^|\s)@([\p{L}\p{N}_-]*)$/u.exec(draft);
   return match ? match[1] ?? "" : null;
 }
+
+// Per-boot sender-directory bookkeeping (#desktop-data-cache task #3): the
+// store holds one server's directory at a time. `seededDirectoryServer` marks
+// which server the cache seed has painted (once per boot — it must never
+// suppress the network fetch); `freshDirectoryServer` marks a server with a
+// successful network load, the only state that skips refetching.
+let seededDirectoryServer: string | null = null;
+let freshDirectoryServer: string | null = null;
 
 export function MessagePane({
   channelId,
@@ -374,6 +383,20 @@ export function MessagePane({
   useEffect(() => {
     if (!settingsChannelId || settingsChannelId === "pending-thread") return;
     let cancelled = false;
+    // Cold-start fast path (#desktop-data-cache task #3): seed the channel
+    // meta (name + DM peer avatar/name) from the cached channel row so an
+    // offline open shows the peer avatar instead of a hash icon; the network
+    // fetch below overwrites the seed once it answers.
+    try {
+      const runtime = getCacheRuntime();
+      const scope = runtime.scopeFor(sessionRef.current.serverId ?? "");
+      if (scope !== null) {
+        const row = runtime.repo.getChannels(scope).find((channel) => channel.id === settingsChannelId);
+        if (row && !cancelled) setMeta(parseChannelMeta(row.raw));
+      }
+    } catch {
+      // Cache unavailable — meta comes from the network below.
+    }
     void sessionRef.current.client.get<unknown>(`/channels/${settingsChannelId}`).then((data) => {
       if (cancelled || !isRecord(data)) return;
       setDm(!thread && data.type === "dm");
@@ -1111,14 +1134,46 @@ export function MessagePane({
 
   useEffect(() => {
     const serverId = session.serverId;
-    if (!serverId || Object.keys(useRaftStore.getState().senderAvatars).length > 0) return;
+    if (!serverId) return;
     let cancelled = false;
+    // Cold-start fast path (#desktop-data-cache task #3): paint the cached
+    // sender directory (agent/member avatar urls) before the network answers
+    // so offline message rows show real avatars instead of letters. Reseeded
+    // on server switches — the directory is per-server, and the old guard
+    // (non-empty map skips) kept the previous server's map forever.
+    if (seededDirectoryServer !== serverId) {
+      seededDirectoryServer = serverId;
+      if (freshDirectoryServer !== serverId) {
+        let avatars: Record<string, string> = {};
+        try {
+          const runtime = getCacheRuntime();
+          const scope = runtime.scopeFor(serverId);
+          if (scope !== null) avatars = readSenderDirectory(runtime.repo, scope)?.avatars ?? {};
+        } catch {
+          // Cache unavailable — fetch-only path below.
+        }
+        useRaftStore.getState().setSenderAvatars(avatars);
+      }
+    }
+    if (freshDirectoryServer === serverId) return;
     void Promise.all([
       sessionRef.current.client.get<unknown>("/agents").catch(() => null),
       sessionRef.current.client.get<unknown>(`/servers/${serverId}/members`).catch(() => null),
     ]).then(([agents, members]) => {
       if (cancelled) return;
-      useRaftStore.getState().setSenderAvatars(collectSenderAvatars(agents, members));
+      // Total failure (offline): keep the seed on screen and let the next
+      // channel open retry — unlike a half-failure, nothing new was learned.
+      if (agents === null && members === null) return;
+      freshDirectoryServer = serverId;
+      const directory = collectSenderDirectory(agents, members);
+      useRaftStore.getState().setSenderAvatars(directory.avatars);
+      try {
+        const runtime = getCacheRuntime();
+        const scope = runtime.scopeFor(serverId);
+        if (scope !== null) void writeSenderDirectory(runtime.repo, scope, directory);
+      } catch {
+        // Cache unavailable — the store still got the fresh map.
+      }
     });
     return () => {
       cancelled = true;

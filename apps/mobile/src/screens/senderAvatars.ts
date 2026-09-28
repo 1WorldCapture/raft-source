@@ -35,3 +35,15 @@ export function collectSenderNames(agents: unknown, members: unknown): Record<st
   add(isRecord(members) && Array.isArray(members.members) ? members.members : members, "userId");
   return map;
 }
+
+/**
+ * Both maps in one pass over the same two responses — the cacheable sender
+ * directory (#desktop-data-cache task #3): avatars make offline message rows
+ * render real avatars, names ride along for future name lookups.
+ */
+export function collectSenderDirectory(agents: unknown, members: unknown): { avatars: Record<string, string>; names: Record<string, string> } {
+  return {
+    avatars: collectSenderAvatars(agents, members),
+    names: collectSenderNames(agents, members),
+  };
+}

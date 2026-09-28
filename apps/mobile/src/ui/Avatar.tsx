@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Animated, Image, StyleSheet, View } from "react-native";
 import { User } from "lucide-react-native";
 import { pixelColor, resolvePixel } from "./pixelAvatar";
@@ -22,7 +22,12 @@ export function Avatar({
   const stroke = size >= 36 ? border.strong : border.hairline;
   const fill = kind === "agent" ? color.cyan : kind === "server" ? color.ink : color.lavender;
   const letter = (name.trim()[0] || "?").toUpperCase();
-  const photo = !pixel && avatarUrl && /^https?:\/\//.test(avatarUrl) ? avatarUrl : null;
+  // Photo avatars depend on the network; offline (or a dead url) the Image
+  // fails silently — fall back to the letter instead of an empty box. A new
+  // url on a recycled row resets the failure (#desktop-data-cache task #3).
+  const [photoFailed, setPhotoFailed] = useState(false);
+  useEffect(() => setPhotoFailed(false), [avatarUrl]);
+  const photo = !pixel && !photoFailed && avatarUrl && /^https?:\/\//.test(avatarUrl) ? avatarUrl : null;
   return (
     <View style={{ width: size, height: size }}>
       <View style={[styles.box, { width: size, height: size, borderWidth: stroke, backgroundColor: pixel ? pixel.bg : fill }]}>
@@ -35,7 +40,7 @@ export function Avatar({
             </View>
           ))
         ) : photo ? (
-          <Image source={{ uri: photo }} style={{ width: size - stroke * 2, height: size - stroke * 2 }} />
+          <Image onError={() => setPhotoFailed(true)} source={{ uri: photo }} style={{ width: size - stroke * 2, height: size - stroke * 2 }} />
         ) : kind === "human" ? (
           <User color={color.ink} size={Math.round(size * 0.5)} strokeWidth={2.25} />
         ) : (
