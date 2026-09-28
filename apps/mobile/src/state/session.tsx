@@ -8,6 +8,15 @@ import { isRecord, parseChannelUnread, parseUser, type RaftUser } from "../model
 import { useActivityStore } from "../activity/store";
 import { useTaskStore } from "../tasks/store";
 import { useBoardStore } from "../tasks/boardStore";
+import {
+  markCacheSocketDisconnected,
+  noteLiveMessage,
+  noteMessageUpdated,
+  noteReadState,
+  noteTaskDeleted,
+  noteTaskEvent,
+  runCacheGapSync,
+} from "../cache/cacheSyncRuntime";
 import { createRealtime, type Realtime } from "../realtime/socket";
 import { BUNDLED_SERVER_ORIGIN } from "../session/origin";
 import { shouldApplyServerResponse, shouldCommitTokens, shouldMarkVisibleRead, catchUpPlan, releaseFocus } from "./sessionPolicy";
@@ -184,6 +193,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     refreshTokens: () => client.refreshTokens(),
     onSessionExpired: () => clearAuth(),
     onMessage: (message) => {
+      noteLiveMessage(client, message);
       useRaftStore.getState().upsertMessages([message]);
       useRaftStore.getState().applyLiveToConversations(message);
       useActivityStore.getState().scheduleRefresh(client);
@@ -216,6 +226,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       }).catch(() => {});
     },
     onMessageUpdated: (message) => {
+      noteMessageUpdated(client, message);
       useRaftStore.getState().upsertMessages([message]);
     },
     onThreadUpdated: (summary) => {
@@ -236,6 +247,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       );
     },
     onReadState: (channelId) => {
+      noteReadState(client, [channelId]);
       useRaftStore.getState().clearChannelUnread(channelId);
       useRaftStore.getState().clearLiveUnread(channelId);
       useActivityStore.getState().applyReadStates([channelId]);
@@ -244,6 +256,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       scheduleBadgeRefresh();
     },
     onReadStateBulk: (scopeIds) => {
+      noteReadState(client, scopeIds);
       for (const scopeId of scopeIds) {
         useRaftStore.getState().clearChannelUnread(scopeId);
         useRaftStore.getState().clearLiveUnread(scopeId);
@@ -261,6 +274,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       useServerRailStore.getState().applyServerOrder(serverIds);
     },
     onConnect: () => {
+      void runCacheGapSync(client);
       void useTaskStore.getState().catchUp(client);
       // Events emitted while disconnected were lost — the board cannot be
       // fixed up incrementally, so reload it from page 1.
@@ -268,19 +282,23 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       if (board.loaded) void board.load(client);
     },
     onDisconnect: () => {
+      markCacheSocketDisconnected();
       useTaskStore.getState().markStale();
     },
     onTaskCreated: (payload) => {
+      noteTaskEvent(client, payload);
       useTaskStore.getState().applyCreated(payload);
       const board = useBoardStore.getState();
       if (board.loaded) for (const id of taskIdsFromEvent(payload)) board.noteTaskActivity(client, id);
     },
     onTaskUpdated: (payload) => {
+      noteTaskEvent(client, payload);
       useTaskStore.getState().applyUpdated(payload);
       const board = useBoardStore.getState();
       if (board.loaded) for (const id of taskIdsFromEvent(payload)) board.noteTaskActivity(client, id);
     },
     onTaskDeleted: (payload) => {
+      noteTaskDeleted(client, payload);
       useTaskStore.getState().applyDeleted(payload);
       const board = useBoardStore.getState();
       if (board.loaded) for (const id of taskIdsFromEvent(payload)) board.noteTaskActivity(client, id);
@@ -379,6 +397,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       backgroundAt.current = null;
       if (away > BACKGROUND_DISCONNECT_MS) realtime.reset();
       realtime.connect();
+      // Same foreground-return reasoning for the cache: onConnect can miss
+      // it, and events may have been lost in the background — run the gap
+      // sync loop regardless (it is cheap when already converged).
+      void runCacheGapSync(client);
       // The socket may have stayed up in the background, so onConnect can miss
       // the foreground return — reload the board the same way (load dedupes).
       const board = useBoardStore.getState();
