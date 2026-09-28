@@ -12,6 +12,7 @@ const EXPECTED_MAIN_LAYOUT_SOCKET_EVENTS = [
   "scope_read:updated",
   "read_state:updated",
   "read_state:updated_bulk",
+  "unread_summary:changed",
   "agent:activity",
   "agent:session",
   "dm:new",
