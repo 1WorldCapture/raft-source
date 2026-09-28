@@ -1154,6 +1154,38 @@ async function captureGlobalBoundary(
           AND tf.follower_id = ${principalId}::uuid
           AND tf.done_at IS NULL
           AND tf.unfollowed_at IS NULL
+        UNION
+        -- The enabled #all channel: every server human is implicitly joined,
+        -- so it never has a channel_humans row (addHuman skips it).
+        SELECT c.id::text AS "scopeId"
+        FROM channels c
+        LEFT JOIN user_channel_inbox_states inbox
+          ON inbox.channel_id = c.id AND inbox.user_id = ${principalId}::uuid
+        WHERE c.server_id = ${serverId}::uuid
+          AND c.type = 'channel'
+          AND c.name = 'all'
+          AND c.deleted_at IS NULL
+          AND c.archived_at IS NULL
+          AND inbox.done_at IS NULL
+        UNION
+        -- Unread personal mentions surface in Activity even without
+        -- membership or a follow (public channels, public threads); read-all
+        -- must clear them too. Authorization is re-checked below.
+        SELECT c.id::text AS "scopeId"
+        FROM message_mentions mm
+        INNER JOIN channels c
+          ON c.id = mm.channel_id
+         AND c.server_id = ${serverId}::uuid
+         AND c.type IN ('channel', 'private', 'joint', 'dm', 'thread')
+         AND c.deleted_at IS NULL
+         AND c.archived_at IS NULL
+        LEFT JOIN user_channel_read_cursors rc
+          ON rc.channel_id = c.id AND rc.user_id = ${principalId}::uuid
+        WHERE mm.target_type = 'user'
+          AND mm.target_id = ${principalId}::uuid
+          AND mm.server_id = ${serverId}::uuid
+          AND (mm.notifiable_at_send OR mm.notified_at IS NOT NULL)
+          AND mm.message_seq > COALESCE(rc.last_read_seq, 0)
         ORDER BY "scopeId"
       `)
     : await tx.execute(sql`
