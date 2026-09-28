@@ -7,6 +7,7 @@
 // restoring A's badges on top of B's session.
 import { create } from "zustand";
 import { activityUnreadByServer } from "../activity/model";
+import { getCacheRuntime } from "../cache/runtime";
 import { isRecord, parseServers, parseUnreadSummary, type RaftServer } from "../model/messages";
 
 /** Minimal client surface the store needs (session.client satisfies it). */
@@ -40,6 +41,30 @@ export function orderServersByStoredIds(servers: RaftServer[], storedIds: Readon
 export interface LoadServersResult {
   stale: boolean;
   server: RaftServer | null;
+}
+
+/**
+ * Persist the ordered server list to the local cache (#desktop-data-cache
+ * task #1) so an offline cold start can paint the rail and title. One write,
+ * to the ATTACHED scope only (review: per-server copies would queue N
+ * transactions ahead of message-cache writes and could drift apart). A cold
+ * start always lands on the last-selected server — the attached one — and a
+ * server switch re-runs loadServers after the session re-attach, so the new
+ * scope gets its copy then. Best-effort: no runtime / no attached scope yet
+ * (the pre-attach rail call on cold start) or a failed write just means the
+ * next successful load retries.
+ */
+function persistServersToCache(servers: readonly RaftServer[]): void {
+  void (async () => {
+    try {
+      const runtime = getCacheRuntime();
+      const scope = runtime.scopeId;
+      if (scope === null) return;
+      await runtime.repo.putKv(scope, "serverList", { servers: servers as unknown as Record<string, unknown>[] });
+    } catch {
+      // Cache unavailable — the rail works from the network.
+    }
+  })();
 }
 
 /**
@@ -105,6 +130,7 @@ export const useServerRailStore = create<ServerRailState>((set, get) => ({
       serverUnread: parseUnreadSummary(unreadData),
       activityUnread: activityUnreadByServer(unreadData),
     });
+    persistServersToCache(next);
     return { stale: false, server: next.find((server) => server.id === preferredId) ?? next[0] ?? null };
   },
 
@@ -125,6 +151,7 @@ export const useServerRailStore = create<ServerRailState>((set, get) => ({
     if (!Array.isArray(serverIds)) return;
     const ids = serverIds.filter((id): id is string => typeof id === "string");
     set((state) => ({ servers: orderServersByStoredIds(state.servers, ids) }));
+    persistServersToCache(get().servers);
   },
 
   reorderServers: async (client, orderedIds) => {
@@ -137,6 +164,7 @@ export const useServerRailStore = create<ServerRailState>((set, get) => ({
         const saved = data.serverOrder.filter((id): id is string => typeof id === "string");
         set((state) => ({ servers: orderServersByStoredIds(state.servers, saved) }));
       }
+      persistServersToCache(get().servers);
       return true;
     } catch {
       set({ servers: previous });

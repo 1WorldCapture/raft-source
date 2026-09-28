@@ -9,7 +9,9 @@ import { RailLayout } from "../../src/home/RailLayout";
 import { channelHasDraft } from "../../src/home/drafts";
 import { conversationUnreadCount, filterUnreadConversations } from "../../src/home/conversations";
 import { setCurrentServerRole } from "../../src/home/serverRole";
+import { serversFromCacheValue } from "../../src/home/serverRailCache";
 import { useServerRail } from "../../src/home/useServerRail";
+import { useServerRailStore } from "../../src/home/serverRailStore";
 import { formatRelativeTime, relativeTimeStrings } from "../../src/tasks/relativeTime";
 import { useT } from "../../src/i18n/provider";
 import { seedConversations } from "../../src/cache/boot";
@@ -130,6 +132,14 @@ export default function HomeScreen() {
         if (seeded.length > 0) useRaftStore.getState().setConversations(seeded);
         const cachedUnread = runtime.repo.getKv(scope, "channelUnread");
         if (cachedUnread) useRaftStore.getState().setChannelUnread(cachedUnread as unknown as Record<string, { unreadCount: number; hasMention: boolean }>);
+      }
+      // Server-rail seed (#desktop-data-cache task #1): same fast path for the
+      // rail and the header title — an offline cold start paints the cached
+      // server list; the loadServers call below overwrites it wholesale (and
+      // drops removed servers) once the network answers.
+      if (scope !== null && useServerRailStore.getState().servers.length === 0) {
+        const servers = serversFromCacheValue(runtime.repo.getKv(scope, "serverList"));
+        if (servers.length > 0) useServerRailStore.setState({ servers });
       }
     } catch {
       // Cache unavailable or not yet initialized.
