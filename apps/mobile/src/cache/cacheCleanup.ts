@@ -17,26 +17,33 @@ import type { CacheRepo } from "./repo";
 
 // ---- channel reconciliation -------------------------------------------------
 
+export type LiveChannel = { id: string; archivedAt?: string | null };
+
 export type ReconcileReport = {
   removed: string[];
 };
 
 /**
- * Drop cached channels that are absent from the live list. Call after a
- * successful channel-list refresh (task #2's home wiring): whatever the
- * server no longer returns — archived channels stay in the list until
- * unarchived, so absence means revoked access or deletion — must not stay
- * readable from the local cache.
+ * Drop cached channels that must not stay readable: absent from the live
+ * list (revoked access / deleted) OR archived (requirement: 「归档的删除，
+ * 其余的都保留」 — an archived channel disappears from the rail even though
+ * the server keeps returning it until unarchived).
+ *
+ * CONTRACT — call this ONLY with a complete list: /channels AND /channels/dm
+ * both succeeded with full results AND the scope has not switched since the
+ * fetches started. A failed, timed-out or partial fetch must skip the
+ * reconcile entirely — one network hiccup must never wipe the whole cache.
+ * The wiring (task #2 home refresh) owns that guard.
  */
 export async function reconcileChannels(
   repo: CacheRepo,
   scopeId: number,
-  liveChannelIds: readonly string[],
+  live: readonly LiveChannel[],
 ): Promise<ReconcileReport> {
-  const live = new Set(liveChannelIds);
+  const keep = new Set(live.filter((channel) => !channel.archivedAt).map((channel) => channel.id));
   const removed: string[] = [];
   for (const channel of repo.getChannels(scopeId)) {
-    if (!live.has(channel.id)) {
+    if (!keep.has(channel.id)) {
       await repo.deleteChannel(scopeId, channel.id);
       removed.push(channel.id);
     }

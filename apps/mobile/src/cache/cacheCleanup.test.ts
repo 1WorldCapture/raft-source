@@ -31,7 +31,10 @@ test("reconcileChannels deletes cached channels missing from the live list", asy
     window: { coveredFromSeq: 1, coveredThroughSeq: 1, hasGap: false },
   });
 
-  const report = await reconcileChannels(repo, scopeId, ["c1", "c3"]);
+  const report = await reconcileChannels(repo, scopeId, [
+    { id: "c1" },
+    { id: "c3" },
+  ]);
 
   assert.deepEqual(report.removed, ["c2"], "the revoked channel is removed, order preserved");
   assert.deepEqual(
@@ -45,8 +48,26 @@ test("reconcileChannels deletes cached channels missing from the live list", asy
 test("reconcileChannels with the full live list removes nothing", async () => {
   const { repo, scopeId } = fixture();
   await repo.putChannels(scopeId, [{ id: "c1", type: "channel", raw: { id: "c1" } }]);
-  const report = await reconcileChannels(repo, scopeId, ["c1"]);
+  const report = await reconcileChannels(repo, scopeId, [{ id: "c1" }]);
   assert.deepEqual(report.removed, []);
+});
+
+test("reconcileChannels also deletes archived channels still present in the list", async () => {
+  const { repo, scopeId } = fixture();
+  await repo.putChannels(scopeId, [
+    { id: "c1", type: "channel", raw: { id: "c1" } },
+    { id: "c9", type: "channel", raw: { id: "c9" } },
+  ]);
+  // The server still returns c9 — but archived. Requirement: archived goes.
+  const report = await reconcileChannels(repo, scopeId, [
+    { id: "c1" },
+    { id: "c9", archivedAt: "2026-09-28T00:00:00Z" },
+  ]);
+  assert.deepEqual(report.removed, ["c9"]);
+  assert.deepEqual(
+    repo.getChannels(scopeId).map((c) => c.id),
+    ["c1"],
+  );
 });
 
 test("historyDaysForPlan mirrors the shared limits table", () => {
