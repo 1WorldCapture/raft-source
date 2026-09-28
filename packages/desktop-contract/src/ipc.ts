@@ -434,3 +434,23 @@ export interface DeepLinkEvent {
 // ── Reserved for future phases ────────────────────
 // window.navigate, notification.subscribe, notification.click,
 // window.lifecycle, cancel, session.getOpaqueHandle
+
+// ── Electron shell event channels ─────────────────
+// The Electron app (apps/raft-desktop-electron) layers a small
+// ipcRenderer/ipcMain event surface on top of the typed invoke requests
+// above. Channel names live here so the preload, the main process and the
+// renderer share one source of truth instead of bare string literals that
+// can drift.
+export const ELECTRON_IPC_CHANNELS = {
+  /** renderer → main: set the macOS dock badge (0 clears it). */
+  setBadge: "app:set-badge",
+  /** renderer → main (invoke): is the shell window focused right now. */
+  isFocused: "app:is-focused",
+  /** main → renderer: focus/blur push for notification gating. */
+  focusState: "app:focus-state",
+  /** renderer → main: bring the window to front (OS notification click). */
+  focusWindow: "app:focus-window",
+} as const;
+
+export type ElectronIpcChannel =
+  (typeof ELECTRON_IPC_CHANNELS)[keyof typeof ELECTRON_IPC_CHANNELS];

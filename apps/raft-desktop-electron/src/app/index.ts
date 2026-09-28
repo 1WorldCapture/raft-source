@@ -16,6 +16,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { BrowserWindow, app, ipcMain, nativeImage, protocol, session, shell } from "electron";
+import { ELECTRON_IPC_CHANNELS } from "@raft/desktop-contract";
 import { runResident, runService } from "@botiverse/raft-computer/lib";
 import { installApplicationMenu } from "../main/appMenu.js";
 import {
@@ -105,6 +106,16 @@ if (!process.env.RAFT_COMPUTER_CLI_PATH) {
 }
 
 const headlessMode = findHeadlessMode(process.argv);
+
+// Dev-only: point this instance at its own userData directory. The
+// single-instance lock, login session and window state all key off userData,
+// so a second instance with its own dir runs fully isolated — local
+// verification of a dev build without disturbing the installed app (whose
+// window would otherwise pop to the foreground on single-instance activation).
+// Never active in packaged builds: the installed app must always share the
+// one canonical data dir.
+const userDataOverride = !app.isPackaged ? process.env.RAFT_DESKTOP_USER_DATA?.trim() : undefined;
+if (userDataOverride) app.setPath("userData", userDataOverride);
 
 let computerHost: ComputerHost | null = null;
 let menubarResident: MenubarResident | null = null;
@@ -216,12 +227,12 @@ function registerIpcHandlers(): void {
     else w.maximize();
   });
   ipcMain.on("window:close", (e) => BrowserWindow.fromWebContents(e.sender)?.close());
-  ipcMain.handle("app:is-focused", (e) => BrowserWindow.fromWebContents(e.sender)?.isFocused() ?? false);
-  ipcMain.on("app:set-badge", (_e, count: unknown) => {
+  ipcMain.handle(ELECTRON_IPC_CHANNELS.isFocused, (e) => BrowserWindow.fromWebContents(e.sender)?.isFocused() ?? false);
+  ipcMain.on(ELECTRON_IPC_CHANNELS.setBadge, (_e, count: unknown) => {
     const n = typeof count === "number" && Number.isFinite(count) ? Math.max(0, Math.round(count)) : 0;
     app.setBadgeCount(n);
   });
-  ipcMain.on("app:focus-window", (e) => {
+  ipcMain.on(ELECTRON_IPC_CHANNELS.focusWindow, (e) => {
     const w = BrowserWindow.fromWebContents(e.sender);
     if (!w) return;
     if (w.isMinimized()) w.restore();
@@ -383,8 +394,8 @@ function createMainWindow(): BrowserWindow {
   });
 
   // Native focus state → renderer (reliable substitute for document.hasFocus).
-  window.on("focus", () => window.webContents.send("app:focus-state", true));
-  window.on("blur", () => window.webContents.send("app:focus-state", false));
+  window.on("focus", () => window.webContents.send(ELECTRON_IPC_CHANNELS.focusState, true));
+  window.on("blur", () => window.webContents.send(ELECTRON_IPC_CHANNELS.focusState, false));
 
   // Menubar residency: closing the window (red button / Cmd+W) hides it and
   // the Dock icon instead of quitting — the Tray icon is the remaining
