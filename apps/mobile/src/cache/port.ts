@@ -8,9 +8,9 @@
 //
 // Reads are synchronous: they are local point lookups (sub-millisecond for
 // the sizes involved) and cold-start first paint (task #2) needs them before
-// an await boundary. ALL writes go through the async transaction API so the
-// JS thread is never blocked by realtime write-through bursts (Firstmate
-// review note #3).
+// an await boundary. ALL writes go through the exclusive async transaction
+// API with async statements, so the JS thread is never blocked by realtime
+// write-through bursts (Firstmate review note #3).
 
 export type SqliteValue = string | number | null;
 export type SqliteRow = Record<string, SqliteValue>;
@@ -26,13 +26,17 @@ export interface SqliteDb {
    * never blocks on realtime bursts (Firstmate review note #3).
    */
   run(sql: string, params?: SqliteValue[]): { changes: number };
-  /** Async write inside a transaction. Rollback on throw. */
-  write(fn: (tx: WriteTx) => Promise<void> | void): Promise<void>;
+  /**
+   * Exclusive async transaction: no other statement interleaves into it,
+   * and every statement inside is scheduled off the synchronous path.
+   * Rollback on throw.
+   */
+  write(fn: (tx: WriteTx) => Promise<void>): Promise<void>;
 }
 
-/** Statement handles valid only inside a `write` callback. */
+/** Async statement handles valid only inside a `write` callback. */
 export interface WriteTx {
-  run(sql: string, params?: SqliteValue[]): { changes: number };
+  run(sql: string, params?: SqliteValue[]): Promise<{ changes: number }>;
 }
 
 /** JSON helpers shared by the adapters and the repository. */

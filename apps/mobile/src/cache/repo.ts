@@ -6,8 +6,9 @@
 //
 // Concurrency model: reads are synchronous point lookups (cold-start paint);
 // the only synchronous writes are the one-shot schema/scope bootstrap. Every
-// data mutation runs in one async transaction (SqliteDb.write), so realtime
-// bursts never block the JS thread (Firstmate review note #3).
+// data mutation runs in one EXCLUSIVE async transaction with async
+// statements, so realtime bursts never block the JS thread and no other
+// statement can fold into an open transaction (Firstmate review notes).
 //
 // Cascades (review note #4): deleting a channel removes its thread channels'
 // messages/ranges/overlays/read-states too, via thread_links. Pruning
@@ -90,7 +91,7 @@ export function createCacheRepo(deps: CacheRepoDeps) {
   const now = deps.now ?? (() => new Date().toISOString());
   ensureSchema(db);
   // One boot id per repo instance = one per app launch (the overlay
-  // once-per-boot rule consumed by task #3 lives in overlay_pages.bookkeeping).
+  // once-per-boot rule consumed by task #3 lives in overlay_pages bookkeeping).
   const bootId = `boot_${now()}_${Math.random().toString(36).slice(2, 10)}`;
 
   // ---- scope management --------------------------------------------------
@@ -110,14 +111,14 @@ export function createCacheRepo(deps: CacheRepoDeps) {
 
   async function wipeScope(scopeId: number): Promise<void> {
     await db.write(async (tx) => {
-      for (const table of DATA_TABLES) tx.run(`DELETE FROM ${table} WHERE scopeId = ?`, [scopeId]);
-      tx.run("DELETE FROM scopes WHERE id = ?", [scopeId]);
+      for (const table of DATA_TABLES) await tx.run(`DELETE FROM ${table} WHERE scopeId = ?`, [scopeId]);
+      await tx.run("DELETE FROM scopes WHERE id = ?", [scopeId]);
     });
   }
 
   async function wipeAll(): Promise<void> {
     await db.write(async (tx) => {
-      for (const table of [...DATA_TABLES, "scopes"]) tx.run(`DELETE FROM ${table}`);
+      for (const table of [...DATA_TABLES, "scopes"]) await tx.run(`DELETE FROM ${table}`);
     });
   }
 
@@ -153,7 +154,7 @@ export function createCacheRepo(deps: CacheRepoDeps) {
     await db.write(async (tx) => {
       const ts = now();
       for (const row of rows) {
-        tx.run(
+        await tx.run(
           `INSERT INTO channels (scopeId, channelId, type, lastMessageAt, raw, updatedAt)
            VALUES (?, ?, ?, ?, ?, ?)
            ON CONFLICT (scopeId, channelId) DO UPDATE SET
@@ -173,7 +174,7 @@ export function createCacheRepo(deps: CacheRepoDeps) {
            AND channelId NOT IN (${kept.length > 0 ? kept.map(() => "?").join(",") : "SELECT '' WHERE 1=0"})`,
         [scopeId, ...types, ...kept],
       );
-      for (const row of stale) deleteChannelTx(tx, scopeId, String(row.channelId));
+      for (const row of stale) await deleteChannelTx(tx, scopeId, String(row.channelId));
     });
   }
 
@@ -216,10 +217,10 @@ export function createCacheRepo(deps: CacheRepoDeps) {
   async function appendPage(scopeId: number, channelId: string, page: AppendPage): Promise<void> {
     await db.write(async (tx) => {
       for (const message of page.messages) {
-        upsertMessageTx(tx, scopeId, channelId, message.seq, message.id, message.raw);
+        await upsertMessageTx(tx, scopeId, channelId, message.seq, message.id, message.raw);
       }
       const range = pageRange(page.messages, page.window);
-      if (range) recordRangeTx(tx, scopeId, channelId, range);
+      if (range) await recordRangeTx(tx, scopeId, channelId, range);
     });
   }
 
@@ -236,13 +237,13 @@ export function createCacheRepo(deps: CacheRepoDeps) {
     opts: { connected: boolean },
   ): Promise<void> {
     await db.write(async (tx) => {
-      upsertMessageTx(tx, scopeId, channelId, message.seq, message.id, message.raw);
+      await upsertMessageTx(tx, scopeId, channelId, message.seq, message.id, message.raw);
       if (!opts.connected) return;
       const ranges = getCoverage(scopeId, channelId);
       if (!canExtendTailWithLive(ranges, message.seq, true)) return;
       const tail = ranges.find((range) => range.throughSeq + 1 === message.seq);
       if (tail) {
-        tx.run(
+        await tx.run(
           "UPDATE channel_ranges SET throughSeq = ? WHERE scopeId = ? AND channelId = ? AND fromSeq = ?",
           [message.seq, scopeId, channelId, tail.fromSeq],
         );
@@ -255,12 +256,12 @@ export function createCacheRepo(deps: CacheRepoDeps) {
     await db.write(async (tx) => {
       const ts = now();
       for (const message of page.messages) {
-        writeOverlayTx(tx, scopeId, channelId, message.seq, message.raw, message.updatedAt ?? ts, ts);
+        await writeOverlayTx(tx, scopeId, channelId, message.seq, message.raw, message.updatedAt ?? ts, ts);
       }
       for (const [parentMessageId, summary] of Object.entries(page.threadSummaries ?? {})) {
-        writeThreadSummaryTx(tx, scopeId, channelId, parentMessageId, summary, ts);
+        await writeThreadSummaryTx(tx, scopeId, channelId, parentMessageId, summary, ts);
       }
-      tx.run(
+      await tx.run(
         `INSERT INTO overlay_pages (scopeId, channelId, fromSeq, throughSeq, refreshedAt, bootId)
          VALUES (?, ?, ?, ?, ?, ?)
          ON CONFLICT (scopeId, channelId, fromSeq) DO UPDATE SET
@@ -280,14 +281,14 @@ export function createCacheRepo(deps: CacheRepoDeps) {
   ): Promise<void> {
     await db.write(async (tx) => {
       const ts = now();
-      writeOverlayTx(tx, scopeId, channelId, message.seq, message.raw, message.updatedAt ?? ts, ts);
+      await writeOverlayTx(tx, scopeId, channelId, message.seq, message.raw, message.updatedAt ?? ts, ts);
     });
   }
 
   /** thread:updated / threads-endpoint write-through. */
   async function applyThreadSummary(scopeId: number, summary: ThreadSummaryInput): Promise<void> {
     await db.write(async (tx) => {
-      writeThreadSummaryTx(
+      await writeThreadSummaryTx(
         tx,
         scopeId,
         summary.parentChannelId,
@@ -321,7 +322,7 @@ export function createCacheRepo(deps: CacheRepoDeps) {
       )[0];
       const storedRevision = stored ? Number(stored.revision) : null;
       if (!taskRevisionGate(storedRevision, task.revision)) return;
-      tx.run(
+      await tx.run(
         `INSERT INTO task_rows (scopeId, taskId, revision, raw, updatedAt)
          VALUES (?, ?, ?, ?, ?)
          ON CONFLICT (scopeId, taskId) DO UPDATE SET
@@ -335,7 +336,7 @@ export function createCacheRepo(deps: CacheRepoDeps) {
 
   async function deleteTask(scopeId: number, taskId: string): Promise<void> {
     await db.write(async (tx) => {
-      tx.run("DELETE FROM task_rows WHERE scopeId = ? AND taskId = ?", [scopeId, taskId]);
+      await tx.run("DELETE FROM task_rows WHERE scopeId = ? AND taskId = ?", [scopeId, taskId]);
     });
   }
 
@@ -363,7 +364,7 @@ export function createCacheRepo(deps: CacheRepoDeps) {
         [scopeId, channelId],
       )[0];
       if (stored && Number(stored.version) >= version) return;
-      tx.run(
+      await tx.run(
         `INSERT INTO read_states (scopeId, channelId, maxReadSeq, version)
          VALUES (?, ?, ?, ?)
          ON CONFLICT (scopeId, channelId) DO UPDATE SET
@@ -393,7 +394,7 @@ export function createCacheRepo(deps: CacheRepoDeps) {
 
   async function putInboxPage(scopeId: number, pageNo: number, raw: RawRecord): Promise<void> {
     await db.write(async (tx) => {
-      tx.run(
+      await tx.run(
         `INSERT INTO inbox_pages (scopeId, pageNo, raw, fetchedAt)
          VALUES (?, ?, ?, ?)
          ON CONFLICT (scopeId, pageNo) DO UPDATE SET
@@ -411,7 +412,7 @@ export function createCacheRepo(deps: CacheRepoDeps) {
 
   async function putKv(scopeId: number, key: string, value: RawRecord): Promise<void> {
     await db.write(async (tx) => {
-      tx.run(
+      await tx.run(
         `INSERT INTO kv (scopeId, key, value) VALUES (?, ?, ?)
          ON CONFLICT (scopeId, key) DO UPDATE SET value = excluded.value`,
         [scopeId, key, encodeJson(value)],
@@ -435,12 +436,12 @@ export function createCacheRepo(deps: CacheRepoDeps) {
       const channels = db.all("SELECT DISTINCT channelId FROM messages WHERE scopeId = ?", [scopeId]);
       for (const channelRow of channels) {
         const channelId = String(channelRow.channelId);
-        tx.run(
+        await tx.run(
           `DELETE FROM messages
            WHERE scopeId = ? AND channelId = ? AND sentAt IS NOT NULL AND sentAt < ?`,
           [scopeId, channelId, olderThanIso],
         );
-        tx.run(
+        await tx.run(
           `DELETE FROM message_overlays
            WHERE scopeId = ? AND channelId = ?
              AND seq NOT IN (SELECT seq FROM messages WHERE scopeId = ? AND channelId = ?)`,
@@ -449,28 +450,28 @@ export function createCacheRepo(deps: CacheRepoDeps) {
         const remaining = db
           .all("SELECT seq FROM messages WHERE scopeId = ? AND channelId = ? ORDER BY seq", [scopeId, channelId])
           .map((row) => Number(row.seq));
-        tx.run("DELETE FROM channel_ranges WHERE scopeId = ? AND channelId = ?", [scopeId, channelId]);
+        await tx.run("DELETE FROM channel_ranges WHERE scopeId = ? AND channelId = ?", [scopeId, channelId]);
         for (const run of contiguousRuns(remaining)) {
-          tx.run(
+          await tx.run(
             "INSERT INTO channel_ranges (scopeId, channelId, fromSeq, throughSeq) VALUES (?, ?, ?, ?)",
             [scopeId, channelId, run.fromSeq, run.throughSeq],
           );
         }
         if (remaining.length > 0) {
           const floor = remaining[0];
-          tx.run(
+          await tx.run(
             "DELETE FROM overlay_pages WHERE scopeId = ? AND channelId = ? AND throughSeq < ?",
             [scopeId, channelId, floor],
           );
-          tx.run(
+          await tx.run(
             "UPDATE overlay_pages SET fromSeq = ? WHERE scopeId = ? AND channelId = ? AND fromSeq < ?",
             [floor, scopeId, channelId, floor],
           );
         } else {
-          tx.run("DELETE FROM overlay_pages WHERE scopeId = ? AND channelId = ?", [scopeId, channelId]);
+          await tx.run("DELETE FROM overlay_pages WHERE scopeId = ? AND channelId = ?", [scopeId, channelId]);
         }
       }
-      tx.run(
+      await tx.run(
         `DELETE FROM thread_summaries WHERE scopeId = ? AND NOT EXISTS (
            SELECT 1 FROM messages m
            WHERE m.scopeId = thread_summaries.scopeId
@@ -483,15 +484,15 @@ export function createCacheRepo(deps: CacheRepoDeps) {
 
   // ---- internals --------------------------------------------------------------
 
-  function upsertMessageTx(
+  async function upsertMessageTx(
     tx: WriteTx,
     scopeId: number,
     channelId: string,
     seq: number,
     messageId: string,
     raw: RawRecord,
-  ): void {
-    tx.run(
+  ): Promise<void> {
+    await tx.run(
       `INSERT INTO messages (scopeId, channelId, seq, messageId, senderType, senderId, sentAt, bodyRaw)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (scopeId, channelId, seq) DO UPDATE SET
@@ -513,19 +514,19 @@ export function createCacheRepo(deps: CacheRepoDeps) {
     );
   }
 
-  function recordRangeTx(tx: WriteTx, scopeId: number, channelId: string, range: Range): void {
+  async function recordRangeTx(tx: WriteTx, scopeId: number, channelId: string, range: Range): Promise<void> {
     const existing = getCoverage(scopeId, channelId);
     const merged = mergeRanges(existing, range);
-    tx.run("DELETE FROM channel_ranges WHERE scopeId = ? AND channelId = ?", [scopeId, channelId]);
+    await tx.run("DELETE FROM channel_ranges WHERE scopeId = ? AND channelId = ?", [scopeId, channelId]);
     for (const row of merged) {
-      tx.run(
+      await tx.run(
         "INSERT INTO channel_ranges (scopeId, channelId, fromSeq, throughSeq) VALUES (?, ?, ?, ?)",
         [scopeId, channelId, row.fromSeq, row.throughSeq],
       );
     }
   }
 
-  function writeOverlayTx(
+  async function writeOverlayTx(
     tx: WriteTx,
     scopeId: number,
     channelId: string,
@@ -533,7 +534,7 @@ export function createCacheRepo(deps: CacheRepoDeps) {
     raw: RawRecord,
     effectiveAt: string,
     writeTs: string,
-  ): void {
+  ): Promise<void> {
     const stored = db.all(
       "SELECT updatedAt FROM message_overlays WHERE scopeId = ? AND channelId = ? AND seq = ?",
       [scopeId, channelId, seq],
@@ -542,7 +543,7 @@ export function createCacheRepo(deps: CacheRepoDeps) {
       const storedUpdatedAt = typeof stored.updatedAt === "string" ? stored.updatedAt : null;
       if (!overlayIsNewer(storedUpdatedAt, effectiveAt)) return;
     }
-    tx.run(
+    await tx.run(
       `INSERT INTO message_overlays (scopeId, channelId, seq, raw, updatedAt)
        VALUES (?, ?, ?, ?, ?)
        ON CONFLICT (scopeId, channelId, seq) DO UPDATE SET
@@ -552,15 +553,15 @@ export function createCacheRepo(deps: CacheRepoDeps) {
     );
   }
 
-  function writeThreadSummaryTx(
+  async function writeThreadSummaryTx(
     tx: WriteTx,
     scopeId: number,
     parentChannelId: string,
     parentMessageId: string,
     summary: RawRecord & { threadChannelId?: string },
     ts: string,
-  ): void {
-    tx.run(
+  ): Promise<void> {
+    await tx.run(
       `INSERT INTO thread_summaries (scopeId, parentChannelId, parentMessageId, raw, updatedAt)
        VALUES (?, ?, ?, ?, ?)
        ON CONFLICT (scopeId, parentChannelId, parentMessageId) DO UPDATE SET
@@ -569,7 +570,7 @@ export function createCacheRepo(deps: CacheRepoDeps) {
       [scopeId, parentChannelId, parentMessageId, encodeJson(summary), ts],
     );
     if (typeof summary.threadChannelId === "string" && summary.threadChannelId) {
-      tx.run(
+      await tx.run(
         `INSERT INTO thread_links (scopeId, parentChannelId, parentMessageId, threadChannelId)
          VALUES (?, ?, ?, ?)
          ON CONFLICT (scopeId, threadChannelId) DO UPDATE SET
@@ -581,25 +582,25 @@ export function createCacheRepo(deps: CacheRepoDeps) {
   }
 
   /** Cascade delete a channel plus every thread channel hanging under it. */
-  function deleteChannelTx(tx: WriteTx, scopeId: number, channelId: string): void {
+  async function deleteChannelTx(tx: WriteTx, scopeId: number, channelId: string): Promise<void> {
     const threadChannels = db.all(
       "SELECT threadChannelId FROM thread_links WHERE scopeId = ? AND parentChannelId = ?",
       [scopeId, channelId],
     );
     const channelIds = [channelId, ...threadChannels.map((row) => String(row.threadChannelId))];
     for (const id of channelIds) {
-      tx.run("DELETE FROM messages WHERE scopeId = ? AND channelId = ?", [scopeId, id]);
-      tx.run("DELETE FROM channel_ranges WHERE scopeId = ? AND channelId = ?", [scopeId, id]);
-      tx.run("DELETE FROM overlay_pages WHERE scopeId = ? AND channelId = ?", [scopeId, id]);
-      tx.run("DELETE FROM message_overlays WHERE scopeId = ? AND channelId = ?", [scopeId, id]);
-      tx.run("DELETE FROM read_states WHERE scopeId = ? AND channelId = ?", [scopeId, id]);
+      await tx.run("DELETE FROM messages WHERE scopeId = ? AND channelId = ?", [scopeId, id]);
+      await tx.run("DELETE FROM channel_ranges WHERE scopeId = ? AND channelId = ?", [scopeId, id]);
+      await tx.run("DELETE FROM overlay_pages WHERE scopeId = ? AND channelId = ?", [scopeId, id]);
+      await tx.run("DELETE FROM message_overlays WHERE scopeId = ? AND channelId = ?", [scopeId, id]);
+      await tx.run("DELETE FROM read_states WHERE scopeId = ? AND channelId = ?", [scopeId, id]);
     }
-    tx.run("DELETE FROM thread_summaries WHERE scopeId = ? AND parentChannelId = ?", [scopeId, channelId]);
-    tx.run(
+    await tx.run("DELETE FROM thread_summaries WHERE scopeId = ? AND parentChannelId = ?", [scopeId, channelId]);
+    await tx.run(
       "DELETE FROM thread_links WHERE scopeId = ? AND (parentChannelId = ? OR threadChannelId = ?)",
       [scopeId, channelId, channelId],
     );
-    tx.run("DELETE FROM channels WHERE scopeId = ? AND channelId = ?", [scopeId, channelId]);
+    await tx.run("DELETE FROM channels WHERE scopeId = ? AND channelId = ?", [scopeId, channelId]);
   }
 
   return {
