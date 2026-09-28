@@ -39,9 +39,9 @@ test("serversFromCacheValue round-trips a cached list and degrades junk to empty
   assert.deepEqual(serversFromCacheValue({ servers: [{ id: 1 }, "junk", { id: "ok", name: "OK", slug: "ok" }] }).map((s) => s.id), ["ok"], "invalid rows dropped, valid ones kept");
 });
 
-test("loadServers persists the list under every member server's scope", async () => {
+test("loadServers persists the list exactly once, to the attached scope (review: no per-server copies)", async () => {
   __resetCacheRuntimeSingleton();
-  const runtime = freshRuntime();
+  const runtime = freshRuntime(); // attached to srv-a
   useServerRailStore.getState().reset();
   await useServerRailStore.getState().loadServers(
     liveClient([{ id: "srv-a", name: "A", slug: "a" }, { id: "srv-b", name: "B", slug: "b" }]),
@@ -50,9 +50,8 @@ test("loadServers persists the list under every member server's scope", async ()
   const scopeA = runtime.scopeFor("srv-a");
   const scopeB = runtime.scopeFor("srv-b");
   assert.notEqual(scopeA, null);
-  assert.notEqual(scopeB, null);
   assert.deepEqual(serversFromCacheValue(await untilKv(scopeA as number)).map((s) => s.id), ["srv-a", "srv-b"]);
-  assert.deepEqual(serversFromCacheValue(await untilKv(scopeB as number)).map((s) => s.id), ["srv-a", "srv-b"], "the scope a cold start lands on also finds the list");
+  assert.equal(runtime.repo.getKv(scopeB as number, "serverList"), null, "other servers' scopes are NOT written");
 });
 
 test("a newer loadServers overwrites the cached list (removed servers disappear)", async () => {
@@ -89,6 +88,21 @@ test("applyServerOrder re-persists the new order for offline cold starts", async
     ids = serversFromCacheValue(runtime.repo.getKv(scope, "serverList")).map((s) => s.id);
   }
   assert.deepEqual(ids, ["srv-b", "srv-a"], "cached order tracks the live reorder");
+});
+
+test("switching servers re-runs loadServers against the newly attached scope", async () => {
+  __resetCacheRuntimeSingleton();
+  const runtime = freshRuntime(); // attached to srv-a
+  useServerRailStore.getState().reset();
+  await useServerRailStore.getState().loadServers(liveClient([{ id: "srv-a", name: "A", slug: "a" }]), "srv-a");
+  const scopeA = runtime.scopeFor("srv-a") as number;
+  await untilKv(scopeA);
+  // Server switch: the session re-attaches, then loadServers runs again —
+  // the same in-memory list lands in the NEW scope, one write at a time.
+  runtime.attach("https://raft.example", "user-1", "srv-b");
+  await useServerRailStore.getState().loadServers(liveClient([{ id: "srv-a", name: "A", slug: "a" }, { id: "srv-b", name: "B", slug: "b" }]), "srv-b");
+  const scopeB = runtime.scopeFor("srv-b") as number;
+  assert.deepEqual(serversFromCacheValue(await untilKv(scopeB)).map((s) => s.id), ["srv-a", "srv-b"], "a cold start on the switched-to server finds the list");
 });
 
 test("resetAll (logout / origin change) clears the cached server list", async () => {

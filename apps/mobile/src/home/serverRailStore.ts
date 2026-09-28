@@ -45,22 +45,22 @@ export interface LoadServersResult {
 
 /**
  * Persist the ordered server list to the local cache (#desktop-data-cache
- * task #1) so an offline cold start can paint the rail and title. The list is
- * origin+user data, but the kv store is scope-partitioned (per server), so the
- * same snapshot is written under every member server's scope — whichever
- * server a cold start lands on finds it. Best-effort: no runtime / no scope
- * yet (child effects run before the session attach) or a failed write just
- * means the next successful load retries.
+ * task #1) so an offline cold start can paint the rail and title. One write,
+ * to the ATTACHED scope only (review: per-server copies would queue N
+ * transactions ahead of message-cache writes and could drift apart). A cold
+ * start always lands on the last-selected server — the attached one — and a
+ * server switch re-runs loadServers after the session re-attach, so the new
+ * scope gets its copy then. Best-effort: no runtime / no attached scope yet
+ * (the pre-attach rail call on cold start) or a failed write just means the
+ * next successful load retries.
  */
 function persistServersToCache(servers: readonly RaftServer[]): void {
   void (async () => {
     try {
       const runtime = getCacheRuntime();
-      for (const server of servers) {
-        const scope = runtime.scopeFor(server.id);
-        if (scope === null) continue;
-        await runtime.repo.putKv(scope, "serverList", { servers: servers as unknown as Record<string, unknown>[] });
-      }
+      const scope = runtime.scopeId;
+      if (scope === null) return;
+      await runtime.repo.putKv(scope, "serverList", { servers: servers as unknown as Record<string, unknown>[] });
     } catch {
       // Cache unavailable — the rail works from the network.
     }
