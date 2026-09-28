@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { StyleSheet, View } from "react-native";
+import { StatusBar } from "expo-status-bar";
 import { SafeAreaInsetsContext, useSafeAreaInsets } from "react-native-safe-area-context";
 import { RefreshCw, WifiOff } from "lucide-react-native";
 import { useOfflineStore } from "../cache/cacheCleanup";
@@ -38,6 +39,8 @@ export function ConnectionBanner({ children }: { children: ReactNode }) {
   if (!offline && !updating) return <>{children}</>;
   return (
     <>
+      {/* The ink strip sits under the status bar: switch its icons to light so the clock stays readable. */}
+      {offline ? <StatusBar style="light" /> : null}
       <View
         accessibilityLiveRegion="polite"
         style={[styles.bar, offline ? styles.offline : styles.updating, { paddingTop: insets.top + 6 }]}
