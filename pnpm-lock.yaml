@@ -621,10 +621,10 @@ importers:
         version: link:../sync-core
       marked:
         specifier: ^18.0.7
-        version: 18.0.14
+        version: 18.0.7
       marked-plaintify:
         specifier: ^1.1.1
-        version: 1.1.1(marked@18.0.14)
+        version: 1.1.1(marked@18.0.7)
       zod:
         specifier: ^4.3.6
         version: 4.3.6
@@ -16514,10 +16514,6 @@ snapshots:
       - supports-color
 
   markdown-table@3.0.4: {}
-
-  marked-plaintify@1.1.1(marked@18.0.14):
-    dependencies:
-      marked: 18.0.14
 
   marked-plaintify@1.1.1(marked@18.0.7):
     dependencies:
