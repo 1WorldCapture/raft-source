@@ -98,3 +98,29 @@ export function getCacheRuntime(): CacheRuntime {
 export function __resetCacheRuntimeSingleton(): void {
   singleton = null;
 }
+
+// ---- sync cancellation seam (review fix #3) --------------------------------
+//
+// The session layer must cancel in-flight sync/write-through BEFORE wiping
+// the DB on logout/origin change, or late responses write data back into a
+// cleared cache. #3's wiring registers its canceller here; the session calls
+// cancelCacheSync() at the top of logout/origin-change. No-op when nothing
+// is registered (e.g. #3 not wired yet, tests).
+
+type CancelFn = () => void;
+
+let registeredCancel: CancelFn | null = null;
+
+/** #3's sync runner registers its canceller; null unregisters. */
+export function registerCacheSyncCancel(fn: CancelFn | null): void {
+  registeredCancel = fn;
+}
+
+/** Cancel any registered in-flight cache sync/write-through (best-effort). */
+export function cancelCacheSync(): void {
+  try {
+    registeredCancel?.();
+  } catch {
+    // Cancellation must never block logout.
+  }
+}

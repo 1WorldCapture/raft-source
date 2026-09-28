@@ -46,6 +46,36 @@ export function hydrateCachedMessages(rows: readonly CachedMessage[]): RaftMessa
   return out;
 }
 
+/**
+ * Drain an `after=` catch-up to the newest tail (review fix): a full page
+ * means MORE newer messages exist beyond it, so keep paging until a short
+ * page — otherwise a >PAGE gap offline shows stale content with hasNewer
+ * false. `maxPages` caps pathological loops (default 40 pages ≈ 2000
+ * messages).
+ */
+export async function drainAfterPages<T>(
+  startAfter: number,
+  fetchPage: (after: number) => Promise<readonly T[]>,
+  isFull: (page: readonly T[]) => boolean,
+  maxPages = 40,
+): Promise<{ pages: T[][]; lastSeq: number }> {
+  const pages: T[][] = [];
+  let after = startAfter;
+  let lastSeq = startAfter;
+  for (let fetched = 0; fetched < maxPages; fetched += 1) {
+    const page = await fetchPage(after);
+    if (page.length === 0) break;
+    pages.push([...page]);
+    for (const item of page) {
+      const seq = (item as { seq?: unknown }).seq;
+      if (typeof seq === "number" && seq > lastSeq) lastSeq = seq;
+    }
+    if (!isFull(page)) break;
+    after = lastSeq;
+  }
+  return { pages, lastSeq };
+}
+
 type RawPageLike = {
   messages?: unknown;
   messageWindow?: {

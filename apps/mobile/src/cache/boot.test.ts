@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  drainAfterPages,
   hydrateCachedMessages,
   latestCoverageThrough,
   messageFetchPlan,
@@ -75,4 +76,32 @@ test("rawPageForCache extracts rows and coerces the coverage window", () => {
     toRow,
   );
   assert.deepEqual(windowed.window, { coveredFromSeq: 1, coveredThroughSeq: 9, hasGap: false });
+});
+
+test("drainAfterPages pages until a short page and caps runaway loops", async () => {
+  let calls = 0;
+  const fake = async (after: number) => {
+    calls += 1;
+    // Three full pages of 50, then a short page of 3.
+    if (calls <= 3) return Array.from({ length: 50 }, (_, i) => ({ seq: after + i + 1 }));
+    return [{ seq: after + 1 }, { seq: after + 2 }, { seq: after + 3 }];
+  };
+  const drained = await drainAfterPages(100, fake, (p) => p.length >= 50);
+  assert.equal(drained.pages.length, 4);
+  assert.equal(drained.lastSeq, 100 + 150 + 3);
+  assert.equal(calls, 4);
+
+  // Runaway: always-full fetcher stops at the cap without hanging.
+  let endless = 0;
+  const result = await drainAfterPages(0, async (after) => {
+    endless += 1;
+    return Array.from({ length: 50 }, (_, i) => ({ seq: after + i + 1 }));
+  }, (p) => p.length >= 50, 5);
+  assert.equal(result.pages.length, 5);
+  assert.equal(endless, 5);
+
+  // Empty first page: nothing pulled.
+  const empty = await drainAfterPages(7, async () => [], (p) => p.length >= 50);
+  assert.deepEqual(empty.pages, []);
+  assert.equal(empty.lastSeq, 7);
 });
