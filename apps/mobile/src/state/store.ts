@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { useActivityStore } from "../activity/store";
 import { useTaskStore } from "../tasks/store";
+import { useBoardStore } from "../tasks/boardStore";
 import { maxSeq } from "../model/messages";
 import { reconcileIncoming } from "../model/reconcile";
 import { applyLiveMessage, replaceConversations, shouldRefreshForUnknownChannel, type ConversationEntry } from "../home/conversations";
@@ -115,6 +116,9 @@ export const useRaftStore = create<RaftDataState>((set) => ({
   clearServerData: () => {
     useActivityStore.getState().reset();
     useTaskStore.getState().reset();
+    // The tasks board would otherwise stay loaded from the previous server
+    // (its load() early-returns while loaded) after a rail switch.
+    useBoardStore.getState().reset();
     set({
       messagesByChannel: {},
       threadSummaries: {},

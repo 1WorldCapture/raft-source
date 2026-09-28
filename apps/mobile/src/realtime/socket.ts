@@ -19,6 +19,7 @@ export interface RealtimeOptions {
   onReadStateBulk: (scopeIds: string[]) => void;
   onDirectoryChanged: (joinChannelId?: string) => void;
   onRoomsJoined: () => void;
+  onServerOrderUpdated: (serverIds: unknown) => void;
   onConnect: () => void;
   onDisconnect: () => void;
   onTaskCreated: (payload: unknown) => void;
@@ -189,6 +190,10 @@ export function createRealtime(options: RealtimeOptions) {
       if (scopeIds.length > 0) options.onReadStateBulk(scopeIds);
     });
     created.on("channel:updated", () => options.onDirectoryChanged());
+    created.on("server_order:updated", (payload: unknown) => {
+      if (!isRecord(payload) || !Array.isArray(payload.serverIds)) return;
+      options.onServerOrderUpdated(payload.serverIds);
+    });
     created.on("dm:new", (payload: unknown) => {
       const channelId = channelIdFrom(payload);
       if (channelId) created.emit("join:channel", channelId);

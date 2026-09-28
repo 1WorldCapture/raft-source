@@ -12,6 +12,7 @@ import { createRealtime, type Realtime } from "../realtime/socket";
 import { BUNDLED_SERVER_ORIGIN } from "../session/origin";
 import { shouldApplyServerResponse, shouldCommitTokens, shouldMarkVisibleRead, catchUpPlan, releaseFocus } from "./sessionPolicy";
 import { useRaftStore } from "./store";
+import { useServerRailStore } from "../home/serverRailStore";
 
 const ORIGIN = "raft_mobile_origin";
 const ACCESS = "raft_mobile_access";
@@ -129,6 +130,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     bumpServerEpoch();
     apply({ accessToken: null, refreshToken: null, user: null, serverId: null });
     useRaftStore.getState().clearServerData();
+    useServerRailStore.getState().reset();
     useRaftStore.getState().setNotice(null);
     void persistTokens(null);
     void SecureStore.deleteItemAsync(SERVER);
@@ -231,6 +233,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     onRoomsJoined: () => {
       useRaftStore.getState().bumpDirectory();
       void useActivityStore.getState().refresh(client);
+    },
+    onServerOrderUpdated: (serverIds) => {
+      useServerRailStore.getState().applyServerOrder(serverIds);
     },
     onConnect: () => {
       void useTaskStore.getState().catchUp(client);
@@ -355,6 +360,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       // the foreground return — reload the board the same way (load dedupes).
       const board = useBoardStore.getState();
       if (board.loaded) void board.load(client);
+      // Cross-server rail dots cannot arrive over the (single, active-server)
+      // socket; refresh them when the app returns to the foreground.
+      void useServerRailStore.getState().refreshBadges(client);
       void flushReads();
     });
     return () => subscription.remove();
