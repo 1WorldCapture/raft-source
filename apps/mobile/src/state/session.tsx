@@ -169,6 +169,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     onSessionExpired: () => clearAuth(),
     onMessage: (message) => {
       useRaftStore.getState().upsertMessages([message]);
+      useRaftStore.getState().applyLiveToConversations(message);
       useActivityStore.getState().scheduleRefresh(client);
       if (shouldMarkVisibleRead(focusedRef.current, message.channelId)) {
         useRaftStore.getState().clearLiveUnread(message.channelId);
