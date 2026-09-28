@@ -72,6 +72,23 @@ export function replaceConversations(_current: ConversationEntry[], freshChannel
   return buildConversations(freshChannels);
 }
 
+const REFRESHABLE_CHANNEL_TYPES: ReadonlySet<string> = new Set(["channel", "private", "joint", "dm"]);
+
+/**
+ * Should a live message for a channel missing from the list trigger a full
+ * refresh (new DM peer, newly joined channel)? The channel list never includes
+ * thread channels, so the server's `conversationContext.channelType` decides:
+ * thread replies are ignored, and a missing type (older server) is treated
+ * conservatively — no refresh, rather than one per thread reply.
+ */
+export function shouldRefreshForUnknownChannel(
+  message: Pick<RaftMessage, "channelId" | "conversationChannelType">,
+  listedChannelIds: ReadonlySet<string>,
+): boolean {
+  if (listedChannelIds.has(message.channelId)) return false;
+  return message.conversationChannelType != null && REFRESHABLE_CHANNEL_TYPES.has(message.conversationChannelType);
+}
+
 /**
  * Merge one live `message:new` into the list. Thread replies arrive with the
  * thread channel's id, which is never a conversation entry, so they fall out

@@ -96,7 +96,7 @@ const styles = StyleSheet.create({
   unread: { fontWeight: "700" },
   time: { ...fontSize.time, color: color.inkFaint, flexShrink: 0, fontFamily: "mono", marginLeft: "auto", paddingLeft: 8 },
   summaryLine: { alignItems: "center", flexDirection: "row", gap: 6 },
-  summary: { ...fontSize.bodySm, color: color.inkLabel, flexShrink: 1 },
+  summary: { ...fontSize.bodySm, color: color.inkLabel, flex: 1, flexShrink: 1 },
   summaryUnread: { color: color.ink, fontWeight: "700" },
   marks: { alignItems: "center", flexDirection: "row", gap: 4, flexShrink: 0 },
 });

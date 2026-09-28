@@ -94,6 +94,8 @@ export const mobileEn = {
   "mobile.conversations.attachmentCount": "{n, plural, one {# file} other {# files}}",
   "mobile.conversations.taskLabel": "Task #{n}",
   "mobile.conversations.noMessages": "No messages yet",
+  "mobile.conversations.unreadOnly": "Unread",
+  "mobile.conversations.unreadEmpty": "No unread conversations",
 } as const;
 
 export const mobileZh: Record<keyof typeof mobileEn, string> = {
@@ -188,6 +190,8 @@ export const mobileZh: Record<keyof typeof mobileEn, string> = {
   "mobile.conversations.attachmentCount": "[附件]×{n}",
   "mobile.conversations.taskLabel": "任务 #{n}",
   "mobile.conversations.noMessages": "暂无消息",
+  "mobile.conversations.unreadOnly": "未读",
+  "mobile.conversations.unreadEmpty": "没有未读会话",
 };
 
 export type MobileId = keyof typeof mobileEn;
