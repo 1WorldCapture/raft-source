@@ -35,3 +35,34 @@ export function collectSenderNames(agents: unknown, members: unknown): Record<st
   add(isRecord(members) && Array.isArray(members.members) ? members.members : members, "userId");
   return map;
 }
+
+/**
+ * Both maps in one pass over the same two responses — the cacheable sender
+ * directory (#desktop-data-cache task #3): avatars make offline message rows
+ * render real avatars, names ride along for future name lookups.
+ */
+export function collectSenderDirectory(agents: unknown, members: unknown): { avatars: Record<string, string>; names: Record<string, string> } {
+  return {
+    avatars: collectSenderAvatars(agents, members),
+    names: collectSenderNames(agents, members),
+  };
+}
+
+/** Per-process seed/fresh milestones for one server's sender directory. */
+export interface SenderDirectoryGate {
+  seededServer: string | null;
+  freshServer: string | null;
+}
+
+/**
+ * What the loader should do for this server under the current gate: seed the
+ * cached avatars (once per process unless the gate was cleared — logout /
+ * server switch via clearServerData), and fetch from the network unless a
+ * fresh load already landed for this server.
+ */
+export function senderDirectoryStep(gate: SenderDirectoryGate, serverId: string): { seed: boolean; fetch: boolean } {
+  return {
+    seed: gate.seededServer !== serverId && gate.freshServer !== serverId,
+    fetch: gate.freshServer !== serverId,
+  };
+}
