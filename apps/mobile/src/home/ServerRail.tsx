@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Pressable, StyleSheet, View, type LayoutChangeEvent, type NativeScrollEvent, type NativeSyntheticEvent } from "react-native";
+import { LayoutAnimation, Platform, Pressable, StyleSheet, UIManager, View, type LayoutChangeEvent, type NativeScrollEvent, type NativeSyntheticEvent } from "react-native";
 import { Gesture, GestureDetector, ScrollView } from "react-native-gesture-handler";
+import * as Haptics from "expo-haptics";
 import type { RaftServer } from "../model/messages";
 import { HardShadow } from "../ui/shadow";
 import { AppText } from "../ui/text";
@@ -15,6 +16,10 @@ const COMPACT_RAIL_WIDTH = 52;
 const COMPACT_TILE = 36;
 /** Hold time before a tile starts following the finger (task #4). */
 const DRAG_ACTIVATE_MS = 350;
+/** Neighbours slide into their new slots instead of jumping (task #5). */
+const REFLOW = LayoutAnimation.create(140, LayoutAnimation.Types.easeInEaseOut, LayoutAnimation.Properties.opacity);
+
+if (Platform.OS === "android") UIManager.setLayoutAnimationEnabledExperimental?.(true);
 
 // Discord-style server rail (home task #10; scrolling task #3, drag reorder
 // task #4 in #mobile-server-rail): one square tile per server, the current one
@@ -47,7 +52,9 @@ export function ServerRail({
   // Local drag shadow: while dragging, `order` is the working order and `dy`
   // the finger travel. Dropped or cancelled → null, prop order takes over
   // again (the caller applies it optimistically to the store).
-  const [drag, setDrag] = useState<{ id: string; order: RaftServer[]; dy: number } | null>(null);
+  // `startY` is the tile's slot top when the drag began: the finger position
+  // is startY + dy regardless of how many times the working order reflowed.
+  const [drag, setDrag] = useState<{ id: string; order: RaftServer[]; dy: number; startY: number } | null>(null);
   const overflow = railOverflow({ offset, viewport, contentHeight });
   const displayServers = drag ? drag.order : servers;
 
@@ -70,11 +77,12 @@ export function ServerRail({
   // Which slot the dragged tile's center is closest to, from the measured
   // layouts of the CURRENT working order. Scroll is disabled for the whole
   // gesture, so screen-space travel maps 1:1 onto content space.
-  const targetIndexFor = useCallback((order: RaftServer[], id: string, dy: number): number => {
+  const targetIndexFor = useCallback((order: RaftServer[], id: string, startY: number, dy: number): number => {
     const center = (entry: { y: number; height: number }) => entry.y + entry.height / 2;
     const draggedLayout = slotLayouts.current[id];
     if (!draggedLayout) return order.findIndex((server) => server.id === id);
-    const draggedCenter = center(draggedLayout) + dy;
+    // Anchor on where the drag started, not the slot's current (reflowed) y.
+    const draggedCenter = startY + draggedLayout.height / 2 + dy;
     let best = 0;
     let bestDistance = Number.POSITIVE_INFINITY;
     order.forEach((server, index) => {
@@ -90,15 +98,18 @@ export function ServerRail({
   }, []);
 
   const beginDrag = useCallback((id: string) => {
-    setDrag({ id, order: servers, dy: 0 });
+    setDrag({ id, order: servers, dy: 0, startY: slotLayouts.current[id]?.y ?? 0 });
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
   }, [servers]);
 
   const moveDrag = useCallback((id: string, dy: number) => {
     setDrag((current) => {
       if (!current || current.id !== id) return current;
       const from = current.order.findIndex((server) => server.id === id);
-      const to = targetIndexFor(current.order, id, dy);
+      const to = targetIndexFor(current.order, id, current.startY, dy);
       if (to < 0 || to === from) return { ...current, dy };
+      LayoutAnimation.configureNext(REFLOW);
+      void Haptics.selectionAsync().catch(() => {});
       const order = current.order.slice();
       const [moved] = order.splice(from, 1);
       order.splice(to, 0, moved);
@@ -112,6 +123,8 @@ export function ServerRail({
       const originalIds = servers.map((server) => server.id);
       const finalIds = current.order.map((server) => server.id);
       if (finalIds.join("\n") !== originalIds.join("\n")) onReorder(finalIds);
+      // Settle the lifted tile into its slot rather than snapping.
+      LayoutAnimation.configureNext(REFLOW);
       return null;
     });
   }, [onReorder, servers]);
@@ -136,7 +149,8 @@ export function ServerRail({
             compact={compact}
             currentId={currentId}
             dragging={drag?.id === server.id}
-            dragDy={drag?.id === server.id ? drag.dy : 0}
+            // Visual lift = finger position minus the slot's current top.
+            dragDy={drag?.id === server.id ? drag.startY + drag.dy - (slotLayouts.current[server.id]?.y ?? drag.startY) : 0}
             onBeginDrag={beginDrag}
             onDragMove={moveDrag}
             onDragEnd={endDrag}
@@ -201,14 +215,21 @@ function RailSlot({
         style={[
           styles.slot,
           compact ? styles.slotCompact : null,
-          dragging ? { opacity: 0.85, transform: [{ translateY: dragDy }], zIndex: 1, elevation: 2 } : null,
+          dragging ? { transform: [{ translateY: dragDy }], zIndex: 2, elevation: 4 } : null,
         ]}
       >
         {({ pressed }) => (
           <View style={styles.slotInner}>
+            {dragging ? (
+              // Placeholder: a dashed outline where the tile will land.
+              <View pointerEvents="none" style={[styles.placeholder, compact ? styles.tileCompact : null, { transform: [{ translateY: -dragDy }] }]} />
+            ) : null}
             {server.id === currentId ? <View style={[styles.indicator, compact ? styles.indicatorCompact : null]} /> : null}
-            <HardShadow offset={server.id === currentId && !pressed ? shadowOffset.sm : shadowOffset.pressed}>
-              <View style={[styles.tile, compact ? styles.tileCompact : null, server.id === currentId ? styles.tileSelected : null, dragging ? styles.tileDragging : null]}>
+            <HardShadow
+              offset={dragging ? shadowOffset.md : server.id === currentId && !pressed ? shadowOffset.sm : shadowOffset.pressed}
+              style={dragging ? styles.lifted : null}
+            >
+              <View style={[styles.tile, compact ? styles.tileCompact : null, server.id === currentId ? styles.tileSelected : null]}>
                 <AppText numberOfLines={1} style={[styles.initial, compact ? styles.initialCompact : null]}>{serverInitial(server.name)}</AppText>
               </View>
             </HardShadow>
@@ -253,7 +274,17 @@ const styles = StyleSheet.create({
     width: TILE,
   },
   tileSelected: { backgroundColor: color.yellow },
-  tileDragging: { opacity: 0.9 },
+  // Lifted tile: bigger hard shadow, slightly larger and tilted, like a card
+  // picked up off the rail.
+  lifted: { transform: [{ scale: 1.12 }, { rotate: "-4deg" }] },
+  placeholder: {
+    borderColor: color.ink,
+    borderStyle: "dashed",
+    borderWidth: border.strong,
+    height: TILE,
+    position: "absolute",
+    width: TILE,
+  },
   initial: { color: color.ink, fontSize: 18, fontWeight: "700", lineHeight: 22 },
   initialCompact: { fontSize: 15, lineHeight: 18 },
   dot: {
