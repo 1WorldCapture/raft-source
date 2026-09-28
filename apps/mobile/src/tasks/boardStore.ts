@@ -19,6 +19,7 @@
 import { create } from "zustand";
 import type { ApiClient } from "../api/client";
 import { isRecord } from "../model/messages";
+import { getCacheRuntime } from "../cache/runtime";
 import { applyThreadActivityToTask, boardStatusParam, parseBoardTask, reconcileByIds, taskMatchesThread, type BoardTask, type BoardViewer, type ThreadActivityEvent } from "./board";
 import { parseTask } from "./model";
 
@@ -80,6 +81,16 @@ export type BoardStoreDeps = {
   clearTimeout?: (handle: unknown) => void;
   /** Injectable clock for deterministic day-rollover tests. */
   now?: () => Date;
+  /**
+   * Local cache access for the boot fast-path (#client-data-cache task #2):
+   * seed the board from `board_page` before the network answers and persist
+   * each successful load. Absent in tests and when the cache is unavailable.
+   */
+  cache?: {
+    scopeFor(serverId: string): number | null;
+    readBoardPage(scope: number): unknown;
+    writeBoardPage(scope: number, tasks: BoardTask[]): void;
+  };
 };
 
 function parseBoardPage(data: unknown): { tasks: BoardTask[]; nextCursor: string | null } {
@@ -172,6 +183,8 @@ export function createBoardStore(deps: BoardStoreDeps = {}) {
         if (ticket !== loadTicket) return;
         loadedDay = dayKeyOf(now());
         set({ tasks, loading: false, loaded: true, error: null });
+        const writeScope = deps.cache && get().serverId !== null ? deps.cache.scopeFor(get().serverId as string) : null;
+        if (deps.cache && writeScope !== null) deps.cache.writeBoardPage(writeScope, tasks);
       } catch (caught) {
         if (ticket !== loadTicket) return;
         set({ loading: false, error: caught instanceof Error && caught.message ? caught.message : "Request failed" });
@@ -182,6 +195,15 @@ export function createBoardStore(deps: BoardStoreDeps = {}) {
       const state = get();
       if (state.loaded && state.serverId === serverId) return;
       set({ serverId });
+      // Boot fast-path: show the cached board rows immediately, then let the
+      // network load below correct them (server switches included — each
+      // server's cache is its own scope).
+      const seedScope = deps.cache ? deps.cache.scopeFor(serverId) : null;
+      if (deps.cache && seedScope !== null) {
+        const cachedPage = deps.cache.readBoardPage(seedScope);
+        const parsed = parseBoardPage(cachedPage);
+        if (parsed.tasks.length > 0) set({ tasks: parsed.tasks, loaded: true });
+      }
       await get().load(client);
     },
 
@@ -262,4 +284,28 @@ export function createBoardStore(deps: BoardStoreDeps = {}) {
   return useBoardStore;
 }
 
-export const useBoardStore = createBoardStore();
+export const useBoardStore = createBoardStore({
+  cache: {
+    scopeFor(serverId) {
+      try {
+        return getCacheRuntime().scopeFor(serverId);
+      } catch {
+        return null;
+      }
+    },
+    readBoardPage(scope) {
+      try {
+        return getCacheRuntime().repo.getKv(scope, "board_page");
+      } catch {
+        return null;
+      }
+    },
+    writeBoardPage(scope, tasks) {
+      try {
+        void getCacheRuntime().repo.putKv(scope, "board_page", { tasks: tasks as unknown as Record<string, unknown>[] });
+      } catch {
+        // Cache unavailable — the board works from the network.
+      }
+    },
+  },
+});

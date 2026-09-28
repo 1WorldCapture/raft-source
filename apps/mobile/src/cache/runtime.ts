@@ -31,9 +31,15 @@ export type CacheRuntime = {
   /**
    * Attach (or switch to) a scope. Synchronous by design: it is a
    * bootstrap-time idempotent insert, and cold-start first paint needs the
-   * scope id before any await boundary.
+   * scope id before any await boundary. Remembers the identity so callers
+   * can scope other servers (e.g. during a server switch) via scopeFor.
    */
   attach(origin: string, userId: string, serverId: string): number;
+  /**
+   * Scope id for another server under the attached identity — null before
+   * the first attach. Never creates bogus partitions with empty keys.
+   */
+  scopeFor(serverId: string): number | null;
   /** Logout: wipe the attached account+server partition, then detach. */
   logout(): Promise<void>;
   /** Origin change: the whole local DB is disposable. */
@@ -43,22 +49,30 @@ export type CacheRuntime = {
 export function createCacheRuntime(deps: CacheRuntimeDeps): CacheRuntime {
   const repo = createCacheRepo({ db: deps.openDb(), now: deps.now });
   let scopeId: number | null = null;
+  let identity: { origin: string; userId: string } | null = null;
   return {
     repo,
     get scopeId() {
       return scopeId;
     },
     attach(origin, userId, serverId) {
+      identity = { origin, userId };
       scopeId = repo.openScope(origin, userId, serverId);
       return scopeId;
+    },
+    scopeFor(serverId) {
+      if (identity === null || !serverId) return null;
+      return repo.openScope(identity.origin, identity.userId, serverId);
     },
     async logout() {
       if (scopeId !== null) await repo.wipeScope(scopeId);
       scopeId = null;
+      identity = null;
     },
     async resetAll() {
       await repo.wipeAll();
       scopeId = null;
+      identity = null;
     },
   };
 }

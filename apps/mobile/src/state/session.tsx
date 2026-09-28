@@ -22,6 +22,18 @@ import { BUNDLED_SERVER_ORIGIN } from "../session/origin";
 import { shouldApplyServerResponse, shouldCommitTokens, shouldMarkVisibleRead, catchUpPlan, releaseFocus } from "./sessionPolicy";
 import { useRaftStore } from "./store";
 import { useServerRailStore } from "../home/serverRailStore";
+import { getCacheRuntime, initCacheRuntime } from "../cache/runtime";
+import { openExpoSqliteDb } from "../cache/portExpo";
+
+// Cache runtime is initialized once per process. The lazy flag keeps tests
+// (which never mount this provider) from touching sqlite.
+let cacheRuntimeReady = false;
+function ensureCacheRuntime() {
+  if (!cacheRuntimeReady) {
+    initCacheRuntime({ openDb: () => openExpoSqliteDb("raft-cache.sqlite") });
+    cacheRuntimeReady = true;
+  }
+}
 
 const ORIGIN = "raft_mobile_origin";
 const ACCESS = "raft_mobile_access";
@@ -393,6 +405,21 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     realtime.connect();
   }, [realtime, snapshot.accessToken, snapshot.origin, snapshot.ready, snapshot.serverId]);
 
+  // Local cache scope follows the session (#client-data-cache task #2):
+  // attach is a synchronous idempotent bootstrap write, so cold-start first
+  // paint (home seeding) can read the scope before any await boundary.
+  // Server switches re-attach without wiping; logout/origin-change wipe in
+  // their own handlers.
+  useEffect(() => {
+    if (!snapshot.ready || !snapshot.user || !snapshot.serverId || !snapshot.origin) return;
+    try {
+      ensureCacheRuntime();
+      getCacheRuntime().attach(snapshot.origin, snapshot.user.id, snapshot.serverId);
+    } catch {
+      // Cache unavailable (e.g. storage failure) — the app works without it.
+    }
+  }, [snapshot.ready, snapshot.user, snapshot.serverId, snapshot.origin]);
+
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (state) => {
       if (state === "background" || state === "inactive") {
@@ -441,7 +468,16 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setOrigin: async (origin: string) => {
       const changed = origin !== snapshotRef.current.origin;
       await SecureStore.setItemAsync(ORIGIN, origin);
-      if (changed) clearAuth();
+      if (changed) {
+        clearAuth();
+        // Whole local DB is disposable on origin change (#1 draft decision).
+        try {
+          ensureCacheRuntime();
+          void getCacheRuntime().resetAll();
+        } catch {
+          // Non-fatal.
+        }
+      }
       apply({ origin });
     },
     login: async (email: string, password: string) => {
@@ -455,6 +491,15 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     logout: async () => {
       const refreshToken = snapshotRef.current.refreshToken;
       clearAuth();
+      // Wipe the local cache partition for this account+server (#4 contract)
+      // — best-effort; in-flight cache writes are cancelled by Anna's #3
+      // sync layer before this runs.
+      try {
+        ensureCacheRuntime();
+        await getCacheRuntime().logout();
+      } catch {
+        // Cache wipe failure is non-fatal.
+      }
       if (!refreshToken) return;
       try {
         await client.post("/auth/logout", { refreshToken }, { auth: false, server: false });
