@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, BackHandler, FlatList, Modal, Pressable, RefreshControl, StyleSheet, View, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import { Activity, Bookmark, ChevronDown, Search } from "lucide-react-native";
 import { ApiError, StaleRequestError } from "../../src/api/client";
 import { ConversationRow } from "../../src/home/ConversationRow";
@@ -144,6 +144,22 @@ export default function HomeScreen() {
     });
     return () => subscription.remove();
   }, [menu]);
+
+  // Returning to the tab no longer reloads the list, but the header badges
+  // (activity count, other-server dots) would sit stale until the next full
+  // reload — refresh just the unread summary instead (review point on #52).
+  useFocusEffect(useCallback(() => {
+    const startedTicket = loadTicket.current;
+    const currentSession = sessionRef.current;
+    if (!currentSession.ready) return;
+    void currentSession.client.get<unknown>("/servers/unread-summary", { server: false })
+      .then((data) => {
+        if (startedTicket !== loadTicket.current) return;
+        setServerUnread(parseUnreadSummary(data));
+        setActivityUnread(activityUnreadByServer(data));
+      })
+      .catch(() => {});
+  }, []));
 
   const markRead = useCallback((channel: RaftChannel) => {
     Alert.alert(channelLabel(channel), undefined, [
