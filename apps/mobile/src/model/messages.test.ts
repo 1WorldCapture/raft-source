@@ -49,3 +49,18 @@ test("mergeMessages keeps an unsent row after messages that have a seq", () => {
   );
   assert.deepEqual(merged.map((message) => message.id), ["old", "new", "optimistic-1"]);
 });
+
+test("parseCreatedAt normalizes pg-format timestamps (server sync endpoint shape)", async () => {
+  const { parseCreatedAt } = await import("./messages.ts");
+  // BackendDev finding (task #8): /messages/sync without channel_id emits
+  // pg row timestamps like '2026-09-28 11:34:17.509+00'. Hermes only
+  // guarantees ISO for Date.parse, so the normalizer must convert before
+  // parsing — and already-stored caches carry this shape too.
+  assert.equal(parseCreatedAt("2026-09-28 11:34:17.509+00"), "2026-09-28T11:34:17.509Z");
+  assert.equal(parseCreatedAt("2026-09-28 11:34:17+00"), "2026-09-28T11:34:17.000Z");
+  assert.equal(parseCreatedAt("2026-09-28 11:34:17.509123+00"), "2026-09-28T11:34:17.509Z");
+  assert.equal(parseCreatedAt("2026-09-28 11:34:17.509+08"), "2026-09-28T03:34:17.509Z");
+  assert.equal(parseCreatedAt("2026-09-28T11:34:17.509Z"), "2026-09-28T11:34:17.509Z");
+  // Unparseable input falls back to the original string, never throws.
+  assert.equal(parseCreatedAt("not a date"), "not a date");
+});
