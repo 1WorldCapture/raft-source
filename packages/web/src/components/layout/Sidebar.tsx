@@ -42,7 +42,7 @@ import { useUIStore } from "../../store/uiStore";
 import { useMessageStore } from "../../store/messageStore";
 import { useThreadStore } from "../../store/threadStore";
 import { useInboxStore } from "../../store/inboxStore";
-import { SERVER_NOTIFICATION_PREFS_UPDATED_EVENT } from "../../store/events/notificationPrefsEvents";
+import { useServerUnreadSummaryStore } from "../../store/serverUnreadSummaryStore";
 import { trackActivityOpen } from "../../analytics/activity";
 import { useSavedStore } from "../../store/savedStore";
 import { useProfileStore } from "../../store/profileStore";
@@ -91,8 +91,7 @@ import {
 import { isElectronDesktopShell } from "../../utils/desktopShell";
 import { getMachineRunLabelDescriptor } from "../../utils/machineRunLabel";
 import { MachineRunLabel } from "../machine/MachineRunLabel";
-import { hasOtherServerActivityUnread, parseServerUnreadSummaryRows, retainServerUnreadSummary } from "../../utils/serverUnreadSummary";
-import type { ServerUnreadSummary } from "../../utils/serverUnreadSummary";
+import { hasOtherServerActivityUnread } from "../../utils/serverUnreadSummary";
 import { mobileServerSelectorPolygon } from "./mobileServerSelectorGeometry";
 import {
   centeredSidebarScrollTop,
@@ -1145,16 +1144,6 @@ export default function Sidebar({ mobileInline, bottomSlot, workspaceRailMode }:
   // <AgentDmRow> leaves; the parent derives only narrowed aggregates below
   // (`unreadFlags` for collapsed-section dots, `closedDmUnreadIds` for the
   // closed-DM auto-reopen). Non-reactive one-off reads use getState().
-  // Narrowed trigger for the eager cross-server unread-summary refetch below.
-  // Subscribing the effect to the whole `unreadCounts` Record made it re-run
-  // (and fire GET /servers/unread-summary) on EVERY inbound message, because
-  // messageStore rebuilds the Record with a new reference per `message:new`.
-  // The cross-server badge only cares whether *any* local unread exists, so we
-  // collapse to a boolean — it flips on 0↔nonzero transitions, not per message.
-  // (Mirrors the LeftRail/ChatPanel narrowing in PR #2590.)
-  const hasLocalUnread = useMessageStore((s) =>
-    Object.values(s.unreadCounts).some((count) => count > 0),
-  );
   const markRead = useMessageStore((s) => s.markRead);
   // Stryker disable next-line ArrowFunction: adjacent pre-existing selector is outside the Activity mute behavior slice.
   const markUnread = useMessageStore((s) => s.markUnread);
@@ -1194,7 +1183,7 @@ export default function Sidebar({ mobileInline, bottomSlot, workspaceRailMode }:
   const createAgentMenuRef = useRef<HTMLDivElement | null>(null);
   const [showCreateExternalAgent, setShowCreateExternalAgent] = useState(false);
   const [showInviteHuman, setShowInviteHuman] = useState(false);
-  const [serverUnreadCounts, setServerUnreadCounts] = useState<Record<string, ServerUnreadSummary>>({});
+  const serverUnreadCounts = useServerUnreadSummaryStore((s) => s.byServer);
   const currentServerActivityCount = server?.id
     ? serverUnreadCounts[server.id]?.activityUnreadCount
     : undefined;
@@ -1538,61 +1527,17 @@ export default function Sidebar({ mobileInline, bottomSlot, workspaceRailMode }:
     });
   };
 
-  const loadServerUnreadSummary = useCallback(async () => {
-    try {
-      const { data } = await api.get("/servers/unread-summary");
-      const next = parseServerUnreadSummaryRows(data);
-      setServerUnreadCounts((previous) => retainServerUnreadSummary(previous, next));
-    } catch {
-      // Ignore fetch failures to avoid sidebar noise.
-    }
-  }, []);
-
+  // The cross-server unread summary lives in the shared
+  // serverUnreadSummaryStore (one copy for LeftRail, Sidebar and the server
+  // switcher; poll/focus/read-action/socket refreshes live there too).
+  // Retaining it here keeps the poll alive for as long as the sidebar is
+  // mounted, which covers the mobile-inline layout where LeftRail is absent.
   useEffect(() => {
-    if (!user || servers.length === 0) {
-      setServerUnreadCounts({});
-      return;
-    }
-
-    loadServerUnreadSummary();
-
-    const intervalId = window.setInterval(() => {
-      loadServerUnreadSummary();
-    }, 30_000);
-    const handleFocus = () => {
-      loadServerUnreadSummary();
-    };
-    const handleVisibility = () => {
-      if (document.visibilityState === "visible") {
-        loadServerUnreadSummary();
-      }
-    };
-    const handleNotificationPrefsUpdated = () => {
-      loadServerUnreadSummary();
-    };
-
-    window.addEventListener("focus", handleFocus);
-    // Stryker disable next-line StringLiteral: pre-existing browser visibility wiring is outside the notification-prefs behavior slice.
-    document.addEventListener("visibilitychange", handleVisibility);
-    window.addEventListener(SERVER_NOTIFICATION_PREFS_UPDATED_EVENT, handleNotificationPrefsUpdated);
+    useServerUnreadSummaryStore.getState().retain();
     return () => {
-      window.clearInterval(intervalId);
-      window.removeEventListener("focus", handleFocus);
-      // Stryker disable next-line StringLiteral: cleanup mirrors the pre-existing browser visibility listener above.
-      document.removeEventListener("visibilitychange", handleVisibility);
-      window.removeEventListener(SERVER_NOTIFICATION_PREFS_UPDATED_EVENT, handleNotificationPrefsUpdated);
+      useServerUnreadSummaryStore.getState().release();
     };
-  }, [user, servers, loadServerUnreadSummary]);
-
-  // Refresh server unread summary eagerly when unread counters change
-  // (e.g. incoming message or mark-read), instead of waiting for polling.
-  useEffect(() => {
-    if (!user || servers.length === 0) return;
-    const timeoutId = window.setTimeout(() => {
-      loadServerUnreadSummary();
-    }, 150);
-    return () => window.clearTimeout(timeoutId);
-  }, [hasLocalUnread, user, servers.length, loadServerUnreadSummary]);
+  }, []);
 
   const hasOtherServerUnread = hasOtherServerActivityUnread(servers, server, serverUnreadCounts);
 
