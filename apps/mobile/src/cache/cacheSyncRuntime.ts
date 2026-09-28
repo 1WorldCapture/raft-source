@@ -37,6 +37,10 @@ function ensureCacheSync(client: ApiClient): CacheSync | null {
       // bigserial through the raw row path), unlike /messages/channel which
       // sends a number. parseMessage drops string seqs to undefined, so
       // normalize here or the whole gap sync silently persists zero rows.
+      // KEPT even though the server fix (task #7) has landed: unupgraded
+      // servers (e.g. current production) still emit the legacy shape, and
+      // the seed-path regression proved how silently this degrades. The
+      // same compatibility lives in api/sync.ts (reconnect catch-up).
       const rows = Array.isArray(data)
         ? data
         : typeof data === "object" && data !== null && Array.isArray((data as { messages?: unknown }).messages)
