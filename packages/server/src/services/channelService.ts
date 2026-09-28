@@ -17,8 +17,9 @@ import {
   type RisingWaveInboxRfc056ServingMode,
   type RisingWaveInboxItemsServingVersion,
 } from "../db/risingwave.js";
-import { channels, channelAgents, channelHumans, channelMembershipRoleEvents, dmChannelIdentities, agents, users, serverMembers, serverAgentMembers, messages, userChannelReadCursors, userChannelInboxStates, userChannelDisplayPrefs, inboxTargetMuteStates, inboxSuppressionStates, agentChannelReadCursors, servers, threadFollows, agentActivityEvents, tasks, taskEvents, jointChannels, jointChannelServers, jointChannelInvites, readMutationAuthorities, externalMessageAuthorFacts, externalProjectionAvatarArtifacts, externalActorProjections, externalAddressabilityProjections, externalAppRegistrations, externalChannelBindings } from "../db/schema.js";
+import { attachments, channels, channelAgents, channelHumans, channelMembershipRoleEvents, dmChannelIdentities, agents, users, serverMembers, serverAgentMembers, messages, userChannelReadCursors, userChannelInboxStates, userChannelDisplayPrefs, inboxTargetMuteStates, inboxSuppressionStates, agentChannelReadCursors, servers, threadFollows, agentActivityEvents, tasks, taskEvents, jointChannels, jointChannelServers, jointChannelInvites, readMutationAuthorities, externalMessageAuthorFacts, externalProjectionAvatarArtifacts, externalActorProjections, externalAddressabilityProjections, externalAppRegistrations, externalChannelBindings } from "../db/schema.js";
 import { gt, gte } from "drizzle-orm";
+import { buildMessagePreview, type MessagePreview } from "@botiverse/raft-shared/src/messageSnippet.js";
 import { assertJointChannelCreationCapacity, getJointChannelCreationEntitlement, isChannelReadOnlyByBillingFeature, withServerLock, withServerResourceLock } from "./planService.js";
 import { CHANNEL_MANAGEMENT_CAPABILITIES, MAX_JOINT_CHANNEL_SERVERS, PLAN_CONFIG, canAddChannelMembers, canGuestJoinChannel, canGuestPostToChannel, canGuestReadChannel, channelTypeSupportsActivityMute, currentDate, formatInboxScopeCorruptionLine, getChannelAdminBasis, getEffectiveLimits, hasEffectiveChannelCapability, makeInboxScopeReadFrontier, type AgentActivity, type ChannelRole, type InboxScopeCursorCorruption, type InboxScopeReadFrontier, type ServerId, type ServerPlan, type ServerRole, type TraceAttributes, type TrajectoryEntry } from "@botiverse/raft-shared";
 import { untracedDbQuery, type DbQueryTracer } from "../tracing/dbQueryTrace.js";
@@ -998,6 +999,8 @@ interface ChannelListOptions {
   archived?: ArchivedFilter;
   traceQuery?: DbQueryTracer;
   humanActivityMuteEnabled?: boolean;
+  /** Attach `lastMessagePreview` (conversation-list surfaces only). */
+  includeLastMessagePreview?: boolean;
 }
 
 export type ReadStateSnapshot = {
@@ -1275,13 +1278,36 @@ const RW_INBOX_ITEMS_V1_SERVING_VIEW = "rw_inbox_items_v1";
 const RW_INBOX_ITEMS_V2_SERVING_VIEW = "rw_inbox_items_v2_suppressed_v3_4";
 const RW_INBOX_ITEMS_V3_SERVING_VIEW = "rw_inbox_items_v3_2";
 
+type LastMessageRow = {
+  channelId: string;
+  lastMessageAt: Date | string | null;
+  messageId: string | null;
+  senderType: string | null;
+  senderId: string | null;
+  messageType: string | null;
+  content: string | null;
+  taskNumber: number | null;
+};
+
+/**
+ * Attach each conversation's latest-message time (and, when asked, a
+ * structured preview of that message) in one batched LATERAL query.
+ *
+ * The latest message is the highest `seq` so the lookup rides the
+ * (channel_id, seq) index; `lastMessageAt` is that message's created_at.
+ * Previews are opt-in (`includePreview`) so hot paths like socket room joins
+ * don't pay for them; the preview text comes from the shared
+ * `buildMessagePreview`, the same function clients run on `message:new`.
+ */
 async function attachLastMessageAt<T extends { id: string }>(
   rows: T[],
   traceQuery: DbQueryTracer,
   queryName: string,
   countAttrName: string,
-): Promise<Array<T & { lastMessageAt?: Date | null }>> {
+  opts: { includePreview?: boolean } = {},
+): Promise<Array<T & { lastMessageAt?: Date | null; lastMessagePreview?: MessagePreview | null }>> {
   if (rows.length === 0) return [];
+  const includePreview = opts.includePreview === true;
 
   const channelIds = rows.map((row) => row.id);
   const lastMessages = await traceQuery(
@@ -1292,35 +1318,112 @@ async function attachLastMessageAt<T extends { id: string }>(
       )
       SELECT
         input_channels.channel_id::text AS "channelId",
-        latest.created_at AS "lastMessageAt"
+        latest.created_at AS "lastMessageAt",
+        latest.id::text AS "messageId",
+        latest.sender_type AS "senderType",
+        latest.sender_id AS "senderId",
+        latest.message_type AS "messageType",
+        ${includePreview ? sql`left(latest.content, 4000)` : sql`NULL::text`} AS "content",
+        ${includePreview ? sql`(SELECT t.task_number FROM tasks t WHERE t.message_id = latest.id)` : sql`NULL::int`} AS "taskNumber"
       FROM input_channels
       JOIN LATERAL (
-        SELECT m.created_at
+        SELECT m.id, m.created_at, m.sender_type, m.sender_id, m.message_type, m.content
         FROM messages m
         WHERE m.channel_id = input_channels.channel_id
-        ORDER BY m.created_at DESC
+        ORDER BY m.seq DESC
         LIMIT 1
       ) latest ON TRUE
-    `).then((result) =>
-      (result.rows as Array<{ channelId: string; lastMessageAt: Date | string | null }>).map((row) => ({
-        channelId: row.channelId,
-        lastMessageAt: row.lastMessageAt instanceof Date
-          ? row.lastMessageAt
-          : row.lastMessageAt
-            ? new Date(row.lastMessageAt)
-            : null,
-      }))
-    ),
+    `).then((result) => result.rows as LastMessageRow[]),
     (latestRows) => ({
       [countAttrName]: channelIds.length,
       channels_with_messages_count: latestRows.length,
     }),
   );
-  const lastMessageMap = new Map(lastMessages.map((row) => [row.channelId, row.lastMessageAt]));
+
+  const toDate = (value: Date | string | null) => value instanceof Date ? value : value ? new Date(value) : null;
+  const lastMessageMap = new Map(lastMessages.map((row) => [row.channelId, toDate(row.lastMessageAt)]));
+  if (!includePreview) {
+    return rows.map((row) => ({
+      ...row,
+      lastMessageAt: lastMessageMap.get(row.id) ?? null,
+    }));
+  }
+
+  const previewMap = await buildLastMessagePreviews(lastMessages, traceQuery, queryName);
   return rows.map((row) => ({
     ...row,
     lastMessageAt: lastMessageMap.get(row.id) ?? null,
+    lastMessagePreview: previewMap.get(row.id) ?? null,
   }));
+}
+
+const PREVIEW_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+async function buildLastMessagePreviews(
+  lastMessages: LastMessageRow[],
+  traceQuery: DbQueryTracer,
+  queryName: string,
+): Promise<Map<string, MessagePreview>> {
+  const withMessage = lastMessages.filter((row) => row.messageId);
+  if (withMessage.length === 0) return new Map();
+  const db = getDb();
+
+  // Attachment kinds use the same MIME normalisation as realtime payloads.
+  // Lazy import: routes/attachments imports this module.
+  const { resolveAttachmentMimeType } = await import("../routes/attachments.js");
+  const attachmentRows = await traceQuery(
+    `${queryName}.preview_attachments`,
+    () => db
+      .select({ messageId: attachments.messageId, filename: attachments.filename, mimeType: attachments.mimeType })
+      .from(attachments)
+      .where(and(inArray(attachments.messageId, withMessage.map((row) => row.messageId!)), isNull(attachments.revokedAt))),
+    (found) => ({ messages_count: withMessage.length, attachments_count: found.length }),
+  );
+  const attachmentsByMessage = new Map<string, Array<{ mimeType: string }>>();
+  for (const attachment of attachmentRows) {
+    if (!attachment.messageId) continue;
+    const list = attachmentsByMessage.get(attachment.messageId) ?? [];
+    list.push({ mimeType: resolveAttachmentMimeType(attachment.filename, attachment.mimeType) });
+    attachmentsByMessage.set(attachment.messageId, list);
+  }
+
+  const userIds = new Set<string>();
+  const agentIds = new Set<string>();
+  for (const row of withMessage) {
+    if (!row.senderId || !PREVIEW_UUID_RE.test(row.senderId)) continue;
+    if (row.senderType === "user") userIds.add(row.senderId);
+    if (row.senderType === "agent") agentIds.add(row.senderId);
+  }
+  const names = new Map<string, string>();
+  const [userRows, agentRows] = await traceQuery(
+    `${queryName}.preview_senders`,
+    () => Promise.all([
+      userIds.size > 0
+        ? db.select({ id: users.id, name: users.name, displayName: users.displayName }).from(users).where(inArray(users.id, [...userIds]))
+        : Promise.resolve([]),
+      agentIds.size > 0
+        ? db.select({ id: agents.id, name: agents.name, displayName: agents.displayName }).from(agents).where(inArray(agents.id, [...agentIds]))
+        : Promise.resolve([]),
+    ]),
+    ([foundUsers, foundAgents]) => ({ user_senders_count: foundUsers.length, agent_senders_count: foundAgents.length }),
+  );
+  for (const user of userRows) names.set(`user:${user.id}`, user.displayName || user.name);
+  for (const agent of agentRows) names.set(`agent:${agent.id}`, agent.displayName || agent.name);
+
+  const previews = new Map<string, MessagePreview>();
+  for (const row of withMessage) {
+    previews.set(row.channelId, buildMessagePreview({
+      messageId: row.messageId!,
+      messageType: row.messageType ?? "chat",
+      content: row.content,
+      senderType: row.senderType ?? "user",
+      senderId: row.senderId,
+      senderName: names.get(`${row.senderType}:${row.senderId}`) ?? null,
+      taskNumber: row.taskNumber,
+      attachments: attachmentsByMessage.get(row.messageId!) ?? [],
+    }));
+  }
+  return previews;
 }
 
 export async function attachJointChannelMetadata<T extends { id: string; type: string; serverId: string }>(
@@ -1631,12 +1734,13 @@ export async function listChannels(
           traceQuery,
           "channels.last_messages_by_channels",
           "channels_count",
+          { includePreview: opts?.includeLastMessagePreview },
         ),
       );
     }
     const visibleChannels = list.filter((ch) => ch.type === "channel");
     return attachJointChannelMetadata(
-      await attachLastMessageAt(visibleChannels, traceQuery, "channels.last_messages_by_channels", "channels_count"),
+      await attachLastMessageAt(visibleChannels, traceQuery, "channels.last_messages_by_channels", "channels_count", { includePreview: opts?.includeLastMessagePreview }),
     );
   }
 
@@ -1720,13 +1824,14 @@ export async function listChannels(
         traceQuery,
         "channels.last_messages_by_channels",
         "channels_count",
+        { includePreview: opts?.includeLastMessagePreview },
       ),
     );
   }
 
   const visibleChannels = visibleList.filter((ch) => ch.type === "channel");
   return attachJointChannelMetadata(
-    await attachLastMessageAt(visibleChannels, traceQuery, "channels.last_messages_by_channels", "channels_count"),
+    await attachLastMessageAt(visibleChannels, traceQuery, "channels.last_messages_by_channels", "channels_count", { includePreview: opts?.includeLastMessagePreview }),
   );
 }
 
@@ -3407,6 +3512,8 @@ export type DMChannel = {
 interface DMChannelListOptions {
   traceQuery?: DbQueryTracer;
   humanActivityMuteEnabled?: boolean;
+  /** Attach `lastMessagePreview` (conversation-list surfaces only). */
+  includeLastMessagePreview?: boolean;
 }
 
 /**
@@ -4065,6 +4172,7 @@ export async function listDMChannels(
     traceQuery,
     "dm_channels.last_messages_by_channels",
     "dm_channels_count",
+    { includePreview: opts?.includeLastMessagePreview },
   );
 
   return allDmsWithLastMessageAt.sort((a, b) => {

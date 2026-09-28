@@ -576,6 +576,7 @@ channelRouter.get("/", async (req, res) => {
           archived,
           humanActivityMuteEnabled,
           traceQuery,
+          includeLastMessagePreview: true,
         });
         return channelService.attachExternalBridgeMetadata(channels, traceQuery);
       },
@@ -614,6 +615,7 @@ channelRouter.get("/dm", async (req, res) => {
         return channelService.listDMChannels(req.serverId!, req.userId!, {
           humanActivityMuteEnabled,
           traceQuery: createTraceDbQueryTracer("dm_channels.loaded"),
+          includeLastMessagePreview: true,
         });
       },
       (durationMs, result) => ({

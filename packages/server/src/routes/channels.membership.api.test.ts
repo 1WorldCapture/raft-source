@@ -117,6 +117,12 @@ test("GET /api/channels/dm records DM list phases and constant query shape", asy
   assert.equal(body.find((channel) => channel.id === agentDm.id)?.lastMessageAt, agentDmMessage.createdAt.toISOString());
   assert.equal(body.find((channel) => channel.id === userDm.id)?.lastMessageAt, userDmMessage.createdAt.toISOString());
   assert.equal(body.find((channel) => channel.id === selfDm.id)?.lastMessageAt, null);
+  const previews = body as unknown as Array<{ id: string; lastMessagePreview: { kind: string; text: string; senderName: string | null } | null }>;
+  assert.deepEqual(
+    (({ kind, text, senderName }) => ({ kind, text, senderName }))(previews.find((channel) => channel.id === userDm.id)!.lastMessagePreview!),
+    { kind: "text", text: "user dm message", senderName: "dm-trace-peer" },
+  );
+  assert.equal(previews.find((channel) => channel.id === selfDm.id)?.lastMessagePreview, null);
 
   const span = sink.getAllSpans().find((candidate) =>
     candidate.name === "server.http.request"
@@ -140,12 +146,15 @@ test("GET /api/channels/dm records DM list phases and constant query shape", asy
     [
       "dm_channels.agent_dms_by_user",
       "dm_channels.last_messages_by_channels",
+      "dm_channels.last_messages_by_channels.preview_attachments",
+      "dm_channels.last_messages_by_channels.preview_senders",
       "dm_channels.self_dms_by_user",
       "dm_channels.user_dms_by_user",
     ],
   );
-  assert.equal(dbEvents.length, 4);
-  assert.ok(dbEvents.length <= 4, "DM list query count should stay constant for mixed peer types");
+  // The two preview queries are batched by id, so the count stays constant.
+  assert.equal(dbEvents.length, 6);
+  assert.ok(dbEvents.length <= 6, "DM list query count should stay constant for mixed peer types");
 
   const dbEventByQuery = new Map(dbEvents.map((event) => [event.attrs?.query_name, event]));
   assert.equal(dbEventByQuery.get("dm_channels.agent_dms_by_user")?.attrs?.phase, "dm_channels.loaded");
