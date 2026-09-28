@@ -7,11 +7,12 @@
 // restoring A's badges on top of B's session.
 import { create } from "zustand";
 import { activityUnreadByServer } from "../activity/model";
-import { parseServers, parseUnreadSummary, type RaftServer } from "../model/messages";
+import { isRecord, parseServers, parseUnreadSummary, type RaftServer } from "../model/messages";
 
 /** Minimal client surface the store needs (session.client satisfies it). */
 export interface ServerRailClient {
   get: (path: string, options?: { server?: boolean }) => Promise<unknown>;
+  patch: (path: string, body?: unknown, options?: { server?: boolean }) => Promise<unknown>;
 }
 
 /**
@@ -55,6 +56,13 @@ interface ServerRailState {
   refreshBadges: (client: ServerRailClient) => Promise<void>;
   /** Apply a `server_order:updated` payload (own optimistic reorder or another client's). */
   applyServerOrder: (serverIds: unknown) => void;
+  /**
+   * Drag-and-drop reorder (task #4): apply the new order optimistically, then
+   * persist it; on failure roll back to the previous order and return false.
+   * The server's confirmation (and the echo of our own socket event) is
+   * idempotent through orderServersByStoredIds.
+   */
+  reorderServers: (client: ServerRailClient, orderedIds: ReadonlyArray<string>) => Promise<boolean>;
   reset: () => void;
 }
 
@@ -102,6 +110,23 @@ export const useServerRailStore = create<ServerRailState>((set, get) => ({
     if (!Array.isArray(serverIds)) return;
     const ids = serverIds.filter((id): id is string => typeof id === "string");
     set((state) => ({ servers: orderServersByStoredIds(state.servers, ids) }));
+  },
+
+  reorderServers: async (client, orderedIds) => {
+    const previous = get().servers;
+    const next = orderServersByStoredIds(previous, orderedIds);
+    set({ servers: next });
+    try {
+      const data = await client.patch("/servers/order", { serverOrder: next.map((server) => server.id) }, { server: false });
+      if (isRecord(data) && Array.isArray(data.serverOrder)) {
+        const saved = data.serverOrder.filter((id): id is string => typeof id === "string");
+        set((state) => ({ servers: orderServersByStoredIds(state.servers, saved) }));
+      }
+      return true;
+    } catch {
+      set({ servers: previous });
+      return false;
+    }
   },
 
   reset: () => set({ servers: [], serverUnread: {}, activityUnread: {}, loadTicket: 0, badgeTicket: 0 }),
