@@ -153,3 +153,39 @@ test("reset clears everything", () => {
   assert.deepEqual(state.activityUnread, {});
   assert.equal(state.loadTicket, 0);
 });
+
+/** Fake patch client for reorder tests. */
+function patchClient(mode: "ok-confirm" | "ok-same" | "fail"): ServerRailClient {
+  return {
+    get: async () => ({}),
+    patch: async () => {
+      if (mode === "fail") throw new Error("boom");
+      if (mode === "ok-same") return { notAnOrder: true };
+      return { serverOrder: ["b", "a", "c"], serverOrderVersion: 4 };
+    },
+  };
+}
+
+test("reorderServers applies optimistically, then adopts the server-confirmed order", async () => {
+  resetStore();
+  useServerRailStore.setState({ servers: [server("a"), server("b"), server("c")] });
+  const saved = await useServerRailStore.getState().reorderServers(patchClient("ok-confirm"), ["c", "a", "b"]);
+  assert.equal(saved, true);
+  assert.deepEqual(useServerRailStore.getState().servers.map((s) => s.id), ["b", "a", "c"], "server's canonical order wins");
+});
+
+test("reorderServers keeps the optimistic order when the response has no array", async () => {
+  resetStore();
+  useServerRailStore.setState({ servers: [server("a"), server("b"), server("c")] });
+  const saved = await useServerRailStore.getState().reorderServers(patchClient("ok-same"), ["b", "c", "a"]);
+  assert.equal(saved, true);
+  assert.deepEqual(useServerRailStore.getState().servers.map((s) => s.id), ["b", "c", "a"]);
+});
+
+test("reorderServers rolls back to the previous order when the patch fails", async () => {
+  resetStore();
+  useServerRailStore.setState({ servers: [server("a"), server("b"), server("c")] });
+  const saved = await useServerRailStore.getState().reorderServers(patchClient("fail"), ["c", "b", "a"]);
+  assert.equal(saved, false);
+  assert.deepEqual(useServerRailStore.getState().servers.map((s) => s.id), ["a", "b", "c"], "rolled back");
+});

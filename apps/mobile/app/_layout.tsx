@@ -5,6 +5,7 @@ import { StatusBar } from "expo-status-bar";
 import { useFonts } from "expo-font";
 import * as SplashScreen from "expo-splash-screen";
 import { Pressable, View } from "react-native";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { LocaleProvider, useT } from "../src/i18n/provider";
 import { fontAssets } from "../src/ui/fonts";
 import { SessionProvider, useSession } from "../src/state/session";
@@ -97,13 +98,17 @@ export default function RootLayout() {
   }, [loaded]);
   if (!loaded) return null;
   return (
-    <SessionProvider>
-      <LocaleProvider>
-        <StatusBar style="dark" />
-        <SessionRedirect />
-        <AccountNotice />
-        <AppStack />
-      </LocaleProvider>
-    </SessionProvider>
+    // RNGH gestures (rail drag, image viewer zoom) only activate inside a
+    // GestureHandlerRootView on Android — this is the app-wide one.
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SessionProvider>
+        <LocaleProvider>
+          <StatusBar style="dark" />
+          <SessionRedirect />
+          <AccountNotice />
+          <AppStack />
+        </LocaleProvider>
+      </SessionProvider>
+    </GestureHandlerRootView>
   );
 }
