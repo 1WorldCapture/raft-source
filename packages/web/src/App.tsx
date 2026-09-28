@@ -43,7 +43,7 @@ import {
 } from "./utils/authRestoreMachine";
 import type { LastRestoreError } from "./utils/authRestoreMachine";
 import { getRestoreTimeoutAction, nextRestoreRetryDelayMs } from "./utils/restoreTimeoutPolicy";
-import { RUNTIME_API_BASE } from "./desktopRuntimeEnvironment";
+import { RUNTIME_API_BASE, absoluteApiBase } from "./desktopRuntimeEnvironment";
 import { shouldRecoverAuthOnBrowserSignal } from "./utils/browserRecoveryPolicy";
 import { PENDING_INVITE_STORAGE_KEY, takePendingInviteRedirectPath } from "./utils/socialAuth";
 import { requiresAccountProfileSetup } from "./utils/accountProfileSetup";
@@ -798,6 +798,7 @@ export function DegradedRestoreStatus({
   onLogout: () => void;
 }) {
   const { formatMessage } = useIntl();
+  const serverUrl = absoluteApiBase(RUNTIME_API_BASE, window.location.origin);
   const errorText = lastRestoreError?.kind === "http"
     ? formatMessage({ id: "auth.bootstrap.errorHttp" }, { status: lastRestoreError.status ?? 0 })
     : lastRestoreError?.kind === "network"
@@ -810,7 +811,7 @@ export function DegradedRestoreStatus({
         <div className="mt-4 space-y-1 text-sm">
           <div>
             <span className="font-bold">{formatMessage({ id: "auth.bootstrap.serverLabel" })}</span>{" "}
-            <span className="font-mono break-all">{RUNTIME_API_BASE}</span>
+            <span className="font-mono break-all">{serverUrl}</span>
           </div>
           <div>
             <span className="font-bold">{formatMessage({ id: "auth.bootstrap.lastErrorLabel" })}</span>{" "}
