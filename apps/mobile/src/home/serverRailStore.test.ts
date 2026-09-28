@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { RaftServer } from "../model/messages.ts";
-import { orderServersByStoredIds, useServerRailStore, type ServerRailClient } from "./serverRailStore.ts";
+import { adjustActivityUnread, orderServersByStoredIds, useServerRailStore, type ServerRailClient } from "./serverRailStore.ts";
 
 function server(id: string, name = id): RaftServer {
   return { id, name, slug: id };
@@ -188,4 +188,14 @@ test("reorderServers rolls back to the previous order when the patch fails", asy
   const saved = await useServerRailStore.getState().reorderServers(patchClient("fail"), ["c", "b", "a"]);
   assert.equal(saved, false);
   assert.deepEqual(useServerRailStore.getState().servers.map((s) => s.id), ["a", "b", "c"], "rolled back");
+});
+
+test("adjustActivityUnread clamps at zero and never invents keys", () => {
+  const base = { a: 5, b: 0 };
+  assert.equal(adjustActivityUnread(base, "a", 3).a, 2, "partial read lowers the badge");
+  assert.equal(adjustActivityUnread(base, "a", 99).a, 0, "over-read clamps at zero");
+  assert.equal(adjustActivityUnread(base, "b", 4).b, 0, "already-zero stays zero");
+  assert.equal(adjustActivityUnread(base, "missing", 4).missing, undefined, "unknown server is not created");
+  assert.equal(adjustActivityUnread(base, "a", 0), base, "zero-read is a no-op, same reference");
+  assert.equal(adjustActivityUnread(base, "a", -2), base, "negative garbage is a no-op");
 });

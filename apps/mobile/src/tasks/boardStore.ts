@@ -57,6 +57,12 @@ export interface BoardStore {
   bumpTick: (client?: ApiClient) => void;
   /** Optimistic patch + schedule recalibration for a thread:updated event. */
   noteThreadActivity: (client: ApiClient, event: ThreadActivityEvent, me: BoardViewer | null) => void;
+  /**
+   * A thread channel was just read (TaskDetail / thread pane markRead):
+   * clear the board row's unread lift immediately instead of waiting for the
+   * next thread event / recalibration / pull-to-refresh.
+   */
+  noteThreadRead: (threadChannelId: string) => void;
   /** Schedule recalibration for a task:created/updated/deleted event. */
   noteTaskActivity: (client: ApiClient, taskId: string) => void;
   /**
@@ -199,6 +205,20 @@ export function createBoardStore(deps: BoardStoreDeps = {}) {
 
     noteTaskActivity(client, taskId) {
       scheduleRecalibration(client, [taskId]);
+    },
+
+    noteThreadRead(threadChannelId) {
+      const state = get();
+      // Bail before map(): a no-op read must keep the tasks reference stable
+      // so untouched boards don't re-render.
+      if (!state.tasks.some((task) => task.threadChannelId === threadChannelId && (task.unreadCount > 0 || task.mentionsMe))) return;
+      set({
+        tasks: state.tasks.map((task) => (
+          task.threadChannelId === threadChannelId
+            ? { ...task, unreadCount: 0, mentionsMe: false }
+            : task
+        )),
+      });
     },
 
     async approveTask(client, taskId) {

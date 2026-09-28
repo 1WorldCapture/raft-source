@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AppState } from "react-native";
 import * as SecureStore from "expo-secure-store";
 import { ApiError, createApiClient, shouldLogoutAfterRefresh, type ApiClient, type TokenPair } from "../api/client";
@@ -21,6 +21,8 @@ const USER = "raft_mobile_user";
 const SERVER = "raft_mobile_server";
 const INSTALLATION = "raft_mobile_installation";
 const BACKGROUND_DISCONNECT_MS = 30_000;
+/** Coalesce a burst of live events into one unread-summary refetch. */
+const BADGE_REFRESH_DEBOUNCE_MS = 2_000;
 
 interface Snapshot {
   ready: boolean;
@@ -162,6 +164,18 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     onApiError: classifyNotice,
   }), []);
 
+  // Live messages and thread events move the server unread summary; coalesce
+  // a burst into one badge refetch instead of one per event. Also driven by
+  // the server's unread_summary:changed push (when shipped).
+  const badgeRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleBadgeRefresh = useCallback(() => {
+    if (badgeRefreshTimer.current !== null) clearTimeout(badgeRefreshTimer.current);
+    badgeRefreshTimer.current = setTimeout(() => {
+      badgeRefreshTimer.current = null;
+      void useServerRailStore.getState().refreshBadges(client);
+    }, BADGE_REFRESH_DEBOUNCE_MS);
+  }, [client]);
+
   const realtime = useMemo(() => createRealtime({
     getOrigin: () => snapshotRef.current.origin,
     getAccessToken: () => snapshotRef.current.accessToken,
@@ -173,6 +187,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       useRaftStore.getState().upsertMessages([message]);
       useRaftStore.getState().applyLiveToConversations(message);
       useActivityStore.getState().scheduleRefresh(client);
+      scheduleBadgeRefresh();
       if (shouldMarkVisibleRead(focusedRef.current, message.channelId)) {
         useRaftStore.getState().clearLiveUnread(message.channelId);
         if (typeof message.seq === "number") void markReadRef.current(message.channelId, message.seq);
@@ -204,10 +219,15 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       useRaftStore.getState().upsertMessages([message]);
     },
     onThreadUpdated: (summary) => {
+      // Socket summaries carry no unreadCount — merge over the stored one so
+      // the inline "N new replies" label survives exactly when a new reply
+      // lands, instead of being wiped by the whole-key replacement.
+      const existing = useRaftStore.getState().threadSummaries[summary.parentMessageId];
       useRaftStore.getState().setThreadSummaries({
-        [summary.parentMessageId]: summary,
+        [summary.parentMessageId]: existing ? { ...existing, ...summary } : summary,
       });
       useActivityStore.getState().scheduleRefresh(client);
+      scheduleBadgeRefresh();
       const viewerId = snapshotRef.current.user?.id;
       useBoardStore.getState().noteThreadActivity(
         client,
@@ -219,6 +239,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       useRaftStore.getState().clearChannelUnread(channelId);
       useRaftStore.getState().clearLiveUnread(channelId);
       useActivityStore.getState().applyReadStates([channelId]);
+    },
+    onUnreadSummaryChanged: () => {
+      scheduleBadgeRefresh();
     },
     onReadStateBulk: (scopeIds) => {
       for (const scopeId of scopeIds) {
@@ -443,6 +466,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         await client.post(`/channels/${channelId}/read`, { seq: queued });
         pendingReads.current.delete(channelId);
         useRaftStore.getState().clearChannelUnread(channelId);
+        // A read thread channel also clears its task board row's unread lift
+        // (TaskDetail embeds the thread pane) — no refetch needed.
+        useBoardStore.getState().noteThreadRead(channelId);
       } catch {
         // Queued for flushReads.
       }

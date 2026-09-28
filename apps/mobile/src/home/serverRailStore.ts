@@ -42,6 +42,21 @@ export interface LoadServersResult {
   server: RaftServer | null;
 }
 
+/**
+ * Optimistically lower a server's Activity badge after local reads (Activity
+ * page markRead/markAllRead): clamped at 0, never creates a key, never turns a
+ * positive count negative. The next summary refresh lands the server truth.
+ */
+export function adjustActivityUnread(
+  activityUnread: Readonly<Record<string, number>>,
+  serverId: string,
+  readCount: number,
+): Readonly<Record<string, number>> {
+  const current = activityUnread[serverId];
+  if (readCount <= 0 || current === undefined || current <= 0) return activityUnread;
+  return { ...activityUnread, [serverId]: Math.max(0, current - readCount) };
+}
+
 interface ServerRailState {
   servers: RaftServer[];
   serverUnread: Record<string, number>;

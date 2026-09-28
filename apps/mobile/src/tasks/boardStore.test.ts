@@ -354,3 +354,29 @@ test("reset invalidates a load still in flight (switch clears the board)", async
   assert.equal(state.loading, false);
   assert.equal(state.serverId, null);
 });
+
+test("noteThreadRead clears the row's unread lift for the matching thread only", async () => {
+  const store = createBoardStore();
+  const client = fakeClient(() => ({
+    tasks: [
+      boardTask("t1", { threadChannelId: "thread-t1", unreadCount: 3, mentionsMe: true }),
+      boardTask("t2", { threadChannelId: "thread-t2", unreadCount: 1, mentionsMe: false }),
+    ],
+    next_cursor: null,
+  }));
+  await store.getState().load(client);
+  store.getState().noteThreadRead("thread-t1");
+  const tasks = store.getState().tasks;
+  assert.equal(tasks[0].unreadCount, 0, "read thread clears its unread count");
+  assert.equal(tasks[0].mentionsMe, false, "reading also clears the mention lift");
+  assert.equal(tasks[1].unreadCount, 1, "other rows untouched");
+});
+
+test("noteThreadRead keeps state stable when nothing matches", async () => {
+  const store = createBoardStore();
+  const client = fakeClient(() => ({ tasks: [boardTask("t1", { unreadCount: 0 })], next_cursor: null }));
+  await store.getState().load(client);
+  const before = store.getState().tasks;
+  store.getState().noteThreadRead("thread-unknown");
+  assert.equal(store.getState().tasks, before, "no rows matched — same array reference, no re-render");
+});
