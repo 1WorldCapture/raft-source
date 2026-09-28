@@ -6,6 +6,7 @@ exports[`Claude runtime editor renders the canonical model list and persists an 
   "Claude Fable",
   "Claude Sonnet",
   "Claude Haiku",
+  "Claude Opus 5.5",
   "Claude Opus 5",
   "Claude Opus 4.8",
   "Claude Opus 4.7",

@@ -1921,6 +1921,7 @@ export const RUNTIME_MODELS: Record<string, RuntimeModelInfo[]> = {
     { id: "fable", label: "Claude Fable" },
     { id: "sonnet", label: "Claude Sonnet" },
     { id: "haiku", label: "Claude Haiku" },
+    { id: "claude-opus-5-5", label: "Claude Opus 5.5" },
     { id: "claude-opus-5", label: "Claude Opus 5" },
     { id: "claude-opus-4-8", label: "Claude Opus 4.8" },
     { id: "claude-opus-4-7", label: "Claude Opus 4.7" },
