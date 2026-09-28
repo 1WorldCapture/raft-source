@@ -123,3 +123,28 @@ test("fetchSyncPage persists rows with string seqs from the live /messages/sync 
   const cursor = runtime.repo.getKv(scopeId, "syncCursor");
   assert.match(JSON.stringify(cursor), /"maxSeq":8/, "cursor advances to the normalized max");
 });
+
+test("gap-sync raw payloads carry a NUMBER seq inside bodyRaw (seed-path contract)", async () => {
+  // Postmortem #2: the fetcher normalized only the outer {seq} but stored the
+  // raw payload as-is — bodyRaw.seq stayed a string, parseMessage dropped it
+  // to undefined on the seed path, and minSeq(visible) came back null so the
+  // overlay refresh (and markRead / window logic) never fired.
+  const runtime = freshRuntime();
+  const page: unknown[] = [
+    { seq: "11", id: "m11", channelId: "c1", senderId: "u", senderType: "user", createdAt: "t", content: "x" },
+  ];
+  const client: FakeClient = {
+    syncCalls: 0,
+    get: (path: string) => {
+      if (!path.startsWith("/messages/sync")) return Promise.resolve({});
+      client.syncCalls += 1;
+      return Promise.resolve(client.syncCalls === 1 ? page : []);
+    },
+  };
+  await runCacheGapSync(client as unknown as ApiClient);
+  const rows = runtime.repo.getLatestMessages(runtime.scopeId!, "c1", 5);
+  assert.equal(rows.length, 1);
+  const raw = rows[0]!.raw as Record<string, unknown>;
+  assert.equal(typeof raw.seq, "number", "bodyRaw.seq must be a number for the seed path");
+  assert.equal(raw.seq, 11);
+});

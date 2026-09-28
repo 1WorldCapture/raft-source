@@ -49,7 +49,11 @@ function ensureCacheSync(client: ApiClient): CacheSync | null {
           : typeof record.seq === "string" && /^\d+$/.test(record.seq) ? Number(record.seq)
           : null;
         if (seq === null || typeof record.id !== "string" || typeof record.channelId !== "string") return [];
-        return [{ seq, id: record.id, channelId: record.channelId, raw: record as RawRecord }];
+        // Normalize seq INSIDE the raw payload too: the stored bodyRaw feeds
+        // the seed path (parseMessage drops string seqs to undefined, which
+        // silently killed minSeq/maxSeq → overlay refresh, markRead and the
+        // pane window logic for every gap-synced message).
+        return [{ seq, id: record.id, channelId: record.channelId, raw: { ...record, seq } as RawRecord }];
       });
     },
     fetchOverlayPage: async (channelId, fromSeq) => {
