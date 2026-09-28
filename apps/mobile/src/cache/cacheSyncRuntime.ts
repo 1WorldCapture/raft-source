@@ -102,8 +102,28 @@ let tailExtendable = false;
 /** Bumped by cancelCacheSync(); in-flight sync loops abort on the next check. */
 let syncGeneration = 0;
 
+/**
+ * Drop the once-per-boot overlay markers for the attached scope (data kept).
+ * Awaitable for tests; markCacheSocketDisconnected fires it without waiting —
+ * the write lands in milliseconds while reconnects take seconds.
+ */
+export async function invalidateOverlayMarksForDisconnect(): Promise<void> {
+  try {
+    const runtime = getCacheRuntime();
+    const scopeId = runtime.scopeId;
+    if (scopeId !== null) await runtime.repo.invalidateOverlayPageMarks(scopeId);
+  } catch {
+    // Runtime not initialized — nothing to invalidate.
+  }
+}
+
 export function markCacheSocketDisconnected(): void {
   tailExtendable = false;
+  // A disconnect invalidates "already refreshed this boot" for every page —
+  // anything may have changed while the socket was down. Dropping the
+  // overlay_page markers (data kept) lets the reconnect refresh re-pull the
+  // focused page instead of being gated out (desktop-data-cache task #2).
+  void invalidateOverlayMarksForDisconnect();
 }
 
 /**

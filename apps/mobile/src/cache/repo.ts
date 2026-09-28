@@ -291,6 +291,19 @@ export function createCacheRepo(deps: CacheRepoDeps) {
     };
   }
 
+  /**
+   * Drop the once-per-boot refresh markers for the whole scope WITHOUT
+   * touching the overlay data itself: a disconnect invalidates "already
+   * refreshed this boot" for every page (anything may have changed while the
+   * socket was down), so the reconnect refresh re-pulls instead of being
+   * gated out (desktop-data-cache task #2).
+   */
+  async function invalidateOverlayPageMarks(scopeId: number): Promise<void> {
+    await db.write(async (tx) => {
+      await tx.run("DELETE FROM overlay_pages WHERE scopeId = ?", [scopeId]);
+    });
+  }
+
   /** message:updated write-through (reactions and other projections). */
   async function applyMessageUpdated(
     scopeId: number,
@@ -634,6 +647,7 @@ export function createCacheRepo(deps: CacheRepoDeps) {
     appendLiveMessage,
     applyOverlayPage,
     getOverlayPageInfo,
+    invalidateOverlayPageMarks,
     applyMessageUpdated,
     applyThreadSummary,
     getThreadSummaries,

@@ -5,6 +5,7 @@ import type { ApiClient } from "../api/client";
 import { initCacheRuntime, getCacheRuntime } from "./runtime.ts";
 import {
   cancelCacheSync,
+  invalidateOverlayMarksForDisconnect,
   noteReadState,
   refreshOverlayIntoStore,
   runCacheGapSync,
@@ -181,4 +182,39 @@ test("refreshOverlayIntoStore lands the fetched page in the UI store in place", 
   assert.equal(after.length, 1, "the refreshed page is upserted into the store");
   assert.equal(after[0]!.reactions?.[0]?.emoji, "👍");
   assert.equal(after[0]!.reactions?.[0]?.count, 1, "fresh reaction data is visible in place");
+});
+
+test("a disconnect clears the once-per-boot overlay markers so reconnect re-refreshes", async () => {
+  // desktop-data-cache task #2: a page refreshed earlier this boot used to
+  // stay stale across a disconnect→reconnect cycle (the marker survived).
+  const runtime = freshRuntime();
+  let fetches = 0;
+  const page = (): unknown[] => [
+    { seq: 3, id: "m3", channelId: "c1", senderId: "u", senderType: "user", createdAt: "t", content: "x" },
+  ];
+  const client: FakeClient = {
+    syncCalls: 0,
+    get: (path: string) => {
+      if (path.startsWith("/messages/channel/")) {
+        fetches += 1;
+        return Promise.resolve({ messages: page(), messageWindow: { coveredFromSeq: 3, coveredThroughSeq: 3, hasGap: false } });
+      }
+      if (!path.startsWith("/messages/sync")) return Promise.resolve({});
+      return Promise.resolve([]);
+    },
+  };
+  await runtime.repo.appendPage(runtime.scopeId!, "c1", {
+    messages: [{ seq: 3, id: "m3", raw: { id: "m3", seq: 3, channelId: "c1", senderId: "u", senderType: "user", createdAt: "t", content: "x" } }],
+    window: { coveredFromSeq: 3, coveredThroughSeq: 3, hasGap: false },
+  });
+  await refreshOverlayIntoStore(client as unknown as ApiClient, "c1", 3, 3);
+  assert.equal(fetches, 1);
+  // Gated: same boot, marker present.
+  await refreshOverlayIntoStore(client as unknown as ApiClient, "c1", 3, 3);
+  assert.equal(fetches, 1, "same-boot refresh is gated by the marker");
+  // Disconnect clears the markers (data kept)...
+  await invalidateOverlayMarksForDisconnect();
+  // ...so the reconnect refresh re-pulls.
+  await refreshOverlayIntoStore(client as unknown as ApiClient, "c1", 3, 3);
+  assert.equal(fetches, 2, "after a disconnect the refresh re-pulls");
 });
