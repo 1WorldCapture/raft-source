@@ -151,14 +151,17 @@ test("overlay refresh is gated to once per boot per page", async () => {
   });
 
   const first = await gated.refreshOverlayPageOncePerBoot(scopeId, "c1", 1, 50);
-  assert.deepEqual(first, { refreshed: true, reason: "done" });
+  assert.equal(first.refreshed, true);
+  assert.equal(first.reason, "done");
+  assert.ok(first.page, "the fetched page is returned so callers can upsert it into the store");
   const second = await gated.refreshOverlayPageOncePerBoot(scopeId, "c1", 1, 50);
   assert.deepEqual(second, { refreshed: false, reason: "already" }, "same boot, same page: skipped");
   assert.equal(fetches, 1);
 
   // A different page fromSeq is a different gate.
   const other = await gated.refreshOverlayPageOncePerBoot(scopeId, "c1", 51, 100);
-  assert.deepEqual(other, { refreshed: true, reason: "done" });
+  assert.equal(other.refreshed, true);
+  assert.equal(other.reason, "done");
   assert.equal(fetches, 2);
 
   // Overlay data is readable through the repo's message projection.

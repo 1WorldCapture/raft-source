@@ -53,7 +53,7 @@ import {
 } from "../model/messages";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { drainAfterPages, hydrateCachedMessages, messageFetchPlan, rawPageForCache } from "../cache/boot";
-import { refreshOverlayPageOncePerBoot } from "../cache/cacheSyncRuntime";
+import { refreshOverlayIntoStore } from "../cache/cacheSyncRuntime";
 import { useOfflineStore } from "../cache/cacheCleanup";
 import { getCacheRuntime } from "../cache/runtime";
 import { useSession } from "../state/session";
@@ -539,7 +539,7 @@ export function MessagePane({
             const from = minSeq(visible);
             const through = maxSeq(visible);
             if (from !== null && through !== null) {
-              void refreshOverlayPageOncePerBoot(sessionRef.current.client, channelId, from, through);
+              void refreshOverlayIntoStore(sessionRef.current.client, channelId, from, through);
             }
           }
         } else {

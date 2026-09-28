@@ -13,6 +13,7 @@
 import { create } from "zustand";
 import type { ApiClient } from "../api/client";
 import { parseMessage, parseMessagePage, type RaftMessage } from "../model/messages";
+import { useRaftStore } from "../state/store";
 import { getCacheRuntime } from "./runtime";
 import { createCacheSync, type CacheSync } from "./cacheSync";
 import type { RawRecord } from "./repo";
@@ -264,9 +265,51 @@ export async function refreshOverlayPageOncePerBoot(
   channelId: string,
   fromSeq: number,
   throughSeq: number,
+) {
+  const sync = ensureCacheSync(client);
+  const scopeId = scope();
+  if (!sync || scopeId === null) return { refreshed: false, reason: "no-scope" as const };
+  return sync.refreshOverlayPageOncePerBoot(scopeId, channelId, fromSeq, throughSeq);
+}
+
+/**
+ * Overlay refresh that ALSO lands in the UI store: on success the fetched
+ * page's messages and thread summaries are upserted the same way the pane's
+ * online fetch does, so the visible page turns fresh in place (requirement:
+ * 「先显示缓存……更新成最新的」within the same open — not on the next boot).
+ *
+ * A failed refresh leaves the once-per-boot marker untouched (the repo row is
+ * only written by applyOverlayPage on success), so a reconnect retry works:
+ * pass null bounds to re-run against the channel's newest covered range.
+ */
+export async function refreshOverlayIntoStore(
+  client: ApiClient,
+  channelId: string,
+  fromSeq: number | null,
+  throughSeq: number | null,
 ): Promise<{ refreshed: boolean; reason: string }> {
   const sync = ensureCacheSync(client);
   const scopeId = scope();
   if (!sync || scopeId === null) return { refreshed: false, reason: "no-scope" };
-  return sync.refreshOverlayPageOncePerBoot(scopeId, channelId, fromSeq, throughSeq);
+  let from = fromSeq;
+  let through = throughSeq;
+  if (from === null || through === null) {
+    const ranges = getCacheRuntime().repo.getCoverage(scopeId, channelId);
+    const newest = ranges[ranges.length - 1];
+    if (!newest) return { refreshed: false, reason: "no-coverage" };
+    from ??= newest.fromSeq;
+    through ??= newest.throughSeq;
+  }
+  const outcome = await sync.refreshOverlayPageOncePerBoot(scopeId, channelId, from, through);
+  if (outcome.refreshed && outcome.page) {
+    const messages = outcome.page.messages
+      .map((row) => parseMessage(row.raw))
+      .filter((message): message is RaftMessage => message !== null);
+    if (messages.length > 0) useRaftStore.getState().upsertMessages(messages);
+    const summaries = outcome.page.threadSummaries;
+    if (summaries && Object.keys(summaries).length > 0) {
+      useRaftStore.getState().setThreadSummaries(summaries as Record<string, never>);
+    }
+  }
+  return { refreshed: outcome.refreshed, reason: outcome.reason };
 }

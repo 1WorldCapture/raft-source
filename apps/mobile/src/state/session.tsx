@@ -23,7 +23,7 @@ import { shouldApplyServerResponse, shouldCommitTokens, shouldMarkVisibleRead, c
 import { useRaftStore } from "./store";
 import { useServerRailStore } from "../home/serverRailStore";
 import { getCacheRuntime, initCacheRuntime } from "../cache/runtime";
-import { cancelCacheSync } from "../cache/cacheSyncRuntime";
+import { cancelCacheSync, refreshOverlayIntoStore } from "../cache/cacheSyncRuntime";
 import { useOfflineStore } from "../cache/cacheCleanup";
 import { openExpoSqliteDb } from "../cache/portExpo";
 
@@ -297,6 +297,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     onConnect: () => {
       useOfflineStore.getState().setOffline(false);
       void runCacheGapSync(client);
+      // A channel opened while offline left its overlay refresh failed (and
+      // the once-per-boot marker unwritten) — re-run it for the focused
+      // channel now that the network is back, landing fresh dynamic data in
+      // the store in place (#6 acceptance follow-up).
+      const focus = focusedRef.current;
+      if (focus) void refreshOverlayIntoStore(client, focus, null, null);
       void useTaskStore.getState().catchUp(client);
       // Events emitted while disconnected were lost — the board cannot be
       // fixed up incrementally, so reload it from page 1.
