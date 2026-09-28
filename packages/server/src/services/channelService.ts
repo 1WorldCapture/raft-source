@@ -1,4 +1,5 @@
 import { revokeSocketAccess } from "../socket/accessRevocation.js";
+import { notifyUnreadSummaryChanged } from "./unreadSummaryNotifier.js";
 import { createHash, randomInt, randomUUID } from "crypto";
 import { performance } from "node:perf_hooks";
 import type { QueryResultRow } from "pg";
@@ -193,6 +194,23 @@ async function resolveHumanServerRole(serverId: string, userId: string, executor
     .where(and(eq(serverMembers.serverId, serverId), eq(serverMembers.userId, userId)))
     .limit(1);
   return membership?.role ?? null;
+}
+
+/**
+ * Membership/archive changes alter every affected human's unread counts; ask
+ * their clients to re-fetch the summary. Emission is timer-based, so this is
+ * safe to call inside a transaction.
+ */
+async function notifyChannelHumansUnreadChanged(
+  channelId: string,
+  serverId: string,
+  executor: DatabaseExecutor = getDb(),
+): Promise<void> {
+  // Read through the caller's executor: archive/unarchive may run inside a
+  // transaction, and a second connection must not wait on it.
+  const humans = await executor.select({ userId: channelHumans.userId })
+    .from(channelHumans).where(eq(channelHumans.channelId, channelId));
+  notifyUnreadSummaryChanged({ userIds: humans.map((human) => human.userId), serverId, reason: "user_action" });
 }
 
 async function isGuestFeatureEnabled(
@@ -2790,6 +2808,7 @@ export async function archiveChannel(
   if (!REGULAR_CHANNEL_TYPES.includes(channel.type as RegularChannelType) && channel.type !== "joint") throw new Error("Only regular channels can be archived");
   if (isAllSystemChannel(channel)) throw new Error("The #all channel cannot be archived");
   if (channel.archivedAt) return channel;
+  await notifyChannelHumansUnreadChanged(channelId, channel.serverId, db);
 
   if (channel.type === "joint") {
     const projections = await getActiveJointChannelProjectionsByLocalChannel(channelId);
@@ -2906,6 +2925,7 @@ export async function unarchiveChannel(channelId: string, executor?: DatabaseExe
   if (!channel) throw new Error("Channel not found");
   if (!REGULAR_CHANNEL_TYPES.includes(channel.type as RegularChannelType) && channel.type !== "joint") throw new Error("Only regular channels can be unarchived");
   if (!channel.archivedAt) return channel;
+  await notifyChannelHumansUnreadChanged(channelId, channel.serverId, db);
 
   if (channel.type === "joint") {
     const projections = await getActiveJointChannelProjectionsByLocalChannel(channelId);
@@ -4657,6 +4677,9 @@ export async function addHuman(
     .values({ channelId, userId, role: options.role ?? "member" })
     .onConflictDoNothing()
     .returning({ userId: channelHumans.userId });
+  if (inserted.length > 0) {
+    notifyUnreadSummaryChanged({ userIds: [userId], serverId: channel.serverId, reason: "user_action" });
+  }
   return inserted.length > 0;
 }
 
@@ -4922,6 +4945,7 @@ export async function removeHuman(channelId: string, userId: string, executor?: 
   await db.delete(channelHumans).where(
     and(eq(channelHumans.channelId, channelId), eq(channelHumans.userId, userId))
   );
+  if (channel) notifyUnreadSummaryChanged({ userIds: [userId], serverId: channel.serverId, reason: "user_action" });
   await deletePrivateChannelIfEmpty(channelId, db);
   // Executor callers own the surrounding transaction and invalidate after its
   // commit. A reconnect before commit could otherwise recover the old rooms.
@@ -14588,6 +14612,9 @@ export async function setInboxTargetActivityMuteState(opts: {
   const current = await getInboxTargetActivityMuteState(opts.receiverType, opts.receiverId, opts.sourceChannelId);
   if (current.activityMuted === opts.activityMuted) {
     return { ...current, changed: false };
+  }
+  if (opts.receiverType === "user") {
+    notifyUnreadSummaryChanged({ userIds: [opts.receiverId], serverId: opts.serverId, reason: "user_action" });
   }
 
   if (!opts.activityMuted) {

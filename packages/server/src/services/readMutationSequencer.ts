@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { notifyUnreadSummaryChanged } from "./unreadSummaryNotifier.js";
 import { hostname } from "node:os";
 import { and, asc, eq, gt, inArray, isNotNull, lt, lte, or, sql } from "drizzle-orm";
 import { currentDate, currentTimeMs, setClockInterval, setClockTimeout } from "@botiverse/raft-shared";
@@ -1625,6 +1626,13 @@ export async function executeReadMutationClaim(input: {
     ));
     return completeAck;
   });
+
+  // Committed: every read/Done/unread mutation — whether applied inline by a
+  // compatibility route or later by the background worker — can change the
+  // user's unread summary. Humans only; agents have no badge clients.
+  if (input.claim.principalKind === "human" && ack.scopes.some((scope) => scope.changed)) {
+    notifyUnreadSummaryChanged({ userIds: [ack.principalId], serverId: ack.serverId, reason: "user_action" });
+  }
 
   if (input.failpoint === "after_commit_before_response") {
     throw new ReadMutationFailpointError(input.failpoint);

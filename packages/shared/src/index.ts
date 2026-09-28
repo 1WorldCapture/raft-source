@@ -192,6 +192,7 @@ export interface AgentMessage {
 
 export * from "./activityMute.js";
 export * from "./computerHostKind.js";
+export * from "./unreadSummaryEvent.js";
 export * from "./channelPermissions.js";
 export * from "./raftPermalinks.js";
 export * from "./raftRefs.js";

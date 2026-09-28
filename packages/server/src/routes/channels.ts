@@ -1,4 +1,5 @@
 import { publishChannelUpdate } from "../services/channelRealtimeEvents.js";
+import { notifyUnreadSummaryChanged } from "../services/unreadSummaryNotifier.js";
 import { serializeErrorForLog } from "../tracing/safeErrorLog.js";
 import { revokeSocketAccess } from "../socket/accessRevocation.js";
 import { Router, type Request, type Response, type Router as RouterType } from "express";
@@ -207,6 +208,7 @@ function emitReadStateUpdated(req: Request, state: channelService.ReadStateMutat
     return;
   }
   logReadStatePush(req, state, { outcome: "emitted", enabled, io_present: ioPresent });
+  notifyUnreadSummaryForRequest(req);
   io.to(`user:${req.userId}`).emit("read_state:updated", {
     serverId: req.serverId,
     scopeId: state.channelId,
@@ -217,6 +219,7 @@ function emitReadStateUpdated(req: Request, state: channelService.ReadStateMutat
 
 function emitReadStateUpdatedBulk(req: Request, scopes: channelService.ReadStateMutationResult[]): void {
   if (scopes.length === 0) return;
+  notifyUnreadSummaryForRequest(req);
   if (!isReceiverStatePushEnabled()) {
     warnReceiverStatePushOnce("disabled", { event: "read_state:updated_bulk", serverId: req.serverId });
     return;
@@ -234,6 +237,35 @@ function emitReadStateUpdatedBulk(req: Request, scopes: channelService.ReadState
       readStateVersion: scope.readStateVersion,
     })),
   });
+}
+
+/** Debounced `unread_summary:changed` for the acting user (see unreadSummaryNotifier). */
+function notifyUnreadSummaryForRequest(req: Request, serverId: string | undefined = req.serverId): void {
+  notifyUnreadSummaryChanged({ userIds: [req.userId!], serverId, reason: "user_action" });
+}
+
+/**
+ * Done moves the read cursor as part of its atomic composite; tell the
+ * user's other devices like an ordinary read does. Uses the ack's server,
+ * which can differ from the request server for cross-server Activity items.
+ */
+function emitReadStateUpdatedForAck(
+  req: Request,
+  ack: { serverId: string; scopes: Array<{ scopeId: string; maxReadSeq: number; readStateVersion: number; changed: boolean }> },
+): void {
+  notifyUnreadSummaryForRequest(req, ack.serverId);
+  if (!isReceiverStatePushEnabled()) return;
+  const io = req.app.get("io") as SocketServer | undefined;
+  if (!io) return;
+  for (const scope of ack.scopes) {
+    if (!scope.changed) continue;
+    io.to(`user:${req.userId}`).emit("read_state:updated", {
+      serverId: ack.serverId,
+      scopeId: scope.scopeId,
+      maxReadSeq: scope.maxReadSeq,
+      readStateVersion: scope.readStateVersion,
+    });
+  }
 }
 
 function emitNotificationPrefsUpdated(
@@ -1247,7 +1279,8 @@ channelRouter.post("/inbox/done", async (req, res) => {
       res.status(404).json({ error: "Chat not found" });
       return;
     }
-    await channelService.markChannelInboxDone(req.userId!, channelId, throughActivitySeq);
+    const doneAck = await channelService.markChannelInboxDone(req.userId!, channelId, throughActivitySeq);
+    emitReadStateUpdatedForAck(req, doneAck);
     res.json({ ok: true });
   } catch (err) {
     if (err instanceof DoneFrontierRequiredError) {
@@ -1287,6 +1320,7 @@ channelRouter.post("/inbox/undone", async (req, res) => {
       return;
     }
     await channelService.markChannelInboxActive(req.userId!, channelId);
+    notifyUnreadSummaryForRequest(req, canonicalServerId);
     res.json({ ok: true });
   } catch (err) {
     console.error("Failed to restore chat from Done:", serializeErrorForLog(err));
@@ -1718,6 +1752,7 @@ channelRouter.post("/threads/done", async (req, res) => {
         threadChannelId,
         throughActivitySeq,
       );
+      notifyUnreadSummaryForRequest(req);
       res.json({ ok: true, ...receipt });
       return;
     }
@@ -1735,6 +1770,7 @@ channelRouter.post("/threads/done", async (req, res) => {
         threadChannelId,
         throughActivitySeq,
       );
+      notifyUnreadSummaryForRequest(req);
       res.json({ ok: true, ...receipt });
       return;
     }
@@ -1742,7 +1778,8 @@ channelRouter.post("/threads/done", async (req, res) => {
       res.status(404).json({ error: "Thread not found" });
       return;
     }
-    await channelService.markThreadDone(req.userId!, threadChannelId, throughActivitySeq);
+    const doneAck = await channelService.markThreadDone(req.userId!, threadChannelId, throughActivitySeq);
+    emitReadStateUpdatedForAck(req, doneAck);
     res.json({ ok: true });
   } catch (err) {
     if (err instanceof DoneFrontierRequiredError) {
@@ -1781,6 +1818,7 @@ channelRouter.post("/threads/undone", async (req, res) => {
       return;
     }
     await channelService.undoneThread(req.userId!, threadChannelId);
+    notifyUnreadSummaryForRequest(req);
     res.json({ ok: true });
   } catch {
     res.status(500).json({ error: "Failed to undone thread" });
@@ -3865,6 +3903,9 @@ channelRouter.post("/:id/read-all", async (req, res) => {
       // the socket instead. `emitScopeReadUpdated` is skipped for the same
       // reason and because a former member's read position is not something the
       // channel's remaining members' read-receipt UI should be told about.
+      // unread_summary:changed carries only serverId (no frontier), so it is
+      // safe here: the former member's Activity badge still needs to drop.
+      if (state.changed) notifyUnreadSummaryForRequest(req);
       res.json(channelService.buildResidueOnlyReadAllReceipt(state));
       return;
     }

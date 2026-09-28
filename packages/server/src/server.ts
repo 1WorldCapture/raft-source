@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { setUnreadSummaryIO } from "./services/unreadSummaryNotifier.js";
 import { resolveListenHost } from "./config/trustProxy.js";
 
 // Safety net: log unhandled rejections instead of crashing the process
@@ -156,6 +157,7 @@ async function bootstrap() {
   app.set("io", io);
   agentOrchestrator.setIO(io);
   setBillingIO(io);
+  setUnreadSummaryIO(io);
 
   // Brief Cindy whenever she actually comes up — not only when a user happens to press a
   // button that starts her. A computer switched on the next morning wakes her through the
