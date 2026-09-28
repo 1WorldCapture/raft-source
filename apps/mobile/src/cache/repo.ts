@@ -273,6 +273,24 @@ export function createCacheRepo(deps: CacheRepoDeps) {
     });
   }
 
+  /** Overlay-page bookkeeping read for task #3's once-per-boot refresh gate. */
+  function getOverlayPageInfo(
+    scopeId: number,
+    channelId: string,
+    fromSeq: number,
+  ): { throughSeq: number; refreshedAt: string; bootId: string } | null {
+    const row = db.all(
+      "SELECT throughSeq, refreshedAt, bootId FROM overlay_pages WHERE scopeId = ? AND channelId = ? AND fromSeq = ?",
+      [scopeId, channelId, fromSeq],
+    )[0];
+    if (!row) return null;
+    return {
+      throughSeq: Number(row.throughSeq),
+      refreshedAt: String(row.refreshedAt),
+      bootId: String(row.bootId),
+    };
+  }
+
   /** message:updated write-through (reactions and other projections). */
   async function applyMessageUpdated(
     scopeId: number,
@@ -615,6 +633,7 @@ export function createCacheRepo(deps: CacheRepoDeps) {
     appendPage,
     appendLiveMessage,
     applyOverlayPage,
+    getOverlayPageInfo,
     applyMessageUpdated,
     applyThreadSummary,
     getThreadSummaries,
