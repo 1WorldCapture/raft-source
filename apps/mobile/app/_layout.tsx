@@ -11,6 +11,7 @@ import { fontAssets } from "../src/ui/fonts";
 import { SessionProvider, useSession } from "../src/state/session";
 import { useRaftStore } from "../src/state/store";
 import { AppText } from "../src/ui/text";
+import { ConnectionBanner } from "../src/ui/ConnectionBanner";
 import { colors } from "../src/ui/theme";
 import { color } from "../src/ui/tokens";
 
@@ -106,7 +107,9 @@ export default function RootLayout() {
           <StatusBar style="dark" />
           <SessionRedirect />
           <AccountNotice />
-          <AppStack />
+          <ConnectionBanner>
+            <AppStack />
+          </ConnectionBanner>
         </LocaleProvider>
       </SessionProvider>
     </GestureHandlerRootView>

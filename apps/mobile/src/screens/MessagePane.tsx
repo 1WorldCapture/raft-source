@@ -54,6 +54,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { drainAfterPages, hydrateCachedMessages, messageFetchPlan, rawPageForCache } from "../cache/boot";
 import { refreshOverlayPageOncePerBoot } from "../cache/cacheSyncRuntime";
+import { useOfflineStore } from "../cache/cacheCleanup";
 import { getCacheRuntime } from "../cache/runtime";
 import { useSession } from "../state/session";
 import { useRaftStore } from "../state/store";
@@ -203,6 +204,8 @@ export function MessagePane({
   const [uploads, setUploads] = useState<PendingUpload[]>([]);
   const channelCache = useRef<Array<{ id: string; name: string; description: string | null; archived: boolean }> | null>(null);
   const inputRef = useRef<TextInput>(null);
+  // Offline is read-only (client-data-cache task #5): drafting stays possible, sending does not.
+  const offline = useOfflineStore((state) => state.offline);
   const suggestGen = useRef(0);
   const [memberCache, setMemberCache] = useState<MentionCandidate[] | null>(null);
   const [unseen, setUnseen] = useState(0);
@@ -1597,7 +1600,7 @@ export function MessagePane({
           blurOnSubmit={false}
           multiline
           onChangeText={(value) => void onChangeDraft(value)}
-          placeholder={thread ? t("message.threadPanel.composerPlaceholder") : t("message.composer.messagePlaceholder", { channel: composerTarget })}
+          placeholder={offline ? t("mobile.messages.offlinePlaceholder") : thread ? t("message.threadPanel.composerPlaceholder") : t("message.composer.messagePlaceholder", { channel: composerTarget })}
           placeholderTextColor={colors.muted}
           style={styles.input}
           submitBehavior="newline"
@@ -1605,9 +1608,9 @@ export function MessagePane({
         />
         <View style={styles.toolbar}>
           <View style={styles.tools}>
-            <ToolButton onPress={() => void pickImage(false)}><ImagePlus color={color.ink} size={16} strokeWidth={2.5} /></ToolButton>
-            <ToolButton onPress={() => void pickImage(true)}><Camera color={color.ink} size={16} strokeWidth={2.5} /></ToolButton>
-            <ToolButton onPress={() => void pickFile()}><Paperclip color={color.ink} size={16} strokeWidth={2.5} /></ToolButton>
+            <ToolButton disabled={offline} onPress={() => void pickImage(false)}><ImagePlus color={color.ink} size={16} strokeWidth={2.5} /></ToolButton>
+            <ToolButton disabled={offline} onPress={() => void pickImage(true)}><Camera color={color.ink} size={16} strokeWidth={2.5} /></ToolButton>
+            <ToolButton disabled={offline} onPress={() => void pickFile()}><Paperclip color={color.ink} size={16} strokeWidth={2.5} /></ToolButton>
             {thread ? null : (
               <Pressable accessibilityRole="checkbox" accessibilityState={{ checked: asTask }} onPress={() => { setAsTask((current) => !current); focusComposer(); }} style={styles.taskToggle}>
                 <ListChecks color={color.ink} size={16} />
@@ -1617,7 +1620,7 @@ export function MessagePane({
             )}
           </View>
           {(() => {
-            const sendDisabled = uploads.some((file) => file.status !== "ready") || (draft.trim().length === 0 && !uploads.some((file) => file.status === "ready"));
+            const sendDisabled = offline || uploads.some((file) => file.status !== "ready") || (draft.trim().length === 0 && !uploads.some((file) => file.status === "ready"));
             return (
               <Pressable accessibilityLabel={t("mobile.messages.send")} accessibilityRole="button" disabled={sendDisabled} onPress={() => void send()}>
                 {sendDisabled ? (
@@ -1752,12 +1755,16 @@ export function MessagePane({
 }
 
 
-function ToolButton({ children, onPress }: { children: ReactNode; onPress: () => void }) {
+function ToolButton({ children, disabled, onPress }: { children: ReactNode; disabled?: boolean; onPress: () => void }) {
   return (
-    <Pressable accessibilityRole="button" hitSlop={4} onPress={onPress}>
-      <HardShadow offset={shadowOffset.sm}>
-        <View style={styles.toolFace}>{children}</View>
-      </HardShadow>
+    <Pressable accessibilityRole="button" accessibilityState={{ disabled: !!disabled }} disabled={disabled} hitSlop={4} onPress={onPress}>
+      {disabled ? (
+        <View style={[styles.toolFace, styles.toolFaceDisabled]}>{children}</View>
+      ) : (
+        <HardShadow offset={shadowOffset.sm}>
+          <View style={styles.toolFace}>{children}</View>
+        </HardShadow>
+      )}
     </Pressable>
   );
 }
@@ -1801,6 +1808,7 @@ const styles = StyleSheet.create({
   send: { alignItems: "center", backgroundColor: color.pink, borderColor: color.border, borderWidth: 2, height: 32, justifyContent: "center", width: 36 },
   sendDisabled: { backgroundColor: color.pinkPale, borderColor: color.muted, marginBottom: shadowOffset.sm, marginRight: shadowOffset.sm },
   toolFace: { alignItems: "center", backgroundColor: color.page, borderColor: color.border, borderWidth: 2, height: 30, justifyContent: "center", width: 30 },
+  toolFaceDisabled: { borderColor: color.muted, marginBottom: shadowOffset.sm, marginRight: shadowOffset.sm, opacity: 0.5 },
   memberCount: { color: color.ink, fontSize: 13, fontWeight: "700" },
   sendText: { color: color.ink, fontSize: 14, fontWeight: "700" },
   uploads: { gap: 4, paddingHorizontal: 12 },

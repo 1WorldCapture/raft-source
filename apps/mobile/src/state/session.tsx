@@ -311,6 +311,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       useOfflineStore.getState().setOffline(true, "network");
       useTaskStore.getState().markStale();
     },
+    onConnectError: () => {
+      // A cold start in airplane mode never connects, so no disconnect fires.
+      useOfflineStore.getState().setOffline(true, "network");
+    },
     onTaskCreated: (payload) => {
       noteTaskEvent(client, payload);
       useTaskStore.getState().applyCreated(payload);
