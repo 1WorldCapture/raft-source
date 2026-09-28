@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, View, type LayoutChangeEvent, type NativeScrollEvent, type NativeSyntheticEvent } from "react-native";
-import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import { Pressable, StyleSheet, View, type LayoutChangeEvent, type NativeScrollEvent, type NativeSyntheticEvent } from "react-native";
+import { Gesture, GestureDetector, ScrollView } from "react-native-gesture-handler";
 import type { RaftServer } from "../model/messages";
 import { HardShadow } from "../ui/shadow";
 import { AppText } from "../ui/text";
