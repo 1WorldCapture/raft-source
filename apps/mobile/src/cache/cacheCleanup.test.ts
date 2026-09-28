@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { openNodeSqliteDb } from "./portNode.ts";
 import { createCacheRepo, type CacheRepo } from "./repo.ts";
-import { historyDaysForPlan, pruneToHistoryLimit, reconcileChannels, useOfflineStore } from "./cacheCleanup.ts";
+import { historyDaysForPlan, pruneToHistoryLimit, reconcileAfterChannelRefresh, reconcileChannels, useOfflineStore } from "./cacheCleanup.ts";
 
 // client-data-cache task #4 — cleanup and offline state against a real
 // node:sqlite repo (same discipline as the cache suite).
@@ -109,4 +109,36 @@ test("offline store toggles with a cause and clears it back", () => {
   useOfflineStore.getState().setOffline(false);
   assert.equal(useOfflineStore.getState().offline, false);
   assert.equal(useOfflineStore.getState().cause, null);
+});
+
+test("reconcileAfterChannelRefresh skips entirely when either list fetch fails", async () => {
+  const { repo, scopeId } = fixture();
+  await repo.putChannels(scopeId, [
+    { id: "c1", type: "channel", raw: { id: "c1" } },
+    { id: "c2", type: "channel", raw: { id: "c2" } },
+  ]);
+
+  const failed = await reconcileAfterChannelRefresh(repo, scopeId, async () => {
+    throw new Error("timeout");
+  });
+  assert.deepEqual(failed, { reconciled: false, removed: [] });
+  assert.deepEqual(
+    repo.getChannels(scopeId).map((c) => c.id),
+    ["c1", "c2"],
+    "a failed refresh must not delete anything",
+  );
+
+  const switched = await reconcileAfterChannelRefresh(
+    repo, scopeId,
+    async () => ({ channels: [], dms: [] }),
+    { stillActive: () => false },
+  );
+  assert.deepEqual(switched, { reconciled: false, removed: [] }, "scope switch mid-fetch skips too" );
+  assert.deepEqual(repo.getChannels(scopeId).map((c) => c.id), ["c1", "c2"]);
+
+  const ok = await reconcileAfterChannelRefresh(
+    repo, scopeId,
+    async () => ({ channels: [{ id: "c1" }, { id: "c2", archivedAt: "x" }], dms: [] }),
+  );
+  assert.deepEqual(ok, { reconciled: true, removed: ["c2"] }, "success path reconciles channels + dms");
 });

@@ -51,6 +51,32 @@ export async function reconcileChannels(
   return { removed };
 }
 
+/**
+ * Guarded reconcile entry for the home-refresh wiring (#2 合并后一行接入):
+ * fetches BOTH channel lists, and reconciles only when both succeeded AND
+ * the scope is unchanged. Any throw (network error, timeout) skips the
+ * reconcile entirely — review r1: one failed refresh must never wipe the
+ * cache.
+ */
+export async function reconcileAfterChannelRefresh(
+  repo: CacheRepo,
+  scopeId: number,
+  fetch: () => Promise<{ channels: readonly LiveChannel[]; dms: readonly LiveChannel[] }>,
+  opts?: { stillActive?: () => boolean },
+): Promise<{ reconciled: boolean; removed: string[] }> {
+  let lists: { channels: readonly LiveChannel[]; dms: readonly LiveChannel[] };
+  try {
+    lists = await fetch();
+  } catch {
+    return { reconciled: false, removed: [] };
+  }
+  if (opts?.stillActive && !opts.stillActive()) {
+    return { reconciled: false, removed: [] };
+  }
+  const report = await reconcileChannels(repo, scopeId, [...lists.channels, ...lists.dms]);
+  return { reconciled: true, removed: report.removed };
+}
+
 // ---- history pruning ----------------------------------------------------------
 
 /**
