@@ -83,10 +83,15 @@ export default function TasksScreen() {
   const [filterMenu, setFilterMenu] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
+  // Load on focus and on every server switch. session.client keeps its
+  // identity across switches, so the effect must also depend on serverId —
+  // otherwise switching servers while this tab stays focused leaves the
+  // board empty (or stale) until a manual pull-to-refresh.
   useFocusEffect(useCallback(() => {
-    if (!useBoardStore.getState().loaded) void useBoardStore.getState().load(session.client);
+    const serverId = session.serverId;
+    if (serverId) void useBoardStore.getState().ensureLoadedForServer(session.client, serverId);
     return () => undefined;
-  }, [session.client]));
+  }, [session.client, session.serverId]));
 
   // Per-minute tick: rows recompute relative times and staleness; a calendar-day
   // rollover reloads the board with the new midnight as completedAfter.

@@ -267,3 +267,90 @@ test("bumpTick reloads with the new midnight after the calendar day rolls over",
   await Promise.resolve();
   assert.equal(client.calls.length, 2, "ticks within the same day do not reload");
 });
+
+/**
+ * Fake client whose GETs stay pending until the test resolves them by index,
+ * so out-of-order server responses are observable (server-switch races).
+ */
+function deferredClient() {
+  const calls: string[] = [];
+  const pending: Array<(value: { tasks: unknown[]; next_cursor: string | null }) => void> = [];
+  const client = {
+    async get<T>(path: string): Promise<T> {
+      calls.push(path);
+      return new Promise<T>((resolve) => {
+        pending.push((value) => resolve(value as T));
+      });
+    },
+    async patch<T>(path: string): Promise<T> {
+      calls.push(path);
+      return {} as T;
+    },
+  };
+  return { client, calls, respond: (index: number, tasks: unknown[]) => pending[index]({ tasks, next_cursor: null }) };
+}
+
+test("ensureLoadedForServer reloads on every server switch (A→B→A keeps current data)", async () => {
+  const store = createBoardStore();
+  const fake = deferredClient();
+  const a1 = boardTask("a1");
+  const b1 = boardTask("b1");
+  // Switch to A: one load, A's rows.
+  const loadA = store.getState().ensureLoadedForServer(fake.client, "srv-a");
+  fake.respond(0, [a1]);
+  await loadA;
+  assert.deepEqual(store.getState().tasks.map((task) => task.id), ["a1"]);
+  assert.equal(store.getState().serverId, "srv-a");
+  // Switch to B: reloads even though the board is loaded (bug scenario).
+  const loadB = store.getState().ensureLoadedForServer(fake.client, "srv-b");
+  fake.respond(1, [b1]);
+  await loadB;
+  assert.deepEqual(store.getState().tasks.map((task) => task.id), ["b1"], "switching servers replaces the rows");
+  assert.equal(store.getState().serverId, "srv-b");
+  // Switch back to A: reloads again — the old A rows must not be assumed live.
+  const loadA2 = store.getState().ensureLoadedForServer(fake.client, "srv-a");
+  fake.respond(2, [a1]);
+  await loadA2;
+  assert.deepEqual(store.getState().tasks.map((task) => task.id), ["a1"], "switching back re-fetches A");
+  assert.equal(fake.calls.length, 3, "one fetch per server entry, including the switch-back");
+  assert.equal(store.getState().serverId, "srv-a");
+});
+
+test("ensureLoadedForServer is a no-op for the already-loaded server", async () => {
+  const store = createBoardStore();
+  const client = fakeClient(() => ({ tasks: [boardTask("a1")], next_cursor: null }));
+  await store.getState().ensureLoadedForServer(client, "srv-a");
+  await store.getState().ensureLoadedForServer(client, "srv-a");
+  assert.equal(client.calls.length, 1, "refocusing the same server does not refetch");
+});
+
+test("a load superseded by a newer server's load never writes its rows back", async () => {
+  const store = createBoardStore();
+  const fake = deferredClient();
+  // Rapid A→B while the tab stays focused: A's request is still in flight
+  // when B's starts. B answers first; A's late response must be dropped.
+  const loadA = store.getState().ensureLoadedForServer(fake.client, "srv-a");
+  const loadB = store.getState().ensureLoadedForServer(fake.client, "srv-b");
+  fake.respond(1, [boardTask("b1")]);
+  await loadB;
+  assert.deepEqual(store.getState().tasks.map((task) => task.id), ["b1"]);
+  fake.respond(0, [boardTask("a1")]);
+  await loadA;
+  assert.deepEqual(store.getState().tasks.map((task) => task.id), ["b1"], "the stale A response is discarded, not merged");
+  assert.equal(store.getState().serverId, "srv-b");
+  assert.equal(store.getState().loading, false);
+});
+
+test("reset invalidates a load still in flight (switch clears the board)", async () => {
+  const store = createBoardStore();
+  const fake = deferredClient();
+  const loadA = store.getState().ensureLoadedForServer(fake.client, "srv-a");
+  store.getState().reset(); // what clearServerData does on a server switch
+  fake.respond(0, [boardTask("a1")]);
+  await loadA;
+  const state = store.getState();
+  assert.deepEqual(state.tasks, [], "the pre-reset response lands nowhere");
+  assert.equal(state.loaded, false);
+  assert.equal(state.loading, false);
+  assert.equal(state.serverId, null);
+});
