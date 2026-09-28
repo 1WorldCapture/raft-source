@@ -5076,6 +5076,27 @@ async function getReactionsForMessages(
   return new Map([...byMessage.entries()].map(([messageId, emojiMap]) => [messageId, [...emojiMap.values()]]));
 }
 
+/**
+ * Raw `db.execute` rows skip Drizzle's column mapping: bigint `seq` arrives as
+ * a string and timestamps as Postgres text. Normalize to the same types the
+ * Drizzle `select` path (and GET /messages/channel) returns — numeric seq,
+ * ISO-8601 timestamps — so one message entity has one wire shape. Any new
+ * raw-SQL query that returns message rows should pass them through this.
+ */
+const RAW_MESSAGE_TIMESTAMP_FIELDS = ["createdAt", "updatedAt", "taskClaimedAt", "taskCompletedAt"] as const;
+export function normalizeRawMessageRow(row: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...row };
+  if (typeof out.seq === "string" && /^\d+$/.test(out.seq)) out.seq = Number(out.seq);
+  for (const field of RAW_MESSAGE_TIMESTAMP_FIELDS) {
+    const value = out[field];
+    if (typeof value === "string") {
+      const parsed = new Date(value);
+      if (!Number.isNaN(parsed.getTime())) out[field] = parsed;
+    }
+  }
+  return out;
+}
+
 async function enrichWithSenderNames<T extends MessageRowForEnrichment>(
   inputRows: T[],
   opts: MessageQueryTraceOptions = {},
@@ -6609,7 +6630,7 @@ export async function syncMessages(
       LIMIT ${limit}
     `);
 
-    return enrichWithSenderNames(rows.rows as any[], enrichOptions);
+    return enrichWithSenderNames(rows.rows.map(normalizeRawMessageRow) as any[], enrichOptions);
   }
 
   const rows = await db
