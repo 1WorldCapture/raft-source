@@ -142,3 +142,23 @@ test("reconcileAfterChannelRefresh skips entirely when either list fetch fails",
   );
   assert.deepEqual(ok, { reconciled: true, removed: ["c2"] }, "success path reconciles channels + dms");
 });
+
+test("reconcile deletes even right after a concurrent putChannels write", async () => {
+  // Regression: the home wiring used to fire putChannels with `void` and
+  // then immediately run the reconcile — its deleteChannel db.write opened
+  // INSIDE the still-running putChannels transaction ("cannot start a
+  // transaction within a transaction") and the delete silently died.
+  const { repo, scopeId } = fixture();
+  await repo.putChannels(scopeId, [
+    { id: "c1", type: "private", raw: { id: "c1" } },
+    { id: "c9", type: "channel", raw: { id: "c9" } },
+  ]);
+  // The exact wiring shape: un-awaited putChannels, then reconcile.
+  void repo.putChannels(scopeId, [{ id: "c1", type: "private", raw: { id: "c1" } }]);
+  const out = await reconcileAfterChannelRefresh(repo, scopeId, async () => ({
+    channels: [{ id: "c1", archivedAt: null }],
+    dms: [],
+  }));
+  assert.deepEqual(out.removed.sort(), ["c9"], "c9 is deleted despite the racing putChannels");
+  assert.deepEqual(repo.getChannels(scopeId).map((c) => c.id), ["c1"]);
+});

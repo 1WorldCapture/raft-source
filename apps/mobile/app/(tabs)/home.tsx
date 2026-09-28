@@ -70,29 +70,32 @@ export default function HomeScreen() {
     useRaftStore.getState().setConversations([...channels, ...dms]);
     // Persist the directory to the local cache (#client-data-cache task #2):
     // two type-scoped batches so dropMissing never crosses lists (#4).
+    // AWAITED in order: fire-and-forget writes let the reconcile's own
+    // db.write open while a putChannels transaction is still running —
+    // sqlite rejects the nested transaction and the delete silently dies.
     try {
       const runtime = getCacheRuntime();
       const scope = runtime.scopeFor(serverId);
       if (scope === null) return;
-      void runtime.repo.putChannels(scope, channels.map((channel) => ({
+      await runtime.repo.putChannels(scope, channels.map((channel) => ({
         id: channel.id,
         type: channel.type || "channel",
         lastMessageAt: channel.lastMessageAt ?? null,
         raw: channel as unknown as Record<string, unknown>,
       })));
-      void runtime.repo.putChannels(scope, dms.map((channel) => ({
+      await runtime.repo.putChannels(scope, dms.map((channel) => ({
         id: channel.id,
         type: "dm",
         lastMessageAt: channel.lastMessageAt ?? null,
         raw: channel as unknown as Record<string, unknown>,
       })));
-      void runtime.repo.putKv(scope, "channelUnread", parseChannelUnread(unreadData) as unknown as Record<string, unknown>);
+      await runtime.repo.putKv(scope, "channelUnread", parseChannelUnread(unreadData) as unknown as Record<string, unknown>);
       // Channel reconcile (#client-data-cache task #4): both lists are in
       // hand here — Promise.all above means /channels AND /channels/dm both
       // succeeded (any throw skips this block entirely). stillActive drops
       // the sweep when the identity was wiped mid-flight (logout / origin
       // change makes scopeFor return a different id).
-      void reconcileAfterChannelRefresh(
+      await reconcileAfterChannelRefresh(
         runtime.repo,
         scope,
         async () => ({
@@ -149,7 +152,7 @@ export default function HomeScreen() {
       try {
         const runtime = getCacheRuntime();
         const scope = runtime.scopeFor(selected.id);
-        if (scope !== null) void pruneToHistoryLimit(runtime.repo, scope, selected.plan);
+        if (scope !== null) await pruneToHistoryLimit(runtime.repo, scope, selected.plan);
       } catch {
         // Cache unavailable — the server-side limit still applies.
       }

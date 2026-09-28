@@ -12,6 +12,11 @@ import type { SqliteDb, SqliteRow, WriteTx } from "./port";
 export function openExpoSqliteDb(name: string): SqliteDb {
   const db = ExpoSQLite.openDatabaseSync(name);
   const bind = (params?: Array<string | number | null>) => params ?? [];
+  // Serialized write queue on top of the exclusive transaction: repo callers
+  // may fire writes without awaiting the previous one (home directory
+  // persist + reconcile), and the queue keeps every transaction standalone
+  // instead of racing into a nested BEGIN.
+  let writeChain: Promise<unknown> = Promise.resolve();
   return {
     exec: (sql) => db.execSync(sql),
     all: (sql, params) => db.getAllSync(sql, bind(params)) as SqliteRow[],
@@ -19,15 +24,20 @@ export function openExpoSqliteDb(name: string): SqliteDb {
       const result = db.runSync(sql, bind(params));
       return { changes: result?.changes ?? 0 };
     },
-    write: (fn) =>
-      db.withExclusiveTransactionAsync(async (txn) => {
-        const tx: WriteTx = {
-          run: async (sql, params) => {
-            const result = await txn.runAsync(sql, bind(params));
-            return { changes: result?.changes ?? 0 };
-          },
-        };
-        await fn(tx);
-      }),
+    write: (fn) => {
+      const run = writeChain.then(() =>
+        db.withExclusiveTransactionAsync(async (txn) => {
+          const tx: WriteTx = {
+            run: async (sql, params) => {
+              const result = await txn.runAsync(sql, bind(params));
+              return { changes: result?.changes ?? 0 };
+            },
+          };
+          await fn(tx);
+        }),
+      );
+      writeChain = run.catch(() => {});
+      return run as Promise<void>;
+    },
   };
 }
