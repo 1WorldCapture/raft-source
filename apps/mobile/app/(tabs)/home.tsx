@@ -174,7 +174,8 @@ export default function HomeScreen() {
   if (loading && conversations.length === 0) return <LoadingScreen />;
   if (error && conversations.length === 0) return <ScreenMessage title={t("mobile.channels.loadFailed")} body={error} />;
 
-  const visible = unreadOnly ? filterUnreadConversations(conversations, channelUnread, liveUnread) : conversations;
+  const unreadConversations = filterUnreadConversations(conversations, channelUnread, liveUnread);
+  const visible = unreadOnly ? unreadConversations : conversations;
   const timeStrings = relativeTimeStrings(t);
 
   return (
@@ -206,6 +207,7 @@ export default function HomeScreen() {
       </View>
       <FlatList
         data={visible}
+        contentContainerStyle={styles.listContent}
         keyExtractor={(entry) => entry.channel.id}
         ListHeaderComponent={
           <Pressable
@@ -213,7 +215,11 @@ export default function HomeScreen() {
             onPress={() => setUnreadOnly((value) => !value)}
             style={[styles.unreadToggle, unreadOnly ? styles.unreadToggleActive : null]}
           >
-            <AppText style={styles.unreadToggleLabel}>{t("mobile.conversations.unreadOnly")}</AppText>
+            <AppText style={styles.unreadToggleLabel}>
+              {unreadConversations.length > 0
+                ? t("mobile.conversations.unreadOnlyCount", { n: unreadConversations.length })
+                : t("mobile.conversations.unreadOnly")}
+            </AppText>
           </Pressable>
         }
         ListEmptyComponent={
@@ -291,14 +297,15 @@ const styles = StyleSheet.create({
     alignSelf: "flex-start",
     borderColor: color.border,
     borderWidth: border.strong,
-    marginBottom: 4,
-    marginLeft: 16,
-    marginTop: 10,
+    marginBottom: 10,
+    marginLeft: 12,
+    marginTop: 12,
     paddingHorizontal: 10,
     paddingVertical: 4,
   },
   unreadToggleActive: { backgroundColor: color.yellow },
   unreadToggleLabel: { ...fontSize.group, color: color.ink, fontWeight: "700", textTransform: "uppercase", letterSpacing: 1.2 },
+  listContent: { paddingBottom: 16 },
   empty: { ...fontSize.list, color: color.muted, padding: 16 },
   serverName: { color: color.ink, fontSize: 14, fontWeight: "700" },
   dot: { backgroundColor: color.pink, borderRadius: 4, height: 8, width: 8 },

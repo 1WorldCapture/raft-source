@@ -95,6 +95,7 @@ export const mobileEn = {
   "mobile.conversations.taskLabel": "Task #{n}",
   "mobile.conversations.noMessages": "No messages yet",
   "mobile.conversations.unreadOnly": "Unread",
+  "mobile.conversations.unreadOnlyCount": "Unread {n}",
   "mobile.conversations.unreadEmpty": "No unread conversations",
 } as const;
 
@@ -191,6 +192,7 @@ export const mobileZh: Record<keyof typeof mobileEn, string> = {
   "mobile.conversations.taskLabel": "任务 #{n}",
   "mobile.conversations.noMessages": "暂无消息",
   "mobile.conversations.unreadOnly": "未读",
+  "mobile.conversations.unreadOnlyCount": "未读 {n}",
   "mobile.conversations.unreadEmpty": "没有未读会话",
 };
 
