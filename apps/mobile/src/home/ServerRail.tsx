@@ -102,9 +102,14 @@ export function ServerRail({
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
   }, [servers]);
 
-  const moveDrag = useCallback((id: string, dy: number) => {
+  const moveDrag = useCallback((id: string, rawDy: number) => {
     setDrag((current) => {
       if (!current || current.id !== id) return current;
+      // Keep the lifted tile inside the rail: between the first and last slot.
+      const ys = current.order.map((server) => slotLayouts.current[server.id]?.y).filter((y): y is number => y !== undefined);
+      const dy = ys.length > 0
+        ? Math.min(Math.max(...ys) - current.startY, Math.max(Math.min(...ys) - current.startY, rawDy))
+        : rawDy;
       const from = current.order.findIndex((server) => server.id === id);
       const to = targetIndexFor(current.order, id, current.startY, dy);
       if (to < 0 || to === from) return { ...current, dy };
