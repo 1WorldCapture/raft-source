@@ -45,3 +45,20 @@ export function getRestoreTimeoutAction(params: {
   // logged-out terminal state is correct here.
   return "logout";
 }
+
+// Retry cadence for the restore loop (#desktop-session-restore task #1).
+// Before the timeout the behavior is unchanged (1.5s, matching the previous
+// fixed interval). After it, each further retry backs off along the ladder
+// 3s → 6s → 12s → 15s so a long outage no longer means a request every 1.5s.
+const DEGRADED_RETRY_LADDER_MS = [3_000, 6_000, 12_000, 15_000] as const;
+
+export function nextRestoreRetryDelayMs(params: {
+  elapsedMs: number;
+  maxElapsedMs?: number;
+  /** How many retries have already run since entering degraded_retry (0-based). */
+  degradedRetryCount: number;
+}): number {
+  const timedOut = params.elapsedMs >= (params.maxElapsedMs ?? MAX_AUTH_RESTORE_MS);
+  if (!timedOut) return 1_500;
+  return DEGRADED_RETRY_LADDER_MS[Math.min(params.degradedRetryCount, DEGRADED_RETRY_LADDER_MS.length - 1)]!;
+}

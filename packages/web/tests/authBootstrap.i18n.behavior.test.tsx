@@ -48,3 +48,40 @@ test("AuthBootstrapStatus loading view still uses common.loading", () => {
   assert.ok(screen.getByText("加载中…"));
   assert.doesNotMatch(document.body.textContent ?? "", /Restoring session/i);
 });
+
+// #desktop-session-restore task #1 — the degraded restore chrome renders through
+// react-intl under zh-cn: title, server/last-error rows, hint, and both actions.
+// No raw ids or English fallbacks may leak into the rendered body.
+import { DegradedRestoreStatus } from "../src/App";
+import type { LastRestoreError } from "../src/utils/authRestoreMachine";
+
+function renderDegradedZh(lastRestoreError: LastRestoreError | null) {
+  return render(
+    <TestIntlProvider locale="zh-cn">
+      <DegradedRestoreStatus
+        lastRestoreError={lastRestoreError}
+        onRetry={() => {}}
+        onLogout={() => {}}
+      />
+    </TestIntlProvider>,
+  );
+}
+
+test("DegradedRestoreStatus renders the zh-cn degraded chrome with the HTTP error", () => {
+  renderDegradedZh({ kind: "http", status: 502, at: 0 });
+
+  assert.ok(screen.getByText("暂时连不上服务器"));
+  assert.ok(screen.getByText("HTTP 502"));
+  assert.ok(screen.getByText("立即重试"));
+  assert.ok(screen.getByText("退出登录"));
+  assert.ok(screen.getByText(/请检查网络、VPN\/代理（如 Clash）和 Tailscale/));
+  assert.doesNotMatch(document.body.textContent ?? "", /auth\.bootstrap\./);
+  assert.doesNotMatch(document.body.textContent ?? "", /Retry now|Sign out|Can't reach/i);
+});
+
+test("DegradedRestoreStatus renders the network error copy without a status", () => {
+  renderDegradedZh({ kind: "network", at: 0 });
+
+  assert.ok(screen.getByText("网络错误"));
+  assert.ok(screen.queryByText(/HTTP \d+/) === null);
+});
