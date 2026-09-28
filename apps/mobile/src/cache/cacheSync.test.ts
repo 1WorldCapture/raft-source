@@ -72,7 +72,7 @@ test("syncAll loops pages until a short page and advances the cursor once", asyn
 test("syncAll with an empty first page keeps the cursor at zero", async () => {
   const { scopeId, sync } = makeSync([[]]);
   const outcome = await sync.syncAll(scopeId);
-  assert.deepEqual(outcome, { pulled: 0, cursor: 0 });
+  assert.deepEqual(outcome, { pulled: 0, cursor: 0, aborted: false });
 });
 
 test("a mid-loop failure leaves the cursor untouched and a retry re-pulls the overlap", async () => {
@@ -197,4 +197,32 @@ test("read-state and task write-through gates live in the repo and pass through"
 
   await sync.onTaskDeleted(scopeId, "t1");
   assert.equal(repo.getTaskRows(scopeId).length, 0);
+});
+
+// ---- review fixes: race guards, cancellation, single-flight ------------------
+
+test("syncAll aborts before the next batch write when stillActive turns false", async () => {
+  const { repo, scopeId, sync } = makeSync([
+    Array.from({ length: SYNC_PAGE_LIMIT }, (_, i) => wire(i + 1, "c1")),
+    [wire(900, "c1")],
+  ]);
+  let batches = 0;
+  const outcome = await sync.syncAll(scopeId, {
+    stillActive: () => (batches += 1) === 1, // active for batch 1 only
+  });
+  assert.equal(outcome.aborted, true, "loop reports the abort");
+  assert.equal(sync.readCursor(scopeId), 0, "cursor stays at its pre-run value");
+  assert.ok(
+    !repo.getLatestMessages(scopeId, "c1", 1).some((m) => m.seq === 900),
+    "the second batch never landed",
+  );
+});
+
+test("read-state write-through stores the server-provided maxReadSeq and version", async () => {
+  const { repo, scopeId, sync } = makeSync([]);
+  await sync.onReadState(scopeId, "c1", 42, 7);
+  assert.deepEqual(repo.getReadStates(scopeId).c1, { maxReadSeq: 42, version: 7 });
+  // Older version does not overwrite.
+  await sync.onReadState(scopeId, "c1", 99, 3);
+  assert.deepEqual(repo.getReadStates(scopeId).c1, { maxReadSeq: 42, version: 7 });
 });

@@ -37,6 +37,8 @@ export type SyncWireMessage = {
 export type SyncOutcome = {
   pulled: number;
   cursor: number;
+  /** True when a stillActive check aborted the loop before the cursor advanced. */
+  aborted: boolean;
 };
 
 export type CacheSyncDeps = {
@@ -71,13 +73,19 @@ export function createCacheSync(deps: CacheSyncDeps) {
    * Full gap sync for one scope: loop /messages/sync pages until a short
    * page, grouping each batch per channel into appendPage calls. Cursor
    * advancement happens once, after the loop completes without throwing.
+   * A stillActive() that turns false aborts before the next batch write —
+   * the cursor stays at its pre-run value.
    */
-  async function syncAll(scopeId: number): Promise<SyncOutcome> {
-    let cursor = readCursor(scopeId);
+  async function syncAll(scopeId: number, opts?: { stillActive?: () => boolean }): Promise<SyncOutcome> {
+    const initialCursor = readCursor(scopeId);
+    let cursor = initialCursor;
     let pulled = 0;
     for (;;) {
       const batch = await deps.fetchSyncPage(cursor, SYNC_PAGE_LIMIT);
       if (batch.length === 0) break;
+      if (opts?.stillActive && !opts.stillActive()) {
+        return { pulled, cursor: initialCursor, aborted: true };
+      }
       const byChannel = new Map<string, Array<{ seq: number; id: string; raw: RawRecord }>>();
       for (const message of batch) {
         const bucket = byChannel.get(message.channelId) ?? [];
@@ -104,7 +112,7 @@ export function createCacheSync(deps: CacheSyncDeps) {
       if (batch.length < SYNC_PAGE_LIMIT) break;
     }
     await writeCursor(scopeId, cursor);
-    return { pulled, cursor };
+    return { pulled, cursor, aborted: false };
   }
 
   // ---- realtime write-through (thin schedulers over the repo) --------------

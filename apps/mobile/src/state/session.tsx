@@ -246,8 +246,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         viewerId ? { type: "user", id: viewerId } : null,
       );
     },
-    onReadState: (channelId) => {
-      noteReadState(client, [channelId]);
+    onReadState: (state) => {
+      if (state.serverId === null || state.serverId === snapshotRef.current.serverId) {
+        noteReadState(client, [state]);
+      }
+      const channelId = state.channelId;
       useRaftStore.getState().clearChannelUnread(channelId);
       useRaftStore.getState().clearLiveUnread(channelId);
       useActivityStore.getState().applyReadStates([channelId]);
@@ -255,13 +258,17 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     onUnreadSummaryChanged: () => {
       scheduleBadgeRefresh();
     },
-    onReadStateBulk: (scopeIds) => {
-      noteReadState(client, scopeIds);
-      for (const scopeId of scopeIds) {
+    onReadStateBulk: (states) => {
+      noteReadState(
+        client,
+        states.filter((state) => state.serverId === null || state.serverId === snapshotRef.current.serverId),
+      );
+      for (const state of states) {
+        const scopeId = state.channelId;
         useRaftStore.getState().clearChannelUnread(scopeId);
         useRaftStore.getState().clearLiveUnread(scopeId);
       }
-      useActivityStore.getState().applyReadStates(scopeIds);
+      useActivityStore.getState().applyReadStates(states.map((state) => state.channelId));
     },
     onDirectoryChanged: () => {
       useRaftStore.getState().bumpDirectory();

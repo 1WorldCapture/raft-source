@@ -71,30 +71,63 @@ function scope(): number | null {
   }
 }
 
-// ---- socket continuity ------------------------------------------------------
+// ---- socket continuity + cancellation + single-flight ------------------------
 
 let tailExtendable = false;
+
+/** Bumped by cancelCacheSync(); in-flight sync loops abort on the next check. */
+let syncGeneration = 0;
 
 export function markCacheSocketDisconnected(): void {
   tailExtendable = false;
 }
 
 /**
- * Post-(re)connect gap sync for the attached scope. Runs the full
- * /messages/sync loop; only after it completes do live messages regain the
- * right to extend coverage tails (markCacheSocketTailExtendable below).
+ * Cancel any in-flight gap sync (logout / scope switch path). The #2 logout
+ * hook must call this BEFORE runtime.logout() so a wiping sweep cannot be
+ * followed by a late batch writing data back into the fresh scope.
  */
-export async function runCacheGapSync(client: ApiClient): Promise<void> {
+export function cancelCacheSync(): void {
+  syncGeneration += 1;
   tailExtendable = false;
-  const sync = ensureCacheSync(client);
-  const scopeId = scope();
-  if (!sync || scopeId === null) return;
-  try {
-    await sync.syncAll(scopeId);
-    tailExtendable = true;
-  } catch {
-    // Cursor stays put — the next connect/foreground attempt re-pulls.
+}
+
+let gapInFlight: Promise<void> | null = null;
+let gapRerunRequested = false;
+
+/**
+ * Post-(re)connect / foreground-return gap sync, single-flight: while one
+ * round is running, further calls join it and request (at most) one more
+ * round afterwards — two loops never interleave on the same scope.
+ */
+export function runCacheGapSync(client: ApiClient): Promise<void> {
+  if (gapInFlight !== null) {
+    gapRerunRequested = true;
+    return gapInFlight;
   }
+  gapInFlight = (async () => {
+    for (;;) {
+      gapRerunRequested = false;
+      const generation = syncGeneration;
+      const startedScope = scope();
+      tailExtendable = false;
+      const sync = ensureCacheSync(client);
+      if (sync && startedScope !== null) {
+        try {
+          await sync.syncAll(startedScope, {
+            stillActive: () => generation === syncGeneration && scope() === startedScope,
+          });
+          if (generation === syncGeneration && scope() === startedScope) tailExtendable = true;
+        } catch {
+          // Cursor stays put — the next connect/foreground attempt re-pulls.
+        }
+      }
+      if (!gapRerunRequested || generation !== syncGeneration) break;
+    }
+  })().finally(() => {
+    gapInFlight = null;
+  });
+  return gapInFlight;
 }
 
 // ---- write-through bridges ----------------------------------------------------
@@ -178,18 +211,25 @@ export function noteTaskDeleted(client: ApiClient, payload: unknown): void {
   for (const id of ids) void sync.onTaskDeleted(scopeId, id);
 }
 
+export type ReadStateWire = {
+  channelId: string;
+  maxReadSeq: number;
+  readStateVersion: number;
+  serverId: string | null;
+};
+
 /**
- * read_state carries no version in the socket payload; Date.now() is
- * monotonic per device and the repo's version gate only needs ordering
- * between successive local writes (server read-state lands via page reads).
+ * read_state:updated(:_bulk) write-through with the server-provided
+ * maxReadSeq / readStateVersion. The caller filters by the session's current
+ * serverId BEFORE calling — foreign-server events must not land in this
+ * scope (review note #1).
  */
-export function noteReadState(client: ApiClient, channelIds: readonly string[]): void {
+export function noteReadState(client: ApiClient, states: readonly ReadStateWire[]): void {
   const sync = ensureCacheSync(client);
   const scopeId = scope();
-  if (!sync || scopeId === null) return;
-  const version = Date.now();
-  for (const channelId of channelIds) {
-    void sync.onReadState(scopeId, channelId, 0, version);
+  if (!sync || scopeId === null || states.length === 0) return;
+  for (const state of states) {
+    void sync.onReadState(scopeId, state.channelId, state.maxReadSeq, state.readStateVersion);
   }
 }
 

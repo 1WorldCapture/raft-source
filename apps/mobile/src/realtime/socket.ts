@@ -15,8 +15,8 @@ export interface RealtimeOptions {
   onCatchUp: (messages: RaftMessage[], hasMore: boolean) => void;
   onMessageUpdated: (message: RaftMessage) => void;
   onThreadUpdated: (summary: ThreadSummary & { parentMessageId: string }) => void;
-  onReadState: (channelId: string) => void;
-  onReadStateBulk: (scopeIds: string[]) => void;
+  onReadState: (state: { channelId: string; maxReadSeq: number; readStateVersion: number; serverId: string | null }) => void;
+  onReadStateBulk: (states: Array<{ channelId: string; maxReadSeq: number; readStateVersion: number; serverId: string | null }>) => void;
   onDirectoryChanged: (joinChannelId?: string) => void;
   onRoomsJoined: () => void;
   onServerOrderUpdated: (serverIds: unknown) => void;
@@ -182,14 +182,28 @@ export function createRealtime(options: RealtimeOptions) {
       const channelId = typeof payload.scopeId === "string"
         ? payload.scopeId
         : typeof payload.channelId === "string" ? payload.channelId : null;
-      if (channelId) options.onReadState(channelId);
+      if (!channelId) return;
+      options.onReadState({
+        channelId,
+        maxReadSeq: typeof payload.maxReadSeq === "number" && Number.isFinite(payload.maxReadSeq) ? payload.maxReadSeq : 0,
+        readStateVersion: typeof payload.readStateVersion === "number" && Number.isFinite(payload.readStateVersion) ? payload.readStateVersion : 0,
+        serverId: typeof payload.serverId === "string" ? payload.serverId : null,
+      });
     });
     created.on("read_state:updated_bulk", (payload: unknown) => {
       if (!isRecord(payload) || !Array.isArray(payload.scopes)) return;
-      const scopeIds = payload.scopes.flatMap((scope) => (
-        isRecord(scope) && typeof scope.scopeId === "string" ? [scope.scopeId] : []
+      const serverId = typeof payload.serverId === "string" ? payload.serverId : null;
+      const states = payload.scopes.flatMap((scope) => (
+        isRecord(scope) && typeof scope.scopeId === "string"
+          ? [{
+              channelId: scope.scopeId,
+              maxReadSeq: typeof scope.maxReadSeq === "number" && Number.isFinite(scope.maxReadSeq) ? scope.maxReadSeq : 0,
+              readStateVersion: typeof scope.readStateVersion === "number" && Number.isFinite(scope.readStateVersion) ? scope.readStateVersion : 0,
+              serverId,
+            }]
+          : []
       ));
-      if (scopeIds.length > 0) options.onReadStateBulk(scopeIds);
+      if (states.length > 0) options.onReadStateBulk(states);
     });
     created.on("channel:updated", () => options.onDirectoryChanged());
     created.on("server_order:updated", (payload: unknown) => {
