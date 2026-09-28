@@ -175,14 +175,20 @@ export function createCacheSync(deps: CacheSyncDeps) {
     channelId: string,
     fromSeq: number,
     throughSeq: number,
-  ): Promise<{ refreshed: boolean; reason: "already" | "no-fetcher" | "empty" | "done" }> {
+  ): Promise<{
+    refreshed: boolean;
+    reason: "already" | "no-fetcher" | "empty" | "done";
+    /** The fetched page on success — callers upsert it into the UI store so
+     * the visible pane updates in place instead of on the next cold boot. */
+    page?: OverlayPage;
+  }> {
     const info = repo.getOverlayPageInfo(scopeId, channelId, fromSeq);
     if (info && info.bootId === repo.bootId) return { refreshed: false, reason: "already" };
     if (!deps.fetchOverlayPage) return { refreshed: false, reason: "no-fetcher" };
     const page = await deps.fetchOverlayPage(channelId, fromSeq, throughSeq);
     if (!page) return { refreshed: false, reason: "empty" };
     await repo.applyOverlayPage(scopeId, channelId, page);
-    return { refreshed: true, reason: "done" };
+    return { refreshed: true, reason: "done", page };
   }
 
   // ---- history pagination (task #3 ④) ---------------------------------------

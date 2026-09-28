@@ -6,6 +6,7 @@ import { initCacheRuntime, getCacheRuntime } from "./runtime.ts";
 import {
   cancelCacheSync,
   noteReadState,
+  refreshOverlayIntoStore,
   runCacheGapSync,
 } from "./cacheSyncRuntime.ts";
 
@@ -147,4 +148,37 @@ test("gap-sync raw payloads carry a NUMBER seq inside bodyRaw (seed-path contrac
   const raw = rows[0]!.raw as Record<string, unknown>;
   assert.equal(typeof raw.seq, "number", "bodyRaw.seq must be a number for the seed path");
   assert.equal(raw.seq, 11);
+});
+
+test("refreshOverlayIntoStore lands the fetched page in the UI store in place", async () => {
+  const runtime = freshRuntime();
+  await runtime.repo.appendPage(runtime.scopeId!, "c1", {
+    messages: [{ seq: 1, id: "m1", raw: { id: "m1", seq: 1, channelId: "c1", senderId: "u", senderType: "user", createdAt: "t", content: "old", reactions: [] } }],
+    window: { coveredFromSeq: 1, coveredThroughSeq: 1, hasGap: false },
+  });
+  const client: FakeClient = {
+    syncCalls: 0,
+    get: (path: string) => {
+      if (path.startsWith("/messages/channel/")) {
+        return Promise.resolve({
+          messages: [
+            { id: "m1", seq: 1, channelId: "c1", senderId: "u", senderType: "user", createdAt: "t", content: "old", reactions: [{ emoji: "👍", count: 1 }] },
+          ],
+          messageWindow: { coveredFromSeq: 1, coveredThroughSeq: 1, hasGap: false },
+          threadSummariesByParentMessageId: {},
+        });
+      }
+      if (!path.startsWith("/messages/sync")) return Promise.resolve({});
+      return Promise.resolve([]);
+    },
+  };
+  const { useRaftStore } = await import("../state/store.ts");
+  const before = useRaftStore.getState().messagesByChannel["c1"] ?? [];
+  assert.equal(before.length, 0, "store starts empty for this channel");
+  const out = await refreshOverlayIntoStore(client as unknown as ApiClient, "c1", 1, 1);
+  assert.deepEqual(out, { refreshed: true, reason: "done" });
+  const after = useRaftStore.getState().messagesByChannel["c1"] ?? [];
+  assert.equal(after.length, 1, "the refreshed page is upserted into the store");
+  assert.equal(after[0]!.reactions?.[0]?.emoji, "👍");
+  assert.equal(after[0]!.reactions?.[0]?.count, 1, "fresh reaction data is visible in place");
 });
