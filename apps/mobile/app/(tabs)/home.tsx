@@ -5,7 +5,7 @@ import { useRouter } from "expo-router";
 import { Activity, Bookmark, Search } from "lucide-react-native";
 import { ApiError, StaleRequestError } from "../../src/api/client";
 import { ConversationRow } from "../../src/home/ConversationRow";
-import { ServerRail } from "../../src/home/ServerRail";
+import { RailLayout } from "../../src/home/RailLayout";
 import { channelHasDraft } from "../../src/home/drafts";
 import { conversationUnreadCount, filterUnreadConversations } from "../../src/home/conversations";
 import { setCurrentServerRole } from "../../src/home/serverRole";
@@ -36,7 +36,7 @@ export default function HomeScreen() {
   const channelUnread = useRaftStore((state) => state.channelUnread);
   const liveUnread = useRaftStore((state) => state.liveUnread);
   const directoryVersion = useRaftStore((state) => state.directoryVersion);
-  const { servers, serverUnread, activityUnread, current, switchServer, loadServers } = useServerRail();
+  const { activityUnread, current, switchServer, loadServers } = useServerRail();
   const [unreadOnly, setUnreadOnly] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -166,8 +166,7 @@ export default function HomeScreen() {
           </Pressable>
         </View>
       </View>
-      <View style={styles.body}>
-        <ServerRail compact={compact} currentId={session.serverId} onSelect={selectServer} servers={servers} unreadByServer={serverUnread} />
+      <RailLayout onSelect={selectServer}>
         {loading && conversations.length === 0 ? (
           <View style={styles.centered}><ActivityIndicator color={color.ink} /></View>
         ) : error && conversations.length === 0 ? (
@@ -220,7 +219,7 @@ export default function HomeScreen() {
             )}
           />
         )}
-      </View>
+      </RailLayout>
     </View>
   );
 }
@@ -238,7 +237,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
   },
   serverTitle: { color: color.ink, flexShrink: 1, fontSize: 20, fontWeight: "700", lineHeight: 24, marginRight: 8 },
-  body: { flex: 1, flexDirection: "row" },
   listPane: { flex: 1 },
   centered: { alignItems: "center", flex: 1, justifyContent: "center" },
   headerIcons: { alignItems: "center", flexDirection: "row", gap: 4 },
