@@ -185,30 +185,16 @@ export function pageForCache(data: unknown): AppendPage {
   return rawPageForCache(data, rowToCacheRow);
 }
 
-// Local order of live overlay writes (message:updated). Reactions do not
-// bump messages.updated_at on the server (messageReactionService
-// mutateMessageReaction touches only reaction/version tables), so updatedAt
-// cannot tell a fresh page from an older live overlay. A page instead wins
-// unless the row got a live write after the page's request started.
-// In memory only: tabs do not share marks, so a page in one tab can still
-// overwrite a live write that only another tab saw (accepted for now).
-let liveWriteCounter = 0;
-const liveWriteMarks = new Map<string, number>();
-const LIVE_WRITE_MARKS_MAX = 10_000;
-
-function liveWriteKey(scopeId: number, channelId: string, seq: number): string {
-  return `${scopeId}:${channelId}:${seq}`;
-}
-
-/** Capture before a page request; pass to recordMessagePage with the response. */
-export function captureLiveWriteMark(): number {
-  return liveWriteCounter;
-}
-
-/** True when this row got a live overlay write after `mark` was captured. */
-export function liveWriteAfter(scopeId: number, channelId: string, seq: number, mark: number): boolean {
-  return (liveWriteMarks.get(liveWriteKey(scopeId, channelId, seq)) ?? -1) > mark;
-}
+// Live-write marks (order of live overlay writes, message:updated) now live
+// in shared/liveWriteMarks.ts so web and mobile share one implementation
+// (desktop-data-cache task #9). Re-exported here so the existing callers
+// (messageStore, overlayRefresh, taskBoardCache) keep their imports; behavior
+// is identical — a page wins unless the row got a live write after the
+// page's request started. Reactions do not bump messages.updated_at on the
+// server, so updatedAt cannot order them. In memory only: tabs do not share
+// marks (accepted for now).
+export { captureLiveWriteMark, liveWriteAfter } from "@botiverse/raft-shared/src/liveWriteMarks.js";
+import { liveWriteAfter, noteLiveWrite } from "@botiverse/raft-shared/src/liveWriteMarks.js";
 
 /**
  * Record one fetched page (grows coverage) + its bundled thread summaries.
@@ -374,18 +360,7 @@ export function noteMessageUpdated(
   if (!cache) return;
   if (typeof message.seq !== "number" || !Number.isFinite(message.seq) || message.seq <= 0) return;
   const { id: _id, seq, channelId, ...rest } = message;
-  liveWriteCounter += 1;
-  const markKey = liveWriteKey(cache.scopeId, channelId, seq);
-  // Re-insert so the map stays in write order, then drop the oldest marks
-  // once it grows: a mark only matters to requests already in flight.
-  liveWriteMarks.delete(markKey);
-  liveWriteMarks.set(markKey, liveWriteCounter);
-  if (liveWriteMarks.size > LIVE_WRITE_MARKS_MAX) {
-    for (const key of liveWriteMarks.keys()) {
-      if (liveWriteMarks.size <= LIVE_WRITE_MARKS_MAX / 2) break;
-      liveWriteMarks.delete(key);
-    }
-  }
+  noteLiveWrite(cache.scopeId, channelId, seq);
   void cache.repo.applyMessageUpdated(cache.scopeId, channelId, {
     seq,
     raw: rest as RawRecord,
