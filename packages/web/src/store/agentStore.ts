@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import api from "../api/client";
 import { isExternalAgentRuntime, normalizeActivity, normalizeActivityDetailKind } from "@botiverse/raft-shared";
-import type { AgentActivity, AgentActivityDetailKind, AgentRuntimeErrorState, AgentStatus, ReasoningEffort, RuntimeConfig, RuntimeFormDefinitionRef, ServerRole, TrajectoryEntry } from "@botiverse/raft-shared";
+import type { AgentActivity, AgentActivityDetailKind, AgentLifecycleSocketPayload, AgentRuntimeErrorState, AgentStatus, ReasoningEffort, RuntimeConfig, RuntimeFormDefinitionRef, ServerRole, TrajectoryEntry } from "@botiverse/raft-shared";
 import { useServerStore } from "./serverStore";
 import { registerServerReset } from "./serverResetRegistry";
 import { en } from "../i18n/messages/en";
@@ -38,6 +38,8 @@ export interface Agent {
   avatarUrl: string | null;
   description: string | null;
   status: AgentStatus;
+  /** ms epoch when `status` began, from `agent:lifecycle`; absent until one arrives. */
+  lifecycleStatusSince?: number | null;
   model: string;
   runtime: string;
   external?: boolean;
@@ -301,6 +303,7 @@ interface AgentState {
   deleteAgent: (agentId: string) => Promise<void>;
   resetAgent: (agentId: string, mode: "restart" | "session" | "full") => Promise<void>;
   updateAgentSession: (agentId: string, sessionId: string | null) => void;
+  applyAgentLifecycle: (payload: AgentLifecycleSocketPayload) => void;
   updateActivity: (
     agentId: string,
     activity: string,
@@ -907,6 +910,18 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       a.id === agentId ? { ...a, sessionId } : a
     ),
   })),
+
+  applyAgentLifecycle: ({ agentId, lifecycleStatus, since }) => set((state) => {
+    const agent = state.agents.find((a) => a.id === agentId);
+    // Out-of-order delivery: an older transition never overwrites a newer one.
+    if (!agent || (agent.lifecycleStatusSince != null && agent.lifecycleStatusSince > since)) return {};
+    if (agent.status === lifecycleStatus && agent.lifecycleStatusSince === since) return {};
+    return {
+      agents: state.agents.map((a) =>
+        a.id === agentId ? { ...a, status: lifecycleStatus, lifecycleStatusSince: since } : a
+      ),
+    };
+  }),
 
   updateActivity: (agentId, activity, activityDetail = "", serverSeq, timestamp = Date.now(), joinKeys, activityKind, detailKind, traceJoin, isHeartbeat, isRefreshOnly) =>
     set((state) => {

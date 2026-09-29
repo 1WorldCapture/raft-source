@@ -1371,6 +1371,20 @@ export const AGENT_ACTIVITY_DETAIL_KINDS = [
 export type AgentActivityDetailKind = (typeof AGENT_ACTIVITY_DETAIL_KINDS)[number];
 export const isAgentActivityDetailKind = makeIsMember(AGENT_ACTIVITY_DETAIL_KINDS);
 export type AgentStatus = "active" | "inactive" | "stopped";
+/**
+ * Server -> web socket event pushed to `server:<id>` when agents.status
+ * actually changes. Unrelated to the orchestrator's in-process
+ * "agent:lifecycle" EventEmitter event, which carries runtime lifecycle rows.
+ */
+export const AGENT_LIFECYCLE_SOCKET_EVENT = "agent:lifecycle";
+export interface AgentLifecycleSocketPayload {
+  agentId: string;
+  lifecycleStatus: AgentStatus;
+  /** ms epoch when lifecycleStatus began. */
+  since: number;
+  /** Server clock (ms epoch) at emit, for client clock-skew correction. */
+  serverTime: number;
+}
 export interface AgentRuntimeErrorState {
   message: string;
   at: string;

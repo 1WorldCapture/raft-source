@@ -15,6 +15,7 @@ const EXPECTED_MAIN_LAYOUT_SOCKET_EVENTS = [
   "unread_summary:changed",
   "agent:activity",
   "agent:session",
+  "agent:lifecycle",
   "dm:new",
   "machine:status",
   "machine:capabilities",

@@ -16,6 +16,7 @@ import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import type { NavigateFunction } from "react-router-dom";
 import { failpoints } from "@botiverse/raft-shared";
+import type { AgentLifecycleSocketPayload } from "@botiverse/raft-shared";
 import {
   getLiveSessionRecoveryPlan,
   planStatusReconcile,
@@ -155,6 +156,7 @@ export const MAIN_LAYOUT_SOCKET_EVENT_NAMES = [
   "unread_summary:changed",
   "agent:activity",
   "agent:session",
+  "agent:lifecycle",
   "dm:new",
   "machine:status",
   "machine:capabilities",
@@ -500,6 +502,10 @@ export function buildMainLayoutSocketBindings(
     useAgentStore.getState().updateAgentSession(data.agentId, data.sessionId);
   };
 
+  const agentLifecycle = (data: AgentLifecycleSocketPayload) => {
+    useAgentStore.getState().applyAgentLifecycle(data);
+  };
+
   const executeMachineReloadRecovery = async (
     machineId: string,
     statusVersion?: number,
@@ -524,10 +530,11 @@ export function buildMainLayoutSocketBindings(
     machineId: string;
     status: "online" | "offline";
     statusVersion?: number;
+    since?: number | null;
   }) => {
     const transition = useMachineStore
       .getState()
-      .applyMachineStatusEvent(data.machineId, data.status, data.statusVersion);
+      .applyMachineStatusEvent(data.machineId, data.status, data.statusVersion, data.since);
     if (transition.recoveryAction === "reload-machines-and-agents") {
       void executeMachineReloadRecovery(data.machineId, data.statusVersion);
     }
@@ -1000,6 +1007,7 @@ export function buildMainLayoutSocketBindings(
     },
     { event: "agent:activity", handler: agentActivity },
     { event: "agent:session", handler: agentSession },
+    { event: "agent:lifecycle", handler: agentLifecycle },
     ...createChannelRealtimeBindings(socket, scheduleInboxRefresh),
     { event: "notification_prefs:updated", handler: notificationPrefsUpdated },
     { event: "message_display_prefs:updated", handler: messageDisplayPrefsUpdated },

@@ -15,6 +15,7 @@ import { countAgents, countMachines, countChannels, getHistoryCutoff } from "../
 import type { AgentOrchestrator } from "../services/agentOrchestrator.js";
 import { planMentionRedriveHttpStatus } from "../services/agentOrchestrator.js";
 import { buildMachineReadModel } from "../services/machineReadModel.js";
+import { getMachineStatusSince } from "../services/lifecycleSinceService.js";
 import {
   getComputerLinkedMachineAttachers,
   getComputerLinkedMachineCreators,
@@ -2648,6 +2649,10 @@ serverRouter.get("/:id/machines", async (req, res) => {
         },
       }),
     );
+    const statusSinceByMachine = await getMachineStatusSince(
+      req.params.id,
+      enriched.map((machine) => ({ id: machine.id, status: machine.status })),
+    );
     const [latestDaemonVersion, latestComputerVersion] = await Promise.all([
       tracePhase(
         () => getLatestDaemonVersion(),
@@ -2674,8 +2679,10 @@ serverRouter.get("/:id/machines", async (req, res) => {
       const {
         computerVersionObservedAt,
         computerVersionProvenance,
-        ...publicMachine
+        ...readModel
       } = machine;
+      // ms epoch; null = unknown start.
+      const publicMachine = { ...readModel, statusSince: statusSinceByMachine.get(machine.id) ?? null };
       if (!machine.isComputer) {
         return {
           ...publicMachine,

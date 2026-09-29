@@ -3548,11 +3548,14 @@ test("PATCH /api/servers/:id/machines/:machineId updates machine description", a
       },
     });
     assert.equal(listRes.status, 200);
-    const listBody = await listRes.json() as { machines: Array<{ id: string; description: string | null }> };
-    assert.equal(
-      listBody.machines.find((candidate) => candidate.id === machine.id)?.description,
-      "Runs the staging smoke tests",
-    );
+    const listBody = await listRes.json() as {
+      machines: Array<{ id: string; description: string | null; status: string; statusSince: number | null; createdAt: string }>;
+    };
+    const listed = listBody.machines.find((candidate) => candidate.id === machine.id);
+    assert.equal(listed?.description, "Runs the staging smoke tests");
+    // Never connected: offline since the row was created.
+    assert.equal(listed?.status, "offline");
+    assert.equal(listed?.statusSince, new Date(listed!.createdAt).getTime());
 
     const clearRes = await fetch(`${app.baseUrl}/api/servers/${server.id}/machines/${machine.id}`, {
       method: "PATCH",

@@ -622,13 +622,51 @@ function runtimeConfigWithoutModel(config: RuntimeConfig | null): Omit<RuntimeCo
   return rest;
 }
 
+export type AgentStatusTransition = {
+  agentId: string;
+  serverId: string;
+  status: AgentStatus;
+  changedAt: Date;
+};
+
+type AgentStatusTransitionListener = (transition: AgentStatusTransition) => void;
+const agentStatusTransitionListeners = new Set<AgentStatusTransitionListener>();
+
+/**
+ * Observe committed agents.status transitions (the value actually changed).
+ * Listeners run after the transaction commits; a throwing listener is logged
+ * and never affects the write or other listeners.
+ */
+export function subscribeAgentStatusTransitions(listener: AgentStatusTransitionListener): () => void {
+  agentStatusTransitionListeners.add(listener);
+  return () => {
+    agentStatusTransitionListeners.delete(listener);
+  };
+}
+
+/** @internal Exported for orchestrator wiring tests; production publishes only after commit. */
+export function publishAgentStatusTransitions(transitions: readonly AgentStatusTransition[]): void {
+  for (const transition of transitions) {
+    for (const listener of agentStatusTransitionListeners) {
+      try {
+        listener(transition);
+      } catch (err) {
+        console.warn(
+          `[Agent ${transition.agentId}] Status transition listener failed:`,
+          err instanceof Error ? err.message : err,
+        );
+      }
+    }
+  }
+}
+
 export async function updateAgentStatus(
   agentId: string,
   status: AgentStatus,
   sessionId?: string
 ) {
   const db = getDb();
-  await db.transaction(async (tx) => {
+  const transition = await db.transaction(async (tx): Promise<AgentStatusTransition | null> => {
     const [existing] = await tx.select({
       id: agents.id,
       serverId: agents.serverId,
@@ -637,7 +675,7 @@ export async function updateAgentStatus(
       .where(and(eq(agents.id, agentId), isNull(agents.deletedAt)))
       .limit(1)
       .for("update");
-    if (!existing || (status === "inactive" && existing.status === "stopped")) return;
+    if (!existing || (status === "inactive" && existing.status === "stopped")) return null;
 
     const now = currentDate();
     await tx.update(agents)
@@ -648,10 +686,11 @@ export async function updateAgentStatus(
         updatedAt: now,
       })
       .where(and(eq(agents.id, agentId), isNull(agents.deletedAt)));
-    if (existing.status !== status) {
-      await emitAgentNotificationEvent(tx, existing, "agent.status_changed", ["status"], now);
-    }
+    if (existing.status === status) return null;
+    await emitAgentNotificationEvent(tx, existing, "agent.status_changed", ["status"], now);
+    return { agentId, serverId: existing.serverId, status, changedAt: now };
   });
+  if (transition) publishAgentStatusTransitions([transition]);
 }
 
 /**
@@ -673,7 +712,7 @@ export async function updateAgentStatusFromSignal(
   sessionId?: string
 ): Promise<boolean> {
   const db = getDb();
-  return db.transaction(async (tx) => {
+  const outcome = await db.transaction(async (tx): Promise<{ updated: boolean; transition: AgentStatusTransition | null }> => {
     const [existing] = await tx.select({
       id: agents.id,
       serverId: agents.serverId,
@@ -682,7 +721,7 @@ export async function updateAgentStatusFromSignal(
       .where(and(eq(agents.id, agentId), isNull(agents.deletedAt)))
       .limit(1)
       .for("update");
-    if (!existing || existing.status === "stopped") return false;
+    if (!existing || existing.status === "stopped") return { updated: false, transition: null };
 
     const now = currentDate();
     const [updated] = await tx.update(agents)
@@ -698,11 +737,12 @@ export async function updateAgentStatusFromSignal(
         ne(agents.status, "stopped"),
       ))
       .returning({ id: agents.id });
-    if (updated && existing.status !== status) {
-      await emitAgentNotificationEvent(tx, existing, "agent.status_changed", ["status"], now);
-    }
-    return Boolean(updated);
+    if (!updated || existing.status === status) return { updated: Boolean(updated), transition: null };
+    await emitAgentNotificationEvent(tx, existing, "agent.status_changed", ["status"], now);
+    return { updated: true, transition: { agentId, serverId: existing.serverId, status, changedAt: now } };
   });
+  if (outcome.transition) publishAgentStatusTransitions([outcome.transition]);
+  return outcome.updated;
 }
 
 export async function invalidateAgentSessionFromSignal(
@@ -1113,7 +1153,7 @@ export async function deleteAgent(agentId: string) {
 
 export async function resetAgentSession(agentId: string, status: AgentStatus = "inactive") {
   const db = getDb();
-  await db.transaction(async (tx) => {
+  const transition = await db.transaction(async (tx): Promise<AgentStatusTransition | null> => {
     const [existing] = await tx.select({
       id: agents.id,
       serverId: agents.serverId,
@@ -1122,7 +1162,7 @@ export async function resetAgentSession(agentId: string, status: AgentStatus = "
       .where(and(eq(agents.id, agentId), isNull(agents.deletedAt)))
       .limit(1)
       .for("update");
-    if (!existing) return;
+    if (!existing) return null;
     const now = currentDate();
     await tx.update(agents)
       .set({
@@ -1132,10 +1172,11 @@ export async function resetAgentSession(agentId: string, status: AgentStatus = "
         updatedAt: now,
       })
       .where(and(eq(agents.id, agentId), isNull(agents.deletedAt)));
-    if (existing.status !== status) {
-      await emitAgentNotificationEvent(tx, existing, "agent.status_changed", ["status"], now);
-    }
+    if (existing.status === status) return null;
+    await emitAgentNotificationEvent(tx, existing, "agent.status_changed", ["status"], now);
+    return { agentId, serverId: existing.serverId, status, changedAt: now };
   });
+  if (transition) publishAgentStatusTransitions([transition]);
 }
 
 export async function assignMachine(agentId: string, machineId: string | null) {
@@ -1177,12 +1218,12 @@ export async function autoAssignMachine(serverId: string, machineId: string) {
 /** Reset all active agents to inactive on server startup (no running processes exist yet). */
 export async function resetAllAgentStatuses() {
   const db = getDb();
-  await db.transaction(async (tx) => {
+  const transitions = await db.transaction(async (tx): Promise<AgentStatusTransition[]> => {
     const activeAgents = await tx.select({ id: agents.id, serverId: agents.serverId })
       .from(agents)
       .where(and(eq(agents.status, "active"), isNull(agents.deletedAt)))
       .for("update");
-    if (activeAgents.length === 0) return;
+    if (activeAgents.length === 0) return [];
     const now = currentDate();
     await tx.update(agents)
       .set({ status: "inactive", statusChangedAt: now, updatedAt: now })
@@ -1190,5 +1231,12 @@ export async function resetAllAgentStatuses() {
     for (const agent of activeAgents) {
       await emitAgentNotificationEvent(tx, agent, "agent.status_changed", ["status"], now);
     }
+    return activeAgents.map((agent) => ({
+      agentId: agent.id,
+      serverId: agent.serverId,
+      status: "inactive" as const,
+      changedAt: now,
+    }));
   });
+  publishAgentStatusTransitions(transitions);
 }
