@@ -33,6 +33,7 @@ import {
   type SkillInfo,
   type RuntimeAccountUsageProvider
 } from "@botiverse/raft-shared";
+import { publishAgentStatusTransitions } from "./agentService.js";
 import { WIKI_AGENT_WORKSPACE_PACK } from "../generated/wikiAgentWorkspacePack.js";
 import {
   REPLICA_ID,
@@ -4675,6 +4676,15 @@ test("user-visible machine read model falls back to the persisted daemon version
   orchestrator.shutdown();
 });
 
+/** Strip the machine:status since/serverTime pair after checking it is well-formed. */
+function withoutStatusSince(entry: { room: string; event: string; payload: unknown } | undefined) {
+  assert.ok(entry);
+  const { since, serverTime, ...payload } = entry.payload as { since?: unknown; serverTime?: unknown };
+  assert.equal(typeof serverTime, "number");
+  assert.ok(since === null || typeof since === "number");
+  return { ...entry, payload };
+}
+
 test("machine status websocket event matches machine read model when a machine connects", async () => {
   const orchestrator = new DeterministicAgentOrchestrator();
   const emitted: Array<{ room: string; event: string; payload: unknown }> = [];
@@ -4684,7 +4694,7 @@ test("machine status websocket event matches machine read model when a machine c
   await orchestrator.registerMachine("machine-1", "server-1", ws as never);
 
   const machine = await buildMachineReadModel(makeMachineRecord(), orchestrator);
-  assert.deepEqual(emitted.at(-1), {
+  assert.deepEqual(withoutStatusSince(emitted.at(-1)), {
     room: "server:server-1",
     event: "machine:status",
     payload: { machineId: "machine-1", status: "online", statusVersion: 1 },
@@ -4712,7 +4722,7 @@ test("machine status websocket event matches machine read model when a machine d
   await advanceClockAndWaitForCondition(clock, 2000, () => emitted.length > 1);
 
   const machine = await buildMachineReadModel(makeMachineRecord(), orchestrator);
-  assert.deepEqual(emitted.at(-1), {
+  assert.deepEqual(withoutStatusSince(emitted.at(-1)), {
     room: "server:server-1",
     event: "machine:status",
     payload: { machineId: "machine-1", status: "offline", statusVersion: 2, cause: "socket_close" },
@@ -4836,7 +4846,7 @@ test("machine disconnect within grace then reconnect does not emit user-visible 
 
   assert.equal(await orchestrator.getMachineStatus("machine-1"), "online");
   assert.deepEqual(await orchestrator.getActivity("agent-1"), { activity: "online", activityDetail: "" });
-  assert.deepEqual(emitted.map((entry) => entry.payload), [
+  assert.deepEqual(emitted.map((entry) => withoutStatusSince(entry).payload), [
     { machineId: "machine-1", status: "online", statusVersion: 2 },
   ]);
 
@@ -4859,7 +4869,7 @@ test("true machine disconnect beyond grace emits user-visible offline with cause
   assert.equal(await orchestrator.getMachineStatus("machine-1"), "online");
   await advanceClockAndWaitForCondition(clock, 1, () => emitted.length > 0);
 
-  assert.deepEqual(emitted.at(-1), {
+  assert.deepEqual(withoutStatusSince(emitted.at(-1)), {
     room: "server:server-1",
     event: "machine:status",
     payload: { machineId: "machine-1", status: "offline", statusVersion: 2, cause: "heartbeat_timeout" },
@@ -4929,7 +4939,7 @@ test("machine reconnect during delayed disconnect unregister keeps replica owner
   );
   assert.equal(shared.machineOwners.get("machine-1"), "replica-a");
   assert.equal(await replicaB.getMachineStatus("machine-1"), "online");
-  assert.deepEqual(emitted.map((entry) => entry.payload), [
+  assert.deepEqual(emitted.map((entry) => withoutStatusSince(entry).payload), [
     { machineId: "machine-1", status: "online", statusVersion: 2 },
   ]);
 
@@ -4970,7 +4980,7 @@ test("machine disconnect commits replica unregister before emitting offline stat
   unregisterGate.resolve();
   await waitForCondition(() => emitted.length > 0);
 
-  assert.deepEqual(emitted.at(-1), {
+  assert.deepEqual(withoutStatusSince(emitted.at(-1)), {
     room: "server:server-1",
     event: "machine:status",
     payload: { machineId: "machine-1", status: "offline", statusVersion: 2, cause: "socket_close" },
@@ -4994,7 +5004,7 @@ test("machine disconnect emits offline even when replica unregister fails", asyn
   await assert.doesNotReject(() => orchestrator.handleMachineDisconnect("machine-1", ws as never, { cause: "socket_close" }));
   await advanceClockAndWaitForCondition(clock, 2000, () => emitted.length > 0);
 
-  assert.deepEqual(emitted.at(-1), {
+  assert.deepEqual(withoutStatusSince(emitted.at(-1)), {
     room: "server:server-1",
     event: "machine:status",
     payload: { machineId: "machine-1", status: "offline", statusVersion: 2, cause: "socket_close" },
@@ -5019,7 +5029,7 @@ test("machine disconnect emits offline when replica unregister hangs past the gu
   await new Promise((resolve) => setTimeout(resolve, 1100));
   await waitForCondition(() => emitted.length > 0);
 
-  assert.deepEqual(emitted.at(-1), {
+  assert.deepEqual(withoutStatusSince(emitted.at(-1)), {
     room: "server:server-1",
     event: "machine:status",
     payload: { machineId: "machine-1", status: "offline", statusVersion: 2, cause: "socket_close" },
@@ -17819,4 +17829,53 @@ test("machine status since: online on registration, offline at socket loss, grac
     [{ machineId: "machine-1", status: "offline", atMs: lostAtMs }],
   );
   orchestrator.shutdown();
+});
+
+test("agent:lifecycle socket event mirrors committed agents.status transitions until shutdown", async () => {
+  const clock = new FakeClock();
+  const orchestrator = new DeterministicAgentOrchestrator(new InMemoryReplicaStateStore(), clock);
+  const emitted: Array<{ room: string; event: string; payload: any }> = [];
+  orchestrator.setIO({
+    to: (room: string) => ({ emit: (event: string, payload: unknown) => emitted.push({ room, event, payload }) }),
+  } as never);
+  const internal: unknown[] = [];
+  orchestrator.on("agent:lifecycle", (event) => internal.push(event));
+
+  const changedAt = new Date(clock.now() - 5_000);
+  publishAgentStatusTransitions([{ agentId: "agent-1", serverId: "server-1", status: "stopped", changedAt }]);
+
+  assert.deepEqual(emitted.filter((e) => e.event === "agent:lifecycle"), [{
+    room: "server:server-1",
+    event: "agent:lifecycle",
+    payload: { agentId: "agent-1", lifecycleStatus: "stopped", since: changedAt.getTime(), serverTime: clock.now() },
+  }]);
+  assert.equal(internal.length, 0, "the socket event does not feed the in-process lifecycle emitter");
+
+  await orchestrator.shutdown();
+  publishAgentStatusTransitions([{ agentId: "agent-1", serverId: "server-1", status: "active", changedAt }]);
+  assert.equal(emitted.filter((e) => e.event === "agent:lifecycle").length, 1);
+});
+
+test("machine:status carries since and serverTime for online and offline", async () => {
+  const clock = new FakeClock();
+  const orchestrator = new DeterministicAgentOrchestrator(new InMemoryReplicaStateStore(), clock);
+  const statuses: any[] = [];
+  orchestrator.setIO({
+    to: () => ({ emit: (event: string, payload: unknown) => { if (event === "machine:status") statuses.push(payload); } }),
+  } as never);
+
+  const ws = makeFakeWs();
+  const onlineAt = clock.now();
+  await orchestrator.registerMachine("machine-1", "server-1", ws as never);
+  clock.advance(10_000);
+  const lostAt = clock.now();
+  await orchestrator.handleMachineDisconnect("machine-1", ws as never, { cause: "socket_close" });
+  clock.advance(2_000);
+  await waitForCondition(() => statuses.some((s) => s.status === "offline"));
+
+  assert.deepEqual(statuses.map((s) => ({ status: s.status, since: s.since, serverTime: s.serverTime })), [
+    { status: "online", since: onlineAt, serverTime: onlineAt },
+    { status: "offline", since: lostAt, serverTime: lostAt + 2_000 },
+  ]);
+  await orchestrator.shutdown();
 });

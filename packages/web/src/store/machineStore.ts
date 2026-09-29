@@ -60,6 +60,9 @@ export interface Machine {
   } | null;
   lastHeartbeat: string | null;
   createdAt: string;
+  // ms epoch when the current status began; null when the server cannot tell.
+  // Absent on older server responses.
+  statusSince?: number | null;
 }
 
 export interface MachineWorkspaceEntry {
@@ -133,6 +136,7 @@ interface MachineState {
     machineId: string,
     status: "online" | "offline",
     statusVersion?: number,
+    since?: number | null,
   ) => MachineTransition;
   requestMachineReconcile: (
     reason: "machine-updated" | "scheduled",
@@ -394,12 +398,14 @@ export const useMachineStore = create<MachineState>((set, get) => {
       machineId: string,
       status: "online" | "offline",
       statusVersion?: number,
+      since?: number | null,
     ) =>
       dispatchMachineEvent({
         kind: "status",
         machineId,
         status,
         statusVersion,
+        since,
       }),
 
     requestMachineReconcile: (reason) =>

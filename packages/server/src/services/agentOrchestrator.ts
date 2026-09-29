@@ -67,6 +67,8 @@ import {
   type ComputerHostKind,
   DEFAULT_COMPUTER_HOST_KIND,
   normalizeComputerHostKind,
+  AGENT_LIFECYCLE_SOCKET_EVENT,
+  type AgentLifecycleSocketPayload,
 } from "@botiverse/raft-shared";
 import {
   appConfigTraceAttrs,
@@ -2007,6 +2009,7 @@ type AgentLifecycleRingBuffer = {
  */
 export class AgentOrchestrator extends EventEmitter {
   private io: SocketServer | null = null;
+  private unsubscribeAgentStatusTransitions: (() => void) | null = null;
   private machineConnections = new Map<string, MachineConnection>();
   private machineCatalogAuthority = new MachineCatalogAuthority((machineId) => {
     const conn = this.machineConnections.get(machineId);
@@ -2304,6 +2307,19 @@ export class AgentOrchestrator extends EventEmitter {
     return events;
   }
 
+  // Socket event for persisted agents.status transitions. Deliberately
+  // separate from the in-process `this.emit("agent:lifecycle")` below, which
+  // shares the name but carries runtime lifecycle rows to local listeners.
+  private broadcastAgentLifecycle(transition: agentService.AgentStatusTransition): void {
+    const payload: AgentLifecycleSocketPayload = {
+      agentId: transition.agentId,
+      lifecycleStatus: transition.status,
+      since: transition.changedAt.getTime(),
+      serverTime: this.clock.now(),
+    };
+    this.io?.to(`server:${transition.serverId}`).emit(AGENT_LIFECYCLE_SOCKET_EVENT, payload);
+  }
+
   protected recordLifecycleEvent(event: Omit<AgentLifecycleEvent, "at">) {
     const enriched: AgentLifecycleEvent = {
       at: this.clock.now(),
@@ -2407,6 +2423,9 @@ export class AgentOrchestrator extends EventEmitter {
 
   setIO(io: SocketServer) {
     this.io = io;
+    this.unsubscribeAgentStatusTransitions ??= agentService.subscribeAgentStatusTransitions(
+      (transition) => this.broadcastAgentLifecycle(transition),
+    );
     // Periodically sweep stale transient activities (working/thinking stuck due to missed events)
     if (!this.staleActivityTimer) {
       void this.sweepComputerLifecycleOperations().catch(() => {});
@@ -4871,13 +4890,15 @@ export class AgentOrchestrator extends EventEmitter {
         return;
       }
 
-      await this.recordMachineStatusSince(machineId, "online", new Date(this.clock.now()));
+      const onlineRecord = await this.recordMachineStatusSince(machineId, "online", new Date(this.clock.now()));
       const statusVersion = await this.bumpMachineStatusVersion(machineId);
 
       this.io?.to(`server:${serverId}`).emit("machine:status", {
         machineId,
         status: "online",
         statusVersion,
+        since: onlineRecord?.lastStatus === "online" ? onlineRecord.statusChangedAt?.getTime() ?? null : null,
+        serverTime: this.clock.now(),
       });
       this.emit("machine:online", { machineId, serverId });
       span.addEvent("machine.status.emitted", {
@@ -5561,6 +5582,8 @@ export class AgentOrchestrator extends EventEmitter {
 
   /** Close all machine connections and timers (for graceful shutdown). */
   async shutdown(): Promise<void> {
+    this.unsubscribeAgentStatusTransitions?.();
+    this.unsubscribeAgentStatusTransitions = null;
     if (this.staleActivityTimer) {
       this.clock.cancelRepeated(this.staleActivityTimer);
       this.staleActivityTimer = null;
@@ -5794,6 +5817,7 @@ export class AgentOrchestrator extends EventEmitter {
 
     // Mark all active agents on this machine offline, but preserve enough
     // lifecycle state for a future explicit work item to lazy-wake them.
+    let offlineRecord: machineService.MachineStatusRecord | null = null;
     try {
       try {
         const outage = await recordComputerOfflineTransition({
@@ -5818,7 +5842,7 @@ export class AgentOrchestrator extends EventEmitter {
           error_class: err instanceof Error ? err.name : typeof err,
         });
       }
-      await this.recordMachineStatusSince(machineId, "offline", new Date(pending.disconnectedAtMs));
+      offlineRecord = await this.recordMachineStatusSince(machineId, "offline", new Date(pending.disconnectedAtMs));
       const machineAgents = await this.loadAgentsForDisconnect(machineId);
       let activeAgentsCount = 0;
       let pendingReceivesResolvedCount = 0;
@@ -5904,6 +5928,9 @@ export class AgentOrchestrator extends EventEmitter {
           machineId,
           status: "offline",
           statusVersion,
+          // The socket-loss time is the offline start even if persisting it failed.
+          since: this.offlineSinceMs(offlineRecord, pending.disconnectedAtMs),
+          serverTime: this.clock.now(),
           cause: context.shutdownIntent ? "machine_shutdown" : context.cause || "socket_close",
           ...(context.shutdownIntent ? { shutdownReason: context.shutdownIntent.reason } : {}),
         });
@@ -5945,6 +5972,9 @@ export class AgentOrchestrator extends EventEmitter {
           machineId,
           status: "offline",
           statusVersion,
+          // The socket-loss time is the offline start even if persisting it failed.
+          since: this.offlineSinceMs(offlineRecord, pending.disconnectedAtMs),
+          serverTime: this.clock.now(),
           cause: context.shutdownIntent ? "machine_shutdown" : context.cause || "socket_close",
           ...(context.shutdownIntent ? { shutdownReason: context.shutdownIntent.reason } : {}),
         });
@@ -12347,6 +12377,17 @@ export class AgentOrchestrator extends EventEmitter {
     at: Date,
   ): Promise<machineService.MachineStatusRecord | null> {
     return machineService.recordMachineStatusTransition(machineId, status, at);
+  }
+
+  /**
+   * The offline start to announce: the stored offline since when the record
+   * agrees, else the socket-loss time (the write failed, or a newer online
+   * already landed and this projection's offline is only locally true).
+   */
+  private offlineSinceMs(record: machineService.MachineStatusRecord | null, disconnectedAtMs: number): number {
+    return record?.lastStatus === "offline" && record.statusChangedAt
+      ? record.statusChangedAt.getTime()
+      : disconnectedAtMs;
   }
 
   /** Best-effort: a failed since write must never block connect/disconnect. */

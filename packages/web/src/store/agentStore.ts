@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import api from "../api/client";
 import { isExternalAgentRuntime, normalizeActivity, normalizeActivityDetailKind } from "@botiverse/raft-shared";
-import type { AgentActivity, AgentActivityDetailKind, AgentRuntimeErrorState, AgentStatus, ReasoningEffort, RuntimeConfig, RuntimeFormDefinitionRef, ServerRole, TrajectoryEntry } from "@botiverse/raft-shared";
+import type { AgentActivity, AgentActivityDetailKind, AgentLifecycleSocketPayload, AgentRuntimeErrorState, AgentStatus, ReasoningEffort, RuntimeConfig, RuntimeFormDefinitionRef, ServerRole, TrajectoryEntry } from "@botiverse/raft-shared";
 import { useServerStore } from "./serverStore";
 import { registerServerReset } from "./serverResetRegistry";
 import { en } from "../i18n/messages/en";
@@ -38,6 +38,8 @@ export interface Agent {
   avatarUrl: string | null;
   description: string | null;
   status: AgentStatus;
+  /** ms epoch when `status` began, from `agent:lifecycle`; absent until one arrives. */
+  lifecycleStatusSince?: number | null;
   model: string;
   runtime: string;
   external?: boolean;
@@ -58,6 +60,17 @@ export interface Agent {
   createdAt: string;
   /** Bounded public profile carried by a readable channel relation. */
   profileProjection?: "channel_summary";
+}
+
+/**
+ * Optimistic status flip for a local action. The since belongs to the old
+ * status, so a changed status drops it until `agent:lifecycle` brings the
+ * server's value (a failed action would otherwise leave them mismatched).
+ */
+function withOptimisticStatus(agent: Agent, status: AgentStatus): Agent {
+  return agent.status === status
+    ? agent
+    : { ...agent, status, lifecycleStatusSince: null };
 }
 
 export type OnboardingIdentityField = "name" | "displayName" | "role" | "serverRole" | "avatarUrl";
@@ -301,6 +314,7 @@ interface AgentState {
   deleteAgent: (agentId: string) => Promise<void>;
   resetAgent: (agentId: string, mode: "restart" | "session" | "full") => Promise<void>;
   updateAgentSession: (agentId: string, sessionId: string | null) => void;
+  applyAgentLifecycle: (payload: AgentLifecycleSocketPayload) => void;
   updateActivity: (
     agentId: string,
     activity: string,
@@ -805,7 +819,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     set((state) => {
       const current = state.agentActivities[agentId];
       const agents = state.agents.map((a) =>
-        a.id === agentId ? { ...a, status: "active" as const } : a
+        a.id === agentId ? withOptimisticStatus(a, "active") : a
       );
       if (current?.activity !== "offline") {
         return { agents };
@@ -834,7 +848,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     await api.post(`/agents/${agentId}/stop`);
     set((state) => ({
       agents: state.agents.map((a) =>
-        a.id === agentId ? { ...a, status: "stopped" as const } : a
+        a.id === agentId ? withOptimisticStatus(a, "stopped") : a
       ),
       agentActivities: {
         ...state.agentActivities,
@@ -861,7 +875,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       const { [agentId]: _version, ...restVersions } = state.agentActivityVersions;
       return {
         agents: state.agents.map((a) =>
-          a.id === agentId ? { ...a, deletedAt: new Date().toISOString(), status: "inactive" as const } : a
+          a.id === agentId ? { ...withOptimisticStatus(a, "inactive"), deletedAt: new Date().toISOString() } : a
         ),
         agentActivities: restActivities,
         agentActivityTraceJoins: restTraceJoins,
@@ -887,7 +901,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       })(),
       agents: state.agents.map((a) =>
         a.id === agentId
-          ? { ...a, status: "active" as const, ...(mode === "restart" ? {} : { sessionId: null }) }
+          ? { ...withOptimisticStatus(a, "active"), ...(mode === "restart" ? {} : { sessionId: null }) }
           : a
       ),
       agentActivities: {
@@ -907,6 +921,18 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       a.id === agentId ? { ...a, sessionId } : a
     ),
   })),
+
+  applyAgentLifecycle: ({ agentId, lifecycleStatus, since }) => set((state) => {
+    const agent = state.agents.find((a) => a.id === agentId);
+    // Out-of-order delivery: an older transition never overwrites a newer one.
+    if (!agent || (agent.lifecycleStatusSince != null && agent.lifecycleStatusSince > since)) return {};
+    if (agent.status === lifecycleStatus && agent.lifecycleStatusSince === since) return {};
+    return {
+      agents: state.agents.map((a) =>
+        a.id === agentId ? { ...a, status: lifecycleStatus, lifecycleStatusSince: since } : a
+      ),
+    };
+  }),
 
   updateActivity: (agentId, activity, activityDetail = "", serverSeq, timestamp = Date.now(), joinKeys, activityKind, detailKind, traceJoin, isHeartbeat, isRefreshOnly) =>
     set((state) => {

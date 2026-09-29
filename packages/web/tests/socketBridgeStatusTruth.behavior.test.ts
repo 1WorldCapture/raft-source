@@ -162,3 +162,42 @@ test("status K3 xxchan 8890d027: machine offline then agent working resolves to 
   assert.equal(useAgentStore.getState().agentActivities["agent-1"]?.activity, "working");
   assert.equal(useAgentStore.getState().agentActivities["agent-1"]?.activityDetail, "Recovered");
 });
+
+test("agent:lifecycle patches agents.status and its since; older transitions never win", () => {
+  const agentLifecycle = getBinding("agent:lifecycle");
+
+  agentLifecycle({ agentId: "agent-1", lifecycleStatus: "inactive", since: 2_000, serverTime: 2_100 });
+  let agent = useAgentStore.getState().agents.find((a) => a.id === "agent-1");
+  assert.equal(agent?.status, "inactive");
+  assert.equal(agent?.lifecycleStatusSince, 2_000);
+
+  agentLifecycle({ agentId: "agent-1", lifecycleStatus: "active", since: 1_000, serverTime: 2_200 });
+  agent = useAgentStore.getState().agents.find((a) => a.id === "agent-1");
+  assert.equal(agent?.status, "inactive");
+  assert.equal(agent?.lifecycleStatusSince, 2_000);
+
+  agentLifecycle({ agentId: "unknown", lifecycleStatus: "stopped", since: 3_000, serverTime: 3_000 });
+  assert.equal(useAgentStore.getState().agents.some((a) => a.id === "unknown"), false);
+});
+
+test("machine:status carries its since into the machine; servers that omit it leave it alone", () => {
+  const machineStatus = getBinding("machine:status");
+
+  machineStatus({ machineId: "machine-1", status: "offline", statusVersion: 11, since: 5_000, serverTime: 6_000 });
+  assert.equal(useMachineStore.getState().machines[0]?.statusSince, 5_000);
+
+  machineStatus({ machineId: "machine-1", status: "offline", statusVersion: 12 });
+  assert.equal(useMachineStore.getState().machines[0]?.statusSince, 5_000);
+
+  machineStatus({ machineId: "machine-1", status: "online", statusVersion: 13, since: null, serverTime: 7_000 });
+  assert.equal(useMachineStore.getState().machines[0]?.statusSince, null);
+});
+
+test("machine:status without since clears a since that belonged to the previous status", () => {
+  const machineStatus = getBinding("machine:status");
+
+  machineStatus({ machineId: "machine-1", status: "offline", statusVersion: 11, since: 5_000, serverTime: 6_000 });
+  machineStatus({ machineId: "machine-1", status: "online", statusVersion: 12 });
+  assert.equal(useMachineStore.getState().machines[0]?.status, "online");
+  assert.equal(useMachineStore.getState().machines[0]?.statusSince, null);
+});

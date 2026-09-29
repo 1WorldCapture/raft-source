@@ -952,3 +952,20 @@ test("agent display state falls back to database status when activity is not see
     isOnline: false,
   });
 });
+
+test("optimistic stop drops the old status since; a lifecycle event that beat the response keeps its since", async () => {
+  resetStores();
+  useAgentStore.setState({ agents: [makeAgent({ status: "active", lifecycleStatusSince: 1_000 })] });
+  api.post = (async () => ({ data: {} })) as typeof api.post;
+
+  await useAgentStore.getState().stopAgent("agent-1");
+  let agent = useAgentStore.getState().agents[0];
+  assert.equal(agent?.status, "stopped");
+  assert.equal(agent?.lifecycleStatusSince, null);
+
+  // agent:lifecycle arrived before the HTTP response: status already matches.
+  useAgentStore.setState({ agents: [makeAgent({ status: "stopped", lifecycleStatusSince: 2_000 })] });
+  await useAgentStore.getState().stopAgent("agent-1");
+  agent = useAgentStore.getState().agents[0];
+  assert.equal(agent?.lifecycleStatusSince, 2_000);
+});
