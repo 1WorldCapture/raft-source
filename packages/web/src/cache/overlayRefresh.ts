@@ -179,6 +179,10 @@ export function overlayFetchPlan(
         if (index < from && at - index < OVERLAY_PAGE_SIZE && !inPlan(index)) from = index;
       }
     }
+    // Never restart inside a done range below: when the cache is sparser than
+    // the server, a page aligned to the boundary above can end short of it,
+    // and re-aligning would fetch that same page again on every open.
+    if (below >= 0 && from <= below) from = below + 1;
     const through = Math.min(from + OVERLAY_PAGE_SIZE - 1, all.length - 1);
     planned.push([from, through]);
     plan.push({

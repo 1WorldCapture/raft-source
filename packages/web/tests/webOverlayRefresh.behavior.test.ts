@@ -606,3 +606,34 @@ test("a fresh store page replaces a cached overlay even when reactions left upda
   assert.equal(emoji(1), "🎉", "the page is the server's state at request time and wins over the older overlay");
   assert.equal(emoji(2), "🔥", "a live write after the request started is kept");
 });
+
+test("reopening a channel does not refetch a covered page when the cache is sparser than the server", SERIAL, async (t) => {
+  const { scopeId } = await attach();
+  // The server has every seq 1-200; the cache only holds 1-40 and 150-200.
+  const server = channelServer(Array.from({ length: 200 }, (_, index) => index + 1));
+  t.mock.method(api, "get", server.handler);
+  const cached = [...Array.from({ length: 40 }, (_, index) => index + 1), ...Array.from({ length: 51 }, (_, index) => 150 + index)];
+  await seedSeqs(scopeId, cached);
+  resetStore();
+  useMessageStore.setState({ currentChannelId: "c1" });
+
+  // Open: the store's latest page proves 151+; the refresh covers the rest.
+  await useMessageStore.getState().loadMessages("c1");
+  await flush();
+  await refreshLatestOverlayPages("c1");
+  await flush();
+  const afterFirstOpen = server.urls.filter((url) => url.includes("after=")).map(afterParam);
+
+  // Reopen: the page from 1 ended at 50, short of cached 150. The next fetch
+  // must start after the covered range, never repeat an issued page.
+  await refreshLatestOverlayPages("c1");
+  await flush();
+  const afterReopen = server.urls.filter((url) => url.includes("after=")).map(afterParam);
+  const reopenFetches = afterReopen.slice(afterFirstOpen.length);
+  assert.ok(reopenFetches.every((after) => !afterFirstOpen.includes(after)), `reopen repeated a page: ${afterReopen.join(",")}`);
+
+  // A third open finds everything cached covered: no request at all.
+  await refreshLatestOverlayPages("c1");
+  await flush();
+  assert.equal(server.urls.filter((url) => url.includes("after=")).length, afterReopen.length);
+});
