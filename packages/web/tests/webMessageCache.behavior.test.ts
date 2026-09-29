@@ -232,3 +232,64 @@ test("messageStore: a network failure keeps the seeded pane readable", async (t)
   assert.equal(bucket.length, 50, "the cold-start seed stays painted");
   assert.equal(useMessageStore.getState().loading, false);
 });
+
+test("messageStore: cache already current → loading clears and the auto-read fires (PR #91 review)", async (t) => {
+  await freshCache();
+  await recordMessagePage("c2", page(Array.from({ length: 50 }, (_, i) => msg(i + 1, "c2"))));
+  resetMessageStoreState();
+
+  const posts: Array<{ url: string; body: unknown }> = [];
+  t.mock.method(api, "get", async (url: string) => {
+    assert.ok(url.includes("after=50"), "the catch-up asks after the cached tail");
+    return { data: page([]) }; // already current — zero rows
+  });
+  t.mock.method(api, "post", async (url: string, body: unknown) => {
+    posts.push({ url, body });
+    return { data: {} };
+  });
+
+  await useMessageStore.getState().loadMessages("c2");
+
+  const state = useMessageStore.getState();
+  assert.equal((state.channelMessages["c2"] ?? []).length, 50, "seed painted");
+  assert.equal(state.loading, false, "an empty drain must NOT leave the spinner stuck");
+  assert.equal(state.hasNewer, false);
+  assert.equal(state.hasMore, true, "a full seeded bucket implies older history may exist");
+  const readCall = posts.find((call) => call.url === "/channels/c2/read");
+  assert.ok(readCall, "the auto-read is queued even when the catch-up pulled nothing");
+  assert.deepEqual(readCall!.body, { seq: 50 }, "read position = the cached tail's max seq");
+});
+
+test("messageStore: non-empty bucket + empty drain → no stuck loading (PR #91 review)", async (t) => {
+  await freshCache();
+  await recordMessagePage("c3", page(Array.from({ length: 50 }, (_, i) => msg(i + 1, "c3"))));
+  resetMessageStoreState();
+
+  // Round 1: the catch-up hits the drain cap (40 full pages), which is the
+  // real-world producer of hasNewer=true on the channel meta — the state a
+  // re-open lands on with a non-empty bucket.
+  let round = 1;
+  t.mock.method(api, "get", async (url: string) => {
+    const after = Number(/after=(\d+)/.exec(url)?.[1] ?? 0);
+    if (round === 1) {
+      return { data: page(Array.from({ length: 50 }, (_, i) => msg(after + i + 1, "c3"))) };
+    }
+    return { data: page([]) }; // re-open: the cache is current
+  });
+  t.mock.method(api, "post", async () => ({ data: {} }));
+
+  await useMessageStore.getState().loadMessages("c3");
+  assert.equal(useMessageStore.getState().hasNewer, true, "fixture: hitting the drain cap sets hasNewer");
+  const bucketAfterCap = (useMessageStore.getState().channelMessages["c3"] ?? []).length;
+  assert.ok(bucketAfterCap > 50, "fixture: bucket is non-empty");
+
+  // Round 2: re-open. The bucket is non-empty so the seed guard refuses,
+  // the drain pulls zero pages — the unified tail must still clear loading.
+  round = 2;
+  await useMessageStore.getState().loadMessages("c3");
+
+  const state = useMessageStore.getState();
+  assert.equal(state.loading, false, "non-empty bucket + empty drain must not stick on loading");
+  assert.equal(state.hasNewer, false, "an empty catch-up means the tail is current");
+  assert.equal((state.channelMessages["c3"] ?? []).length, bucketAfterCap);
+});

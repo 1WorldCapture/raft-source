@@ -1853,7 +1853,12 @@ export const useMessageStore = create<MessageState>((set, get) => ({
           (page) => page.length >= limit,
         );
         if (requestGeneration !== messageWindowRequestGeneration) return;
-        if (drained.pages.length === 0) return;
+        // NOTE: an empty drain (cache already current — the COMMON case when
+        // reopening a recently viewed channel) still falls through to the
+        // unified tail below. Early-returning here left `loading: true`
+        // stuck when the seed could not write (non-empty bucket), skipped
+        // the window-meta refresh and never queued the auto-read for
+        // realtime-cached unread messages (PR #91 review).
         const maxSeq = Math.max(...getBucket(get().channelMessages, channelId).map((m) => m.seq || 0), 0);
         const historyLimited = lastHistoryLimited;
         // A full drain page or a seeded bucket implies older history may
