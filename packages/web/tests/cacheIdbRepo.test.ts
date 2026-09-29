@@ -318,6 +318,48 @@ test("lifecycle: startup user=null never wipes; persisted identity attaches befo
   wired.unsubscribe();
 });
 
+test("lifecycle: user already known attaches the persisted scope while current is null", async () => {
+  freshDb();
+  const seeded = await createWebCacheRuntime();
+  const previous = await seeded.attach(RUNTIME_API_BASE, "user-1", "srv-a");
+  await seeded.repo.putKv(previous, "serverList", { servers: [{ id: "s", name: "Raft", slug: "raft" }] });
+  const storage = memoryStorage({
+    "raft_web_cache_last_scope": JSON.stringify({ userId: "user-1", serverId: "srv-a" }),
+  });
+
+  // Offline admission can publish the user before wiring's first sync, and
+  // current is still null because the list has not seeded yet.
+  const runtime = await createWebCacheRuntime();
+  assert.equal(runtime.scopeId, null);
+  const { store } = fakeStores({ user: { id: "user-1" }, current: null });
+  const wired = wireWebCacheLifecycle(
+    runtime,
+    store as unknown as Parameters<typeof wireWebCacheLifecycle>[1],
+    store as unknown as Parameters<typeof wireWebCacheLifecycle>[2],
+    { storage },
+  );
+  await flush();
+  assert.equal(runtime.scopeId, previous, "persisted scope attaches even though current is null");
+  assert.equal(runtime.userId, "user-1");
+  assert.deepEqual(await runtime.repo.getKv(previous, "serverList"), {
+    servers: [{ id: "s", name: "Raft", slug: "raft" }],
+  });
+
+  // A different account must not be attached to the previous user's scope
+  // just because current has not been chosen yet.
+  const other = await createWebCacheRuntime();
+  const otherWired = wireWebCacheLifecycle(
+    other,
+    fakeStores({ user: { id: "user-2" }, current: null }).store as unknown as Parameters<typeof wireWebCacheLifecycle>[1],
+    fakeStores({ user: { id: "user-2" }, current: null }).store as unknown as Parameters<typeof wireWebCacheLifecycle>[2],
+    { storage },
+  );
+  await flush();
+  assert.equal(other.scopeId, null, "another account does not inherit the persisted scope");
+  wired.unsubscribe();
+  otherWired.unsubscribe();
+});
+
 test("lifecycle: explicit logout wipes; account switch wipes the old account first", async () => {
   freshDb();
   const runtime = await createWebCacheRuntime();

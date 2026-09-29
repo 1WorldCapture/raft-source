@@ -820,6 +820,54 @@ test("a stuck attach wait releases later loads instead of timing out again", asy
   assert.ok(Date.now() - again < 20, "the next load does not wait another timeout");
 });
 
+test("loadServers keeps a server list fetched before any scope and writes it when that user attaches", async (t) => {
+  clearActiveWebCache();
+  setActiveCacheProvider(null);
+  resetStores();
+  noteDirectorySessionUser("user-1");
+  useServerStore.setState({ current: null, servers: [], loading: true });
+
+  t.mock.method(api, "get", async () => ({ data: [serverFixture({ id: "late-1", name: "Late", slug: "late" })] }));
+  await useServerStore.getState().loadServers();
+  assert.deepEqual(useServerStore.getState().servers.map((s) => s.id), ["late-1"]);
+  assert.equal(currentDirectoryCacheScope(), null, "nothing is attached yet");
+
+  const repo = createWebCacheRepo();
+  const scopeId = await attachMemoryWebCache("https://raft.example", "user-1", ATTACHED_SERVER, repo);
+  noteDirectoryAttachSettled();
+  await flush();
+  const recorded = serversFromCacheValue(await repo.getKv(scopeId, "serverList"));
+  assert.deepEqual(recorded.map((s) => s.id), ["late-1"], "the list lands in the scope that attached afterwards");
+
+  useServerStore.setState({ servers: [], current: null, loading: true });
+  t.mock.method(api, "get", async () => {
+    throw networkDown();
+  });
+  await useServerStore.getState().loadServers();
+  assert.deepEqual(
+    useServerStore.getState().servers.map((s) => s.id),
+    ["late-1"],
+    "an offline reload with no HTTP status seeds the list instead of looking like a brand-new account",
+  );
+});
+
+test("offline channel refresh with no HTTP status does not delete cached channels", async (t) => {
+  const { repo, scopeId } = await freshCache();
+  await recordChannels("channel", [
+    channelFixture("c1", "visible"),
+    channelFixture("c-arch", "archived", { archivedAt: "2026-09-01T00:00:00Z" }),
+  ], ATTACHED_SERVER);
+  await recordChannels("dm", [channelFixture("d1", "dm")], ATTACHED_SERVER);
+  resetStores();
+  t.mock.method(api, "get", async () => {
+    throw networkDown();
+  });
+  await useChannelStore.getState().loadChannels();
+  await useChannelStore.getState().loadDMChannels();
+  const remaining = (await repo.getChannels(scopeId)).map((row) => row.id).sort();
+  assert.deepEqual(remaining, ["c-arch", "c1", "d1"]);
+});
+
 test("loadServers does not seed or write a scope that belongs to another account", async (t) => {
   const repo = createWebCacheRepo();
   const scopeId = await repo.openScope("https://raft.example", "user-1", ATTACHED_SERVER);
