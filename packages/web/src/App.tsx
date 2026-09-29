@@ -891,6 +891,10 @@ export function AppShell() {
   }, [authenticatedUserId, initialized, userDisplayLanguage, setLocaleFromUser]);
 
   const hasStoredSession = !!(accessToken && refreshToken);
+  const offlineReadonly = useAuthStore((s) => s.offlineReadonly);
+  // Offline admission keeps restoreState at restoring_auth so the retry loop
+  // continues. The full-screen restoring card must not cover the shell.
+  const showOfflineApp = offlineReadonly && !!user;
   const authBootstrapView = getAuthBootstrapView({ initialized, restoreState });
   const authRestoreStartedAtRef = useRef<number | null>(null);
   // Degraded-restore chrome (#desktop-session-restore task #1): flips on once
@@ -1040,13 +1044,15 @@ export function AppShell() {
   // Identity setup is account-global and must complete before any server data
   // or pending invite side effects are loaded.
   // Keyed on the user id, not the object: timezone/translation updates replace
-  // the user object and must not refetch the server list.
+  // the user object and must not refetch the server list. offlineReadonly is
+  // the exception: it flips back to false when /auth/me succeeds without
+  // changing the user id, and the server list still has to reload.
   const signedInUserId = user?.id ?? null;
   useEffect(() => {
     if (signedInUserId && !profileSetupRequired) {
       loadServers();
     }
-  }, [signedInUserId, profileSetupRequired, loadServers]);
+  }, [signedInUserId, profileSetupRequired, loadServers, offlineReadonly]);
 
   // Precise PWA resume: restore the last deep location on cold start from `/`.
   // Only active once the user is authenticated and there's no pending invite,
@@ -1081,7 +1087,7 @@ export function AppShell() {
 
   if (urlParams.authCallback === "social") {
     content = <SocialAuthCallbackPage />;
-  } else if (authBootstrapView === "restoring" && restoreDegraded) {
+  } else if (!showOfflineApp && authBootstrapView === "restoring" && restoreDegraded) {
     content = (
       <DegradedRestoreStatus
         lastRestoreError={lastRestoreError}
@@ -1089,7 +1095,7 @@ export function AppShell() {
         onLogout={() => logout("explicit_user_logout")}
       />
     );
-  } else if (authBootstrapView === "loading" || authBootstrapView === "restoring") {
+  } else if (!showOfflineApp && (authBootstrapView === "loading" || authBootstrapView === "restoring")) {
     content = <AuthBootstrapStatus view={authBootstrapView} />;
   } else if (urlParams.resetToken && !user) {
     content = (

@@ -330,6 +330,7 @@ test("lifecycle: explicit logout wipes; account switch wipes the old account fir
   const aScope = await runtime.repo.openScope(RUNTIME_API_BASE, "user-1", "srv-a");
   await runtime.repo.putKv(aScope, "secret", { v: "user-1-data" });
   assert.equal(JSON.parse(storage.getItem("raft_web_cache_last_scope") ?? "{}").userId, "user-1", "identity persisted");
+  storage.setItem("raft_web_offline_user", JSON.stringify({ id: "user-1" }));
 
   // Explicit logout: the wrapped action wipes and clears the persisted id.
   store.getState().logout("explicit_user_logout");
@@ -337,6 +338,7 @@ test("lifecycle: explicit logout wipes; account switch wipes the old account fir
   assert.equal(runtime.scopeId, null, "logout detaches");
   assert.equal(await runtime.repo.getKv(aScope, "secret"), null, "logout wipes the database");
   assert.equal(storage.getItem("raft_web_cache_last_scope"), null, "persisted identity cleared");
+  assert.equal(storage.getItem("raft_web_offline_user"), null, "public profile snapshot cleared");
 
   // Login as another account: fresh scope, no old data.
   setState({ user: { id: "user-2" }, current: { id: "srv-a" } });
