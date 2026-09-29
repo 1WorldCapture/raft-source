@@ -6,6 +6,7 @@ import { LogIn, ArrowLeft, Settings, MessageSquare, ListTodo, ArrowDown, Square,
 import { SortableTabsList, SortableTabsTab, Tabs, TabsLabel, useOrderedTabs } from "raft-ui";
 import { toast } from "raft-ui";
 import SOSDialog from "./SOSDialog";
+import { refreshLatestOverlayPages, refreshVisibleOverlayPages } from "../../cache/overlayRefresh";
 import { useChannelStore } from "../../store/channelStore";
 import type { Channel } from "../../store/channelStore";
 import { canToggleActivityMute, matchesActivityMuteState, matchesMessageDisplayPrefsState, normalizeActivityMuteState, normalizeMessageDisplayPrefs } from "../../store/channelDomain";
@@ -275,6 +276,10 @@ export default function ChatPanel({
   const [serverMessageForwardingEnabled, setServerMessageForwardingEnabled] = useState(false);
   const messageForwardingEnabled = serverMessageForwardingEnabled;
   const channelId = channel?.id ?? null;
+  useEffect(() => {
+    if (!channelId) return;
+    void refreshLatestOverlayPages(channelId);
+  }, [channelId]);
   const topbarOverflow = useServerFeatureFlag(TOPBAR_OVERFLOW_FEATURE_FLAG_KEY);
   useReadReceiptHydrate(channel);
   const messageRenderScope = useContext(ChatPanelMessageRenderScope);
@@ -292,6 +297,10 @@ export default function ChatPanel({
   const messagesBelongToChannel = !!channelId;
   const shouldShowMessageTimeline = messages.length > 0;
   const [translationWindowIds, setTranslationWindowIds] = useState<string[]>([]);
+  const handleVisibleMessageWindow = useCallback((messageIds: string[]) => {
+    setTranslationWindowIds(messageIds);
+    if (channelId) void refreshVisibleOverlayPages(channelId, messageIds);
+  }, [channelId]);
   const translationMessages = useMemo(() => {
     if (translationWindowIds.length === 0) return [];
     const idSet = new Set(translationWindowIds);
@@ -1577,7 +1586,7 @@ export default function ChatPanel({
                 header={channelHeader}
                 footer={channelFooter}
                 onAtBottomChange={handleAtBottomStateChange}
-                onVisibleMessageWindowChange={setTranslationWindowIds}
+                onVisibleMessageWindowChange={handleVisibleMessageWindow}
                 persistKey={`channel:${channel.id}`}
                 className="h-full"
                 sparseAnchor="bottom"

@@ -208,7 +208,7 @@ export {
 };
 export type { ReceiverPrivateIngressContext };
 
-function normalizeReceiverPrivateMessagesIfEnabled(
+export function normalizeReceiverPrivateMessagesIfEnabled(
   messages: readonly Message[],
   context: ReceiverPrivateIngressContext,
 ): Message[] | null {

@@ -76,6 +76,11 @@ import {
 } from "../cache/messageCache";
 import type { ResumeCursorToken } from "../cache/messageCache";
 import {
+  invalidateOverlayMarksForDisconnect,
+  refreshLatestOverlayPages,
+  refreshStoredOverlayPages,
+} from "../cache/overlayRefresh";
+import {
   captureReceiverPrivateIngressContext,
   isReceiverPrivateIngressContextCurrent,
   useMessageStore,
@@ -186,6 +191,7 @@ export const MAIN_LAYOUT_SOCKET_EVENT_NAMES = [
   "thread:updated",
   "thread:followers-updated",
   "connect",
+  "disconnect",
   "rooms:joined",
   "sync:resume:response",
   "heartbeat",
@@ -910,6 +916,10 @@ export function buildMainLayoutSocketBindings(
     requestThreadAgentFollowers(data.threadChannelId, true);
   };
 
+  const cacheDisconnected = () => {
+    void invalidateOverlayMarksForDisconnect();
+  };
+
   const reconnectSnapshot = () => {
     resumeEpoch += 1;
     resumeLive = false;
@@ -923,6 +933,11 @@ export function buildMainLayoutSocketBindings(
     if (typeof window !== "undefined") {
       (window as Window & { __slockRoomsJoined?: boolean }).__slockRoomsJoined =
         false;
+    }
+    const openChannelId = useMessageStore.getState().currentChannelId;
+    if (openChannelId) {
+      void refreshLatestOverlayPages(openChannelId);
+      void refreshStoredOverlayPages(openChannelId);
     }
     // Clear per-agent serverSeq dedup before refetching state. The
     // server's monotonic counter resets on its own restart, so
@@ -1143,6 +1158,7 @@ export function buildMainLayoutSocketBindings(
     { event: "thread:updated", handler: threadUpdated },
     { event: "thread:followers-updated", handler: threadFollowersUpdated },
     { event: "connect", handler: reconnectSnapshot },
+    { event: "disconnect", handler: cacheDisconnected },
     { event: "rooms:joined", handler: roomsJoined },
     {
       event: "reaction_viewer:updated",
