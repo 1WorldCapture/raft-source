@@ -1149,6 +1149,8 @@ export default function Sidebar({ mobileInline, bottomSlot, workspaceRailMode }:
   const markUnread = useMessageStore((s) => s.markUnread);
   // Stryker disable next-line all: pre-existing inbox loading is outside the workspace mutation corpus.
   const loadInbox = useInboxStore((s) => s.loadInbox);
+  const inboxLoaded = useInboxStore((s) => s.loaded);
+  const inboxLoading = useInboxStore((s) => s.loading);
   // Subscribe to the server-provided total (not the loaded `saved` page) so the
   // badge reflects the true count, and so this always-mounted row doesn't
   // re-render on every saved-list page mutation — just on count change.
@@ -1465,8 +1467,10 @@ export default function Sidebar({ mobileInline, bottomSlot, workspaceRailMode }:
   }, [showCreateAgentMenu]);
 
   useEffect(() => {
-    void loadInbox({ reset: true });
-  }, [loadInbox, server?.id]);
+    if (!inboxLoaded && !inboxLoading) {
+      void loadInbox({ reset: true });
+    }
+  }, [loadInbox, inboxLoaded, inboxLoading, server?.id]);
 
   const focusFirstUnreadInboxItem = useCallback(() => {
     // Express the intent rather than computing the key synchronously here: at

@@ -368,7 +368,7 @@ export default function ChatPanel({
   useEffect(() => {
     if (!currentServer) return;
     void loadBilling();
-  }, [currentServer?.id, loadBilling, currentServer]);
+  }, [currentServer?.id, loadBilling]);
 
   const activityMuteSupported =
     !!channelId &&
