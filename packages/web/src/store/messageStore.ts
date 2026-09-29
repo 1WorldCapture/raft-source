@@ -250,7 +250,7 @@ function incompleteReadStateProjection(): ReadStateProjection {
 }
 // Stryker restore all
 
-type MessagesPageThreadSummaryPayload = {
+export type MessagesPageThreadSummaryPayload = {
   threadSummariesByParentMessageId?: Record<string, ThreadSummary>;
 };
 
@@ -270,7 +270,7 @@ function isSyncCoreCompatThreadSummary(
     ));
 }
 
-function hydrateBundledThreadSummaries(
+export function hydrateBundledThreadSummaries(
   data: MessagesPageThreadSummaryPayload,
   ingressContext: ReceiverPrivateIngressContext,
 ): void {

@@ -78,7 +78,6 @@ import type { ResumeCursorToken } from "../cache/messageCache";
 import {
   invalidateOverlayMarksForDisconnect,
   refreshLatestOverlayPages,
-  refreshStoredOverlayPages,
 } from "../cache/overlayRefresh";
 import {
   captureReceiverPrivateIngressContext,
@@ -935,10 +934,9 @@ export function buildMainLayoutSocketBindings(
         false;
     }
     const openChannelId = useMessageStore.getState().currentChannelId;
-    if (openChannelId) {
-      void refreshLatestOverlayPages(openChannelId);
-      void refreshStoredOverlayPages(openChannelId);
-    }
+    // Only the newest 200 refresh on reconnect; older pages refresh when
+    // they are scrolled into view again (the disconnect cleared their marks).
+    if (openChannelId) void refreshLatestOverlayPages(openChannelId);
     // Clear per-agent serverSeq dedup before refetching state. The
     // server's monotonic counter resets on its own restart, so
     // holding stale lastSeen values across a reconnect could block
