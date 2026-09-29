@@ -194,6 +194,7 @@ export function pageForCache(data: unknown): AppendPage {
 // overwrite a live write that only another tab saw (accepted for now).
 let liveWriteCounter = 0;
 const liveWriteMarks = new Map<string, number>();
+const LIVE_WRITE_MARKS_MAX = 10_000;
 
 function liveWriteKey(scopeId: number, channelId: string, seq: number): string {
   return `${scopeId}:${channelId}:${seq}`;
@@ -374,7 +375,17 @@ export function noteMessageUpdated(
   if (typeof message.seq !== "number" || !Number.isFinite(message.seq) || message.seq <= 0) return;
   const { id: _id, seq, channelId, ...rest } = message;
   liveWriteCounter += 1;
-  liveWriteMarks.set(liveWriteKey(cache.scopeId, channelId, seq), liveWriteCounter);
+  const markKey = liveWriteKey(cache.scopeId, channelId, seq);
+  // Re-insert so the map stays in write order, then drop the oldest marks
+  // once it grows: a mark only matters to requests already in flight.
+  liveWriteMarks.delete(markKey);
+  liveWriteMarks.set(markKey, liveWriteCounter);
+  if (liveWriteMarks.size > LIVE_WRITE_MARKS_MAX) {
+    for (const key of liveWriteMarks.keys()) {
+      if (liveWriteMarks.size <= LIVE_WRITE_MARKS_MAX / 2) break;
+      liveWriteMarks.delete(key);
+    }
+  }
   void cache.repo.applyMessageUpdated(cache.scopeId, channelId, {
     seq,
     raw: rest as RawRecord,

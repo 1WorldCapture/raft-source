@@ -96,3 +96,28 @@ test("IndexedDB v1 -> v2 upgrade clears only overlays and their marks", async ()
   assert.equal(await repo.getOverlayPageInfo(reopened, "c1", 10), null, "their marks too");
   assert.deepEqual(await repo.getCoverage(reopened, "c1"), [{ fromSeq: 10, throughSeq: 10 }], "coverage survives");
 });
+
+test("IndexedDB upgrade blocked by an old tab gives up instead of hanging; our connections yield", async () => {
+  (globalThis as Globals).indexedDB = new IDBFactory();
+  // An old tab running v1 code: holds the connection, has no blocking handler.
+  const oldTab = await openDB(WEB_CACHE_DB_NAME, 1, { upgrade: (db) => createStores(db) });
+  await assert.rejects(
+    createIdbCacheRepo({ now: LOCAL_NOW, blockedTimeoutMs: 50 }),
+    (error: Error) => error.name === "UpgradeBlockedError",
+  );
+  oldTab.close();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+
+  // Once the old tab is gone the upgrade goes through; a later version is
+  // not blocked by this connection, because it closes on versionchange.
+  const repo = await createIdbCacheRepo({ now: LOCAL_NOW, blockedTimeoutMs: 50 });
+  await repo.openScope("https://raft.example", "user-1", "srv-1");
+  const next = await Promise.race([
+    openDB(WEB_CACHE_DB_NAME, 99).then((db) => {
+      db.close();
+      return "opened";
+    }),
+    new Promise((resolve) => setTimeout(() => resolve("blocked"), 500)),
+  ]);
+  assert.equal(next, "opened");
+});

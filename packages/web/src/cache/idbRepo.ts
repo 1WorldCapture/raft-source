@@ -108,17 +108,69 @@ function channelRange(scopeId: number, channelId: string): IDBKeyRange {
 export type IdbRepoDeps = {
   /** Injectable clock for deterministic updatedAt/bookkeeping in tests. */
   now?: () => string;
+  /** How long an upgrade may stay blocked by another tab before giving up. */
+  blockedTimeoutMs?: number;
 };
 
-async function openRaw(): Promise<IDBPDatabase> {
+/** Default wait for tabs that hold an older version open (see openGuarded). */
+export const WEB_CACHE_BLOCKED_TIMEOUT_MS = 3_000;
+
+/**
+ * openDB that cannot hang on a schema upgrade. A tab still running older code
+ * keeps its connection open and (before v2) had no `blocking` handler, so our
+ * versionchange would wait until that tab closes. After `blockedTimeoutMs` we
+ * reject instead: the runtime falls back to the in-memory repo for this
+ * session and the upgrade happens on a later load. Our own connections close
+ * on `blocking`, so tabs from this version never hold up the next upgrade.
+ */
+function openGuarded(blockedTimeoutMs: number): Promise<IDBPDatabase> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let opened: IDBPDatabase | null = null;
+    openDB(WEB_CACHE_DB_NAME, WEB_CACHE_SCHEMA_VERSION, {
+      upgrade,
+      blocked() {
+        timer ??= setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          reject(Object.assign(new Error("IndexedDB upgrade blocked by another tab"), { name: "UpgradeBlockedError" }));
+        }, blockedTimeoutMs);
+      },
+      blocking() {
+        opened?.close();
+      },
+    }).then(
+      (db) => {
+        if (timer) clearTimeout(timer);
+        opened = db;
+        // Gave up already: the late connection is not used; release it.
+        if (settled) {
+          db.close();
+          return;
+        }
+        settled = true;
+        resolve(db);
+      },
+      (error: unknown) => {
+        if (timer) clearTimeout(timer);
+        if (settled) return;
+        settled = true;
+        reject(error);
+      },
+    );
+  });
+}
+
+async function openRaw(blockedTimeoutMs: number): Promise<IDBPDatabase> {
   try {
-    return await openDB(WEB_CACHE_DB_NAME, WEB_CACHE_SCHEMA_VERSION, { upgrade });
+    return await openGuarded(blockedTimeoutMs);
   } catch (error) {
     // A database newer than this code (downgrade) cannot be opened at our
     // version — dispose of it and rebuild. The cache is disposable.
     if (!(error instanceof Error) || error.name !== "VersionError") throw error;
     await deleteDB(WEB_CACHE_DB_NAME);
-    return openDB(WEB_CACHE_DB_NAME, WEB_CACHE_SCHEMA_VERSION, { upgrade });
+    return openGuarded(blockedTimeoutMs);
   }
 }
 
@@ -195,7 +247,7 @@ async function coverageOf(store: AnyStore, scopeId: number, channelId: string): 
  * degrade to the no-op repo.
  */
 export async function createIdbCacheRepo(deps: IdbRepoDeps = {}): Promise<CacheRepo> {
-  const db = await openRaw();
+  const db = await openRaw(deps.blockedTimeoutMs ?? WEB_CACHE_BLOCKED_TIMEOUT_MS);
   const tx = (mode: IDBTransactionMode): AnyTx => db.transaction(STORES as unknown as string[], mode) as unknown as AnyTx;
   const now = deps.now ?? (() => new Date().toISOString());
   const bootId = globalThis.crypto?.randomUUID?.() ?? `boot-${now()}-${Math.random().toString(36).slice(2)}`;

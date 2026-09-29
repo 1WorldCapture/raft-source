@@ -11,10 +11,7 @@
 
 import type { SqliteDb } from "./port";
 
-// v2 (desktop-data-cache task #8): message_overlays.updatedAt now holds the
-// server updatedAt watermark instead of the local write time. The version
-// bump drops and rebuilds the cache (first launch after upgrade refetches).
-export const CACHE_SCHEMA_VERSION = 2;
+export const CACHE_SCHEMA_VERSION = 1;
 
 const DDL = `
 CREATE TABLE IF NOT EXISTS scopes (
