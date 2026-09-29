@@ -70,6 +70,11 @@ import type {
 } from "./readStateSync";
 import { releaseActivityReadHoldForMessage } from "./activityReadState";
 import {
+  activeWebCache,
+  readWebResumeCursor,
+  writeWebResumeCursor,
+} from "../cache/messageCache";
+import {
   captureReceiverPrivateIngressContext,
   isReceiverPrivateIngressContextCurrent,
   useMessageStore,
@@ -368,6 +373,20 @@ export function buildMainLayoutSocketBindings(
   recordHeartbeat: SocketHandler,
   recordConnect: SocketHandler,
 ): MainLayoutSocketBinding[] {
+  // Resume cursor gate. Frozen on connect until a sync:resume finishes
+  // (hasMore false, or a page that made no progress — history truncation).
+  // message:new advances the cursor only while this stays live.
+  let resumeEpoch = 0;
+  let resumeLive = false;
+  let resumeFromSeq = 0;
+  let resumeCatchupEpoch = -1;
+
+  const noteResumeCursor = (seq: number | undefined) => {
+    if (!resumeLive) return;
+    if (typeof seq !== "number" || !Number.isSafeInteger(seq) || seq <= 0) return;
+    void writeWebResumeCursor(seq);
+  };
+
   const bindingReceiverPrivateIngressContext = captureReceiverPrivateIngressContext(
     useMessageStore.getState().currentUserId,
   );
@@ -386,6 +405,7 @@ export function buildMainLayoutSocketBindings(
   };
 
   const messageNew = (msg: Message) => {
+    noteResumeCursor(msg.seq);
     if (isNormalizedMessageV2FlagEnabled()) {
       const projectedMessage = normalizeChannelRoomMessage(msg);
       const result = consumeSocketMessageNewWithSyncCore(projectedMessage);
@@ -880,6 +900,10 @@ export function buildMainLayoutSocketBindings(
   };
 
   const reconnectSnapshot = () => {
+    resumeEpoch += 1;
+    resumeLive = false;
+    resumeFromSeq = 0;
+    resumeCatchupEpoch = -1;
     recordConnect();
     if (typeof window !== "undefined") {
       (window as Window & { __slockRoomsJoined?: boolean }).__slockRoomsJoined =
@@ -926,8 +950,38 @@ export function buildMainLayoutSocketBindings(
       window.dispatchEvent(new Event("slock:rooms-joined"));
     }
     const { lastSeq } = useMessageStore.getState();
-    if (lastSeq > 0) {
-      socket.emit("sync:resume", { lastSeq });
+    const epoch = resumeEpoch;
+    if (!activeWebCache()) {
+      // No scope yet: keep the pre-cursor behavior. A seeded lastSeq is the
+      // only floor we have, and there is no per-scope cursor to cap it.
+      if (lastSeq > 0) {
+        resumeLive = false;
+        resumeFromSeq = lastSeq;
+        resumeCatchupEpoch = epoch;
+        socket.emit("sync:resume", { lastSeq });
+      }
+    } else {
+      resumeLive = false;
+      void (async () => {
+        const cursor = await readWebResumeCursor();
+        if (epoch !== resumeEpoch) return;
+        if (cursor != null && cursor > 0) {
+          const seeded = lastSeq > 0 ? lastSeq : cursor;
+          const resumeFrom = Math.min(seeded, cursor);
+          if (resumeFrom > 0) {
+            resumeFromSeq = resumeFrom;
+            resumeCatchupEpoch = epoch;
+            socket.emit("sync:resume", { lastSeq: resumeFrom });
+            return;
+          }
+        }
+        // No cursor (first open, or a cache from before this key existed).
+        // Do not resume from one channel's seeded lastSeq. Open channels
+        // are refreshed by syncVisibleScopes; the next live message:new
+        // may start the cursor.
+        if (epoch !== resumeEpoch) return;
+        resumeLive = true;
+      })();
     }
     void syncVisibleScopes();
     // The server closes a connection when this user's channel eligibility
@@ -980,7 +1034,18 @@ export function buildMainLayoutSocketBindings(
     useMessageStore.setState((s) => ({
       lastSeq: Math.max(s.lastSeq, currentSeq),
     }));
-    // If too many messages were missed, fallback to full refresh
+    const catchupMatches = resumeCatchupEpoch === resumeEpoch;
+    if (hasMore && catchupMatches && currentSeq > resumeFromSeq) {
+      // Keep pulling until hasMore is false. A page that does not move
+      // currentSeq past the seq we just sent is the history-window stop:
+      // messages older than the cutoff are not coming, so this is complete.
+      resumeFromSeq = currentSeq;
+      socket.emit("sync:resume", { lastSeq: currentSeq });
+    } else if (catchupMatches) {
+      resumeLive = true;
+      resumeFromSeq = 0;
+      if (currentSeq > 0) void writeWebResumeCursor(currentSeq);
+    }
     if (hasMore) {
       useMessageStore.getState().loadUnreadCounts();
       void syncVisibleScopes();

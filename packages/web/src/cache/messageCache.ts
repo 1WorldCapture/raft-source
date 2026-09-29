@@ -237,6 +237,78 @@ export function noteLiveMessage(message: { id: string; seq?: number; channelId: 
   void cache.repo.appendLiveMessage(cache.scopeId, message.channelId, row, { connected: false });
 }
 
+// ---- server-wide resume cursor (desktop-data-cache task #5) ------------------
+//
+// seq is shared by every channel. roomsJoined must NOT resume from a single
+// channel's seeded max: messages in other channels with a smaller seq would
+// sit behind that floor forever. The cursor moves only when the client has
+// actually seen everything up to it (a finished sync:resume, or a message:new
+// while the socket stayed continuously caught up). Channel seeds and page
+// loads do not call these functions.
+
+const WEB_RESUME_CURSOR_KEY = "webResumeCursor";
+
+type ResumeCursorToken = {
+  scopeId: number;
+  serverId: string | null;
+  userId: string | null;
+  generation: number;
+};
+
+function captureResumeCursorToken(): ResumeCursorToken | null {
+  const cache = activeWebCache();
+  if (!cache) return null;
+  return {
+    scopeId: cache.scopeId,
+    serverId: cache.serverId,
+    userId: cache.userId ?? null,
+    generation: cache.generation,
+  };
+}
+
+function resumeCursorTokenCurrent(token: ResumeCursorToken): ActiveCache | null {
+  const cache = activeWebCache();
+  if (!cache) return null;
+  if (cache.scopeId !== token.scopeId || cache.generation !== token.generation) return null;
+  if (cache.serverId !== token.serverId) return null;
+  if ((cache.userId ?? null) !== token.userId) return null;
+  return cache;
+}
+
+function cursorMaxSeq(value: RawRecord | null): number | null {
+  const maxSeq = value && typeof value.maxSeq === "number" ? value.maxSeq : 0;
+  return Number.isSafeInteger(maxSeq) && maxSeq > 0 ? maxSeq : null;
+}
+
+/** Global resume floor for the attached scope, or null when this scope has none. */
+export async function readWebResumeCursor(): Promise<number | null> {
+  const token = captureResumeCursorToken();
+  if (!token) return null;
+  const cache = resumeCursorTokenCurrent(token);
+  if (!cache) return null;
+  const kv = await cache.repo.getKv(cache.scopeId, WEB_RESUME_CURSOR_KEY);
+  if (!resumeCursorTokenCurrent(token)) return null;
+  return cursorMaxSeq(kv);
+}
+
+/**
+ * Move the cursor forward. Never backward. A generation or scope change
+ * between the read and the write drops the update.
+ */
+export async function writeWebResumeCursor(maxSeq: number): Promise<void> {
+  if (!Number.isSafeInteger(maxSeq) || maxSeq <= 0) return;
+  const token = captureResumeCursorToken();
+  if (!token) return;
+  const cache = resumeCursorTokenCurrent(token);
+  if (!cache) return;
+  const existing = cursorMaxSeq(await cache.repo.getKv(cache.scopeId, WEB_RESUME_CURSOR_KEY));
+  const current = resumeCursorTokenCurrent(token);
+  if (!current) return;
+  const next = Math.max(existing ?? 0, maxSeq);
+  if (existing != null && next === existing) return;
+  await current.repo.putKv(current.scopeId, WEB_RESUME_CURSOR_KEY, { maxSeq: next });
+}
+
 /**
  * message:updated write-through — reactions and other projections land in the
  * overlay layer, last-write-wins on the server updatedAt inside the repo.

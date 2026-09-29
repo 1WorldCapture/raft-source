@@ -363,7 +363,7 @@ test("offline seed advances lastSeq so reconnect can sync:resume (#11 review fix
   const state = useMessageStore.getState();
   assert.equal((state.channelMessages["c12"] ?? []).length, 30, "seed painted");
   assert.equal(state.lastSeq, 529,
-    "seed advances lastSeq to the cached tail's max seq — roomsJoined's `if (lastSeq > 0)` stays armed for sync:resume");
+    "seed still advances in-memory lastSeq; the persisted resume cursor is a separate floor");
 });
 
 test("messageStore: seed still lands when the cache attaches after loadMessages starts", async (t) => {
