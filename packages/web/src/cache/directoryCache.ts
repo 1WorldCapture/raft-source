@@ -101,8 +101,25 @@ export function currentDirectoryCacheScope(): DirectoryCacheScope | null {
 // current still null so the lifecycle has not re-attached yet).
 let sessionUserId: string | null = null;
 
+// GET /servers often finishes before any scope exists (cold login: current
+// is still null and nothing was persisted yet). The account list has to be
+// written once that user's scope attaches, or the next offline boot finds
+// channels in IndexedDB and an empty server list, and the shell falls
+// through to "create your first server".
+let pendingServerList: readonly Server[] | null = null;
+let pendingServerListUser: string | null = null;
+
 export function noteDirectorySessionUser(userId: string | null): void {
+  if (userId !== sessionUserId) {
+    pendingServerList = null;
+    pendingServerListUser = null;
+  }
   sessionUserId = userId;
+}
+
+/** The user the directory cache is recording for. Null before /me. */
+export function directorySessionUser(): string | null {
+  return sessionUserId;
 }
 
 /**
@@ -149,6 +166,7 @@ export function noteDirectoryAttachSettled(): void {
   const gate = directoryAttachGate;
   directoryAttachGate = null;
   gate?.resolve();
+  flushPendingServerList();
 }
 
 function waitForSignal(signal: Promise<void>, timeoutMs: number): Promise<void> {
@@ -227,12 +245,30 @@ export async function cachedServers(): Promise<Server[]> {
 export async function recordServers(
   servers: readonly Server[],
   requestScope: DirectoryCacheScope | null = currentDirectoryCacheScope(),
+  recordedForUser: string | null = sessionUserId,
 ): Promise<void> {
-  const cache = scopeStillCurrent(requestScope);
-  if (!cache) return;
+  // The response belongs to the user who started the request. An account
+  // switch during the await must not land that list in the new scope.
+  if (recordedForUser !== sessionUserId) return;
+  const cache = scopeStillCurrent(requestScope) ?? scopeStillCurrent(serverListScopeForSession());
+  if (!cache) {
+    pendingServerList = servers;
+    pendingServerListUser = recordedForUser;
+    return;
+  }
+  pendingServerList = null;
+  pendingServerListUser = null;
   await cache.repo.putKv(cache.scopeId, SERVER_LIST_KV_KEY, {
     servers: servers as unknown as RawRecord[],
   });
+}
+
+function flushPendingServerList(): void {
+  const servers = pendingServerList;
+  const recordedForUser = pendingServerListUser;
+  if (!servers || recordedForUser !== sessionUserId) return;
+  if (!serverListScopeForSession()) return;
+  void recordServers(servers, serverListScopeForSession(), recordedForUser);
 }
 
 // ---- channel / DM lists ----------------------------------------------------------
@@ -396,6 +432,8 @@ export function claimDirectorySeed(kind: string, epoch: number, serverId: string
 /** Test isolation: seed claims survive the module for the process lifetime. */
 export function resetDirectorySeedClaims(): void {
   directorySeedEpoch.clear();
+  pendingServerList = null;
+  pendingServerListUser = null;
 }
 
 // ---- cross-server unread summary ---------------------------------------------------
