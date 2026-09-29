@@ -13,7 +13,8 @@
       "@botiverse/raft-shared/src/cacheMerge.ts": ["../../packages/shared/src/cacheMerge.ts"],
       "@botiverse/raft-shared/src/cacheRepoContract.ts": ["../../packages/shared/src/cacheRepoContract.ts"],
       "@botiverse/raft-shared/src/cacheSync.ts": ["../../packages/shared/src/cacheSync.ts"],
-      "@botiverse/raft-shared/src/cacheBoot.ts": ["../../packages/shared/src/cacheBoot.ts"]
+      "@botiverse/raft-shared/src/cacheBoot.ts": ["../../packages/shared/src/cacheBoot.ts"],
+      "@botiverse/raft-shared/src/cacheReconcile.ts": ["../../packages/shared/src/cacheReconcile.ts"]
     }
   },
   "include": [

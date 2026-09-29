@@ -10,6 +10,7 @@ import type {
   ServerEvent,
 } from "./events/serverEvents";
 import { serverPersistence } from "./serverPersistenceRegistry";
+import { cachedServers, recordServers, serverListCachePending, serverListScopeForSession, whenServerListCacheReady } from "../cache/directoryCache";
 import { triggerServerReset } from "./serverResetRegistry";
 import { setAuthTraceServerIdGetter } from "../utils/webAuthTrace";
 import { normalizeSidebarPinnedRefs } from "../utils/sidebarPinnedRefs";
@@ -365,8 +366,27 @@ export const useServerStore = create<ServerState>((set, get) => ({
   loadServers: async () => {
     const existing = serverListRequests.get("list");
     if (existing) return existing;
-    const request = api.get("/servers")
-      .then(({ data }) => {
+    const request = (async () => {
+      // Directory-cache seed (task #8): inside the dedup so it runs once per
+      // flight, and only into an empty store — a refresh never flickers live
+      // data. The server list is account-scoped, stored in the attached
+      // scope (the persisted serverId when current is still null on a cold
+      // start). Wait for that attach before reading or writing it.
+      if (serverListCachePending()) await whenServerListCacheReady();
+      const requestScope = serverListScopeForSession();
+      if (get().servers.length === 0 && requestScope) {
+        try {
+          const cached = await cachedServers();
+          if (cached.length > 0 && get().servers.length === 0) {
+            applyServerDomainEvent({ kind: "hydrate", source: "servers", servers: cached }, set, get);
+            set({ loading: false });
+          }
+        } catch {
+          // Best-effort seed; the network path decides loading state.
+        }
+      }
+      try {
+        const { data } = await api.get("/servers");
         const servers = data as Server[];
 
         serverPersistence.clearLegacyServerId();
@@ -377,10 +397,11 @@ export const useServerStore = create<ServerState>((set, get) => ({
         // themselves, so this is safe for URL-resolved and empty startup states.
         get().loadMembers();
         get().loadSidebarOrder();
-      })
-      .catch(() => {
+        await recordServers(servers, requestScope);
+      } catch {
         set({ loading: false });
-      })
+      }
+    })()
       .finally(() => {
         serverListRequests.delete("list");
       });

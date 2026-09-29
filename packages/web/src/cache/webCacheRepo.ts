@@ -172,6 +172,7 @@ export function createWebCacheRepo(deps: WebCacheRepoDeps = {}): CacheRepo {
     async deleteChannel(scopeId: number, channelId: string): Promise<void> {
       const state = scope(scopeId);
       if (!state) return;
+      state.channels.delete(channelId);
       state.messages.delete(channelId);
       state.overlays.delete(channelId);
       state.ranges.delete(channelId);

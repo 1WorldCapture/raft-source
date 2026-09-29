@@ -27,6 +27,8 @@ export type WebCacheRuntime = {
   readonly scopeId: number | null;
   /** The attached scope's serverId, or null while detached/transitioning. */
   readonly serverId: string | null;
+  /** The attached scope's userId, or null while detached/transitioning. */
+  readonly userId: string | null;
   /**
    * Monotonic invalidation era (P2c review; Firstmate naming ruling:
    * "generation" — directoryCache already has a store-level serverEpoch).
@@ -85,6 +87,9 @@ export async function createWebCacheRuntime(
     },
     get serverId() {
       return attachedServerId;
+    },
+    get userId() {
+      return scopeId === null ? null : attachedIdentity?.userId ?? null;
     },
     get generation() {
       return generation;

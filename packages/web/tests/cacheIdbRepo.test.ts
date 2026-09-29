@@ -355,6 +355,26 @@ test("lifecycle: explicit logout wipes; account switch wipes the old account fir
   assert.notEqual(cScope, bScope);
 });
 
+test("lifecycle: the same serverId for a different user re-attaches", async () => {
+  freshDb();
+  const runtime = await createWebCacheRuntime();
+  await runtime.attach(RUNTIME_API_BASE, "user-1", "srv-a");
+  const previous = runtime.scopeId;
+  const generation = runtime.generation;
+  const { store } = fakeStores({ user: { id: "user-2" }, current: { id: "srv-a" } });
+  const wired = wireWebCacheLifecycle(
+    runtime,
+    store as unknown as Parameters<typeof wireWebCacheLifecycle>[1],
+    store as unknown as Parameters<typeof wireWebCacheLifecycle>[2],
+    { storage: memoryStorage() },
+  );
+  await flush();
+  assert.equal(runtime.userId, "user-2", "the holder follows the signed-in user");
+  assert.notEqual(runtime.scopeId, previous, "user-2 does not keep user-1's scope");
+  assert.ok(runtime.generation > generation);
+  wired.unsubscribe();
+});
+
 function memoryStorage(initial: Record<string, string> = {}): { getItem(k: string): string | null; setItem(k: string, v: string): void; removeItem(k: string): void } {
   const map = new Map(Object.entries(initial));
   return {

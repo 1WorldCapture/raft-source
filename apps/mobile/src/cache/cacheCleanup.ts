@@ -17,65 +17,11 @@ import type { CacheRepo } from "./repo";
 
 // ---- channel reconciliation -------------------------------------------------
 
-export type LiveChannel = { id: string; archivedAt?: string | null };
-
-export type ReconcileReport = {
-  removed: string[];
-};
-
-/**
- * Drop cached channels that must not stay readable: absent from the live
- * list (revoked access / deleted) OR archived (requirement: 「归档的删除，
- * 其余的都保留」 — an archived channel disappears from the rail even though
- * the server keeps returning it until unarchived).
- *
- * CONTRACT — call this ONLY with a complete list: /channels AND /channels/dm
- * both succeeded with full results AND the scope has not switched since the
- * fetches started. A failed, timed-out or partial fetch must skip the
- * reconcile entirely — one network hiccup must never wipe the whole cache.
- * The wiring (task #2 home refresh) owns that guard.
- */
-export async function reconcileChannels(
-  repo: CacheRepo,
-  scopeId: number,
-  live: readonly LiveChannel[],
-): Promise<ReconcileReport> {
-  const keep = new Set(live.filter((channel) => !channel.archivedAt).map((channel) => channel.id));
-  const removed: string[] = [];
-  for (const channel of repo.getChannelsSync(scopeId)) {
-    if (!keep.has(channel.id)) {
-      await repo.deleteChannel(scopeId, channel.id);
-      removed.push(channel.id);
-    }
-  }
-  return { removed };
-}
-
-/**
- * Guarded reconcile entry for the home-refresh wiring (#2 合并后一行接入):
- * fetches BOTH channel lists, and reconciles only when both succeeded AND
- * the scope is unchanged. Any throw (network error, timeout) skips the
- * reconcile entirely — review r1: one failed refresh must never wipe the
- * cache.
- */
-export async function reconcileAfterChannelRefresh(
-  repo: CacheRepo,
-  scopeId: number,
-  fetch: () => Promise<{ channels: readonly LiveChannel[]; dms: readonly LiveChannel[] }>,
-  opts?: { stillActive?: () => boolean },
-): Promise<{ reconciled: boolean; removed: string[] }> {
-  let lists: { channels: readonly LiveChannel[]; dms: readonly LiveChannel[] };
-  try {
-    lists = await fetch();
-  } catch {
-    return { reconciled: false, removed: [] };
-  }
-  if (opts?.stillActive && !opts.stillActive()) {
-    return { reconciled: false, removed: [] };
-  }
-  const report = await reconcileChannels(repo, scopeId, [...lists.channels, ...lists.dms]);
-  return { reconciled: true, removed: report.removed };
-}
+// Reconciled against the async shared CacheRepo contract (task #8 / P2a) —
+// implementations live in packages/shared/src/cacheReconcile.ts and are
+// re-exported here so existing importers keep working.
+export { reconcileChannels, reconcileAfterChannelRefresh } from "@botiverse/raft-shared/src/cacheReconcile.ts";
+export type { LiveChannel, ReconcileReport } from "@botiverse/raft-shared/src/cacheReconcile.ts";
 
 // ---- history pruning ----------------------------------------------------------
 
