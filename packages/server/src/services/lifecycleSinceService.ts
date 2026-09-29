@@ -7,13 +7,16 @@ import { agents, computerOutageOccurrences, machines } from "../db/schema.js";
 // began. Everything is ms epoch; null means unknown and must render as
 // "duration unknown", never as a guessed start.
 
-/** agentId -> when its current agents.status began. Missing or deleted agents are absent. */
-export async function getAgentLifecycleSince(agentIds: readonly string[]): Promise<Map<string, number | null>> {
+/** agentId -> when its current agents.status began, for agents of one server. Missing, deleted or foreign agents are absent. */
+export async function getAgentLifecycleSince(
+  serverId: string,
+  agentIds: readonly string[],
+): Promise<Map<string, number | null>> {
   const result = new Map<string, number | null>();
   if (agentIds.length === 0) return result;
   const rows = await getDb().select({ id: agents.id, statusChangedAt: agents.statusChangedAt })
     .from(agents)
-    .where(and(inArray(agents.id, [...agentIds]), isNull(agents.deletedAt)));
+    .where(and(eq(agents.serverId, serverId), inArray(agents.id, [...agentIds]), isNull(agents.deletedAt)));
   for (const row of rows) result.set(row.id, row.statusChangedAt?.getTime() ?? null);
   return result;
 }
@@ -33,8 +36,9 @@ export type MachineStatusSinceFacts = {
  * last_status/status_changed_at pair is exact when it agrees with the live
  * status. When it does not (e.g. the machine vanished while the server was
  * down, so no offline projection ran), offline falls back to the open outage,
- * then the last heartbeat (off by up to one ping interval), and a machine that
- * never connected has been offline since it was created. A disagreeing online
+ * then the last heartbeat (off by up to one ping interval; managed Computers
+ * without an open outage row use it too, as an approximation), and a machine
+ * that never connected has been offline since it was created. A disagreeing online
  * status has no trustworthy start.
  */
 export function deriveMachineStatusSince(

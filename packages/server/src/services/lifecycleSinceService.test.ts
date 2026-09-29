@@ -97,14 +97,16 @@ test("getAgentLifecycleSince returns status_changed_at as ms epoch", async ({ db
   const [server] = await db.insert(servers).values({ name: "agent-since", slug: "agent-since", ownerId: user!.id }).returning();
   const changed = d("2026-09-29T12:00:00.000Z");
   const [agent] = await db.insert(agents).values({ serverId: server!.id, name: "a1", statusChangedAt: changed }).returning();
-  const result = await getAgentLifecycleSince([agent!.id, "00000000-0000-4000-8000-000000000000"]);
+  const result = await getAgentLifecycleSince(server!.id, [agent!.id, "00000000-0000-4000-8000-000000000000"]);
   assert.deepEqual([...result.entries()], [[agent!.id, changed.getTime()]]);
-  assert.equal((await getAgentLifecycleSince([])).size, 0);
+  assert.equal((await getAgentLifecycleSince(server!.id, [])).size, 0);
+  const [other] = await db.insert(servers).values({ name: "agent-since-other", slug: "agent-since-other", ownerId: user!.id }).returning();
+  assert.equal((await getAgentLifecycleSince(other!.id, [agent!.id])).size, 0, "agents of another server are never read");
 });
 
 test("getAgentLifecycleSince skips deleted agents", async ({ db }) => {
   const [user] = await db.insert(users).values({ email: "agent-since-del@example.com", name: "agent-since-del", passwordHash: "x" }).returning();
   const [server] = await db.insert(servers).values({ name: "agent-since-del", slug: "agent-since-del", ownerId: user!.id }).returning();
   const [agent] = await db.insert(agents).values({ serverId: server!.id, name: "gone", deletedAt: d("2026-09-29T12:00:00.000Z") }).returning();
-  assert.equal((await getAgentLifecycleSince([agent!.id])).size, 0);
+  assert.equal((await getAgentLifecycleSince(server!.id, [agent!.id])).size, 0);
 });

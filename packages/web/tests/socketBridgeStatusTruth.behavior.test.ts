@@ -192,3 +192,12 @@ test("machine:status carries its since into the machine; servers that omit it le
   machineStatus({ machineId: "machine-1", status: "online", statusVersion: 13, since: null, serverTime: 7_000 });
   assert.equal(useMachineStore.getState().machines[0]?.statusSince, null);
 });
+
+test("machine:status without since clears a since that belonged to the previous status", () => {
+  const machineStatus = getBinding("machine:status");
+
+  machineStatus({ machineId: "machine-1", status: "offline", statusVersion: 11, since: 5_000, serverTime: 6_000 });
+  machineStatus({ machineId: "machine-1", status: "online", statusVersion: 12 });
+  assert.equal(useMachineStore.getState().machines[0]?.status, "online");
+  assert.equal(useMachineStore.getState().machines[0]?.statusSince, null);
+});

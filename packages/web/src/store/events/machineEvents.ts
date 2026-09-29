@@ -395,7 +395,11 @@ function mergeMachineStatusByVersionGate(
     ...machine,
     status,
     statusVersion: statusVersion ?? machine.statusVersion,
-    ...(since !== undefined ? { statusSince: since } : {}),
+    // An event without since (older server) only keeps the old since while
+    // the status is unchanged; a changed status makes it meaningless.
+    ...(since !== undefined
+      ? { statusSince: since }
+      : status !== machine.status ? { statusSince: null } : {}),
   };
 }
 

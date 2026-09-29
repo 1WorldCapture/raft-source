@@ -62,6 +62,17 @@ export interface Agent {
   profileProjection?: "channel_summary";
 }
 
+/**
+ * Optimistic status flip for a local action. The since belongs to the old
+ * status, so a changed status drops it until `agent:lifecycle` brings the
+ * server's value (a failed action would otherwise leave them mismatched).
+ */
+function withOptimisticStatus(agent: Agent, status: AgentStatus): Agent {
+  return agent.status === status
+    ? agent
+    : { ...agent, status, lifecycleStatusSince: null };
+}
+
 export type OnboardingIdentityField = "name" | "displayName" | "role" | "serverRole" | "avatarUrl";
 
 export interface OnboardingIdentityChange {
@@ -808,7 +819,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     set((state) => {
       const current = state.agentActivities[agentId];
       const agents = state.agents.map((a) =>
-        a.id === agentId ? { ...a, status: "active" as const } : a
+        a.id === agentId ? withOptimisticStatus(a, "active") : a
       );
       if (current?.activity !== "offline") {
         return { agents };
@@ -837,7 +848,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     await api.post(`/agents/${agentId}/stop`);
     set((state) => ({
       agents: state.agents.map((a) =>
-        a.id === agentId ? { ...a, status: "stopped" as const } : a
+        a.id === agentId ? withOptimisticStatus(a, "stopped") : a
       ),
       agentActivities: {
         ...state.agentActivities,
@@ -864,7 +875,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       const { [agentId]: _version, ...restVersions } = state.agentActivityVersions;
       return {
         agents: state.agents.map((a) =>
-          a.id === agentId ? { ...a, deletedAt: new Date().toISOString(), status: "inactive" as const } : a
+          a.id === agentId ? { ...withOptimisticStatus(a, "inactive"), deletedAt: new Date().toISOString() } : a
         ),
         agentActivities: restActivities,
         agentActivityTraceJoins: restTraceJoins,
@@ -890,7 +901,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       })(),
       agents: state.agents.map((a) =>
         a.id === agentId
-          ? { ...a, status: "active" as const, ...(mode === "restart" ? {} : { sessionId: null }) }
+          ? { ...withOptimisticStatus(a, "active"), ...(mode === "restart" ? {} : { sessionId: null }) }
           : a
       ),
       agentActivities: {
