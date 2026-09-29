@@ -7,6 +7,7 @@ import type {
 } from "@botiverse/raft-shared";
 import { clearClockTimeout, setClockTimeout } from "@botiverse/raft-shared";
 import api from "../api/client";
+import { cachedUnread, claimDirectorySeed, directoryCacheBindPending, recordUnread, whenDirectoryCacheBound } from "../cache/directoryCache";
 import { useServerStore } from "./serverStore";
 import { useThreadStore } from "./threadStore";
 import type { ThreadSummary } from "./threadStore";
@@ -1505,6 +1506,34 @@ export const useMessageStore = create<MessageState>((set, get) => ({
     const epoch = useServerStore.getState().serverEpoch;
     const serverId = useServerStore.getState().current?.id;
     if (!serverId) return;
+    if (directoryCacheBindPending(serverId)) {
+      await whenDirectoryCacheBound(serverId);
+      if (useServerStore.getState().serverEpoch !== epoch) return;
+      if (useServerStore.getState().current?.id !== serverId) return;
+    }
+    // Directory-cache seed (task #8): once per epoch, and only when counts
+    // are empty, from the cached RAW wire payload so parseUnreadSnapshot
+    // runs identically. Later calls in the same epoch (reconnect,
+    // rooms-joined, inbox) must not paint a count the user already read.
+    // The claim is taken even when the scope is not attached yet, so a
+    // reconnect after attach cannot reseed a stale snapshot. The
+    // read-state ledger folding stays network-only.
+    if (claimDirectorySeed("channelUnread", epoch, serverId) && Object.keys(get().unreadCounts).length === 0) {
+      try {
+        const cached = await cachedUnread(serverId);
+        if (cached !== null
+          && Object.keys(get().unreadCounts).length === 0
+          && useServerStore.getState().serverEpoch === epoch) {
+          const snapshot = parseUnreadSnapshot(cached);
+          set({
+            unreadCounts: filterUnreadCountsByLocalReadSuppressions(snapshot.unreadCounts, localReadSuppressions),
+            mentionFlags: filterMentionFlagsByLocalReadSuppressions(snapshot.mentionFlags, localReadSuppressions),
+          });
+        }
+      } catch {
+        // Best-effort seed; the network path is authoritative.
+      }
+    }
     try {
       await flushAllPendingReads();
       const requestReadStateGeneration = getReadStateLedgerGeneration();
@@ -1566,6 +1595,8 @@ export const useMessageStore = create<MessageState>((set, get) => ({
           mentionFlags: nextState.mentionFlags,
         };
       });
+      const boundServerId = useServerStore.getState().current?.id;
+      if (boundServerId) await recordUnread(data, boundServerId);
     } catch {
       // ignore
     }

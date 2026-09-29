@@ -27,7 +27,7 @@ import type {
 import { messageFetchPlan, rawPageForCache } from "@botiverse/raft-shared/src/cacheBoot.js";
 import { createWebCacheRepo } from "./webCacheRepo";
 
-type ActiveCache = {
+export type ActiveCache = {
   repo: CacheRepo;
   scopeId: number;
   /**
@@ -36,6 +36,8 @@ type ActiveCache = {
    * server B never reads/writes server A's scope mid-transition.
    */
   serverId: string | null;
+  /** Account this scope was opened for. Null on the stopgap holder. */
+  userId: string | null;
   /**
    * Invalidation era (P2c review; ruling name: "generation" — the store
    * layer already has a serverEpoch): changes whenever the active scope is
@@ -110,15 +112,19 @@ export function whenActiveCache(timeoutMs: number): Promise<void> {
  * once from bootWebCache; scope switches flow through the provider, this
  * module owns no lifecycle at all.
  */
-export function setActiveCacheProvider(next: ActiveCacheProvider): void {
+export function setActiveCacheProvider(next: ActiveCacheProvider | null): void {
   provider = next;
-  beginActiveCacheBoot();
+  // Clearing the provider is how tests fall back to the stopgap holder.
+  // Arming the boot gate on that path would make the next load wait until
+  // timeout. A real provider still arms the gate (cold start).
+  if (next) beginActiveCacheBoot();
+  else noteActiveCacheSettled();
 }
 
 /** Stopgap/test-only direct holder — real app wiring goes through #7. */
 export function setActiveWebCache(repo: CacheRepo, scopeId: number, serverId: string | null = null): void {
   fallbackGeneration += 1;
-  fallbackActive = { repo, scopeId, serverId, generation: fallbackGeneration };
+  fallbackActive = { repo, scopeId, serverId, userId: null, generation: fallbackGeneration };
   noteActiveCacheSettled();
 }
 

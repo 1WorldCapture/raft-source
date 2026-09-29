@@ -21,6 +21,8 @@ import { create } from "zustand";
 import api from "../api/client";
 import { useMessageStore } from "./messageStore";
 import { parseServerUnreadSummaryRows, retainServerUnreadSummary } from "../utils/serverUnreadSummary";
+import { cachedUnreadSummary, claimDirectorySeed, currentDirectoryCacheScope, directoryCacheBindPending, recordUnreadSummary, whenDirectoryCacheBound } from "../cache/directoryCache";
+import { useServerStore } from "./serverStore";
 import type { ServerUnreadSummary } from "../utils/serverUnreadSummary";
 import { SERVER_NOTIFICATION_PREFS_UPDATED_EVENT } from "./events/notificationPrefsEvents";
 
@@ -134,10 +136,38 @@ export const useServerUnreadSummaryStore = create<ServerUnreadSummaryState>((set
       }
       const generation = loadGeneration;
       const flight = (async () => {
+        // Directory-cache (task #8): seed an empty store from the cached raw
+        // wire payload; the write-back below is guarded by the scope captured
+        // after attach so a server switch mid-flight never persists the
+        // previous scope's summary into the new one.
+        const epoch = useServerStore.getState().serverEpoch;
+        const serverId = useServerStore.getState().current?.id ?? null;
+        if (serverId && directoryCacheBindPending(serverId)) {
+          // The summary is account-scoped. A server switch while this wait
+          // is in flight must not drop the request.
+          await whenDirectoryCacheBound(serverId);
+        }
+        const requestScope = currentDirectoryCacheScope();
+        // Once per epoch. A later load in the same epoch (poll, focus, a
+        // read that cleared the map) must not paint the cached snapshot
+        // back over counts the user already cleared. Claiming before the
+        // scope is bound still occupies the epoch, so the post-attach
+        // reconnect cannot reseed a stale count.
+        if (serverId && claimDirectorySeed("unreadSummary", epoch, serverId) && Object.keys(get().byServer).length === 0) {
+          try {
+            const cached = await cachedUnreadSummary(serverId);
+            if (cached !== null && Object.keys(get().byServer).length === 0 && useServerStore.getState().serverEpoch === epoch) {
+              set((state) => ({ byServer: retainServerUnreadSummary(state.byServer, parseServerUnreadSummaryRows(cached)) }));
+            }
+          } catch {
+            // Best-effort seed; the network path is authoritative.
+          }
+        }
         try {
           const { data } = await api.get("/servers/unread-summary");
           if (generation !== loadGeneration) return; // reset() happened mid-flight; drop the stale snapshot.
           set((state) => ({ byServer: retainServerUnreadSummary(state.byServer, parseServerUnreadSummaryRows(data)) }));
+          await recordUnreadSummary(data, requestScope, useServerStore.getState().current?.id ?? null);
         } catch {
           if (generation !== loadGeneration) return;
           // A failed refresh must not leave stale >0 counts lighting dots.
