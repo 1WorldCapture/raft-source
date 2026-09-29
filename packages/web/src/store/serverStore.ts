@@ -245,6 +245,9 @@ function normalizeServerSettings(data: unknown): ServerSettings | null {
 }
 
 const serverSettingsRequests = new Map<string, Promise<ServerSettings | null>>();
+const serverListRequests = new Map<string, Promise<void>>();
+const serverMembersRequests = new Map<string, Promise<void>>();
+const serverSidebarOrderRequests = new Map<string, Promise<void>>();
 
 // Stryker disable all: API response normalization is defensive schema repair; integration tests cover representative sparse/invalid payloads while exhaustive field mutants are equivalent fallback permutations.
 function normalizeStringArray(value: unknown): string[] {
@@ -360,21 +363,29 @@ export const useServerStore = create<ServerState>((set, get) => ({
   serverEpoch: 0,
 
   loadServers: async () => {
-    try {
-      const { data } = await api.get("/servers");
-      const servers = data as Server[];
+    const existing = serverListRequests.get("list");
+    if (existing) return existing;
+    const request = api.get("/servers")
+      .then(({ data }) => {
+        const servers = data as Server[];
 
-      serverPersistence.clearLegacyServerId();
-      applyServerDomainEvent({ kind: "hydrate", source: "servers", servers }, set, get);
-      set({ loading: false });
+        serverPersistence.clearLegacyServerId();
+        applyServerDomainEvent({ kind: "hydrate", source: "servers", servers }, set, get);
+        set({ loading: false });
 
-      // Loaders are no-ops without a current server and capture serverEpoch
-      // themselves, so this is safe for URL-resolved and empty startup states.
-      get().loadMembers();
-      get().loadSidebarOrder();
-    } catch {
-      set({ loading: false });
-    }
+        // Loaders are no-ops without a current server and capture serverEpoch
+        // themselves, so this is safe for URL-resolved and empty startup states.
+        get().loadMembers();
+        get().loadSidebarOrder();
+      })
+      .catch(() => {
+        set({ loading: false });
+      })
+      .finally(() => {
+        serverListRequests.delete("list");
+      });
+    serverListRequests.set("list", request);
+    return request;
   },
 
   loadSettings: async (options = {}) => {
@@ -592,41 +603,59 @@ export const useServerStore = create<ServerState>((set, get) => ({
     const epoch = get().serverEpoch;
     const serverId = get().current?.id;
     if (!serverId) return;
+    const requestKey = `${serverId}:${epoch}`;
+    const existing = serverMembersRequests.get(requestKey);
+    if (existing) return existing;
     set({ membersLoadError: false });
-    try {
-      const { data } = await api.get(`/servers/${serverId}/members`);
-      if (get().serverEpoch !== epoch) return;
-      set({ members: data, membersLoadError: false });
-    } catch {
-      if (get().serverEpoch !== epoch) return;
-      set({ membersLoadError: true });
-    }
+    const request = api.get(`/servers/${serverId}/members`)
+      .then(({ data }) => {
+        if (get().serverEpoch !== epoch) return;
+        set({ members: data, membersLoadError: false });
+      })
+      .catch(() => {
+        if (get().serverEpoch !== epoch) return;
+        set({ membersLoadError: true });
+      })
+      .finally(() => {
+        serverMembersRequests.delete(requestKey);
+      });
+    serverMembersRequests.set(requestKey, request);
+    return request;
   },
 
   loadSidebarOrder: async () => {
     const epoch = get().serverEpoch;
     const serverId = get().current?.id;
     if (!serverId) return;
-    try {
-      const { data } = await api.get(`/servers/${serverId}/sidebar-order`);
-      if (get().serverEpoch !== epoch) return;
-      applyServerDomainEvent({
-        kind: "hydrate",
-        source: "sidebar-order",
-        serverId,
-        epoch,
-        sidebarOrder: normalizeSidebarOrderResponse(data),
-      }, set, get);
-    } catch {
-      if (get().serverEpoch !== epoch) return;
-      applyServerDomainEvent({
-        kind: "hydrate",
-        source: "sidebar-order",
-        serverId,
-        epoch,
-        sidebarOrder: DEFAULT_SIDEBAR_ORDER,
-      }, set, get);
-    }
+    const requestKey = `${serverId}:${epoch}`;
+    const existing = serverSidebarOrderRequests.get(requestKey);
+    if (existing) return existing;
+    const request = api.get(`/servers/${serverId}/sidebar-order`)
+      .then(({ data }) => {
+        if (get().serverEpoch !== epoch) return;
+        applyServerDomainEvent({
+          kind: "hydrate",
+          source: "sidebar-order",
+          serverId,
+          epoch,
+          sidebarOrder: normalizeSidebarOrderResponse(data),
+        }, set, get);
+      })
+      .catch(() => {
+        if (get().serverEpoch !== epoch) return;
+        applyServerDomainEvent({
+          kind: "hydrate",
+          source: "sidebar-order",
+          serverId,
+          epoch,
+          sidebarOrder: DEFAULT_SIDEBAR_ORDER,
+        }, set, get);
+      })
+      .finally(() => {
+        serverSidebarOrderRequests.delete(requestKey);
+      });
+    serverSidebarOrderRequests.set(requestKey, request);
+    return request;
   },
 
   updateSidebarOrder: async (updates) => {
