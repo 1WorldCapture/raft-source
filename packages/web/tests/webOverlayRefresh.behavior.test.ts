@@ -452,3 +452,52 @@ test("coverage belongs to one scope: switching scopes starts over", SERIAL, asyn
   await flush();
   assert.equal(calls, 3, "each attachment refreshes on its own");
 });
+
+test("opening a channel fetches the newest page once: the store load's page counts as refreshed", SERIAL, async (t) => {
+  await attach();
+  const seqs = Array.from({ length: 50 }, (_, index) => index + 1);
+  const server = channelServer(seqs);
+  t.mock.method(api, "get", server.handler);
+  resetStore();
+  useMessageStore.setState({ currentChannelId: "c1" });
+
+  await useMessageStore.getState().loadMessages("c1");
+  await flush();
+  // The load recorded its page into the cache; the open refresh now sees
+  // those 50 cached rows and must treat them as already fresh.
+  assert.equal((await activeWebCache()!.repo.getLatestMessages(activeWebCache()!.scopeId, "c1", 200)).length, 50);
+  await refreshLatestOverlayPages("c1");
+  await flush();
+  const pageFetches = server.urls.filter((url) => url.startsWith("/messages/channel/c1?"));
+  assert.equal(pageFetches.length, 1, `expected only the store's latest fetch, got ${pageFetches.join(" ")}`);
+
+  refreshVisibleOverlayPages("c1", ["m1", "m50"]);
+  await flush();
+  assert.equal(server.urls.filter((url) => url.startsWith("/messages/channel/c1?")).length, 1);
+});
+
+test("older history loaded over the network is already fresh when scrolled into view", SERIAL, async (t) => {
+  await attach();
+  const seqs = Array.from({ length: 150 }, (_, index) => index + 1);
+  const server = channelServer(seqs);
+  t.mock.method(api, "get", async (url: string) => {
+    const before = new URL(url, "http://local").searchParams.get("before");
+    if (before !== null) {
+      server.urls.push(url);
+      const page = seqs.filter((seq) => seq < Number(before)).slice(-OVERLAY_PAGE_SIZE);
+      return { data: { messages: page.map((seq) => message(seq)) } };
+    }
+    return server.handler(url);
+  });
+  showInStore(seqs.slice(100));
+  useMessageStore.setState((state) => ({
+    channelWindowMeta: { ...state.channelWindowMeta, c1: { ...(state.channelWindowMeta?.c1 ?? {}), hasMore: true, loadingOlder: false } },
+  }) as never);
+  await useMessageStore.getState().loadOlderMessages("c1");
+  const afterOlder = server.urls.length;
+  assert.equal(afterOlder, 1);
+
+  refreshVisibleOverlayPages("c1", ["m51", "m60", "m99"]);
+  await flush();
+  assert.equal(server.urls.length, afterOlder, "the before= page proved seqs 51-100");
+});

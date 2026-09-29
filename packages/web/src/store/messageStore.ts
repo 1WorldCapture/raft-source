@@ -46,6 +46,7 @@ import {
   seedChannel,
   whenActiveCache,
 } from "../cache/messageCache";
+import { beginChannelNetworkLoad } from "../cache/overlayCoverage";
 import { drainAfterPages } from "@botiverse/raft-shared/src/cacheBoot.js";
 import {
   getAcceptedReadState,
@@ -249,6 +250,13 @@ function incompleteReadStateProjection(): ReadStateProjection {
   };
 }
 // Stryker restore all
+
+/** Seqs of a raw messages page (before receiver-private filtering). */
+function rawPageSeqs(data: unknown): number[] {
+  const record = data as { messages?: unknown } | null;
+  const rows = Array.isArray(record?.messages) ? record.messages : Array.isArray(data) ? data : [];
+  return (rows as Array<{ seq?: unknown }>).flatMap((row) => (typeof row?.seq === "number" ? [row.seq] : []));
+}
 
 export type MessagesPageThreadSummaryPayload = {
   threadSummariesByParentMessageId?: Record<string, ThreadSummary>;
@@ -1856,6 +1864,9 @@ export const useMessageStore = create<MessageState>((set, get) => ({
     }
 
     const ingressContext = captureReceiverPrivateIngressContext(get().currentUserId);
+    // Pages fetched here are fresh dynamic data: record them so the overlay
+    // refresh does not fetch the same rows again (desktop-data-cache #7).
+    const overlayLoad = beginChannelNetworkLoad(channelId);
     try {
       const limit = 50;
       // Cache fast path (desktop-data-cache #9): with a cached tail the pane
@@ -1881,6 +1892,8 @@ export const useMessageStore = create<MessageState>((set, get) => ({
           plan.after,
           async (after) => {
             const { data } = await api.get(`/messages/channel/${channelId}?limit=${limit}&after=${after}`);
+            const pageSeqs = rawPageSeqs(data);
+            overlayLoad.page({ after }, pageSeqs, pageSeqs.length >= limit);
             if (requestGeneration !== messageWindowRequestGeneration) return [];
             const msgs = normalizeReceiverPrivateMessagesIfEnabled(
               data.messages ?? data,
@@ -1938,6 +1951,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
         return;
       }
       const { data } = await api.get(`/messages/channel/${channelId}?limit=${limit}`);
+      overlayLoad.page({ latest: true }, rawPageSeqs(data), true);
       if (
         get().currentChannelId === channelId &&
         requestGeneration !== messageWindowRequestGeneration
@@ -2005,6 +2019,8 @@ export const useMessageStore = create<MessageState>((set, get) => ({
         channelWindowMeta: updateWindowMetaRecord(state.channelWindowMeta, channelId, { loading: false }),
         ...(state.currentChannelId === channelId ? { loading: false } : {}),
       }));
+    } finally {
+      overlayLoad.end();
     }
   },
 
@@ -2024,11 +2040,15 @@ export const useMessageStore = create<MessageState>((set, get) => ({
       channelWindowMeta: updateWindowMetaRecord(state.channelWindowMeta, targetChannelId, { loadingOlder: true }),
     }));
     const ingressContext = captureReceiverPrivateIngressContext(state.currentUserId);
+    // Started before the request so a disconnect in flight voids its coverage.
+    const olderLoad = beginChannelNetworkLoad(targetChannelId);
     try {
       const limit = 50;
       const { data } = await api.get(
         `/messages/channel/${targetChannelId}?limit=${limit}&before=${minSeq}`
       );
+      const olderSeqs = rawPageSeqs(data);
+      olderLoad.page({ before: minSeq }, olderSeqs, olderSeqs.length >= limit);
       const older = normalizeReceiverPrivateMessagesIfEnabled(
         data.messages ?? data,
         ingressContext,
@@ -2073,6 +2093,8 @@ export const useMessageStore = create<MessageState>((set, get) => ({
         loadingOlder: targetChannelId === state.currentChannelId ? false : state.loadingOlder,
         channelWindowMeta: updateWindowMetaRecord(state.channelWindowMeta, targetChannelId, { loadingOlder: false }),
       }));
+    } finally {
+      olderLoad.end();
     }
   },
 

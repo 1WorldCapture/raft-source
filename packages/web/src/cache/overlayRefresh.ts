@@ -27,6 +27,16 @@ import {
   whenActiveCache,
 } from "./messageCache";
 import type { ActiveCache } from "./messageCache";
+import {
+  addCoverage,
+  bumpOverlayEpoch,
+  isSeqCovered,
+  onOverlayScopeReset,
+  overlayEpoch,
+  resetOverlayCoverageForTest,
+  syncOverlayScope,
+  whenChannelLoadsSettled,
+} from "./overlayCoverage";
 
 export const OVERLAY_PAGE_SIZE = 50;
 export const OVERLAY_OPEN_MESSAGE_LIMIT = OVERLAY_PAGE_SIZE * 4;
@@ -34,6 +44,8 @@ export const OVERLAY_OPEN_MESSAGE_LIMIT = OVERLAY_PAGE_SIZE * 4;
 export const OVERLAY_RETRY_BASE_MS = 30_000;
 /** After this many failures a page is left alone until the next disconnect/boot. */
 export const OVERLAY_MAX_FAILURES = 3;
+/** How long the open refresh waits for the store's own channel load. */
+export const OVERLAY_LOAD_WAIT_MS = 5_000;
 
 type CacheToken = {
   scopeId: number;
@@ -44,16 +56,18 @@ type CacheToken = {
   epoch: number;
 };
 
-type Coverage = { fromSeq: number; throughSeq: number };
 type Failure = { count: number; retryAt: number };
 
-// Per-boot, per-scope state. Keys are `${scopeId}:${generation}:${channelId}`.
-const covered = new Map<string, Coverage[]>();
+// Per-boot, per-scope state (coverage lives in overlayCoverage). Keys are
+// `${scopeId}:${generation}:${channelId}`.
 const failures = new Map<string, Failure>();
 const inflight = new Map<string, { fromSeq: number; expectedThroughSeq: number; run: Promise<void> }>();
-let disconnectEpoch = 0;
-let stateScopeKey: string | null = null;
 let now = () => Date.now();
+
+onOverlayScopeReset(() => {
+  failures.clear();
+  inflight.clear();
+});
 
 /** @internal test seam for the retry backoff clock. */
 export function setOverlayRefreshClockForTest(clock: (() => number) | null): void {
@@ -63,26 +77,20 @@ export function setOverlayRefreshClockForTest(clock: (() => number) | null): voi
 function captureToken(): CacheToken | null {
   const cache = activeWebCache();
   if (!cache) return null;
-  // Coverage, failures and flights belong to one scope attachment; drop
-  // them as soon as another scope (server switch, reattach) is in use.
-  const scopeKey = `${cache.scopeId}:${cache.generation}`;
-  if (stateScopeKey !== scopeKey) {
-    covered.clear();
-    failures.clear();
-    inflight.clear();
-    stateScopeKey = scopeKey;
-  }
+  // Coverage, failures and flights belong to one scope attachment; this
+  // drops them as soon as another scope (server switch, reattach) is in use.
+  syncOverlayScope();
   return {
     scopeId: cache.scopeId,
     serverId: cache.serverId,
     userId: cache.userId ?? null,
     generation: cache.generation,
-    epoch: disconnectEpoch,
+    epoch: overlayEpoch(),
   };
 }
 
 function tokenCurrent(token: CacheToken): ActiveCache | null {
-  if (token.epoch !== disconnectEpoch) return null;
+  if (token.epoch !== overlayEpoch()) return null;
   const cache = activeWebCache();
   if (!cache) return null;
   if (cache.scopeId !== token.scopeId || cache.generation !== token.generation) return null;
@@ -93,10 +101,6 @@ function tokenCurrent(token: CacheToken): ActiveCache | null {
 
 function channelKey(token: CacheToken, channelId: string): string {
   return `${token.scopeId}:${token.generation}:${channelId}`;
-}
-
-function isCovered(key: string, seq: number): boolean {
-  return (covered.get(key) ?? []).some((span) => seq >= span.fromSeq && seq <= span.throughSeq);
 }
 
 function isInflight(key: string, seq: number): boolean {
@@ -123,20 +127,6 @@ function noteFailure(key: string): void {
   failures.set(key, { count, retryAt: now() + OVERLAY_RETRY_BASE_MS * 2 ** (count - 1) });
 }
 
-/** Add a proven span, merging overlapping or touching ones. */
-function addCoverage(key: string, span: Coverage): void {
-  const spans = [...(covered.get(key) ?? []), span].sort((a, b) => a.fromSeq - b.fromSeq);
-  const merged: Coverage[] = [];
-  for (const next of spans) {
-    const last = merged.at(-1);
-    if (last && next.fromSeq <= last.throughSeq + 1) {
-      last.throughSeq = Math.max(last.throughSeq, next.throughSeq);
-    } else {
-      merged.push({ ...next });
-    }
-  }
-  covered.set(key, merged);
-}
 
 function sortedUnique(seqs: readonly number[]): number[] {
   return [...new Set(seqs.filter((seq) => Number.isSafeInteger(seq) && seq > 0))].sort((a, b) => a - b);
@@ -369,7 +359,7 @@ function refreshSeqs(
 ): Promise<void>[] {
   const key = channelKey(token, channelId);
   if (isBackingOff(key)) return [];
-  const isDone = (seq: number) => isCovered(key, seq) || isInflight(key, seq);
+  const isDone = (seq: number) => isSeqCovered(key, seq) || isInflight(key, seq);
   return overlayFetchPlan(known, wanted, isDone)
     .map(({ fromSeq, expectedThroughSeq }) => refreshFrom(channelId, fromSeq, expectedThroughSeq, token));
 }
@@ -393,6 +383,10 @@ export async function refreshLatestOverlayPages(channelId: string): Promise<void
   if (!token) return;
   const cache = tokenCurrent(token);
   if (!cache) return;
+  // The store's own open load fetches the newest page (or drains past the
+  // cached tail); wait for it so its coverage keeps us from fetching it again.
+  await whenChannelLoadsSettled(channelKey(token, channelId), OVERLAY_LOAD_WAIT_MS);
+  if (!tokenCurrent(token)) return;
   const latest = await cache.repo.getLatestMessages(cache.scopeId, channelId, OVERLAY_OPEN_MESSAGE_LIMIT);
   if (!tokenCurrent(token)) return;
   const latestSeqs = latest.map((row) => row.seq);
@@ -420,8 +414,7 @@ export function refreshVisibleOverlayPages(channelId: string, messageIds: readon
  * after reconnect. Overlay rows themselves stay.
  */
 export async function invalidateOverlayMarksForDisconnect(): Promise<void> {
-  disconnectEpoch += 1;
-  covered.clear();
+  bumpOverlayEpoch();
   failures.clear();
   inflight.clear();
   const token = captureToken();
@@ -433,10 +426,8 @@ export async function invalidateOverlayMarksForDisconnect(): Promise<void> {
 
 /** @internal reset module state between tests. */
 export function resetOverlayRefreshForTest(): void {
-  stateScopeKey = null;
-  covered.clear();
+  resetOverlayCoverageForTest();
   failures.clear();
   inflight.clear();
-  disconnectEpoch = 0;
   now = () => Date.now();
 }

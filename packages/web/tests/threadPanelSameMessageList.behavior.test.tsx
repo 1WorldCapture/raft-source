@@ -4,6 +4,7 @@ import {
   mergeThreadBucketWithinWindow,
   mergeThreadMessageUpdates,
   mergeThreadMessages,
+  mergeThreadReconnectRefresh,
   sameMessageList,
 } from "../src/components/message/ThreadPanel";
 import type { Message } from "../src/store/messageStore";
@@ -429,3 +430,26 @@ test("focused thread windows keep both replay boundaries intact", () => {
   assert.equal(projected.some((message) => message.id === "reply-0"), false);
   assert.equal(projected.some((message) => message.id === "reply-95"), false);
 });
+
+test("reconnect refresh updates stale replies but keeps rows changed while it was in flight", () => {
+  const stale = threadMsg({ id: "reply-a", seq: 1, reactions: [{ emoji: "👍", count: 1, reactorIds: ["u1"] }] as never });
+  const other = threadMsg({ id: "reply-b", seq: 2 });
+  const before = new Map([[stale.id, stale], [other.id, other]]);
+  // A live message:updated lands for reply-b during the request.
+  const live = threadMsg({ id: "reply-b", seq: 2, reactions: [{ emoji: "🔥", count: 1, reactorIds: ["u2"] }] as never });
+  const current = [stale, live];
+  const fresh = [
+    threadMsg({ id: "reply-a", seq: 1, reactions: [{ emoji: "👍", count: 3, reactorIds: ["u1", "u2", "u3"] }] as never }),
+    threadMsg({ id: "reply-b", seq: 2 }),
+    threadMsg({ id: "reply-c", seq: 3, content: "missed while offline" }),
+  ];
+
+  const merged = mergeMessagesById(mergeThreadReconnectRefresh(current, fresh, before));
+  assert.equal((merged.get("reply-a")!.reactions as Array<{ count: number }>)[0]!.count, 3, "stale reactions refresh");
+  assert.equal((merged.get("reply-b")!.reactions as Array<{ emoji: string }>)[0]!.emoji, "🔥", "the in-flight live update wins");
+  assert.equal(merged.get("reply-c")?.content, "missed while offline", "replies missed while disconnected are added");
+});
+
+function mergeMessagesById(messages: Message[]): Map<string, Message> {
+  return new Map(messages.map((message) => [message.id, message]));
+}

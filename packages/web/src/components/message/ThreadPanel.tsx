@@ -181,6 +181,24 @@ export function mergeThreadMessages(existing: Message[], incoming: Message[]): M
 }
 
 /**
+ * Merge a post-reconnect refresh of the newest replies. `before` is the row
+ * set when the request started: a row that changed since then (a live
+ * message:updated or edit) is newer than the response and keeps its value.
+ */
+export function mergeThreadReconnectRefresh(
+  current: Message[],
+  fresh: Message[],
+  before: ReadonlyMap<string, Message>,
+): Message[] {
+  const now = new Map(current.map((message) => [message.id, message]));
+  const unchanged = fresh.filter((message) => {
+    const was = before.get(message.id);
+    return was === undefined || now.get(message.id) === was;
+  });
+  return mergeThreadMessages(current, unchanged);
+}
+
+/**
  * Apply `message:updated` payloads to rows already owned by this thread.
  * Some update producers intentionally send a sparse patch (attachment-comment
  * privacy scrubbing is `{ id, channelId, commentRef }`), so replacing the row
@@ -1093,8 +1111,27 @@ export default function ThreadPanel({
     // Join socket room for thread channel
     socket.emit("join:channel", threadChannelId);
 
+    // Replies live in local state, so a disconnect can leave their dynamic
+    // data (reactions, edits) stale. On reconnect refresh the newest window
+    // once (desktop-data-cache #7); older replies refresh when paged in again.
+    // Rows that changed while the request was in flight keep the live value.
     const handleReconnect = () => {
       socket.emit("join:channel", threadChannelId);
+      if (hasNewerRef.current) return;
+      const before = new Map(messagesRef.current.map((message) => [message.id, message]));
+      const reconnectIngress = captureReceiverPrivateIngressContext(
+        useMessageStore.getState().currentUserId,
+      );
+      void api.get(`/messages/channel/${threadChannelId}?limit=${THREAD_LATEST_WINDOW_LIMIT}`)
+        .then(({ data }) => {
+          if (cancelled || !isReceiverPrivateIngressContextCurrent(reconnectIngress)) return;
+          const fresh = onlyThreadMessages(
+            threadChannelId,
+            normalizeThreadIngress(data.messages ?? data, "receiver-private", "thread"),
+          );
+          setMessages((prev) => mergeThreadReconnectRefresh(prev, fresh, before));
+        })
+        .catch(() => undefined);
     };
 
     socket.on("connect", handleReconnect);
