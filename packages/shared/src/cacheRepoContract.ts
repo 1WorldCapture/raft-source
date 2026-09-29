@@ -53,6 +53,15 @@ export type TaskEventInput = {
   id: string;
   revision: number;
   raw: RawRecord;
+  /**
+   * Web-only tie-breaking for the revision gate (desktop-data-cache P2c
+   * review): when true, an incoming revision EQUAL to the stored one may
+   * overwrite it. Live socket events set it (they are newer in time than
+   * anything cached, so ties go to the event — renames without a revision
+   * bump must land); snapshots leave it off except for revision-0 legacy
+   * rows. Mobile ignores the flag and keeps the strict `>` gate.
+   */
+  allowTie?: boolean;
 };
 
 export type CachedMessage = {

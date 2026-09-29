@@ -324,7 +324,11 @@ export function createWebCacheRepo(deps: WebCacheRepoDeps = {}): CacheRepo {
       const state = scope(scopeId);
       if (!state) return;
       const stored = state.taskRows.get(task.id);
-      if (!taskRevisionGate(stored ? stored.revision : null, task.revision)) return;
+      const storedRevision = stored ? stored.revision : null;
+      // Mirror idbRepo's tie rule: strictly-newer wins; equal revisions only
+      // when the caller opts in (live events tie-break, snapshots stay strict).
+      const tieAllowed = task.allowTie === true && storedRevision !== null && task.revision === storedRevision;
+      if (!taskRevisionGate(storedRevision, task.revision) && !tieAllowed) return;
       state.taskRows.set(task.id, { revision: task.revision, raw: task.raw });
     },
 

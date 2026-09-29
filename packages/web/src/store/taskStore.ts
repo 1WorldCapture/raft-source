@@ -9,6 +9,13 @@ import type {
   TaskMetadataUpdate,
 } from "../utils/taskMetadata";
 import { registerServerReset } from "./serverResetRegistry";
+import {
+  captureTaskCacheToken,
+  readSeededServerTasks,
+  readSeededChannelTasks,
+  persistServerTasksSnapshot,
+  persistChannelTasksSnapshot,
+} from "../cache/taskBoardCache";
 import { emitStateTransitionTrace } from "../utils/stateTransitionTrace";
 import { taskTraceStateChanged, transitionOutcomeDetail } from "../utils/stateTransitionChange";
 
@@ -346,7 +353,33 @@ export const useTaskStore = create<TaskState>((set, get) => ({
       },
     }));
     try {
-      const { data } = await api.get(`/tasks/channel/${channelId}`);
+      // Fire the fetch first, seed second (same synchronous-observation
+      // contract as loadServerTasks — see the note there). The cache era is
+      // captured in the same tick: every cache read/write of this load is
+      // validated against it, so a server switch or logout mid-load can
+      // neither seed nor write through the stale scope.
+      const cacheToken = captureTaskCacheToken();
+      const fetchStarted = api.get(`/tasks/channel/${channelId}`);
+      fetchStarted.catch(() => {}); // no unhandled-rejection window before the await below
+      // Cache seed (#10): cached rows for this channel paint while the fetch
+      // is in flight (cold start, offline included). The bucket is seeded only
+      // when nothing else has populated it (a live event wins) and the channel
+      // is not already loaded — loadedByChannelId stays false so the network
+      // response still commits and corrects the seed.
+      const seeded = await readSeededChannelTasks(channelId, cacheToken);
+      if (seeded && seeded.length > 0
+        && !get().loadedByChannelId[channelId]
+        && get().tasksByChannelId[channelId] === undefined) {
+        set((state) => ({
+          ...(state.currentChannelId === channelId ? { tasks: seeded } : {}),
+          tasksByChannelId: {
+            ...state.tasksByChannelId,
+            [channelId]: seeded,
+          },
+          ...hydrateTaskMetadataState(state, seeded),
+        }));
+      }
+      const { data } = await fetchStarted;
       const tasks = (data as { tasks: Task[] }).tasks;
       set((state) => reduceTaskWithTrace(
         state,
@@ -369,6 +402,11 @@ export const useTaskStore = create<TaskState>((set, get) => ({
           ...hydrateTaskMetadataState(current, tasks),
         }),
       ));
+      // Cache write-back (#10): the committed channel list refreshes cached
+      // rows (revision-gated) and purges this channel's rows it no longer
+      // contains. Fire-and-forget — never blocks the UI path. The load's
+      // captured era gates every write (P2c review race fix).
+      void persistChannelTasksSnapshot(channelId, tasks, cacheToken);
     } catch (err) {
       console.error("Failed to load tasks:", err);
       set((state) => ({
@@ -418,7 +456,33 @@ export const useTaskStore = create<TaskState>((set, get) => ({
       set({ serverLoading: true });
       loadTouchedIds = touched;
       try {
-        const { data } = await api.get("/tasks/server");
+        // Fire the fetch FIRST (synchronously): the single-flight contract is
+        // observed synchronously right after loadServerTasks() returns —
+        // awaiting anything before api.get would shift the call into a later
+        // microtask (taskStoreReentrancyGuard asserts calls()===1 immediately).
+        // The cache era is captured in the same synchronous block: every cache
+        // read/write of this load is validated against it, so a server switch
+        // or logout mid-load can neither seed nor write through the stale
+        // scope (P2c review race fix).
+        const cacheToken = captureTaskCacheToken();
+        const fetchStarted = api.get("/tasks/server");
+        fetchStarted.catch(() => {}); // no unhandled-rejection window before the await below
+        // Cache seed (#10): cached rows paint the board while the fetch is in
+        // flight (cold start, offline included). Seeds never set
+        // serverTasksLoaded — completeness still requires a committed load —
+        // and live mutations during the fetch merge over the seed exactly as
+        // they would over an empty list (touched-set semantics).
+        const seeded = await readSeededServerTasks(cacheToken);
+        if (seeded && seeded.length > 0
+          && !get().serverTasksLoaded
+          && get().serverTasks.length === 0
+          && get().serverTasksGeneration === startGeneration) {
+          set((state) => ({
+            serverTasks: seeded,
+            ...hydrateTaskMetadataState(state, seeded),
+          }));
+        }
+        const { data } = await fetchStarted;
         const snapshot = (data as { tasks: Task[] }).tasks;
         if (get().serverTasksGeneration !== startGeneration) {
           // The socket dropped (or the server switched) while this request was
@@ -437,6 +501,12 @@ export const useTaskStore = create<TaskState>((set, get) => ({
             ...hydrateTaskMetadataState(current, merged),
           }),
         ));
+        // Cache write-back (#10): the committed (lossless-merged) snapshot
+        // refreshes cached rows through the revision gate and purges stale
+        // channel|joint rows by absence. Fire-and-forget — the store has
+        // already committed its own state. The load's captured era gates every
+        // write (P2c review race fix).
+        void persistServerTasksSnapshot(merged, cacheToken);
       } catch (err) {
         console.error("Failed to load server tasks:", err);
       } finally {

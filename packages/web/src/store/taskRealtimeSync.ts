@@ -1,5 +1,6 @@
 import { useTaskStore } from "./taskStore";
 import type { Task } from "./taskStore";
+import { persistTaskUpsert, persistTaskDelete } from "../cache/taskBoardCache";
 
 export type TaskRealtimeSocket = {
   on: (event: string, handler: (data: any) => void) => unknown;
@@ -8,6 +9,10 @@ export type TaskRealtimeSocket = {
 
 export function applyTaskRealtimeUpdate(task: Task) {
   useTaskStore.getState().upsertTask(task);
+  // Cache write-through (#10): the event row is authoritative and carries a
+  // revision, so the repo gate keeps a racing stale snapshot from regressing
+  // it. Fire-and-forget — cache health never blocks the live update.
+  void persistTaskUpsert(task);
 }
 
 export function registerTaskRealtimeHandlers(socket: TaskRealtimeSocket): () => void {
@@ -21,6 +26,8 @@ export function registerTaskRealtimeHandlers(socket: TaskRealtimeSocket): () => 
   };
   const handleTaskDeleted = (data: { channelId: string; taskId: string }) => {
     useTaskStore.getState().removeTask(data.taskId);
+    // Cache write-through (#10): deletions must not linger as ghost seed rows.
+    void persistTaskDelete(data.taskId);
   };
   // When the socket drops, the server-tasks list can no longer be assumed
   // complete: task:created/updated/deleted events during the gap are lost (the
