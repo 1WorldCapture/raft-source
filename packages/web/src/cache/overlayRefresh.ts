@@ -23,7 +23,9 @@ import {
 import type { Message, MessagesPageThreadSummaryPayload } from "../store/messageStore";
 import {
   activeWebCache,
+  captureLiveWriteMark,
   isActiveCacheBootPending,
+  liveWriteAfter,
   whenActiveCache,
 } from "./messageCache";
 import type { ActiveCache } from "./messageCache";
@@ -283,6 +285,7 @@ async function refreshFromNow(channelId: string, fromSeq: number, token: CacheTo
     (useMessageStore.getState().channelMessages[channelId] ?? []).map((message) => [message.id, message]),
   );
   const ingress = captureReceiverPrivateIngressContext(useMessageStore.getState().currentUserId);
+  const requestMark = captureLiveWriteMark();
   let data: unknown;
   try {
     const response = await api.get(
@@ -310,6 +313,7 @@ async function refreshFromNow(channelId: string, fromSeq: number, token: CacheTo
     (useMessageStore.getState().channelMessages[channelId] ?? []).map((message) => [message.id, message]),
   );
   const cacheRows = page.messages.filter((row) => {
+    if (liveWriteAfter(cache.scopeId, channelId, row.seq, requestMark)) return false;
     const id = typeof row.id === "string" ? row.id : null;
     if (!id || !before.has(id)) return true;
     return nowRows.get(id) === before.get(id);

@@ -16,7 +16,14 @@ import {
   resetOverlayRefreshForTest,
   setOverlayRefreshClockForTest,
 } from "../src/cache/overlayRefresh";
-import { activeWebCache, clearActiveWebCache, recordMessagePage, setActiveWebCache } from "../src/cache/messageCache";
+import {
+  activeWebCache,
+  captureLiveWriteMark,
+  clearActiveWebCache,
+  noteMessageUpdated,
+  recordMessagePage,
+  setActiveWebCache,
+} from "../src/cache/messageCache";
 import { createWebCacheRepo } from "../src/cache/webCacheRepo";
 import { buildMainLayoutSocketBindings } from "../src/store/socketBridge";
 import type { MainLayoutSocketBridgeSocket, SocketBinding } from "../src/store/socketBridge";
@@ -571,4 +578,31 @@ test("a store load that straddles a disconnect records no coverage", SERIAL, asy
   refreshVisibleOverlayPages("c1", ["m5"]);
   await flush();
   assert.equal(server.urls.length, 2, "the pre-disconnect page is not trusted; the row refreshes");
+});
+
+test("a fresh store page replaces a cached overlay even when reactions left updatedAt unchanged", SERIAL, async () => {
+  const { repo, scopeId } = await attach();
+  await repo.appendPage(scopeId, "c1", { messages: [1, 2].map((seq) => ({ seq, id: `m${seq}`, raw: message(seq) as unknown as Record<string, unknown> })) });
+  const sameUpdatedAt = "2026-09-29T00:00:01.000Z";
+  // An earlier session cached reactions through message:updated; the server
+  // does not bump messages.updated_at for reactions.
+  noteMessageUpdated({ ...message(1, { reactions: [{ emoji: "👀", count: 1 }], updatedAt: sameUpdatedAt }) } as never);
+  noteMessageUpdated({ ...message(2, { reactions: [{ emoji: "👀", count: 1 }], updatedAt: sameUpdatedAt }) } as never);
+  await flush();
+
+  const requestMark = captureLiveWriteMark();
+  // A live reaction lands on m2 while the page request is in flight.
+  noteMessageUpdated({ ...message(2, { reactions: [{ emoji: "🔥", count: 1 }], updatedAt: sameUpdatedAt }) } as never);
+  await flush();
+  await recordMessagePage("c1", {
+    messages: [
+      message(1, { reactions: [{ emoji: "🎉", count: 2 }], updatedAt: sameUpdatedAt }),
+      message(2, { reactions: [{ emoji: "🎉", count: 2 }], updatedAt: sameUpdatedAt }),
+    ],
+  }, requestMark);
+
+  const rows = await repo.getLatestMessages(scopeId, "c1", 10);
+  const emoji = (seq: number) => (rows.find((row) => row.seq === seq)?.overlay as { reactions?: Array<{ emoji: string }> } | null)?.reactions?.[0]?.emoji;
+  assert.equal(emoji(1), "🎉", "the page is the server's state at request time and wins over the older overlay");
+  assert.equal(emoji(2), "🔥", "a live write after the request started is kept");
 });

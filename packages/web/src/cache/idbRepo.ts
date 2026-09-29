@@ -29,6 +29,7 @@ import {
   contiguousRuns,
   mergeRanges,
   overlayIsNewer,
+  overlayWatermark,
   pageRange,
   taskRevisionGate,
 } from "@botiverse/raft-shared/src/cacheMerge.ts";
@@ -47,7 +48,10 @@ import type {
 } from "@botiverse/raft-shared/src/cacheRepoContract.ts";
 
 export const WEB_CACHE_DB_NAME = "raft-web-cache";
-export const WEB_CACHE_SCHEMA_VERSION = 1;
+// v2 (desktop-data-cache task #8): message_overlays.updatedAt holds the server
+// updatedAt watermark instead of the local write time. Upgrading from v1
+// clears only the two overlay stores; messages, coverage and the rest stay.
+export const WEB_CACHE_SCHEMA_VERSION = 2;
 
 const STORES = [
   "scopes",
@@ -104,21 +108,91 @@ function channelRange(scopeId: number, channelId: string): IDBKeyRange {
 export type IdbRepoDeps = {
   /** Injectable clock for deterministic updatedAt/bookkeeping in tests. */
   now?: () => string;
+  /** How long an upgrade may stay blocked by another tab before giving up. */
+  blockedTimeoutMs?: number;
 };
 
-async function openRaw(): Promise<IDBPDatabase> {
+/** Default wait for tabs that hold an older version open (see openGuarded). */
+export const WEB_CACHE_BLOCKED_TIMEOUT_MS = 3_000;
+
+/**
+ * openDB that cannot hang on a schema upgrade. A tab still running older code
+ * keeps its connection open and (before v2) had no `blocking` handler, so our
+ * versionchange would wait until that tab closes. After `blockedTimeoutMs` we
+ * reject instead: the runtime falls back to the in-memory repo for this
+ * session and the upgrade happens on a later load. Our own connections close
+ * on `blocking`, so tabs from this version never hold up the next upgrade.
+ */
+function openGuarded(blockedTimeoutMs: number): Promise<IDBPDatabase> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let opened: IDBPDatabase | null = null;
+    openDB(WEB_CACHE_DB_NAME, WEB_CACHE_SCHEMA_VERSION, {
+      upgrade,
+      blocked() {
+        timer ??= setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          reject(Object.assign(new Error("IndexedDB upgrade blocked by another tab"), { name: "UpgradeBlockedError" }));
+        }, blockedTimeoutMs);
+      },
+      blocking() {
+        opened?.close();
+      },
+    }).then(
+      (db) => {
+        if (timer) clearTimeout(timer);
+        opened = db;
+        // Gave up already: the late connection is not used; release it.
+        if (settled) {
+          db.close();
+          return;
+        }
+        settled = true;
+        resolve(db);
+      },
+      (error: unknown) => {
+        if (timer) clearTimeout(timer);
+        if (settled) return;
+        settled = true;
+        reject(error);
+      },
+    );
+  });
+}
+
+async function openRaw(blockedTimeoutMs: number): Promise<IDBPDatabase> {
   try {
-    return await openDB(WEB_CACHE_DB_NAME, WEB_CACHE_SCHEMA_VERSION, { upgrade });
+    return await openGuarded(blockedTimeoutMs);
   } catch (error) {
     // A database newer than this code (downgrade) cannot be opened at our
     // version — dispose of it and rebuild. The cache is disposable.
     if (!(error instanceof Error) || error.name !== "VersionError") throw error;
     await deleteDB(WEB_CACHE_DB_NAME);
-    return openDB(WEB_CACHE_DB_NAME, WEB_CACHE_SCHEMA_VERSION, { upgrade });
+    return openGuarded(blockedTimeoutMs);
   }
 }
 
-function upgrade(db: IDBPDatabase): void {
+function upgrade(
+  db: IDBPDatabase,
+  oldVersion: number,
+  _newVersion: number | null,
+  transaction: { objectStore(name: StoreName): { clear(): Promise<void> } },
+): void {
+  if (oldVersion >= 1) {
+    // v1 overlay rows carry a local write time that cannot be compared with
+    // server updatedAt; drop them (and their once-per-boot marks) so the next
+    // open refreshes dynamic data. Nothing else changed shape.
+    void transaction.objectStore("message_overlays").clear();
+    void transaction.objectStore("overlay_pages").clear();
+    return;
+  }
+  createStores(db);
+}
+
+/** @internal The v1 store layout (unchanged in v2); exported for upgrade tests. */
+export function createStores(db: IDBPDatabase): void {
   const scopes = db.createObjectStore("scopes", { keyPath: "id", autoIncrement: true });
   scopes.createIndex("identity", ["origin", "userId", "serverId"], { unique: true });
   db.createObjectStore("channels", { keyPath: ["scopeId", "channelId"] });
@@ -173,7 +247,7 @@ async function coverageOf(store: AnyStore, scopeId: number, channelId: string): 
  * degrade to the no-op repo.
  */
 export async function createIdbCacheRepo(deps: IdbRepoDeps = {}): Promise<CacheRepo> {
-  const db = await openRaw();
+  const db = await openRaw(deps.blockedTimeoutMs ?? WEB_CACHE_BLOCKED_TIMEOUT_MS);
   const tx = (mode: IDBTransactionMode): AnyTx => db.transaction(STORES as unknown as string[], mode) as unknown as AnyTx;
   const now = deps.now ?? (() => new Date().toISOString());
   const bootId = globalThis.crypto?.randomUUID?.() ?? `boot-${now()}-${Math.random().toString(36).slice(2)}`;
@@ -368,7 +442,7 @@ export async function createIdbCacheRepo(deps: IdbRepoDeps = {}): Promise<CacheR
       const t = rw();
       const ts = now();
       for (const message of page.messages) {
-        await writeOverlayInTx(t, scopeId, channelId, message.seq, message.raw, message.updatedAt ?? ts, ts);
+        await writeOverlayInTx(t, scopeId, channelId, message.seq, message.raw, message.updatedAt ?? null);
       }
       for (const [parentMessageId, summary] of Object.entries(page.threadSummaries ?? {})) {
         await writeThreadSummaryInTx(t, scopeId, channelId, parentMessageId, summary, ts);
@@ -397,8 +471,7 @@ export async function createIdbCacheRepo(deps: IdbRepoDeps = {}): Promise<CacheR
 
     async applyMessageUpdated(scopeId, channelId, message) {
       const t = rw();
-      const ts = now();
-      await writeOverlayInTx(t, scopeId, channelId, message.seq, message.raw, message.updatedAt ?? ts, ts);
+      await writeOverlayInTx(t, scopeId, channelId, message.seq, message.raw, message.updatedAt ?? null);
       await t.done;
     },
 
@@ -513,16 +586,14 @@ async function writeOverlayInTx(
   channelId: string,
   seq: number,
   raw: RawRecord,
-  effectiveAt: string,
-  writeTs: string,
+  incomingUpdatedAt: string | null,
 ): Promise<void> {
   const store = t.objectStore("message_overlays");
   const stored = (await store.get([scopeId, channelId, seq])) as { updatedAt?: string } | undefined;
-  if (stored) {
-    const storedUpdatedAt = typeof stored.updatedAt === "string" ? stored.updatedAt : null;
-    if (!overlayIsNewer(storedUpdatedAt, effectiveAt)) return;
-  }
-  store.put({ scopeId, channelId, seq, raw, updatedAt: writeTs });
+  const storedUpdatedAt = typeof stored?.updatedAt === "string" ? stored.updatedAt : null;
+  if (stored && !overlayIsNewer(storedUpdatedAt, incomingUpdatedAt)) return;
+  // updatedAt holds the SERVER watermark (schema v2), not the local write time.
+  store.put({ scopeId, channelId, seq, raw, updatedAt: overlayWatermark(storedUpdatedAt, incomingUpdatedAt) });
 }
 
 async function writeThreadSummaryInTx(

@@ -134,6 +134,25 @@ test("overlays hydrate messages and stale updates lose", async () => {
   assert.deepEqual(repo.getLatestMessagesSync(scope, "c1", 1)[0]?.overlay?.reactions, [{ emoji: "🎉" }]);
 });
 
+test("reaction updates without updatedAt (as the runtime sends them) keep landing", async () => {
+  const { repo, setClock } = makeFixture();
+  const scope = repo.openScopeSync(SCOPE_A.origin, SCOPE_A.userId, SCOPE_A.serverId);
+  await repo.appendPage(scope, "c1", { messages: [msg(10)] });
+
+  // cacheSyncRuntime passes seq + raw only; every write carries no updatedAt.
+  setClock(9_000_000);
+  await repo.applyMessageUpdated(scope, "c1", { seq: 10, raw: msg(10, { reactions: [{ emoji: "👀" }] }).raw });
+  await repo.applyMessageUpdated(scope, "c1", { seq: 10, raw: msg(10, { reactions: [{ emoji: "🎉" }] }).raw });
+  assert.deepEqual(repo.getLatestMessagesSync(scope, "c1", 1)[0]?.overlay?.reactions, [{ emoji: "🎉" }]);
+
+  await repo.applyOverlayPage(scope, "c1", {
+    fromSeq: 10,
+    throughSeq: 10,
+    messages: [{ seq: 10, raw: msg(10, { reactions: [{ emoji: "🔥" }] }).raw }],
+  });
+  assert.deepEqual(repo.getLatestMessagesSync(scope, "c1", 1)[0]?.overlay?.reactions, [{ emoji: "🔥" }]);
+});
+
 test("thread summaries persist and channel deletion cascades into threads", async () => {
   const { repo } = makeFixture();
   const scope = repo.openScopeSync(SCOPE_A.origin, SCOPE_A.userId, SCOPE_A.serverId);
