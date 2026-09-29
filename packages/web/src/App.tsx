@@ -1039,11 +1039,14 @@ export function AppShell() {
 
   // Identity setup is account-global and must complete before any server data
   // or pending invite side effects are loaded.
+  // Keyed on the user id, not the object: timezone/translation updates replace
+  // the user object and must not refetch the server list.
+  const signedInUserId = user?.id ?? null;
   useEffect(() => {
-    if (user && !profileSetupRequired) {
+    if (signedInUserId && !profileSetupRequired) {
       loadServers();
     }
-  }, [user?.id, profileSetupRequired, loadServers]);
+  }, [signedInUserId, profileSetupRequired, loadServers]);
 
   // Precise PWA resume: restore the last deep location on cold start from `/`.
   // Only active once the user is authenticated and there's no pending invite,
