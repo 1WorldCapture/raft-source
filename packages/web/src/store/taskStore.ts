@@ -352,6 +352,10 @@ export const useTaskStore = create<TaskState>((set, get) => ({
       },
     }));
     try {
+      // Fire the fetch first, seed second (same synchronous-observation
+      // contract as loadServerTasks — see the note there).
+      const fetchStarted = api.get(`/tasks/channel/${channelId}`);
+      fetchStarted.catch(() => {}); // no unhandled-rejection window before the await below
       // Cache seed (#10): cached rows for this channel paint while the fetch
       // is in flight (cold start, offline included). The bucket is seeded only
       // when nothing else has populated it (a live event wins) and the channel
@@ -370,7 +374,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
           ...hydrateTaskMetadataState(state, seeded),
         }));
       }
-      const { data } = await api.get(`/tasks/channel/${channelId}`);
+      const { data } = await fetchStarted;
       const tasks = (data as { tasks: Task[] }).tasks;
       set((state) => reduceTaskWithTrace(
         state,
@@ -446,6 +450,12 @@ export const useTaskStore = create<TaskState>((set, get) => ({
       set({ serverLoading: true });
       loadTouchedIds = touched;
       try {
+        // Fire the fetch FIRST (synchronously): the single-flight contract is
+        // observed synchronously right after loadServerTasks() returns —
+        // awaiting anything before api.get would shift the call into a later
+        // microtask (taskStoreReentrancyGuard asserts calls()===1 immediately).
+        const fetchStarted = api.get("/tasks/server");
+        fetchStarted.catch(() => {}); // no unhandled-rejection window before the await below
         // Cache seed (#10): cached rows paint the board while the fetch is in
         // flight (cold start, offline included). Seeds never set
         // serverTasksLoaded — completeness still requires a committed load —
@@ -461,7 +471,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
             ...hydrateTaskMetadataState(state, seeded),
           }));
         }
-        const { data } = await api.get("/tasks/server");
+        const { data } = await fetchStarted;
         const snapshot = (data as { tasks: Task[] }).tasks;
         if (get().serverTasksGeneration !== startGeneration) {
           // The socket dropped (or the server switched) while this request was
