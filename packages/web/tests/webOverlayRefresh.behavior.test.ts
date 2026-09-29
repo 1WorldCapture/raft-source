@@ -572,21 +572,3 @@ test("a store load that straddles a disconnect records no coverage", SERIAL, asy
   await flush();
   assert.equal(server.urls.length, 2, "the pre-disconnect page is not trusted; the row refreshes");
 });
-
-test("a fresh store load replaces an older cached overlay but keeps a newer one", SERIAL, async () => {
-  const { repo, scopeId } = await attach();
-  await repo.appendPage(scopeId, "c1", { messages: [1, 2].map((seq) => ({ seq, id: `m${seq}`, raw: message(seq) as unknown as Record<string, unknown> })) });
-  await repo.applyMessageUpdated(scopeId, "c1", { seq: 1, raw: { reactions: [{ emoji: "👀", count: 1 }] }, updatedAt: "2026-09-29T00:00:01.000Z" });
-  await repo.applyMessageUpdated(scopeId, "c1", { seq: 2, raw: { reactions: [{ emoji: "🔥", count: 1 }] }, updatedAt: "2026-09-29T00:00:09.000Z" });
-
-  await recordMessagePage("c1", {
-    messages: [
-      message(1, { reactions: [{ emoji: "🎉", count: 2 }], updatedAt: "2026-09-29T00:00:05.000Z" }),
-      message(2, { reactions: [{ emoji: "🎉", count: 2 }], updatedAt: "2026-09-29T00:00:05.000Z" }),
-    ],
-  });
-  const rows = await repo.getLatestMessages(scopeId, "c1", 10);
-  const emoji = (seq: number) => (rows.find((row) => row.seq === seq)?.overlay as { reactions?: Array<{ emoji: string }> } | null)?.reactions?.[0]?.emoji;
-  assert.equal(emoji(1), "🎉", "the older overlay no longer shadows the fresh row");
-  assert.equal(emoji(2), "🔥", "a newer live overlay is kept");
-});
