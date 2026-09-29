@@ -10,7 +10,7 @@ import type {
   ServerEvent,
 } from "./events/serverEvents";
 import { serverPersistence } from "./serverPersistenceRegistry";
-import { cachedServers, recordServers, serverListCachePending, serverListScopeForSession, whenServerListCacheReady } from "../cache/directoryCache";
+import { cachedServers, directorySessionUser, recordServers, serverListCachePending, serverListScopeForSession, whenServerListCacheReady } from "../cache/directoryCache";
 import { triggerServerReset } from "./serverResetRegistry";
 import { setAuthTraceServerIdGetter } from "../utils/webAuthTrace";
 import { normalizeSidebarPinnedRefs } from "../utils/sidebarPinnedRefs";
@@ -374,6 +374,7 @@ export const useServerStore = create<ServerState>((set, get) => ({
       // start). Wait for that attach before reading or writing it.
       if (serverListCachePending()) await whenServerListCacheReady();
       const requestScope = serverListScopeForSession();
+      const recordedForUser = directorySessionUser();
       if (get().servers.length === 0 && requestScope) {
         try {
           const cached = await cachedServers();
@@ -397,7 +398,7 @@ export const useServerStore = create<ServerState>((set, get) => ({
         // themselves, so this is safe for URL-resolved and empty startup states.
         get().loadMembers();
         get().loadSidebarOrder();
-        await recordServers(servers, requestScope);
+        await recordServers(servers, requestScope, recordedForUser);
       } catch {
         set({ loading: false });
       }

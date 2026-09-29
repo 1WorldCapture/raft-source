@@ -134,7 +134,17 @@ export function wireWebCacheLifecycle(
       }
       return;
     }
-    if (storeServerId === null) return; // wait for the server restore/load
+    if (storeServerId === null) {
+      // /me (or offline admission) can win the race against this wiring's
+      // first sync. current stays null until the cached server list seeds,
+      // and that list lives in the persisted scope — returning here without
+      // attaching it leaves the cold start on "create your first server".
+      const persisted = readPersisted(storage);
+      if (persisted && persisted.userId === storeUserId && runtime.scopeId === null) {
+        attach(persisted.userId, persisted.serverId);
+      }
+      return;
+    }
     if (attachedUserId !== null && attachedUserId !== storeUserId) {
       // Account switch without a logout in between: the previous account's
       // cached data must not survive into the new session.
