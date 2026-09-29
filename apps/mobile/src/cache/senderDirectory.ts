@@ -32,7 +32,10 @@ function decode(value: unknown): SenderDirectory | null {
 
 /** Read the cached directory; absent or malformed degrades to null. */
 export function readSenderDirectory(repo: CacheRepo, scopeId: number): SenderDirectory | null {
-  return decode(repo.getKv(scopeId, KEY));
+  // Sync read on purpose: this feeds the cold-start first-paint seed path
+  // (avatar seeding before the network answers), which runs before any
+  // await boundary (Firstmate async-contract ruling, desktop task #6).
+  return decode(repo.getKvSync(scopeId, KEY));
 }
 
 /** Persist the directory snapshot (whole-value overwrite — network truth wins). */

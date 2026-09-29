@@ -42,7 +42,7 @@ export async function reconcileChannels(
 ): Promise<ReconcileReport> {
   const keep = new Set(live.filter((channel) => !channel.archivedAt).map((channel) => channel.id));
   const removed: string[] = [];
-  for (const channel of repo.getChannels(scopeId)) {
+  for (const channel of repo.getChannelsSync(scopeId)) {
     if (!keep.has(channel.id)) {
       await repo.deleteChannel(scopeId, channel.id);
       removed.push(channel.id);

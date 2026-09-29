@@ -636,33 +636,53 @@ export function createCacheRepo(deps: CacheRepoDeps) {
 
   return {
     bootId,
-    openScope,
+    // Async contract surface (shared CacheRepo): sync results wrapped in
+    // resolved promises — IndexedDB-shaped, zero behavioral difference.
+    openScope: async (origin: string, userId: string, serverId: string) => openScope(origin, userId, serverId),
     wipeScope,
     wipeAll,
-    getChannels,
+    getChannels: async (scopeId: number, types?: readonly string[]) => getChannels(scopeId, types),
     putChannels,
-    getCoverage,
-    getLatestMessages,
+    getCoverage: async (scopeId: number, channelId: string) => getCoverage(scopeId, channelId),
+    getLatestMessages: async (scopeId: number, channelId: string, limit: number) =>
+      getLatestMessages(scopeId, channelId, limit),
     appendPage,
     appendLiveMessage,
     applyOverlayPage,
-    getOverlayPageInfo,
+    getOverlayPageInfo: async (scopeId: number, channelId: string, fromSeq: number) =>
+      getOverlayPageInfo(scopeId, channelId, fromSeq),
     invalidateOverlayPageMarks,
     applyMessageUpdated,
     applyThreadSummary,
-    getThreadSummaries,
+    getThreadSummaries: async (scopeId: number, parentChannelId: string) =>
+      getThreadSummaries(scopeId, parentChannelId),
     applyTaskEvent,
     deleteTask,
-    getTaskRows,
+    getTaskRows: async (scopeId: number) => getTaskRows(scopeId),
     applyReadState,
-    getReadStates,
-    getInboxPage,
+    getReadStates: async (scopeId: number) => getReadStates(scopeId),
+    getInboxPage: async (scopeId: number, pageNo: number) => getInboxPage(scopeId, pageNo),
     putInboxPage,
-    getKv,
+    getKv: async (scopeId: number, key: string) => getKv(scopeId, key),
     putKv,
     deleteChannel,
     pruneMessages,
+    // Sync reads (mobile-only extension): the cold-start first-paint seed
+    // path renders before any await boundary; the shared contract is async
+    // (Firstmate ruling, desktop-data-cache task #6) and these are the
+    // synchronous originals it wraps.
+    openScopeSync: openScope,
+    getChannelsSync: getChannels,
+    getCoverageSync: getCoverage,
+    getLatestMessagesSync: getLatestMessages,
+    getOverlayPageInfoSync: getOverlayPageInfo,
+    getThreadSummariesSync: getThreadSummaries,
+    getTaskRowsSync: getTaskRows,
+    getReadStatesSync: getReadStates,
+    getInboxPageSync: getInboxPage,
+    getKvSync: getKv,
   };
 }
 
 export type CacheRepo = ReturnType<typeof createCacheRepo>;
+export type MobileCacheRepo = CacheRepo;

@@ -23,7 +23,7 @@ function liveClient(servers: unknown, unread: unknown = []): ServerRailClient {
 async function untilKv(scope: number, ms = 1000): Promise<Record<string, unknown>> {
   const deadline = Date.now() + ms;
   for (;;) {
-    const value = getCacheRuntime().repo.getKv(scope, "serverList");
+    const value = getCacheRuntime().repo.getKvSync(scope, "serverList");
     if (value !== null) return value;
     if (Date.now() > deadline) assert.fail("serverList kv write did not land");
     await new Promise((resolve) => setTimeout(resolve, 5));
@@ -51,7 +51,7 @@ test("loadServers persists the list exactly once, to the attached scope (review:
   const scopeB = runtime.scopeFor("srv-b");
   assert.notEqual(scopeA, null);
   assert.deepEqual(serversFromCacheValue(await untilKv(scopeA as number)).map((s) => s.id), ["srv-a", "srv-b"]);
-  assert.equal(runtime.repo.getKv(scopeB as number, "serverList"), null, "other servers' scopes are NOT written");
+  assert.equal(runtime.repo.getKvSync(scopeB as number, "serverList"), null, "other servers' scopes are NOT written");
 });
 
 test("a newer loadServers overwrites the cached list (removed servers disappear)", async () => {
@@ -64,10 +64,10 @@ test("a newer loadServers overwrites the cached list (removed servers disappear)
   await useServerRailStore.getState().loadServers(liveClient([{ id: "srv-a", name: "A2", slug: "a" }]), "srv-a");
   // Wait until the kv value CHANGES to the single-server list.
   const deadline = Date.now() + 1000;
-  let cached = serversFromCacheValue(runtime.repo.getKv(scope, "serverList"));
+  let cached = serversFromCacheValue(runtime.repo.getKvSync(scope, "serverList"));
   while (cached.length !== 1 && Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, 5));
-    cached = serversFromCacheValue(runtime.repo.getKv(scope, "serverList"));
+    cached = serversFromCacheValue(runtime.repo.getKvSync(scope, "serverList"));
   }
   assert.deepEqual(cached.map((s) => s.id), ["srv-a"], "network truth replaces the cache wholesale");
   assert.equal(cached[0].name, "A2");
@@ -82,10 +82,10 @@ test("applyServerOrder re-persists the new order for offline cold starts", async
   await untilKv(scope);
   useServerRailStore.getState().applyServerOrder(["srv-b", "srv-a"]);
   const deadline = Date.now() + 1000;
-  let ids = serversFromCacheValue(runtime.repo.getKv(scope, "serverList")).map((s) => s.id);
+  let ids = serversFromCacheValue(runtime.repo.getKvSync(scope, "serverList")).map((s) => s.id);
   while (ids.join(",") !== "srv-b,srv-a" && Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, 5));
-    ids = serversFromCacheValue(runtime.repo.getKv(scope, "serverList")).map((s) => s.id);
+    ids = serversFromCacheValue(runtime.repo.getKvSync(scope, "serverList")).map((s) => s.id);
   }
   assert.deepEqual(ids, ["srv-b", "srv-a"], "cached order tracks the live reorder");
 });
@@ -113,7 +113,7 @@ test("resetAll (logout / origin change) clears the cached server list", async ()
   const scope = runtime.scopeFor("srv-a") as number;
   await untilKv(scope);
   await runtime.resetAll();
-  assert.equal(runtime.repo.getKv(scope, "serverList"), null, "kv snapshot gone after resetAll");
+  assert.equal(runtime.repo.getKvSync(scope, "serverList"), null, "kv snapshot gone after resetAll");
   useServerRailStore.getState().reset();
 });
 

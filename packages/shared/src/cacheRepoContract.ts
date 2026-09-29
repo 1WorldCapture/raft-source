@@ -81,12 +81,12 @@ export type CachedTaskRow = { id: string; revision: number; raw: RawRecord };
 
 /**
  * The storage contract. Method-for-method the public surface of the mobile
- * repo; an IndexedDB implementation must satisfy this shape. Reads may be
- * synchronous on mobile (node:sqlite/expo sync APIs) — Web implementations
- * should wrap IndexedDB in a small promise-caching layer to honor the sync
- * signatures, or we loosen these to Promise<T> in a follow-up once measured
- * (the sync reads power the cold-start first paint; keeping them sync in the
- * contract means the seed path cannot accidentally await).
+ * repo; an IndexedDB implementation must satisfy this shape. All reads (and
+ * openScope) are ASYNC — the IndexedDB implementation maps 1:1. The mobile
+ * SQLite repo implements this contract by wrapping its synchronous results
+ * in resolved promises, and EXPOSES its sync reads separately (e.g.
+ * getChannelsSync) for the cold-start first-paint seed path — that is a
+ * mobile-side type extension, not part of this contract.
  */
 export interface CacheRepo {
   /** Per-repo-instance boot identity; overlay once-per-boot gates key on it. */
@@ -94,8 +94,8 @@ export interface CacheRepo {
 
   // ---- scopes / lifecycle --------------------------------------------------
 
-  /** Idempotent per (origin, userId, serverId); returns the scopeId. */
-  openScope(origin: string, userId: string, serverId: string): number;
+  /** Idempotent per (origin, userId, serverId); resolves to the scopeId. */
+  openScope(origin: string, userId: string, serverId: string): Promise<number>;
   /** Clear one scope's data, coverage and bookkeeping. */
   wipeScope(scopeId: number): Promise<void>;
   /** Clear EVERYTHING (logout / origin change). */
@@ -103,16 +103,16 @@ export interface CacheRepo {
 
   // ---- channels ------------------------------------------------------------
 
-  getChannels(scopeId: number, types?: readonly string[]): CachedChannel[];
+  getChannels(scopeId: number, types?: readonly string[]): Promise<CachedChannel[]>;
   putChannels(scopeId: number, rows: readonly PutChannelRow[]): Promise<void>;
   /** Cascade: channel + its messages + coverage + overlays + read state. */
   deleteChannel(scopeId: number, channelId: string): Promise<void>;
 
   // ---- messages + coverage ---------------------------------------------------
 
-  getCoverage(scopeId: number, channelId: string): Range[];
+  getCoverage(scopeId: number, channelId: string): Promise<Range[]>;
   /** Newest-first. */
-  getLatestMessages(scopeId: number, channelId: string, limit: number): CachedMessage[];
+  getLatestMessages(scopeId: number, channelId: string, limit: number): Promise<CachedMessage[]>;
   /** The ONLY writer allowed to create/extend ranges (plus a qualifying live tail). */
   appendPage(scopeId: number, channelId: string, page: AppendPage): Promise<void>;
   /** Always stores; extends the tail range only when directly following AND connected. */
@@ -129,7 +129,7 @@ export interface CacheRepo {
 
   /** A re-fetched page overwrites the dynamic data of its span. */
   applyOverlayPage(scopeId: number, channelId: string, page: OverlayPage): Promise<void>;
-  getOverlayPageInfo(scopeId: number, channelId: string, fromSeq: number): OverlayPageInfo | null;
+  getOverlayPageInfo(scopeId: number, channelId: string, fromSeq: number): Promise<OverlayPageInfo | null>;
   /** Drop the once-per-boot refresh markers (data kept) — reconnect retry. */
   invalidateOverlayPageMarks(scopeId: number): Promise<void>;
   /** message:updated write-through (reactions and other projections). */
@@ -142,28 +142,28 @@ export interface CacheRepo {
   // ---- thread summaries ---------------------------------------------------
 
   applyThreadSummary(scopeId: number, summary: ThreadSummaryInput): Promise<void>;
-  getThreadSummaries(scopeId: number, parentChannelId: string): Record<string, RawRecord>;
+  getThreadSummaries(scopeId: number, parentChannelId: string): Promise<Record<string, RawRecord>>;
 
   // ---- tasks ----------------------------------------------------------------
 
   /** Revision-gated: a stale event must not regress the stored row. */
   applyTaskEvent(scopeId: number, task: TaskEventInput): Promise<void>;
   deleteTask(scopeId: number, taskId: string): Promise<void>;
-  getTaskRows(scopeId: number): CachedTaskRow[];
+  getTaskRows(scopeId: number): Promise<CachedTaskRow[]>;
 
   // ---- read state -------------------------------------------------------------
 
   /** Version-gated upsert. */
   applyReadState(scopeId: number, channelId: string, maxReadSeq: number, version: number): Promise<void>;
-  getReadStates(scopeId: number): Record<string, ReadStateRow>;
+  getReadStates(scopeId: number): Promise<Record<string, ReadStateRow>>;
 
   // ---- inbox pages (activity cache pane) --------------------------------------
 
-  getInboxPage(scopeId: number, pageNo: number): RawRecord | null;
+  getInboxPage(scopeId: number, pageNo: number): Promise<RawRecord | null>;
   putInboxPage(scopeId: number, pageNo: number, raw: RawRecord): Promise<void>;
 
   // ---- misc kv ------------------------------------------------------------------
 
-  getKv(scopeId: number, key: string): RawRecord | null;
+  getKv(scopeId: number, key: string): Promise<RawRecord | null>;
   putKv(scopeId: number, key: string, value: RawRecord): Promise<void>;
 }
