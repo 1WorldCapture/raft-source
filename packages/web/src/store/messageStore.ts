@@ -1777,10 +1777,9 @@ export const useMessageStore = create<MessageState>((set, get) => ({
     if (seeded.length === 0) return false;
     // Newest-first cache rows → chronological pane order.
     const chronological = [...seeded].reverse();
-    // lastSeq MUST advance with the seed (PR review): roomsJoined gates
-    // `sync:resume` on `lastSeq > 0`, so a seed that leaves it at 0 silently
-    // disables the ENTIRE reconnect catch-up after an offline cold start.
-    const seedMaxSeq = Math.max(...seeded.map((message) => message.seq ?? 0), 0);
+    // A seed moves neither lastSeq nor the persisted webResumeCursor: one
+    // channel's cached max seq is not proof that any other channel is caught
+    // up, and roomsJoined resumes from network-seen seqs only.
     set((state) => ({
       channelMessages: { ...state.channelMessages, [channelId]: chronological },
       channelWindowMeta: updateWindowMetaRecord(state.channelWindowMeta, channelId, {
@@ -1788,7 +1787,6 @@ export const useMessageStore = create<MessageState>((set, get) => ({
         hasMore: true,
         hasNewer: false,
       }),
-      lastSeq: Math.max(state.lastSeq, seedMaxSeq),
       ...(state.currentChannelId === channelId ? {
         messages: chronological,
         loading: false,
