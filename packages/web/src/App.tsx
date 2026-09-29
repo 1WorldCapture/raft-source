@@ -1043,7 +1043,7 @@ export function AppShell() {
     if (user && !profileSetupRequired) {
       loadServers();
     }
-  }, [user, profileSetupRequired, loadServers]);
+  }, [user?.id, profileSetupRequired, loadServers]);
 
   // Precise PWA resume: restore the last deep location on cold start from `/`.
   // Only active once the user is authenticated and there's no pending invite,
