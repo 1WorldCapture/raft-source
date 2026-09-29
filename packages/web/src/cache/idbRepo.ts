@@ -424,7 +424,11 @@ export async function createIdbCacheRepo(deps: IdbRepoDeps = {}): Promise<CacheR
       const t = rw();
       const stored = (await t.objectStore("task_rows").get([scopeId, task.id])) as { revision?: number } | undefined;
       const storedRevision = stored ? Number(stored.revision) : null;
-      if (taskRevisionGate(storedRevision, task.revision)) {
+      // Strictly-newer revisions always win; an EQUAL revision only when the
+      // caller opts in (live events are newer in time; snapshots stay strict
+      // so a stale page can never replace a same-revision live row).
+      const tieAllowed = task.allowTie === true && storedRevision !== null && task.revision === storedRevision;
+      if (taskRevisionGate(storedRevision, task.revision) || tieAllowed) {
         t.objectStore("task_rows").put({ scopeId, taskId: task.id, revision: task.revision, raw: task.raw, updatedAt: now() });
       }
       await t.done;

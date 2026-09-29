@@ -5,7 +5,13 @@ import { useTaskStore } from "../src/store/taskStore";
 import { registerTaskRealtimeHandlers } from "../src/store/taskRealtimeSync";
 import { attachMemoryWebCache, clearActiveWebCache, activeWebCache } from "../src/cache/messageCache";
 import { createWebCacheRepo } from "../src/cache/webCacheRepo";
-import { taskRevisionOf } from "../src/cache/taskBoardCache";
+import { createWebCacheRuntime } from "../src/cache/webCache";
+import {
+  taskRevisionOf,
+  captureTaskCacheToken,
+  persistServerTasksSnapshot,
+} from "../src/cache/taskBoardCache";
+import type { CacheRepo } from "@botiverse/raft-shared/src/cacheRepoContract.js";
 import type { Task } from "../src/store/taskStore";
 
 /**
@@ -233,4 +239,234 @@ test("no cache mounted: loads behave exactly as before", async () => {
   await useTaskStore.getState().loadServerTasks();
   assert.equal(useTaskStore.getState().serverTasks.length, 1);
   assert.equal(useTaskStore.getState().serverTasksLoaded, true);
+});
+
+// ---- P2c review: race protections ------------------------------------------
+//
+// Four failure classes from the PR #95 review: (1) logout wipe racing an
+// in-flight write-back, (2) a server switch mid-load writing server A's rows
+// into server B's scope, (3) task:deleted mid write-back resurrecting the row,
+// (4) task:created mid write-back being purged as "absent". Plus the revision
+// tie semantics (events tie-break, snapshots don't except revision 0) and the
+// runtime's synchronous era invalidation.
+
+/** A repo wrapper that lets a test act exactly when a specific row is being
+ *  written — the deterministic stand-in for "the event/logout landed while
+ *  the write-back loop was mid-flight". */
+function wrapRepo(repo: CacheRepo, hooks: {
+  beforeApply?: (id: string, repo: CacheRepo) => void;
+  afterApply?: (id: string, repo: CacheRepo) => Promise<void> | void;
+}): CacheRepo {
+  return {
+    ...repo,
+    async applyTaskEvent(scopeId: number, task: { id: string }) {
+      hooks.beforeApply?.(task.id, repo);
+      const done = repo.applyTaskEvent(scopeId, task as never);
+      const result = await done;
+      await hooks.afterApply?.(task.id, repo);
+      return result;
+    },
+  } as CacheRepo;
+}
+
+test("review#1: a logout wipe mid write-back aborts the loop and leaves no rows behind", async () => {
+  const base = createWebCacheRepo();
+  // The wipe fires while row t3 is in flight — after its put has landed, like
+  // a real resetAll racing the loop — and the holder detach makes every
+  // subsequent per-write era check fail.
+  let applied = 0;
+  const repo = wrapRepo(base, {
+    async afterApply(id) {
+      applied += 1;
+      if (id === "t3") {
+        await base.wipeAll();
+        clearActiveWebCache();
+      }
+    },
+  });
+  const scopeId = await attachMemoryWebCache("http://test", "user-1", "server-1", repo);
+  const tasks = ["t1", "t2", "t3", "t4", "t5"].map((id, i) =>
+    taskFixture({ id, channelId: `c${i}`, revision: 1 }));
+  const token = captureTaskCacheToken();
+  await persistServerTasksSnapshot(tasks, token);
+  await settle();
+  assert.equal(applied, 3, "write-back must stop at the first post-detach era check");
+  assert.deepEqual((await base.getTaskRows(scopeId)).map((r) => r.id), [],
+    "the wipe must be the last word — no exited user's rows may survive");
+});
+
+test("review#2: a server switch mid-load writes nothing into the new scope", async () => {
+  // Channel-load shape (taskStore.loadTasks): no store generation gate, so
+  // the cache era token is the only guard — exercise it end to end.
+  const repoA = createWebCacheRepo();
+  await attachMemoryWebCache("http://test", "user-1", "server-a", repoA);
+  const resolvers: (() => void)[] = [];
+  api.get = ((url: string) => {
+    assert.equal(url, "/tasks/channel/c1");
+    return new Promise((res) => { resolvers.push(() => res({ data: { tasks: [taskFixture({ id: "a1", channelId: "c1", revision: 1 })] } })); });
+  }) as typeof api.get;
+  const loading = useTaskStore.getState().loadTasks("c1");
+  await settle();
+
+  // Switch to server B while A's fetch is still pending.
+  const repoB = createWebCacheRepo();
+  const scopeB = await attachMemoryWebCache("http://test", "user-1", "server-b", repoB);
+
+  resolvers.forEach((r) => r());
+  await loading;
+  await settle();
+  assert.deepEqual((await repoB.getTaskRows(scopeB)).map((r) => r.id), [],
+    "server A's rows must not land in server B's scope after the switch");
+  assert.equal(activeWebCache()!.scopeId, scopeB, "precondition: server B's scope is the active one");
+});
+
+test("review#3: task:deleted landing mid write-back is not resurrected by the older list", async () => {
+  const base = createWebCacheRepo();
+  const handlers = wireSocket();
+  const victim = taskFixture({ id: "victim", channelId: "c9", revision: 2, title: "doomed" });
+  const first = taskFixture({ id: "first", channelId: "c1", revision: 1 });
+  // While "first" is being written, the socket delivers victim's deletion.
+  const repo = wrapRepo(base, {
+    beforeApply(id) {
+      if (id === "first") handlers["task:deleted"]({ channelId: "c9", taskId: "victim" });
+    },
+  });
+  const scopeId = await attachMemoryWebCache("http://test", "user-1", "server-1", repo);
+  await base.applyTaskEvent(scopeId, { id: victim.id, revision: 2, raw: victim as never });
+  const token = captureTaskCacheToken();
+  await persistServerTasksSnapshot([first, victim], token);
+  await settle();
+  const ids = (await base.getTaskRows(scopeId)).map((r) => r.id).sort();
+  assert.deepEqual(ids, ["first"], "the deleted task must not be written back by the stale list");
+});
+
+test("review#4: task:created landing mid write-back is not purged as absent", async () => {
+  const base = createWebCacheRepo();
+  const handlers = wireSocket();
+  const late = taskFixture({ id: "late", channelId: "c7", revision: 1, title: "born mid-loop" });
+  const first = taskFixture({ id: "first", channelId: "c1", revision: 1 });
+  // While "first" is being written, the socket delivers a brand-new task.
+  const repo = wrapRepo(base, {
+    beforeApply(id) {
+      if (id === "first") handlers["task:created"]({ channelId: "c7", tasks: [late] });
+    },
+  });
+  const scopeId = await attachMemoryWebCache("http://test", "user-1", "server-1", repo);
+  const token = captureTaskCacheToken();
+  await persistServerTasksSnapshot([first], token);
+  await settle();
+  const ids = (await base.getTaskRows(scopeId)).map((r) => r.id).sort();
+  assert.deepEqual(ids, ["first", "late"], "a task created mid write-back must survive the absence purge");
+});
+
+test("review#6: private-channel rows do not seed the board (they flash — the snapshot never contains them)", async () => {
+  const scopeId = await attachFreshCache();
+  const repo = activeWebCache()!.repo;
+  const channel = taskFixture({ id: "b1", channelType: "channel", channelId: "board-channel", revision: 1 });
+  const joint = taskFixture({ id: "j1", channelType: "joint", channelId: "joint-channel", revision: 1 });
+  const privateRow = taskFixture({ id: "p1", channelType: "private", channelId: "priv-channel", revision: 1 });
+  for (const t of [channel, joint, privateRow]) {
+    await repo.applyTaskEvent(scopeId, { id: t.id, revision: 1, raw: t as never });
+  }
+
+  api.get = (async () => {
+    throw new Error("offline");
+  }) as typeof api.get;
+  await useTaskStore.getState().loadServerTasks();
+  const seeded = useTaskStore.getState().serverTasks.map((t) => t.id).sort();
+  assert.deepEqual(seeded, ["b1", "j1"], "the board seed is channel|joint only — private rows must not paint");
+});
+
+test("review#7: revision ties — live events tie-break, snapshots stay strict, revision 0 overwrites", async () => {
+  const scopeId = await attachFreshCache();
+  const repo = activeWebCache()!.repo;
+  const handlers = wireSocket();
+
+  const base = taskFixture({ id: "t7", revision: 2, title: "original" });
+  await repo.applyTaskEvent(scopeId, { id: base.id, revision: 2, raw: base as never });
+
+  // A rename that did NOT bump the revision arrives as a live event: ties go
+  // to the event (it is newer in time than anything cached).
+  handlers["task:updated"]({ channelId: "c1", task: taskFixture({ id: "t7", revision: 2, title: "renamed" }) });
+  await settle();
+  let rows = await repo.getTaskRows(scopeId);
+  assert.equal((rows[0].raw as { title?: string }).title, "renamed",
+    "a same-revision live event must land (renames without a revision bump)");
+
+  // A snapshot carrying the OLD title at the same revision must NOT overwrite
+  // the live row (a stale page can never replace same-revision live content).
+  const token = captureTaskCacheToken();
+  await persistServerTasksSnapshot([taskFixture({ id: "t7", revision: 2, title: "stale page" })], token);
+  await settle();
+  rows = await repo.getTaskRows(scopeId);
+  assert.equal((rows[0].raw as { title?: string }).title, "renamed",
+    "a same-revision snapshot row must not regress the live row");
+
+  // Legacy revision-0 rows: the snapshot is server truth and may refresh them
+  // (the PR contract: "0 can be overwritten").
+  const legacy = taskFixture({ id: "legacy", revision: 0, channelId: "c2", title: "old zero" });
+  await repo.applyTaskEvent(scopeId, { id: legacy.id, revision: 0, raw: legacy as never });
+  await persistServerTasksSnapshot([taskFixture({ id: "legacy", revision: 0, channelId: "c2", title: "new zero" })], token);
+  await settle();
+  rows = await repo.getTaskRows(scopeId);
+  const legacyRow = rows.find((r) => r.id === "legacy");
+  assert.equal((legacyRow!.raw as { title?: string }).title, "new zero",
+    "revision-0 snapshot rows must overwrite revision-0 cache rows");
+});
+
+test("review#5: attach() detaches the holder synchronously for the whole scope-open window", async () => {
+  // A slow openScope stands in for the async IndexedDB open: from the moment
+  // attach() is called until it completes, the runtime reports NO scope —
+  // neither a stale seed read nor a stale write can slip through.
+  const inner = createWebCacheRepo();
+  let releaseOpen: (() => void) | null = null;
+  const slowRepo: CacheRepo = {
+    ...inner,
+    openScope(...args: Parameters<CacheRepo["openScope"]>) {
+      return new Promise((res) => {
+        releaseOpen = () => res(inner.openScope(...args));
+      });
+    },
+  } as CacheRepo;
+  const runtime = await createWebCacheRuntime({ repo: slowRepo });
+  const generationBefore = runtime.generation;
+  const attaching = runtime.attach("http://test", "user-1", "server-1");
+  assert.equal(runtime.scopeId, null, "scope must read null during the open window");
+  assert.equal(runtime.serverId, null, "serverId must read null during the open window too");
+  assert.equal(runtime.generation, generationBefore + 1, "the era must bump synchronously at attach entry");
+  releaseOpen!();
+  await attaching;
+  assert.equal(typeof runtime.scopeId, "number", "the scope adopts once openScope completes");
+  assert.equal(runtime.serverId, "server-1");
+
+  const wipeStarted = runtime.resetAll();
+  assert.equal(runtime.scopeId, null, "resetAll must detach synchronously too");
+  assert.equal(runtime.serverId, null);
+  await wipeStarted;
+});
+
+test("naming ruling: identical-identity re-attach returns without bumping the generation", async () => {
+  // Cold start re-attaches the same persisted identity while a MainLayout
+  // load may already be reading the holder — the repeat attach must be a
+  // no-op, not a transition (Firstmate ruling on the #95/#97 counter).
+  const runtime = await createWebCacheRuntime({ repo: createWebCacheRepo() });
+  const scope1 = await runtime.attach("http://test", "user-1", "server-1");
+  const generationAfterFirst = runtime.generation;
+
+  const scope2 = await runtime.attach("http://test", "user-1", "server-1");
+  assert.equal(scope2, scope1, "same identity must reuse the live scope");
+  assert.equal(runtime.generation, generationAfterFirst, "same identity must not bump the generation");
+  assert.equal(runtime.serverId, "server-1");
+
+  // A different server is a real transition: bump + switch.
+  const scope3 = await runtime.attach("http://test", "user-1", "server-2");
+  assert.notEqual(scope3, scope1);
+  assert.equal(runtime.generation, generationAfterFirst + 1, "a server switch must bump the generation");
+  assert.equal(runtime.serverId, "server-2");
+
+  // After resetAll the identity is gone: re-attaching it is a fresh attach.
+  await runtime.resetAll();
+  const scope4 = await runtime.attach("http://test", "user-1", "server-2");
+  assert.equal(typeof scope4, "number");
+  assert.ok(runtime.generation > generationAfterFirst + 1, "post-reset re-attach must be a new era");
 });

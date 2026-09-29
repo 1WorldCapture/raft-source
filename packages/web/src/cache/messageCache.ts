@@ -30,6 +30,22 @@ import { createWebCacheRepo } from "./webCacheRepo";
 type ActiveCache = {
   repo: CacheRepo;
   scopeId: number;
+  /**
+   * The attached scope's serverId (Firstmate naming ruling): consumers that
+   * know "the current server" compare against it so a load started for
+   * server B never reads/writes server A's scope mid-transition.
+   */
+  serverId: string | null;
+  /**
+   * Invalidation era (P2c review; ruling name: "generation" — the store
+   * layer already has a serverEpoch): changes whenever the active scope is
+   * detached or replaced. Long-running writers capture it with the scopeId
+   * and re-verify before each write so a logout wipe or server switch
+   * invalidates them immediately. With the provider path it mirrors the
+   * runtime's generation; the stopgap holder bumps its own counter on every
+   * set/clear.
+   */
+  generation: number;
 };
 
 type ActiveCacheProvider = () => ActiveCache | null;
@@ -39,6 +55,7 @@ type ActiveCacheProvider = () => ActiveCache | null;
 // then an internal fallback serves tests and the pre-#7 stopgap wiring.
 let provider: ActiveCacheProvider | null = null;
 let fallbackActive: ActiveCache | null = null;
+let fallbackGeneration = 0;
 
 // Boot gate. loadMessages may run while IndexedDB open + scope attach are
 // still in flight. Waiters block only while this gate is armed; once the
@@ -99,13 +116,15 @@ export function setActiveCacheProvider(next: ActiveCacheProvider): void {
 }
 
 /** Stopgap/test-only direct holder — real app wiring goes through #7. */
-export function setActiveWebCache(repo: CacheRepo, scopeId: number): void {
-  fallbackActive = { repo, scopeId };
+export function setActiveWebCache(repo: CacheRepo, scopeId: number, serverId: string | null = null): void {
+  fallbackGeneration += 1;
+  fallbackActive = { repo, scopeId, serverId, generation: fallbackGeneration };
   noteActiveCacheSettled();
 }
 
-/** Stopgap/test-only direct holder clear. */
+/** Stopgap/test-only direct holder clear (bumps the era like a real detach). */
 export function clearActiveWebCache(): void {
+  fallbackGeneration += 1;
   fallbackActive = null;
 }
 
@@ -132,7 +151,7 @@ export async function attachMemoryWebCache(
   repo: CacheRepo = createWebCacheRepo(),
 ): Promise<number> {
   const scopeId = await repo.openScope(origin, userId, serverId);
-  setActiveWebCache(repo, scopeId);
+  setActiveWebCache(repo, scopeId, serverId);
   return scopeId;
 }
 

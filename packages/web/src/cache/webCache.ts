@@ -25,6 +25,20 @@ export type WebCacheRuntime = {
   readonly available: boolean;
   /** The attached scope id, or null while detached (logged out). */
   readonly scopeId: number | null;
+  /** The attached scope's serverId, or null while detached/transitioning. */
+  readonly serverId: string | null;
+  /**
+   * Monotonic invalidation era (P2c review; Firstmate naming ruling:
+   * "generation" — directoryCache already has a store-level serverEpoch).
+   * Bumped SYNCHRONOUSLY at the entry of every identity-changing
+   * attach()/resetAll(), before any await. Long-running writers (task-board
+   * snapshot write-back) capture {scopeId, generation} and re-verify before
+   * each write, so a logout wipe or a server switch invalidates in-flight
+   * writes immediately instead of after the await. Re-attaching the SAME
+   * identity returns early WITHOUT bumping (a cold-start repeat attach must
+   * not blank the holder under a concurrent MainLayout load).
+   */
+  readonly generation: number;
   attach(origin: string, userId: string, serverId: string): Promise<number>;
   resetAll(): Promise<void>;
   /**
@@ -35,18 +49,28 @@ export type WebCacheRuntime = {
   subscribe(listener: (scopeId: number | null) => void): () => void;
 };
 
-export async function createWebCacheRuntime(deps: { now?: () => string } = {}): Promise<WebCacheRuntime> {
+export async function createWebCacheRuntime(
+  deps: { now?: () => string; repo?: CacheRepo } = {},
+): Promise<WebCacheRuntime> {
   let repo: CacheRepo;
   let available = true;
-  try {
-    repo = await createIdbCacheRepo(deps);
-  } catch {
-    // Privacy mode / quota / missing IndexedDB: fall back to #9's in-memory
-    // repo — the session keeps cache semantics in RAM (lost on reload).
-    repo = createWebCacheRepo(deps.now ? { now: deps.now } : {});
-    available = false;
+  if (deps.repo) {
+    // Test injection: skip IndexedDB entirely.
+    repo = deps.repo;
+  } else {
+    try {
+      repo = await createIdbCacheRepo(deps);
+    } catch {
+      // Privacy mode / quota / missing IndexedDB: fall back to #9's in-memory
+      // repo — the session keeps cache semantics in RAM (lost on reload).
+      repo = createWebCacheRepo(deps.now ? { now: deps.now } : {});
+      available = false;
+    }
   }
   let scopeId: number | null = null;
+  let generation = 0;
+  let attachedServerId: string | null = null;
+  let attachedIdentity: { origin: string; userId: string; serverId: string } | null = null;
   const listeners = new Set<(scopeId: number | null) => void>();
   const emit = (): void => {
     for (const listener of listeners) listener(scopeId);
@@ -59,14 +83,46 @@ export async function createWebCacheRuntime(deps: { now?: () => string } = {}): 
     get scopeId() {
       return scopeId;
     },
+    get serverId() {
+      return attachedServerId;
+    },
+    get generation() {
+      return generation;
+    },
     async attach(origin, userId, serverId) {
-      scopeId = await repo.openScope(origin, userId, serverId);
+      if (scopeId !== null && attachedIdentity?.origin === origin
+        && attachedIdentity.userId === userId && attachedIdentity.serverId === serverId) {
+        // Identical identity re-attach: the live scope is already the right
+        // one — return it without invalidating the era (a cold-start repeat
+        // attach must not blank the holder under a concurrent load).
+        return scopeId;
+      }
+      // Invalidate the previous era SYNCHRONOUSLY: between this bump and the
+      // openScope completion the holder reports no scope at all, so neither
+      // a stale read (seeding the new server from the old cache) nor a
+      // stale write (the old server's rows landing in the new scope) can
+      // slip through the transition window.
+      generation += 1;
+      const era = generation;
+      scopeId = null;
+      attachedServerId = null;
+      const nextScopeId = await repo.openScope(origin, userId, serverId);
+      // A resetAll() may have raced this attach; only adopt the scope when
+      // this attach is still the newest era.
+      if (generation === era) {
+        scopeId = nextScopeId;
+        attachedServerId = serverId;
+        attachedIdentity = { origin, userId, serverId };
+      }
       emit();
-      return scopeId;
+      return nextScopeId;
     },
     async resetAll() {
-      await repo.wipeAll();
+      generation += 1;
       scopeId = null;
+      attachedServerId = null;
+      attachedIdentity = null;
+      await repo.wipeAll();
       emit();
     },
     subscribe(listener) {

@@ -91,7 +91,12 @@ export function wireWebCacheLifecycle(
         }
       })
       .catch(() => {
-        // A failed attach leaves the previous scope active.
+        // A failed attach (openScope error) leaves the holder DETACHED until
+        // the next attach — never a stale scope: the generation was already
+        // bumped and the old scopeId nulled at attach entry, so consumers
+        // see "no cache" rather than the previous identity's data. This is
+        // deliberate (review item 4): a degraded no-cache window beats
+        // reading/writing the wrong server's scope.
       });
   };
 
@@ -190,7 +195,9 @@ export async function bootWebCache(): Promise<WebCacheRuntime> {
       import("../store/serverStore"),
     ]);
     setActiveCacheProvider(() =>
-      runtime.scopeId === null ? null : { repo: runtime.repo, scopeId: runtime.scopeId },
+      runtime.scopeId === null
+        ? null
+        : { repo: runtime.repo, scopeId: runtime.scopeId, serverId: runtime.serverId, generation: runtime.generation },
     );
     const auth = useAuthStore as unknown as AuthLike;
     wipeOnExplicitLogout(runtime, auth);
