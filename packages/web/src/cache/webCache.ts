@@ -43,6 +43,8 @@ export type WebCacheRuntime = {
   readonly generation: number;
   attach(origin: string, userId: string, serverId: string): Promise<number>;
   resetAll(): Promise<void>;
+  /** Bumped by every resetAll(); attaches queued before a wipe compare it and stand down. */
+  readonly resetEpoch: number;
   /**
    * Fires after every attach/resetAll (and once at subscribe time) with the
    * current scopeId — consumers like #9's messageCache bridge use it to
@@ -71,6 +73,7 @@ export async function createWebCacheRuntime(
   }
   let scopeId: number | null = null;
   let generation = 0;
+  let lastResetGeneration = 0;
   let attachedServerId: string | null = null;
   let attachedIdentity: { origin: string; userId: string; serverId: string } | null = null;
   const listeners = new Set<(scopeId: number | null) => void>();
@@ -84,6 +87,9 @@ export async function createWebCacheRuntime(
     },
     get scopeId() {
       return scopeId;
+    },
+    get resetEpoch() {
+      return lastResetGeneration;
     },
     get serverId() {
       return attachedServerId;
@@ -118,12 +124,18 @@ export async function createWebCacheRuntime(
         scopeId = nextScopeId;
         attachedServerId = serverId;
         attachedIdentity = { origin, userId, serverId };
+      } else if (lastResetGeneration > era && scopeId === null) {
+        // Superseded by a wipe (logout) with nothing attached since: openScope
+        // re-created the scope row after wipeAll. Drop it again so a logout
+        // leaves no identity behind (desktop-data-cache acceptance ③).
+        await repo.wipeScope(nextScopeId);
       }
       emit();
       return nextScopeId;
     },
     async resetAll() {
       generation += 1;
+      lastResetGeneration = generation;
       scopeId = null;
       attachedServerId = null;
       attachedIdentity = null;
