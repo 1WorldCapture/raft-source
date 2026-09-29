@@ -1,0 +1,199 @@
+// Web message-cache bridge (desktop-data-cache task #9 / P2b).
+//
+// The ONLY module packages/web's stores are allowed to touch. It owns:
+//   - the active-cache holder (repo + scopeId). Task #7 wires the lifecycle
+//     (per-account+server scopes, logout wipe, multi-tab coordination) and
+//     will inject the IndexedDB repo; until then the in-memory repo from
+//     webCacheRepo.ts is the default. Keeping the holder here means the
+//     store wiring does not change again when #7 lands.
+//   - translation between web `Message` rows and cache rows, reusing the
+//     shared boot helpers (rawPageForCache / messageFetchPlan) so merge and
+//     window semantics stay identical to mobile.
+//
+// Store integration contract (messageStore):
+//   - loadMessages: seed the pane from the cache before the network answers
+//     (cold start paints instantly), then continue fetching from the cached
+//     coverage tail (after=tail, drained page by page) instead of re-pulling
+//     the latest page;
+//   - loadOlderMessages / loadNewerMessages: every fetched page is recorded
+//     (appendPage grows coverage downward/upward);
+//   - thread summaries bundled with pages are persisted alongside.
+import type {
+  AppendPage,
+  CacheRepo,
+  CachedMessage,
+  RawRecord,
+} from "@botiverse/raft-shared/src/cacheRepoContract.js";
+import { messageFetchPlan, rawPageForCache } from "@botiverse/raft-shared/src/cacheBoot.js";
+import { createWebCacheRepo } from "./webCacheRepo";
+
+type ActiveCache = {
+  repo: CacheRepo;
+  scopeId: number;
+};
+
+type ActiveCacheProvider = () => ActiveCache | null;
+
+// Holder split (Firstmate ruling, desktop-data-cache #6 thread aa568281):
+// lifecycle belongs to #7's runtime, which injects a provider here. Until
+// then an internal fallback serves tests and the pre-#7 stopgap wiring.
+let provider: ActiveCacheProvider | null = null;
+let fallbackActive: ActiveCache | null = null;
+
+/**
+ * #7's runtime injects its live holder: `setActiveCacheProvider(() =>
+ * runtime.scopeId === null ? null : { repo, runtime.repo, ... })`. Called
+ * once from bootWebCache; scope switches flow through the provider, this
+ * module owns no lifecycle at all.
+ */
+export function setActiveCacheProvider(next: ActiveCacheProvider): void {
+  provider = next;
+}
+
+/** Stopgap/test-only direct holder — real app wiring goes through #7. */
+export function setActiveWebCache(repo: CacheRepo, scopeId: number): void {
+  fallbackActive = { repo, scopeId };
+}
+
+/** Stopgap/test-only direct holder clear. */
+export function clearActiveWebCache(): void {
+  fallbackActive = null;
+}
+
+/**
+ * The active cache, or null when no scope is attached (logged out etc.).
+ * Deliberately SYNCHRONOUS — loadMessages must add zero await boundaries
+ * before api.get when no cache is mounted (receiver-private tests capture
+ * the pending request synchronously); repo methods themselves stay async.
+ */
+export function activeWebCache(): ActiveCache | null {
+  if (provider) return provider();
+  return fallbackActive;
+}
+
+/**
+ * Attach an in-memory cache for a scope (tests + the pre-#7 stopgap).
+ * Returns the scopeId. Idempotent: re-attaching the same identity reuses the
+ * same repo scope (identity is handled inside the repo).
+ */
+export async function attachMemoryWebCache(
+  origin: string,
+  userId: string,
+  serverId: string,
+  repo: CacheRepo = createWebCacheRepo(),
+): Promise<number> {
+  const scopeId = await repo.openScope(origin, userId, serverId);
+  setActiveWebCache(repo, scopeId);
+  return scopeId;
+}
+
+// ---- row translation ---------------------------------------------------------
+
+/** A row (raw response item or normalized Message) is cacheable when it carries a real server seq. */
+export function rowToCacheRow(item: unknown): {
+  seq: number;
+  id: string;
+  raw: Record<string, unknown>;
+} | null {
+  if (!item || typeof item !== "object") return null;
+  const record = item as { id?: unknown; seq?: unknown };
+  if (typeof record.id !== "string") return null;
+  if (typeof record.seq !== "number" || !Number.isFinite(record.seq) || record.seq <= 0) return null;
+  return { seq: record.seq, id: record.id, raw: record as Record<string, unknown> };
+}
+
+/**
+ * Extract an AppendPage from a raw `/messages/channel` response WITHOUT
+ * disturbing the screen's own parsing (shared helper: absent or malformed
+ * windows degrade to the row span, the repo rule).
+ */
+export function pageForCache(data: unknown): AppendPage {
+  return rawPageForCache(data, rowToCacheRow);
+}
+
+/** Record one fetched page (grows coverage) + its bundled thread summaries. */
+export async function recordMessagePage(channelId: string, data: unknown): Promise<void> {
+  const cache = activeWebCache();
+  if (!cache) return;
+  const page = pageForCache(data);
+  if (page.messages.length > 0) {
+    await cache.repo.appendPage(cache.scopeId, channelId, page);
+  }
+  await recordThreadSummaries(channelId, data);
+}
+
+/** Persist `threadSummariesByParentMessageId` bundled with a page response. */
+export async function recordThreadSummaries(parentChannelId: string, data: unknown): Promise<void> {
+  const cache = activeWebCache();
+  if (!cache) return;
+  const summaries = (data as { threadSummariesByParentMessageId?: Record<string, unknown> }).threadSummariesByParentMessageId;
+  if (!summaries || typeof summaries !== "object") return;
+  for (const [parentMessageId, summary] of Object.entries(summaries)) {
+    if (!summary || typeof summary !== "object") continue;
+    await cache.repo.applyThreadSummary(cache.scopeId, {
+      parentChannelId,
+      parentMessageId,
+      raw: summary as RawRecord,
+    });
+  }
+}
+
+/** Cached thread summaries for one parent channel (store hydrates them as-is). */
+export async function cachedThreadSummaries(parentChannelId: string): Promise<Record<string, RawRecord>> {
+  const cache = activeWebCache();
+  if (!cache) return {};
+  return cache.repo.getThreadSummaries(cache.scopeId, parentChannelId);
+}
+
+// ---- seed + fetch plan --------------------------------------------------------
+
+export type ChannelSeed = {
+  /** Newest-first cache rows, already overlay-merged and row-validated. */
+  rows: CachedMessage[];
+  /** The cached coverage after this seed read. */
+  coverage: Array<{ fromSeq: number; throughSeq: number }>;
+};
+
+/**
+ * Read the cached tail of a channel for first paint. Degrades to null when
+ * no cache is attached or nothing is stored — the caller then proceeds with
+ * its plain network path unchanged.
+ */
+export async function seedChannel(channelId: string, limit: number): Promise<ChannelSeed | null> {
+  const cache = activeWebCache();
+  if (!cache) return null;
+  const rows = await cache.repo.getLatestMessages(cache.scopeId, channelId, limit);
+  const coverage = await cache.repo.getCoverage(cache.scopeId, channelId);
+  if (rows.length === 0) return null;
+  return { rows, coverage };
+}
+
+/**
+ * Merge a cached row (base + overlay) into a displayable record. The web
+ * Message IS a plain object, so this is a shallow merge with the same legacy
+ * string-seq coercion the shared hydrator applies; rows that fail a minimal
+ * shape check are dropped, never thrown.
+ */
+export function hydrateSeedRows<T>(rows: readonly CachedMessage[], asMessage: (value: Record<string, unknown>) => T | null): T[] {
+  const out: T[] = [];
+  for (const row of rows) {
+    const merged = { ...row.raw, ...(row.overlay ?? {}) } as Record<string, unknown>;
+    if (typeof merged.seq === "string" && /^\d+$/.test(merged.seq)) merged.seq = Number(merged.seq);
+    if (typeof merged.seq !== "number") continue;
+    if (typeof merged.id !== "string") continue;
+    const message = asMessage(merged);
+    if (message) out.push(message);
+  }
+  return out;
+}
+
+/** Coverage → fetch plan: continue from the tail, or request the latest page. */
+export async function channelFetchPlan(
+  channelId: string,
+): Promise<{ after: number } | { latest: true } | null> {
+  const cache = activeWebCache();
+  if (!cache) return null;
+  const coverage = await cache.repo.getCoverage(cache.scopeId, channelId);
+  if (coverage.length === 0) return null;
+  return messageFetchPlan(coverage);
+}

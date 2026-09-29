@@ -34,6 +34,15 @@ import {
 import { reactionReadModelStore } from "./reactionReadModels";
 import { triggerMessagesSyncCoreReset } from "./messageSyncCoreReset";
 import {
+  activeWebCache,
+  cachedThreadSummaries,
+  channelFetchPlan,
+  hydrateSeedRows,
+  recordMessagePage,
+  seedChannel,
+} from "../cache/messageCache";
+import { drainAfterPages } from "@botiverse/raft-shared/src/cacheBoot.js";
+import {
   getAcceptedReadState,
   consumeReadStateSnapshotRows,
   getReadStateLedgerGeneration,
@@ -363,6 +372,10 @@ export interface MessageState {
   loadMessages: (channelId: string, requestGeneration?: number) => Promise<void>;
   loadOlderMessages: (channelId?: string) => Promise<void>;
   loadNewerMessages: (channelId?: string) => Promise<void>;
+  /** Cache bridge (desktop-data-cache #9): merge after-pages into a bucket. */
+  upsertMessagesIntoChannel: (channelId: string, msgs: Message[]) => void;
+  /** Cache bridge (desktop-data-cache #9): cold-start seed from the cache. */
+  seedChannelFromCache: (channelId: string, requestGeneration: number) => Promise<boolean>;
   loadUnreadCounts: () => Promise<void>;
   addMessage: (message: Message, source?: "receiver-private" | "channel-room") => void;
   updateMessage: (message: Pick<Message, "id" | "channelId"> & Partial<Message>) => void;
@@ -1681,6 +1694,77 @@ export const useMessageStore = create<MessageState>((set, get) => ({
     });
   },
 
+  // ---- web message-cache integration (desktop-data-cache task #9) ----------
+  // Both helpers are generation-checked by their callers; they never write a
+  // stale channel view back into the store.
+
+  /**
+   * Upsert one after-page of newer messages into a channel bucket (merge by
+   * id, seq-ascending). The cached-tail catch-up calls this per page so the
+   * pane fills in progressively behind the already-painted seed.
+   */
+  upsertMessagesIntoChannel: (channelId, msgs) => {
+    if (msgs.length === 0) return;
+    set((state) => {
+      const existing = getBucket(state.channelMessages, channelId);
+      const byId = new Map(existing.map((m) => [m.id, m]));
+      for (const message of msgs) byId.set(message.id, message);
+      const merged = [...byId.values()].sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0));
+      const isCurrent = state.currentChannelId === channelId;
+      const maxSeq = Math.max(...merged.map((m) => m.seq || 0), 0);
+      return withAcceptedReadStateProjection(state, {
+        channelMessages: { ...state.channelMessages, [channelId]: merged },
+        ...(isCurrent ? {
+          messages: merged,
+          loading: false,
+          hasNewer: false,
+          hasGap: false,
+        } : {}),
+        lastSeq: Math.max(state.lastSeq, maxSeq),
+      }, [channelId]);
+    });
+  },
+
+  /**
+   * Cold-start fast path: paint the cached tail of a channel before the
+   * network answers. Only fills a bucket that is still empty, so a warm
+   * in-memory tail (channel switch) or a faster network response always wins.
+   */
+  seedChannelFromCache: async (channelId, requestGeneration) => {
+    if (requestGeneration !== messageWindowRequestGeneration) return false;
+    if (getBucket(get().channelMessages, channelId).length > 0) return false;
+    const seed = await seedChannel(channelId, 50);
+    if (!seed) return false;
+    if (requestGeneration !== messageWindowRequestGeneration) return false;
+    const bucket = getBucket(get().channelMessages, channelId);
+    if (bucket.length > 0) return false;
+    const seeded = hydrateSeedRows(seed.rows, (value) => value as unknown as Message);
+    if (seeded.length === 0) return false;
+    // Newest-first cache rows → chronological pane order.
+    const chronological = [...seeded].reverse();
+    set((state) => ({
+      channelMessages: { ...state.channelMessages, [channelId]: chronological },
+      channelWindowMeta: updateWindowMetaRecord(state.channelWindowMeta, channelId, {
+        loading: false,
+        hasMore: true,
+        hasNewer: false,
+      }),
+      ...(state.currentChannelId === channelId ? {
+        messages: chronological,
+        loading: false,
+        hasNewer: false,
+        hasGap: false,
+      } : {}),
+    }));
+    // Cached thread summaries ride along so inline reply counts paint too.
+    void cachedThreadSummaries(channelId).then((summaries) => {
+      if (Object.keys(summaries).length > 0) {
+        useThreadStore.getState().hydrateSummaries(summaries as unknown as Record<string, ThreadSummary>);
+      }
+    });
+    return true;
+  },
+
   loadMessages: async (channelId, ownedRequestGeneration) => {
     const requestGeneration = ownedRequestGeneration ?? claimMessageWindowRequest();
     if (requestGeneration !== messageWindowRequestGeneration) return;
@@ -1736,6 +1820,75 @@ export const useMessageStore = create<MessageState>((set, get) => ({
     const ingressContext = captureReceiverPrivateIngressContext(get().currentUserId);
     try {
       const limit = 50;
+      // Cache fast path (desktop-data-cache #9): with a cached tail the pane
+      // is already painted from the seed; continue from the coverage tail
+      // (after=through) and drain full pages to reach the newest tail,
+      // instead of re-pulling the latest window.
+      // Sync guard first: with no cache attached this must add ZERO await
+      // boundaries before api.get — receiver-private ingress tests capture
+      // the pending request synchronously after calling loadMessages.
+      const plan = !canReuseCachedTail && activeWebCache() ? await channelFetchPlan(channelId) : null;
+      if (plan && "after" in plan) {
+        // Paint the seed BEFORE draining: the catch-up upserts would otherwise
+        // race the seed's empty-bucket guard and drop the cached history.
+        await get().seedChannelFromCache(channelId, requestGeneration);
+        const currentBeforeDrain = getBucket(get().channelMessages, channelId).length;
+        let lastHistoryLimited = false;
+        const drained = await drainAfterPages(
+          plan.after,
+          async (after) => {
+            const { data } = await api.get(`/messages/channel/${channelId}?limit=${limit}&after=${after}`);
+            if (requestGeneration !== messageWindowRequestGeneration) return [];
+            const msgs = normalizeReceiverPrivateMessagesIfEnabled(
+              data.messages ?? data,
+              ingressContext,
+            );
+            if (!msgs) return [];
+            lastHistoryLimited = (data as { historyLimited?: boolean }).historyLimited ?? false;
+            hydrateBundledThreadSummaries(data, ingressContext);
+            void recordMessagePage(channelId, data);
+            get().upsertMessagesIntoChannel(channelId, msgs);
+            return msgs;
+          },
+          (page) => page.length >= limit,
+        );
+        if (requestGeneration !== messageWindowRequestGeneration) return;
+        if (drained.pages.length === 0) return;
+        const maxSeq = Math.max(...getBucket(get().channelMessages, channelId).map((m) => m.seq || 0), 0);
+        const historyLimited = lastHistoryLimited;
+        // A full drain page or a seeded bucket implies older history may
+        // exist beyond what we hold; hitting the cap means even newer
+        // messages may exist (same semantics as the mobile pane).
+        const hasMore = currentBeforeDrain >= limit || drained.pages.some((page) => page.length >= limit);
+        const hasNewer = drained.hitCap;
+        channelMetaMap.set(channelId, { hasMore, hasNewer, historyLimited });
+        set((state) => withAcceptedReadStateProjection(state, {
+          channelWindowMeta: updateWindowMetaRecord(state.channelWindowMeta, channelId, {
+            loading: false,
+            loadingOlder: false,
+            loadingNewer: false,
+            loadingGap: false,
+            hasMore,
+            hasNewer,
+            hasGap: false,
+            historyLimited,
+            contextLoadError: null,
+          }),
+          lastSeq: Math.max(state.lastSeq, maxSeq),
+          ...(state.currentChannelId === channelId ? {
+            loading: false,
+            hasNewer,
+            hasGap: false,
+            historyLimited,
+            hasMore,
+          } : {}),
+        }, [channelId]));
+        if (!hasNewer && maxSeq > 0 && !skipInitialAutoRead) {
+          const autoReadQueued = queueAutoReadSync(channelId, maxSeq);
+          if (autoReadQueued) get().clearUnread(channelId);
+        }
+        return;
+      }
       const { data } = await api.get(`/messages/channel/${channelId}?limit=${limit}`);
       if (
         get().currentChannelId === channelId &&
@@ -1750,6 +1903,9 @@ export const useMessageStore = create<MessageState>((set, get) => ({
       // Hydrate them first so React never commits a parent-only intermediate
       // frame whose later inline-reply expansion changes scrollTop.
       hydrateBundledThreadSummaries(data, ingressContext);
+      // Record the fetched page into the cache (coverage grows; summaries
+      // ride along) — desktop-data-cache #9.
+      void recordMessagePage(channelId, data);
       const historyLimited: boolean = data.historyLimited ?? false;
       const hasMore = msgs.length >= limit;
       const maxSeq = Math.max(...msgs.map((m) => m.seq || 0), 0);
@@ -1831,6 +1987,8 @@ export const useMessageStore = create<MessageState>((set, get) => ({
       );
       if (!older) return;
       hydrateBundledThreadSummaries(data, ingressContext);
+      // History pages extend the cached coverage downwards (#9).
+      void recordMessagePage(targetChannelId, data);
       const historyLimited: boolean = data.historyLimited ?? false;
       const hasMoreResult = older.length >= limit;
       const existingBucket = getBucket(get().channelMessages, targetChannelId);
@@ -1897,6 +2055,8 @@ export const useMessageStore = create<MessageState>((set, get) => ({
       );
       if (!newer) return;
       hydrateBundledThreadSummaries(data, ingressContext);
+      // Newer pages extend the cached coverage at the tail (#9).
+      void recordMessagePage(targetChannelId, data);
       const hasNewerResult = newer.length >= limit;
       const existingBucket = getBucket(get().channelMessages, targetChannelId);
       const existingIds = new Set(existingBucket.map((m) => m.id));
