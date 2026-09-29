@@ -70,6 +70,12 @@ import type {
 } from "./readStateSync";
 import { releaseActivityReadHoldForMessage } from "./activityReadState";
 import {
+  captureResumeCursorToken,
+  readWebResumeCursor,
+  writeWebResumeCursor,
+} from "../cache/messageCache";
+import type { ResumeCursorToken } from "../cache/messageCache";
+import {
   captureReceiverPrivateIngressContext,
   isReceiverPrivateIngressContextCurrent,
   useMessageStore,
@@ -361,6 +367,13 @@ function executeScheduledMachineReconcile() {
   useAgentStore.getState().loadAgents();
 }
 
+function socketAuthServerId(socket: unknown): string | null {
+  const auth = (socket as { auth?: unknown }).auth;
+  if (!auth || typeof auth !== "object") return null;
+  const serverId = (auth as { serverId?: unknown }).serverId;
+  return typeof serverId === "string" && serverId ? serverId : null;
+}
+
 export function buildMainLayoutSocketBindings(
   socket: MainLayoutSocketBridgeSocket,
   scheduleInboxRefresh: () => void,
@@ -368,6 +381,23 @@ export function buildMainLayoutSocketBindings(
   recordHeartbeat: SocketHandler,
   recordConnect: SocketHandler,
 ): MainLayoutSocketBinding[] {
+  // Resume cursor gate. Frozen on connect until a sync:resume finishes
+  // (hasMore false, or a page that made no progress — history truncation).
+  // message:new advances the cursor only while this stays live, and only in
+  // the scope bound when this connection started its resume.
+  let resumeEpoch = 0;
+  let resumeLive = false;
+  let resumeFromSeq = 0;
+  let resumeCatchupEpoch = -1;
+  let resumeToken: ResumeCursorToken | null = null;
+  let socketServerId: string | null = null;
+
+  const noteResumeCursor = (seq: number | undefined) => {
+    if (!resumeLive || !resumeToken) return;
+    if (typeof seq !== "number" || !Number.isSafeInteger(seq) || seq <= 0) return;
+    void writeWebResumeCursor(resumeToken, seq).catch(() => undefined);
+  };
+
   const bindingReceiverPrivateIngressContext = captureReceiverPrivateIngressContext(
     useMessageStore.getState().currentUserId,
   );
@@ -386,6 +416,7 @@ export function buildMainLayoutSocketBindings(
   };
 
   const messageNew = (msg: Message) => {
+    noteResumeCursor(msg.seq);
     if (isNormalizedMessageV2FlagEnabled()) {
       const projectedMessage = normalizeChannelRoomMessage(msg);
       const result = consumeSocketMessageNewWithSyncCore(projectedMessage);
@@ -880,6 +911,14 @@ export function buildMainLayoutSocketBindings(
   };
 
   const reconnectSnapshot = () => {
+    resumeEpoch += 1;
+    resumeLive = false;
+    resumeFromSeq = 0;
+    resumeCatchupEpoch = -1;
+    resumeToken = null;
+    // The server this connection authenticated to (socket.io sends `auth` on
+    // connect). Only that server's cache scope may carry its seqs.
+    socketServerId = socketAuthServerId(socket) ?? useServerStore.getState().current?.id ?? null;
     recordConnect();
     if (typeof window !== "undefined") {
       (window as Window & { __slockRoomsJoined?: boolean }).__slockRoomsJoined =
@@ -925,9 +964,37 @@ export function buildMainLayoutSocketBindings(
         true;
       window.dispatchEvent(new Event("slock:rooms-joined"));
     }
+    // lastSeq only moves on network data (loads, resume, live messages); a
+    // cache seed never moves it, so it is a safe floor on its own.
     const { lastSeq } = useMessageStore.getState();
-    if (lastSeq > 0) {
-      socket.emit("sync:resume", { lastSeq });
+    const epoch = resumeEpoch;
+    const startResume = (fromSeq: number) => {
+      resumeFromSeq = fromSeq;
+      resumeCatchupEpoch = epoch;
+      socket.emit("sync:resume", { lastSeq: fromSeq });
+    };
+    const token = captureResumeCursorToken(socketServerId);
+    if (!token) {
+      // No scope for this connection's server: resume without a cursor.
+      if (lastSeq > 0) startResume(lastSeq);
+    } else {
+      void (async () => {
+        let cursor: number | null = null;
+        try {
+          cursor = await readWebResumeCursor(token);
+        } catch (error) {
+          console.warn("[socketBridge] resume cursor read failed; resuming from network seq", error);
+        }
+        if (epoch !== resumeEpoch) return;
+        resumeToken = token;
+        const fromSeq = cursor != null
+          ? (lastSeq > 0 ? Math.min(lastSeq, cursor) : cursor)
+          : lastSeq;
+        // With neither a cursor nor network-seen seq there is nothing proven
+        // to resume from; open channels are refreshed by syncVisibleScopes and
+        // the cursor starts after the next resume that finishes.
+        if (fromSeq > 0) startResume(fromSeq);
+      })();
     }
     void syncVisibleScopes();
     // The server closes a connection when this user's channel eligibility
@@ -980,7 +1047,18 @@ export function buildMainLayoutSocketBindings(
     useMessageStore.setState((s) => ({
       lastSeq: Math.max(s.lastSeq, currentSeq),
     }));
-    // If too many messages were missed, fallback to full refresh
+    const catchupMatches = resumeCatchupEpoch === resumeEpoch;
+    if (hasMore && catchupMatches && currentSeq > resumeFromSeq) {
+      // Keep pulling until hasMore is false. A page that does not move
+      // currentSeq past the seq we just sent is the history-window stop:
+      // messages older than the cutoff are not coming, so this is complete.
+      resumeFromSeq = currentSeq;
+      socket.emit("sync:resume", { lastSeq: currentSeq });
+    } else if (catchupMatches) {
+      resumeLive = true;
+      resumeFromSeq = 0;
+      if (resumeToken && currentSeq > 0) void writeWebResumeCursor(resumeToken, currentSeq).catch(() => undefined);
+    }
     if (hasMore) {
       useMessageStore.getState().loadUnreadCounts();
       void syncVisibleScopes();
