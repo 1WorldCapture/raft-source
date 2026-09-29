@@ -52,6 +52,7 @@ const covered = new Map<string, Coverage[]>();
 const failures = new Map<string, Failure>();
 const inflight = new Map<string, { fromSeq: number; expectedThroughSeq: number; run: Promise<void> }>();
 let disconnectEpoch = 0;
+let stateScopeKey: string | null = null;
 let now = () => Date.now();
 
 /** @internal test seam for the retry backoff clock. */
@@ -62,6 +63,15 @@ export function setOverlayRefreshClockForTest(clock: (() => number) | null): voi
 function captureToken(): CacheToken | null {
   const cache = activeWebCache();
   if (!cache) return null;
+  // Coverage, failures and flights belong to one scope attachment; drop
+  // them as soon as another scope (server switch, reattach) is in use.
+  const scopeKey = `${cache.scopeId}:${cache.generation}`;
+  if (stateScopeKey !== scopeKey) {
+    covered.clear();
+    failures.clear();
+    inflight.clear();
+    stateScopeKey = scopeKey;
+  }
   return {
     scopeId: cache.scopeId,
     serverId: cache.serverId,
@@ -100,36 +110,88 @@ function isInflight(key: string, seq: number): boolean {
   return false;
 }
 
-function isBackingOff(key: string, fromSeq: number): boolean {
-  const failure = failures.get(`${key}:${fromSeq}`);
+// The failure budget is per channel: a scrolling window changes fromSeq on
+// every step, so a per-page key would restart the budget each time.
+function isBackingOff(key: string): boolean {
+  const failure = failures.get(key);
   if (!failure) return false;
   return failure.count >= OVERLAY_MAX_FAILURES || now() < failure.retryAt;
 }
 
-function noteFailure(key: string, fromSeq: number): void {
-  const failureKey = `${key}:${fromSeq}`;
-  const count = (failures.get(failureKey)?.count ?? 0) + 1;
-  failures.set(failureKey, { count, retryAt: now() + OVERLAY_RETRY_BASE_MS * 2 ** (count - 1) });
+function noteFailure(key: string): void {
+  const count = (failures.get(key)?.count ?? 0) + 1;
+  failures.set(key, { count, retryAt: now() + OVERLAY_RETRY_BASE_MS * 2 ** (count - 1) });
+}
+
+/** Add a proven span, merging overlapping or touching ones. */
+function addCoverage(key: string, span: Coverage): void {
+  const spans = [...(covered.get(key) ?? []), span].sort((a, b) => a.fromSeq - b.fromSeq);
+  const merged: Coverage[] = [];
+  for (const next of spans) {
+    const last = merged.at(-1);
+    if (last && next.fromSeq <= last.throughSeq + 1) {
+      last.throughSeq = Math.max(last.throughSeq, next.throughSeq);
+    } else {
+      merged.push({ ...next });
+    }
+  }
+  covered.set(key, merged);
 }
 
 function sortedUnique(seqs: readonly number[]): number[] {
   return [...new Set(seqs.filter((seq) => Number.isSafeInteger(seq) && seq > 0))].sort((a, b) => a - b);
 }
 
+export type OverlayFetch = { fromSeq: number; expectedThroughSeq: number };
+
 /**
- * Fetches that cover `seqs`: each starts at the smallest seq the previous
- * one cannot reach with a page of 50 known messages. `expectedThroughSeq` is
- * the last known seq that page should return (the end of the channel for the
- * final group).
+ * Plan fetches for the `wanted` seqs that are not done yet, over every seq
+ * the channel has in memory (`known`). Each page is aligned to end right
+ * below the nearest done (covered or in-flight) seq above it, so scrolling
+ * up one message at a time costs one request per 50 messages rather than
+ * one per step. A page with nothing done above it runs to the channel end.
  */
-export function overlayFetchPlan(seqs: readonly number[]): Array<{ fromSeq: number; expectedThroughSeq: number }> {
-  const ordered = sortedUnique(seqs);
-  const plan: Array<{ fromSeq: number; expectedThroughSeq: number }> = [];
-  for (let index = 0; index < ordered.length; index += OVERLAY_PAGE_SIZE) {
-    const last = index + OVERLAY_PAGE_SIZE >= ordered.length;
+export function overlayFetchPlan(
+  known: readonly number[],
+  wanted: readonly number[],
+  isDone: (seq: number) => boolean = () => false,
+): OverlayFetch[] {
+  const all = sortedUnique([...known, ...wanted]);
+  const indexOf = new Map(all.map((seq, index) => [seq, index]));
+  const planned: Array<[number, number]> = [];
+  const inPlan = (index: number) => planned.some(([from, through]) => index >= from && index <= through);
+  const plan: OverlayFetch[] = [];
+  const targets = sortedUnique(wanted).filter((seq) => !isDone(seq)).reverse();
+  for (const seq of targets) {
+    const at = indexOf.get(seq)!;
+    if (inPlan(at)) continue;
+    let boundary = at + 1;
+    while (boundary < all.length && !isDone(all[boundary]!) && !inPlan(boundary)) boundary += 1;
+    let below = at - 1;
+    while (below >= 0 && !isDone(all[below]!) && !inPlan(below)) below -= 1;
+    const doneAbove = boundary < all.length && boundary - at <= OVERLAY_PAGE_SIZE;
+    const doneBelow = below >= 0 && at - below <= OVERLAY_PAGE_SIZE;
+    let from: number;
+    if (doneAbove || (!doneBelow && boundary - at <= OVERLAY_PAGE_SIZE)) {
+      // End right below the done range above (scrolling up), or run to the
+      // channel end when that is within one page.
+      from = Math.max(0, boundary - OVERLAY_PAGE_SIZE);
+    } else if (doneBelow) {
+      // Above a done range (new tail, scrolling down): start right after it.
+      from = below + 1;
+    } else {
+      // An isolated window: start at the lowest wanted seq this page can reach.
+      from = at;
+      for (const other of targets) {
+        const index = indexOf.get(other)!;
+        if (index < from && at - index < OVERLAY_PAGE_SIZE && !inPlan(index)) from = index;
+      }
+    }
+    const through = Math.min(from + OVERLAY_PAGE_SIZE - 1, all.length - 1);
+    planned.push([from, through]);
     plan.push({
-      fromSeq: ordered[index]!,
-      expectedThroughSeq: last ? Number.MAX_SAFE_INTEGER : ordered[index + OVERLAY_PAGE_SIZE - 1]!,
+      fromSeq: all[from]!,
+      expectedThroughSeq: through === all.length - 1 ? Number.MAX_SAFE_INTEGER : all[through]!,
     });
   }
   return plan;
@@ -238,7 +300,7 @@ async function refreshFromNow(channelId: string, fromSeq: number, token: CacheTo
     );
     data = response.data;
   } catch {
-    if (tokenCurrent(token)) noteFailure(key, fromSeq);
+    if (tokenCurrent(token)) noteFailure(key);
     return;
   }
   const cache = tokenCurrent(token);
@@ -248,10 +310,23 @@ async function refreshFromNow(channelId: string, fromSeq: number, token: CacheTo
   // A short page reached the end of the channel: everything from fromSeq on
   // is fresh, including rows deleted server-side (they simply are not there).
   const throughSeq = page.messages.length < OVERLAY_PAGE_SIZE ? Number.MAX_SAFE_INTEGER : page.throughSeq;
-  covered.set(key, [...(covered.get(key) ?? []), { fromSeq, throughSeq }]);
-  failures.delete(`${key}:${fromSeq}`);
+  addCoverage(key, { fromSeq, throughSeq });
+  failures.delete(key);
 
-  if (page.messages.length > 0) await cache.repo.applyOverlayPage(cache.scopeId, channelId, page);
+  // Rows the store changed while the request was in flight (a live
+  // message:updated) are newer than this response: keep them out of the
+  // cache too, or the next boot would paint the stale overlay first.
+  const nowRows = new Map(
+    (useMessageStore.getState().channelMessages[channelId] ?? []).map((message) => [message.id, message]),
+  );
+  const cacheRows = page.messages.filter((row) => {
+    const id = typeof row.id === "string" ? row.id : null;
+    if (!id || !before.has(id)) return true;
+    return nowRows.get(id) === before.get(id);
+  });
+  if (cacheRows.length > 0) {
+    await cache.repo.applyOverlayPage(cache.scopeId, channelId, { ...page, messages: cacheRows });
+  }
   if (!tokenCurrent(token)) return;
 
   const normalized = normalizeReceiverPrivateMessagesIfEnabled(
@@ -285,13 +360,23 @@ function refreshFrom(
   return run;
 }
 
-/** Refresh whatever of `seqs` this boot has not covered yet. */
-function refreshSeqs(channelId: string, seqs: readonly number[], token: CacheToken): Promise<void>[] {
+/** Refresh whatever of `wanted` this boot has not covered yet. */
+function refreshSeqs(
+  channelId: string,
+  known: readonly number[],
+  wanted: readonly number[],
+  token: CacheToken,
+): Promise<void>[] {
   const key = channelKey(token, channelId);
-  const pending = sortedUnique(seqs).filter((seq) => !isCovered(key, seq) && !isInflight(key, seq));
-  return overlayFetchPlan(pending)
-    .filter(({ fromSeq }) => !isBackingOff(key, fromSeq))
+  if (isBackingOff(key)) return [];
+  const isDone = (seq: number) => isCovered(key, seq) || isInflight(key, seq);
+  return overlayFetchPlan(known, wanted, isDone)
     .map(({ fromSeq, expectedThroughSeq }) => refreshFrom(channelId, fromSeq, expectedThroughSeq, token));
+}
+
+function storeSeqs(channelId: string): number[] {
+  return (useMessageStore.getState().channelMessages[channelId] ?? [])
+    .flatMap((message) => (typeof message.seq === "number" ? [message.seq] : []));
 }
 
 async function readyToken(): Promise<CacheToken | null> {
@@ -310,7 +395,8 @@ export async function refreshLatestOverlayPages(channelId: string): Promise<void
   if (!cache) return;
   const latest = await cache.repo.getLatestMessages(cache.scopeId, channelId, OVERLAY_OPEN_MESSAGE_LIMIT);
   if (!tokenCurrent(token)) return;
-  await Promise.all(refreshSeqs(channelId, latest.map((row) => row.seq), token));
+  const latestSeqs = latest.map((row) => row.seq);
+  await Promise.all(refreshSeqs(channelId, [...latestSeqs, ...storeSeqs(channelId)], latestSeqs, token));
 }
 
 /** Scroll: refresh visible messages no fetch has covered this boot. */
@@ -324,7 +410,7 @@ export function refreshVisibleOverlayPages(channelId: string, messageIds: readon
     if (wanted.has(message.id) && typeof message.seq === "number") seqs.push(message.seq);
   }
   if (seqs.length === 0) return;
-  void Promise.all(refreshSeqs(channelId, seqs, token));
+  void Promise.all(refreshSeqs(channelId, storeSeqs(channelId), seqs, token));
 }
 
 /**
@@ -347,6 +433,7 @@ export async function invalidateOverlayMarksForDisconnect(): Promise<void> {
 
 /** @internal reset module state between tests. */
 export function resetOverlayRefreshForTest(): void {
+  stateScopeKey = null;
   covered.clear();
   failures.clear();
   inflight.clear();

@@ -100,12 +100,19 @@ afterEach(() => {
   clearActiveWebCache();
 });
 
-test("fetch plan groups known seqs by 50, whatever their spacing in the global sequence", () => {
-  const sparse = Array.from({ length: 120 }, (_, index) => 1_000 + index * 37);
-  const plan = overlayFetchPlan(sparse);
-  assert.deepEqual(plan.map((entry) => entry.fromSeq), [sparse[0], sparse[50], sparse[100]]);
-  assert.equal(plan[0]!.expectedThroughSeq, sparse[49]);
-  assert.equal(plan[2]!.expectedThroughSeq, Number.MAX_SAFE_INTEGER, "the newest group runs to the end of the channel");
+test("fetch plan aligns pages to end right below the nearest covered seq", () => {
+  const known = Array.from({ length: 300 }, (_, index) => 1_000 + index * 37);
+  // Nothing done: the newest wanted seq's page runs to the channel end.
+  const open = overlayFetchPlan(known, known.slice(-120));
+  assert.deepEqual(open.map((entry) => entry.fromSeq), [known[250], known[200], known[150]]);
+  assert.equal(open[0]!.expectedThroughSeq, Number.MAX_SAFE_INTEGER);
+  assert.equal(open[1]!.expectedThroughSeq, known[249]);
+
+  // Seqs from index 200 up are covered; a newly visible seq at index 180
+  // fetches the 50 known seqs that end right below the boundary.
+  const covered = new Set(known.slice(200));
+  const scroll = overlayFetchPlan(known, [known[180]!], (seq) => covered.has(seq));
+  assert.deepEqual(scroll, [{ fromSeq: known[150], expectedThroughSeq: known[199] }]);
 });
 
 test("opening a channel refreshes the newest 200 once, paints reactions, and leaves lastSeq alone", SERIAL, async (t) => {
@@ -129,10 +136,10 @@ test("opening a channel refreshes the newest 200 once, paints reactions, and lea
   assert.equal(server.urls.length, 4, "the same boot does not refresh the newest 200 twice");
 });
 
-test("new messages do not shift marks: covered messages never refetch", SERIAL, async (t) => {
+test("new messages do not shift marks: covered messages never refetch, the new tail costs one request", SERIAL, async (t) => {
   const { scopeId } = await attach();
   const seqs = Array.from({ length: 90 }, (_, index) => index + 1);
-  const server = channelServer(seqs);
+  const server = channelServer([...seqs, 91, 92]);
   t.mock.method(api, "get", server.handler);
   await seedSeqs(scopeId, seqs);
   showInStore(seqs);
@@ -142,10 +149,13 @@ test("new messages do not shift marks: covered messages never refetch", SERIAL, 
   // Two live messages arrive; every older message keeps its coverage.
   await seedSeqs(scopeId, [91, 92]);
   showInStore([...seqs, 91, 92]);
-  refreshVisibleOverlayPages("c1", ["m1", "m60", "m92"]);
+  refreshVisibleOverlayPages("c1", ["m1", "m60"]);
+  await flush();
+  assert.equal(server.urls.length, 2, "older messages stay covered");
+  refreshVisibleOverlayPages("c1", ["m91", "m92"]);
   await refreshLatestOverlayPages("c1");
   await flush();
-  assert.equal(server.urls.length, 2, "the short newest page covered the channel's tail, including later arrivals");
+  assert.deepEqual(server.urls.slice(2).map(afterParam), [90], "one request, starting right after the covered range");
 });
 
 test("scrolling refreshes an older, uncovered range once per boot", SERIAL, async (t) => {
@@ -358,4 +368,87 @@ test("a scope change during the fetch marks nothing", SERIAL, async (t) => {
   await pending;
   setActiveWebCache(repo, scopeId, "srv-1");
   assert.equal(await repo.getOverlayPageInfo(scopeId, "c1", 10), null);
+});
+
+test("scrolling up one message at a time costs about one request per 50 messages", SERIAL, async (t) => {
+  const { scopeId } = await attach();
+  const seqs = Array.from({ length: 1_000 }, (_, index) => index + 1);
+  const server = channelServer(seqs);
+  t.mock.method(api, "get", server.handler);
+  await seedSeqs(scopeId, seqs);
+  showInStore(seqs);
+  await refreshLatestOverlayPages("c1");
+  const afterOpen = server.urls.length;
+  assert.equal(afterOpen, 4);
+
+  // A 20-message window slides up from the bottom one message per step.
+  for (let top = 981; top >= 201; top -= 1) {
+    const ids = Array.from({ length: 20 }, (_, index) => `m${top + index}`);
+    refreshVisibleOverlayPages("c1", ids);
+    await flush();
+  }
+  const scrollRequests = server.urls.length - afterOpen;
+  assert.ok(scrollRequests <= 13, `expected ~12 page requests while scrolling, got ${scrollRequests}`);
+});
+
+test("a channel that keeps failing while scrolling spends one budget, not one per step", SERIAL, async (t) => {
+  await attach();
+  let calls = 0;
+  t.mock.method(api, "get", async () => {
+    calls += 1;
+    throw Object.assign(new Error("forbidden"), { response: { status: 403 } });
+  });
+  let clock = 1_000_000;
+  setOverlayRefreshClockForTest(() => clock);
+  const seqs = Array.from({ length: 1_000 }, (_, index) => index + 1);
+  showInStore(seqs);
+  for (let top = 981; top >= 1; top -= 1) {
+    refreshVisibleOverlayPages("c1", Array.from({ length: 20 }, (_, index) => `m${top + index}`));
+    await flush();
+    clock += 5_000;
+  }
+  assert.ok(calls <= OVERLAY_MAX_FAILURES, `expected at most ${OVERLAY_MAX_FAILURES} requests, got ${calls}`);
+});
+
+test("rows updated in the store while the request was in flight keep their overlay out of the cache", SERIAL, async (t) => {
+  const { repo, scopeId } = await attach();
+  let release: (() => void) | null = null;
+  t.mock.method(api, "get", () => new Promise((resolve) => {
+    release = () => resolve({
+      data: { messages: [message(1, { reactions: [{ emoji: "👀", count: 1 }] }), message(2, { reactions: [{ emoji: "👀", count: 1 }] })] },
+    });
+  }));
+  await seedSeqs(scopeId, [1, 2]);
+  showInStore([1, 2]);
+  refreshVisibleOverlayPages("c1", ["m1", "m2"]);
+  await flush();
+  useMessageStore.setState((state) => ({
+    channelMessages: { c1: [message(1, { reactions: [{ emoji: "🔥", count: 1 }] }), state.channelMessages.c1![1]!] },
+  }));
+  release!();
+  await flush();
+  const rows = await repo.getLatestMessages(scopeId, "c1", 10);
+  const overlay = (seq: number) => (rows.find((row) => row.seq === seq)?.overlay as { reactions?: Array<{ emoji: string }> } | null)?.reactions?.[0]?.emoji;
+  assert.equal(overlay(1), undefined, "the stale response did not overwrite the live-updated row in the cache");
+  assert.equal(overlay(2), "👀");
+});
+
+test("coverage belongs to one scope: switching scopes starts over", SERIAL, async (t) => {
+  const { repo, scopeId } = await attach();
+  let calls = 0;
+  t.mock.method(api, "get", async () => {
+    calls += 1;
+    return { data: { messages: [message(10)] } };
+  });
+  showInStore([10]);
+  refreshVisibleOverlayPages("c1", ["m10"]);
+  await flush();
+  const other = await repo.openScope("https://raft.example", "user-1", "srv-2");
+  setActiveWebCache(repo, other, "srv-2");
+  refreshVisibleOverlayPages("c1", ["m10"]);
+  await flush();
+  setActiveWebCache(repo, scopeId, "srv-1");
+  refreshVisibleOverlayPages("c1", ["m10"]);
+  await flush();
+  assert.equal(calls, 3, "each attachment refreshes on its own");
 });
