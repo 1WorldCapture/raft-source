@@ -27,6 +27,7 @@ import { registerPushServiceWorker, supportsPushNotifications } from "./utils/pu
 import { initAnalytics, identifyUser, resetAnalytics } from "./analytics/posthog";
 import { useAuthStore } from "./store/authStore";
 import { installExternalTranslationGuard } from "./utils/externalTranslationGuard";
+import { bootWebCache } from "./cache/webCacheLifecycle";
 import RootErrorFallback from "./components/errors/RootErrorFallback";
 import {
   AppRefreshRequiredScreen,
@@ -87,6 +88,10 @@ initAnalytics();
 // reintroduce always-on JS height pinning that left the PWA bottom gap.
 trackVisualViewport();
 installExternalTranslationGuard();
+// Local cache runtime (desktop-data-cache task #7): create the IndexedDB repo
+// and wire its lifecycle (attach on login/server, wipe on logout) before the
+// app mounts. Failures degrade to the fallback repo — never block startup.
+void bootWebCache();
 
 const APP_REFRESH_REQUIRED_EVENT = "raft:app-refresh-required";
 let appRefreshRequired = false;
