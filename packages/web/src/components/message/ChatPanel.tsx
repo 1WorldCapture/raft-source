@@ -365,10 +365,12 @@ export default function ChatPanel({
     [channel?.type, orderedTabs],
   );
 
+  // Keyed on the server id so a replaced server object does not refetch billing.
+  const currentServerId = currentServer?.id ?? null;
   useEffect(() => {
-    if (!currentServer) return;
+    if (!currentServerId) return;
     void loadBilling();
-  }, [currentServer?.id, loadBilling]);
+  }, [currentServerId, loadBilling]);
 
   const activityMuteSupported =
     !!channelId &&
