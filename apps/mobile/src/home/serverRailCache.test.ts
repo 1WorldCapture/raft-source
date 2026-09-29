@@ -32,7 +32,7 @@ async function untilKv(scope: number, ms = 1000): Promise<Record<string, unknown
 
 test("serversFromCacheValue round-trips a cached list and degrades junk to empty", () => {
   const servers = [{ id: "a", name: "Alpha", slug: "alpha", role: "member", plan: "free" }, { id: "b", name: "Beta", slug: "beta" }];
-  const normalized = servers.map((server) => ({ avatarUrl: null, role: null, plan: null, ...server }));
+  const normalized = servers.map((server) => ({ avatarUrl: null, role: null, plan: null, messageHistoryDays: null, ...server }));
   assert.deepEqual(serversFromCacheValue({ servers }), normalized, "parsed servers survive the kv round-trip (parseServers normalizes absent fields to null)");
   assert.deepEqual(serversFromCacheValue(null), []);
   assert.deepEqual(serversFromCacheValue({ servers: "nope" }), []);
