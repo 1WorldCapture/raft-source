@@ -15,12 +15,15 @@ import { useMessageStore } from "../src/store/messageStore";
 import {
   activeWebCache,
   attachMemoryWebCache,
+  beginActiveCacheBoot,
   cachedThreadSummaries,
   channelFetchPlan,
   clearActiveWebCache,
   hydrateSeedRows,
+  noteActiveCacheSettled,
   recordMessagePage,
   seedChannel,
+  setActiveWebCache,
 } from "../src/cache/messageCache";
 import { createWebCacheRepo } from "../src/cache/webCacheRepo";
 
@@ -361,4 +364,40 @@ test("offline seed advances lastSeq so reconnect can sync:resume (#11 review fix
   assert.equal((state.channelMessages["c12"] ?? []).length, 30, "seed painted");
   assert.equal(state.lastSeq, 529,
     "seed advances lastSeq to the cached tail's max seq — roomsJoined's `if (lastSeq > 0)` stays armed for sync:resume");
+});
+
+test("messageStore: seed still lands when the cache attaches after loadMessages starts", async (t) => {
+  clearActiveWebCache();
+  noteActiveCacheSettled();
+  resetMessageStoreState();
+  const repo = createWebCacheRepo();
+  const scopeId = await repo.openScope("https://raft.example", "user-1", "srv-1");
+  await repo.appendPage(scopeId, "c-late", {
+    messages: [1, 2].map((seq) => ({
+      seq,
+      id: `m${seq}`,
+      raw: msg(seq, "c-late") as unknown as Record<string, unknown>,
+    })),
+  });
+  beginActiveCacheBoot();
+  let networkCalls = 0;
+  t.mock.method(api, "get", async () => {
+    networkCalls += 1;
+    throw new Error("offline");
+  });
+  try {
+    const pending = useMessageStore.getState().loadMessages("c-late");
+    await Promise.resolve();
+    assert.equal(networkCalls, 0, "the fetch waits until the boot attach settles");
+    assert.equal(useMessageStore.getState().channelMessages["c-late"], undefined);
+    setActiveWebCache(repo, scopeId);
+    await pending;
+    const bucket = useMessageStore.getState().channelMessages["c-late"] ?? [];
+    assert.deepEqual(bucket.map((message) => message.seq), [1, 2]);
+    assert.equal(useMessageStore.getState().loading, false);
+  } finally {
+    noteActiveCacheSettled();
+    clearActiveWebCache();
+    resetMessageStoreState();
+  }
 });

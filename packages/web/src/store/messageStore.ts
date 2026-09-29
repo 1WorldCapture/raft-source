@@ -38,10 +38,12 @@ import {
   cachedThreadSummaries,
   channelFetchPlan,
   hydrateSeedRows,
+  isActiveCacheBootPending,
   noteLiveMessage,
   noteMessageUpdated,
   recordMessagePage,
   seedChannel,
+  whenActiveCache,
 } from "../cache/messageCache";
 import { drainAfterPages } from "@botiverse/raft-shared/src/cacheBoot.js";
 import {
@@ -1831,9 +1833,14 @@ export const useMessageStore = create<MessageState>((set, get) => ({
       // is already painted from the seed; continue from the coverage tail
       // (after=through) and drain full pages to reach the newest tail,
       // instead of re-pulling the latest window.
-      // Sync guard first: with no cache attached this must add ZERO await
-      // boundaries before api.get — receiver-private ingress tests capture
-      // the pending request synchronously after calling loadMessages.
+      // Sync guard first: with no cache boot in flight this must add ZERO
+      // await boundaries before api.get — receiver-private ingress tests
+      // capture the pending request synchronously after calling loadMessages.
+      // A boot that has not attached yet is the exception (#17): wait for
+      // that one attempt, then seed. Online and offline share this path.
+      if (!canReuseCachedTail && !activeWebCache() && isActiveCacheBootPending()) {
+        await whenActiveCache(4000);
+      }
       const plan = !canReuseCachedTail && activeWebCache() ? await channelFetchPlan(channelId) : null;
       if (plan && "after" in plan) {
         // Paint the seed BEFORE draining: the catch-up upserts would otherwise
