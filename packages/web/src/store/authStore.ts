@@ -19,13 +19,9 @@ import {
 } from "../utils/hostAccessTokenSync";
 import { clearSlockdevManualLogout, markSlockdevManualLogout } from "../utils/devMode";
 import { useServerStore } from "./serverStore";
-import type { Server } from "./serverStore";
-import { serverPersistence } from "./serverPersistenceRegistry";
 import {
-  forgetOfflineUser,
   readOfflineAdmission,
   rememberOfflineUser,
-  setOfflineReadonlyActive,
 } from "../utils/offlineSession";
 import {
   deriveInitialAuthRestoreState,
@@ -231,27 +227,6 @@ function reportBrowserTimezoneObservation(user: User): void {
     });
 }
 
-/** One server row so an offline reload of `/s/:slug/...` can resolve. */
-function seedOfflineServer(serverId: string): void {
-  if (useServerStore.getState().servers.length > 0) return;
-  const slug = serverPersistence.readLastServerSlug();
-  if (!slug) return;
-  const server: Server = {
-    id: serverId,
-    name: slug,
-    avatarUrl: null,
-    slug,
-    ownerId: "",
-    onboardingAgentId: null,
-    hideHumansFromMembers: false,
-    plan: "free",
-    planDowngradedAt: null,
-    role: "member",
-    createdAt: "1970-01-01T00:00:00.000Z",
-  };
-  useServerStore.setState({ servers: [server] });
-}
-
 export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   accessToken: localStorage.getItem("slock_access_token"),
@@ -351,7 +326,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   logout: (trigger: LogoutTrigger = "explicit_user_logout") => {
-    forgetOfflineUser(localStorage);
     emitAuthTraceAndFlush("slock.auth.session_cleared", {
       clearSessionCaller: "logout",
       logoutTrigger: trigger,
@@ -407,7 +381,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const tryEnterOfflineReadonly = (err: unknown, status: number | undefined): boolean => {
       const admission = readOfflineAdmission(status, !!get().accessToken, localStorage);
       if (!admission) return false;
-      seedOfflineServer(admission.serverId);
       set({
         user: admission.user,
         offlineReadonly: true,
@@ -671,7 +644,6 @@ updateAuthRuntimeSnapshot({
 });
 
 useAuthStore.subscribe((state) => {
-  setOfflineReadonlyActive(state.offlineReadonly);
   updateAuthRuntimeSnapshot({
     initialized: state.initialized,
     restoreState: state.restoreState,

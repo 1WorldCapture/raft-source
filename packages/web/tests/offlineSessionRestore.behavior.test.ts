@@ -6,19 +6,13 @@ import api from "../src/api/client";
 import { WEB_CACHE_LAST_SCOPE_KEY } from "../src/cache/webCacheLifecycle";
 import { useAuthStore } from "../src/store/authStore";
 import type { User } from "../src/store/authStore";
-import { useChannelStore } from "../src/store/channelStore";
-import { useServerStore } from "../src/store/serverStore";
-import { LAST_SERVER_SLUG_STORAGE_KEY } from "../src/store/serverPersistenceRegistry";
 import {
   decideOfflineAdmission,
-  isOfflineReadonlyActive,
   OFFLINE_USER_SNAPSHOT_KEY,
   parseOfflineUser,
 } from "../src/utils/offlineSession";
 
 const initialAuthState = useAuthStore.getInitialState();
-const initialServerState = useServerStore.getInitialState();
-const initialChannelState = useChannelStore.getInitialState();
 
 function user(overrides: Partial<User> = {}): User {
   return {
@@ -73,7 +67,6 @@ function seedStoredSession() {
 function seedLastIdentity(snapshot: User = user(), serverId = "srv-1") {
   localStorage.setItem(OFFLINE_USER_SNAPSHOT_KEY, JSON.stringify(snapshot));
   localStorage.setItem(WEB_CACHE_LAST_SCOPE_KEY, JSON.stringify({ userId: snapshot.id, serverId }));
-  localStorage.setItem(LAST_SERVER_SLUG_STORAGE_KEY, "lab");
 }
 
 test("network failure with a matching saved identity is the only admission", () => {
@@ -119,8 +112,6 @@ test.afterEach(async () => {
   await new Promise<void>((resolve) => setTimeout(resolve, 0));
   localStorage.clear();
   useAuthStore.setState(initialAuthState, true);
-  useServerStore.setState(initialServerState, true);
-  useChannelStore.setState(initialChannelState, true);
 });
 
 test("loadUser enters offline read-only when /auth/me is unreachable and the last identity matches", async (t) => {
@@ -134,14 +125,11 @@ test("loadUser enters offline read-only when /auth/me is unreachable and the las
 
   const state = useAuthStore.getState();
   assert.equal(state.offlineReadonly, true);
-  assert.equal(isOfflineReadonlyActive(), true);
   assert.equal(state.user?.id, "restore-user");
   assert.equal(state.restoreState, "restoring_auth", "retry loop must keep running");
   assert.equal(state.accessToken, "stale_access");
   assert.equal(state.refreshToken, "stale_refresh");
   assert.equal(state.lastRestoreError?.kind, "network");
-  assert.equal(useServerStore.getState().servers[0]?.id, "srv-1");
-  assert.equal(useServerStore.getState().servers[0]?.slug, "lab");
 });
 
 test("502 keeps the restoring screen even when a saved identity exists", async (t) => {
@@ -155,7 +143,6 @@ test("502 keeps the restoring screen even when a saved identity exists", async (
 
   const state = useAuthStore.getState();
   assert.equal(state.offlineReadonly, false);
-  assert.equal(isOfflineReadonlyActive(), false);
   assert.equal(state.user, null);
   assert.equal(state.restoreState, "restoring_auth");
   assert.equal(state.accessToken, "stale_access");
@@ -206,24 +193,4 @@ test("a later successful /auth/me leaves offline read-only", async (t) => {
   assert.equal(state.restoreState, "authenticated");
   assert.equal(state.user?.displayName, "Back online");
   assert.equal(state.lastRestoreError, null);
-});
-
-test("ensureChannel stubs a channel only when offline and the server never answered", async (t) => {
-  useServerStore.setState({
-    current: { id: "srv-1" } as typeof initialServerState.current,
-    serverEpoch: 1,
-  });
-  useAuthStore.setState({ offlineReadonly: true });
-  t.mock.method(api, "get", async (url: string) => {
-    if (url.endsWith("/chan-missing")) throw httpError(404);
-    throw networkError();
-  });
-
-  const stubbed = await useChannelStore.getState().ensureChannel("chan-cached");
-  assert.equal(stubbed?.id, "chan-cached");
-  assert.equal(useChannelStore.getState().channels.some((channel) => channel.id === "chan-cached"), true);
-
-  const missing = await useChannelStore.getState().ensureChannel("chan-missing");
-  assert.equal(missing, null);
-  assert.equal(useChannelStore.getState().channels.some((channel) => channel.id === "chan-missing"), false);
 });

@@ -43,7 +43,6 @@ import {
   recordMessagePage,
   seedChannel,
 } from "../cache/messageCache";
-import { isOfflineReadonlyActive } from "../utils/offlineSession";
 import { drainAfterPages } from "@botiverse/raft-shared/src/cacheBoot.js";
 import {
   getAcceptedReadState,
@@ -1962,25 +1961,6 @@ export const useMessageStore = create<MessageState>((set, get) => ({
         get().clearUnread(channelId);
       }
     } catch {
-      if (
-        get().currentChannelId === channelId &&
-        requestGeneration !== messageWindowRequestGeneration
-      ) return;
-      // Offline cold start (#17): the cache scope attaches asynchronously,
-      // after this fetch has already failed. Wait briefly and paint the
-      // cached page instead of leaving an empty channel.
-      if (isOfflineReadonlyActive()) {
-        const deadline = Date.now() + 4000;
-        while (Date.now() < deadline) {
-          if (requestGeneration !== messageWindowRequestGeneration) return;
-          if (activeWebCache()) {
-            const seeded = await get().seedChannelFromCache(channelId, requestGeneration);
-            if (seeded) return;
-            break;
-          }
-          await new Promise((resolve) => setTimeout(resolve, 50));
-        }
-      }
       if (
         get().currentChannelId === channelId &&
         requestGeneration !== messageWindowRequestGeneration

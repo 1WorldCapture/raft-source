@@ -20,6 +20,7 @@
 //     null is ambiguous during startup.
 
 import { RUNTIME_API_BASE } from "../desktopRuntimeEnvironment";
+import { forgetOfflineUser } from "../utils/offlineSession";
 import { initWebCache } from "./webCache";
 import type { WebCacheRuntime } from "./webCache";
 
@@ -150,6 +151,9 @@ export function wipeOnExplicitLogout(runtime: WebCacheRuntime, auth: AuthLike, d
   if (typeof original !== "function") return;
   auth.setState({
     logout: (trigger?: string) => {
+      // Same wrapper as the scope id: explicit logout drops the public
+      // profile snapshot (#17). 401 session expiry does not come through here.
+      forgetOfflineUser(storage);
       void runtime.resetAll().then(() => {
         try {
           storage.removeItem(WEB_CACHE_LAST_SCOPE_KEY);

@@ -96,16 +96,3 @@ export function forgetOfflineUser(storage: StorageWriter): void {
     // ignore
   }
 }
-
-// Mirrors authStore.offlineReadonly without importing the store. messageStore
-// reads this after a failed fetch; importing authStore there evaluates
-// localStorage at module init and breaks node tests.
-let offlineReadonlyActive = false;
-
-export function setOfflineReadonlyActive(active: boolean): void {
-  offlineReadonlyActive = active;
-}
-
-export function isOfflineReadonlyActive(): boolean {
-  return offlineReadonlyActive;
-}

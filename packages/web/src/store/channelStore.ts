@@ -272,35 +272,6 @@ export const useChannelStore = create<ChannelState>((set, get) => ({
         ));
         return channel;
       } catch (err) {
-        const status = (err as { response?: { status?: number } } | null)?.response?.status;
-        // Offline cold start (#17): a missing HTTP status means the server
-        // never answered. A stub lets #9 paint cached messages. A real 404/401
-        // still means the channel is gone.
-        if (typeof status !== "number" && serverId) {
-          // Lazy: a static authStore import evaluates localStorage at module
-          // load and breaks node tests that only touch the channel store.
-          const { useAuthStore } = await import("./authStore");
-          if (!useAuthStore.getState().offlineReadonly) {
-            console.error("Failed to load channel:", err);
-            return null;
-          }
-          if (useServerStore.getState().serverEpoch !== epoch) return null;
-          const stub: ApiChannel = {
-            id: channelId,
-            serverId,
-            name: channelId,
-            description: null,
-            type: "channel",
-            createdAt: "1970-01-01T00:00:00.000Z",
-          };
-          set((state) => reduceChannelWithTrace(
-            state,
-            "ensure",
-            channelId,
-            (current) => patchChannel(current, stub),
-          ));
-          return toChannel(stub);
-        }
         console.error("Failed to load channel:", err);
         return null;
       } finally {

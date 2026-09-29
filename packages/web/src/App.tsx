@@ -892,6 +892,8 @@ export function AppShell() {
 
   const hasStoredSession = !!(accessToken && refreshToken);
   const offlineReadonly = useAuthStore((s) => s.offlineReadonly);
+  // Offline admission keeps restoreState at restoring_auth so the retry loop
+  // continues. The full-screen restoring card must not cover the shell.
   const showOfflineApp = offlineReadonly && !!user;
   const authBootstrapView = getAuthBootstrapView({ initialized, restoreState });
   const authRestoreStartedAtRef = useRef<number | null>(null);
@@ -1042,7 +1044,9 @@ export function AppShell() {
   // Identity setup is account-global and must complete before any server data
   // or pending invite side effects are loaded.
   // Keyed on the user id, not the object: timezone/translation updates replace
-  // the user object and must not refetch the server list.
+  // the user object and must not refetch the server list. offlineReadonly is
+  // the exception: it flips back to false when /auth/me succeeds without
+  // changing the user id, and the server list still has to reload.
   const signedInUserId = user?.id ?? null;
   useEffect(() => {
     if (signedInUserId && !profileSetupRequired) {
@@ -1188,14 +1192,6 @@ export function AppShell() {
     <>
       <NavigationDepthTracker />
       <EnvironmentDevOverlay />
-      {showOfflineApp ? (
-        <div
-          data-testid="offline-readonly-banner"
-          className="fixed inset-x-0 top-0 z-[80] border-b-2 border-black bg-soft-signal px-3 py-1.5 text-center text-sm font-bold"
-        >
-          {formatMessage({ id: "auth.offline.readonlyBanner" })}
-        </div>
-      ) : null}
       {content}
       <MessageSelectionShortcut />
       <ImageLightbox />
