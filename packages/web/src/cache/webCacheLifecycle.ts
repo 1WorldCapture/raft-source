@@ -2,22 +2,31 @@
 //
 // Deliberately separate from webCache.ts: that module (runtime + repos) stays
 // free of store imports so node tests can construct it without localStorage;
-// this module glues the runtime onto the auth/server stores. The store
-// modules are imported LAZILY — authStore reads localStorage at module scope,
-// which node tests do not have — and tests inject fake stores directly.
-// Plan red line: wiring subscribes from the outside — no store rework.
+// this module glues the runtime onto the auth/server stores. Store modules
+// are imported LAZILY (authStore reads localStorage at module scope) and
+// tests inject fakes directly. Plan red line: wiring subscribes from the
+// outside — no store file is edited.
 //
-//   login + current server → attach(origin, userId, serverId)
-//   server switch          → attach the new scope (no wiping)
-//   logout                 → resetAll() — the whole database goes
+// Lifecycle rules (review ruling e3c588fe):
+//   startup (user still null — /me pending or offline)  →  NEVER wipe; attach
+//     the LAST persisted identity (ids only, not credentials) so the first
+//     paint — offline included — can read the cache;
+//   login / server restore                               →  attach (switch
+//     scopes without wiping; a DIFFERENT userId wipes first — an account
+//     switch must not leak the previous account's data);
+//   session expiry (user cleared by a 401, not a logout) →  keep the cache;
+//   explicit logout (the authStore logout action)        →  resetAll(). The
+//     wipe rides the wrapped action, NOT a "user became null" observation —
+//     null is ambiguous during startup.
 
 import { RUNTIME_API_BASE } from "../desktopRuntimeEnvironment";
 import { initWebCache } from "./webCache";
 import type { WebCacheRuntime } from "./webCache";
 
 export type AuthLike = {
-  getState(): { user: { id: string } | null };
+  getState(): { user: { id: string } | null; logout: (trigger?: string) => void };
   subscribe(listener: (state: { user: { id: string } | null }, prev: { user: { id: string } | null }) => void): () => void;
+  setState(partial: { logout: (trigger?: string) => void }): void;
 };
 
 export type ServerLike = {
@@ -25,24 +34,95 @@ export type ServerLike = {
   subscribe(listener: (state: { current: { id: string } | null }, prev: { current: { id: string } | null }) => void): () => void;
 };
 
-/**
- * Subscribe the cache lifecycle to the auth and server stores:
- * - user signed in + current server → attach that server's scope;
- * - current server changed → attach the new scope (data of other servers
- *   stays — switching never wipes);
- * - user signed out → resetAll() (logout/origin change clears everything).
- */
-export function wireWebCacheLifecycle(runtime: WebCacheRuntime, auth: AuthLike, server: ServerLike): () => void {
+export type ScopeIdentityStorage = {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+  removeItem(key: string): void;
+};
+
+/** localStorage key for the last attached identity — ids only, never tokens. */
+export const WEB_CACHE_LAST_SCOPE_KEY = "raft_web_cache_last_scope";
+
+type PersistedScope = { userId: string; serverId: string };
+
+function readPersisted(storage: ScopeIdentityStorage): PersistedScope | null {
+  try {
+    const raw = storage.getItem(WEB_CACHE_LAST_SCOPE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { userId?: unknown; serverId?: unknown };
+    if (typeof parsed.userId === "string" && typeof parsed.serverId === "string" && parsed.userId && parsed.serverId) {
+      return { userId: parsed.userId, serverId: parsed.serverId };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export type WireDeps = {
+  storage?: ScopeIdentityStorage;
+};
+
+export function wireWebCacheLifecycle(
+  runtime: WebCacheRuntime,
+  auth: AuthLike,
+  server: ServerLike,
+  deps: WireDeps = {},
+): { unsubscribe(): void } {
   const origin = RUNTIME_API_BASE;
+  const storage: ScopeIdentityStorage = deps.storage ?? (globalThis as { localStorage?: ScopeIdentityStorage }).localStorage!;
+  /** The userId of the last completed attach this wiring observed. */
+  let attachedUserId: string | null = null;
+  let chain: Promise<void> = Promise.resolve();
+
+  const attach = (userId: string, serverId: string): void => {
+    // Serialize: a rapid identity/server switch must not interleave two
+    // openScope+persist pairs.
+    chain = chain
+      .then(async () => {
+        await runtime.attach(origin, userId, serverId);
+        attachedUserId = userId;
+        try {
+          storage.setItem(WEB_CACHE_LAST_SCOPE_KEY, JSON.stringify({ userId, serverId }));
+        } catch {
+          // Best-effort persistence — the attach itself still worked.
+        }
+      })
+      .catch(() => {
+        // A failed attach leaves the previous scope active.
+      });
+  };
+
   const sync = (): void => {
-    const userId = auth.getState().user?.id ?? null;
-    const serverId = server.getState().current?.id ?? null;
-    if (userId === null) {
-      void runtime.resetAll();
+    const storeUserId = auth.getState().user?.id ?? null;
+    const storeServerId = server.getState().current?.id ?? null;
+    if (storeUserId === null) {
+      // Startup before /me, an offline boot, or a 401 session clear — never
+      // a wipe (that rides the wrapped logout action). Attach the persisted
+      // identity so the cold first paint can read the cache.
+      const persisted = readPersisted(storage);
+      if (persisted && runtime.scopeId === null) {
+        attach(persisted.userId, storeServerId ?? persisted.serverId);
+      }
       return;
     }
-    if (serverId !== null) void runtime.attach(origin, userId, serverId);
+    if (storeServerId === null) return; // wait for the server restore/load
+    if (attachedUserId !== null && attachedUserId !== storeUserId) {
+      // Account switch without a logout in between: the previous account's
+      // cached data must not survive into the new session.
+      chain = chain.then(async () => {
+        await runtime.resetAll();
+        try {
+          storage.removeItem(WEB_CACHE_LAST_SCOPE_KEY);
+        } catch {
+          // ignore
+        }
+        attachedUserId = null;
+      });
+    }
+    attach(storeUserId, storeServerId);
   };
+
   const unsubscribeAuth = auth.subscribe((state, prev) => {
     if ((prev.user?.id ?? null) !== (state.user?.id ?? null)) sync();
   });
@@ -50,10 +130,36 @@ export function wireWebCacheLifecycle(runtime: WebCacheRuntime, auth: AuthLike, 
     if ((prev.current?.id ?? null) !== (state.current?.id ?? null)) sync();
   });
   sync();
-  return () => {
-    unsubscribeAuth();
-    unsubscribeServer();
+  return {
+    unsubscribe() {
+      unsubscribeAuth();
+      unsubscribeServer();
+    },
   };
+}
+
+/**
+ * Ride the explicit logout action with the cache wipe. Observing "user
+ * became null" cannot distinguish logout from the startup null or a 401
+ * session clear, so the wipe is bound to the action itself (an external
+ * wrapper; no store file is touched).
+ */
+export function wipeOnExplicitLogout(runtime: WebCacheRuntime, auth: AuthLike, deps: WireDeps = {}): void {
+  const storage: ScopeIdentityStorage = deps.storage ?? (globalThis as { localStorage?: ScopeIdentityStorage }).localStorage!;
+  const original = auth.getState().logout;
+  if (typeof original !== "function") return;
+  auth.setState({
+    logout: (trigger?: string) => {
+      void runtime.resetAll().then(() => {
+        try {
+          storage.removeItem(WEB_CACHE_LAST_SCOPE_KEY);
+        } catch {
+          // ignore
+        }
+      });
+      return original(trigger);
+    },
+  });
 }
 
 /**
@@ -73,10 +179,8 @@ export async function bootWebCache(): Promise<WebCacheRuntime> {
   setActiveCacheProvider(() =>
     runtime.scopeId === null ? null : { repo: runtime.repo, scopeId: runtime.scopeId },
   );
-  wireWebCacheLifecycle(
-    runtime,
-    useAuthStore as unknown as AuthLike,
-    useServerStore as unknown as ServerLike,
-  );
+  const auth = useAuthStore as unknown as AuthLike;
+  wipeOnExplicitLogout(runtime, auth);
+  wireWebCacheLifecycle(runtime, auth, useServerStore as unknown as ServerLike);
   return runtime;
 }

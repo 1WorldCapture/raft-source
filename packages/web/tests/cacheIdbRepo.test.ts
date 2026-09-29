@@ -12,7 +12,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createIdbCacheRepo, WEB_CACHE_DB_NAME, WEB_CACHE_SCHEMA_VERSION } from "../src/cache/idbRepo";
 import { createWebCacheRuntime } from "../src/cache/webCache";
-import { wireWebCacheLifecycle } from "../src/cache/webCacheLifecycle";
+import { wireWebCacheLifecycle, wipeOnExplicitLogout } from "../src/cache/webCacheLifecycle";
 import { RUNTIME_API_BASE } from "../src/desktopRuntimeEnvironment";
 
 type Globals = { indexedDB?: IDBFactory };
@@ -280,40 +280,112 @@ test("multi-tab: two connections over one factory see each other's committed wri
   assert.equal((await tabB.getLatestMessages(b, "c2", 5)).length, 1);
 });
 
-test("lifecycle: login attaches, server switch re-attaches without wiping, logout resets everything", async () => {
+test("lifecycle: startup user=null never wipes; persisted identity attaches before /me", async () => {
   freshDb();
   const runtime = await createWebCacheRuntime();
-  assert.equal(runtime.available, true);
-  type State = { user: { id: string } | null; current: { id: string } | null };
-  const listeners = new Set<(state: State, prev: State) => void>();
-  let state: State = { user: null, current: null };
-  const fakeStore = {
-    getState: () => state,
-    setState(next: Partial<State>) {
+  // A previous session left data behind (the refresh scenario).
+  const previous = await runtime.attach(RUNTIME_API_BASE, "user-1", "srv-a");
+  await runtime.repo.putKv(previous, "serverList", { v: "cached" });
+  const storage = memoryStorage({ "raft_web_cache_last_scope": JSON.stringify({ userId: "user-1", serverId: "srv-a" }) });
+
+  const { store, setState } = fakeStores({ user: null, current: null });
+  const wired = wireWebCacheLifecycle(
+    runtime,
+    store as unknown as Parameters<typeof wireWebCacheLifecycle>[1],
+    store as unknown as Parameters<typeof wireWebCacheLifecycle>[2],
+    { storage },
+  );
+  await flush();
+  assert.equal(runtime.scopeId, previous, "attached the persisted identity while /me is still pending");
+  assert.deepEqual(await runtime.repo.getKv(previous, "serverList"), { v: "cached" }, "startup never wipes");
+
+  // /me returns with the SAME user: attach continues, still no wipe.
+  setState({ user: { id: "user-1" }, current: { id: "srv-a" } });
+  await flush();
+  assert.deepEqual(await runtime.repo.getKv(previous, "serverList"), { v: "cached" });
+
+  // Server switch re-attaches without wiping the other server's data.
+  await runtime.repo.putKv(await runtime.attach(RUNTIME_API_BASE, "user-1", "srv-b"), "serverList", { v: "b" });
+  setState({ current: { id: "srv-a" } });
+  await flush();
+  const aScope = await runtime.repo.openScope(RUNTIME_API_BASE, "user-1", "srv-a");
+  assert.deepEqual(await runtime.repo.getKv(aScope, "serverList"), { v: "cached" }, "switch never wipes");
+
+  // A 401-style clear (user → null, no logout call) keeps the cache.
+  setState({ user: null });
+  await flush();
+  assert.deepEqual(await runtime.repo.getKv(aScope, "serverList"), { v: "cached" }, "session expiry does not wipe");
+  wired.unsubscribe();
+});
+
+test("lifecycle: explicit logout wipes; account switch wipes the old account first", async () => {
+  freshDb();
+  const runtime = await createWebCacheRuntime();
+  const storage = memoryStorage();
+  const { store, setState } = fakeStores({ user: { id: "user-1" }, current: { id: "srv-a" } });
+  const auth = store as unknown as Parameters<typeof wireWebCacheLifecycle>[1];
+  wipeOnExplicitLogout(runtime, auth, { storage });
+  wireWebCacheLifecycle(runtime, auth, store as unknown as Parameters<typeof wireWebCacheLifecycle>[2], { storage });
+  await flush();
+  const aScope = await runtime.repo.openScope(RUNTIME_API_BASE, "user-1", "srv-a");
+  await runtime.repo.putKv(aScope, "secret", { v: "user-1-data" });
+  assert.equal(JSON.parse(storage.getItem("raft_web_cache_last_scope") ?? "{}").userId, "user-1", "identity persisted");
+
+  // Explicit logout: the wrapped action wipes and clears the persisted id.
+  store.getState().logout("explicit_user_logout");
+  await flush();
+  assert.equal(runtime.scopeId, null, "logout detaches");
+  assert.equal(await runtime.repo.getKv(aScope, "secret"), null, "logout wipes the database");
+  assert.equal(storage.getItem("raft_web_cache_last_scope"), null, "persisted identity cleared");
+
+  // Login as another account: fresh scope, no old data.
+  setState({ user: { id: "user-2" }, current: { id: "srv-a" } });
+  await flush();
+  const bScope = await runtime.repo.openScope(RUNTIME_API_BASE, "user-2", "srv-a");
+  assert.equal(await runtime.repo.getKv(bScope, "secret"), null, "new account starts clean");
+
+  // Direct account switch WITHOUT a logout in between wipes the old data.
+  await runtime.repo.putKv(bScope, "user2", { v: "data" });
+  setState({ user: { id: "user-3" } });
+  await flush();
+  const cScope = await runtime.repo.openScope(RUNTIME_API_BASE, "user-3", "srv-a");
+  assert.equal(await runtime.repo.getKv(cScope, "user2"), null, "account switch wipes the previous account");
+  assert.notEqual(cScope, bScope);
+});
+
+function memoryStorage(initial: Record<string, string> = {}): { getItem(k: string): string | null; setItem(k: string, v: string): void; removeItem(k: string): void } {
+  const map = new Map(Object.entries(initial));
+  return {
+    getItem: (k) => map.get(k) ?? null,
+    setItem: (k, v) => map.set(k, v),
+    removeItem: (k) => map.delete(k),
+  };
+}
+
+type FakeStoreState = { user: { id: string } | null; current: { id: string } | null };
+function fakeStores(initial: FakeStoreState): { store: unknown; setState(next: Partial<FakeStoreState>): void } {
+  const listeners = new Set<(state: FakeStoreState, prev: FakeStoreState) => void>();
+  let state: FakeStoreState = { user: null, current: null, ...initial };
+  let logoutImpl: (trigger?: string) => void = () => {};
+  const store = {
+    getState: () => ({ ...state, logout: logoutImpl }),
+    setState: (partial: { logout?: (trigger?: string) => void }) => {
+      if (partial.logout) logoutImpl = partial.logout;
+    },
+    subscribe: (listener: (state: FakeStoreState, prev: FakeStoreState) => void) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    __setState(next: Partial<FakeStoreState>) {
       const prev = state;
       state = { ...state, ...next };
       for (const listener of listeners) listener(state, prev);
     },
-    subscribe(listener: (state: State, prev: State) => void) {
-      listeners.add(listener);
-      return () => listeners.delete(listener);
-    },
   };
-  const auth = fakeStore;
-  const server = fakeStore;
-  const unsubscribe = wireWebCacheLifecycle(runtime, auth, server);
-  fakeStore.setState({ user: { id: "user-1" }, current: { id: "srv-a" } });
+  return { store, setState: (next) => store.__setState(next) };
+}
+
+async function flush(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 20));
-  assert.equal(runtime.scopeId, await runtime.repo.openScope(RUNTIME_API_BASE, "user-1", "srv-a"), "attached to srv-a's scope");
-  const aScope = runtime.scopeId as number;
-  await runtime.repo.putKv(aScope, "serverList", { v: "cached" });
-  fakeStore.setState({ current: { id: "srv-b" } });
-  await new Promise((resolve) => setTimeout(resolve, 20));
-  assert.notEqual(runtime.scopeId, aScope, "switch re-attached to a new scope");
-  assert.deepEqual(await runtime.repo.getKv(aScope, "serverList"), { v: "cached" }, "switch does NOT wipe other servers");
-  fakeStore.setState({ user: null, current: null });
-  await new Promise((resolve) => setTimeout(resolve, 20));
-  assert.equal(runtime.scopeId, null, "logout detaches");
-  assert.equal(await runtime.repo.getKv(aScope, "serverList"), null, "logout clears the whole database");
-  unsubscribe();
-});
+}
+
