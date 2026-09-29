@@ -48,6 +48,12 @@ export const WEB_CACHE_LAST_SCOPE_KEY = "raft_web_cache_last_scope";
 
 type PersistedScope = { userId: string; serverId: string };
 
+// Bumped synchronously by the explicit-logout wrapper. An attach queued before
+// a logout compares it and stands down. Deliberately NOT the runtime's reset
+// counter: an account switch queues its own resetAll() right before attaching
+// the new account, and that attach must still run.
+let explicitLogoutEpoch = 0;
+
 function readPersisted(storage: ScopeIdentityStorage): PersistedScope | null {
   try {
     const raw = storage.getItem(WEB_CACHE_LAST_SCOPE_KEY);
@@ -90,11 +96,11 @@ export function wireWebCacheLifecycle(
       && runtime.userId === userId;
     if (!alreadyAttached) beginDirectoryAttachWait();
     // An attach queued before a logout wipe belongs to the logged-out session.
-    const resetEpoch = runtime.resetEpoch;
+    const logoutEpoch = explicitLogoutEpoch;
     chain = chain
       .then(async () => {
         try {
-          if (runtime.resetEpoch !== resetEpoch) return;
+          if (explicitLogoutEpoch !== logoutEpoch) return;
           await runtime.attach(origin, userId, serverId);
           // Persist only an attach that was adopted: one superseded by a
           // logout wipe must not write the identity back.
@@ -196,6 +202,7 @@ export function wipeOnExplicitLogout(runtime: WebCacheRuntime, auth: AuthLike, d
       // Same wrapper as the scope id: explicit logout drops the public
       // profile snapshot (#17). 401 session expiry does not come through here.
       forgetOfflineUser(storage);
+      explicitLogoutEpoch += 1;
       // Drop the persisted identity BEFORE the original action clears the
       // user: that user→null transition runs the lifecycle sync, which would
       // otherwise read this id and re-attach (re-creating the scope row and

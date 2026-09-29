@@ -509,3 +509,26 @@ test("lifecycle: an attach still in flight when logout wipes is dropped, not per
   db.close();
   assert.deepEqual(scopes, []);
 });
+
+test("lifecycle: switching accounts without a logout attaches the new account (A -> B)", async () => {
+  freshDb();
+  const runtime = await createWebCacheRuntime();
+  const storage = memoryStorage();
+  const { store, setState } = fakeStores({ user: { id: "user-a" }, current: { id: "srv-a" } });
+  const auth = store as unknown as Parameters<typeof wireWebCacheLifecycle>[1];
+  wipeOnExplicitLogout(runtime, auth, { storage });
+  wireWebCacheLifecycle(runtime, auth, store as unknown as Parameters<typeof wireWebCacheLifecycle>[2], { storage });
+  await flush();
+  const aScope = runtime.scopeId!;
+  await runtime.repo.putKv(aScope, "secret", { v: "user-a-data" });
+
+  setState({ user: { id: "user-b" } });
+  await flush();
+  await flush();
+
+  assert.equal(runtime.userId, "user-b", "the new account is attached");
+  assert.equal(runtime.serverId, "srv-a");
+  assert.notEqual(runtime.scopeId, null);
+  assert.deepEqual(JSON.parse(storage.getItem("raft_web_cache_last_scope") ?? "null"), { userId: "user-b", serverId: "srv-a" });
+  assert.equal(await runtime.repo.getKv(runtime.scopeId!, "secret"), null, "and it starts clean");
+});
