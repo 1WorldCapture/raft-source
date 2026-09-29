@@ -43,8 +43,6 @@ export type WebCacheRuntime = {
   readonly generation: number;
   attach(origin: string, userId: string, serverId: string): Promise<number>;
   resetAll(): Promise<void>;
-  /** Bumped by every resetAll(); attaches queued before a wipe compare it and stand down. */
-  readonly resetEpoch: number;
   /**
    * Fires after every attach/resetAll (and once at subscribe time) with the
    * current scopeId — consumers like #9's messageCache bridge use it to
@@ -87,9 +85,6 @@ export async function createWebCacheRuntime(
     },
     get scopeId() {
       return scopeId;
-    },
-    get resetEpoch() {
-      return lastResetGeneration;
     },
     get serverId() {
       return attachedServerId;
