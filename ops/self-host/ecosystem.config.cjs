@@ -57,7 +57,7 @@ const apps = [
 if (cfg.RAFT_BACKUP_CRON) {
   apps.push({
     ...BASE,
-    // Daily backup (backup.sh). pm2 also runs it once when the app is (re)started.
+    // Scheduled backup (backup.sh; RAFT_BACKUP_EVERY_HOURS / RAFT_BACKUP_UTC_HOUR). pm2 also runs it once when the app is (re)started.
     name: "raft-backup",
     script: path.join(__dirname, "backup.sh"),
     interpreter: "bash",
