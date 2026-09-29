@@ -50,6 +50,11 @@ let messageStoreUnsubscribe: (() => void) | null = null;
 let previousHasLocalUnread: boolean | null = null;
 let queued = false;
 let loadInFlight: Promise<void> | null = null;
+// Bumped by reset(): flights captured before it may not touch the state when
+// they finally settle, and the in-flight handshake must not survive a reset —
+// a loader whose request never settles would otherwise wedge every future
+// load() onto it forever.
+let loadGeneration = 0;
 
 const hasAnyLocalUnread = (): boolean =>
   Object.values(useMessageStore.getState().unreadCounts).some((count) => count > 0);
@@ -127,11 +132,14 @@ export const useServerUnreadSummaryStore = create<ServerUnreadSummaryState>((set
         await loadInFlight;
         return;
       }
+      const generation = loadGeneration;
       const flight = (async () => {
         try {
           const { data } = await api.get("/servers/unread-summary");
+          if (generation !== loadGeneration) return; // reset() happened mid-flight; drop the stale snapshot.
           set((state) => ({ byServer: retainServerUnreadSummary(state.byServer, parseServerUnreadSummaryRows(data)) }));
         } catch {
+          if (generation !== loadGeneration) return;
           // A failed refresh must not leave stale >0 counts lighting dots.
           set({ byServer: {} });
         }
@@ -140,7 +148,9 @@ export const useServerUnreadSummaryStore = create<ServerUnreadSummaryState>((set
       try {
         await flight;
       } finally {
-        loadInFlight = null;
+        // reset() may have already cleared the handshake (or a successor
+        // flight may own it); only retire the slot this flight actually holds.
+        if (loadInFlight === flight) loadInFlight = null;
         if (queued) {
           queued = false;
           void get().load();
@@ -176,6 +186,10 @@ export const useServerUnreadSummaryStore = create<ServerUnreadSummaryState>((set
       stopLifecycle();
       refCount = 0;
       queued = false;
+      // Invalidate any in-flight snapshot and free the coalescing slot so a
+      // request that never settles cannot wedge the load pipeline for good.
+      loadGeneration += 1;
+      loadInFlight = null;
       previousHasLocalUnread = null;
       set({ byServer: {} });
     },
