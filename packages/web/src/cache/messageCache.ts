@@ -36,6 +36,8 @@ export type ActiveCache = {
    * server B never reads/writes server A's scope mid-transition.
    */
   serverId: string | null;
+  /** Account this scope was opened for. Null on the stopgap holder. */
+  userId: string | null;
   /**
    * Invalidation era (P2c review; ruling name: "generation" — the store
    * layer already has a serverEpoch): changes whenever the active scope is
@@ -122,7 +124,7 @@ export function setActiveCacheProvider(next: ActiveCacheProvider | null): void {
 /** Stopgap/test-only direct holder — real app wiring goes through #7. */
 export function setActiveWebCache(repo: CacheRepo, scopeId: number, serverId: string | null = null): void {
   fallbackGeneration += 1;
-  fallbackActive = { repo, scopeId, serverId, generation: fallbackGeneration };
+  fallbackActive = { repo, scopeId, serverId, userId: null, generation: fallbackGeneration };
   noteActiveCacheSettled();
 }
 

@@ -81,13 +81,40 @@ function cacheStillBound(serverId: string, seen: ActiveCache): ActiveCache | nul
  * the CURRENT attach scope — a server switch mid-flight must not persist
  * the previous scope's snapshot into the new one.
  */
-export type DirectoryCacheScope = { scopeId: number; serverId: string; generation: number };
+export type DirectoryCacheScope = { scopeId: number; serverId: string; userId: string | null; generation: number };
 
 /** Capture the active scope token for a request about to start (sync, no I/O). */
 export function currentDirectoryCacheScope(): DirectoryCacheScope | null {
   const cache = activeWebCache();
   if (!cache || cache.serverId === null) return null;
-  return { scopeId: cache.scopeId, serverId: cache.serverId, generation: cache.generation };
+  return {
+    scopeId: cache.scopeId,
+    serverId: cache.serverId,
+    userId: cache.userId ?? null,
+    generation: cache.generation,
+  };
+}
+
+// Session user published by the lifecycle. Null before /me. The server list
+// is account-scoped, so a scope opened for a different user must not seed
+// or receive that list (logout wipe interrupted, next /me is another account,
+// current still null so the lifecycle has not re-attached yet).
+let sessionUserId: string | null = null;
+
+export function noteDirectorySessionUser(userId: string | null): void {
+  sessionUserId = userId;
+}
+
+/**
+ * The attached scope when it is safe to read or write the server list for
+ * the signed-in user. Null when nothing is attached, or when the scope
+ * belongs to a different account than the current session.
+ */
+export function serverListScopeForSession(): DirectoryCacheScope | null {
+  const scope = currentDirectoryCacheScope();
+  if (!scope) return null;
+  if (sessionUserId && scope.userId && scope.userId !== sessionUserId) return null;
+  return scope;
 }
 
 function scopeStillCurrent(token: DirectoryCacheScope | null): ActiveCache | null {
@@ -97,6 +124,7 @@ function scopeStillCurrent(token: DirectoryCacheScope | null): ActiveCache | nul
   if (cache.scopeId !== token.scopeId || cache.generation !== token.generation || cache.serverId !== token.serverId) {
     return null;
   }
+  if ((cache.userId ?? null) !== token.userId) return null;
   return cache;
 }
 
@@ -125,7 +153,12 @@ export function noteDirectoryAttachSettled(): void {
 
 function waitForSignal(signal: Promise<void>, timeoutMs: number): Promise<void> {
   return new Promise((resolve) => {
-    const timer = setTimeout(resolve, timeoutMs);
+    const timer = setTimeout(() => {
+      // Same as whenActiveCache: a stuck openScope must not make every
+      // later load wait out another full timeout.
+      noteDirectoryAttachSettled();
+      resolve();
+    }, timeoutMs);
     signal.then(() => {
       clearTimeout(timer);
       resolve();

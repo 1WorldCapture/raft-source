@@ -18,10 +18,13 @@ import {
 import {
   beginDirectoryAttachWait,
   cachedServers,
+  directoryCacheBindPending,
   CHANNEL_UNREAD_KV_KEY,
   currentDirectoryCacheScope,
   noteDirectoryAttachSettled,
+  noteDirectorySessionUser,
   recordChannels,
+  whenDirectoryCacheBound,
   recordServers,
   recordUnread,
   recordUnreadSummary,
@@ -82,6 +85,7 @@ const ATTACHED_SERVER = "server-1";
 
 function resetStores() {
   resetDirectorySeedClaims();
+  noteDirectorySessionUser(null);
   useServerStore.setState({
     servers: [],
     current: serverFixture(),
@@ -378,6 +382,7 @@ test("reconcile runs when the provider allocates a fresh holder on every read", 
     repo,
     scopeId,
     serverId: ATTACHED_SERVER,
+    userId: null,
     generation: 7,
   }));
   t.after(() => setActiveCacheProvider(null));
@@ -554,6 +559,7 @@ test("resetAll detaches the scope before the wipe, so a write during the wipe do
       repo: runtime.repo,
       scopeId: runtime.scopeId,
       serverId: runtime.serverId,
+      userId: runtime.userId,
       generation: runtime.generation,
     };
   });
@@ -625,6 +631,7 @@ test("loadServers waits for the cold-start attach before reading the server list
     repo,
     scopeId,
     serverId: ATTACHED_SERVER,
+    userId: null,
     generation: 2,
   }));
   noteActiveCacheSettled();
@@ -672,6 +679,7 @@ test("loadChannels waits for the in-flight attach before seeding or writing", as
     repo,
     scopeId,
     serverId: "server-b",
+    userId: null,
     generation: 4,
   }));
   noteDirectoryAttachSettled();
@@ -711,6 +719,7 @@ test("an unread load that runs before attach occupies the epoch so a later load 
     repo,
     scopeId,
     serverId: "server-b",
+    userId: null,
     generation: 3,
   }));
   t.after(() => setActiveCacheProvider(null));
@@ -749,6 +758,7 @@ test("ensureChannel does not hydrate a cached row when the server changes during
     repo,
     scopeId,
     serverId: ATTACHED_SERVER,
+    userId: null,
     generation: 1,
   }));
   t.after(() => setActiveCacheProvider(null));
@@ -795,4 +805,71 @@ test("ensureChannel falls back to cache on a timeout", async (t) => {
   });
   const resolved = await useChannelStore.getState().ensureChannel("c1");
   assert.equal(resolved?.id, "c1");
+});
+
+test("a stuck attach wait releases later loads instead of timing out again", async () => {
+  clearActiveWebCache();
+  setActiveCacheProvider(null);
+  beginDirectoryAttachWait();
+  const started = Date.now();
+  await whenDirectoryCacheBound(ATTACHED_SERVER, 40);
+  assert.ok(Date.now() - started >= 30, "the first wait uses the timeout");
+  assert.equal(directoryCacheBindPending(ATTACHED_SERVER), false, "timeout clears the gate");
+  const again = Date.now();
+  await whenDirectoryCacheBound(ATTACHED_SERVER, 40);
+  assert.ok(Date.now() - again < 20, "the next load does not wait another timeout");
+});
+
+test("loadServers does not seed or write a scope that belongs to another account", async (t) => {
+  const repo = createWebCacheRepo();
+  const scopeId = await repo.openScope("https://raft.example", "user-1", ATTACHED_SERVER);
+  await repo.putKv(scopeId, "serverList", {
+    servers: [serverFixture({ id: "u1-server", name: "U1" })],
+  });
+  clearActiveWebCache();
+  setActiveCacheProvider(() => ({
+    repo,
+    scopeId,
+    serverId: ATTACHED_SERVER,
+    userId: "user-1",
+    generation: 1,
+  }));
+  t.after(() => setActiveCacheProvider(null));
+  resetStores();
+  noteDirectorySessionUser("user-2");
+  useServerStore.setState({ current: null, servers: [], loading: true });
+
+  t.mock.method(api, "get", async () => ({ data: [serverFixture({ id: "u2-server", name: "U2" })] }));
+  await useServerStore.getState().loadServers();
+  assert.deepEqual(
+    useServerStore.getState().servers.map((s) => s.id),
+    ["u2-server"],
+    "the signed-in account sees the network list, not the other account's cache",
+  );
+  const recorded = serversFromCacheValue(await repo.getKv(scopeId, "serverList"));
+  assert.deepEqual(recorded.map((s) => s.id), ["u1-server"], "u2's list is not written into u1's scope");
+});
+
+test("unread summary still requests after a server switch during the attach wait", async (t) => {
+  clearActiveWebCache();
+  setActiveCacheProvider(null);
+  beginDirectoryAttachWait();
+  t.after(() => noteDirectoryAttachSettled());
+  resetStores();
+
+  let calls = 0;
+  t.mock.method(api, "get", async (url: string) => {
+    if (url === "/servers/unread-summary") calls += 1;
+    return { data: [] };
+  });
+  const pending = useServerUnreadSummaryStore.getState().load();
+  await flush();
+  assert.equal(calls, 0, "the request waits for attach");
+  useServerStore.setState({
+    current: serverFixture({ id: "server-b", slug: "b", name: "B" }),
+    serverEpoch: 4,
+  });
+  noteDirectoryAttachSettled();
+  await pending;
+  assert.equal(calls, 1, "a server switch does not drop the account-level summary request");
 });

@@ -21,7 +21,7 @@
 
 import { RUNTIME_API_BASE } from "../desktopRuntimeEnvironment";
 import { forgetOfflineUser } from "../utils/offlineSession";
-import { beginDirectoryAttachWait, noteDirectoryAttachSettled } from "./directoryCache";
+import { beginDirectoryAttachWait, noteDirectoryAttachSettled, noteDirectorySessionUser } from "./directoryCache";
 import { beginActiveCacheBoot, noteActiveCacheSettled, setActiveCacheProvider } from "./messageCache";
 import { initWebCache } from "./webCache";
 import type { WebCacheRuntime } from "./webCache";
@@ -85,7 +85,9 @@ export function wireWebCacheLifecycle(
     // runtime.attach nulls the holder, so a load started in this turn waits
     // for the new scope instead of missing the seed and the write-back.
     const wave = ++attachWave;
-    const alreadyAttached = runtime.scopeId !== null && runtime.serverId === serverId;
+    const alreadyAttached = runtime.scopeId !== null
+      && runtime.serverId === serverId
+      && runtime.userId === userId;
     if (!alreadyAttached) beginDirectoryAttachWait();
     chain = chain
       .then(async () => {
@@ -115,6 +117,7 @@ export function wireWebCacheLifecycle(
   const sync = (): void => {
     const storeUserId = auth.getState().user?.id ?? null;
     const storeServerId = server.getState().current?.id ?? null;
+    noteDirectorySessionUser(storeUserId);
     if (storeUserId === null) {
       // Startup before /me, an offline boot, or a 401 session clear — never
       // a wipe (that rides the wrapped logout action). Attach the persisted
@@ -209,7 +212,13 @@ export async function bootWebCache(): Promise<WebCacheRuntime> {
     setActiveCacheProvider(() =>
       runtime.scopeId === null
         ? null
-        : { repo: runtime.repo, scopeId: runtime.scopeId, serverId: runtime.serverId, generation: runtime.generation },
+        : {
+            repo: runtime.repo,
+            scopeId: runtime.scopeId,
+            serverId: runtime.serverId,
+            userId: runtime.userId,
+            generation: runtime.generation,
+          },
     );
     const auth = useAuthStore as unknown as AuthLike;
     wipeOnExplicitLogout(runtime, auth);

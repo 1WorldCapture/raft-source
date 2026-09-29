@@ -140,12 +140,12 @@ export const useServerUnreadSummaryStore = create<ServerUnreadSummaryState>((set
         // wire payload; the write-back below is guarded by the scope captured
         // after attach so a server switch mid-flight never persists the
         // previous scope's summary into the new one.
-        const serverId = useServerStore.getState().current?.id ?? null;
         const epoch = useServerStore.getState().serverEpoch;
+        const serverId = useServerStore.getState().current?.id ?? null;
         if (serverId && directoryCacheBindPending(serverId)) {
+          // The summary is account-scoped. A server switch while this wait
+          // is in flight must not drop the request.
           await whenDirectoryCacheBound(serverId);
-          if (useServerStore.getState().serverEpoch !== epoch) return;
-          if (useServerStore.getState().current?.id !== serverId) return;
         }
         const requestScope = currentDirectoryCacheScope();
         // Once per epoch. A later load in the same epoch (poll, focus, a

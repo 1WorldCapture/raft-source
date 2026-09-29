@@ -10,7 +10,7 @@ import type {
   ServerEvent,
 } from "./events/serverEvents";
 import { serverPersistence } from "./serverPersistenceRegistry";
-import { cachedServers, currentDirectoryCacheScope, recordServers, serverListCachePending, whenServerListCacheReady } from "../cache/directoryCache";
+import { cachedServers, recordServers, serverListCachePending, serverListScopeForSession, whenServerListCacheReady } from "../cache/directoryCache";
 import { triggerServerReset } from "./serverResetRegistry";
 import { setAuthTraceServerIdGetter } from "../utils/webAuthTrace";
 import { normalizeSidebarPinnedRefs } from "../utils/sidebarPinnedRefs";
@@ -373,8 +373,8 @@ export const useServerStore = create<ServerState>((set, get) => ({
       // scope (the persisted serverId when current is still null on a cold
       // start). Wait for that attach before reading or writing it.
       if (serverListCachePending()) await whenServerListCacheReady();
-      const requestScope = currentDirectoryCacheScope();
-      if (get().servers.length === 0) {
+      const requestScope = serverListScopeForSession();
+      if (get().servers.length === 0 && requestScope) {
         try {
           const cached = await cachedServers();
           if (cached.length > 0 && get().servers.length === 0) {
