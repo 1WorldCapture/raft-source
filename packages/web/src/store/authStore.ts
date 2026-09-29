@@ -20,6 +20,7 @@ import {
 import { clearSlockdevManualLogout, markSlockdevManualLogout } from "../utils/devMode";
 import { useServerStore } from "./serverStore";
 import {
+  forgetOfflineUserOnSubjectChange,
   readOfflineAdmission,
   rememberOfflineUser,
 } from "../utils/offlineSession";
@@ -379,7 +380,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   loadUser: async () => {
     const tryEnterOfflineReadonly = (err: unknown, status: number | undefined): boolean => {
-      const admission = readOfflineAdmission(status, !!get().accessToken, localStorage);
+      const admission = readOfflineAdmission(
+        status,
+        !!(get().accessToken && get().refreshToken),
+        localStorage,
+        accessTokenSubject(get().accessToken),
+      );
       if (!admission) return false;
       set({
         user: admission.user,
@@ -477,7 +483,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       } catch (refreshErr) {
         // Transient refresh failure — keep session and let later calls retry.
         const refreshStatus = (refreshErr as { response?: { status?: number } } | null)?.response?.status;
-        if (!tryEnterOfflineReadonly(refreshErr, refreshStatus)) {
+        // Offline read-only requires a /auth/me the server never answered. A
+        // numeric /auth/me status above means the server REJECTED the session;
+        // a revoked session must not read the cache offline just because the
+        // refresh check then failed without a response.
+        const admitted = typeof status !== "number" && tryEnterOfflineReadonly(refreshErr, refreshStatus);
+        if (!admitted) {
           keepRestoring(refreshErr, !!(get().accessToken && get().refreshToken));
         }
       }
@@ -508,6 +519,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   setTokens: (accessToken, refreshToken) => {
     if (accessTokenSubject(get().accessToken) !== accessTokenSubject(accessToken)) {
       useAnnouncementStore.getState().reset();
+      // A different account's tokens must not keep the previous account's
+      // offline profile snapshot alive (#17 review fix).
+      forgetOfflineUserOnSubjectChange(accessTokenSubject(accessToken), localStorage);
     }
     localStorage.setItem("slock_access_token", accessToken);
     localStorage.setItem("slock_refresh_token", refreshToken);
@@ -577,6 +591,7 @@ authTokenSync.subscribe((tokens) => {
   const current = useAuthStore.getState();
   if (accessTokenSubject(current.accessToken) !== accessTokenSubject(tokens.accessToken)) {
     useAnnouncementStore.getState().reset();
+    forgetOfflineUserOnSubjectChange(accessTokenSubject(tokens.accessToken), localStorage);
   }
   useAuthStore.setState((state) => {
     if (

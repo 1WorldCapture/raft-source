@@ -50,12 +50,21 @@ function user(overrides: Partial<User> = {}): User {
 const httpError = (status: number) => Object.assign(new Error(`HTTP ${status}`), { response: { status } });
 const networkError = () => new Error("Network Error");
 
-function seedStoredSession() {
-  localStorage.setItem("slock_access_token", "stale_access");
+/** Minimal JWT-shaped token whose subject accessTokenSubject() can decode. */
+const fakeAccessJwt = (sub: string) => {
+  const payload = globalThis.btoa(JSON.stringify({ sub, type: "access" }))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+  return `h.${payload}.s`;
+};
+
+function seedStoredSession(accessToken = fakeAccessJwt("restore-user")) {
+  localStorage.setItem("slock_access_token", accessToken);
   localStorage.setItem("slock_refresh_token", "stale_refresh");
   useAuthStore.setState({
     user: null,
-    accessToken: "stale_access",
+    accessToken,
     refreshToken: "stale_refresh",
     initialized: false,
     restoreState: "restoring_auth",
@@ -71,39 +80,23 @@ function seedLastIdentity(snapshot: User = user(), serverId = "srv-1") {
 
 test("network failure with a matching saved identity is the only admission", () => {
   const saved = user();
-  assert.deepEqual(
-    decideOfflineAdmission({
-      status: undefined,
-      hasAccessToken: true,
-      scope: { userId: saved.id, serverId: "srv-1" },
-      user: saved,
-    })?.serverId,
-    "srv-1",
-  );
-  assert.equal(decideOfflineAdmission({
-    status: 401,
-    hasAccessToken: true,
-    scope: { userId: saved.id, serverId: "srv-1" },
-    user: saved,
-  }), null);
-  assert.equal(decideOfflineAdmission({
-    status: 502,
-    hasAccessToken: true,
-    scope: { userId: saved.id, serverId: "srv-1" },
-    user: saved,
-  }), null);
-  assert.equal(decideOfflineAdmission({
+  const admit = {
     status: undefined,
-    hasAccessToken: false,
+    hasStoredSession: true,
+    tokenSubject: saved.id,
     scope: { userId: saved.id, serverId: "srv-1" },
     user: saved,
-  }), null);
-  assert.equal(decideOfflineAdmission({
-    status: undefined,
-    hasAccessToken: true,
-    scope: { userId: "someone-else", serverId: "srv-1" },
-    user: saved,
-  }), null);
+  };
+  assert.deepEqual(decideOfflineAdmission(admit)?.serverId, "srv-1");
+  assert.equal(decideOfflineAdmission({ ...admit, status: 401 }), null);
+  assert.equal(decideOfflineAdmission({ ...admit, status: 502 }), null);
+  assert.equal(decideOfflineAdmission({ ...admit, hasStoredSession: false }), null,
+    "an access token without a refresh token is not a complete stored session");
+  assert.equal(decideOfflineAdmission({ ...admit, tokenSubject: "someone-else" }), null,
+    "a token issued to another account must not read this snapshot");
+  assert.equal(decideOfflineAdmission({ ...admit, tokenSubject: null }), null,
+    "a token whose subject cannot be decoded must not admit");
+  assert.equal(decideOfflineAdmission({ ...admit, scope: { userId: "someone-else", serverId: "srv-1" } }), null);
   assert.equal(parseOfflineUser(JSON.stringify(user({ emailVerified: false }))), null);
   assert.equal(parseOfflineUser(JSON.stringify(user({ name: "pending_abc" }))), null);
 });
@@ -127,7 +120,6 @@ test("loadUser enters offline read-only when /auth/me is unreachable and the las
   assert.equal(state.offlineReadonly, true);
   assert.equal(state.user?.id, "restore-user");
   assert.equal(state.restoreState, "restoring_auth", "retry loop must keep running");
-  assert.equal(state.accessToken, "stale_access");
   assert.equal(state.refreshToken, "stale_refresh");
   assert.equal(state.lastRestoreError?.kind, "network");
 });
@@ -145,7 +137,7 @@ test("502 keeps the restoring screen even when a saved identity exists", async (
   assert.equal(state.offlineReadonly, false);
   assert.equal(state.user, null);
   assert.equal(state.restoreState, "restoring_auth");
-  assert.equal(state.accessToken, "stale_access");
+  assert.equal(state.accessToken, fakeAccessJwt("restore-user"));
 });
 
 test("401 still signs out and does not enter offline read-only", async (t) => {
@@ -193,4 +185,86 @@ test("a later successful /auth/me leaves offline read-only", async (t) => {
   assert.equal(state.restoreState, "authenticated");
   assert.equal(state.user?.displayName, "Back online");
   assert.equal(state.lastRestoreError, null);
+});
+
+test("401 from /auth/me never enters offline read-only even when refresh then fails offline (#17 review fix 1)", async (t) => {
+  seedStoredSession();
+  seedLastIdentity();
+  // /auth/me IS answered — with a rejection. Only the refresh probe dies offline.
+  t.mock.method(api, "get", async () => {
+    throw httpError(401);
+  });
+  const originalAdapter = axios.defaults.adapter;
+  let refreshAttempts = 0;
+  axios.defaults.adapter = (async () => {
+    refreshAttempts += 1;
+    throw networkError();
+  }) as typeof axios.defaults.adapter;
+  try {
+    await useAuthStore.getState().loadUser();
+  } finally {
+    axios.defaults.adapter = originalAdapter;
+  }
+
+  const state = useAuthStore.getState();
+  assert.ok(refreshAttempts > 0, "fixture: the refresh probe actually ran and failed offline");
+  assert.equal(state.offlineReadonly, false, "the server rejected the session — no offline read-only");
+  assert.equal(state.user, null, "the snapshot identity must not be painted");
+  assert.equal(state.restoreState, "restoring_auth", "session kept, the retry loop keeps running");
+});
+
+test("a token issued to another account never reads the snapshot offline (#17 review fix 2)", async (t) => {
+  // A's snapshot and cache scope; B's access token (B's login completed but
+  // /auth/me never answered before the network dropped).
+  seedStoredSession(fakeAccessJwt("user-b"));
+  seedLastIdentity();
+  t.mock.method(api, "get", async () => {
+    throw networkError();
+  });
+
+  await useAuthStore.getState().loadUser();
+
+  const state = useAuthStore.getState();
+  assert.equal(state.offlineReadonly, false, "subject mismatch — no offline read-only");
+  assert.equal(state.user, null, "A's identity must not be painted over B's token");
+  assert.equal(state.restoreState, "restoring_auth");
+});
+
+test("setTokens for a different account drops the previous user's snapshot (#17 review fix 2)", () => {
+  seedLastIdentity();
+
+  useAuthStore.getState().setTokens(fakeAccessJwt("user-b"), "refresh-b");
+  assert.equal(localStorage.getItem(OFFLINE_USER_SNAPSHOT_KEY), null,
+    "an account switch without /auth/me must not keep the old snapshot");
+
+  localStorage.setItem(OFFLINE_USER_SNAPSHOT_KEY, JSON.stringify(user()));
+  useAuthStore.getState().setTokens(fakeAccessJwt("restore-user"), "refresh-2");
+  assert.ok(localStorage.getItem(OFFLINE_USER_SNAPSHOT_KEY),
+    "a same-account token rotation keeps the snapshot");
+});
+
+test("an access token without a refresh token does not enter offline read-only (#17 review fix 3)", async (t) => {
+  const token = fakeAccessJwt("restore-user");
+  localStorage.setItem("slock_access_token", token);
+  useAuthStore.setState({
+    user: null,
+    accessToken: token,
+    refreshToken: null,
+    initialized: false,
+    restoreState: "restoring_auth",
+    lastRestoreError: null,
+    offlineReadonly: false,
+  });
+  seedLastIdentity();
+  t.mock.method(api, "get", async () => {
+    throw networkError();
+  });
+
+  await useAuthStore.getState().loadUser();
+
+  const state = useAuthStore.getState();
+  assert.equal(state.offlineReadonly, false, "an incomplete stored session must not admit");
+  assert.equal(state.user, null);
+  assert.equal(state.restoreState, "signed_out",
+    "no stored session — the restore machine lands on the login screen instead of a fake signed-in read-only");
 });
