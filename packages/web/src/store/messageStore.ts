@@ -1892,8 +1892,6 @@ export const useMessageStore = create<MessageState>((set, get) => ({
           plan.after,
           async (after) => {
             const { data } = await api.get(`/messages/channel/${channelId}?limit=${limit}&after=${after}`);
-            const pageSeqs = rawPageSeqs(data);
-            overlayLoad.page({ after }, pageSeqs, pageSeqs.length >= limit);
             if (requestGeneration !== messageWindowRequestGeneration) return [];
             const msgs = normalizeReceiverPrivateMessagesIfEnabled(
               data.messages ?? data,
@@ -1903,6 +1901,8 @@ export const useMessageStore = create<MessageState>((set, get) => ({
             lastHistoryLimited = (data as { historyLimited?: boolean }).historyLimited ?? false;
             hydrateBundledThreadSummaries(data, ingressContext);
             void recordMessagePage(channelId, data);
+            const pageSeqs = rawPageSeqs(data);
+            overlayLoad.page({ after }, pageSeqs, pageSeqs.length >= limit);
             get().upsertMessagesIntoChannel(channelId, msgs);
             return msgs;
           },
@@ -1951,7 +1951,6 @@ export const useMessageStore = create<MessageState>((set, get) => ({
         return;
       }
       const { data } = await api.get(`/messages/channel/${channelId}?limit=${limit}`);
-      overlayLoad.page({ latest: true }, rawPageSeqs(data), true);
       if (
         get().currentChannelId === channelId &&
         requestGeneration !== messageWindowRequestGeneration
@@ -1968,6 +1967,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
       // Record the fetched page into the cache (coverage grows; summaries
       // ride along) — desktop-data-cache #9.
       void recordMessagePage(channelId, data);
+      overlayLoad.page({ latest: true }, rawPageSeqs(data), true);
       const historyLimited: boolean = data.historyLimited ?? false;
       const hasMore = msgs.length >= limit;
       const maxSeq = Math.max(...msgs.map((m) => m.seq || 0), 0);
@@ -2047,8 +2047,6 @@ export const useMessageStore = create<MessageState>((set, get) => ({
       const { data } = await api.get(
         `/messages/channel/${targetChannelId}?limit=${limit}&before=${minSeq}`
       );
-      const olderSeqs = rawPageSeqs(data);
-      olderLoad.page({ before: minSeq }, olderSeqs, olderSeqs.length >= limit);
       const older = normalizeReceiverPrivateMessagesIfEnabled(
         data.messages ?? data,
         ingressContext,
@@ -2057,6 +2055,8 @@ export const useMessageStore = create<MessageState>((set, get) => ({
       hydrateBundledThreadSummaries(data, ingressContext);
       // History pages extend the cached coverage downwards (#9).
       void recordMessagePage(targetChannelId, data);
+      const olderSeqs = rawPageSeqs(data);
+      olderLoad.page({ before: minSeq }, olderSeqs, olderSeqs.length >= limit);
       const historyLimited: boolean = data.historyLimited ?? false;
       const hasMoreResult = older.length >= limit;
       const existingBucket = getBucket(get().channelMessages, targetChannelId);

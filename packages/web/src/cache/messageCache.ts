@@ -192,6 +192,16 @@ export async function recordMessagePage(channelId: string, data: unknown): Promi
   const page = pageForCache(data);
   if (page.messages.length > 0) {
     await cache.repo.appendPage(cache.scopeId, channelId, page);
+    // These rows are fresh from the network and count as refreshed for this
+    // boot (overlayCoverage), so their dynamic data must not stay shadowed by
+    // an older overlay (painting prefers the overlay). Same last-write-wins
+    // gate as message:updated: a newer live overlay is kept.
+    for (const message of page.messages) {
+      const { id: _id, seq: _seq, channelId: _channelId, ...rest } = message.raw as RawRecord & { seq?: unknown; channelId?: unknown };
+      const updatedAt = typeof message.raw.updatedAt === "string" ? message.raw.updatedAt : null;
+      if (!updatedAt) continue;
+      await cache.repo.applyMessageUpdated(cache.scopeId, channelId, { seq: message.seq, raw: rest as RawRecord, updatedAt });
+    }
   }
   await recordThreadSummaries(channelId, data);
 }

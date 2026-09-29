@@ -16,7 +16,7 @@ import {
   resetOverlayRefreshForTest,
   setOverlayRefreshClockForTest,
 } from "../src/cache/overlayRefresh";
-import { activeWebCache, clearActiveWebCache, setActiveWebCache } from "../src/cache/messageCache";
+import { activeWebCache, clearActiveWebCache, recordMessagePage, setActiveWebCache } from "../src/cache/messageCache";
 import { createWebCacheRepo } from "../src/cache/webCacheRepo";
 import { buildMainLayoutSocketBindings } from "../src/store/socketBridge";
 import type { MainLayoutSocketBridgeSocket, SocketBinding } from "../src/store/socketBridge";
@@ -500,4 +500,93 @@ test("older history loaded over the network is already fresh when scrolled into 
   refreshVisibleOverlayPages("c1", ["m51", "m60", "m99"]);
   await flush();
   assert.equal(server.urls.length, afterOlder, "the before= page proved seqs 51-100");
+});
+
+function deferredServer(seqs: number[]) {
+  const ordered = [...seqs].sort((a, b) => a - b);
+  const urls: string[] = [];
+  const held: Array<() => void> = [];
+  let hold = true;
+  const handler = (url: string) => new Promise((resolve) => {
+    urls.push(url);
+    const params = new URL(url, "http://local").searchParams;
+    const after = params.get("after");
+    const page = after === null
+      ? ordered.slice(-OVERLAY_PAGE_SIZE)
+      : ordered.filter((seq) => seq > Number(after)).slice(0, OVERLAY_PAGE_SIZE);
+    const respond = () => resolve({ data: { messages: page.map((seq) => message(seq)) } });
+    if (hold) held.push(respond);
+    else respond();
+  });
+  return {
+    urls,
+    handler,
+    releaseAll() {
+      hold = false;
+      for (const respond of held.splice(0)) respond();
+    },
+  };
+}
+
+test("the open refresh waits for the store's catch-up drain and reuses its after= coverage", SERIAL, async (t) => {
+  await attach();
+  const server = deferredServer(Array.from({ length: 60 }, (_, index) => index + 1));
+  t.mock.method(api, "get", server.handler);
+  // A previous session cached seqs 1-50 (coverage), so the load drains after=50.
+  await recordMessagePage("c1", { messages: Array.from({ length: 50 }, (_, index) => message(index + 1)) });
+  resetStore();
+  useMessageStore.setState({ currentChannelId: "c1" });
+
+  const load = useMessageStore.getState().loadMessages("c1");
+  await flush();
+  const refresh = refreshLatestOverlayPages("c1");
+  await flush();
+  assert.deepEqual(server.urls.map(afterParam), [50], "the refresh waits while the drain is in flight");
+
+  server.releaseAll();
+  await load;
+  await refresh;
+  await flush();
+  assert.deepEqual(server.urls.map(afterParam), [50, 0], "after the drain only the uncovered 1-50 are refreshed");
+
+  refreshVisibleOverlayPages("c1", ["m55", "m60"]);
+  await flush();
+  assert.equal(server.urls.length, 2, "drained rows 51-60 count as refreshed");
+});
+
+test("a store load that straddles a disconnect records no coverage", SERIAL, async (t) => {
+  await attach();
+  const server = deferredServer(Array.from({ length: 10 }, (_, index) => index + 1));
+  t.mock.method(api, "get", server.handler);
+  resetStore();
+  useMessageStore.setState({ currentChannelId: "c1" });
+
+  const load = useMessageStore.getState().loadMessages("c1");
+  await flush();
+  await invalidateOverlayMarksForDisconnect();
+  server.releaseAll();
+  await load;
+  await flush();
+
+  refreshVisibleOverlayPages("c1", ["m5"]);
+  await flush();
+  assert.equal(server.urls.length, 2, "the pre-disconnect page is not trusted; the row refreshes");
+});
+
+test("a fresh store load replaces an older cached overlay but keeps a newer one", SERIAL, async () => {
+  const { repo, scopeId } = await attach();
+  await repo.appendPage(scopeId, "c1", { messages: [1, 2].map((seq) => ({ seq, id: `m${seq}`, raw: message(seq) as unknown as Record<string, unknown> })) });
+  await repo.applyMessageUpdated(scopeId, "c1", { seq: 1, raw: { reactions: [{ emoji: "👀", count: 1 }] }, updatedAt: "2026-09-29T00:00:01.000Z" });
+  await repo.applyMessageUpdated(scopeId, "c1", { seq: 2, raw: { reactions: [{ emoji: "🔥", count: 1 }] }, updatedAt: "2026-09-29T00:00:09.000Z" });
+
+  await recordMessagePage("c1", {
+    messages: [
+      message(1, { reactions: [{ emoji: "🎉", count: 2 }], updatedAt: "2026-09-29T00:00:05.000Z" }),
+      message(2, { reactions: [{ emoji: "🎉", count: 2 }], updatedAt: "2026-09-29T00:00:05.000Z" }),
+    ],
+  });
+  const rows = await repo.getLatestMessages(scopeId, "c1", 10);
+  const emoji = (seq: number) => (rows.find((row) => row.seq === seq)?.overlay as { reactions?: Array<{ emoji: string }> } | null)?.reactions?.[0]?.emoji;
+  assert.equal(emoji(1), "🎉", "the older overlay no longer shadows the fresh row");
+  assert.equal(emoji(2), "🔥", "a newer live overlay is kept");
 });
