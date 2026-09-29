@@ -39,6 +39,7 @@ const EXPECTED_MAIN_LAYOUT_SOCKET_EVENTS = [
   "thread:updated",
   "thread:followers-updated",
   "connect",
+  "disconnect",
   "rooms:joined",
   "sync:resume:response",
   "heartbeat",
