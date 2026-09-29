@@ -46,6 +46,7 @@ import {
   seedChannel,
   whenActiveCache,
 } from "../cache/messageCache";
+import { beginChannelNetworkLoad } from "../cache/overlayCoverage";
 import { drainAfterPages } from "@botiverse/raft-shared/src/cacheBoot.js";
 import {
   getAcceptedReadState,
@@ -249,6 +250,13 @@ function incompleteReadStateProjection(): ReadStateProjection {
   };
 }
 // Stryker restore all
+
+/** Seqs of a raw messages page (before receiver-private filtering). */
+function rawPageSeqs(data: unknown): number[] {
+  const record = data as { messages?: unknown } | null;
+  const rows = Array.isArray(record?.messages) ? record.messages : Array.isArray(data) ? data : [];
+  return (rows as Array<{ seq?: unknown }>).flatMap((row) => (typeof row?.seq === "number" ? [row.seq] : []));
+}
 
 export type MessagesPageThreadSummaryPayload = {
   threadSummariesByParentMessageId?: Record<string, ThreadSummary>;
@@ -1856,6 +1864,9 @@ export const useMessageStore = create<MessageState>((set, get) => ({
     }
 
     const ingressContext = captureReceiverPrivateIngressContext(get().currentUserId);
+    // Pages fetched here are fresh dynamic data: record them so the overlay
+    // refresh does not fetch the same rows again (desktop-data-cache #7).
+    const overlayLoad = beginChannelNetworkLoad(channelId);
     try {
       const limit = 50;
       // Cache fast path (desktop-data-cache #9): with a cached tail the pane
@@ -1890,6 +1901,8 @@ export const useMessageStore = create<MessageState>((set, get) => ({
             lastHistoryLimited = (data as { historyLimited?: boolean }).historyLimited ?? false;
             hydrateBundledThreadSummaries(data, ingressContext);
             void recordMessagePage(channelId, data);
+            const pageSeqs = rawPageSeqs(data);
+            overlayLoad.page({ after }, pageSeqs, pageSeqs.length >= limit);
             get().upsertMessagesIntoChannel(channelId, msgs);
             return msgs;
           },
@@ -1954,6 +1967,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
       // Record the fetched page into the cache (coverage grows; summaries
       // ride along) — desktop-data-cache #9.
       void recordMessagePage(channelId, data);
+      overlayLoad.page({ latest: true }, rawPageSeqs(data), true);
       const historyLimited: boolean = data.historyLimited ?? false;
       const hasMore = msgs.length >= limit;
       const maxSeq = Math.max(...msgs.map((m) => m.seq || 0), 0);
@@ -2005,6 +2019,8 @@ export const useMessageStore = create<MessageState>((set, get) => ({
         channelWindowMeta: updateWindowMetaRecord(state.channelWindowMeta, channelId, { loading: false }),
         ...(state.currentChannelId === channelId ? { loading: false } : {}),
       }));
+    } finally {
+      overlayLoad.end();
     }
   },
 
@@ -2024,6 +2040,8 @@ export const useMessageStore = create<MessageState>((set, get) => ({
       channelWindowMeta: updateWindowMetaRecord(state.channelWindowMeta, targetChannelId, { loadingOlder: true }),
     }));
     const ingressContext = captureReceiverPrivateIngressContext(state.currentUserId);
+    // Started before the request so a disconnect in flight voids its coverage.
+    const olderLoad = beginChannelNetworkLoad(targetChannelId);
     try {
       const limit = 50;
       const { data } = await api.get(
@@ -2037,6 +2055,8 @@ export const useMessageStore = create<MessageState>((set, get) => ({
       hydrateBundledThreadSummaries(data, ingressContext);
       // History pages extend the cached coverage downwards (#9).
       void recordMessagePage(targetChannelId, data);
+      const olderSeqs = rawPageSeqs(data);
+      olderLoad.page({ before: minSeq }, olderSeqs, olderSeqs.length >= limit);
       const historyLimited: boolean = data.historyLimited ?? false;
       const hasMoreResult = older.length >= limit;
       const existingBucket = getBucket(get().channelMessages, targetChannelId);
@@ -2073,6 +2093,8 @@ export const useMessageStore = create<MessageState>((set, get) => ({
         loadingOlder: targetChannelId === state.currentChannelId ? false : state.loadingOlder,
         channelWindowMeta: updateWindowMetaRecord(state.channelWindowMeta, targetChannelId, { loadingOlder: false }),
       }));
+    } finally {
+      olderLoad.end();
     }
   },
 
