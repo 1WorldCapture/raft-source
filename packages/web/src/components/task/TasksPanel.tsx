@@ -1068,7 +1068,9 @@ export default function TasksPanel({ channelId, onOpenTask, onOpenTaskInNewTab, 
         data-task-virtual-scroll
         className="flex-1 overflow-auto bg-white p-4 safe-bottom"
       >
-        {loading ? (
+        {/* Skeleton only while there is nothing to show: a cache seed (#10)
+            may already paint rows while the network refresh is in flight. */}
+        {loading && sortedTasks.length === 0 ? (
           <div className="flex flex-col gap-2" aria-hidden="true">
             {Array.from({ length: 5 }, (_, i) => (
               <SkeletonRow

@@ -9,6 +9,12 @@ import type {
   TaskMetadataUpdate,
 } from "../utils/taskMetadata";
 import { registerServerReset } from "./serverResetRegistry";
+import {
+  readSeededServerTasks,
+  readSeededChannelTasks,
+  persistServerTasksSnapshot,
+  persistChannelTasksSnapshot,
+} from "../cache/taskBoardCache";
 import { emitStateTransitionTrace } from "../utils/stateTransitionTrace";
 import { taskTraceStateChanged, transitionOutcomeDetail } from "../utils/stateTransitionChange";
 
@@ -346,6 +352,24 @@ export const useTaskStore = create<TaskState>((set, get) => ({
       },
     }));
     try {
+      // Cache seed (#10): cached rows for this channel paint while the fetch
+      // is in flight (cold start, offline included). The bucket is seeded only
+      // when nothing else has populated it (a live event wins) and the channel
+      // is not already loaded — loadedByChannelId stays false so the network
+      // response still commits and corrects the seed.
+      const seeded = await readSeededChannelTasks(channelId);
+      if (seeded && seeded.length > 0
+        && !get().loadedByChannelId[channelId]
+        && get().tasksByChannelId[channelId] === undefined) {
+        set((state) => ({
+          ...(state.currentChannelId === channelId ? { tasks: seeded } : {}),
+          tasksByChannelId: {
+            ...state.tasksByChannelId,
+            [channelId]: seeded,
+          },
+          ...hydrateTaskMetadataState(state, seeded),
+        }));
+      }
       const { data } = await api.get(`/tasks/channel/${channelId}`);
       const tasks = (data as { tasks: Task[] }).tasks;
       set((state) => reduceTaskWithTrace(
@@ -369,6 +393,10 @@ export const useTaskStore = create<TaskState>((set, get) => ({
           ...hydrateTaskMetadataState(current, tasks),
         }),
       ));
+      // Cache write-back (#10): the committed channel list refreshes cached
+      // rows (revision-gated) and purges this channel's rows it no longer
+      // contains. Fire-and-forget — never blocks the UI path.
+      void persistChannelTasksSnapshot(channelId, tasks);
     } catch (err) {
       console.error("Failed to load tasks:", err);
       set((state) => ({
@@ -418,6 +446,21 @@ export const useTaskStore = create<TaskState>((set, get) => ({
       set({ serverLoading: true });
       loadTouchedIds = touched;
       try {
+        // Cache seed (#10): cached rows paint the board while the fetch is in
+        // flight (cold start, offline included). Seeds never set
+        // serverTasksLoaded — completeness still requires a committed load —
+        // and live mutations during the fetch merge over the seed exactly as
+        // they would over an empty list (touched-set semantics).
+        const seeded = await readSeededServerTasks();
+        if (seeded && seeded.length > 0
+          && !get().serverTasksLoaded
+          && get().serverTasks.length === 0
+          && get().serverTasksGeneration === startGeneration) {
+          set((state) => ({
+            serverTasks: seeded,
+            ...hydrateTaskMetadataState(state, seeded),
+          }));
+        }
         const { data } = await api.get("/tasks/server");
         const snapshot = (data as { tasks: Task[] }).tasks;
         if (get().serverTasksGeneration !== startGeneration) {
@@ -437,6 +480,11 @@ export const useTaskStore = create<TaskState>((set, get) => ({
             ...hydrateTaskMetadataState(current, merged),
           }),
         ));
+        // Cache write-back (#10): the committed (lossless-merged) snapshot
+        // refreshes cached rows through the revision gate and purges stale
+        // channel|joint rows by absence. Fire-and-forget — the store has
+        // already committed its own state.
+        void persistServerTasksSnapshot(merged);
       } catch (err) {
         console.error("Failed to load server tasks:", err);
       } finally {
