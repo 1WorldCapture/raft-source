@@ -20,6 +20,7 @@ import {
   contiguousRuns,
   mergeRanges,
   overlayIsNewer,
+  overlayWatermark,
   pageRange,
   taskRevisionGate,
   type MessageWindowCoverage,
@@ -256,7 +257,7 @@ export function createCacheRepo(deps: CacheRepoDeps) {
     await db.write(async (tx) => {
       const ts = now();
       for (const message of page.messages) {
-        await writeOverlayTx(tx, scopeId, channelId, message.seq, message.raw, message.updatedAt ?? ts, ts);
+        await writeOverlayTx(tx, scopeId, channelId, message.seq, message.raw, message.updatedAt ?? null);
       }
       for (const [parentMessageId, summary] of Object.entries(page.threadSummaries ?? {})) {
         await writeThreadSummaryTx(tx, scopeId, channelId, parentMessageId, summary, ts);
@@ -311,8 +312,7 @@ export function createCacheRepo(deps: CacheRepoDeps) {
     message: { seq: number; raw: RawRecord; updatedAt?: string | null },
   ): Promise<void> {
     await db.write(async (tx) => {
-      const ts = now();
-      await writeOverlayTx(tx, scopeId, channelId, message.seq, message.raw, message.updatedAt ?? ts, ts);
+      await writeOverlayTx(tx, scopeId, channelId, message.seq, message.raw, message.updatedAt ?? null);
     });
   }
 
@@ -563,17 +563,16 @@ export function createCacheRepo(deps: CacheRepoDeps) {
     channelId: string,
     seq: number,
     raw: RawRecord,
-    effectiveAt: string,
-    writeTs: string,
+    incomingUpdatedAt: string | null,
   ): Promise<void> {
     const stored = db.all(
       "SELECT updatedAt FROM message_overlays WHERE scopeId = ? AND channelId = ? AND seq = ?",
       [scopeId, channelId, seq],
     )[0];
-    if (stored) {
-      const storedUpdatedAt = typeof stored.updatedAt === "string" ? stored.updatedAt : null;
-      if (!overlayIsNewer(storedUpdatedAt, effectiveAt)) return;
-    }
+    const storedUpdatedAt = typeof stored?.updatedAt === "string" ? stored.updatedAt : null;
+    if (stored && !overlayIsNewer(storedUpdatedAt, incomingUpdatedAt)) return;
+    // updatedAt holds the SERVER watermark (schema v2), not the local write time.
+    const writeTs = overlayWatermark(storedUpdatedAt, incomingUpdatedAt);
     await tx.run(
       `INSERT INTO message_overlays (scopeId, channelId, seq, raw, updatedAt)
        VALUES (?, ?, ?, ?, ?)

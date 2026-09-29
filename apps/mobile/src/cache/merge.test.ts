@@ -5,6 +5,7 @@ import {
   contiguousRuns,
   mergeRanges,
   overlayIsNewer,
+  overlayWatermark,
   overlayPageNeedsRefresh,
   pageRange,
   taskRevisionGate,
@@ -93,11 +94,20 @@ test("contiguousRuns rebuilds true coverage", () => {
   assert.deepEqual(contiguousRuns([42]), [{ fromSeq: 42, throughSeq: 42 }]);
 });
 
-test("overlayIsNewer is last-write-wins with a stale guard", () => {
+test("overlayIsNewer is last-write-wins with a stale guard; ties go to the later write", () => {
   assert.equal(overlayIsNewer(null, "2026-01-01T00:00:00Z"), true);
   assert.equal(overlayIsNewer("2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z"), true);
   assert.equal(overlayIsNewer("2026-01-02T00:00:00Z", "2026-01-01T00:00:00Z"), false);
-  assert.equal(overlayIsNewer("2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"), false);
+  // Reactions change a message without bumping updatedAt.
+  assert.equal(overlayIsNewer("2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"), true);
+  assert.equal(overlayIsNewer("2026-01-01T00:00:00Z", null), true, "no updatedAt carries no staleness evidence");
+  assert.equal(overlayIsNewer("", "2026-01-01T00:00:00Z"), true, "unknown watermark");
+});
+
+test("overlayWatermark keeps a server time, never falls back to a local clock", () => {
+  assert.equal(overlayWatermark("2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z"), "2026-01-02T00:00:00Z");
+  assert.equal(overlayWatermark("2026-01-01T00:00:00Z", null), "2026-01-01T00:00:00Z");
+  assert.equal(overlayWatermark(null, null), "");
 });
 
 test("taskRevisionGate only moves forward", () => {

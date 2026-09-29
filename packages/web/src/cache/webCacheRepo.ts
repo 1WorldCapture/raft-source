@@ -21,6 +21,7 @@ import {
   canExtendTailWithLive,
   mergeRanges,
   overlayIsNewer,
+  overlayWatermark,
   pageRange,
   taskRevisionGate,
 } from "@botiverse/raft-shared/src/cacheMerge.js";
@@ -39,6 +40,18 @@ import type {
   ThreadSummaryInput,
 } from "@botiverse/raft-shared/src/cacheRepoContract.js";
 import type { Range } from "@botiverse/raft-shared/src/cacheMerge.js";
+
+/** Same gate and server-time watermark as the IndexedDB repo (contract parity). */
+function writeOverlay(
+  overlays: Map<number, { raw: RawRecord; updatedAt: string | null }>,
+  seq: number,
+  raw: RawRecord,
+  incomingUpdatedAt: string | null,
+): void {
+  const stored = overlays.get(seq);
+  if (stored && !overlayIsNewer(stored.updatedAt, incomingUpdatedAt)) return;
+  overlays.set(seq, { raw, updatedAt: overlayWatermark(stored?.updatedAt, incomingUpdatedAt) });
+}
 
 type ScopeState = {
   channels: Map<string, { type: string; lastMessageAt: string | null; raw: RawRecord }>;
@@ -264,7 +277,7 @@ export function createWebCacheRepo(deps: WebCacheRepoDeps = {}): CacheRepo {
         state.overlays.set(channelId, overlays);
       }
       for (const message of page.messages) {
-        overlays.set(message.seq, { raw: message.raw, updatedAt: message.updatedAt ?? ts });
+        writeOverlay(overlays, message.seq, message.raw, message.updatedAt ?? null);
       }
       for (const [parentMessageId, summary] of Object.entries(page.threadSummaries ?? {})) {
         state.threadSummaries.set(`${channelId}:${parentMessageId}`, summary);
@@ -300,9 +313,7 @@ export function createWebCacheRepo(deps: WebCacheRepoDeps = {}): CacheRepo {
         overlays = new Map();
         state.overlays.set(channelId, overlays);
       }
-      const stored = overlays.get(message.seq);
-      if (stored && !overlayIsNewer(stored.updatedAt, message.updatedAt ?? now())) return;
-      overlays.set(message.seq, { raw: message.raw, updatedAt: message.updatedAt ?? now() });
+      writeOverlay(overlays, message.seq, message.raw, message.updatedAt ?? null);
     },
 
     async applyThreadSummary(scopeId: number, summary: ThreadSummaryInput): Promise<void> {

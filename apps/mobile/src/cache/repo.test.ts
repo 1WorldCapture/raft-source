@@ -134,6 +134,33 @@ test("overlays hydrate messages and stale updates lose", async () => {
   assert.deepEqual(repo.getLatestMessagesSync(scope, "c1", 1)[0]?.overlay?.reactions, [{ emoji: "🎉" }]);
 });
 
+test("reaction-only updates with an unchanged updatedAt reach the cache; the watermark is server time", async () => {
+  const { repo, setClock } = makeFixture();
+  const scope = repo.openScopeSync(SCOPE_A.origin, SCOPE_A.userId, SCOPE_A.serverId);
+  await repo.appendPage(scope, "c1", { messages: [msg(10)] });
+  const serverUpdatedAt = new Date(1_000).toISOString();
+
+  // The local clock runs far ahead of the message's server updatedAt: the old
+  // schema stored this local time and then rejected every later reaction.
+  setClock(9_000_000);
+  await repo.applyMessageUpdated(scope, "c1", { seq: 10, raw: msg(10, { reactions: [{ emoji: "👀" }] }).raw, updatedAt: serverUpdatedAt });
+  await repo.applyMessageUpdated(scope, "c1", { seq: 10, raw: msg(10, { reactions: [{ emoji: "🎉" }] }).raw, updatedAt: serverUpdatedAt });
+  assert.deepEqual(repo.getLatestMessagesSync(scope, "c1", 1)[0]?.overlay?.reactions, [{ emoji: "🎉" }]);
+
+  await repo.applyOverlayPage(scope, "c1", {
+    fromSeq: 10,
+    throughSeq: 10,
+    messages: [{ seq: 10, raw: msg(10, { reactions: [{ emoji: "🔥" }] }).raw, updatedAt: serverUpdatedAt }],
+  });
+  assert.deepEqual(repo.getLatestMessagesSync(scope, "c1", 1)[0]?.overlay?.reactions, [{ emoji: "🔥" }], "a refreshed page with the same updatedAt lands");
+
+  // No updatedAt: accepted, and the server watermark is kept for the next gate.
+  await repo.applyMessageUpdated(scope, "c1", { seq: 10, raw: msg(10, { reactions: [{ emoji: "✅" }] }).raw, updatedAt: null });
+  assert.deepEqual(repo.getLatestMessagesSync(scope, "c1", 1)[0]?.overlay?.reactions, [{ emoji: "✅" }]);
+  await repo.applyMessageUpdated(scope, "c1", { seq: 10, raw: msg(10, { reactions: [] }).raw, updatedAt: new Date(500).toISOString() });
+  assert.deepEqual(repo.getLatestMessagesSync(scope, "c1", 1)[0]?.overlay?.reactions, [{ emoji: "✅" }], "an older updatedAt still loses");
+});
+
 test("thread summaries persist and channel deletion cascades into threads", async () => {
   const { repo } = makeFixture();
   const scope = repo.openScopeSync(SCOPE_A.origin, SCOPE_A.userId, SCOPE_A.serverId);

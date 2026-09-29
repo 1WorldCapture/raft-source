@@ -185,13 +185,62 @@ export function pageForCache(data: unknown): AppendPage {
   return rawPageForCache(data, rowToCacheRow);
 }
 
-/** Record one fetched page (grows coverage) + its bundled thread summaries. */
-export async function recordMessagePage(channelId: string, data: unknown): Promise<void> {
+// Local order of live overlay writes (message:updated). Reactions do not
+// bump messages.updated_at on the server (messageReactionService
+// mutateMessageReaction touches only reaction/version tables), so updatedAt
+// cannot tell a fresh page from an older live overlay. A page instead wins
+// unless the row got a live write after the page's request started.
+// In memory only: tabs do not share marks, so a page in one tab can still
+// overwrite a live write that only another tab saw (accepted for now).
+let liveWriteCounter = 0;
+const liveWriteMarks = new Map<string, number>();
+
+function liveWriteKey(scopeId: number, channelId: string, seq: number): string {
+  return `${scopeId}:${channelId}:${seq}`;
+}
+
+/** Capture before a page request; pass to recordMessagePage with the response. */
+export function captureLiveWriteMark(): number {
+  return liveWriteCounter;
+}
+
+/** True when this row got a live overlay write after `mark` was captured. */
+export function liveWriteAfter(scopeId: number, channelId: string, seq: number, mark: number): boolean {
+  return (liveWriteMarks.get(liveWriteKey(scopeId, channelId, seq)) ?? -1) > mark;
+}
+
+/**
+ * Record one fetched page (grows coverage) + its bundled thread summaries.
+ * With `requestMark` (captured before the request) the rows also replace
+ * their cached overlay: they are the server's state at request time and
+ * count as refreshed for this boot (overlayCoverage), so an older overlay
+ * must not keep shadowing them (painting prefers the overlay). Rows with a
+ * live write after the request started keep that newer overlay.
+ */
+export async function recordMessagePage(channelId: string, data: unknown, requestMark?: number): Promise<void> {
   const cache = activeWebCache();
   if (!cache) return;
   const page = pageForCache(data);
   if (page.messages.length > 0) {
     await cache.repo.appendPage(cache.scopeId, channelId, page);
+    if (requestMark !== undefined) {
+      const fresh = page.messages.filter((message) => !liveWriteAfter(cache.scopeId, channelId, message.seq, requestMark));
+      if (fresh.length > 0 && activeWebCache() === cache) {
+        await cache.repo.applyOverlayPage(cache.scopeId, channelId, {
+          fromSeq: Math.min(...fresh.map((message) => message.seq)),
+          throughSeq: Math.max(...fresh.map((message) => message.seq)),
+          messages: fresh.map((message) => {
+            const { id: _id, seq: _seq, channelId: _channelId, ...rest } = message.raw as RawRecord & { seq?: unknown; channelId?: unknown };
+            return {
+              seq: message.seq,
+              id: message.id,
+              raw: rest as RawRecord,
+              updatedAt: typeof message.raw.updatedAt === "string" ? message.raw.updatedAt : null,
+            };
+          }),
+        });
+      }
+    }
   }
   await recordThreadSummaries(channelId, data);
 }
@@ -324,6 +373,8 @@ export function noteMessageUpdated(
   if (!cache) return;
   if (typeof message.seq !== "number" || !Number.isFinite(message.seq) || message.seq <= 0) return;
   const { id: _id, seq, channelId, ...rest } = message;
+  liveWriteCounter += 1;
+  liveWriteMarks.set(liveWriteKey(cache.scopeId, channelId, seq), liveWriteCounter);
   void cache.repo.applyMessageUpdated(cache.scopeId, channelId, {
     seq,
     raw: rest as RawRecord,
