@@ -156,13 +156,13 @@ export default function HomeScreen() {
         return;
       }
       setCurrentServerRole(selected.role ?? null);
-      // Plan-driven history prune (#client-data-cache task #4): the plan now
-      // rides on GET /servers; free servers keep 30 days locally, mirroring
-      // the server-side cutoff. Idempotent DELETE — safe on every load.
+      // History prune: GET /servers now carries the server's authoritative
+      // messageHistoryDays (falls back to the plan table on older servers).
+      // Idempotent DELETE — safe on every load.
       try {
         const runtime = getCacheRuntime();
         const scope = runtime.scopeFor(selected.id);
-        if (scope !== null) await pruneToHistoryLimit(runtime.repo, scope, selected.plan);
+        if (scope !== null) await pruneToHistoryLimit(runtime.repo, scope, selected);
       } catch {
         // Cache unavailable — the server-side limit still applies.
       }

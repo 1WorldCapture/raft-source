@@ -47,7 +47,7 @@ import {
   type ServerSetupAction,
 } from "../services/serverSetupStateService.js";
 import { handleMachineLocalRouting, sendMachineAffinityUnavailable } from "../machineLocalReplay.js";
-import { asMachineId, COMPOSER_RESOURCE_REFERENCES_FEATURE_FLAG_KEY, COMPUTER_CAPABILITY_SUPERVISOR_MUTATIONS, currentDate, INVALID_EMAIL_MESSAGE, PUBLIC_SERVER_FEATURE_FLAG_KEY, RUNTIME_ACCOUNT_USAGE_FEATURE_FLAG_KEY, RUNTIME_ACCOUNT_USAGE_PROVIDERS, SERVER_GUEST_FEATURE_FLAG_KEY, SERVER_SYSTEM_NOTIFICATIONS_CONTRACT_VERSION, validateEmailAddress, validateServerSlug, MANAGEABLE_SERVER_ROLES, type ManageableServerRole, type RuntimeAccountUsageProvider, type ServerCapability, type ServerPlan, type ServerRole } from "@botiverse/raft-shared";
+import { asMachineId, COMPOSER_RESOURCE_REFERENCES_FEATURE_FLAG_KEY, COMPUTER_CAPABILITY_SUPERVISOR_MUTATIONS, currentDate, getEffectiveLimits, INVALID_EMAIL_MESSAGE, PUBLIC_SERVER_FEATURE_FLAG_KEY, RUNTIME_ACCOUNT_USAGE_FEATURE_FLAG_KEY, RUNTIME_ACCOUNT_USAGE_PROVIDERS, SERVER_GUEST_FEATURE_FLAG_KEY, SERVER_SYSTEM_NOTIFICATIONS_CONTRACT_VERSION, validateEmailAddress, validateServerSlug, MANAGEABLE_SERVER_ROLES, type ManageableServerRole, type RuntimeAccountUsageProvider, type ServerCapability, type ServerPlan, type ServerRole } from "@botiverse/raft-shared";
 import { canInspectAgentPrivateSurfaces } from "./agents.js";
 import { actorRoleHasServerCapability, getActorServerRoleInServer } from "../lib/actorPermissions.js";
 import { createScopeAttestation } from "../lib/scopeAttestation.js";
@@ -720,7 +720,19 @@ function hydrateSidebarPinnedResponse(
 serverRouter.get("/", async (req, res) => {
   try {
     const servers = await serverService.getOrderedUserServers(req.userId!);
-    res.json(servers);
+    // Expose each server's plan history window so client caches prune to the
+    // server's real policy instead of a hard-coded guess. messageHistoryDays
+    // is -1 for unlimited (historyCutoff null).
+    const now = new Date();
+    res.json(servers.map((server) => {
+      const plan = ((server as { plan?: string | null }).plan || "free") as ServerPlan;
+      const historyCutoff = getHistoryCutoff(plan, now);
+      return {
+        ...server,
+        messageHistoryDays: getEffectiveLimits(plan, now).messageHistoryDays,
+        historyCutoff: historyCutoff ? historyCutoff.toISOString() : null,
+      };
+    }));
   } catch {
     res.status(500).json({ error: "Failed to list servers" });
   }
