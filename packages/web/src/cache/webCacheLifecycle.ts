@@ -56,14 +56,23 @@ export function wireWebCacheLifecycle(runtime: WebCacheRuntime, auth: AuthLike, 
   };
 }
 
-/** App bootstrap (main.tsx): create the runtime singleton and wire the real stores. */
+/**
+ * App bootstrap (main.tsx): create the runtime singleton, wire the real
+ * stores, and hand #9's message-cache bridge its live holder — the provider
+ * is evaluated on every access, so server switches and logout flow through
+ * without this module owning any of that lifecycle.
+ */
 export async function bootWebCache(): Promise<WebCacheRuntime> {
   const runtime = await initWebCache();
   // Lazy: authStore/serverStore evaluate browser globals at module scope.
-  const [{ useAuthStore }, { useServerStore }] = await Promise.all([
+  const [{ useAuthStore }, { useServerStore }, { setActiveCacheProvider }] = await Promise.all([
     import("../store/authStore"),
     import("../store/serverStore"),
+    import("./messageCache"),
   ]);
+  setActiveCacheProvider(() =>
+    runtime.scopeId === null ? null : { repo: runtime.repo, scopeId: runtime.scopeId },
+  );
   wireWebCacheLifecycle(
     runtime,
     useAuthStore as unknown as AuthLike,

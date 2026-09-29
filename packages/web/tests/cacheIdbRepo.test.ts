@@ -11,7 +11,7 @@ import { openDB } from "idb";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createIdbCacheRepo, WEB_CACHE_DB_NAME, WEB_CACHE_SCHEMA_VERSION } from "../src/cache/idbRepo";
-import { createNoopCacheRepo, createWebCacheRuntime } from "../src/cache/webCache";
+import { createWebCacheRuntime } from "../src/cache/webCache";
 import { wireWebCacheLifecycle } from "../src/cache/webCacheLifecycle";
 import { RUNTIME_API_BASE } from "../src/desktopRuntimeEnvironment";
 
@@ -244,23 +244,20 @@ test("schema downgrade: a newer-version database is deleted and rebuilt", async 
   assert.deepEqual(await r.getKv(s, "after"), { rebuilt: true }, "repo rebuilt the database at its own version");
 });
 
-test("degradation: without indexedDB the runtime falls back to the no-op repo", async () => {
+test("degradation: without indexedDB the runtime falls back to the in-memory repo", async () => {
   const globals = globalThis as Globals;
   const saved = globals.indexedDB;
   delete globals.indexedDB;
   try {
     const runtime = await createWebCacheRuntime();
-    assert.equal(runtime.available, false);
-    await runtime.attach("https://raft.example", "user-1", "srv-a");
-    assert.deepEqual(await runtime.repo.getKv(0, "any"), null, "noop reads are empty");
-    await runtime.repo.putKv(0, "any", { x: 1 });
-    assert.deepEqual(await runtime.repo.getKv(0, "any"), null, "noop writes are discarded");
+    assert.equal(runtime.available, false, "IndexedDB unavailable is reported");
+    // #9's in-memory repo keeps session-level cache semantics in RAM.
+    const scope = await runtime.attach("https://raft.example", "user-1", "srv-a");
+    await runtime.repo.putKv(scope, "session", { ok: true });
+    assert.deepEqual(await runtime.repo.getKv(scope, "session"), { ok: true }, "RAM-backed reads work");
   } finally {
     if (saved) globals.indexedDB = saved;
   }
-  const noop = createNoopCacheRepo();
-  assert.ok(noop.bootId.length > 0);
-  assert.deepEqual(await noop.getChannels(1), []);
 });
 
 test("multi-tab: two connections over one factory see each other's committed writes", async () => {

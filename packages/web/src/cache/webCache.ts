@@ -17,6 +17,7 @@
 
 import type { CacheRepo } from "@botiverse/raft-shared/src/cacheRepoContract.ts";
 import { createIdbCacheRepo } from "./idbRepo";
+import { createWebCacheRepo } from "./webCacheRepo";
 
 export type WebCacheRuntime = {
   readonly repo: CacheRepo;
@@ -40,7 +41,9 @@ export async function createWebCacheRuntime(deps: { now?: () => string } = {}): 
   try {
     repo = await createIdbCacheRepo(deps);
   } catch {
-    repo = createNoopCacheRepo();
+    // Privacy mode / quota / missing IndexedDB: fall back to #9's in-memory
+    // repo — the session keeps cache semantics in RAM (lost on reload).
+    repo = createWebCacheRepo(deps.now ? { now: deps.now } : {});
     available = false;
   }
   let scopeId: number | null = null;
@@ -92,37 +95,3 @@ export function getWebCacheRuntime(): WebCacheRuntime | null {
   return singleton;
 }
 
-/** Inert repo for degraded environments: empty reads, discarded writes. */
-export function createNoopCacheRepo(): CacheRepo {
-  const bootId = `noop-${Math.random().toString(36).slice(2)}`;
-  const empty = async (): Promise<void> => {};
-  return {
-    bootId,
-    openScope: async () => 0,
-    wipeScope: empty,
-    wipeAll: empty,
-    getChannels: async () => [],
-    putChannels: empty,
-    deleteChannel: empty,
-    getCoverage: async () => [],
-    getLatestMessages: async () => [],
-    appendPage: empty,
-    appendLiveMessage: empty,
-    pruneMessages: empty,
-    applyOverlayPage: empty,
-    getOverlayPageInfo: async () => null,
-    invalidateOverlayPageMarks: empty,
-    applyMessageUpdated: empty,
-    applyThreadSummary: empty,
-    getThreadSummaries: async () => ({}),
-    applyTaskEvent: empty,
-    deleteTask: empty,
-    getTaskRows: async () => [],
-    applyReadState: empty,
-    getReadStates: async () => ({}),
-    getInboxPage: async () => null,
-    putInboxPage: empty,
-    getKv: async () => null,
-    putKv: empty,
-  };
-}
