@@ -891,6 +891,8 @@ export function AppShell() {
   }, [authenticatedUserId, initialized, userDisplayLanguage, setLocaleFromUser]);
 
   const hasStoredSession = !!(accessToken && refreshToken);
+  const offlineReadonly = useAuthStore((s) => s.offlineReadonly);
+  const showOfflineApp = offlineReadonly && !!user;
   const authBootstrapView = getAuthBootstrapView({ initialized, restoreState });
   const authRestoreStartedAtRef = useRef<number | null>(null);
   // Degraded-restore chrome (#desktop-session-restore task #1): flips on once
@@ -1046,7 +1048,7 @@ export function AppShell() {
     if (signedInUserId && !profileSetupRequired) {
       loadServers();
     }
-  }, [signedInUserId, profileSetupRequired, loadServers]);
+  }, [signedInUserId, profileSetupRequired, loadServers, offlineReadonly]);
 
   // Precise PWA resume: restore the last deep location on cold start from `/`.
   // Only active once the user is authenticated and there's no pending invite,
@@ -1081,7 +1083,7 @@ export function AppShell() {
 
   if (urlParams.authCallback === "social") {
     content = <SocialAuthCallbackPage />;
-  } else if (authBootstrapView === "restoring" && restoreDegraded) {
+  } else if (!showOfflineApp && authBootstrapView === "restoring" && restoreDegraded) {
     content = (
       <DegradedRestoreStatus
         lastRestoreError={lastRestoreError}
@@ -1089,7 +1091,7 @@ export function AppShell() {
         onLogout={() => logout("explicit_user_logout")}
       />
     );
-  } else if (authBootstrapView === "loading" || authBootstrapView === "restoring") {
+  } else if (!showOfflineApp && (authBootstrapView === "loading" || authBootstrapView === "restoring")) {
     content = <AuthBootstrapStatus view={authBootstrapView} />;
   } else if (urlParams.resetToken && !user) {
     content = (
@@ -1186,6 +1188,14 @@ export function AppShell() {
     <>
       <NavigationDepthTracker />
       <EnvironmentDevOverlay />
+      {showOfflineApp ? (
+        <div
+          data-testid="offline-readonly-banner"
+          className="fixed inset-x-0 top-0 z-[80] border-b-2 border-black bg-soft-signal px-3 py-1.5 text-center text-sm font-bold"
+        >
+          {formatMessage({ id: "auth.offline.readonlyBanner" })}
+        </div>
+      ) : null}
       {content}
       <MessageSelectionShortcut />
       <ImageLightbox />

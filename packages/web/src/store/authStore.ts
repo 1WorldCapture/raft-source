@@ -19,6 +19,14 @@ import {
 } from "../utils/hostAccessTokenSync";
 import { clearSlockdevManualLogout, markSlockdevManualLogout } from "../utils/devMode";
 import { useServerStore } from "./serverStore";
+import type { Server } from "./serverStore";
+import { serverPersistence } from "./serverPersistenceRegistry";
+import {
+  forgetOfflineUser,
+  readOfflineAdmission,
+  rememberOfflineUser,
+  setOfflineReadonlyActive,
+} from "../utils/offlineSession";
 import {
   deriveInitialAuthRestoreState,
   describeRestoreError,
@@ -90,6 +98,11 @@ interface AuthState {
   restoreState: AuthRestoreState;
   /** Last transient failure of the bootstrap restore loop; null once a restore succeeds. */
   lastRestoreError: LastRestoreError | null;
+  /**
+   * True while /auth/me is unreachable and the shell is showing the last
+   * signed-in identity read-only. Background restore keeps running.
+   */
+  offlineReadonly: boolean;
 
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string, legalAcceptance: { acceptTerms: boolean; termsVersion: string; privacyVersion: string; legalAcceptanceSource?: "signup" | "invite" }) => Promise<void>;
@@ -218,6 +231,27 @@ function reportBrowserTimezoneObservation(user: User): void {
     });
 }
 
+/** One server row so an offline reload of `/s/:slug/...` can resolve. */
+function seedOfflineServer(serverId: string): void {
+  if (useServerStore.getState().servers.length > 0) return;
+  const slug = serverPersistence.readLastServerSlug();
+  if (!slug) return;
+  const server: Server = {
+    id: serverId,
+    name: slug,
+    avatarUrl: null,
+    slug,
+    ownerId: "",
+    onboardingAgentId: null,
+    hideHumansFromMembers: false,
+    plan: "free",
+    planDowngradedAt: null,
+    role: "member",
+    createdAt: "1970-01-01T00:00:00.000Z",
+  };
+  useServerStore.setState({ servers: [server] });
+}
+
 export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   accessToken: localStorage.getItem("slock_access_token"),
@@ -228,6 +262,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     !!(localStorage.getItem("slock_access_token") && localStorage.getItem("slock_refresh_token")),
   ),
   lastRestoreError: null,
+  offlineReadonly: false,
 
   login: async (email, password) => {
     set({ loading: true });
@@ -239,12 +274,14 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       localStorage.setItem("slock_refresh_token", data.refreshToken);
       seedMessageBodyFontSizeFromProfile(data.user.preferredMessageBodyFontSize);
       if (get().user?.id !== data.user.id) useAnnouncementStore.getState().reset();
+      rememberOfflineUser(data.user, localStorage);
       set({
         user: data.user,
         accessToken: data.accessToken,
         refreshToken: data.refreshToken,
         loading: false,
         initialized: true,
+        offlineReadonly: false,
         restoreState: transitionRestore(get().restoreState, { type: "LOGIN_SUCCEEDED" }),
       });
       reportBrowserTimezoneObservation(data.user);
@@ -262,12 +299,14 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       localStorage.setItem("slock_refresh_token", data.refreshToken);
       seedMessageBodyFontSizeFromProfile(data.user.preferredMessageBodyFontSize);
       if (get().user?.id !== data.user.id) useAnnouncementStore.getState().reset();
+      rememberOfflineUser(data.user, localStorage);
       set({
         user: data.user,
         accessToken: data.accessToken,
         refreshToken: data.refreshToken,
         loading: false,
         initialized: true,
+        offlineReadonly: false,
         restoreState: transitionRestore(get().restoreState, { type: "LOGIN_SUCCEEDED" }),
       });
       reportBrowserTimezoneObservation(data.user);
@@ -300,6 +339,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           displayName: displayName.trim(),
         });
         seedMessageBodyFontSizeFromProfile(data.preferredMessageBodyFontSize);
+        rememberOfflineUser(data, localStorage);
         set({ user: data, loading: false });
       } catch (error) {
         throw markOnboardingProfileError(error, "profile");
@@ -311,6 +351,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   logout: (trigger: LogoutTrigger = "explicit_user_logout") => {
+    forgetOfflineUser(localStorage);
     emitAuthTraceAndFlush("slock.auth.session_cleared", {
       clearSessionCaller: "logout",
       logoutTrigger: trigger,
@@ -344,6 +385,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       initialized: true,
       restoreState: transitionRestore(get().restoreState, { type: "LOGOUT" }),
       lastRestoreError: null,
+      offlineReadonly: false,
     });
     // Signal a host-embedded WebView, if any, that the user COMPLETED logout.
     //
@@ -362,6 +404,46 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   loadUser: async () => {
+    const tryEnterOfflineReadonly = (err: unknown, status: number | undefined): boolean => {
+      const admission = readOfflineAdmission(status, !!get().accessToken, localStorage);
+      if (!admission) return false;
+      seedOfflineServer(admission.serverId);
+      set({
+        user: admission.user,
+        offlineReadonly: true,
+        initialized: true,
+        restoreState: transitionRestore(get().restoreState, {
+          type: "RESTORE_TRANSIENT_FAILURE",
+          hasStoredSession: !!(get().accessToken && get().refreshToken),
+        }),
+        lastRestoreError: describeRestoreError(err),
+      });
+      return true;
+    };
+    const keepRestoring = (err: unknown, hasStoredSession: boolean) => {
+      set({
+        initialized: true,
+        restoreState: transitionRestore(get().restoreState, {
+          type: "RESTORE_TRANSIENT_FAILURE",
+          hasStoredSession,
+        }),
+        lastRestoreError: describeRestoreError(err),
+      });
+    };
+    const acceptMe = (data: User) => {
+      seedMessageBodyFontSizeFromProfile(data.preferredMessageBodyFontSize);
+      if (get().user?.id !== data.id) useAnnouncementStore.getState().reset();
+      rememberOfflineUser(data, localStorage);
+      set({
+        user: data,
+        offlineReadonly: false,
+        initialized: true,
+        restoreState: transitionRestore(get().restoreState, { type: "RESTORE_SUCCEEDED" }),
+        lastRestoreError: null,
+      });
+      reportBrowserTimezoneObservation(data);
+    };
+
     emitAuthBootInitTraceOnce();
     const { accessToken } = get();
     if (!accessToken) {
@@ -379,41 +461,19 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     });
     try {
       const { data } = await api.get("/auth/me");
-      seedMessageBodyFontSizeFromProfile(data.preferredMessageBodyFontSize);
-      if (get().user?.id !== data.id) useAnnouncementStore.getState().reset();
-      set({
-        user: data,
-        initialized: true,
-        restoreState: transitionRestore(get().restoreState, { type: "RESTORE_SUCCEEDED" }),
-        lastRestoreError: null,
-      });
-      reportBrowserTimezoneObservation(data);
+      acceptMe(data);
     } catch (err: any) {
       const status = err?.response?.status as number | undefined;
       const hasStoredSession = !!(get().accessToken && get().refreshToken);
       // Non-auth failures should not force logout.
       if (shouldKeepSessionAfterLoadUserFailure(status)) {
-        set({
-          initialized: true,
-          restoreState: transitionRestore(get().restoreState, {
-            type: "RESTORE_TRANSIENT_FAILURE",
-            hasStoredSession,
-          }),
-          lastRestoreError: describeRestoreError(err),
-        });
+        if (!tryEnterOfflineReadonly(err, status)) keepRestoring(err, hasStoredSession);
         return;
       }
 
       // Token might be expired — try refresh.
       if (!shouldRetryLoadUserAfterError(status)) {
-        set({
-          initialized: true,
-          restoreState: transitionRestore(get().restoreState, {
-            type: "RESTORE_TRANSIENT_FAILURE",
-            hasStoredSession,
-          }),
-          lastRestoreError: describeRestoreError(err),
-        });
+        if (!tryEnterOfflineReadonly(err, status)) keepRestoring(err, hasStoredSession);
         return;
       }
 
@@ -422,15 +482,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         if (refreshed) {
           try {
             const { data } = await api.get("/auth/me");
-            seedMessageBodyFontSizeFromProfile(data.preferredMessageBodyFontSize);
-            if (get().user?.id !== data.id) useAnnouncementStore.getState().reset();
-            set({
-              user: data,
-              initialized: true,
-              restoreState: transitionRestore(get().restoreState, { type: "RESTORE_SUCCEEDED" }),
-              lastRestoreError: null,
-            });
-            reportBrowserTimezoneObservation(data);
+            acceptMe(data);
           } catch (meErr: any) {
             const meStatus = meErr?.response?.status as number | undefined;
             if (shouldLogoutAfterPostRefreshLoadUserFailure({
@@ -439,15 +491,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
               restoreState: get().restoreState,
             })) {
               get().logout("terminal_verdict");
-            } else {
-              set({
-                initialized: true,
-                restoreState: transitionRestore(get().restoreState, {
-                  type: "RESTORE_TRANSIENT_FAILURE",
-                  hasStoredSession: !!(get().accessToken && get().refreshToken),
-                }),
-                lastRestoreError: describeRestoreError(meErr),
-              });
+            } else if (!tryEnterOfflineReadonly(meErr, meStatus)) {
+              keepRestoring(meErr, !!(get().accessToken && get().refreshToken));
             }
           }
         } else {
@@ -458,14 +503,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         }
       } catch (refreshErr) {
         // Transient refresh failure — keep session and let later calls retry.
-        set({
-          initialized: true,
-          restoreState: transitionRestore(get().restoreState, {
-            type: "RESTORE_TRANSIENT_FAILURE",
-            hasStoredSession: !!(get().accessToken && get().refreshToken),
-          }),
-          lastRestoreError: describeRestoreError(refreshErr),
-        });
+        const refreshStatus = (refreshErr as { response?: { status?: number } } | null)?.response?.status;
+        if (!tryEnterOfflineReadonly(refreshErr, refreshStatus)) {
+          keepRestoring(refreshErr, !!(get().accessToken && get().refreshToken));
+        }
       }
     }
   },
@@ -630,6 +671,7 @@ updateAuthRuntimeSnapshot({
 });
 
 useAuthStore.subscribe((state) => {
+  setOfflineReadonlyActive(state.offlineReadonly);
   updateAuthRuntimeSnapshot({
     initialized: state.initialized,
     restoreState: state.restoreState,

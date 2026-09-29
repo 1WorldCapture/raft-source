@@ -709,6 +709,7 @@ export default function MessageInput({
   const adoptDraftChannel = useMessageStore((s) => s.adoptDraftChannel);
   const clearDraft = useMessageStore((s) => s.clearDraft);
   const currentUser = useAuthStore().user;
+  const offlineReadonly = useAuthStore((s) => s.offlineReadonly);
   const nav = useAppNavigate();
   const [content, setContent] = useState(draft);
   const sendMessage = useMessageStore((s) => s.sendMessage);
@@ -1834,7 +1835,7 @@ export default function MessageInput({
 
   const handleSubmit = async (e: React.FormEvent | React.KeyboardEvent, options?: { forceAsTask?: boolean }) => {
     e.preventDefault();
-    if (submitDisabled || submitBusy) return;
+    if (useAuthStore.getState().offlineReadonly || submitDisabled || submitBusy) return;
     const hasContent = content.trim().length > 0;
     const hasFiles = pendingFiles.length > 0;
     if (!hasContent && !hasFiles && !(allowEmptySubmit && onSendOverride)) return;
@@ -2337,7 +2338,7 @@ export default function MessageInput({
     (pf) => pf.uploadStatus !== "error" || isBillingUploadQuotaError(pf.uploadError),
   );
   const canSubmit = content.trim().length > 0 || pendingFiles.length > 0 || (allowEmptySubmit && Boolean(onSendOverride));
-  const submitBlocked = !canSubmit || hasValidatingAttachments || hasUploadingAttachments || hasFailedAttachments || submitDisabled || submitBusy;
+  const submitBlocked = offlineReadonly || !canSubmit || hasValidatingAttachments || hasUploadingAttachments || hasFailedAttachments || submitDisabled || submitBusy;
   // Stryker disable next-line ConditionalExpression,LogicalOperator: spinner state is covered by MessageInput DOM tests; generated mutants hang tsx.
   const showSubmitSpinner = submitBusy || hasValidatingAttachments || hasUploadingAttachments;
   const submitTitle = submitBusy
@@ -2730,7 +2731,11 @@ export default function MessageInput({
             onChange={handleChange}
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
-            placeholder={placeholder ?? formatMessage({ id: "message.composer.messagePlaceholder" }, { channel: channelName })}
+            placeholder={offlineReadonly
+              ? formatMessage({ id: "message.composer.offlineReadonly" })
+              : placeholder ?? formatMessage({ id: "message.composer.messagePlaceholder" }, { channel: channelName })}
+            disabled={offlineReadonly}
+            readOnly={offlineReadonly}
             maxLength={maxLength}
             className="max-h-32 w-full resize-none text-base md:text-sm font-display focus:outline-none leading-5 min-h-5 md:min-h-10"
             rows={1}
