@@ -293,3 +293,72 @@ test("messageStore: non-empty bucket + empty drain → no stuck loading (PR #91 
   assert.equal(state.hasNewer, false, "an empty catch-up means the tail is current");
   assert.equal((state.channelMessages["c3"] ?? []).length, bucketAfterCap);
 });
+
+// ---- realtime write-through (desktop-data-cache #11) -------------------------
+
+test("live write-through: addMessage stores the row but never extends coverage (#11)", async () => {
+  const scopeId = await freshCache();
+  await recordMessagePage("c9", page([msg(10, "c9"), msg(11, "c9")]));
+  assert.deepEqual(await activeWebCache()!.repo.getCoverage(scopeId, "c9"), [{ fromSeq: 10, throughSeq: 11 }]);
+
+  useMessageStore.getState().addMessage(msg(12, "c9"), "channel-room");
+  await new Promise((r) => setTimeout(r, 10));
+  const rows = await activeWebCache()!.repo.getLatestMessages(scopeId, "c9", 10);
+  assert.deepEqual(rows.map((row) => row.seq), [12, 11, 10], "the live message is stored newest-first");
+  assert.deepEqual(await activeWebCache()!.repo.getCoverage(scopeId, "c9"), [{ fromSeq: 10, throughSeq: 11 }],
+    "connected:false — a live message must not extend coverage (gap safety)");
+});
+
+test("live write-through: optimistic rows without a server seq never reach the cache (#11)", async () => {
+  const scopeId = await freshCache();
+  const before = (await activeWebCache()!.repo.getLatestMessages(scopeId, "c9", 10)).length;
+  useMessageStore.getState().addMessage({ ...msg(1, "c9"), id: "optimistic-x", seq: undefined }, "channel-room");
+  await new Promise((r) => setTimeout(r, 10));
+  const after = (await activeWebCache()!.repo.getLatestMessages(scopeId, "c9", 10)).length;
+  assert.equal(after, before, "no server seq ⇒ no cache row");
+});
+
+test("live write-through: batchAddMessages (sync:resume) lands every row without coverage (#11)", async () => {
+  const scopeId = await freshCache();
+  const batch = Array.from({ length: 60 }, (_, i) => msg(100 + i, "c10"));
+  useMessageStore.getState().batchAddMessages(batch);
+  await new Promise((r) => setTimeout(r, 50));
+  const rows = await activeWebCache()!.repo.getLatestMessages(scopeId, "c10", 100);
+  assert.equal(rows.length, 60, "the full reconnect catch-up batch is cached");
+  assert.deepEqual(await activeWebCache()!.repo.getCoverage(scopeId, "c10"), [],
+    "a resume stream may skip seqs — it must never create coverage ranges");
+});
+
+test("live write-through: updateMessage lands an overlay for dynamic data (#11)", async () => {
+  const scopeId = await freshCache();
+  useMessageStore.getState().addMessage(msg(5, "c11"), "channel-room");
+  await new Promise((r) => setTimeout(r, 10));
+  useMessageStore.getState().updateMessage({
+    id: "m5",
+    channelId: "c11",
+    seq: 5,
+    reactions: [{ emoji: "👍", count: 2 }],
+    updatedAt: "2026-09-29T05:00:00.000Z",
+  } as never);
+  await new Promise((r) => setTimeout(r, 10));
+  const [row] = await activeWebCache()!.repo.getLatestMessages(scopeId, "c11", 10);
+  assert.ok(row, "base row present");
+  assert.equal((row!.overlay as { reactions?: Array<{ emoji: string }> } | null)?.reactions?.[0]?.emoji, "👍",
+    "reaction projection persists in the overlay layer");
+});
+
+test("offline seed advances lastSeq so reconnect can sync:resume (#11 review fix)", async (t) => {
+  await freshCache();
+  await recordMessagePage("c12", page(Array.from({ length: 30 }, (_, i) => msg(500 + i, "c12"))));
+  resetMessageStoreState();
+  assert.equal(useMessageStore.getState().lastSeq, 0, "fixture: cold start, lastSeq 0");
+
+  // Offline cold start: the catch-up fetch fails (network down) but the seed
+  // has already painted — and MUST have armed sync:resume via lastSeq.
+  t.mock.method(api, "get", async () => { throw new Error("offline"); });
+  await useMessageStore.getState().loadMessages("c12");
+  const state = useMessageStore.getState();
+  assert.equal((state.channelMessages["c12"] ?? []).length, 30, "seed painted");
+  assert.equal(state.lastSeq, 529,
+    "seed advances lastSeq to the cached tail's max seq — roomsJoined's `if (lastSeq > 0)` stays armed for sync:resume");
+});
