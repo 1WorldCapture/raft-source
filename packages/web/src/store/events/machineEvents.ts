@@ -31,6 +31,8 @@ export type MachineEvent =
       machineId: string;
       status: "online" | "offline";
       statusVersion?: number;
+      /** ms epoch the status began; undefined from servers that omit it. */
+      since?: number | null;
     }
   | {
       kind: "capabilities";
@@ -215,6 +217,7 @@ function applyStatus(
       machine,
       event.status,
       event.statusVersion,
+      event.since,
     );
     if (merged !== machine) changed = true;
     return merged;
@@ -382,6 +385,7 @@ function mergeMachineStatusByVersionGate(
   machine: Machine,
   status: "online" | "offline",
   statusVersion?: number,
+  since?: number | null,
 ): Machine {
   if (statusVersion !== undefined && statusVersion < machine.statusVersion) {
     return machine;
@@ -391,6 +395,11 @@ function mergeMachineStatusByVersionGate(
     ...machine,
     status,
     statusVersion: statusVersion ?? machine.statusVersion,
+    // An event without since (older server) only keeps the old since while
+    // the status is unchanged; a changed status makes it meaningless.
+    ...(since !== undefined
+      ? { statusSince: since }
+      : status !== machine.status ? { statusSince: null } : {}),
   };
 }
 

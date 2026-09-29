@@ -6,7 +6,7 @@ import { eq } from "drizzle-orm";
 import { getDb } from "../db/index.js";
 import { agents, channelAgents, machines, notificationEvents, serverAgentMembers, users } from "../db/schema.js";
 import { countActiveAgentsMissingServerMembership, createServer, getAgentMemberRole } from "./serverService.js";
-import { createAgent, deleteAgent, getAgent, invalidateAgentSessionFromSignal, resetAgentSession, resetAllAgentStatuses, updateAgent, updateAgentStatus, updateAgentStatusFromSignal } from "./agentService.js";
+import { createAgent, deleteAgent, getAgent, invalidateAgentSessionFromSignal, resetAgentSession, resetAllAgentStatuses, subscribeAgentStatusTransitions, updateAgent, updateAgentStatus, updateAgentStatusFromSignal } from "./agentService.js";
 import { addAgent, createChannel, findOrCreateAgentDM } from "./channelService.js";
 
 const test = createApiTest({ humanActivityMuteFlagDefaultEnabled: true, onboardingOpenerFlagDefaultEnabled: false });
@@ -322,4 +322,28 @@ test("deleteAgent stamps status_changed_at only when it actually leaves a non-in
   const deletedSince = await readStatusChangedAt(running.id);
   assert.ok(deletedSince && activeSince && deletedSince.getTime() >= activeSince.getTime());
   assert.notDeepEqual(deletedSince, activeSince);
+});
+
+test("committed status transitions reach subscribers once, with the persisted since", async ({ app }) => {
+  const agent = await seedAgent("status-since-subscribe");
+  const seen: Array<{ agentId: string; serverId: string; status: string; changedAt: Date }> = [];
+  const unsubscribe = subscribeAgentStatusTransitions((transition) => {
+    if (transition.agentId === agent.id) seen.push(transition);
+  });
+  try {
+    await updateAgentStatus(agent.id, "active");
+    await updateAgentStatus(agent.id, "active", "same-status");
+    assert.equal(await updateAgentStatusFromSignal(agent.id, "inactive"), true);
+    await updateAgentStatus(agent.id, "stopped");
+    await updateAgentStatus(agent.id, "inactive");
+    await resetAgentSession(agent.id, "inactive");
+  } finally {
+    unsubscribe();
+  }
+  assert.deepEqual(seen.map((t) => t.status), ["active", "inactive", "stopped", "inactive"]);
+  assert.ok(seen.every((t) => t.serverId === agent.serverId));
+  assert.deepEqual(seen.at(-1)!.changedAt, await readStatusChangedAt(agent.id));
+
+  await updateAgentStatus(agent.id, "active");
+  assert.equal(seen.length, 4, "unsubscribed listeners are not called");
 });
