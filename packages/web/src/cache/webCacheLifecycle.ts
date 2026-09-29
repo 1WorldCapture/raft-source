@@ -89,10 +89,16 @@ export function wireWebCacheLifecycle(
       && runtime.serverId === serverId
       && runtime.userId === userId;
     if (!alreadyAttached) beginDirectoryAttachWait();
+    // An attach queued before a logout wipe belongs to the logged-out session.
+    const resetEpoch = runtime.resetEpoch;
     chain = chain
       .then(async () => {
         try {
+          if (runtime.resetEpoch !== resetEpoch) return;
           await runtime.attach(origin, userId, serverId);
+          // Persist only an attach that was adopted: one superseded by a
+          // logout wipe must not write the identity back.
+          if (runtime.scopeId === null || runtime.userId !== userId || runtime.serverId !== serverId) return;
           attachedUserId = userId;
           try {
             storage.setItem(WEB_CACHE_LAST_SCOPE_KEY, JSON.stringify({ userId, serverId }));
@@ -180,6 +186,15 @@ export function wipeOnExplicitLogout(runtime: WebCacheRuntime, auth: AuthLike, d
       // Same wrapper as the scope id: explicit logout drops the public
       // profile snapshot (#17). 401 session expiry does not come through here.
       forgetOfflineUser(storage);
+      // Drop the persisted identity BEFORE the original action clears the
+      // user: that user→null transition runs the lifecycle sync, which would
+      // otherwise read this id and re-attach (re-creating the scope row and
+      // re-persisting the id) right after the wipe.
+      try {
+        storage.removeItem(WEB_CACHE_LAST_SCOPE_KEY);
+      } catch {
+        // ignore
+      }
       void runtime.resetAll().then(() => {
         try {
           storage.removeItem(WEB_CACHE_LAST_SCOPE_KEY);

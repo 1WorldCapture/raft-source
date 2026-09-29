@@ -411,3 +411,59 @@ async function flush(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 20));
 }
 
+
+test("lifecycle: a logout that clears the user leaves no scope row and no persisted identity (acceptance ③)", async () => {
+  freshDb();
+  const runtime = await createWebCacheRuntime();
+  const storage = memoryStorage();
+  const { store, setState } = fakeStores({ user: { id: "user-1" }, current: { id: "srv-a" } });
+  // Like the real authStore: logout clears the user synchronously, which
+  // fires the lifecycle's user→null sync inside the wrapped action.
+  (store as { setState(partial: { logout: () => void }): void }).setState({
+    logout: () => setState({ user: null }),
+  });
+  const auth = store as unknown as Parameters<typeof wireWebCacheLifecycle>[1];
+  wipeOnExplicitLogout(runtime, auth, { storage });
+  wireWebCacheLifecycle(runtime, auth, store as unknown as Parameters<typeof wireWebCacheLifecycle>[2], { storage });
+  await flush();
+  const aScope = runtime.scopeId!;
+  await runtime.repo.putKv(aScope, "secret", { v: "user-1-data" });
+
+  store.getState().logout("explicit_user_logout");
+  await flush();
+  await flush();
+
+  assert.equal(runtime.scopeId, null, "stays detached after logout");
+  assert.equal(storage.getItem("raft_web_cache_last_scope"), null, "persisted identity stays cleared");
+  const db = await openDB(WEB_CACHE_DB_NAME, WEB_CACHE_SCHEMA_VERSION);
+  const scopes = await db.getAll("scopes");
+  db.close();
+  assert.deepEqual(scopes, [], "no scope row is re-created after the wipe");
+});
+
+test("lifecycle: an attach still in flight when logout wipes is dropped, not persisted", async () => {
+  freshDb();
+  const runtime = await createWebCacheRuntime();
+  const storage = memoryStorage();
+  const { store, setState } = fakeStores({ user: { id: "user-1" }, current: { id: "srv-a" } });
+  (store as { setState(partial: { logout: () => void }): void }).setState({
+    logout: () => setState({ user: null }),
+  });
+  const auth = store as unknown as Parameters<typeof wireWebCacheLifecycle>[1];
+  wipeOnExplicitLogout(runtime, auth, { storage });
+  wireWebCacheLifecycle(runtime, auth, store as unknown as Parameters<typeof wireWebCacheLifecycle>[2], { storage });
+  await flush();
+
+  // A server switch starts an attach; logout lands before it completes.
+  setState({ current: { id: "srv-b" } });
+  store.getState().logout("explicit_user_logout");
+  await flush();
+  await flush();
+
+  assert.equal(runtime.scopeId, null);
+  assert.equal(storage.getItem("raft_web_cache_last_scope"), null);
+  const db = await openDB(WEB_CACHE_DB_NAME, WEB_CACHE_SCHEMA_VERSION);
+  const scopes = await db.getAll("scopes");
+  db.close();
+  assert.deepEqual(scopes, []);
+});
