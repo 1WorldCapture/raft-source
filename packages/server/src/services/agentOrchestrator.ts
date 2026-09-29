@@ -12345,7 +12345,7 @@ export class AgentOrchestrator extends EventEmitter {
     machineId: string,
     status: "online" | "offline",
     at: Date,
-  ): Promise<Date | null> {
+  ): Promise<machineService.MachineStatusRecord | null> {
     return machineService.recordMachineStatusTransition(machineId, status, at);
   }
 
@@ -12354,7 +12354,7 @@ export class AgentOrchestrator extends EventEmitter {
     machineId: string,
     status: "online" | "offline",
     at: Date,
-  ): Promise<Date | null> {
+  ): Promise<machineService.MachineStatusRecord | null> {
     try {
       return await this.persistMachineStatusTransition(machineId, status, at);
     } catch (err) {

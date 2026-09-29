@@ -32,19 +32,35 @@ test("machine status since only moves on real transitions", async ({ db }) => {
     return row!;
   };
 
-  assert.deepEqual(await recordMachineStatusTransition(machine.id, "online", t0), t0);
+  assert.deepEqual(await recordMachineStatusTransition(machine.id, "online", t0), { lastStatus: "online", statusChangedAt: t0 });
   assert.deepEqual(await read(), { lastStatus: "online", statusChangedAt: t0 });
 
   // Server restart / grace reconnect with a fresh heartbeat keeps the since.
   await db.update(machines).set({ lastHeartbeat: at(60_000) }).where(eq(machines.id, machine.id));
-  assert.deepEqual(await recordMachineStatusTransition(machine.id, "online", at(90_000)), t0);
+  assert.deepEqual(await recordMachineStatusTransition(machine.id, "online", at(90_000)), { lastStatus: "online", statusChangedAt: t0 });
 
-  assert.deepEqual(await recordMachineStatusTransition(machine.id, "offline", at(120_000)), at(120_000));
+  assert.deepEqual(await recordMachineStatusTransition(machine.id, "offline", at(120_000)), { lastStatus: "offline", statusChangedAt: at(120_000) });
   // A duplicate offline projection keeps the first offline time.
-  assert.deepEqual(await recordMachineStatusTransition(machine.id, "offline", at(180_000)), at(120_000));
+  assert.deepEqual(await recordMachineStatusTransition(machine.id, "offline", at(180_000)), { lastStatus: "offline", statusChangedAt: at(120_000) });
   assert.deepEqual(await read(), { lastStatus: "offline", statusChangedAt: at(120_000) });
 
-  assert.deepEqual(await recordMachineStatusTransition(machine.id, "online", at(300_000)), at(300_000));
+  assert.deepEqual(await recordMachineStatusTransition(machine.id, "online", at(300_000)), { lastStatus: "online", statusChangedAt: at(300_000) });
+});
+
+test("a late offline projection never buries a newer online", async ({ db }) => {
+  // Daemon dropped from replica A at t0 and reconnected to replica B inside
+  // A's grace window; A's projection runs after B's online write.
+  const machine = await seedMachine(db, "machine-since-late-offline", at(1_000));
+  assert.deepEqual(
+    await recordMachineStatusTransition(machine.id, "online", at(1_000)),
+    { lastStatus: "online", statusChangedAt: at(1_000) },
+  );
+  assert.deepEqual(
+    await recordMachineStatusTransition(machine.id, "offline", t0),
+    { lastStatus: "online", statusChangedAt: at(1_000) },
+  );
+  const [row] = await db.select({ lastStatus: machines.lastStatus }).from(machines).where(eq(machines.id, machine.id));
+  assert.equal(row!.lastStatus, "online");
 });
 
 test("an online commit after a stale heartbeat starts a new online stretch", async ({ db }) => {
@@ -55,7 +71,7 @@ test("an online commit after a stale heartbeat starts a new online stretch", asy
     .where(eq(machines.id, machine.id));
 
   const reconnectAt = at(MACHINE_ONLINE_CONTINUITY_MS + 1_000);
-  assert.deepEqual(await recordMachineStatusTransition(machine.id, "online", reconnectAt), reconnectAt);
+  assert.deepEqual(await recordMachineStatusTransition(machine.id, "online", reconnectAt), { lastStatus: "online", statusChangedAt: reconnectAt });
 });
 
 test("unknown machines record nothing", async ({ db: _db }) => {

@@ -995,6 +995,7 @@ export async function deleteAgent(agentId: string) {
       .set({
         deletedAt,
         status: "inactive",
+        statusChangedAt: sql`CASE WHEN ${agents.status} = 'inactive' THEN ${agents.statusChangedAt} ELSE ${deletedAt} END`,
         sessionId: null,
         machineId: null,
         updatedAt: deletedAt,

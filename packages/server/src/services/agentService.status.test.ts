@@ -308,3 +308,18 @@ test("startup reset stamps status_changed_at on agents it moves to inactive", as
   assert.ok(resetSince && activeSince && resetSince.getTime() >= activeSince.getTime());
   assert.deepEqual(resetSince, await latestStatusChangedEventAt(agent.id));
 });
+
+test("deleteAgent stamps status_changed_at only when it actually leaves a non-inactive status", async ({ app }) => {
+  const idle = await seedAgent("status-since-delete-idle");
+  const idleSince = await readStatusChangedAt(idle.id);
+  await deleteAgent(idle.id);
+  assert.deepEqual(await readStatusChangedAt(idle.id), idleSince);
+
+  const running = await seedAgent("status-since-delete-active");
+  await updateAgentStatus(running.id, "active");
+  const activeSince = await readStatusChangedAt(running.id);
+  await deleteAgent(running.id);
+  const deletedSince = await readStatusChangedAt(running.id);
+  assert.ok(deletedSince && activeSince && deletedSince.getTime() >= activeSince.getTime());
+  assert.notDeepEqual(deletedSince, activeSince);
+});

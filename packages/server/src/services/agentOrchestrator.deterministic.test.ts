@@ -714,9 +714,9 @@ class DeterministicAgentOrchestrator extends AgentOrchestrator {
     machineId: string,
     status: "online" | "offline",
     at: Date,
-  ): Promise<Date | null> {
+  ): Promise<{ lastStatus: "online" | "offline" | null; statusChangedAt: Date | null } | null> {
     this.machineStatusTransitions.push({ machineId, status, atMs: at.getTime() });
-    return at;
+    return { lastStatus: status, statusChangedAt: at };
   }
 
   protected override async persistMachineComputerVersion(
