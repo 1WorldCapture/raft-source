@@ -238,6 +238,57 @@ export async function updateHeartbeat(machineId: string) {
   }).where(eq(machines.id, machineId));
 }
 
+// A reconnect whose previous heartbeat is at most this old is treated as the
+// same online stretch (server restart / replica handoff), so its since stays.
+// Pongs land every ~30s, so a live machine is always well inside the window.
+export const MACHINE_ONLINE_CONTINUITY_MS = 3 * 60 * 1000;
+
+export type MachineStatusRecord = {
+  lastStatus: "online" | "offline" | null;
+  statusChangedAt: Date | null;
+};
+
+/**
+ * Record a settled connection transition and return the stored pair after the
+ * call (null for an unknown machine). Writes only on a real transition: an
+ * online commit keeps the stored since when the machine was already online
+ * with a fresh heartbeat, and an offline projection keeps it when the machine
+ * was already offline. A write older than the stored since is dropped, so a
+ * late offline projection (the daemon already reconnected, possibly to another
+ * replica) cannot bury the newer online. Callers must check `lastStatus`
+ * before treating `statusChangedAt` as the start of `status`.
+ */
+export async function recordMachineStatusTransition(
+  machineId: string,
+  status: "online" | "offline",
+  at: Date,
+): Promise<MachineStatusRecord | null> {
+  return getDb().transaction(async (tx) => {
+    const [current] = await tx.select({
+      lastStatus: machines.lastStatus,
+      statusChangedAt: machines.statusChangedAt,
+      lastHeartbeat: machines.lastHeartbeat,
+    }).from(machines)
+      .where(eq(machines.id, machineId))
+      .limit(1)
+      .for("update");
+    if (!current) return null;
+    const stored = { lastStatus: current.lastStatus, statusChangedAt: current.statusChangedAt };
+    if (current.statusChangedAt && current.statusChangedAt.getTime() > at.getTime()) return stored;
+    const transitioned = status === "online"
+      ? current.lastStatus !== "online"
+        || !current.statusChangedAt
+        || !current.lastHeartbeat
+        || current.lastHeartbeat.getTime() < at.getTime() - MACHINE_ONLINE_CONTINUITY_MS
+      : current.lastStatus !== "offline" || !current.statusChangedAt;
+    if (!transitioned) return stored;
+    await tx.update(machines)
+      .set({ lastStatus: status, statusChangedAt: at })
+      .where(eq(machines.id, machineId));
+    return { lastStatus: status, statusChangedAt: at };
+  });
+}
+
 export async function regenerateApiKey(machineId: string) {
   const db = getDb();
   clearAuthCache(machineId);
