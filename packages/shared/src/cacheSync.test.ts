@@ -12,10 +12,17 @@ import type { AppendPage, CacheRepo, OverlayPage, RawRecord, TaskEventInput, Thr
 /** In-memory async repo: Maps keyed by scope; enough storage semantics for
  * the scheduler tests (cursor kv + per-channel appended pages + overlay
  * marker rows with a fixed bootId). */
-function makeMemoryRepo(): CacheRepo & { appended: Map<string, AppendPage[]>; overlayMarks: Map<string, string> } {
+function makeMemoryRepo(): CacheRepo & {
+  appended: Map<string, AppendPage[]>;
+  overlayMarks: Map<string, string>;
+  overlayPages: Map<string, OverlayPage[]>;
+  messageUpdates: Array<{ channelId: string; message: { seq: number; raw: RawRecord; updatedAt?: string | null } }>;
+} {
   const kv = new Map<string, RawRecord>();
   const appended = new Map<string, AppendPage[]>();
   const overlayMarks = new Map<string, string>(); // `${scope}:${channel}:${from}` -> bootId
+  const overlayPages = new Map<string, OverlayPage[]>();
+  const messageUpdates: Array<{ channelId: string; message: { seq: number; raw: RawRecord; updatedAt?: string | null } }> = [];
   const repo: CacheRepo = {
     bootId: "boot-test-1",
     openScope: async () => 1,
@@ -35,6 +42,9 @@ function makeMemoryRepo(): CacheRepo & { appended: Map<string, AppendPage[]>; ov
     pruneMessages: async () => {},
     applyOverlayPage: async (scopeId, channelId, page) => {
       overlayMarks.set(`${scopeId}:${channelId}:${page.fromSeq}`, repo.bootId);
+      const list = overlayPages.get(`${scopeId}:${channelId}`) ?? [];
+      list.push(page);
+      overlayPages.set(`${scopeId}:${channelId}`, list);
     },
     getOverlayPageInfo: async (scopeId, channelId, fromSeq) => {
       const bootId = overlayMarks.get(`${scopeId}:${channelId}:${fromSeq}`);
@@ -43,7 +53,9 @@ function makeMemoryRepo(): CacheRepo & { appended: Map<string, AppendPage[]>; ov
     invalidateOverlayPageMarks: async () => {
       overlayMarks.clear();
     },
-    applyMessageUpdated: async () => {},
+    applyMessageUpdated: async (scopeId, channelId, message) => {
+      messageUpdates.push({ channelId: `${scopeId}:${channelId}`, message });
+    },
     applyThreadSummary: async () => {},
     getThreadSummaries: async () => ({}),
     applyTaskEvent: async () => {},
@@ -58,7 +70,7 @@ function makeMemoryRepo(): CacheRepo & { appended: Map<string, AppendPage[]>; ov
       kv.set(`${scopeId}:${key}`, value);
     },
   };
-  return Object.assign(repo, { appended, overlayMarks });
+  return Object.assign(repo, { appended, overlayMarks, overlayPages, messageUpdates });
 }
 
 function msg(seq: number, channelId = "c1"): SyncWireMessage {
@@ -158,6 +170,93 @@ test("refreshOverlayPageOncePerBoot without a fetcher reports no-fetcher", async
   const repo = makeMemoryRepo();
   const sync = createCacheSync({ repo, fetchSyncPage: async () => [] });
   assert.deepEqual(await sync.refreshOverlayPageOncePerBoot(1, "c1", 1, 10), { refreshed: false, reason: "no-fetcher" });
+});
+
+test("overlay refresh skips rows written live while the request was in flight (task #9)", async () => {
+  const repo = makeMemoryRepo();
+  let resolveFetch: (page: OverlayPage | null) => void = () => {};
+  let fetchStarted!: () => void;
+  // Gate so the test only injects the live update AFTER the refresh captured
+  // its mark and the request is in flight — the real-world ordering (a socket
+  // event cannot beat the request that already left).
+  const fetchStartedGate = new Promise<void>((resolve) => { fetchStarted = resolve; });
+  const sync: CacheSync = createCacheSync({
+    repo,
+    fetchSyncPage: async () => [],
+    fetchOverlayPage: () => {
+      fetchStarted();
+      return new Promise<OverlayPage | null>((resolve) => { resolveFetch = resolve; });
+    },
+  });
+  const inFlight = sync.refreshOverlayPageOncePerBoot(1, "c9a", 1, 10);
+  await fetchStartedGate;
+  // A realtime message:updated (e.g. a new reaction) lands mid-request.
+  await sync.onMessageUpdated(1, "c9a", { seq: 3, raw: { seq: 3, reactions: { "👍": ["u1"] } } });
+  resolveFetch({
+    fromSeq: 1,
+    throughSeq: 10,
+    messages: [
+      { seq: 1, id: "m1", raw: { seq: 1 } },
+      { seq: 3, id: "m3", raw: { seq: 3 } },
+      { seq: 5, id: "m5", raw: { seq: 5 } },
+    ],
+  });
+  const out = await inFlight;
+  assert.equal(out.reason, "done");
+  // The repo write and the returned page (upserted into the UI store by the
+  // caller) both keep only the rows with no live write after the request.
+  assert.deepEqual(repo.overlayPages.get("1:c9a")![0]!.messages.map((m) => m.seq), [1, 5]);
+  assert.deepEqual(out.page?.messages.map((m) => m.seq), [1, 5]);
+  // The live update itself still reached the repo.
+  assert.deepEqual(repo.messageUpdates.map((u) => u.message.seq), [3]);
+});
+
+test("overlay refresh writes every row when nothing changed live during the request", async () => {
+  const repo = makeMemoryRepo();
+  const sync: CacheSync = createCacheSync({
+    repo,
+    fetchSyncPage: async () => [],
+    fetchOverlayPage: async () => ({
+      fromSeq: 1,
+      throughSeq: 10,
+      messages: [
+        { seq: 1, id: "m1", raw: { seq: 1 } },
+        { seq: 3, id: "m3", raw: { seq: 3 } },
+      ],
+    }),
+  });
+  const out = await sync.refreshOverlayPageOncePerBoot(1, "c9b", 1, 10);
+  assert.equal(out.reason, "done");
+  assert.deepEqual(repo.overlayPages.get("1:c9b")![0]!.messages.map((m) => m.seq), [1, 3]);
+  assert.equal(out.page?.messages.length, 2);
+});
+
+test("overlay refresh with every row live-written still stamps the once-per-boot marker", async () => {
+  const repo = makeMemoryRepo();
+  let resolveFetch: (page: OverlayPage | null) => void = () => {};
+  let fetchStarted!: () => void;
+  const fetchStartedGate = new Promise<void>((resolve) => { fetchStarted = resolve; });
+  const sync: CacheSync = createCacheSync({
+    repo,
+    fetchSyncPage: async () => [],
+    fetchOverlayPage: () => {
+      fetchStarted();
+      return new Promise<OverlayPage | null>((resolve) => { resolveFetch = resolve; });
+    },
+  });
+  const inFlight = sync.refreshOverlayPageOncePerBoot(1, "c9c", 1, 10);
+  await fetchStartedGate;
+  await sync.onMessageUpdated(1, "c9c", { seq: 2, raw: { seq: 2 } });
+  resolveFetch({ fromSeq: 1, throughSeq: 10, messages: [{ seq: 2, id: "m2", raw: { seq: 2 } }] });
+  const out = await inFlight;
+  assert.equal(out.reason, "done");
+  // Zero rows survive the filter, but applyOverlayPage still ran (it owns
+  // the bootId marker) and the returned page is empty.
+  assert.deepEqual(repo.overlayPages.get("1:c9c")![0]!.messages, []);
+  assert.deepEqual(out.page?.messages, []);
+  // The marker was stamped: a second refresh this boot is gated.
+  const second = await sync.refreshOverlayPageOncePerBoot(1, "c9c", 1, 10);
+  assert.deepEqual([second.refreshed, second.reason], [false, "already"]);
 });
 
 test("task/thread/read-state write-throughs are forwarded to the repo verbatim", async () => {
