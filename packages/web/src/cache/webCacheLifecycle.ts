@@ -21,6 +21,7 @@
 
 import { RUNTIME_API_BASE } from "../desktopRuntimeEnvironment";
 import { forgetOfflineUser } from "../utils/offlineSession";
+import { beginActiveCacheBoot, noteActiveCacheSettled, setActiveCacheProvider } from "./messageCache";
 import { initWebCache } from "./webCache";
 import type { WebCacheRuntime } from "./webCache";
 
@@ -131,6 +132,11 @@ export function wireWebCacheLifecycle(
     if ((prev.current?.id ?? null) !== (state.current?.id ?? null)) sync();
   });
   sync();
+  // The boot gate (#17) waits for this first attach attempt, including the
+  // case where there is nothing to attach yet.
+  void chain.then(() => {
+    noteActiveCacheSettled();
+  });
   return {
     unsubscribe() {
       unsubscribeAuth();
@@ -173,18 +179,25 @@ export function wipeOnExplicitLogout(runtime: WebCacheRuntime, auth: AuthLike, d
  * without this module owning any of that lifecycle.
  */
 export async function bootWebCache(): Promise<WebCacheRuntime> {
-  const runtime = await initWebCache();
-  // Lazy: authStore/serverStore evaluate browser globals at module scope.
-  const [{ useAuthStore }, { useServerStore }, { setActiveCacheProvider }] = await Promise.all([
-    import("../store/authStore"),
-    import("../store/serverStore"),
-    import("./messageCache"),
-  ]);
-  setActiveCacheProvider(() =>
-    runtime.scopeId === null ? null : { repo: runtime.repo, scopeId: runtime.scopeId },
-  );
-  const auth = useAuthStore as unknown as AuthLike;
-  wipeOnExplicitLogout(runtime, auth);
-  wireWebCacheLifecycle(runtime, auth, useServerStore as unknown as ServerLike);
-  return runtime;
+  // Arm before IndexedDB open so a channel load during boot waits for attach
+  // instead of painting an empty pane and never looking at the cache.
+  beginActiveCacheBoot();
+  try {
+    const runtime = await initWebCache();
+    // Lazy: authStore/serverStore evaluate browser globals at module scope.
+    const [{ useAuthStore }, { useServerStore }] = await Promise.all([
+      import("../store/authStore"),
+      import("../store/serverStore"),
+    ]);
+    setActiveCacheProvider(() =>
+      runtime.scopeId === null ? null : { repo: runtime.repo, scopeId: runtime.scopeId },
+    );
+    const auth = useAuthStore as unknown as AuthLike;
+    wipeOnExplicitLogout(runtime, auth);
+    wireWebCacheLifecycle(runtime, auth, useServerStore as unknown as ServerLike);
+    return runtime;
+  } catch (error) {
+    noteActiveCacheSettled();
+    throw error;
+  }
 }

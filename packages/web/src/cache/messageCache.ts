@@ -40,6 +40,53 @@ type ActiveCacheProvider = () => ActiveCache | null;
 let provider: ActiveCacheProvider | null = null;
 let fallbackActive: ActiveCache | null = null;
 
+// Boot gate. loadMessages may run while IndexedDB open + scope attach are
+// still in flight. Waiters block only while this gate is armed; once the
+// attach attempt settles (or times out) later loads stay synchronous.
+let bootGate: { pending: Promise<void>; resolve: () => void } | null = null;
+
+/** Arm the boot gate. Idempotent until noteActiveCacheSettled. */
+export function beginActiveCacheBoot(): void {
+  if (bootGate) return;
+  let resolve!: () => void;
+  const pending = new Promise<void>((done) => {
+    resolve = done;
+  });
+  bootGate = { pending, resolve };
+}
+
+/** True while boot has started and the attach attempt has not settled. */
+export function isActiveCacheBootPending(): boolean {
+  return bootGate !== null;
+}
+
+/** Attach finished, failed, or was skipped. Unblocks whenActiveCache. */
+export function noteActiveCacheSettled(): void {
+  const gate = bootGate;
+  bootGate = null;
+  gate?.resolve();
+}
+
+/**
+ * Resolves when the boot attach attempt settles, or after timeoutMs.
+ * Already-active caches and processes that never booted a cache resolve
+ * immediately, so loadMessages adds no await before api.get in those cases.
+ */
+export function whenActiveCache(timeoutMs: number): Promise<void> {
+  if (!bootGate || activeWebCache()) return Promise.resolve();
+  const gate = bootGate;
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      noteActiveCacheSettled();
+      resolve();
+    }, timeoutMs);
+    gate.pending.then(() => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
+}
+
 /**
  * #7's runtime injects its live holder: `setActiveCacheProvider(() =>
  * runtime.scopeId === null ? null : { repo, runtime.repo, ... })`. Called
@@ -48,11 +95,13 @@ let fallbackActive: ActiveCache | null = null;
  */
 export function setActiveCacheProvider(next: ActiveCacheProvider): void {
   provider = next;
+  beginActiveCacheBoot();
 }
 
 /** Stopgap/test-only direct holder — real app wiring goes through #7. */
 export function setActiveWebCache(repo: CacheRepo, scopeId: number): void {
   fallbackActive = { repo, scopeId };
+  noteActiveCacheSettled();
 }
 
 /** Stopgap/test-only direct holder clear. */
