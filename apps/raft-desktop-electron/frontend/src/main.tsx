@@ -27,6 +27,7 @@ import {
 } from "@web/utils/clientErrorTrace";
 import RootErrorFallback from "@web/components/errors/RootErrorFallback";
 import { applyDesktopAppAdaptation } from "./desktop/desktopAppAdaptation";
+import { bootWebCache } from "@web/cache/webCacheLifecycle";
 import { useAuthStore } from "@web/store/authStore";
 import App from "@web/App";
 import { DesktopNativeBridge } from "./desktop/DesktopNativeBridge";
@@ -112,6 +113,11 @@ applyDesktopAppAdaptation();
 initSkin();
 // Route social-login clicks through the native PKCE + loopback flow.
 installDesktopOAuth();
+// Web cache runtime (desktop-data-cache #7/#8): the desktop app reuses the
+// web stores, so the IndexedDB cache must boot here too — attach on
+// login/server, wipe on logout, degrade silently on IDB failure. Without
+// this the packaged app never populates the directory cache (#8).
+void bootWebCache();
 
 const container = document.getElementById("root");
 if (container) {

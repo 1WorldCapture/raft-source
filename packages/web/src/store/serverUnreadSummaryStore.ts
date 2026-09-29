@@ -21,6 +21,7 @@ import { create } from "zustand";
 import api from "../api/client";
 import { useMessageStore } from "./messageStore";
 import { parseServerUnreadSummaryRows, retainServerUnreadSummary } from "../utils/serverUnreadSummary";
+import { cachedUnreadSummary, currentDirectoryCacheScope, recordUnreadSummary } from "../cache/directoryCache";
 import type { ServerUnreadSummary } from "../utils/serverUnreadSummary";
 import { SERVER_NOTIFICATION_PREFS_UPDATED_EVENT } from "./events/notificationPrefsEvents";
 
@@ -134,10 +135,26 @@ export const useServerUnreadSummaryStore = create<ServerUnreadSummaryState>((set
       }
       const generation = loadGeneration;
       const flight = (async () => {
+        // Directory-cache (task #8): seed an empty store from the cached raw
+        // wire payload; the write-back below is guarded by the scope captured
+        // at REQUEST START so a server switch mid-flight never persists the
+        // previous scope's summary into the new one.
+        const requestScope = currentDirectoryCacheScope();
+        if (Object.keys(get().byServer).length === 0) {
+          try {
+            const cached = await cachedUnreadSummary();
+            if (cached !== null && Object.keys(get().byServer).length === 0) {
+              set((state) => ({ byServer: retainServerUnreadSummary(state.byServer, parseServerUnreadSummaryRows(cached)) }));
+            }
+          } catch {
+            // Best-effort seed; the network path is authoritative.
+          }
+        }
         try {
           const { data } = await api.get("/servers/unread-summary");
           if (generation !== loadGeneration) return; // reset() happened mid-flight; drop the stale snapshot.
           set((state) => ({ byServer: retainServerUnreadSummary(state.byServer, parseServerUnreadSummaryRows(data)) }));
+          await recordUnreadSummary(data, requestScope);
         } catch {
           if (generation !== loadGeneration) return;
           // A failed refresh must not leave stale >0 counts lighting dots.

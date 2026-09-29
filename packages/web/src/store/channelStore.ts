@@ -14,6 +14,7 @@ import {
 } from "./channelDomain";
 import type { ChannelAdminBasis, ChannelRole, InboxScopeReadFrontier, ServerCapability } from "@botiverse/raft-shared";
 import { useServerStore } from "./serverStore";
+import { cachedChannelById, cachedChannels, noteChannelListLoaded, recordChannels } from "../cache/directoryCache";
 import { consumeReadStateSnapshotRows, getReadStateLedgerGeneration } from "./readStateSync";
 import { registerServerReset } from "./serverResetRegistry";
 import { emitStateTransitionTrace } from "../utils/stateTransitionTrace";
@@ -198,6 +199,27 @@ export const useChannelStore = create<ChannelState>((set, get) => ({
     // Never set loading here — it starts as true (store init / server reset)
     // and goes to false after the first successful fetch. This keeps existing
     // data (or a legitimate empty state) visible during refreshes.
+    // Directory-cache seed (task #8): only into an empty list. A non-empty
+    // cached snapshot is the last authoritative state, so it releases the
+    // loading gate like a successful fetch; the network answer below
+    // overwrites wholesale (offline failure still flips loading).
+    if (get().channels.length === 0) {
+      try {
+        const cached = await cachedChannels("channel");
+        if (cached.length > 0
+          && get().channels.length === 0
+          && useServerStore.getState().serverEpoch === epoch) {
+          set((state) => reduceChannelWithTrace(
+            state,
+            "hydrate",
+            "channel-list",
+            (current) => ({ ...hydrateChannels(current, cached), loading: false }),
+          ));
+        }
+      } catch {
+        // Best-effort seed; the network path decides loading state.
+      }
+    }
     try {
       const { data } = await api.get("/channels", { params: { archived: "include" } });
       if (useServerStore.getState().serverEpoch !== epoch) return;
@@ -212,6 +234,8 @@ export const useChannelStore = create<ChannelState>((set, get) => ({
         "channel-list",
         (current) => ({ ...hydrateChannels(current, apiChannels), loading: false }),
       ));
+      await recordChannels("channel", apiChannels);
+      await noteChannelListLoaded("channel", epoch, apiChannels);
     } catch (err) {
       console.error("Failed to load channels:", err);
       if (useServerStore.getState().serverEpoch !== epoch) return;
@@ -224,6 +248,24 @@ export const useChannelStore = create<ChannelState>((set, get) => ({
     const serverId = useServerStore.getState().current?.id;
     const readLedgerGeneration = getReadStateLedgerGeneration();
     if (!serverId) return;
+    // Directory-cache seed (task #8): empty list only, network overwrites.
+    if (get().dmChannels.length === 0) {
+      try {
+        const cached = await cachedChannels("dm");
+        if (cached.length > 0
+          && get().dmChannels.length === 0
+          && useServerStore.getState().serverEpoch === epoch) {
+          set((state) => reduceChannelWithTrace(
+            state,
+            "hydrate:dm",
+            "dm-list",
+            (current) => hydrateDmChannels(current, cached),
+          ));
+        }
+      } catch {
+        // Best-effort seed; the network path is authoritative.
+      }
+    }
     try {
       const { data } = await api.get("/channels/dm");
       if (useServerStore.getState().serverEpoch !== epoch) return;
@@ -237,6 +279,8 @@ export const useChannelStore = create<ChannelState>((set, get) => ({
         "dm-list",
         (current) => hydrateDmChannels(current, apiDms),
       ));
+      await recordChannels("dm", apiDms);
+      await noteChannelListLoaded("dm", epoch, apiDms);
     } catch (err) {
       console.error("Failed to load DM channels:", err);
     }
@@ -273,6 +317,27 @@ export const useChannelStore = create<ChannelState>((set, get) => ({
         return channel;
       } catch (err) {
         console.error("Failed to load channel:", err);
+        // Offline fallback (task #8): the directory cache holds the last
+        // authoritative list rows, so a channel the server once listed
+        // resolves from cache instead of failing the route — ChatPanel
+        // (and its cached message pane) must stay reachable with the
+        // network down. Cached readState stays out of the ledger, same
+        // discipline as the list seeds.
+        try {
+          const cached = await cachedChannelById(channelId);
+          if (cached) {
+            const channel = toChannel(cached);
+            set((state) => reduceChannelWithTrace(
+              state,
+              "ensure",
+              channelId,
+              (current) => patchChannel(current, cached),
+            ));
+            return channel;
+          }
+        } catch {
+          // Best-effort fallback; the route shows its missing sentinel.
+        }
         return null;
       } finally {
         ensureChannelInFlight.delete(channelId);

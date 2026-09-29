@@ -7,6 +7,7 @@ import type {
 } from "@botiverse/raft-shared";
 import { clearClockTimeout, setClockTimeout } from "@botiverse/raft-shared";
 import api from "../api/client";
+import { cachedUnread, recordUnread } from "../cache/directoryCache";
 import { useServerStore } from "./serverStore";
 import { useThreadStore } from "./threadStore";
 import type { ThreadSummary } from "./threadStore";
@@ -1505,6 +1506,26 @@ export const useMessageStore = create<MessageState>((set, get) => ({
     const epoch = useServerStore.getState().serverEpoch;
     const serverId = useServerStore.getState().current?.id;
     if (!serverId) return;
+    // Directory-cache seed (task #8): only when counts are empty, from the
+    // cached RAW wire payload so parseUnreadSnapshot runs identically. The
+    // read-state ledger folding (consumeReadStateSnapshotRows) stays
+    // network-only — cached readState rows are stale by definition.
+    if (Object.keys(get().unreadCounts).length === 0) {
+      try {
+        const cached = await cachedUnread();
+        if (cached !== null
+          && Object.keys(get().unreadCounts).length === 0
+          && useServerStore.getState().serverEpoch === epoch) {
+          const snapshot = parseUnreadSnapshot(cached);
+          set({
+            unreadCounts: filterUnreadCountsByLocalReadSuppressions(snapshot.unreadCounts, localReadSuppressions),
+            mentionFlags: filterMentionFlagsByLocalReadSuppressions(snapshot.mentionFlags, localReadSuppressions),
+          });
+        }
+      } catch {
+        // Best-effort seed; the network path is authoritative.
+      }
+    }
     try {
       await flushAllPendingReads();
       const requestReadStateGeneration = getReadStateLedgerGeneration();
@@ -1566,6 +1587,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
           mentionFlags: nextState.mentionFlags,
         };
       });
+      await recordUnread(data);
     } catch {
       // ignore
     }
