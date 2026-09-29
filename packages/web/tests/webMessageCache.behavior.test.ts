@@ -350,20 +350,20 @@ test("live write-through: updateMessage lands an overlay for dynamic data (#11)"
     "reaction projection persists in the overlay layer");
 });
 
-test("offline seed advances lastSeq so reconnect can sync:resume (#11 review fix)", async (t) => {
+test("offline seed paints without moving the network lastSeq (resume floor comes from webResumeCursor)", async (t) => {
   await freshCache();
   await recordMessagePage("c12", page(Array.from({ length: 30 }, (_, i) => msg(500 + i, "c12"))));
   resetMessageStoreState();
   assert.equal(useMessageStore.getState().lastSeq, 0, "fixture: cold start, lastSeq 0");
 
   // Offline cold start: the catch-up fetch fails (network down) but the seed
-  // has already painted — and MUST have armed sync:resume via lastSeq.
+  // has already painted. One channel's cached tail is not a server-wide
+  // resume floor; reconnect resumes from the persisted cursor instead.
   t.mock.method(api, "get", async () => { throw new Error("offline"); });
   await useMessageStore.getState().loadMessages("c12");
   const state = useMessageStore.getState();
   assert.equal((state.channelMessages["c12"] ?? []).length, 30, "seed painted");
-  assert.equal(state.lastSeq, 529,
-    "seed still advances in-memory lastSeq; the persisted resume cursor is a separate floor");
+  assert.equal(state.lastSeq, 0, "the seed leaves lastSeq to network data");
 });
 
 test("messageStore: seed still lands when the cache attaches after loadMessages starts", async (t) => {

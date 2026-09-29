@@ -5,13 +5,15 @@ import test from "node:test";
 import api from "../src/api/client";
 import {
   activeWebCache,
+  captureResumeCursorToken,
   clearActiveWebCache,
-  readWebResumeCursor,
+  readWebResumeCursor as readCursorFor,
   recordMessagePage,
   setActiveCacheProvider,
   setActiveWebCache,
-  writeWebResumeCursor,
+  writeWebResumeCursor as writeCursorFor,
 } from "../src/cache/messageCache";
+import type { ResumeCursorToken } from "../src/cache/messageCache";
 import { createWebCacheRepo } from "../src/cache/webCacheRepo";
 import { buildMainLayoutSocketBindings } from "../src/store/socketBridge";
 import type { MainLayoutSocketBridgeSocket, SocketBinding } from "../src/store/socketBridge";
@@ -24,6 +26,10 @@ const SERIAL = { concurrency: false };
 
 class FakeSocket implements MainLayoutSocketBridgeSocket {
   connected = true;
+  auth: { serverId: string | null };
+  constructor(serverId: string | null = "srv-1") {
+    this.auth = { serverId };
+  }
   readonly emitted: Array<{ event: string; args: unknown[] }> = [];
   emit(event: string, ...args: unknown[]) {
     this.emitted.push({ event, args });
@@ -34,6 +40,14 @@ class FakeSocket implements MainLayoutSocketBridgeSocket {
   offAny() { return undefined; }
   disconnect() { this.connected = false; }
   connect() { this.connected = true; }
+}
+
+async function readWebResumeCursor(token: ResumeCursorToken | null = captureResumeCursorToken(activeWebCache()?.serverId ?? null)) {
+  return token ? readCursorFor(token) : null;
+}
+
+async function writeWebResumeCursor(maxSeq: number, token: ResumeCursorToken | null = captureResumeCursorToken(activeWebCache()?.serverId ?? null)) {
+  if (token) await writeCursorFor(token, maxSeq);
 }
 
 function msg(seq: number, channelId: string): Message {
@@ -126,7 +140,7 @@ test("reconnect resumes from the cursor when a seeded channel has a higher seq",
     await recordMessagePage("channel-a", { messages: [msg(100, "channel-a")] });
     resetMessageStore();
     await useMessageStore.getState().loadMessages("channel-a");
-    assert.equal(useMessageStore.getState().lastSeq, 100, "seed paints channel A's tail into lastSeq");
+    assert.equal(useMessageStore.getState().lastSeq, 0, "a cache seed does not move the network lastSeq");
     assert.equal(await readWebResumeCursor(), 10, "seeding a channel does not move the cursor");
 
     const socket = new FakeSocket();
@@ -135,7 +149,7 @@ test("reconnect resumes from the cursor when a seeded channel has a higher seq",
     handlers.roomsJoined(undefined);
     await flush();
 
-    assert.deepEqual(resumeEmits(socket), [10], "resume uses min(lastSeq, cursor), not the seeded tail");
+    assert.deepEqual(resumeEmits(socket), [10], "resume uses the cursor, not the seeded tail");
 
     handlers.resumeResponse({
       messages: [msg(50, "channel-b")],
@@ -256,23 +270,151 @@ test("disconnect freezes the cursor until the next resume finishes", SERIAL, asy
   }
 });
 
-test("without a cursor, roomsJoined does not resume from the seeded lastSeq", SERIAL, async () => {
+test("cold start without a cursor: a seed alone never resumes, and live messages do not start the cursor", SERIAL, async (t) => {
   await attach();
   const restore = stubLoaders();
+  t.mock.method(api, "get", async () => {
+    throw new Error("offline");
+  });
   try {
+    await recordMessagePage("channel-a", { messages: [msg(100, "channel-a")] });
     resetMessageStore();
-    useMessageStore.setState({ lastSeq: 100 });
+    await useMessageStore.getState().loadMessages("channel-a");
     const socket = new FakeSocket();
     const handlers = bind(socket);
     handlers.connect(undefined);
     handlers.roomsJoined(undefined);
     await flush();
-    assert.deepEqual(resumeEmits(socket), [], "no cursor ⇒ no resume from one channel's lastSeq");
+    assert.deepEqual(resumeEmits(socket), [], "nothing network-seen to resume from; the seed is not a floor");
 
-    handlers.messageNew(msg(30, "channel-a"));
+    handlers.messageNew(msg(130, "channel-a"));
     await flush();
-    assert.equal(await readWebResumeCursor(), 30, "the first live message:new starts the cursor");
+    assert.equal(await readWebResumeCursor(), null, "no resume has finished, so live traffic cannot start the cursor");
   } finally {
+    restore();
+    resetMessageStore();
+    clearActiveWebCache();
+  }
+});
+
+test("cold start without a cursor resumes from the network seq and starts the cursor when that resume finishes", SERIAL, async (t) => {
+  await attach();
+  const restore = stubLoaders();
+  t.mock.method(api, "get", async () => {
+    throw new Error("offline");
+  });
+  try {
+    await recordMessagePage("channel-a", { messages: [msg(100, "channel-a")] });
+    resetMessageStore();
+    // Seen over the network before the drop (e.g. restored from the last page).
+    useMessageStore.setState({ lastSeq: 40 });
+    await useMessageStore.getState().loadMessages("channel-a");
+    assert.equal(useMessageStore.getState().lastSeq, 40);
+
+    const socket = new FakeSocket();
+    const handlers = bind(socket);
+    handlers.connect(undefined);
+    handlers.roomsJoined(undefined);
+    await flush();
+    assert.deepEqual(resumeEmits(socket), [40], "resume from the network seq, below channel A's seeded 100");
+
+    handlers.messageNew(msg(120, "channel-a"));
+    await flush();
+    assert.equal(await readWebResumeCursor(), null, "message:new during the resume does not start the cursor");
+
+    handlers.resumeResponse({ messages: [msg(50, "channel-b")], currentSeq: 120, hasMore: false });
+    await flush();
+    assert.equal(useMessageStore.getState().channelMessages["channel-b"]?.[0]?.seq, 50,
+      "channel B's message missed while offline comes back");
+    assert.equal(await readWebResumeCursor(), 120, "the finished resume starts the cursor");
+
+    handlers.messageNew(msg(121, "channel-b"));
+    await flush();
+    assert.equal(await readWebResumeCursor(), 121);
+  } finally {
+    restore();
+    resetMessageStore();
+    clearActiveWebCache();
+  }
+});
+
+test("server switch: server A's late traffic never moves server B's cursor", SERIAL, async () => {
+  const repo = createWebCacheRepo();
+  const scopeA = await repo.openScope("https://raft.example", "user-1", "srv-a");
+  const scopeB = await repo.openScope("https://raft.example", "user-1", "srv-b");
+  const restore = stubLoaders();
+  try {
+    setActiveWebCache(repo, scopeA, "srv-a");
+    await writeWebResumeCursor(10);
+    setActiveWebCache(repo, scopeB, "srv-b");
+    await writeWebResumeCursor(5);
+    setActiveWebCache(repo, scopeA, "srv-a");
+    resetMessageStore();
+
+    const socketA = new FakeSocket("srv-a");
+    const handlers = bind(socketA);
+    handlers.connect(undefined);
+    handlers.roomsJoined(undefined);
+    await flush();
+    assert.deepEqual(resumeEmits(socketA), [10]);
+
+    // The cache moves to B before A's listeners are torn down.
+    setActiveWebCache(repo, scopeB, "srv-b");
+    handlers.resumeResponse({ messages: [], currentSeq: 900, hasMore: false });
+    handlers.messageNew(msg(901, "channel-a"));
+    await flush();
+    assert.equal(await readWebResumeCursor(), 5, "B's cursor is untouched by A's seqs");
+    setActiveWebCache(repo, scopeA, "srv-a");
+    assert.equal(await readWebResumeCursor(), 10, "A's writes were dropped once its scope was detached");
+  } finally {
+    restore();
+    resetMessageStore();
+    clearActiveWebCache();
+  }
+});
+
+test("a socket for another server than the attached scope resumes without touching any cursor", SERIAL, async () => {
+  await attach("srv-b");
+  const restore = stubLoaders();
+  try {
+    await writeWebResumeCursor(5);
+    resetMessageStore();
+    useMessageStore.setState({ lastSeq: 70 });
+    const socket = new FakeSocket("srv-a");
+    const handlers = bind(socket);
+    handlers.connect(undefined);
+    handlers.roomsJoined(undefined);
+    await flush();
+    assert.deepEqual(resumeEmits(socket), [70], "no scope for this socket's server: plain network-seq resume");
+    handlers.resumeResponse({ messages: [], currentSeq: 80, hasMore: false });
+    handlers.messageNew(msg(81, "channel-a"));
+    await flush();
+    assert.equal(await readWebResumeCursor(), 5);
+  } finally {
+    restore();
+    resetMessageStore();
+    clearActiveWebCache();
+  }
+});
+
+test("a failing cursor read still resumes from the network seq", SERIAL, async () => {
+  const { repo } = await attach();
+  const restore = stubLoaders();
+  const originalGetKv = repo.getKv.bind(repo);
+  repo.getKv = async () => {
+    throw new Error("IndexedDB unavailable");
+  };
+  try {
+    resetMessageStore();
+    useMessageStore.setState({ lastSeq: 33 });
+    const socket = new FakeSocket();
+    const handlers = bind(socket);
+    handlers.connect(undefined);
+    handlers.roomsJoined(undefined);
+    await flush();
+    assert.deepEqual(resumeEmits(socket), [33]);
+  } finally {
+    repo.getKv = originalGetKv;
     restore();
     resetMessageStore();
     clearActiveWebCache();

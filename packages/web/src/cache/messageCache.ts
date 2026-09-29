@@ -248,19 +248,27 @@ export function noteLiveMessage(message: { id: string; seq?: number; channelId: 
 
 const WEB_RESUME_CURSOR_KEY = "webResumeCursor";
 
-type ResumeCursorToken = {
+/**
+ * The scope a socket connection may read and move the cursor in. Captured
+ * when the connection starts its resume, for the server that connection
+ * authenticated to; every later write is checked against it, so a late
+ * message:new or sync:resume from server A's socket can never move server B's
+ * cursor (seq is one global sequence across servers).
+ */
+export type ResumeCursorToken = {
   scopeId: number;
-  serverId: string | null;
+  serverId: string;
   userId: string | null;
   generation: number;
 };
 
-function captureResumeCursorToken(): ResumeCursorToken | null {
+/** Token for the attached scope, or null when no scope for `serverId` is attached. */
+export function captureResumeCursorToken(serverId: string | null): ResumeCursorToken | null {
   const cache = activeWebCache();
-  if (!cache) return null;
+  if (!cache || !serverId || cache.serverId !== serverId) return null;
   return {
     scopeId: cache.scopeId,
-    serverId: cache.serverId,
+    serverId,
     userId: cache.userId ?? null,
     generation: cache.generation,
   };
@@ -280,10 +288,8 @@ function cursorMaxSeq(value: RawRecord | null): number | null {
   return Number.isSafeInteger(maxSeq) && maxSeq > 0 ? maxSeq : null;
 }
 
-/** Global resume floor for the attached scope, or null when this scope has none. */
-export async function readWebResumeCursor(): Promise<number | null> {
-  const token = captureResumeCursorToken();
-  if (!token) return null;
+/** Global resume floor for the token's scope, or null when it has none (or the scope moved on). */
+export async function readWebResumeCursor(token: ResumeCursorToken): Promise<number | null> {
   const cache = resumeCursorTokenCurrent(token);
   if (!cache) return null;
   const kv = await cache.repo.getKv(cache.scopeId, WEB_RESUME_CURSOR_KEY);
@@ -292,13 +298,11 @@ export async function readWebResumeCursor(): Promise<number | null> {
 }
 
 /**
- * Move the cursor forward. Never backward. A generation or scope change
- * between the read and the write drops the update.
+ * Move the token scope's cursor forward. Never backward. Dropped when the
+ * attached scope is no longer the token's (server switch, logout, reattach).
  */
-export async function writeWebResumeCursor(maxSeq: number): Promise<void> {
+export async function writeWebResumeCursor(token: ResumeCursorToken, maxSeq: number): Promise<void> {
   if (!Number.isSafeInteger(maxSeq) || maxSeq <= 0) return;
-  const token = captureResumeCursorToken();
-  if (!token) return;
   const cache = resumeCursorTokenCurrent(token);
   if (!cache) return;
   const existing = cursorMaxSeq(await cache.repo.getKv(cache.scopeId, WEB_RESUME_CURSOR_KEY));
