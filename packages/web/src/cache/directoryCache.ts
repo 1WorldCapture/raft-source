@@ -240,7 +240,9 @@ export async function cachedServers(): Promise<Server[]> {
 
 /**
  * Record the authoritative GET /servers payload into the scope captured
- * when the load decided to fetch. A later attach does not receive it.
+ * when the load decided to fetch. With no scope attached yet, the list is
+ * held for the requesting user and written once that user's scope attaches
+ * (a session-user change drops it, so another account never receives it).
  */
 export async function recordServers(
   servers: readonly Server[],
