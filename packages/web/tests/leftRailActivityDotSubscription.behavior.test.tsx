@@ -11,6 +11,7 @@ import { TestIntlProvider } from "./helpers/intl";
 import { useAuthStore } from "../src/store/authStore";
 import { useInboxStore } from "../src/store/inboxStore";
 import { useServerStore } from "../src/store/serverStore";
+import { useServerUnreadSummaryStore } from "../src/store/serverUnreadSummaryStore";
 import { useThreadStore } from "../src/store/threadStore";
 
 const originalApiGet = api.get;
@@ -20,6 +21,10 @@ afterEach(() => {
   cleanup();
   api.get = originalApiGet;
   localStorage.clear();
+  // LeftRail retains the shared server-unread-summary singleton on mount. A
+  // test whose api.get never settles would otherwise leave that store's
+  // in-flight loader wedged, silencing every later summary GET in this file.
+  useServerUnreadSummaryStore.getState().reset();
   useAuthStore.setState(useAuthStore.getInitialState(), true);
   useInboxStore.setState(useInboxStore.getInitialState(), true);
   useServerStore.setState(originalServerState, true);

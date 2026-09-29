@@ -25,6 +25,7 @@ import { useInboxStore } from "../src/store/inboxStore";
 import { useMachineStore } from "../src/store/machineStore";
 import { useMessageStore } from "../src/store/messageStore";
 import { useServerStore } from "../src/store/serverStore";
+import { useServerUnreadSummaryStore } from "../src/store/serverUnreadSummaryStore";
 import { SERVER_NOTIFICATION_PREFS_UPDATED_EVENT } from "../src/store/events/notificationPrefsEvents";
 import { useTaskStore } from "../src/store/taskStore";
 import { useUIStore } from "../src/store/uiStore";
@@ -63,6 +64,10 @@ afterEach(() => {
   api.get = originalGet as typeof api.get;
   api.patch = originalPatch as typeof api.patch;
   localStorage.clear();
+  // Sidebar retains the shared server-unread-summary singleton on mount. A
+  // test whose api.get never settles would otherwise leave that store's
+  // in-flight loader wedged, silencing every later summary GET in this file.
+  useServerUnreadSummaryStore.getState().reset();
   resetServerFeatureFlagsForTests();
 });
 
