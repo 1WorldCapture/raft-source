@@ -643,6 +643,7 @@ export async function updateAgentStatus(
     await tx.update(agents)
       .set({
         status,
+        ...(existing.status !== status ? { statusChangedAt: now } : {}),
         ...(sessionId !== undefined ? { sessionId } : {}),
         updatedAt: now,
       })
@@ -687,6 +688,7 @@ export async function updateAgentStatusFromSignal(
     const [updated] = await tx.update(agents)
       .set({
         status,
+        ...(existing.status !== status ? { statusChangedAt: now } : {}),
         ...(sessionId !== undefined ? { sessionId } : {}),
         updatedAt: now,
       })
@@ -993,6 +995,7 @@ export async function deleteAgent(agentId: string) {
       .set({
         deletedAt,
         status: "inactive",
+        statusChangedAt: sql`CASE WHEN ${agents.status} = 'inactive' THEN ${agents.statusChangedAt} ELSE ${deletedAt} END`,
         sessionId: null,
         machineId: null,
         updatedAt: deletedAt,
@@ -1125,6 +1128,7 @@ export async function resetAgentSession(agentId: string, status: AgentStatus = "
       .set({
         sessionId: null,
         status,
+        ...(existing.status !== status ? { statusChangedAt: now } : {}),
         updatedAt: now,
       })
       .where(and(eq(agents.id, agentId), isNull(agents.deletedAt)));
@@ -1181,7 +1185,7 @@ export async function resetAllAgentStatuses() {
     if (activeAgents.length === 0) return;
     const now = currentDate();
     await tx.update(agents)
-      .set({ status: "inactive", updatedAt: now })
+      .set({ status: "inactive", statusChangedAt: now, updatedAt: now })
       .where(and(eq(agents.status, "active"), isNull(agents.deletedAt)));
     for (const agent of activeAgents) {
       await emitAgentNotificationEvent(tx, agent, "agent.status_changed", ["status"], now);

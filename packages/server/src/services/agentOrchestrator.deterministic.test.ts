@@ -708,6 +708,17 @@ class DeterministicAgentOrchestrator extends AgentOrchestrator {
     // No-op in deterministic tests; the scenarios care only about replica-state transitions.
   }
 
+  readonly machineStatusTransitions: Array<{ machineId: string; status: "online" | "offline"; atMs: number }> = [];
+
+  protected override async persistMachineStatusTransition(
+    machineId: string,
+    status: "online" | "offline",
+    at: Date,
+  ): Promise<{ lastStatus: "online" | "offline" | null; statusChangedAt: Date | null } | null> {
+    this.machineStatusTransitions.push({ machineId, status, atMs: at.getTime() });
+    return { lastStatus: status, statusChangedAt: at };
+  }
+
   protected override async persistMachineComputerVersion(
     _machineId: string,
     _computerVersion: string | null | undefined,
@@ -17774,4 +17785,38 @@ test("GREEN #356: late-open reload after a successful done reads new; a done wit
     noVersion.shutdown();
 
     orchestrator.shutdown();
+});
+
+test("machine status since: online on registration, offline at socket loss, grace reconnect records nothing", async () => {
+  const clock = new FakeClock();
+  const orchestrator = new DeterministicAgentOrchestrator(new InMemoryReplicaStateStore(), clock);
+  const startMs = clock.now();
+
+  await orchestrator.registerMachine("machine-1", "server-1", makeFakeWs() as never);
+  assert.deepEqual(orchestrator.machineStatusTransitions, [
+    { machineId: "machine-1", status: "online", atMs: startMs },
+  ]);
+
+  // Reconnect inside the projection grace: no offline is ever settled.
+  const flapWs = makeFakeWs();
+  await orchestrator.registerMachine("machine-1", "server-1", flapWs as never);
+  await orchestrator.handleMachineDisconnect("machine-1", flapWs as never, { cause: "socket_close" });
+  clock.advance(500);
+  await orchestrator.registerMachine("machine-1", "server-1", makeFakeWs() as never);
+  clock.advance(5_000);
+  await flushMicrotasks();
+  assert.equal(orchestrator.machineStatusTransitions.filter((t) => t.status === "offline").length, 0);
+
+  // A real loss settles offline at the moment the socket went away.
+  const lastWs = makeFakeWs();
+  await orchestrator.registerMachine("machine-1", "server-1", lastWs as never);
+  const lostAtMs = clock.now();
+  await orchestrator.handleMachineDisconnect("machine-1", lastWs as never, { cause: "heartbeat_timeout" });
+  clock.advance(2_000);
+  await waitForCondition(() => orchestrator.machineStatusTransitions.some((t) => t.status === "offline"));
+  assert.deepEqual(
+    orchestrator.machineStatusTransitions.filter((t) => t.status === "offline"),
+    [{ machineId: "machine-1", status: "offline", atMs: lostAtMs }],
+  );
+  orchestrator.shutdown();
 });

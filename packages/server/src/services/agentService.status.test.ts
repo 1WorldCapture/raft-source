@@ -6,7 +6,7 @@ import { eq } from "drizzle-orm";
 import { getDb } from "../db/index.js";
 import { agents, channelAgents, machines, notificationEvents, serverAgentMembers, users } from "../db/schema.js";
 import { countActiveAgentsMissingServerMembership, createServer, getAgentMemberRole } from "./serverService.js";
-import { createAgent, deleteAgent, getAgent, invalidateAgentSessionFromSignal, resetAgentSession, updateAgent, updateAgentStatus, updateAgentStatusFromSignal } from "./agentService.js";
+import { createAgent, deleteAgent, getAgent, invalidateAgentSessionFromSignal, resetAgentSession, resetAllAgentStatuses, updateAgent, updateAgentStatus, updateAgentStatusFromSignal } from "./agentService.js";
 import { addAgent, createChannel, findOrCreateAgentDM } from "./channelService.js";
 
 const test = createApiTest({ humanActivityMuteFlagDefaultEnabled: true, onboardingOpenerFlagDefaultEnabled: false });
@@ -246,4 +246,80 @@ test("active agent membership completeness counts only active agents missing ser
   });
 
   assert.equal(await countActiveAgentsMissingServerMembership(), 0);
+});
+
+async function readStatusChangedAt(agentId: string): Promise<Date | null> {
+  const [row] = await getDb().select({ statusChangedAt: agents.statusChangedAt })
+    .from(agents).where(eq(agents.id, agentId));
+  return row?.statusChangedAt ?? null;
+}
+
+async function latestStatusChangedEventAt(agentId: string): Promise<Date | null> {
+  const rows = await getDb().select({ occurredAt: notificationEvents.occurredAt })
+    .from(notificationEvents)
+    .where(eq(notificationEvents.subjectId, agentId));
+  const times = rows.map((row) => row.occurredAt.getTime()).sort((a, b) => b - a);
+  return times.length ? new Date(times[0]!) : null;
+}
+
+test("status_changed_at starts at creation and moves only on real status transitions", async ({ app }) => {
+  const agent = await seedAgent("status-since");
+  const created = await readStatusChangedAt(agent.id);
+  assert.ok(created instanceof Date);
+
+  await updateAgentStatus(agent.id, "active", "session-1");
+  const activeSince = await readStatusChangedAt(agent.id);
+  assert.ok(activeSince && activeSince.getTime() >= created.getTime());
+  assert.deepEqual(activeSince, await latestStatusChangedEventAt(agent.id));
+
+  // Same status (session refresh / signal replay) keeps the since.
+  await updateAgentStatus(agent.id, "active", "session-2");
+  assert.ok(await updateAgentStatusFromSignal(agent.id, "active"));
+  assert.deepEqual(await readStatusChangedAt(agent.id), activeSince);
+
+  assert.ok(await updateAgentStatusFromSignal(agent.id, "inactive"));
+  const inactiveSince = await readStatusChangedAt(agent.id);
+  assert.ok(inactiveSince && inactiveSince.getTime() >= activeSince.getTime());
+  assert.deepEqual(inactiveSince, await latestStatusChangedEventAt(agent.id));
+
+  await updateAgentStatus(agent.id, "stopped");
+  const stoppedSince = await readStatusChangedAt(agent.id);
+  // Sticky stop: rejected inactive/signal writes leave the since alone.
+  await updateAgentStatus(agent.id, "inactive");
+  assert.equal(await updateAgentStatusFromSignal(agent.id, "active"), false);
+  await resetAgentSession(agent.id, "stopped");
+  assert.deepEqual(await readStatusChangedAt(agent.id), stoppedSince);
+
+  await resetAgentSession(agent.id, "inactive");
+  const resetSince = await readStatusChangedAt(agent.id);
+  assert.ok(resetSince && resetSince.getTime() >= (stoppedSince?.getTime() ?? 0));
+  assert.deepEqual(resetSince, await latestStatusChangedEventAt(agent.id));
+});
+
+test("startup reset stamps status_changed_at on agents it moves to inactive", async ({ app }) => {
+  const agent = await seedAgent("status-since-startup");
+  await updateAgentStatus(agent.id, "active");
+  const activeSince = await readStatusChangedAt(agent.id);
+
+  await resetAllAgentStatuses();
+
+  const resetSince = await readStatusChangedAt(agent.id);
+  assert.equal((await getAgent(agent.id))?.status, "inactive");
+  assert.ok(resetSince && activeSince && resetSince.getTime() >= activeSince.getTime());
+  assert.deepEqual(resetSince, await latestStatusChangedEventAt(agent.id));
+});
+
+test("deleteAgent stamps status_changed_at only when it actually leaves a non-inactive status", async ({ app }) => {
+  const idle = await seedAgent("status-since-delete-idle");
+  const idleSince = await readStatusChangedAt(idle.id);
+  await deleteAgent(idle.id);
+  assert.deepEqual(await readStatusChangedAt(idle.id), idleSince);
+
+  const running = await seedAgent("status-since-delete-active");
+  await updateAgentStatus(running.id, "active");
+  const activeSince = await readStatusChangedAt(running.id);
+  await deleteAgent(running.id);
+  const deletedSince = await readStatusChangedAt(running.id);
+  assert.ok(deletedSince && activeSince && deletedSince.getTime() >= activeSince.getTime());
+  assert.notDeepEqual(deletedSince, activeSince);
 });

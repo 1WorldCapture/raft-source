@@ -857,6 +857,9 @@ export const agents = pgTable("agents", {
   description: text("description"),
   allChannelIntroSentAt: timestamp("all_channel_intro_sent_at", { withTimezone: true }),
   status: text("status", { enum: ["active", "inactive", "stopped"] }).default("inactive").notNull(),
+  // When `status` last took its current value. Written in the same statement
+  // as every status transition; null only for rows the 0267 backfill missed.
+  statusChangedAt: timestamp("status_changed_at", { withTimezone: true }).defaultNow(),
   sessionId: text("session_id"),
   model: text("model").default("sonnet").notNull(),
   runtime: text("runtime").default("claude").notNull(),
@@ -3393,6 +3396,13 @@ export const machines = pgTable("daemons", {
   computerVersion: text("computer_version"),
   computerVersionReportedAt: timestamp("computer_version_reported_at", { withTimezone: true }),
   lastHeartbeat: timestamp("last_heartbeat", { withTimezone: true }),
+  // Last settled connection state and when it began. Only real transitions
+  // write these (registration commit / post-grace disconnect projection), so
+  // grace-window flaps and server restarts keep the original since. The live
+  // status still comes from the orchestrator; readers must fall back when the
+  // live status disagrees with last_status.
+  lastStatus: text("last_status", { enum: ["online", "offline"] }),
+  statusChangedAt: timestamp("status_changed_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   legacyKeyMigratedAt: timestamp("legacy_key_migrated_at", { withTimezone: true }),
 }, (t) => [
