@@ -205,7 +205,7 @@ export const useChannelStore = create<ChannelState>((set, get) => ({
     // overwrites wholesale (offline failure still flips loading).
     if (get().channels.length === 0) {
       try {
-        const cached = await cachedChannels("channel");
+        const cached = await cachedChannels("channel", serverId);
         if (cached.length > 0
           && get().channels.length === 0
           && useServerStore.getState().serverEpoch === epoch) {
@@ -234,8 +234,11 @@ export const useChannelStore = create<ChannelState>((set, get) => ({
         "channel-list",
         (current) => ({ ...hydrateChannels(current, apiChannels), loading: false }),
       ));
-      await recordChannels("channel", apiChannels);
-      await noteChannelListLoaded("channel", epoch, apiChannels);
+      const boundServerId = useServerStore.getState().current?.id;
+      if (boundServerId) {
+        await recordChannels("channel", apiChannels, boundServerId);
+        await noteChannelListLoaded("channel", epoch, apiChannels, boundServerId);
+      }
     } catch (err) {
       console.error("Failed to load channels:", err);
       if (useServerStore.getState().serverEpoch !== epoch) return;
@@ -251,7 +254,7 @@ export const useChannelStore = create<ChannelState>((set, get) => ({
     // Directory-cache seed (task #8): empty list only, network overwrites.
     if (get().dmChannels.length === 0) {
       try {
-        const cached = await cachedChannels("dm");
+        const cached = await cachedChannels("dm", serverId);
         if (cached.length > 0
           && get().dmChannels.length === 0
           && useServerStore.getState().serverEpoch === epoch) {
@@ -279,8 +282,11 @@ export const useChannelStore = create<ChannelState>((set, get) => ({
         "dm-list",
         (current) => hydrateDmChannels(current, apiDms),
       ));
-      await recordChannels("dm", apiDms);
-      await noteChannelListLoaded("dm", epoch, apiDms);
+      const boundServerId = useServerStore.getState().current?.id;
+      if (boundServerId) {
+        await recordChannels("dm", apiDms, boundServerId);
+        await noteChannelListLoaded("dm", epoch, apiDms, boundServerId);
+      }
     } catch (err) {
       console.error("Failed to load DM channels:", err);
     }
@@ -317,14 +323,19 @@ export const useChannelStore = create<ChannelState>((set, get) => ({
         return channel;
       } catch (err) {
         console.error("Failed to load channel:", err);
-        // Offline fallback (task #8): the directory cache holds the last
-        // authoritative list rows, so a channel the server once listed
-        // resolves from cache instead of failing the route — ChatPanel
-        // (and its cached message pane) must stay reachable with the
-        // network down. Cached readState stays out of the ledger, same
-        // discipline as the list seeds.
+        // Offline fallback (task #8): only when the request never got an
+        // HTTP response (network down or timeout). A 403/404 means the
+        // server refused this channel — falling back would keep a revoked
+        // channel open. The epoch must still be the one this request
+        // started in, or the cached row would hydrate into the next server.
+        const httpResponse = err && typeof err === "object" && "response" in err
+          ? (err as { response?: unknown }).response
+          : undefined;
+        if (httpResponse != null) return null;
+        if (useServerStore.getState().serverEpoch !== epoch) return null;
+        if (useServerStore.getState().current?.id !== serverId) return null;
         try {
-          const cached = await cachedChannelById(channelId);
+          const cached = await cachedChannelById(channelId, serverId);
           if (cached) {
             const channel = toChannel(cached);
             set((state) => reduceChannelWithTrace(

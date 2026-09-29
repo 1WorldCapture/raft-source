@@ -374,7 +374,7 @@ export const useServerStore = create<ServerState>((set, get) => ({
       // network answer below stays authoritative and is recorded.
       if (get().servers.length === 0) {
         try {
-          const cached = await cachedServers();
+          const cached = await cachedServers(get().current?.id ?? "");
           if (cached.length > 0 && get().servers.length === 0) {
             applyServerDomainEvent({ kind: "hydrate", source: "servers", servers: cached }, set, get);
             set({ loading: false });
@@ -395,7 +395,7 @@ export const useServerStore = create<ServerState>((set, get) => ({
         // themselves, so this is safe for URL-resolved and empty startup states.
         get().loadMembers();
         get().loadSidebarOrder();
-        await recordServers(servers);
+        await recordServers(servers, get().current?.id ?? "");
       } catch {
         set({ loading: false });
       }

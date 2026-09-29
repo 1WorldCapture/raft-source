@@ -21,7 +21,8 @@ import { create } from "zustand";
 import api from "../api/client";
 import { useMessageStore } from "./messageStore";
 import { parseServerUnreadSummaryRows, retainServerUnreadSummary } from "../utils/serverUnreadSummary";
-import { cachedUnreadSummary, currentDirectoryCacheScope, recordUnreadSummary } from "../cache/directoryCache";
+import { cachedUnreadSummary, claimDirectorySeed, currentDirectoryCacheScope, recordUnreadSummary } from "../cache/directoryCache";
+import { useServerStore } from "./serverStore";
 import type { ServerUnreadSummary } from "../utils/serverUnreadSummary";
 import { SERVER_NOTIFICATION_PREFS_UPDATED_EVENT } from "./events/notificationPrefsEvents";
 
@@ -140,10 +141,15 @@ export const useServerUnreadSummaryStore = create<ServerUnreadSummaryState>((set
         // at REQUEST START so a server switch mid-flight never persists the
         // previous scope's summary into the new one.
         const requestScope = currentDirectoryCacheScope();
-        if (Object.keys(get().byServer).length === 0) {
+        const serverId = useServerStore.getState().current?.id ?? null;
+        const epoch = useServerStore.getState().serverEpoch;
+        // Once per epoch. A later load in the same epoch (poll, focus, a
+        // read that cleared the map) must not paint the cached snapshot
+        // back over counts the user already cleared.
+        if (serverId && claimDirectorySeed("unreadSummary", epoch, serverId) && Object.keys(get().byServer).length === 0) {
           try {
-            const cached = await cachedUnreadSummary();
-            if (cached !== null && Object.keys(get().byServer).length === 0) {
+            const cached = await cachedUnreadSummary(serverId);
+            if (cached !== null && Object.keys(get().byServer).length === 0 && useServerStore.getState().serverEpoch === epoch) {
               set((state) => ({ byServer: retainServerUnreadSummary(state.byServer, parseServerUnreadSummaryRows(cached)) }));
             }
           } catch {
@@ -154,7 +160,7 @@ export const useServerUnreadSummaryStore = create<ServerUnreadSummaryState>((set
           const { data } = await api.get("/servers/unread-summary");
           if (generation !== loadGeneration) return; // reset() happened mid-flight; drop the stale snapshot.
           set((state) => ({ byServer: retainServerUnreadSummary(state.byServer, parseServerUnreadSummaryRows(data)) }));
-          await recordUnreadSummary(data, requestScope);
+          await recordUnreadSummary(data, requestScope, useServerStore.getState().current?.id ?? null);
         } catch {
           if (generation !== loadGeneration) return;
           // A failed refresh must not leave stale >0 counts lighting dots.

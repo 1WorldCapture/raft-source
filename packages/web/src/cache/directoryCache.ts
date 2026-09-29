@@ -23,6 +23,7 @@ import type { LiveChannel } from "@botiverse/raft-shared/src/cacheReconcile.js";
 import type { ApiChannel } from "../store/channelStore";
 import type { Server } from "../store/serverStore";
 import { activeWebCache } from "./messageCache";
+import type { ActiveCache } from "./messageCache";
 
 // kv keys — aligned with mobile (serverRailCache.ts / home wiring).
 export const SERVER_LIST_KV_KEY = "serverList";
@@ -54,16 +55,39 @@ export function serversFromCacheValue(value: unknown): Server[] {
   return out;
 }
 
-/** Cached server list for the attached scope, [] when absent or detached. */
-export async function cachedServers(): Promise<Server[]> {
+/**
+ * The attached cache, but only when it was opened for `serverId`.
+ * Store resets are synchronous and scope attach is async, so a load that
+ * starts on server B can still see A's holder. Reading or writing in that
+ * gap paints A's rows as B's and, on putChannels, deletes A's cached
+ * channels (and their messages) as "missing".
+ */
+function cacheBoundTo(serverId: string | null | undefined): ActiveCache | null {
+  if (!serverId) return null;
   const cache = activeWebCache();
+  if (!cache || cache.serverId !== serverId) return null;
+  return cache;
+}
+
+/** Re-read immediately before a write so a logout that already detached cannot land. */
+function cacheStillBound(serverId: string, seen: ActiveCache): ActiveCache | null {
+  const cache = cacheBoundTo(serverId);
+  if (!cache || cache.generation !== seen.generation || cache.scopeId !== seen.scopeId) return null;
+  return cache;
+}
+
+/** Cached server list for the attached scope, [] when absent, detached, or bound to another server. */
+export async function cachedServers(serverId: string): Promise<Server[]> {
+  const cache = cacheBoundTo(serverId);
   if (!cache) return [];
   return serversFromCacheValue(await cache.repo.getKv(cache.scopeId, SERVER_LIST_KV_KEY));
 }
 
 /** Record the authoritative GET /servers payload (raw rows, one snapshot). */
-export async function recordServers(servers: readonly Server[]): Promise<void> {
-  const cache = activeWebCache();
+export async function recordServers(servers: readonly Server[], serverId: string): Promise<void> {
+  const seen = cacheBoundTo(serverId);
+  if (!seen) return;
+  const cache = cacheStillBound(serverId, seen);
   if (!cache) return;
   await cache.repo.putKv(cache.scopeId, SERVER_LIST_KV_KEY, {
     servers: servers as unknown as RawRecord[],
@@ -84,9 +108,9 @@ function channelsFromRows(rows: readonly { raw: RawRecord }[]): ApiChannel[] {
   return out;
 }
 
-/** Cached list for one kind ("channel" | "dm"), [] when absent or detached. */
-export async function cachedChannels(kind: ChannelListKind): Promise<ApiChannel[]> {
-  const cache = activeWebCache();
+/** Cached list for one kind ("channel" | "dm"), [] when absent, detached, or bound to another server. */
+export async function cachedChannels(kind: ChannelListKind, serverId: string): Promise<ApiChannel[]> {
+  const cache = cacheBoundTo(serverId);
   if (!cache) return [];
   return channelsFromRows(await cache.repo.getChannels(cache.scopeId, [kind]));
 }
@@ -97,8 +121,8 @@ export async function cachedChannels(kind: ChannelListKind): Promise<ApiChannel[
  * so a channel the server once listed resolves offline without a network
  * round-trip. Null when absent or detached.
  */
-export async function cachedChannelById(channelId: string): Promise<ApiChannel | null> {
-  const cache = activeWebCache();
+export async function cachedChannelById(channelId: string, serverId: string): Promise<ApiChannel | null> {
+  const cache = cacheBoundTo(serverId);
   if (!cache) return null;
   const rows = channelsFromRows(await cache.repo.getChannels(cache.scopeId));
   return rows.find((channel) => channel.id === channelId) ?? null;
@@ -112,8 +136,11 @@ export async function cachedChannelById(channelId: string): Promise<ApiChannel |
 export async function recordChannels(
   kind: ChannelListKind,
   channels: readonly ApiChannel[],
+  serverId: string,
 ): Promise<void> {
-  const cache = activeWebCache();
+  const seen = cacheBoundTo(serverId);
+  if (!seen) return;
+  const cache = cacheStillBound(serverId, seen);
   if (!cache) return;
   await cache.repo.putChannels(
     cache.scopeId,
@@ -127,14 +154,15 @@ export async function recordChannels(
 }
 
 // Per-scope record of which channel-list kinds have landed for the CURRENT
-// epoch. `owner` holds the activeWebCache() object identity: a re-attach
-// (logout/re-login, tests constructing fresh repos) reuses numeric scopeIds,
-// so the identity — not the number — decides whether a partial entry is
-// still trustworthy. Entries are dropped once both kinds are present and the
-// reconcile has run, or when the epoch/owner changes, so the map cannot grow
-// unboundedly.
+// attach generation + epoch. The holder object itself is not an identity:
+// bootWebCache's provider allocates a fresh `{ repo, scopeId, serverId,
+// generation }` on every read. `generation` is stable for one attach and
+// bumps on re-attach / reset, so a reused numeric scopeId cannot finish a
+// reconcile that a previous attach started. Entries are dropped once both
+// kinds are present and the reconcile has run, or when the epoch/generation
+// changes, so the map cannot grow unboundedly.
 type ChannelListEpochEntry = {
-  owner: unknown;
+  generation: number;
   epoch: number;
   channel?: readonly LiveChannel[];
   dm?: readonly LiveChannel[];
@@ -161,14 +189,15 @@ export async function noteChannelListLoaded(
   kind: ChannelListKind,
   epoch: number,
   live: readonly ApiChannel[],
+  serverId: string,
 ): Promise<void> {
-  const cache = activeWebCache();
-  if (!cache) return;
-  const scopeId = cache.scopeId;
+  const seen = cacheBoundTo(serverId);
+  if (!seen) return;
+  const scopeId = seen.scopeId;
   const current = channelListLoads.get(scopeId);
   // A newer epoch or a different attach supersedes any partial entry.
-  if (!current || current.owner !== cache || current.epoch !== epoch) {
-    channelListLoads.set(scopeId, { owner: cache, epoch, [kind]: toLiveChannels(live) });
+  if (!current || current.generation !== seen.generation || current.epoch !== epoch) {
+    channelListLoads.set(scopeId, { generation: seen.generation, epoch, [kind]: toLiveChannels(live) });
     return;
   }
   current[kind] = toLiveChannels(live);
@@ -176,8 +205,9 @@ export async function noteChannelListLoaded(
   const dmLive = current.dm;
   if (!channelLive || !dmLive) return;
   channelListLoads.delete(scopeId);
-  if (activeWebCache() !== cache) return;
-  await reconcileChannels(cache.repo, scopeId, [...channelLive, ...dmLive]);
+  const cache = cacheStillBound(serverId, seen);
+  if (!cache) return;
+  await reconcileChannels(cache.repo, cache.scopeId, [...channelLive, ...dmLive]);
 }
 
 // ---- unread counts ---------------------------------------------------------------
@@ -187,18 +217,45 @@ export async function noteChannelListLoaded(
  * so parseUnreadSnapshot runs identically on the cached seed; the read-state
  * ledger folding (consumeReadStateSnapshotRows) stays network-only.
  */
-export async function cachedUnread(): Promise<unknown> {
-  const cache = activeWebCache();
+export async function cachedUnread(serverId: string): Promise<unknown> {
+  const cache = cacheBoundTo(serverId);
   if (!cache) return null;
   return await cache.repo.getKv(cache.scopeId, CHANNEL_UNREAD_KV_KEY);
 }
 
 /** Record the raw unread wire payload (validated: non-object junk skipped). */
-export async function recordUnread(data: unknown): Promise<void> {
-  const cache = activeWebCache();
-  if (!cache) return;
+export async function recordUnread(data: unknown, serverId: string): Promise<void> {
+  const seen = cacheBoundTo(serverId);
+  if (!seen) return;
   if (!data || typeof data !== "object") return;
+  const cache = cacheStillBound(serverId, seen);
+  if (!cache) return;
   await cache.repo.putKv(cache.scopeId, CHANNEL_UNREAD_KV_KEY, data as RawRecord);
+}
+
+// One seed per (kind, attach generation, server, epoch). loadUnreadCounts and
+// the summary load run on reconnect, rooms-joined, and inbox refresh; seeding
+// whenever the in-memory map is empty paints a count the user already read,
+// and a failed request leaves that stale seed in place for the next call.
+const directorySeedEpoch = new Map<string, number>();
+
+/**
+ * True the first time `kind` is seeded for this attach + server + epoch.
+ * A cache bound to a different server does not consume the claim, so the
+ * load that runs after attach catches up can still seed.
+ */
+export function claimDirectorySeed(kind: string, epoch: number, serverId: string): boolean {
+  const cache = cacheBoundTo(serverId);
+  if (!cache) return false;
+  const key = `${kind}:${cache.generation}:${cache.serverId}`;
+  if (directorySeedEpoch.get(key) === epoch) return false;
+  directorySeedEpoch.set(key, epoch);
+  return true;
+}
+
+/** Test isolation: seed claims survive the module for the process lifetime. */
+export function resetDirectorySeedClaims(): void {
+  directorySeedEpoch.clear();
 }
 
 // ---- cross-server unread summary ---------------------------------------------------
@@ -209,17 +266,18 @@ export async function recordUnread(data: unknown): Promise<void> {
  * mid-flight must not persist the previous scope's summary snapshot into the
  * new scope (mobile serverRailCache pattern, Firstmate ruling #6 thread).
  */
-export type DirectoryCacheScope = { scopeId: number };
+export type DirectoryCacheScope = { scopeId: number; serverId: string; generation: number };
 
 /** Capture the active scope token for a request about to start (sync, no I/O). */
 export function currentDirectoryCacheScope(): DirectoryCacheScope | null {
   const cache = activeWebCache();
-  return cache ? { scopeId: cache.scopeId } : null;
+  if (!cache || cache.serverId === null) return null;
+  return { scopeId: cache.scopeId, serverId: cache.serverId, generation: cache.generation };
 }
 
-/** Cached raw wire payload of GET /servers/unread-summary, null when absent. */
-export async function cachedUnreadSummary(): Promise<unknown> {
-  const cache = activeWebCache();
+/** Cached raw wire payload of GET /servers/unread-summary, null when absent or bound elsewhere. */
+export async function cachedUnreadSummary(serverId: string): Promise<unknown> {
+  const cache = cacheBoundTo(serverId);
   if (!cache) return null;
   return await cache.repo.getKv(cache.scopeId, UNREAD_SUMMARY_KV_KEY);
 }
@@ -232,10 +290,16 @@ export async function cachedUnreadSummary(): Promise<unknown> {
 export async function recordUnreadSummary(
   data: unknown,
   requestScope: DirectoryCacheScope | null,
+  serverId: string | null,
 ): Promise<void> {
-  const cache = activeWebCache();
-  if (!cache || !requestScope) return;
-  if (requestScope.scopeId !== cache.scopeId) return;
+  const seen = cacheBoundTo(serverId);
+  if (!seen || !requestScope) return;
+  if (requestScope.scopeId !== seen.scopeId) return;
+  if (requestScope.serverId !== seen.serverId) return;
+  if (requestScope.generation !== seen.generation) return;
   if (!data || typeof data !== "object") return;
+  if (!serverId) return;
+  const cache = cacheStillBound(serverId, seen);
+  if (!cache) return;
   await cache.repo.putKv(cache.scopeId, UNREAD_SUMMARY_KV_KEY, data as RawRecord);
 }
