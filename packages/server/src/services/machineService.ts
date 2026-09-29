@@ -238,6 +238,44 @@ export async function updateHeartbeat(machineId: string) {
   }).where(eq(machines.id, machineId));
 }
 
+// A reconnect whose previous heartbeat is at most this old is treated as the
+// same online stretch (server restart / replica handoff), so its since stays.
+// Pongs land every ~30s, so a live machine is always well inside the window.
+export const MACHINE_ONLINE_CONTINUITY_MS = 3 * 60 * 1000;
+
+/**
+ * Record a settled connection transition and return when the current
+ * last_status began. Writes only on a real transition: an online commit keeps
+ * the stored since when the machine was already online with a fresh heartbeat,
+ * and an offline projection keeps it when the machine was already offline.
+ */
+export async function recordMachineStatusTransition(
+  machineId: string,
+  status: "online" | "offline",
+  at: Date,
+): Promise<Date | null> {
+  const db = getDb();
+  const transitioned = status === "online"
+    ? or(
+      sql`${machines.lastStatus} IS DISTINCT FROM 'online'`,
+      isNull(machines.statusChangedAt),
+      isNull(machines.lastHeartbeat),
+      lt(machines.lastHeartbeat, new Date(at.getTime() - MACHINE_ONLINE_CONTINUITY_MS)),
+    )
+    : or(
+      sql`${machines.lastStatus} IS DISTINCT FROM 'offline'`,
+      isNull(machines.statusChangedAt),
+    );
+  await db.update(machines)
+    .set({ lastStatus: status, statusChangedAt: at })
+    .where(and(eq(machines.id, machineId), transitioned));
+  const [row] = await db.select({ statusChangedAt: machines.statusChangedAt })
+    .from(machines)
+    .where(eq(machines.id, machineId))
+    .limit(1);
+  return row?.statusChangedAt ?? null;
+}
+
 export async function regenerateApiKey(machineId: string) {
   const db = getDb();
   clearAuthCache(machineId);

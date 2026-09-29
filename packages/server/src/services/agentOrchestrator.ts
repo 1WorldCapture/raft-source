@@ -631,6 +631,9 @@ interface PendingMachineDisconnectProjection {
   connectionEpochId: string;
   replicaGeneration: string | null;
   context: MachineDisconnectContext;
+  // When the socket actually went away; the offline since, not the post-grace
+  // projection time.
+  disconnectedAtMs: number;
   timer: unknown;
 }
 
@@ -4868,6 +4871,7 @@ export class AgentOrchestrator extends EventEmitter {
         return;
       }
 
+      await this.recordMachineStatusSince(machineId, "online", new Date(this.clock.now()));
       const statusVersion = await this.bumpMachineStatusVersion(machineId);
 
       this.io?.to(`server:${serverId}`).emit("machine:status", {
@@ -5648,6 +5652,7 @@ export class AgentOrchestrator extends EventEmitter {
       connectionEpochId,
       replicaGeneration,
       context: disconnectContext,
+      disconnectedAtMs: this.clock.now(),
       timer: null,
     };
     pending.timer = this.scheduleOnClock(() => {
@@ -5813,6 +5818,7 @@ export class AgentOrchestrator extends EventEmitter {
           error_class: err instanceof Error ? err.name : typeof err,
         });
       }
+      await this.recordMachineStatusSince(machineId, "offline", new Date(pending.disconnectedAtMs));
       const machineAgents = await this.loadAgentsForDisconnect(machineId);
       let activeAgentsCount = 0;
       let pendingReceivesResolvedCount = 0;
@@ -12333,6 +12339,31 @@ export class AgentOrchestrator extends EventEmitter {
 
   protected async updateMachineHeartbeat(machineId: string) {
     await machineService.updateHeartbeat(machineId);
+  }
+
+  protected async persistMachineStatusTransition(
+    machineId: string,
+    status: "online" | "offline",
+    at: Date,
+  ): Promise<Date | null> {
+    return machineService.recordMachineStatusTransition(machineId, status, at);
+  }
+
+  /** Best-effort: a failed since write must never block connect/disconnect. */
+  private async recordMachineStatusSince(
+    machineId: string,
+    status: "online" | "offline",
+    at: Date,
+  ): Promise<Date | null> {
+    try {
+      return await this.persistMachineStatusTransition(machineId, status, at);
+    } catch (err) {
+      console.warn(
+        `[Machine ${machineId}] Failed to record ${status} since:`,
+        err instanceof Error ? err.message : err,
+      );
+      return null;
+    }
   }
 
   protected async persistActivityEvent(

@@ -1870,6 +1870,13 @@
       "when": 1789376344766,
       "tag": "0266_session_token_predecessors",
       "breakpoints": true
+    },
+    {
+      "idx": 267,
+      "version": "7",
+      "when": 1790697977520,
+      "tag": "0267_agent_machine_status_since",
+      "breakpoints": true
     }
   ]
 }
