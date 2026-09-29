@@ -21,6 +21,7 @@
 
 import { RUNTIME_API_BASE } from "../desktopRuntimeEnvironment";
 import { forgetOfflineUser } from "../utils/offlineSession";
+import { beginDirectoryAttachWait, noteDirectoryAttachSettled } from "./directoryCache";
 import { beginActiveCacheBoot, noteActiveCacheSettled, setActiveCacheProvider } from "./messageCache";
 import { initWebCache } from "./webCache";
 import type { WebCacheRuntime } from "./webCache";
@@ -76,18 +77,28 @@ export function wireWebCacheLifecycle(
   /** The userId of the last completed attach this wiring observed. */
   let attachedUserId: string | null = null;
   let chain: Promise<void> = Promise.resolve();
+  let attachWave = 0;
 
   const attach = (userId: string, serverId: string): void => {
     // Serialize: a rapid identity/server switch must not interleave two
-    // openScope+persist pairs.
+    // openScope+persist pairs. Arm the directory wait synchronously, before
+    // runtime.attach nulls the holder, so a load started in this turn waits
+    // for the new scope instead of missing the seed and the write-back.
+    const wave = ++attachWave;
+    const alreadyAttached = runtime.scopeId !== null && runtime.serverId === serverId;
+    if (!alreadyAttached) beginDirectoryAttachWait();
     chain = chain
       .then(async () => {
-        await runtime.attach(origin, userId, serverId);
-        attachedUserId = userId;
         try {
-          storage.setItem(WEB_CACHE_LAST_SCOPE_KEY, JSON.stringify({ userId, serverId }));
-        } catch {
-          // Best-effort persistence — the attach itself still worked.
+          await runtime.attach(origin, userId, serverId);
+          attachedUserId = userId;
+          try {
+            storage.setItem(WEB_CACHE_LAST_SCOPE_KEY, JSON.stringify({ userId, serverId }));
+          } catch {
+            // Best-effort persistence — the attach itself still worked.
+          }
+        } finally {
+          if (wave === attachWave) noteDirectoryAttachSettled();
         }
       })
       .catch(() => {
@@ -97,6 +108,7 @@ export function wireWebCacheLifecycle(
         // see "no cache" rather than the previous identity's data. This is
         // deliberate (review item 4): a degraded no-cache window beats
         // reading/writing the wrong server's scope.
+        if (wave === attachWave) noteDirectoryAttachSettled();
       });
   };
 

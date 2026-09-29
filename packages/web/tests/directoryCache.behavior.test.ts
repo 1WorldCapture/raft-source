@@ -10,13 +10,17 @@ import test from "node:test";
 import api from "../src/api/client";
 import {
   attachMemoryWebCache,
+  beginActiveCacheBoot,
   clearActiveWebCache,
+  noteActiveCacheSettled,
   setActiveCacheProvider,
 } from "../src/cache/messageCache";
 import {
+  beginDirectoryAttachWait,
   cachedServers,
   CHANNEL_UNREAD_KV_KEY,
   currentDirectoryCacheScope,
+  noteDirectoryAttachSettled,
   recordChannels,
   recordServers,
   recordUnread,
@@ -34,6 +38,11 @@ import { useMessageStore } from "../src/store/messageStore";
 import { useServerStore } from "../src/store/serverStore";
 import type { Server } from "../src/store/serverStore";
 import { useServerUnreadSummaryStore } from "../src/store/serverUnreadSummaryStore";
+import { MissingRefreshTokenError } from "../src/utils/authErrors";
+
+function networkDown(): Error {
+  return Object.assign(new Error("network down"), { code: "ERR_NETWORK" });
+}
 
 function serverFixture(overrides: Partial<Server> = {}): Server {
   return {
@@ -103,7 +112,7 @@ test("serversFromCacheValue validates rows; junk degrades to []", () => {
 
 test("loadServers: empty store seeds from cache before the network, network overwrites and is recorded", async (t) => {
   const { repo, scopeId } = await freshCache();
-  await recordServers([serverFixture({ id: "cached-1", name: "Cached" })], ATTACHED_SERVER);
+  await recordServers([serverFixture({ id: "cached-1", name: "Cached" })]);
   resetStores();
 
   const net = deferred<{ data: unknown }>();
@@ -130,12 +139,12 @@ test("loadServers: empty store seeds from cache before the network, network over
   );
   const recorded = serversFromCacheValue(await repo.getKv(scopeId, "serverList"));
   assert.deepEqual(recorded.map((s) => s.id), ["net-1"], "authoritative payload written back");
-  assert.deepEqual((await cachedServers(ATTACHED_SERVER)).map((s) => s.id), ["net-1"]);
+  assert.deepEqual((await cachedServers()).map((s) => s.id), ["net-1"]);
 });
 
 test("loadServers: a non-empty store is not seeded from cache", async (t) => {
   await freshCache();
-  await recordServers([serverFixture({ id: "cached-1" })], ATTACHED_SERVER);
+  await recordServers([serverFixture({ id: "cached-1" })]);
   resetStores();
   useServerStore.setState({ servers: [serverFixture({ id: "live-1" })] });
 
@@ -208,7 +217,7 @@ test("ensureChannel falls back to the cached row when the detail request fails",
   // Store lists stay EMPTY here — the channel only exists in the cache, so
   // the offline fallback (not the store-hit path) resolves it.
   t.mock.method(api, "get", async (url: string) => {
-    if (url.startsWith("/channels/")) throw new Error("network down");
+    if (url.startsWith("/channels/")) throw networkDown();
     return { data: [] };
   });
   const resolved = await useChannelStore.getState().ensureChannel("c1");
@@ -351,8 +360,8 @@ test("summary write-back is skipped when the scope changed mid-flight", async (t
 test("all directory ops no-op silently with no cache attached", async () => {
   clearActiveWebCache();
   resetStores();
-  assert.deepEqual(await cachedServers(ATTACHED_SERVER), []);
-  await assert.doesNotReject(recordServers([serverFixture()], ATTACHED_SERVER));
+  assert.deepEqual(await cachedServers(), []);
+  await assert.doesNotReject(recordServers([serverFixture()]));
   await assert.doesNotReject(recordChannels("channel", [channelFixture("c1", "x")], ATTACHED_SERVER));
   await assert.doesNotReject(recordUnread({ channels: {} }, ATTACHED_SERVER));
   await assert.doesNotReject(recordUnreadSummary({}, null, ATTACHED_SERVER));
@@ -528,7 +537,7 @@ test("ensureChannel does not apply the cached row after the server epoch changes
 
   t.mock.method(api, "get", async () => {
     useServerStore.setState({ serverEpoch: 9 });
-    throw new Error("network down");
+    throw networkDown();
   });
   const resolved = await useChannelStore.getState().ensureChannel("c1");
   assert.equal(resolved, null);
@@ -574,4 +583,216 @@ test("resetAll detaches the scope before the wipe, so a write during the wipe do
   assert.equal(puts, 0, "a directory write during the wipe is refused");
   release();
   await pending;
+});
+
+test("loadServers seeds and writes the attached scope when current is still null", async (t) => {
+  const { repo, scopeId } = await freshCache();
+  await recordServers([serverFixture({ id: "cached-1", name: "Cached" })]);
+  resetStores();
+  useServerStore.setState({ current: null, servers: [], loading: true });
+
+  t.mock.method(api, "get", async () => ({ data: [serverFixture({ id: "net-1", name: "Network" })] }));
+  await useServerStore.getState().loadServers();
+  assert.equal(useServerStore.getState().current, null, "hydrating the list does not select a server");
+  assert.deepEqual(useServerStore.getState().servers.map((s) => s.id), ["net-1"]);
+  const recorded = serversFromCacheValue(await repo.getKv(scopeId, "serverList"));
+  assert.deepEqual(recorded.map((s) => s.id), ["net-1"], "write-back does not require a current server");
+});
+
+test("loadServers waits for the cold-start attach before reading the server list", async (t) => {
+  const repo = createWebCacheRepo();
+  const scopeId = await repo.openScope("https://raft.example", "user-1", ATTACHED_SERVER);
+  await repo.putKv(scopeId, "serverList", {
+    servers: [serverFixture({ id: "cached-1", name: "Cached" })],
+  });
+  clearActiveWebCache();
+  setActiveCacheProvider(null);
+  beginActiveCacheBoot();
+  t.after(() => {
+    noteActiveCacheSettled();
+    setActiveCacheProvider(null);
+  });
+  resetStores();
+  useServerStore.setState({ current: null, servers: [], loading: true });
+
+  const net = deferred<{ data: unknown }>();
+  t.mock.method(api, "get", async () => net.promise);
+  const pending = useServerStore.getState().loadServers();
+  await flush();
+  assert.deepEqual(useServerStore.getState().servers, [], "no seed until the persisted scope is attached");
+
+  setActiveCacheProvider(() => ({
+    repo,
+    scopeId,
+    serverId: ATTACHED_SERVER,
+    generation: 2,
+  }));
+  noteActiveCacheSettled();
+  await flush();
+  assert.deepEqual(
+    useServerStore.getState().servers.map((s) => s.id),
+    ["cached-1"],
+    "the attached scope paints the list while current is still null",
+  );
+  net.resolve({ data: [serverFixture({ id: "net-1", name: "Network" })] });
+  await pending;
+});
+
+test("loadChannels waits for the in-flight attach before seeding or writing", async (t) => {
+  const repo = createWebCacheRepo();
+  const scopeId = await repo.openScope("https://raft.example", "user-1", "server-b");
+  await repo.putChannels(scopeId, [{
+    id: "b-cached",
+    type: "channel",
+    lastMessageAt: null,
+    raw: channelFixture("b-cached", "cached") as unknown as Record<string, unknown>,
+  }]);
+  clearActiveWebCache();
+  setActiveCacheProvider(null);
+  beginDirectoryAttachWait();
+  t.after(() => noteDirectoryAttachSettled());
+  resetStores();
+  useServerStore.setState({
+    current: serverFixture({ id: "server-b", slug: "b", name: "B" }),
+    serverEpoch: 2,
+  });
+  useChannelStore.setState({ channels: [], dmChannels: [], loading: true });
+
+  const net = deferred<{ data: unknown }>();
+  t.mock.method(api, "get", async (url: string) => {
+    if (url === "/channels") return net.promise;
+    return { data: [] };
+  });
+  const pending = useChannelStore.getState().loadChannels();
+  await flush();
+  assert.deepEqual(useChannelStore.getState().channels, [], "B does not seed before its scope is attached");
+  assert.equal(useChannelStore.getState().loading, true);
+
+  setActiveCacheProvider(() => ({
+    repo,
+    scopeId,
+    serverId: "server-b",
+    generation: 4,
+  }));
+  noteDirectoryAttachSettled();
+  await flush();
+  assert.deepEqual(useChannelStore.getState().channels.map((c) => c.id), ["b-cached"]);
+
+  net.resolve({ data: [channelFixture("b-net", "B")] });
+  await pending;
+  assert.deepEqual(
+    (await repo.getChannels(scopeId, ["channel"])).map((row) => row.id),
+    ["b-net"],
+    "B's first response is written once the scope is attached",
+  );
+});
+
+test("an unread load that runs before attach occupies the epoch so a later load cannot reseed", async (t) => {
+  const repo = createWebCacheRepo();
+  const scopeId = await repo.openScope("https://raft.example", "user-1", "server-b");
+  await repo.putKv(scopeId, CHANNEL_UNREAD_KV_KEY, { channels: { b1: 9 } });
+  clearActiveWebCache();
+  setActiveCacheProvider(null);
+  resetStores();
+  useServerStore.setState({
+    current: serverFixture({ id: "server-b", slug: "b", name: "B" }),
+    serverEpoch: 2,
+  });
+  useMessageStore.setState({ unreadCounts: {}, mentionFlags: {} });
+
+  t.mock.method(api, "get", async (url: string) => {
+    if (url === "/channels/unread") return { data: { channels: {} } };
+    return { data: [] };
+  });
+  await useMessageStore.getState().loadUnreadCounts();
+  assert.deepEqual(useMessageStore.getState().unreadCounts, {}, "the pre-attach load keeps the network snapshot");
+
+  setActiveCacheProvider(() => ({
+    repo,
+    scopeId,
+    serverId: "server-b",
+    generation: 3,
+  }));
+  t.after(() => setActiveCacheProvider(null));
+  const second = deferred<{ data: unknown }>();
+  t.mock.method(api, "get", async (url: string) => {
+    if (url === "/channels/unread") return second.promise;
+    return { data: [] };
+  });
+  const pending = useMessageStore.getState().loadUnreadCounts();
+  await flush();
+  assert.equal(useMessageStore.getState().unreadCounts.b1, undefined, "stale {b1: 9} is not reseeded");
+  second.resolve({ data: { channels: {} } });
+  await pending;
+  assert.equal(useMessageStore.getState().unreadCounts.b1, undefined);
+});
+
+test("ensureChannel does not hydrate a cached row when the server changes during the cache read", async (t) => {
+  const repo = createWebCacheRepo();
+  const scopeId = await repo.openScope("https://raft.example", "user-1", ATTACHED_SERVER);
+  await repo.putChannels(scopeId, [{
+    id: "c1",
+    type: "channel",
+    lastMessageAt: null,
+    raw: channelFixture("c1", "cached-name") as unknown as Record<string, unknown>,
+  }]);
+  clearActiveWebCache();
+  const read = repo.getChannels.bind(repo);
+  repo.getChannels = async (scope, types) => {
+    useServerStore.setState({
+      serverEpoch: 9,
+      current: serverFixture({ id: "server-b", slug: "b", name: "B" }),
+    });
+    return read(scope, types);
+  };
+  setActiveCacheProvider(() => ({
+    repo,
+    scopeId,
+    serverId: ATTACHED_SERVER,
+    generation: 1,
+  }));
+  t.after(() => setActiveCacheProvider(null));
+  resetStores();
+
+  t.mock.method(api, "get", async () => {
+    throw networkDown();
+  });
+  const resolved = await useChannelStore.getState().ensureChannel("c1");
+  assert.equal(resolved, null);
+  assert.equal(useChannelStore.getState().channels.find((c) => c.id === "c1"), undefined);
+});
+
+test("ensureChannel does not fall back on cancel, missing refresh token, or an empty resolution", async (t) => {
+  await freshCache();
+  await recordChannels("channel", [channelFixture("c1", "cached-name")], ATTACHED_SERVER);
+  resetStores();
+
+  const failures: Array<() => unknown> = [
+    () => {
+      throw Object.assign(new Error("canceled"), { code: "ERR_CANCELED" });
+    },
+    () => {
+      throw new MissingRefreshTokenError();
+    },
+    () => undefined,
+  ];
+  let mode = 0;
+  t.mock.method(api, "get", async () => failures[mode]!());
+  for (mode = 0; mode < failures.length; mode += 1) {
+    useChannelStore.setState({ channels: [], dmChannels: [] });
+    const resolved = await useChannelStore.getState().ensureChannel("c1");
+    assert.equal(resolved, null, `case ${mode} does not resolve from cache`);
+    assert.equal(useChannelStore.getState().channels.find((c) => c.id === "c1"), undefined);
+  }
+});
+
+test("ensureChannel falls back to cache on a timeout", async (t) => {
+  await freshCache();
+  await recordChannels("channel", [channelFixture("c1", "cached-name")], ATTACHED_SERVER);
+  resetStores();
+  t.mock.method(api, "get", async () => {
+    throw Object.assign(new Error("timeout"), { code: "ECONNABORTED" });
+  });
+  const resolved = await useChannelStore.getState().ensureChannel("c1");
+  assert.equal(resolved?.id, "c1");
 });

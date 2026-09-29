@@ -21,7 +21,7 @@ import { create } from "zustand";
 import api from "../api/client";
 import { useMessageStore } from "./messageStore";
 import { parseServerUnreadSummaryRows, retainServerUnreadSummary } from "../utils/serverUnreadSummary";
-import { cachedUnreadSummary, claimDirectorySeed, currentDirectoryCacheScope, recordUnreadSummary } from "../cache/directoryCache";
+import { cachedUnreadSummary, claimDirectorySeed, currentDirectoryCacheScope, directoryCacheBindPending, recordUnreadSummary, whenDirectoryCacheBound } from "../cache/directoryCache";
 import { useServerStore } from "./serverStore";
 import type { ServerUnreadSummary } from "../utils/serverUnreadSummary";
 import { SERVER_NOTIFICATION_PREFS_UPDATED_EVENT } from "./events/notificationPrefsEvents";
@@ -138,14 +138,21 @@ export const useServerUnreadSummaryStore = create<ServerUnreadSummaryState>((set
       const flight = (async () => {
         // Directory-cache (task #8): seed an empty store from the cached raw
         // wire payload; the write-back below is guarded by the scope captured
-        // at REQUEST START so a server switch mid-flight never persists the
+        // after attach so a server switch mid-flight never persists the
         // previous scope's summary into the new one.
-        const requestScope = currentDirectoryCacheScope();
         const serverId = useServerStore.getState().current?.id ?? null;
         const epoch = useServerStore.getState().serverEpoch;
+        if (serverId && directoryCacheBindPending(serverId)) {
+          await whenDirectoryCacheBound(serverId);
+          if (useServerStore.getState().serverEpoch !== epoch) return;
+          if (useServerStore.getState().current?.id !== serverId) return;
+        }
+        const requestScope = currentDirectoryCacheScope();
         // Once per epoch. A later load in the same epoch (poll, focus, a
         // read that cleared the map) must not paint the cached snapshot
-        // back over counts the user already cleared.
+        // back over counts the user already cleared. Claiming before the
+        // scope is bound still occupies the epoch, so the post-attach
+        // reconnect cannot reseed a stale count.
         if (serverId && claimDirectorySeed("unreadSummary", epoch, serverId) && Object.keys(get().byServer).length === 0) {
           try {
             const cached = await cachedUnreadSummary(serverId);

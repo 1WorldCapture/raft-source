@@ -22,7 +22,7 @@ import { reconcileChannels } from "@botiverse/raft-shared/src/cacheReconcile.js"
 import type { LiveChannel } from "@botiverse/raft-shared/src/cacheReconcile.js";
 import type { ApiChannel } from "../store/channelStore";
 import type { Server } from "../store/serverStore";
-import { activeWebCache } from "./messageCache";
+import { activeWebCache, isActiveCacheBootPending, whenActiveCache } from "./messageCache";
 import type { ActiveCache } from "./messageCache";
 
 // kv keys — aligned with mobile (serverRailCache.ts / home wiring).
@@ -76,18 +76,126 @@ function cacheStillBound(serverId: string, seen: ActiveCache): ActiveCache | nul
   return cache;
 }
 
-/** Cached server list for the attached scope, [] when absent, detached, or bound to another server. */
-export async function cachedServers(serverId: string): Promise<Server[]> {
-  const cache = cacheBoundTo(serverId);
-  if (!cache) return [];
-  return serversFromCacheValue(await cache.repo.getKv(cache.scopeId, SERVER_LIST_KV_KEY));
+/**
+ * The attached scope captured at REQUEST START. Writes compare it against
+ * the CURRENT attach scope — a server switch mid-flight must not persist
+ * the previous scope's snapshot into the new one.
+ */
+export type DirectoryCacheScope = { scopeId: number; serverId: string; generation: number };
+
+/** Capture the active scope token for a request about to start (sync, no I/O). */
+export function currentDirectoryCacheScope(): DirectoryCacheScope | null {
+  const cache = activeWebCache();
+  if (!cache || cache.serverId === null) return null;
+  return { scopeId: cache.scopeId, serverId: cache.serverId, generation: cache.generation };
 }
 
-/** Record the authoritative GET /servers payload (raw rows, one snapshot). */
-export async function recordServers(servers: readonly Server[], serverId: string): Promise<void> {
-  const seen = cacheBoundTo(serverId);
-  if (!seen) return;
-  const cache = cacheStillBound(serverId, seen);
+function scopeStillCurrent(token: DirectoryCacheScope | null): ActiveCache | null {
+  if (!token) return null;
+  const cache = activeWebCache();
+  if (!cache || cache.serverId === null) return null;
+  if (cache.scopeId !== token.scopeId || cache.generation !== token.generation || cache.serverId !== token.serverId) {
+    return null;
+  }
+  return cache;
+}
+
+// Server-switch attach is async and nulls the holder at entry. Directory
+// loads that start in that window must wait for the new scope; the boot
+// gate only covers the cold start. Armed synchronously by the lifecycle
+// before openScope, settled when the newest attach attempt finishes.
+let directoryAttachGate: { pending: Promise<void>; resolve: () => void } | null = null;
+
+/** Arm the server-switch attach wait. Idempotent until noteDirectoryAttachSettled. */
+export function beginDirectoryAttachWait(): void {
+  if (directoryAttachGate) return;
+  let resolve!: () => void;
+  const pending = new Promise<void>((done) => {
+    resolve = done;
+  });
+  directoryAttachGate = { pending, resolve };
+}
+
+/** The in-flight attach attempt finished (or failed). Unblocks directory loads. */
+export function noteDirectoryAttachSettled(): void {
+  const gate = directoryAttachGate;
+  directoryAttachGate = null;
+  gate?.resolve();
+}
+
+function waitForSignal(signal: Promise<void>, timeoutMs: number): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, timeoutMs);
+    signal.then(() => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
+}
+
+/**
+ * True only when a load must wait before touching the cache. Callers await
+ * only in that case: an already-bound scope, or a holder on another server
+ * with nothing in flight, must not add an await before api.get.
+ */
+export function directoryCacheBindPending(serverId: string): boolean {
+  if (!serverId || cacheBoundTo(serverId)) return false;
+  return directoryAttachGate !== null || (!activeWebCache() && isActiveCacheBootPending());
+}
+
+/**
+ * Resolves when `serverId`'s scope is attached, or after timeoutMs.
+ * Call only when directoryCacheBindPending is true.
+ */
+export async function whenDirectoryCacheBound(serverId: string, timeoutMs = 4000): Promise<void> {
+  const attachPending = directoryAttachGate?.pending ?? null;
+  const bootPending = !activeWebCache() && isActiveCacheBootPending();
+  if (bootPending) await whenActiveCache(timeoutMs);
+  if (cacheBoundTo(serverId)) return;
+  if (attachPending) await waitForSignal(attachPending, timeoutMs);
+}
+
+/**
+ * True when the server-list load must wait for an in-flight attach.
+ * The list lives in the attached scope (the persisted serverId when
+ * current is still null), so a cold start waits; a live scope does not.
+ */
+export function serverListCachePending(): boolean {
+  if (activeWebCache() && !directoryAttachGate) return false;
+  return isActiveCacheBootPending() || directoryAttachGate !== null;
+}
+
+/** Call only when serverListCachePending is true. */
+export async function whenServerListCacheReady(timeoutMs = 4000): Promise<void> {
+  if (!activeWebCache() && isActiveCacheBootPending()) await whenActiveCache(timeoutMs);
+  if (activeWebCache() && !directoryAttachGate) return;
+  const attachPending = directoryAttachGate?.pending;
+  if (attachPending) await waitForSignal(attachPending, timeoutMs);
+}
+
+/**
+ * Cached server list from the attached scope, [] when absent or detached.
+ * Not bound to the current server: on a cold start `current` is still null
+ * and the list is the one stored for the persisted scope.
+ */
+export async function cachedServers(): Promise<Server[]> {
+  const seen = activeWebCache();
+  if (!seen) return [];
+  const value = await seen.repo.getKv(seen.scopeId, SERVER_LIST_KV_KEY);
+  const cache = activeWebCache();
+  if (!cache || cache.scopeId !== seen.scopeId || cache.generation !== seen.generation) return [];
+  return serversFromCacheValue(value);
+}
+
+/**
+ * Record the authoritative GET /servers payload into the scope captured
+ * when the load decided to fetch. A later attach does not receive it.
+ */
+export async function recordServers(
+  servers: readonly Server[],
+  requestScope: DirectoryCacheScope | null = currentDirectoryCacheScope(),
+): Promise<void> {
+  const cache = scopeStillCurrent(requestScope);
   if (!cache) return;
   await cache.repo.putKv(cache.scopeId, SERVER_LIST_KV_KEY, {
     servers: servers as unknown as RawRecord[],
@@ -233,21 +341,20 @@ export async function recordUnread(data: unknown, serverId: string): Promise<voi
   await cache.repo.putKv(cache.scopeId, CHANNEL_UNREAD_KV_KEY, data as RawRecord);
 }
 
-// One seed per (kind, attach generation, server, epoch). loadUnreadCounts and
-// the summary load run on reconnect, rooms-joined, and inbox refresh; seeding
-// whenever the in-memory map is empty paints a count the user already read,
-// and a failed request leaves that stale seed in place for the next call.
+// One seed per (kind, server, epoch). Keyed by the server the load is FOR,
+// not by whether the cache was already bound: a load that runs before
+// attach still occupies the epoch, so the reconnect load after attach
+// cannot paint a stale cached count the user already cleared.
 const directorySeedEpoch = new Map<string, number>();
 
 /**
- * True the first time `kind` is seeded for this attach + server + epoch.
- * A cache bound to a different server does not consume the claim, so the
- * load that runs after attach catches up can still seed.
+ * True the first time `kind` is claimed for this server + epoch.
+ * Does not require the cache to be bound. Callers seed only when the
+ * claim succeeds AND the scope is actually attached.
  */
 export function claimDirectorySeed(kind: string, epoch: number, serverId: string): boolean {
-  const cache = cacheBoundTo(serverId);
-  if (!cache) return false;
-  const key = `${kind}:${cache.generation}:${cache.serverId}`;
+  if (!serverId) return false;
+  const key = `${kind}:${serverId}`;
   if (directorySeedEpoch.get(key) === epoch) return false;
   directorySeedEpoch.set(key, epoch);
   return true;
@@ -259,21 +366,6 @@ export function resetDirectorySeedClaims(): void {
 }
 
 // ---- cross-server unread summary ---------------------------------------------------
-
-/**
- * The attached scope captured at REQUEST START. recordUnreadSummary compares
- * it against the CURRENT attach scope before writing — a server switch
- * mid-flight must not persist the previous scope's summary snapshot into the
- * new scope (mobile serverRailCache pattern, Firstmate ruling #6 thread).
- */
-export type DirectoryCacheScope = { scopeId: number; serverId: string; generation: number };
-
-/** Capture the active scope token for a request about to start (sync, no I/O). */
-export function currentDirectoryCacheScope(): DirectoryCacheScope | null {
-  const cache = activeWebCache();
-  if (!cache || cache.serverId === null) return null;
-  return { scopeId: cache.scopeId, serverId: cache.serverId, generation: cache.generation };
-}
 
 /** Cached raw wire payload of GET /servers/unread-summary, null when absent or bound elsewhere. */
 export async function cachedUnreadSummary(serverId: string): Promise<unknown> {

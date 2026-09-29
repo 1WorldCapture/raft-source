@@ -14,7 +14,7 @@ import {
 } from "./channelDomain";
 import type { ChannelAdminBasis, ChannelRole, InboxScopeReadFrontier, ServerCapability } from "@botiverse/raft-shared";
 import { useServerStore } from "./serverStore";
-import { cachedChannelById, cachedChannels, noteChannelListLoaded, recordChannels } from "../cache/directoryCache";
+import { cachedChannelById, cachedChannels, directoryCacheBindPending, noteChannelListLoaded, recordChannels, whenDirectoryCacheBound } from "../cache/directoryCache";
 import { consumeReadStateSnapshotRows, getReadStateLedgerGeneration } from "./readStateSync";
 import { registerServerReset } from "./serverResetRegistry";
 import { emitStateTransitionTrace } from "../utils/stateTransitionTrace";
@@ -119,6 +119,16 @@ const ensureChannelInFlight = new Map<string, Promise<Channel | null>>();
 const openAgentDmInFlight = new Map<string, Promise<Channel>>();
 const openUserDmInFlight = new Map<string, Promise<Channel>>();
 
+/** Network down or timed out. Canceled requests and auth failures are not offline. */
+function isOfflineChannelFallback(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const error = err as { code?: unknown; name?: unknown; response?: unknown };
+  if (error.response != null) return false;
+  const code = typeof error.code === "string" ? error.code : "";
+  if (code === "ERR_NETWORK" || code === "ECONNABORTED" || code === "ETIMEDOUT") return true;
+  return error.name === "TimeoutError";
+}
+
 function reduceChannelWithTrace(
   state: ChannelState,
   event: string,
@@ -196,6 +206,14 @@ export const useChannelStore = create<ChannelState>((set, get) => ({
     const serverId = useServerStore.getState().current?.id;
     const readLedgerGeneration = getReadStateLedgerGeneration();
     if (!serverId) return;
+    // Attach is async and nulls the holder at entry. Wait for this server's
+    // scope so the seed and the write-back both land on it. A holder still
+    // bound to the previous server, with no attach in flight, does not wait.
+    if (directoryCacheBindPending(serverId)) {
+      await whenDirectoryCacheBound(serverId);
+      if (useServerStore.getState().serverEpoch !== epoch) return;
+      if (useServerStore.getState().current?.id !== serverId) return;
+    }
     // Never set loading here — it starts as true (store init / server reset)
     // and goes to false after the first successful fetch. This keeps existing
     // data (or a legitimate empty state) visible during refreshes.
@@ -251,6 +269,11 @@ export const useChannelStore = create<ChannelState>((set, get) => ({
     const serverId = useServerStore.getState().current?.id;
     const readLedgerGeneration = getReadStateLedgerGeneration();
     if (!serverId) return;
+    if (directoryCacheBindPending(serverId)) {
+      await whenDirectoryCacheBound(serverId);
+      if (useServerStore.getState().serverEpoch !== epoch) return;
+      if (useServerStore.getState().current?.id !== serverId) return;
+    }
     // Directory-cache seed (task #8): empty list only, network overwrites.
     if (get().dmChannels.length === 0) {
       try {
@@ -323,19 +346,19 @@ export const useChannelStore = create<ChannelState>((set, get) => ({
         return channel;
       } catch (err) {
         console.error("Failed to load channel:", err);
-        // Offline fallback (task #8): only when the request never got an
-        // HTTP response (network down or timeout). A 403/404 means the
-        // server refused this channel — falling back would keep a revoked
-        // channel open. The epoch must still be the one this request
-        // started in, or the cached row would hydrate into the next server.
-        const httpResponse = err && typeof err === "object" && "response" in err
-          ? (err as { response?: unknown }).response
-          : undefined;
-        if (httpResponse != null) return null;
+        // Offline fallback (task #8): only a network error or a timeout.
+        // 403/404, a canceled request, a missing refresh token, and the
+        // logout path (the request resolves undefined and destructuring
+        // throws) must not reopen a channel from cache.
+        if (!isOfflineChannelFallback(err)) return null;
         if (useServerStore.getState().serverEpoch !== epoch) return null;
         if (useServerStore.getState().current?.id !== serverId) return null;
         try {
           const cached = await cachedChannelById(channelId, serverId);
+          // The epoch check has to happen AFTER the cache read. A switch
+          // during that await would otherwise hydrate A's row into B.
+          if (useServerStore.getState().serverEpoch !== epoch) return null;
+          if (useServerStore.getState().current?.id !== serverId) return null;
           if (cached) {
             const channel = toChannel(cached);
             set((state) => reduceChannelWithTrace(

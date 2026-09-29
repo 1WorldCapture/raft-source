@@ -10,7 +10,7 @@ import type {
   ServerEvent,
 } from "./events/serverEvents";
 import { serverPersistence } from "./serverPersistenceRegistry";
-import { cachedServers, recordServers } from "../cache/directoryCache";
+import { cachedServers, currentDirectoryCacheScope, recordServers, serverListCachePending, whenServerListCacheReady } from "../cache/directoryCache";
 import { triggerServerReset } from "./serverResetRegistry";
 import { setAuthTraceServerIdGetter } from "../utils/webAuthTrace";
 import { normalizeSidebarPinnedRefs } from "../utils/sidebarPinnedRefs";
@@ -369,12 +369,14 @@ export const useServerStore = create<ServerState>((set, get) => ({
     const request = (async () => {
       // Directory-cache seed (task #8): inside the dedup so it runs once per
       // flight, and only into an empty store — a refresh never flickers live
-      // data. A non-empty cached snapshot is the last authoritative state, so
-      // it releases the loading gate exactly like a successful fetch; the
-      // network answer below stays authoritative and is recorded.
+      // data. The server list is account-scoped, stored in the attached
+      // scope (the persisted serverId when current is still null on a cold
+      // start). Wait for that attach before reading or writing it.
+      if (serverListCachePending()) await whenServerListCacheReady();
+      const requestScope = currentDirectoryCacheScope();
       if (get().servers.length === 0) {
         try {
-          const cached = await cachedServers(get().current?.id ?? "");
+          const cached = await cachedServers();
           if (cached.length > 0 && get().servers.length === 0) {
             applyServerDomainEvent({ kind: "hydrate", source: "servers", servers: cached }, set, get);
             set({ loading: false });
@@ -395,7 +397,7 @@ export const useServerStore = create<ServerState>((set, get) => ({
         // themselves, so this is safe for URL-resolved and empty startup states.
         get().loadMembers();
         get().loadSidebarOrder();
-        await recordServers(servers, get().current?.id ?? "");
+        await recordServers(servers, requestScope);
       } catch {
         set({ loading: false });
       }
