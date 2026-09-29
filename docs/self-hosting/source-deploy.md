@@ -388,7 +388,7 @@ proxy_request_buffering off;
 | `raft-server` | `node <root>/node_modules/tsx/dist/cli.mjs src/server.ts`，工作目录 `packages/server` |
 | `raft-nginx` | `nginx -p $RAFT_OPS_HOME/nginx -c nginx.conf -g 'daemon off;'` |
 | `raft-nginx-logrotate` | 每天 04:00（**主机本地时区**）由 pm2 `cron_restart` 触发一次日志轮转 |
-| `raft-backup` | 可选；设置了 `RAFT_BACKUP_CRON` 时启用，每天在 `RAFT_BACKUP_UTC_HOUR` 备份一次（第 17 节） |
+| `raft-backup` | 可选；设置了 `RAFT_BACKUP_CRON` 时启用，按 `RAFT_BACKUP_EVERY_HOURS` 每 N 小时、或在 `RAFT_BACKUP_UTC_HOUR` 每天备份一次（第 17 节） |
 | `raft-trace-upload-worker` | 可选；存在 `packages/trace-upload-worker/.env` 时才启用 |
 | `raft-daemon` | 可选；`env.local` 里设置了 `RAFT_DAEMON_KEY_FILE` 时才启用（第 12 节） |
 
@@ -591,11 +591,17 @@ $RAFT_BACKUP_DIR/
 RAFT_BACKUP_DIR=/var/lib/raft-backups
 RAFT_BACKUP_KEEP=7
 RAFT_BACKUP_CRON="0 * * * *"
+RAFT_BACKUP_EVERY_HOURS=
 RAFT_BACKUP_UTC_HOUR=21
 RAFT_BACKUP_EXTRA="packages/server/.env packages/trace-upload-worker/.env ops/self-host/env.local"
 ```
 
-设置了 `RAFT_BACKUP_CRON` 后，`ecosystem.config.cjs` 会多一个 `raft-backup` 进程。注意 **pm2 的 cron 用的是主机的本地时区**，还会受夏令时影响；所以这里让 pm2 每小时触发一次，由脚本判断当前 UTC 小时是否等于 `RAFT_BACKUP_UTC_HOUR`，不是就立即退出。这样备份时间固定在 UTC，不受主机时区影响。`pm2 ls` 里它平时显示为 `stopped`，这是正常的。
+设置了 `RAFT_BACKUP_CRON` 后，`ecosystem.config.cjs` 会多一个 `raft-backup` 进程。注意 **pm2 的 cron 用的是主机的本地时区**，还会受夏令时影响；所以这里让 pm2 每小时触发一次，由脚本决定这一小时要不要备份，不要就立即退出。这样备份时间固定在 UTC，不受主机时区影响。`pm2 ls` 里它平时显示为 `stopped`，这是正常的。
+
+两种频率二选一：
+
+- **每天一次**：只设 `RAFT_BACKUP_UTC_HOUR`，当前 UTC 小时等于它时备份。
+- **每 N 小时一次**：设 `RAFT_BACKUP_EVERY_HOURS=N`（优先于 `RAFT_BACKUP_UTC_HOUR`），从 1970 年起算的小时数能被 N 整除时备份。这样间隔始终是 N 小时，N 不能整除 24 时也一样（例如 5）；不要用 cron 的 `*/5`，那样每天零点前后只隔 4 小时，而且按本机时区算。记得同时调大 `RAFT_BACKUP_KEEP`，例如每 5 小时一份、保留 7 天，需要 `RAFT_BACKUP_KEEP=34`。
 
 手动立即备份：
 

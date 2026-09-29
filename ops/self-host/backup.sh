@@ -1,21 +1,28 @@
 #!/usr/bin/env bash
-# Daily backup of a source deployment, meant to be pulled off-site by another machine.
+# Scheduled backup of a source deployment, meant to be pulled off-site by another machine.
 # Writes $RAFT_BACKUP_DIR/<UTC timestamp>/ containing:
 #   db.dump        pg_dump custom format of DATABASE_URL (restore with pg_restore)
 #   uploads.tar.gz local attachment directory (UPLOADS_DIR or packages/server/uploads)
 #   secrets.tar.gz files listed in RAFT_BACKUP_EXTRA (e.g. .env files, daemon key files)
 #   MANIFEST, SHA256SUMS, and DONE (written last: a folder without DONE is incomplete)
 # plus a `latest` symlink. Keeps the newest $RAFT_BACKUP_KEEP backups.
-# Scheduling: pm2 cron uses the HOST's local timezone (and DST). To pin a UTC time, let pm2 fire
-# hourly (RAFT_BACKUP_CRON="0 * * * *") and set RAFT_BACKUP_UTC_HOUR; other hours exit quietly.
+# Scheduling: pm2 cron uses the HOST's local timezone (and DST). To pin UTC times, let pm2 fire
+# hourly (RAFT_BACKUP_CRON="0 * * * *") and set either RAFT_BACKUP_EVERY_HOURS=N (runs when the
+# hours since the Unix epoch are a multiple of N: a steady N-hour interval, even when 24 % N != 0)
+# or RAFT_BACKUP_UTC_HOUR (once a day); other hours exit quietly. EVERY_HOURS wins if both are set.
 # Run by hand with --now to back up immediately.
 # The folder can contain secrets: it is created 0700 and files 0600.
 set -eu
 source "$(dirname "$0")/lib.sh"
 : "${RAFT_BACKUP_DIR:?set RAFT_BACKUP_DIR in env.local}"
 KEEP=${RAFT_BACKUP_KEEP:-7}
-if [ "${1:-}" != "--now" ] && [ -n "${RAFT_BACKUP_UTC_HOUR:-}" ] && [ "$(date -u +%-H)" != "$RAFT_BACKUP_UTC_HOUR" ]; then
-  exit 0
+if [ "${1:-}" != "--now" ]; then
+  if [ -n "${RAFT_BACKUP_EVERY_HOURS:-}" ]; then
+    case $RAFT_BACKUP_EVERY_HOURS in ''|*[!0-9]*|0*) die "RAFT_BACKUP_EVERY_HOURS must be a positive integer";; esac
+    [ $(( $(date -u +%s) / 3600 % RAFT_BACKUP_EVERY_HOURS )) -eq 0 ] || exit 0
+  elif [ -n "${RAFT_BACKUP_UTC_HOUR:-}" ] && [ "$(date -u +%-H)" != "$RAFT_BACKUP_UTC_HOUR" ]; then
+    exit 0
+  fi
 fi
 TS=$(date -u +%Y-%m-%dT%H%M%SZ)
 umask 077
