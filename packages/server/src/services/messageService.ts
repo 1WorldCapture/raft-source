@@ -2710,6 +2710,10 @@ async function emitPersistedMessageToFrontend(
             parentMessageId,
             ...threadInfo,
             threadChannelId: projection.localThreadChannelId,
+            // Local ids, so a client cache can file the summary under the
+            // parent channel it already holds.
+            parentChannelId: projection.localParentChannelId,
+            serverId: projection.localServerId,
             syncCoreReplyWindow: buildThreadRepliesSyncWindow({
               serverId: projection.localServerId,
               parentMessageId,
@@ -2873,6 +2877,10 @@ async function emitPersistedMessageToFrontend(
         parentMessageId: channel.parentMessageId,
         threadChannelId: channelId,
         ...threadInfo,
+        // Lets client caches file the updated summary under its parent
+        // channel without a lookup (the mobile cache could not before).
+        parentChannelId: parentMsgForThread.channelId,
+        serverId: channel.serverId,
         syncCoreReplyWindow: buildThreadRepliesSyncWindow({
           serverId: channel.serverId,
           parentMessageId: channel.parentMessageId,

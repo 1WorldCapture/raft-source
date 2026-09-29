@@ -3482,6 +3482,8 @@ test("broadcastAndDeliver emits replies sync window producer envelope for normal
       : events.find((entry) => entry.event === "thread:updated" && entry.room === `user:${owner.id}`);
     assert.ok(event, `expected ${parentType} thread:updated payload`);
     assert.equal(event.payload.threadChannelId, thread.id);
+    assert.equal(event.payload.parentChannelId, parentChannel.id, "clients file the summary under its parent channel");
+    assert.equal(event.payload.serverId, server.id);
     assert.equal(event.payload.latestReply.senderDisplayName, owner.displayName);
     assertThreadRepliesSyncWindow(event.payload, {
       serverId: server.id,
@@ -5182,6 +5184,8 @@ test("broadcastAndDeliver keeps followed joint-thread agent and push projections
     assert.ok(peerThreadUpdate, "expected peer local parent thread:updated payload");
     assert.equal(hostThreadUpdate.threadChannelId, localThreadA.id);
     assert.equal(peerThreadUpdate.threadChannelId, localThreadB.id);
+    assert.equal(hostThreadUpdate.parentChannelId, localParentA.id, "joint payloads carry the receiver-local parent");
+    assert.equal(peerThreadUpdate.parentChannelId, localParentB.id);
     assertThreadRepliesSyncWindow(hostThreadUpdate, {
       serverId: serverA.id,
       parentMessageId: canonicalParentMessage.id,
