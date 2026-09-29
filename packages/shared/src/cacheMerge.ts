@@ -83,10 +83,35 @@ export function contiguousRuns(sortedSeqs: readonly number[]): Range[] {
   return runs;
 }
 
-/** Last-write-wins guard for per-message overlays (stale pages must not win). */
-export function overlayIsNewer(storedUpdatedAt: string | null, incomingUpdatedAt: string): boolean {
-  if (storedUpdatedAt === null) return true;
-  return incomingUpdatedAt > storedUpdatedAt;
+/**
+ * Last-write-wins guard for per-message overlays (stale pages must not win).
+ * Both sides are SERVER updatedAt values: the stored one is the watermark
+ * from `overlayWatermark`, never a local write time. Ties go to the later
+ * write — reactions change a message without bumping its updatedAt, so an
+ * equal updatedAt is not evidence that the incoming data is stale. An
+ * incoming write without updatedAt is accepted (it carries no staleness
+ * evidence); callers that know a row got a live write after their request
+ * started must drop that row themselves before writing.
+ */
+export function overlayIsNewer(
+  storedUpdatedAt: string | null | undefined,
+  incomingUpdatedAt: string | null | undefined,
+): boolean {
+  if (!storedUpdatedAt || !incomingUpdatedAt) return true;
+  return incomingUpdatedAt >= storedUpdatedAt;
+}
+
+/**
+ * The server-time watermark to store with an accepted overlay write: the
+ * incoming updatedAt, else the previous watermark, else "" (unknown). Never a
+ * local clock value — comparing local write time with server updatedAt is
+ * what froze reaction overlays (desktop-data-cache task #8).
+ */
+export function overlayWatermark(
+  storedUpdatedAt: string | null | undefined,
+  incomingUpdatedAt: string | null | undefined,
+): string {
+  return incomingUpdatedAt || storedUpdatedAt || "";
 }
 
 /** Task rows only move forward: drop events at or below the stored revision. */
