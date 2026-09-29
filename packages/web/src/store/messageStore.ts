@@ -38,6 +38,8 @@ import {
   cachedThreadSummaries,
   channelFetchPlan,
   hydrateSeedRows,
+  noteLiveMessage,
+  noteMessageUpdated,
   recordMessagePage,
   seedChannel,
 } from "../cache/messageCache";
@@ -1742,6 +1744,10 @@ export const useMessageStore = create<MessageState>((set, get) => ({
     if (seeded.length === 0) return false;
     // Newest-first cache rows → chronological pane order.
     const chronological = [...seeded].reverse();
+    // lastSeq MUST advance with the seed (PR review): roomsJoined gates
+    // `sync:resume` on `lastSeq > 0`, so a seed that leaves it at 0 silently
+    // disables the ENTIRE reconnect catch-up after an offline cold start.
+    const seedMaxSeq = Math.max(...seeded.map((message) => message.seq ?? 0), 0);
     set((state) => ({
       channelMessages: { ...state.channelMessages, [channelId]: chronological },
       channelWindowMeta: updateWindowMetaRecord(state.channelWindowMeta, channelId, {
@@ -1749,6 +1755,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
         hasMore: true,
         hasNewer: false,
       }),
+      lastSeq: Math.max(state.lastSeq, seedMaxSeq),
       ...(state.currentChannelId === channelId ? {
         messages: chronological,
         loading: false,
@@ -2139,6 +2146,10 @@ export const useMessageStore = create<MessageState>((set, get) => ({
           captureReceiverPrivateIngressContext(get().currentUserId),
         );
     if (!message) return;
+    // Realtime write-through (#11): fires for EVERY store path below,
+    // including the gap-deferred branch (the message is cached even while
+    // the UI waits for gap healing). No-ops without a server seq or cache.
+    noteLiveMessage(message);
     set((state) => {
       // Stryker disable next-line MethodExpression,ConditionalExpression,LogicalOperator: lastSeq monotonic bookkeeping predates this read-state projection slice; unread behavior is asserted separately.
       const newLastSeq = Math.max(state.lastSeq, message.seq || 0);
@@ -2273,8 +2284,12 @@ export const useMessageStore = create<MessageState>((set, get) => ({
 
   // Merge-only update for existing messages (e.g. task field/reaction changes).
   // Does NOT append if message is not cached, does NOT increment unread.
-  updateMessage: (message) =>
-    set((state) => {
+  updateMessage: (message) => {
+    // Overlay write-through (#11): dynamic data (reactions etc.) persists
+    // even when the channel is not open. Needs a real seq — partial updates
+    // without one cannot address the overlay row and are skipped.
+    noteMessageUpdated(message as { id: string; seq?: number; channelId: string } & Record<string, unknown>);
+    return set((state) => {
       const mergeIntoRows = (rows: Message[]) => {
         let changed = false;
         const merged = rows.map((m) => {
@@ -2300,7 +2315,8 @@ export const useMessageStore = create<MessageState>((set, get) => ({
           : state.channelWindowMeta,
         messages: visibleUpdate.changed ? visibleUpdate.merged : state.messages,
       };
-    }),
+    });
+  },
 
   addOptimisticMessage: (message) =>
     set((state) => {
@@ -2349,8 +2365,12 @@ export const useMessageStore = create<MessageState>((set, get) => ({
 
   // Batch-add messages in a single state update (used by sync:resume).
   // Avoids N re-renders when catching up many missed messages.
-  batchAddMessages: (newMsgs: Message[]) =>
-    set((state) => {
+  batchAddMessages: (newMsgs: Message[]) => {
+    // sync:resume write-through (#11): the reconnect catch-up batch lands in
+    // the cache one message at a time (single-row writes, never a page range
+    // — a resume stream may skip seqs and must not create false coverage).
+    for (const message of newMsgs) noteLiveMessage(message);
+    return set((state) => {
       if (newMsgs.length === 0) return state;
 
       // Group incoming messages by channel
@@ -2393,7 +2413,8 @@ export const useMessageStore = create<MessageState>((set, get) => ({
         lastSeq: maxSeq,
         unreadCounts: unreadUpdates,
       }, byChannel.keys());
-    }),
+    });
+  },
 
   sendMessage: async (channelId, content, attachmentIds, asTask, optimisticId, randomId, mentions) => {
     const ingressContext = captureReceiverPrivateIngressContext(get().currentUserId);

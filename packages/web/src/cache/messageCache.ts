@@ -145,6 +145,42 @@ export async function cachedThreadSummaries(parentChannelId: string): Promise<Re
   return cache.repo.getThreadSummaries(cache.scopeId, parentChannelId);
 }
 
+// ---- realtime write-through (desktop-data-cache #11 P3) ----------------------
+
+/**
+ * message:new / sync:resume write-through. The message is ALWAYS stored;
+ * coverage-tail extension deliberately does NOT happen here (appendLiveMessage
+ * with connected:false — mobile semantics when socket continuity is unknown):
+ * ranges grow only from appendPage (HTTP pages), so a live burst that skipped
+ * seqs can never punch a false hole-free range. The cost — a cold start re-
+ * pulls from the older tail — is idempotent upserts, never wrong data.
+ */
+export function noteLiveMessage(message: { id: string; seq?: number; channelId: string }): void {
+  const cache = activeWebCache();
+  if (!cache) return;
+  const row = rowToCacheRow(message);
+  if (!row) return; // optimistic rows carry no server seq
+  void cache.repo.appendLiveMessage(cache.scopeId, message.channelId, row, { connected: false });
+}
+
+/**
+ * message:updated write-through — reactions and other projections land in the
+ * overlay layer, last-write-wins on the server updatedAt inside the repo.
+ */
+export function noteMessageUpdated(
+  message: { id: string; seq?: number; channelId: string } & Record<string, unknown>,
+): void {
+  const cache = activeWebCache();
+  if (!cache) return;
+  if (typeof message.seq !== "number" || !Number.isFinite(message.seq) || message.seq <= 0) return;
+  const { id: _id, seq, channelId, ...rest } = message;
+  void cache.repo.applyMessageUpdated(cache.scopeId, channelId, {
+    seq,
+    raw: rest as RawRecord,
+    updatedAt: typeof message.updatedAt === "string" ? message.updatedAt : null,
+  });
+}
+
 // ---- seed + fetch plan --------------------------------------------------------
 
 export type ChannelSeed = {
