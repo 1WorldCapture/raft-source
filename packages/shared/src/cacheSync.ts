@@ -26,6 +26,9 @@
 // completed — see shouldExtendLiveTail below).
 
 import type { CacheRepo, RawRecord, ThreadSummaryInput, TaskEventInput, AppendPage, OverlayPage } from "./cacheRepoContract.ts";
+// .js suffix (not .ts like the type-only import above): this is a value
+// import, and the mobile tsconfig (expo base) has no allowImportingTsExtensions.
+import { captureLiveWriteMark, liveWriteAfter, noteLiveWrite } from "./liveWriteMarks.js";
 
 export type SyncWireMessage = {
   seq: number;
@@ -133,6 +136,9 @@ export function createCacheSync(deps: CacheSyncDeps) {
     channelId: string,
     message: { seq: number; raw: RawRecord; updatedAt?: string | null },
   ): Promise<void> {
+    // Stamp the live-write mark BEFORE the repo write so an overlay page
+    // response already in flight can never shadow this newer value (task #9).
+    noteLiveWrite(scopeId, channelId, message.seq);
     return repo.applyMessageUpdated(scopeId, channelId, message);
   }
 
@@ -169,6 +175,13 @@ export function createCacheSync(deps: CacheSyncDeps) {
    * id (applyOverlayPage stamps it). Visible-area hooks and the latest-4-
    * pages opening refresh both funnel through here, so the gate needs no
    * extra bookkeeping of its own.
+   *
+   * Rows that got a realtime write (message:updated) while the request was
+   * in flight are newer than this response (a reaction change does not bump
+   * messages.updated_at, so last-write-wins cannot order them): they are
+   * filtered out of the repo write AND of the returned page, which callers
+   * upsert into the UI store. applyOverlayPage still runs with the remaining
+   * (possibly empty) row list — it is what stamps the once-per-boot marker.
    */
   async function refreshOverlayPageOncePerBoot(
     scopeId: number,
@@ -179,16 +192,19 @@ export function createCacheSync(deps: CacheSyncDeps) {
     refreshed: boolean;
     reason: "already" | "no-fetcher" | "empty" | "done";
     /** The fetched page on success — callers upsert it into the UI store so
-     * the visible pane updates in place instead of on the next cold boot. */
+     * the visible pane updates in place instead of on the next cold boot.
+     * Rows protected by a live write during the request are NOT in it. */
     page?: OverlayPage;
   }> {
     const info = await repo.getOverlayPageInfo(scopeId, channelId, fromSeq);
     if (info && info.bootId === repo.bootId) return { refreshed: false, reason: "already" };
     if (!deps.fetchOverlayPage) return { refreshed: false, reason: "no-fetcher" };
+    const requestMark = captureLiveWriteMark();
     const page = await deps.fetchOverlayPage(channelId, fromSeq, throughSeq);
     if (!page) return { refreshed: false, reason: "empty" };
-    await repo.applyOverlayPage(scopeId, channelId, page);
-    return { refreshed: true, reason: "done", page };
+    const messages = page.messages.filter((row) => !liveWriteAfter(scopeId, channelId, row.seq, requestMark));
+    await repo.applyOverlayPage(scopeId, channelId, { ...page, messages });
+    return { refreshed: true, reason: "done", page: { ...page, messages } };
   }
 
   // ---- history pagination (task #3 ④) ---------------------------------------
