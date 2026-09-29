@@ -8,6 +8,7 @@ import { isRedisAvailable, getRedisPub, getRedisSub } from "../redis.js";
 import * as serverService from "../services/serverService.js";
 import * as channelService from "../services/channelService.js";
 import * as messageService from "../services/messageService.js";
+import { getHistoryCutoff, getServerPlan } from "../services/planService.js";
 import { socketConnectedClients, socketDisconnects, syncResumeTotal } from "../metrics.js";
 import { parseSocketClientKind, socketClientKindRoom, socketUserServerRoom, type SocketClientKind } from "./platformScope.js";
 import { fanoutWithAck } from "./fanout.js";
@@ -246,12 +247,15 @@ export function setupSocket(server: http.Server, corsOrigin: string | string[]) 
       if (!serverId) return;
 
       try {
+        // Same plan history window as GET /messages/sync: resume must never
+        // return messages older than the server's plan allows.
+        const historyCutoff = getHistoryCutoff(await getServerPlan(serverId));
         const missed = await messageService.syncMessages(
           lastSeq,
           undefined, // all channels
           RESUME_LIMIT,
           serverId,
-          undefined,
+          historyCutoff,
           userId,
         );
 

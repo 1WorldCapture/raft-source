@@ -80,26 +80,46 @@ export async function reconcileAfterChannelRefresh(
 // ---- history pruning ----------------------------------------------------------
 
 /**
- * plan → messageHistoryDays, mirroring packages/shared's limits table
- * (free = 30 days, everything above = unlimited). Drift risk noted as a
- * known open question: the authoritative cutoff should eventually ship on
- * GET /servers so the client never guesses.
+ * plan → messageHistoryDays fallback, mirroring packages/shared's limits table
+ * (free = 30 days, everything above = unlimited). Only used when the server
+ * does not send its authoritative `messageHistoryDays` (older servers).
  */
 export function historyDaysForPlan(plan: string | null | undefined): number {
   return plan === "free" ? 30 : -1;
 }
 
+/** History policy source: a bare plan, or a server row from GET /servers. */
+export type HistoryPolicySource =
+  | string
+  | null
+  | undefined
+  | { plan?: string | null; messageHistoryDays?: number | null };
+
 /**
- * Prune local messages older than the plan's history window. No-op when the
- * plan is unlimited (-1).
+ * Resolve the history window in days (-1 = unlimited). The server-provided
+ * `messageHistoryDays` wins; the plan table is only the fallback.
+ */
+export function resolveHistoryDays(source: HistoryPolicySource): number {
+  if (source !== null && typeof source === "object") {
+    if (typeof source.messageHistoryDays === "number" && Number.isInteger(source.messageHistoryDays)) {
+      return source.messageHistoryDays < 0 ? -1 : source.messageHistoryDays;
+    }
+    return historyDaysForPlan(source.plan);
+  }
+  return historyDaysForPlan(source);
+}
+
+/**
+ * Prune local messages older than the server's history window. No-op when the
+ * window is unlimited (-1).
  */
 export async function pruneToHistoryLimit(
   repo: CacheRepo,
   scopeId: number,
-  plan: string | null | undefined,
+  source: HistoryPolicySource,
   now: Date = new Date(),
 ): Promise<{ pruned: boolean; cutoffIso: string | null }> {
-  const days = historyDaysForPlan(plan);
+  const days = resolveHistoryDays(source);
   if (days === -1) return { pruned: false, cutoffIso: null };
   const cutoff = new Date(now);
   cutoff.setDate(cutoff.getDate() - days);

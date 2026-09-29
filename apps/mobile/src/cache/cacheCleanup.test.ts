@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { openNodeSqliteDb } from "./portNode.ts";
 import { createCacheRepo, type CacheRepo } from "./repo.ts";
-import { historyDaysForPlan, pruneToHistoryLimit, reconcileAfterChannelRefresh, reconcileChannels, useOfflineStore } from "./cacheCleanup.ts";
+import { historyDaysForPlan, pruneToHistoryLimit, reconcileAfterChannelRefresh, reconcileChannels, resolveHistoryDays, useOfflineStore } from "./cacheCleanup.ts";
 
 // client-data-cache task #4 — cleanup and offline state against a real
 // node:sqlite repo (same discipline as the cache suite).
@@ -161,4 +161,25 @@ test("reconcile deletes even right after a concurrent putChannels write", async 
   }));
   assert.deepEqual(out.removed.sort(), ["c9"], "c9 is deleted despite the racing putChannels");
   assert.deepEqual(repo.getChannels(scopeId).map((c) => c.id), ["c1"]);
+});
+
+test("resolveHistoryDays prefers the server-sent messageHistoryDays over the plan table", () => {
+  assert.equal(resolveHistoryDays({ plan: "free", messageHistoryDays: 90 }), 90, "server value wins");
+  assert.equal(resolveHistoryDays({ plan: "free", messageHistoryDays: -1 }), -1);
+  assert.equal(resolveHistoryDays({ plan: "free", messageHistoryDays: null }), 30, "older server: plan fallback");
+  assert.equal(resolveHistoryDays({ plan: "pro" }), -1);
+  assert.equal(resolveHistoryDays("free"), 30, "bare plan strings still work");
+  assert.equal(resolveHistoryDays(undefined), -1);
+});
+
+test("pruneToHistoryLimit uses the server window when present", async () => {
+  const calls: string[] = [];
+  const repo = { pruneMessages: async (_scope: number, cutoffIso: string) => { calls.push(cutoffIso); } } as never;
+  const now = new Date("2026-09-29T00:00:00.000Z");
+  const outcome = await pruneToHistoryLimit(repo, 1, { plan: "free", messageHistoryDays: 7 }, now);
+  assert.equal(outcome.pruned, true);
+  assert.equal(outcome.cutoffIso, "2026-09-22T00:00:00.000Z");
+  assert.deepEqual(calls, ["2026-09-22T00:00:00.000Z"]);
+  const unlimited = await pruneToHistoryLimit(repo, 1, { plan: "free", messageHistoryDays: -1 }, now);
+  assert.equal(unlimited.pruned, false);
 });

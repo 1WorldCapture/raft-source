@@ -119,6 +119,12 @@ export interface RaftServer {
   role?: string | null;
   /** Server plan ("free" | "pro" | …) — drives the local history-prune window (#client-data-cache #4). */
   plan?: string | null;
+  /**
+   * The server's authoritative message history window in days (-1 = unlimited),
+   * sent by GET /servers. Preferred over deriving it from `plan`; null when an
+   * older server does not send it.
+   */
+  messageHistoryDays?: number | null;
 }
 
 export interface ServerUnread {
@@ -350,6 +356,9 @@ export function parseServers(data: unknown): RaftServer[] {
       avatarUrl: typeof item.avatarUrl === "string" ? item.avatarUrl : null,
       role: typeof item.role === "string" ? item.role : null,
       plan: typeof item.plan === "string" ? item.plan : null,
+      messageHistoryDays: typeof item.messageHistoryDays === "number" && Number.isInteger(item.messageHistoryDays)
+        ? item.messageHistoryDays
+        : null,
     }];
   });
 }
