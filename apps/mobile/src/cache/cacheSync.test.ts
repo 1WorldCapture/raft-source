@@ -29,7 +29,7 @@ function wire(seq: number, channelId: string): SyncWireMessage {
 
 function makeSync(pages: Array<readonly SyncWireMessage[] | Error>) {
   const repo = createCacheRepo({ db: openNodeSqliteDb(":memory:") });
-  const scopeId = repo.openScope(SCOPE.origin, SCOPE.userId, SCOPE.serverId);
+  const scopeId = repo.openScopeSync(SCOPE.origin, SCOPE.userId, SCOPE.serverId);
   let call = 0;
   const calls: Array<{ sinceSeq: number; limit: number }>[] = [];
   const sync = createCacheSync({
@@ -62,11 +62,11 @@ test("syncAll loops pages until a short page and advances the cursor once", asyn
   assert.deepEqual(calls.map((c) => c.sinceSeq), [0, SYNC_PAGE_LIMIT, SYNC_PAGE_LIMIT * 2]);
   assert.equal(calls.every((c) => c.limit === SYNC_PAGE_LIMIT), true);
   // Per-channel coverage spans exist and contain the channel's own messages.
-  const c1 = repo.getLatestMessages(scopeId, "c1", 10_000);
-  const c2 = repo.getLatestMessages(scopeId, "c2", 10_000);
+  const c1 = repo.getLatestMessagesSync(scopeId, "c1", 10_000);
+  const c2 = repo.getLatestMessagesSync(scopeId, "c2", 10_000);
   assert.ok(c1.length >= 500 && c2.length >= 500, `both channels persisted (c1=${c1.length}, c2=${c2.length})`);
   // Cursor persists in kv for the next cold boot.
-  assert.equal(sync.readCursor(scopeId), 3000);
+  assert.equal(await sync.readCursor(scopeId), 3000);
 });
 
 test("syncAll with an empty first page keeps the cursor at zero", async () => {
@@ -78,7 +78,7 @@ test("syncAll with an empty first page keeps the cursor at zero", async () => {
 test("a mid-loop failure leaves the cursor untouched and a retry re-pulls the overlap", async () => {
   const boom = new Error("network down");
   const repo = createCacheRepo({ db: openNodeSqliteDb(":memory:") });
-  const scopeId = repo.openScope(SCOPE.origin, SCOPE.userId, SCOPE.serverId);
+  const scopeId = repo.openScopeSync(SCOPE.origin, SCOPE.userId, SCOPE.serverId);
   const fullPage = Array.from({ length: SYNC_PAGE_LIMIT }, (_, i) => wire(i + 1, "c1"));
   let callCount = 0;
   let failSecondCall = true;
@@ -93,8 +93,8 @@ test("a mid-loop failure leaves the cursor untouched and a retry re-pulls the ov
   await assert.rejects(() => sync.syncAll(scopeId), /network down/);
   // Cursor NOT advanced: the failed round stored its page but the gap
   // accounting must re-pull from the old cursor next time.
-  assert.equal(sync.readCursor(scopeId), 0);
-  assert.ok(repo.getLatestMessages(scopeId, "c1", 10).length > 0, "already-pulled page stays stored (idempotent upserts)");
+  assert.equal(await sync.readCursor(scopeId), 0);
+  assert.ok(repo.getLatestMessagesSync(scopeId, "c1", 10).length > 0, "already-pulled page stays stored (idempotent upserts)");
 
   // Round 2: network repaired — the overlap page is re-pulled, cursor lands on the tail.
   failSecondCall = false;
@@ -109,12 +109,12 @@ test("live write-through extends the tail only when continuity allows it", async
   const fullPage = Array.from({ length: SYNC_PAGE_LIMIT }, (_, i) => wire(i + 1, "c1"));
   const { repo, scopeId, sync } = makeSync([fullPage]);
   await sync.syncAll(scopeId);
-  assert.deepEqual(repo.getCoverage(scopeId, "c1"), [{ fromSeq: 1, throughSeq: SYNC_PAGE_LIMIT }]);
+  assert.deepEqual(repo.getCoverageSync(scopeId, "c1"), [{ fromSeq: 1, throughSeq: SYNC_PAGE_LIMIT }]);
 
   // connected tail extension: seq 501 directly follows the covered tail.
   await sync.onLiveMessage(scopeId, "c1", msg(SYNC_PAGE_LIMIT + 1), shouldExtendLiveTail(true, true));
   assert.deepEqual(
-    repo.getCoverage(scopeId, "c1"),
+    repo.getCoverageSync(scopeId, "c1"),
     [{ fromSeq: 1, throughSeq: SYNC_PAGE_LIMIT + 1 }],
     "connected live message extends the covered range",
   );
@@ -122,12 +122,12 @@ test("live write-through extends the tail only when continuity allows it", async
   // disconnected message is stored but never bridges a gap.
   await sync.onLiveMessage(scopeId, "c1", msg(SYNC_PAGE_LIMIT + 9), shouldExtendLiveTail(false, false));
   assert.deepEqual(
-    repo.getCoverage(scopeId, "c1"),
+    repo.getCoverageSync(scopeId, "c1"),
     [{ fromSeq: 1, throughSeq: SYNC_PAGE_LIMIT + 1 }],
     "gap stays open for the next sync",
   );
   assert.ok(
-    repo.getLatestMessages(scopeId, "c1", 1).some((m) => m.seq === SYNC_PAGE_LIMIT + 9),
+    repo.getLatestMessagesSync(scopeId, "c1", 1).some((m) => m.seq === SYNC_PAGE_LIMIT + 9),
     "the disconnected message itself is still stored",
   );
 });
@@ -165,7 +165,7 @@ test("overlay refresh is gated to once per boot per page", async () => {
   assert.equal(fetches, 2);
 
   // Overlay data is readable through the repo's message projection.
-  const refreshed = repo.getLatestMessages(scopeId, "c1", 1)[0];
+  const refreshed = repo.getLatestMessagesSync(scopeId, "c1", 1)[0];
   assert.deepEqual(refreshed?.overlay, { reactions: { "👍": 2 } });
 });
 
@@ -180,7 +180,7 @@ test("appendHistoryPage stores a before-cursor page and grows coverage via its w
   });
 
   assert.deepEqual(
-    repo.getCoverage(scopeId, "c1"),
+    repo.getCoverageSync(scopeId, "c1"),
     [{ fromSeq: 30, throughSeq: 50 }],
     "history page fuses with the adjacent tail into one covered range",
   );
@@ -190,16 +190,16 @@ test("read-state and task write-through gates live in the repo and pass through"
   const { repo, scopeId, sync } = makeSync([]);
   await sync.onReadState(scopeId, "c1", 12, 1);
   await sync.onReadState(scopeId, "c1", 8, 2); // older maxReadSeq, newer version: version gate stores it as-is
-  assert.deepEqual(repo.getReadStates(scopeId).c1, { maxReadSeq: 8, version: 2 });
+  assert.deepEqual(repo.getReadStatesSync(scopeId).c1, { maxReadSeq: 8, version: 2 });
 
   await sync.onTaskEvent(scopeId, { id: "t1", revision: 2, raw: { id: "t1", title: "v2" } });
   await sync.onTaskEvent(scopeId, { id: "t1", revision: 1, raw: { id: "t1", title: "stale" } });
-  const rows = repo.getTaskRows(scopeId);
+  const rows = repo.getTaskRowsSync(scopeId);
   assert.equal(rows.length, 1);
   assert.equal((rows[0]!.raw as { title?: string }).title, "v2", "revision gate drops the stale event");
 
   await sync.onTaskDeleted(scopeId, "t1");
-  assert.equal(repo.getTaskRows(scopeId).length, 0);
+  assert.equal(repo.getTaskRowsSync(scopeId).length, 0);
 });
 
 // ---- review fixes: race guards, cancellation, single-flight ------------------
@@ -214,9 +214,9 @@ test("syncAll aborts before the next batch write when stillActive turns false", 
     stillActive: () => (batches += 1) === 1, // active for batch 1 only
   });
   assert.equal(outcome.aborted, true, "loop reports the abort");
-  assert.equal(sync.readCursor(scopeId), 0, "cursor stays at its pre-run value");
+  assert.equal(await sync.readCursor(scopeId), 0, "cursor stays at its pre-run value");
   assert.ok(
-    !repo.getLatestMessages(scopeId, "c1", 1).some((m) => m.seq === 900),
+    !repo.getLatestMessagesSync(scopeId, "c1", 1).some((m) => m.seq === 900),
     "the second batch never landed",
   );
 });
@@ -224,8 +224,8 @@ test("syncAll aborts before the next batch write when stillActive turns false", 
 test("read-state write-through stores the server-provided maxReadSeq and version", async () => {
   const { repo, scopeId, sync } = makeSync([]);
   await sync.onReadState(scopeId, "c1", 42, 7);
-  assert.deepEqual(repo.getReadStates(scopeId).c1, { maxReadSeq: 42, version: 7 });
+  assert.deepEqual(repo.getReadStatesSync(scopeId).c1, { maxReadSeq: 42, version: 7 });
   // Older version does not overwrite.
   await sync.onReadState(scopeId, "c1", 99, 3);
-  assert.deepEqual(repo.getReadStates(scopeId).c1, { maxReadSeq: 42, version: 7 });
+  assert.deepEqual(repo.getReadStatesSync(scopeId).c1, { maxReadSeq: 42, version: 7 });
 });

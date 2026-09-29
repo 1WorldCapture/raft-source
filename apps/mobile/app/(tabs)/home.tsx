@@ -128,9 +128,9 @@ export default function HomeScreen() {
       }
       const scope = runtime.scopeFor(seedServerId);
       if (scope !== null && useRaftStore.getState().conversations.length === 0) {
-        const seeded = seedConversations(runtime.repo.getChannels(scope));
+        const seeded = seedConversations(runtime.repo.getChannelsSync(scope));
         if (seeded.length > 0) useRaftStore.getState().setConversations(seeded);
-        const cachedUnread = runtime.repo.getKv(scope, "channelUnread");
+        const cachedUnread = runtime.repo.getKvSync(scope, "channelUnread");
         if (cachedUnread) useRaftStore.getState().setChannelUnread(cachedUnread as unknown as Record<string, { unreadCount: number; hasMention: boolean }>);
       }
       // Server-rail seed (#desktop-data-cache task #1): same fast path for the

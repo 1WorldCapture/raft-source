@@ -11,7 +11,7 @@ const SCOPE = { origin: "https://a.example", userId: "user-1", serverId: "srv-1"
 
 function fixture() {
   const repo = createCacheRepo({ db: openNodeSqliteDb(":memory:") });
-  const scopeId = repo.openScope(SCOPE.origin, SCOPE.userId, SCOPE.serverId);
+  const scopeId = repo.openScopeSync(SCOPE.origin, SCOPE.userId, SCOPE.serverId);
   return { repo: repo as CacheRepo, scopeId };
 }
 
@@ -38,11 +38,11 @@ test("reconcileChannels deletes cached channels missing from the live list", asy
 
   assert.deepEqual(report.removed, ["c2"], "the revoked channel is removed, order preserved");
   assert.deepEqual(
-    repo.getChannels(scopeId).map((c) => c.id),
+    repo.getChannelsSync(scopeId).map((c) => c.id),
     ["c1", "c3"],
   );
-  assert.deepEqual(repo.getLatestMessages(scopeId, "c2", 10), [], "its messages cascade away");
-  assert.deepEqual(repo.getCoverage(scopeId, "c2"), [], "its coverage ranges cascade away");
+  assert.deepEqual(repo.getLatestMessagesSync(scopeId, "c2", 10), [], "its messages cascade away");
+  assert.deepEqual(repo.getCoverageSync(scopeId, "c2"), [], "its coverage ranges cascade away");
 });
 
 test("reconcileChannels with the full live list removes nothing", async () => {
@@ -65,7 +65,7 @@ test("reconcileChannels also deletes archived channels still present in the list
   ]);
   assert.deepEqual(report.removed, ["c9"]);
   assert.deepEqual(
-    repo.getChannels(scopeId).map((c) => c.id),
+    repo.getChannelsSync(scopeId).map((c) => c.id),
     ["c1"],
   );
 });
@@ -88,11 +88,11 @@ test("pruneToHistoryLimit cuts messages older than the window and no-ops on unli
   assert.equal(outcome.pruned, true);
   assert.equal(outcome.cutoffIso, "2026-08-29T12:00:00.000Z");
   assert.deepEqual(
-    repo.getLatestMessages(scopeId, "c1", 10).map((m) => m.seq),
+    repo.getLatestMessagesSync(scopeId, "c1", 10).map((m) => m.seq),
     [2],
     "the August message is gone, the fresh one stays",
   );
-  assert.deepEqual(repo.getCoverage(scopeId, "c1"), [{ fromSeq: 2, throughSeq: 2 }],
+  assert.deepEqual(repo.getCoverageSync(scopeId, "c1"), [{ fromSeq: 2, throughSeq: 2 }],
     "pruning rebuilds coverage from the surviving seqs");
 
   const unlimited = await pruneToHistoryLimit(repo, scopeId, "pro", now);
@@ -123,7 +123,7 @@ test("reconcileAfterChannelRefresh skips entirely when either list fetch fails",
   });
   assert.deepEqual(failed, { reconciled: false, removed: [] });
   assert.deepEqual(
-    repo.getChannels(scopeId).map((c) => c.id),
+    repo.getChannelsSync(scopeId).map((c) => c.id),
     ["c1", "c2"],
     "a failed refresh must not delete anything",
   );
@@ -134,7 +134,7 @@ test("reconcileAfterChannelRefresh skips entirely when either list fetch fails",
     { stillActive: () => false },
   );
   assert.deepEqual(switched, { reconciled: false, removed: [] }, "scope switch mid-fetch skips too" );
-  assert.deepEqual(repo.getChannels(scopeId).map((c) => c.id), ["c1", "c2"]);
+  assert.deepEqual(repo.getChannelsSync(scopeId).map((c) => c.id), ["c1", "c2"]);
 
   const ok = await reconcileAfterChannelRefresh(
     repo, scopeId,
@@ -160,7 +160,7 @@ test("reconcile deletes even right after a concurrent putChannels write", async 
     dms: [],
   }));
   assert.deepEqual(out.removed.sort(), ["c9"], "c9 is deleted despite the racing putChannels");
-  assert.deepEqual(repo.getChannels(scopeId).map((c) => c.id), ["c1"]);
+  assert.deepEqual(repo.getChannelsSync(scopeId).map((c) => c.id), ["c1"]);
 });
 
 test("resolveHistoryDays prefers the server-sent messageHistoryDays over the plan table", () => {

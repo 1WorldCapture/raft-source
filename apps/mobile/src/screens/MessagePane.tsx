@@ -389,7 +389,7 @@ export function MessagePane({
       const runtime = getCacheRuntime();
       const scope = runtime.scopeFor(sessionRef.current.serverId ?? "");
       if (scope !== null) {
-        const row = runtime.repo.getChannels(scope).find((channel) => channel.id === settingsChannelId);
+        const row = runtime.repo.getChannelsSync(scope).find((channel) => channel.id === settingsChannelId);
         if (row && !cancelled) setMeta(parseChannelMeta(row.raw));
       }
     } catch {
@@ -457,7 +457,7 @@ export function MessagePane({
           const runtime = getCacheRuntime();
           cacheScope = runtime.scopeFor(sessionRef.current.serverId ?? "");
           if (cached.length === 0 && cacheScope !== null) {
-            const rows = runtime.repo.getLatestMessages(cacheScope, channelId, PAGE);
+            const rows = runtime.repo.getLatestMessagesSync(cacheScope, channelId, PAGE);
             if (rows.length > 0) {
               // getLatestMessages is newest-first; the store is chronological.
               const hydrated = hydrateCachedMessages(rows).reverse();
@@ -518,7 +518,7 @@ export function MessagePane({
         // With local coverage, continue from the tail instead of re-pulling
         // the whole page (#client-data-cache task #2).
         const plan = cacheScope !== null
-          ? messageFetchPlan(getCacheRuntime().repo.getCoverage(cacheScope, channelId))
+          ? messageFetchPlan(getCacheRuntime().repo.getCoverageSync(cacheScope, channelId))
           : ({ latest: true } as const);
         if ("after" in plan && !missingTarget) {
           // Review fix #1: a FULL after-page means more newer messages exist

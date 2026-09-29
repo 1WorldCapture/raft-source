@@ -24,7 +24,7 @@ test("attach is idempotent per scope and switching servers keeps data", async ()
   // Switch back: the first server's cache is intact (no wipe on switch).
   runtime.attach("https://a.example", "u1", "srv-1");
   assert.deepEqual(
-    runtime.repo.getChannels(runtime.scopeId ?? -1).map((c) => c.id),
+    runtime.repo.getChannelsSync(runtime.scopeId ?? -1).map((c) => c.id),
     ["c1"],
   );
 });
@@ -44,9 +44,9 @@ test("logout wipes only the attached scope and detaches", async () => {
   await runtime.logout();
   assert.equal(runtime.scopeId, null);
   const back = runtime.attach("https://a.example", "u1", "srv-2");
-  assert.deepEqual(runtime.repo.getLatestMessages(back, "c9", 10), []);
+  assert.deepEqual(runtime.repo.getLatestMessagesSync(back, "c9", 10), []);
   const other = runtime.attach("https://a.example", "u1", "srv-1");
-  assert.equal(runtime.repo.getLatestMessages(other, "c1", 10).length, 1);
+  assert.equal(runtime.repo.getLatestMessagesSync(other, "c1", 10).length, 1);
 });
 
 test("resetAll clears every partition (origin change)", async () => {
@@ -58,5 +58,5 @@ test("resetAll clears every partition (origin change)", async () => {
   await runtime.resetAll();
   assert.equal(runtime.scopeId, null);
   const fresh = runtime.attach("https://b.example", "u2", "srv-1");
-  assert.deepEqual(runtime.repo.getLatestMessages(fresh, "c1", 10), []);
+  assert.deepEqual(runtime.repo.getLatestMessagesSync(fresh, "c1", 10), []);
 });

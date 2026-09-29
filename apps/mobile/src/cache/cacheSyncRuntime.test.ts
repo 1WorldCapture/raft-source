@@ -47,22 +47,39 @@ function freshRuntime() {
 test("cancelCacheSync aborts an in-flight gap sync before its next batch", async () => {
   const runtime = freshRuntime();
   let releaseSecond: (() => void) | null = null;
+  // Page 1 must be FULL (SYNC_PAGE_LIMIT rows): the sync loop stops on a
+  // short page, so a 1-message page 1 would end the round before the second
+  // fetch is ever issued and the cancellation below would be vacuous (the
+  // pre-async version of this test passed for exactly that wrong reason —
+  // releaseSecond stayed null and nobody noticed).
+  const fullPage = Array.from({ length: 500 }, (_, i) => ({
+    seq: i + 1, id: `m${i + 1}`, channelId: "c1", senderId: "u", senderType: "user", createdAt: "t",
+  }));
   const client = makeClient([
-    () => Promise.resolve([{ seq: 1, id: "m1", channelId: "c1", senderId: "u", senderType: "user", createdAt: "t" }]),
+    () => Promise.resolve(fullPage),
     () => new Promise((resolve) => { releaseSecond = () => resolve([{ seq: 900, id: "m900", channelId: "c1", senderId: "u", senderType: "user", createdAt: "t" }]); }),
   ]);
 
   const running = runCacheGapSync(client as unknown as ApiClient);
   void running;
-  await new Promise((r) => setTimeout(r, 0));
+  // The async contract adds await boundaries before the second fetch, so a
+  // single macrotask tick no longer guarantees it is parked. Poll for the
+  // park itself; cancelling too early would orphan a LATER fetch whose
+  // release nobody calls, hanging the test forever.
+  for (let i = 0; i < 500 && !releaseSecond; i += 1) {
+    await new Promise((r) => setTimeout(r, 1));
+  }
+  assert.ok(releaseSecond, "second fetch must be parked before cancelling");
   // While the second fetch is parked, cancel — the logout path.
   cancelCacheSync();
-  releaseSecond?.();
+  releaseSecond();
   await running;
 
   const repo = getCacheRuntime().repo;
-  assert.equal(repo.getLatestMessages(runtime.scopeId!, "c1", 100).some((m) => m.seq === 900), false,
+  assert.equal(repo.getLatestMessagesSync(runtime.scopeId!, "c1", 1000).some((m) => m.seq === 900), false,
     "cancelled round must not land the post-cancel batch");
+  assert.equal(repo.getLatestMessagesSync(runtime.scopeId!, "c1", 1000).some((m) => m.seq === 500), true,
+    "batch 1 of the cancelled round was already committed and stays");
 });
 
 test("runCacheGapSync is single-flight: concurrent calls share one loop", async () => {
@@ -75,7 +92,14 @@ test("runCacheGapSync is single-flight: concurrent calls share one loop", async 
   const first = runCacheGapSync(client as unknown as ApiClient);
   const second = runCacheGapSync(client as unknown as ApiClient);
   assert.equal(first === second, true, "second call joins the in-flight round");
-  releaseFirst?.();
+  // Async contract: the first fetch parks a microtask or two later — poll
+  // for the park before releasing, or the release no-ops and a LATER fetch
+  // parks forever with nobody to release it.
+  for (let i = 0; i < 500 && !releaseFirst; i += 1) {
+    await new Promise((r) => setTimeout(r, 1));
+  }
+  assert.ok(releaseFirst, "first fetch must be parked before releasing");
+  releaseFirst();
   await first;
   await new Promise((r) => setTimeout(r, 0));
   assert.equal(client.syncCalls <= 3, true, "no unbounded extra rounds");
@@ -86,12 +110,12 @@ test("noteReadState writes server-provided values only while a scope is attached
   const client = makeClient([]);
   noteReadState(client as unknown as ApiClient, [{ channelId: "c1", maxReadSeq: 42, readStateVersion: 7, serverId: SCOPE.serverId }]);
   await new Promise((r) => setTimeout(r, 0));
-  assert.deepEqual(getCacheRuntime().repo.getReadStates(runtime.scopeId!).c1, { maxReadSeq: 42, version: 7 });
+  assert.deepEqual(getCacheRuntime().repo.getReadStatesSync(runtime.scopeId!).c1, { maxReadSeq: 42, version: 7 });
 
   await runtime.logout();
   noteReadState(client as unknown as ApiClient, [{ channelId: "c1", maxReadSeq: 99, readStateVersion: 8, serverId: SCOPE.serverId }]);
   await new Promise((r) => setTimeout(r, 0));
-  assert.deepEqual(getCacheRuntime().repo.getReadStates(runtime.scopeId!), {},
+  assert.deepEqual(getCacheRuntime().repo.getReadStatesSync(runtime.scopeId!), {},
     "no scope attached — the write is dropped, wiped data stays wiped");
 });
 
@@ -120,9 +144,9 @@ test("fetchSyncPage persists rows with string seqs from the live /messages/sync 
   };
   await runCacheGapSync(client as unknown as ApiClient);
   const scopeId = runtime.scopeId!;
-  const rows = runtime.repo.getLatestMessages(scopeId, "c1", 10);
+  const rows = runtime.repo.getLatestMessagesSync(scopeId, "c1", 10);
   assert.deepEqual(rows.map((r) => r.seq), [8, 7], "string seq 7, number seq 8 land; junk seq dropped");
-  const cursor = runtime.repo.getKv(scopeId, "syncCursor");
+  const cursor = runtime.repo.getKvSync(scopeId, "syncCursor");
   assert.match(JSON.stringify(cursor), /"maxSeq":8/, "cursor advances to the normalized max");
 });
 
@@ -144,7 +168,7 @@ test("gap-sync raw payloads carry a NUMBER seq inside bodyRaw (seed-path contrac
     },
   };
   await runCacheGapSync(client as unknown as ApiClient);
-  const rows = runtime.repo.getLatestMessages(runtime.scopeId!, "c1", 5);
+  const rows = runtime.repo.getLatestMessagesSync(runtime.scopeId!, "c1", 5);
   assert.equal(rows.length, 1);
   const raw = rows[0]!.raw as Record<string, unknown>;
   assert.equal(typeof raw.seq, "number", "bodyRaw.seq must be a number for the seed path");

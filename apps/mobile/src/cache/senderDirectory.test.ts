@@ -10,7 +10,7 @@ import { collectSenderDirectory, senderDirectoryStep } from "../screens/senderAv
 
 function repoWithScope() {
   const repo = createCacheRepo({ db: openNodeSqliteDb(":memory:") });
-  const scope = repo.openScope("https://raft.example", "user-1", "srv-a");
+  const scope = repo.openScopeSync("https://raft.example", "user-1", "srv-a");
   return { repo, scope };
 }
 
@@ -38,7 +38,7 @@ test("a newer write overwrites the snapshot wholesale (network truth wins)", asy
 test("absent value and malformed rows degrade to null / dropped entries", () => {
   const { repo, scope } = repoWithScope();
   assert.equal(readSenderDirectory(repo, scope), null, "nothing cached yet");
-  const other = repo.openScope("https://raft.example", "user-1", "srv-b");
+  const other = repo.openScopeSync("https://raft.example", "user-1", "srv-b");
   assert.equal(readSenderDirectory(repo, other), null, "scopes are isolated per server");
 });
 

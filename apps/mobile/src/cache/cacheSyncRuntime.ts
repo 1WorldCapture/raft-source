@@ -318,7 +318,7 @@ export async function refreshOverlayIntoStore(
   let from = fromSeq;
   let through = throughSeq;
   if (from === null || through === null) {
-    const ranges = getCacheRuntime().repo.getCoverage(scopeId, channelId);
+    const ranges = getCacheRuntime().repo.getCoverageSync(scopeId, channelId);
     const newest = ranges[ranges.length - 1];
     if (!newest) return { refreshed: false, reason: "no-coverage" };
     from ??= newest.fromSeq;

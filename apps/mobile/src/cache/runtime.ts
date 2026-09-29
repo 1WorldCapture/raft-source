@@ -57,12 +57,12 @@ export function createCacheRuntime(deps: CacheRuntimeDeps): CacheRuntime {
     },
     attach(origin, userId, serverId) {
       identity = { origin, userId };
-      scopeId = repo.openScope(origin, userId, serverId);
+      scopeId = repo.openScopeSync(origin, userId, serverId);
       return scopeId;
     },
     scopeFor(serverId) {
       if (identity === null || !serverId) return null;
-      return repo.openScope(identity.origin, identity.userId, serverId);
+      return repo.openScopeSync(identity.origin, identity.userId, serverId);
     },
     async logout() {
       if (scopeId !== null) await repo.wipeScope(scopeId);
