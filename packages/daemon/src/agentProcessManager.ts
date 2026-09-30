@@ -4170,6 +4170,30 @@ export class AgentProcessManager {
     }
   }
 
+  /**
+   * Who this agent's mention occurrences are bound to. A live process carries its
+   * own identity; an agent with no process (a one-process-per-turn runtime between
+   * turns, an idle-evicted agent, a start in flight) is still the same launch and
+   * session the server bound the occurrence to, read from its restart snapshot or
+   * pending start. Terminal agents have none.
+   */
+  private mentionDeliveryIdentity(
+    agentId: string,
+    ap: AgentProcess | undefined,
+  ): { launchId: string | null; sessionId: string | null } {
+    if (ap) return { launchId: ap.launchId || null, sessionId: ap.sessionId || null };
+    const record = this.agentLifecycleRecord(agentId);
+    if (record?.kind === "idle" || record?.kind === "cooldown") {
+      return {
+        launchId: record.restartSnapshot.launchId || null,
+        sessionId: record.restartSnapshot.sessionId || null,
+      };
+    }
+    const start = this.agentStarts.getQueued(agentId);
+    if (start) return { launchId: start.launchId || null, sessionId: start.config.sessionId || null };
+    return { launchId: null, sessionId: null };
+  }
+
   private beginTrackedMentionDelivery(
     agentId: string,
     message: AgentMessage,
@@ -4179,6 +4203,15 @@ export class AgentProcessManager {
     const tracked = context.mentionDelivery;
     if (!tracked) return "untracked";
     const reject = (code: MentionDeliveryTerminalErrorCode) => {
+      // A rejected mention is a missed wake; it must leave a log line and a routed
+      // trace, not just the bare "Delivery received".
+      logger.warn(`[Agent ${agentId}] Mention delivery rejected (${code}, process_present=${Boolean(ap)}, seq=${message.seq ?? 0})`);
+      this.recordDaemonTrace("daemon.agent.delivery.routed", this.deliveryTraceAttrs(agentId, message, {
+        outcome: "mention_rejected",
+        accepted: false,
+        process_present: Boolean(ap),
+        mention_reject_code: code,
+      }), "error");
       context.onMentionTerminalError?.(code);
       return "rejected" as const;
     };
@@ -4189,8 +4222,9 @@ export class AgentProcessManager {
     ) {
       return reject("INSTRUMENT_FAILED");
     }
-    if (!ap?.launchId || !ap.sessionId) return reject("IDENTITY_UNKNOWN");
-    if (ap.launchId !== tracked.launchId || ap.sessionId !== tracked.sessionId) {
+    const identity = this.mentionDeliveryIdentity(agentId, ap);
+    if (!identity.launchId || !identity.sessionId) return reject("IDENTITY_UNKNOWN");
+    if (identity.launchId !== tracked.launchId || identity.sessionId !== tracked.sessionId) {
       return reject("IDENTITY_DRIFT");
     }
     const existing = this.trackedMentionDeliveries.get(tracked.occurrenceId);
@@ -4308,6 +4342,9 @@ export class AgentProcessManager {
           starting_inbox_count: startingInboxCount,
           launchId: queuedStart?.launchId,
         }));
+        // Buffered for the start in flight; the spawn drains it into the turn.
+        // TODO: if that start fails, the already-acked occurrence is not re-reported.
+        if (trackedBegin === "accepted") this.completeTrackedMentionDelivery(traceContext);
         return true;
       }
 
@@ -4355,6 +4392,10 @@ export class AgentProcessManager {
             session_id_present: Boolean(cached.sessionId),
             launchId: cached.launchId || undefined,
           }));
+          if (trackedBegin === "accepted") {
+            traceContext.onMentionTerminalError?.("UNSUPPORTED_DELIVERY_PATH");
+            return false;
+          }
           return true;
         }
         logger.info(`[Agent ${agentId}] Starting from idle state for new message`);
@@ -4379,6 +4420,14 @@ export class AgentProcessManager {
             spawn_fail_until_ms: state.untilMs,
             starting_inbox_count: startingInboxCount,
           }));
+          // The message stays buffered for the next spawn, but the agent is in
+          // cooldown because its starts keep failing: the mention is not delivered,
+          // so it must not be acked. The server records it undelivered and the
+          // sender can see it pending.
+          if (trackedBegin === "accepted") {
+            traceContext.onMentionTerminalError?.("DELIVERY_REJECTED");
+            return false;
+          }
           return true;
         }
         const restartFromPendingInbox = !transientDelivery && this.startingInboxes.has(agentId);
@@ -4397,7 +4446,7 @@ export class AgentProcessManager {
           session_id_present: Boolean(cached.sessionId),
           launchId: cached.launchId || undefined,
         }));
-        return this.startAgent(
+        const restarted = this.startAgent(
           agentId,
           cached.config,
           restartFromPendingInbox ? undefined : message,
@@ -4450,6 +4499,13 @@ export class AgentProcessManager {
           });
           return false;
         });
+        if (trackedBegin !== "accepted") return restarted;
+        // The wake message rides the spawn, so a started process is the drain.
+        return restarted.then((started) => {
+          if (started) this.completeTrackedMentionDelivery(traceContext);
+          else traceContext.onMentionTerminalError?.("DELIVERY_REJECTED");
+          return started;
+        });
       }
 
       if (!transientDelivery && (this.agentStarts.hasQueued(agentId) || this.agentStarts.hasStarting(agentId))) {
@@ -4462,6 +4518,7 @@ export class AgentProcessManager {
           cached_idle_config_present: false,
           starting_inbox_count: startingInboxCount,
         }));
+        if (trackedBegin === "accepted") this.completeTrackedMentionDelivery(traceContext);
         return true;
       }
 

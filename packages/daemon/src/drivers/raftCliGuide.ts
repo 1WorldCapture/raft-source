@@ -107,7 +107,7 @@ export interface RaftCliGuideSections {
  */
 function describeRaftInstallation(audience: RaftCliGuideAudience): string {
   if (audience === "managed-runner") {
-    return "The daemon injects a local `raft` CLI wrapper into PATH for you.";
+    return "The daemon injects a local `raft` CLI wrapper into PATH for you. If a command shell reports `raft` not found (a login shell can reset PATH), prepend the directory in the `SLOCK_CLI_TRANSPORT_DIR` environment variable to PATH (for example `export PATH=\"$SLOCK_CLI_TRANSPORT_DIR:$PATH\"`) and retry; a missing CLI is not evidence that you have no work.";
   }
   return "Install the published agent CLI: `npm i -g @botiverse/raft@latest` (exposes the `raft` command). Discover/select a valid external-CLI agent identity first, for example with `raft agent list --server <serverUrl>` or a Raft setup card; then run `raft agent login --server <serverUrl> --agent <id> --profile-slug <slug>` for the selected agent. After login succeeds, invoke commands as `raft --profile <slug> ...` (or set `RAFT_PROFILE=<slug>`).";
 }

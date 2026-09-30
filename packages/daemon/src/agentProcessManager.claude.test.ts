@@ -3270,6 +3270,117 @@ test("delivery-gating seam ①c: a boundary-dropped already-consumed seq must st
 });
 
 // ===========================================================================
+// A direct @mention must wake an agent that has no running process. The mention
+// occurrence used to be rejected (IDENTITY_UNKNOWN) whenever `ap` was absent, so a
+// one-process-per-turn runtime (cursor, gemini, copilot, opencode) between turns, or
+// any runtime whose process had exited, never woke on a direct @mention — only on
+// messages that did not @ it. The occurrence is bound to the launch/session the
+// restart snapshot still carries, so the wake proceeds and drains the occurrence.
+// ===========================================================================
+// Park the agent the way the daemon does when a process is gone but the agent stays
+// wakeable (a per-turn runtime after its turn, or an idle-evicted/exited process):
+// no `ap`, and an idle restart snapshot carrying the launch and session.
+async function parkAgentIdle(manager: AgentProcessManager, driver: { processes: { kill(): void }[] }) {
+  const ap = getProcess(manager, "agent-1");
+  const snapshot = { config: ap.config, sessionId: "session-1", launchId: "launch-1" };
+  driver.processes[0].kill();
+  await flush();
+  (manager as any).lifecycleRecords.setRestartSnapshot("agent-1", snapshot);
+  assert.equal(getProcess(manager, "agent-1"), undefined, "no running process");
+  assert.equal((manager as any).agentLifecycleRecord("agent-1")?.kind, "idle");
+}
+
+async function deliverTrackedMentionToStoppedAgent(
+  manager: AgentProcessManager,
+  driver: { processes: { kill(): void }[] },
+  mention: { launchId: string; sessionId: string },
+) {
+  const transitions: { state: string; outcome: string }[] = [];
+  const terminalErrors: string[] = [];
+  let ackCount = 0;
+  const result = await manager.deliverMessage(
+    "agent-1",
+    makeMessage("@agent-1 wake up", { seq: 77, message_id: "m-77", channel_name: "general", channel_type: "channel" }),
+    {
+      deliveryId: "occ-77",
+      mentionDelivery: { occurrenceId: "occ-77", messageId: "m-77", ...mention },
+      onMentionTransition: (state: string, outcome: string) => { transitions.push({ state, outcome }); },
+      onMentionAck: () => { ackCount += 1; },
+      onMentionTerminalError: (code: string) => { terminalErrors.push(code); },
+    } as any,
+  );
+  return { result, transitions, terminalErrors, ackCount: () => ackCount };
+}
+
+for (const [label, stdin] of [["persistent (stdin) runtime whose process exited", true], ["per-turn runtime between turns", false]] as const) {
+  test(`mention wake: a direct @mention wakes an agent with no running process — ${label}`, async () => {
+    const { sink, tracer } = makeDeterministicTracer();
+    await withManager(async ({ driver, manager }) => {
+      await manager.startAgent("agent-1", makeConfig({ sessionId: "session-1" }), undefined, undefined, undefined, "launch-1");
+      const ap = getProcess(manager, "agent-1");
+      (ap.driver as any).supportsStdinNotification = stdin;
+      await parkAgentIdle(manager, driver);
+
+      const out = await deliverTrackedMentionToStoppedAgent(manager, driver, { launchId: "launch-1", sessionId: "session-1" });
+
+      assert.equal(out.result, true);
+      assert.equal(lastDeliveryOutcome(sink), "auto_restart_from_idle", "the mention goes through the same wake as any other message");
+      assert.equal(driver.processes.length, 2, "a new process was spawned");
+      assert.deepEqual(out.transitions, [
+        { state: "daemon_received", outcome: "accepted" },
+        { state: "daemon_drained", outcome: "accepted" },
+      ]);
+      assert.equal(out.ackCount(), 1, "acked exactly once after the spawn");
+      assert.deepEqual(out.terminalErrors, []);
+    }, { tracer });
+  });
+}
+
+test("mention wake: an occurrence bound to another launch is still rejected as drift, with a log-visible trace", async () => {
+  const { sink, tracer } = makeDeterministicTracer();
+  await withManager(async ({ driver, manager }) => {
+    await manager.startAgent("agent-1", makeConfig({ sessionId: "session-1" }), undefined, undefined, undefined, "launch-1");
+    await parkAgentIdle(manager, driver);
+
+    const out = await deliverTrackedMentionToStoppedAgent(manager, driver, { launchId: "launch-OTHER", sessionId: "session-1" });
+
+    assert.equal(out.result, false);
+    assert.deepEqual(out.terminalErrors, ["IDENTITY_DRIFT"]);
+    assert.equal(driver.processes.length, 1, "a drifted occurrence must not spawn");
+    assert.equal(lastDeliveryOutcome(sink), "mention_rejected", "a rejection leaves a routed trace, not just 'Delivery received'");
+  }, { tracer });
+});
+
+test("mention wake: during spawn-fail cooldown the message is buffered but the mention is rejected, not acked", async () => {
+  const { sink, tracer } = makeDeterministicTracer();
+  await withManager(async ({ driver, manager }) => {
+    await manager.startAgent("agent-1", makeConfig({ sessionId: "session-1" }), undefined, undefined, undefined, "launch-1");
+    await parkAgentIdle(manager, driver);
+    (manager as any).recordSpawnFailure("agent-1", "spawn_error");
+    assert.equal((manager as any).agentLifecycleRecord("agent-1")?.kind, "cooldown");
+
+    const out = await deliverTrackedMentionToStoppedAgent(manager, driver, { launchId: "launch-1", sessionId: "session-1" });
+
+    assert.equal(out.result, false);
+    assert.deepEqual(out.terminalErrors, ["DELIVERY_REJECTED"], "an agent that cannot start has not received the mention");
+    assert.equal(out.ackCount(), 0, "no ack: the sender must see it undelivered");
+    assert.ok(((manager as any).startingInboxes.values("agent-1") ?? []).length > 0, "the message itself is still buffered for the next spawn");
+    assert.equal(driver.processes.length, 1, "no spawn during cooldown");
+    assert.equal(lastDeliveryOutcome(sink), "spawn_fail_cooldown_active");
+  }, { tracer });
+});
+
+test("mention wake: an agent with no identity at all (never started) is rejected IDENTITY_UNKNOWN", async () => {
+  const { sink, tracer } = makeDeterministicTracer();
+  await withManager(async ({ driver, manager }) => {
+    const out = await deliverTrackedMentionToStoppedAgent(manager, driver, { launchId: "launch-1", sessionId: "session-1" });
+    assert.equal(out.result, false);
+    assert.deepEqual(out.terminalErrors, ["IDENTITY_UNKNOWN"]);
+    assert.equal(lastDeliveryOutcome(sink), "mention_rejected");
+  }, { tracer });
+});
+
+// ===========================================================================
 // Agent-start slot accounting (lead-run, methodology run 2 — start/spawn state
 // machine). `activeAgentStartCount` is incremented once at dequeue (pumpAgentStartQueue,
 // :2148) and must be released exactly once when startAgentNow settles — on BOTH
