@@ -48,6 +48,16 @@ contextBridge.exposeInMainWorld("raftDesktop", {
   // Bring the window forward (e.g. when an OS notification is clicked).
   focusWindow: () => ipcRenderer.send(ELECTRON_IPC_CHANNELS.focusWindow),
 
+  // Storage doctor (task #12): the renderer's boot health check calls these
+  // when localStorage looks corrupted while the IndexedDB cache has data.
+  // resetAndRelaunch schedules a wipe of the Local Storage directory for the
+  // next boot and relaunches the app; justWiped reports that this boot
+  // already consumed a wipe (skip the heuristic, start a fresh canary).
+  storage: {
+    justWiped: (): Promise<boolean> => ipcRenderer.invoke(ELECTRON_IPC_CHANNELS.storageWipeStatus),
+    resetAndRelaunch: (): void => ipcRenderer.send(ELECTRON_IPC_CHANNELS.storageResetRequest),
+  },
+
   // Desktop OAuth (native half). The renderer owns PKCE + the /start & /complete
   // HTTPS calls; this bridges the loopback + system browser only.
   oauth: {

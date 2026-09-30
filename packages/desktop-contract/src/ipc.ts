@@ -450,6 +450,11 @@ export const ELECTRON_IPC_CHANNELS = {
   focusState: "app:focus-state",
   /** renderer → main: bring the window to front (OS notification click). */
   focusWindow: "app:focus-window",
+  /** renderer → main: wipe Local Storage at next boot (corruption loop) and
+   *  relaunch the app. See storageDoctor in the Electron shell. */
+  storageResetRequest: "app:storage-reset-request",
+  /** renderer → main (invoke): did this boot consume a pending storage wipe? */
+  storageWipeStatus: "app:storage-wipe-status",
 } as const;
 
 export type ElectronIpcChannel =

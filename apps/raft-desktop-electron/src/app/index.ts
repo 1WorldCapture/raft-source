@@ -40,6 +40,7 @@ import { MenubarResident, shouldHideOnClose } from "../main/menubarResident.js";
 import { isHiddenLaunch } from "../main/loginItem.js";
 import { armOAuthLoopback, cancelOAuthLoopback, isAllowedAuthorizationUrl } from "./oauthLoopback.js";
 import { buildApiOrigins, isOfficialApiBuild } from "./configuredApiOrigin.js";
+import { requestStorageWipeAndRelaunch, resolvePendingStorageWipe } from "./storageDoctor.js";
 import { createOAuthCoordinator } from "./oauthCoordinator.js";
 import { ComputerHost } from "./computerHost.js";
 import { installStatusMonitorLifecycle } from "../main/statusMonitorLifecycle.js";
@@ -116,6 +117,12 @@ const headlessMode = findHeadlessMode(process.argv);
 // one canonical data dir.
 const userDataOverride = !app.isPackaged ? process.env.RAFT_DESKTOP_USER_DATA?.trim() : undefined;
 if (userDataOverride) app.setPath("userData", userDataOverride);
+
+// Storage doctor (task #12): consume a pending wipe BEFORE anything can open
+// the profile's Local Storage — this runs at module scope, ahead of app ready
+// and window creation. Deleting the directory is the only way out of the
+// corrupted-journal write-loss loop; IndexedDB (message cache) is untouched.
+const storageWipedThisBoot = resolvePendingStorageWipe(app.getPath("userData"));
 
 let computerHost: ComputerHost | null = null;
 let menubarResident: MenubarResident | null = null;
@@ -238,6 +245,13 @@ function registerIpcHandlers(): void {
     if (w.isMinimized()) w.restore();
     w.show();
     w.focus();
+  });
+  ipcMain.handle(ELECTRON_IPC_CHANNELS.storageWipeStatus, () => storageWipedThisBoot);
+  ipcMain.on(ELECTRON_IPC_CHANNELS.storageResetRequest, () => {
+    // Renderer-side corruption heuristic fired (canary lost while the
+    // IndexedDB cache clearly has data): schedule the wipe marker and
+    // relaunch so the next boot starts from a clean Local Storage.
+    requestStorageWipeAndRelaunch(app.getPath("userData"), () => app.relaunch(), (code) => app.exit(code));
   });
 }
 

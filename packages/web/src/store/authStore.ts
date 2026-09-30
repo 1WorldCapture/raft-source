@@ -20,10 +20,17 @@ import {
 import { clearSlockdevManualLogout, markSlockdevManualLogout } from "../utils/devMode";
 import { useServerStore } from "./serverStore";
 import {
+  decideOfflineAdmission,
   forgetOfflineUserOnSubjectChange,
+  parseOfflineUserValue,
   readOfflineAdmission,
   rememberOfflineUser,
 } from "../utils/offlineSession";
+import {
+  backupOfflineUser,
+  getBackupLastScope,
+  getBackupOfflineUser,
+} from "../cache/identityBackup";
 import {
   deriveInitialAuthRestoreState,
   describeRestoreError,
@@ -251,6 +258,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       seedMessageBodyFontSizeFromProfile(data.user.preferredMessageBodyFontSize);
       if (get().user?.id !== data.user.id) useAnnouncementStore.getState().reset();
       rememberOfflineUser(data.user, localStorage);
+      backupOfflineUser(data.user as unknown as Record<string, unknown>);
       set({
         user: data.user,
         accessToken: data.accessToken,
@@ -276,6 +284,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       seedMessageBodyFontSizeFromProfile(data.user.preferredMessageBodyFontSize);
       if (get().user?.id !== data.user.id) useAnnouncementStore.getState().reset();
       rememberOfflineUser(data.user, localStorage);
+      backupOfflineUser(data.user as unknown as Record<string, unknown>);
       set({
         user: data.user,
         accessToken: data.accessToken,
@@ -316,6 +325,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         });
         seedMessageBodyFontSizeFromProfile(data.preferredMessageBodyFontSize);
         rememberOfflineUser(data, localStorage);
+      backupOfflineUser(data as unknown as Record<string, unknown>);
         set({ user: data, loading: false });
       } catch (error) {
         throw markOnboardingProfileError(error, "profile");
@@ -380,12 +390,19 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   loadUser: async () => {
     const tryEnterOfflineReadonly = (err: unknown, status: number | undefined): boolean => {
-      const admission = readOfflineAdmission(
-        status,
-        !!(get().accessToken && get().refreshToken),
-        localStorage,
-        accessTokenSubject(get().accessToken),
-      );
+      const hasStoredSession = !!(get().accessToken && get().refreshToken);
+      const tokenSubject = accessTokenSubject(get().accessToken);
+      // localStorage first; fall back to the IndexedDB backup rows (task #12)
+      // when the localStorage journal lost the snapshot to the write-loss
+      // loop. Same admission rules — the backup holds no tokens.
+      const admission = readOfflineAdmission(status, hasStoredSession, localStorage, tokenSubject)
+        ?? decideOfflineAdmission({
+          status,
+          hasStoredSession,
+          tokenSubject,
+          scope: getBackupLastScope(),
+          user: parseOfflineUserValue(getBackupOfflineUser()),
+        });
       if (!admission) return false;
       set({
         user: admission.user,
@@ -413,6 +430,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       seedMessageBodyFontSizeFromProfile(data.preferredMessageBodyFontSize);
       if (get().user?.id !== data.id) useAnnouncementStore.getState().reset();
       rememberOfflineUser(data, localStorage);
+      backupOfflineUser(data as unknown as Record<string, unknown>);
       set({
         user: data,
         offlineReadonly: false,

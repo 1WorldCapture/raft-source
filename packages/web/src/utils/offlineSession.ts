@@ -38,17 +38,25 @@ export function parseScopeIdentity(raw: string | null): ScopeIdentity | null {
 export function parseOfflineUser(raw: string | null): User | null {
   if (!raw) return null;
   try {
-    const parsed = JSON.parse(raw) as Partial<User> | null;
-    if (!parsed || typeof parsed !== "object") return null;
-    if (typeof parsed.id !== "string" || !parsed.id) return null;
-    if (typeof parsed.email !== "string") return null;
-    if (typeof parsed.name !== "string" || !parsed.name) return null;
-    if (hasPlaceholderHandle(parsed.name)) return null;
-    if (parsed.emailVerified !== true) return null;
-    return parsed as User;
+    return parseOfflineUserValue(JSON.parse(raw));
   } catch {
     return null;
   }
+}
+
+/**
+ * Same validation as parseOfflineUser, for an already-parsed value — the
+ * IndexedDB backup row (task #12) stores the snapshot as an object.
+ */
+export function parseOfflineUserValue(value: unknown): User | null {
+  const parsed = value as Partial<User> | null;
+  if (!parsed || typeof parsed !== "object") return null;
+  if (typeof parsed.id !== "string" || !parsed.id) return null;
+  if (typeof parsed.email !== "string") return null;
+  if (typeof parsed.name !== "string" || !parsed.name) return null;
+  if (hasPlaceholderHandle(parsed.name)) return null;
+  if (parsed.emailVerified !== true) return null;
+  return parsed as User;
 }
 
 /**
