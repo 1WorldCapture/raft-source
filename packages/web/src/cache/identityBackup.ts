@@ -28,7 +28,7 @@ let opened: Promise<IDBDatabase | null> | null = null;
 
 function openCacheDb(): Promise<IDBDatabase | null> {
   if (opened) return opened;
-  opened = (async () => {
+  const attempt = (async () => {
     // Never create the database from here: a fresh open would race the
     // runtime's versioned open. Only attach when it already exists.
     try {
@@ -44,7 +44,13 @@ function openCacheDb(): Promise<IDBDatabase | null> {
       req.onblocked = () => resolve(null);
     });
   })();
-  return opened;
+  // Cache only a SUCCESSFUL attach: the boot-time load often runs before the
+  // runtime has created the database, and caching that null would silently
+  // disable every later backup write for the whole session.
+  void attempt.then((db) => {
+    if (db) opened = Promise.resolve(db);
+  });
+  return attempt;
 }
 
 async function readKv(key: string): Promise<unknown> {
