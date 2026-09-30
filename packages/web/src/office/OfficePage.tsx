@@ -2,7 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useIntl } from "react-intl";
 import { getSocket } from "../api/socket";
 import { useAppNavigate } from "../hooks/useAppNavigate";
+import { useAuthStore } from "../store/authStore";
 import { useServerStore } from "../store/serverStore";
+import { TILE_SIZE, ZOOM_MAX, ZOOM_MIN } from "../officePixel/constants.js";
+import { writeMembersSurface } from "./membersSurface";
 import { EditorState } from "../officePixel/office/editor/editorState.js";
 import { OfficeState } from "../officePixel/office/engine/officeState.js";
 import { OfficeCanvas } from "../officePixel/office/components/OfficeCanvas.js";
@@ -31,6 +34,8 @@ export default function OfficePage() {
   const [zoom, setZoom] = useState(3);
   const [query, setQuery] = useState("");
   const members = useServerStore((s) => s.members);
+  const userId = useAuthStore((s) => s.user?.id ?? null);
+  const frameRef = useRef<HTMLDivElement>(null);
   const officeRef = useRef<OfficeState | null>(null);
   const structureRef = useRef<string | null>(null);
   const editorState = useRef(new EditorState());
@@ -122,6 +127,26 @@ export default function OfficePage() {
       query,
     );
   }, [bosses, overview, query, tick]);
+  const layoutCols = scene?.layout.cols ?? 0;
+  const layoutRows = scene?.layout.rows ?? 0;
+
+  useEffect(() => {
+    const frame = frameRef.current;
+    if (!frame || layoutCols === 0 || layoutRows === 0) return;
+    const fit = () => {
+      const rect = frame.getBoundingClientRect();
+      if (rect.width < 32 || rect.height < 32) return;
+      const margin = 24;
+      const fitX = Math.floor((rect.width - margin) / (layoutCols * TILE_SIZE));
+      const fitY = Math.floor((rect.height - margin) / (layoutRows * TILE_SIZE));
+      const next = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, Math.min(fitX, fitY)));
+      setZoom((current) => (current === next ? current : next));
+    };
+    fit();
+    const observer = new ResizeObserver(fit);
+    observer.observe(frame);
+    return () => observer.disconnect();
+  }, [layoutCols, layoutRows]);
 
   if (assetsReady && scene) {
     if (!officeRef.current) officeRef.current = new OfficeState(scene.layout);
@@ -141,7 +166,26 @@ export default function OfficePage() {
 
   return (
     <div className="relative flex h-full min-h-0 w-full flex-col bg-black" data-testid="office-page">
-      <label className="flex items-center gap-2 px-3 py-1 text-xs text-white/80">
+      <div className="flex items-center gap-2 px-3 py-1 text-xs text-white/80">
+        <div className="flex gap-1" data-testid="members-surface-toggle">
+          <button
+            type="button"
+            data-testid="members-surface-office"
+            className="border border-white bg-white px-2 py-0.5 font-bold text-black"
+            onClick={() => writeMembersSurface(userId, "office")}
+          >
+            {formatMessage({ id: "office.viewOffice" })}
+          </button>
+          <button
+            type="button"
+            data-testid="members-surface-list"
+            className="border border-white/30 px-2 py-0.5"
+            onClick={() => writeMembersSurface(userId, "list")}
+          >
+            {formatMessage({ id: "office.viewList" })}
+          </button>
+        </div>
+      <label className="flex min-w-0 flex-1 items-center gap-2">
         <span>{formatMessage({ id: "office.search" })}</span>
         <input
           value={query}
@@ -150,6 +194,7 @@ export default function OfficePage() {
           data-testid="office-search"
         />
       </label>
+      </div>
       {USE_FAKE_AGENT_OVERVIEW ? (
         <p className="px-3 py-1 text-xs text-white/80" data-testid="office-preview-notice">
           {formatMessage({ id: "office.previewNotice" })}
@@ -162,7 +207,7 @@ export default function OfficePage() {
         <p className="p-4 text-sm text-white" data-testid="office-loading">{formatMessage({ id: "office.loading" })}</p>
       ) : null}
       {officeState && scene ? (
-        <div className="relative min-h-0 flex-1">
+        <div ref={frameRef} className="relative min-h-0 flex-1">
           <OfficeCanvas
             officeState={officeState}
             onClick={openCharacter}

@@ -175,6 +175,8 @@ export interface DemoRole {
   /** Idle-short stays inside this column span. */
   roomMinCol: number;
   roomMaxCol: number;
+  /** Columns a wanderer may cross but must not stop on (doorways). */
+  avoidCols?: number[];
   /** Sofa tile the offline pose is pinned to. */
   anchorCol: number;
   anchorRow: number;

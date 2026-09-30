@@ -35,6 +35,8 @@ export interface OfficePlacement {
   anchorRow: number;
   spawnCol: number;
   spawnRow: number;
+  /** Door columns. Wander targets skip these so people don't rest in the doorway. */
+  avoidCols?: number[];
   highlighted?: boolean;
 }
 
@@ -63,10 +65,14 @@ function uniqueLabel(name: string, used: Set<string>): string {
   return label;
 }
 
-function innerHeight(agents: AgentOverviewAgent[]): number {
-  const workers = agents.filter((agent) => agent.presence === "working").length;
-  const workRows = Math.max(1, Math.ceil(workers / 2));
-  return Math.max(BASE_INNER_H, 1 + workRows * 5 + 4);
+const DESKS_PER_ROW = 2;
+const DESK_ROW_STRIDE = 5;
+
+/** One desk row per pair of agents. Empty rooms keep the original height. */
+function innerHeight(agentCount: number): number {
+  if (agentCount === 0) return BASE_INNER_H;
+  const deskRows = Math.ceil(agentCount / DESKS_PER_ROW);
+  return Math.max(BASE_INNER_H, 2 + deskRows * DESK_ROW_STRIDE);
 }
 
 export function buildOfficeScene(
@@ -94,7 +100,7 @@ export function buildOfficeScene(
     };
   }
 
-  const innerH = Math.max(...rooms.map((room) => innerHeight(room.agents)));
+  const innerH = Math.max(...rooms.map((room) => innerHeight(room.agents.length)));
   const gridCols = Math.min(ROOMS_PER_ROW, rooms.length);
   const gridRows = Math.ceil(rooms.length / ROOMS_PER_ROW);
   const cols = 1 + gridCols * ROOM_STRIDE;
@@ -104,6 +110,7 @@ export function buildOfficeScene(
   const areaTiles: Array<string | null> = Array.from({ length: cols * rows }, () => null);
   const furniture: OfficeLayout["furniture"] = [];
   const placements: OfficePlacement[] = [];
+  const doorCols: number[] = [];
 
   rooms.forEach((room, index) => {
     const gridCol = index % ROOMS_PER_ROW;
@@ -124,6 +131,7 @@ export function buildOfficeScene(
     const hasRightNeighbor = gridCol < gridCols - 1 && index + 1 < rooms.length && Math.floor((index + 1) / ROOMS_PER_ROW) === gridRow;
     if (hasRightNeighbor) {
       const doorCol = roomMaxCol + 1;
+      doorCols.push(doorCol);
       for (const doorRow of [roomFloorRow + 5, roomFloorRow + 6]) {
         if (doorRow >= roomFloorRow + innerH) continue;
         const at = doorRow * cols + doorCol;
@@ -145,10 +153,18 @@ export function buildOfficeScene(
     placeAgents(room.agents, roomMinCol, roomMaxCol, roomFloorRow, nowMs, furniture, placements);
   });
 
+  for (const placement of placements) placement.avoidCols = doorCols;
+
   if (rooms.length > 0) {
     const query = highlightQuery.trim().toLowerCase();
     bosses.forEach((boss, index) => {
-      const col = Math.min(7 + index * 2, cols - 2);
+      const roomIndex = index % rooms.length;
+      const gridCol = roomIndex % ROOMS_PER_ROW;
+      const gridRow = Math.floor(roomIndex / ROOMS_PER_ROW);
+      const roomMinCol = 1 + gridCol * ROOM_STRIDE;
+      const roomFloorRow = 1 + gridRow * (innerH + 1);
+      const col = roomMinCol + 4;
+      const row = roomFloorRow + 3 + (Math.floor(index / rooms.length) % 3);
       placements.push({
         agentId: boss.id,
         name: boss.name,
@@ -159,9 +175,10 @@ export function buildOfficeScene(
         roomMaxCol: cols - 2,
         seatId: null,
         anchorCol: col,
-        anchorRow: 8,
+        anchorRow: row,
         spawnCol: col,
-        spawnRow: 8,
+        spawnRow: row,
+        avoidCols: doorCols,
         highlighted: query.length > 0 && boss.name.toLowerCase().includes(query),
       });
     });
@@ -206,61 +223,17 @@ function placeAgents(
   furniture: OfficeLayout["furniture"],
   placements: OfficePlacement[],
 ): void {
-  let workSlot = 0;
-  let offlineSlot = 0;
-  let idleSlot = 0;
-  for (const agent of agents) {
+  agents.forEach((agent, index) => {
     const tier = durationTier(agent.presence, presenceDurationMs(agent.presenceSince, nowMs));
     const activity = agent.activityDetail?.trim() || agent.activity;
-    if (agent.presence === "working") {
-      const col = roomMinCol + 2 + (workSlot % 2) * 5;
-      const row = roomFloorRow + Math.floor(workSlot / 2) * 5;
-      const seatId = `chair-${agent.id}`;
-      furniture.push(
-        { uid: seatId, type: "WOODEN_CHAIR_FRONT", col, row },
-        { uid: `desk-${agent.id}`, type: "DESK_FRONT", col: col - 1, row: row + 2 },
-      );
-      placements.push({
-        agentId: agent.id,
-        name: agent.name,
-        presence: agent.presence,
-        tier,
-        activity,
-        roomMinCol,
-        roomMaxCol,
-        seatId,
-        anchorCol: col,
-        anchorRow: row + 1,
-        spawnCol: col,
-        spawnRow: row + 1,
-      });
-      workSlot += 1;
-      continue;
-    }
-    if (agent.presence === "offline") {
-      const col = roomMinCol + 1 + (offlineSlot % 3) * 4;
-      const row = roomFloorRow + 11;
-      const seatId = `sofa-${agent.id}`;
-      furniture.push({ uid: seatId, type: "SOFA_FRONT", col, row });
-      placements.push({
-        agentId: agent.id,
-        name: agent.name,
-        presence: agent.presence,
-        tier,
-        activity,
-        roomMinCol,
-        roomMaxCol,
-        seatId,
-        anchorCol: col,
-        anchorRow: row,
-        spawnCol: col,
-        spawnRow: row,
-      });
-      offlineSlot += 1;
-      continue;
-    }
-    const col = roomMinCol + 3 + (idleSlot % 4) * 2;
-    const row = roomFloorRow + 7;
+    const col = roomMinCol + 2 + (index % DESKS_PER_ROW) * 5;
+    const row = roomFloorRow + Math.floor(index / DESKS_PER_ROW) * DESK_ROW_STRIDE;
+    const seatId = `chair-${agent.id}`;
+    furniture.push(
+      { uid: seatId, type: "WOODEN_CHAIR_FRONT", col, row },
+      { uid: `desk-${agent.id}`, type: "DESK_FRONT", col: col - 1, row: row + 2 },
+    );
+    const seated = agent.presence === "working" || agent.presence === "offline";
     placements.push({
       agentId: agent.id,
       name: agent.name,
@@ -269,12 +242,11 @@ function placeAgents(
       activity,
       roomMinCol,
       roomMaxCol,
-      seatId: null,
+      seatId: seated ? seatId : null,
       anchorCol: col,
       anchorRow: row,
       spawnCol: col,
-      spawnRow: row,
+      spawnRow: row + 1,
     });
-    idleSlot += 1;
-  }
+  });
 }

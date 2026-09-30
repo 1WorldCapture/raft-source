@@ -37,10 +37,15 @@ export function demoWalkableTiles(
   tiles: Array<{ col: number; row: number }>,
 ): Array<{ col: number; row: number }> {
   const demo = ch.demo;
-  if (!demo || demo.presence === 'boss') return tiles;
-  if (demo.presence !== 'idle') return tiles;
+  if (!demo) return tiles;
+  const avoid = demo.avoidCols;
+  const open = avoid && avoid.length > 0
+    ? tiles.filter((t) => !avoid.includes(t.col))
+    : tiles;
+  if (demo.presence === 'boss') return open;
+  if (demo.presence !== 'idle') return open;
   if (demo.tier === 0) {
-    return tiles.filter((t) => t.col >= demo.roomMinCol && t.col <= demo.roomMaxCol);
+    return open.filter((t) => t.col >= demo.roomMinCol && t.col <= demo.roomMaxCol);
   }
-  return tiles.filter((t) => t.col < demo.roomMinCol || t.col > demo.roomMaxCol);
+  return open.filter((t) => t.col < demo.roomMinCol || t.col > demo.roomMaxCol);
 }

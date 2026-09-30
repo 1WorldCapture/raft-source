@@ -138,6 +138,24 @@ test("six machines wrap to two rows of three", () => {
   assert.equal(scene.layout.tiles[secondRowFloor], TileType.FLOOR_2);
 });
 
+test("every agent gets a desk and working agents sit", () => {
+  const overview = fakeAgentOverview();
+  const agents = Array.from({ length: 8 }, (_, index) => bareAgent({
+    id: `seat-${index}`,
+    name: `seat-${index}`,
+    presence: index < 5 ? "working" : "idle",
+  }));
+  const scene = buildOfficeScene({
+    ...overview,
+    unassignedAgents: 0,
+    machines: [{ ...overview.machines[0], agents }],
+  }, FAKE_OVERVIEW_SERVER_TIME);
+  const desks = scene.layout.furniture.filter((item) => item.type === "DESK_FRONT");
+  assert.equal(desks.length, 8);
+  assert.ok(scene.placements.filter((item) => item.presence === "working").every((item) => item.seatId));
+  assert.ok(scene.placements.filter((item) => item.presence === "idle").every((item) => item.seatId === null));
+});
+
 test("human members patrol as bosses and search highlights a name", () => {
   const overview = fakeAgentOverview();
   const scene = buildOfficeScene(overview, FAKE_OVERVIEW_SERVER_TIME, [{ id: "human-1", name: "老板" }], "老板");
@@ -146,5 +164,7 @@ test("human members patrol as bosses and search highlights a name", () => {
   assert.equal(boss.presence, "boss");
   assert.equal(boss.seatId, null);
   assert.equal(boss.highlighted, true);
+  assert.notEqual(boss.spawnCol, 13);
+  assert.ok(boss.avoidCols?.includes(13));
   assert.equal(scene.placements.find((placement) => placement.name === "工作短")?.highlighted, false);
 });

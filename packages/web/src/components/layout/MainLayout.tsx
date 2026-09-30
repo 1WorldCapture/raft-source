@@ -2035,7 +2035,7 @@ export default function MainLayout() {
   ) => {
     emitWorkspaceGridDragPanel(event.nativeEvent, ref, source);
   }, []);
-  const hideSidebar = isWikiRoute || (workspaceEnabled
+  const hideSidebar = showMembersOffice || isWikiRoute || (workspaceEnabled
     ? workspaceSidebars.left.collapsed || workspaceSidebars.left.activeItem === null
     : isTasksRoute || (isContentRoute && !searchMasterDetail));
   const isMobileTabRoot = mobileShowSidebarInline || (!isDesktop && isTasksRoute);
