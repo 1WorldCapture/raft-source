@@ -3331,6 +3331,9 @@ export const zhCn: Record<MessageId, string> = {
   "layout.leftRail.unreadActivity": "未读动态",
   "layout.leftRail.computersNeedAttentionSummary": "{count} / {total} 需要处理",
 
+  "office.viewOffice": "办公室",
+  "office.viewList": "列表",
+  "office.search": "搜索",
   "office.previewNotice": "预览数据。总览接口上线后会换成真实 agent。",
   "office.loading": "正在加载办公室…",
   "office.loadFailed": "办公室加载失败。",

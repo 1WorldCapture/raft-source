@@ -32,7 +32,7 @@ export function classifyRouteForTab(pathname: string, pathBase: string | null): 
   if (rest.startsWith("/computer/")) return "computers";
   if (rest.startsWith("/machine/")) return "computers"; // legacy
   if (rest === "/computers" || rest.startsWith("/computers/")) return "computers";
-  if (rest === "/office" || rest.startsWith("/office/")) return "office";
+  if (rest === "/office" || rest.startsWith("/office/")) return "members";
   if (rest === "/settings" || rest.startsWith("/settings/")) return "settings";
   if (rest === "/release-notes" || rest.startsWith("/release-notes/")) return "settings";
   return null;

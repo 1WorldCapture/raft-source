@@ -17,10 +17,15 @@ const FLOOR_COLORS = [
 
 const AREA_COLORS = ["#7fd4ff", "#ffe7a3", "#d7e4ff", "#ffb3c7"];
 
+export interface OfficeBoss {
+  id: string;
+  name: string;
+}
+
 export interface OfficePlacement {
   agentId: string;
   name: string;
-  presence: OfficePresence;
+  presence: OfficePresence | "boss";
   tier: DurationTier;
   activity: string;
   roomMinCol: number;
@@ -30,6 +35,7 @@ export interface OfficePlacement {
   anchorRow: number;
   spawnCol: number;
   spawnRow: number;
+  highlighted?: boolean;
 }
 
 export interface OfficeScene {
@@ -66,6 +72,8 @@ function innerHeight(agents: AgentOverviewAgent[]): number {
 export function buildOfficeScene(
   overview: AgentOverview,
   nowMs: number,
+  bosses: OfficeBoss[] = [],
+  highlightQuery = "",
 ): OfficeScene {
   const used = new Set<string>();
   const rooms: RoomInput[] = overview.machines.map((machine) => ({
@@ -137,9 +145,38 @@ export function buildOfficeScene(
     placeAgents(room.agents, roomMinCol, roomMaxCol, roomFloorRow, nowMs, furniture, placements);
   });
 
-  const structureKey = rooms
+  if (rooms.length > 0) {
+    const query = highlightQuery.trim().toLowerCase();
+    bosses.forEach((boss, index) => {
+      const col = Math.min(7 + index * 2, cols - 2);
+      placements.push({
+        agentId: boss.id,
+        name: boss.name,
+        presence: "boss",
+        tier: 0,
+        activity: "",
+        roomMinCol: 1,
+        roomMaxCol: cols - 2,
+        seatId: null,
+        anchorCol: col,
+        anchorRow: 8,
+        spawnCol: col,
+        spawnRow: 8,
+        highlighted: query.length > 0 && boss.name.toLowerCase().includes(query),
+      });
+    });
+  }
+
+  const needle = highlightQuery.trim().toLowerCase();
+  if (needle) {
+    for (const placement of placements) {
+      placement.highlighted = placement.name.toLowerCase().includes(needle);
+    }
+  }
+
+  const structureKey = `${rooms
     .map((room) => `${room.label}:${room.agents.map((agent) => `${agent.id}:${agent.presence}`).join(",")}`)
-    .join("|");
+    .join("|")}|boss:${bosses.map((boss) => boss.id).join(",")}`;
 
   return {
     layout: {

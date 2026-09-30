@@ -165,7 +165,7 @@ export interface OfficeLayout {
   areaTiles?: Array<string | null>;
 }
 
-export type DemoPresence = 'offline' | 'work' | 'idle';
+export type DemoPresence = 'offline' | 'work' | 'idle' | 'boss';
 
 export interface DemoRole {
   name: string;
@@ -180,6 +180,8 @@ export interface DemoRole {
   anchorRow: number;
   /** Current activity, drawn only while this character is hovered. */
   activity?: string;
+  /** Name search match. The label is drawn in gold. */
+  highlighted?: boolean;
 }
 
 export interface Character {

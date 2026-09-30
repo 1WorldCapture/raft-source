@@ -10,7 +10,7 @@ export function holdDemoCharacter(ch: Character): boolean {
     ch.bubbleType = null;
     return false;
   }
-  if (demo.presence === 'idle') {
+  if (demo.presence === 'idle' || demo.presence === 'boss') {
     ch.isActive = false;
     ch.bubbleType = null;
     return false;
@@ -37,7 +37,8 @@ export function demoWalkableTiles(
   tiles: Array<{ col: number; row: number }>,
 ): Array<{ col: number; row: number }> {
   const demo = ch.demo;
-  if (!demo || demo.presence !== 'idle') return tiles;
+  if (!demo || demo.presence === 'boss') return tiles;
+  if (demo.presence !== 'idle') return tiles;
   if (demo.tier === 0) {
     return tiles.filter((t) => t.col >= demo.roomMinCol && t.col <= demo.roomMaxCol);
   }

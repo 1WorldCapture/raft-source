@@ -7,7 +7,6 @@ import {
   Activity,
   ArrowUpRight,
   Bookmark,
-  Building2,
   BookOpenText,
   CheckSquare,
   CircleHelp,
@@ -550,7 +549,6 @@ export function LeftRail({ hidden, workspaceModeAvailable = false, side = "left"
               onClick={() => selectRailMode("computers")}
               testId="left-rail-tab-computers"
             />}
-            {!isGuest && <RailTabButton icon={<Building2 size={18} />} label={formatMessage({ id: "layout.leftRail.tabOffice" })} active={railMode === "office"} onClick={() => selectRailMode("office")} testId="left-rail-tab-office" />}
           </>
         )}
         {workspaceEnabled ? (

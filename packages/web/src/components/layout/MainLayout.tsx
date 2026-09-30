@@ -23,6 +23,7 @@ import { isHostShell } from "../../embed";
 import { useEmbedParamsKeeper } from "../../hooks/useEmbedParamsKeeper";
 import { LeftRail } from "./LeftRail";
 import { useTabRouteMemory } from "../../hooks/useTabRouteMemory";
+import { useMembersSurface } from "../../office/membersSurface";
 import { useRailLegacyRedirect } from "../../hooks/useRailLegacyRedirect";
 import { useMobileNav } from "../../hooks/useMobileNav";
 import ChatPanel from "../message/ChatPanel";
@@ -703,6 +704,11 @@ function TasksRoute() {
 /** Route: /wiki */
 function OfficeRoute() {
   return <Suspense fallback={<PanelFallback />}><OfficePage /></Suspense>;
+}
+
+function OfficeRedirect() {
+  const serverSlug = useServerStore((s) => s.current?.slug);
+  return <Navigate to={serverSlug ? `/s/${serverSlug}/members` : "/"} replace />;
 }
 
 function WikiRoute() {
@@ -1846,7 +1852,8 @@ export default function MainLayout() {
   const isInboxRoute = isActivityRoute;
   const isContentRoute = isSearchRoute || isInboxRoute;
   const isWikiRoute = path === `${pathBase}/wiki` || path.startsWith(`${pathBase}/wiki/`);
-  const isOfficeRoute = path === `${pathBase}/office` || path.startsWith(`${pathBase}/office/`);
+  const membersSurface = useMembersSurface(currentUserId);
+  const showMembersOffice = isDesktop && isMembersRoot && membersSurface === "office";
   const searchSlotOpen = useSearchContentStore((s) => !!s.slot);
   const searchSlotKind = useSearchContentStore((s) => s.slot?.kind ?? null);
   const threadOpenForLayout = useThreadStore((s) => !!s.openParentMessageId);
@@ -2028,7 +2035,7 @@ export default function MainLayout() {
   ) => {
     emitWorkspaceGridDragPanel(event.nativeEvent, ref, source);
   }, []);
-  const hideSidebar = isWikiRoute || isOfficeRoute || (workspaceEnabled
+  const hideSidebar = isWikiRoute || (workspaceEnabled
     ? workspaceSidebars.left.collapsed || workspaceSidebars.left.activeItem === null
     : isTasksRoute || (isContentRoute && !searchMasterDetail));
   const isMobileTabRoot = mobileShowSidebarInline || (!isDesktop && isTasksRoute);
@@ -2276,7 +2283,9 @@ export default function MainLayout() {
               className="thread-main-column flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
               data-testid="thread-main-column"
             >
-              {workspaceEnabled && !isWikiRoute && !isOfficeRoute ? (
+              {showMembersOffice ? (
+                <OfficeRoute />
+              ) : workspaceEnabled && !isWikiRoute ? (
                 <Suspense fallback={<PanelFallback />}>
                   <WorkspaceGridDemo initialPanel={workspaceInitialPanel} />
                 </Suspense>
@@ -2292,10 +2301,10 @@ export default function MainLayout() {
                   <Route path="human/:userId" element={<HumanRoute />} />
                   <Route path="members/graph" element={<MemberGraphRoute />} />
                   <Route path="members" element={<EmptyRoute />} />
+                  <Route path="office" element={<OfficeRedirect />} />
                   <Route path="computers" element={<ComputersRoute />} />
                   <Route path="search" element={<SearchContentRoute />} />
                   <Route path="wiki" element={<WikiRoute />} />
-                  <Route path="office" element={<OfficeRoute />} />
                   <Route path="settings/:tab?/*" element={<SettingsRoute />} />
                   <Route path="activity" element={<InboxContentRoute />} />
                   {/* Legacy /inbox + /threads → /activity (stdrc renamed the route
@@ -2316,7 +2325,7 @@ export default function MainLayout() {
 
         </div>
 
-        {workspaceEnabled && !isWikiRoute && !isOfficeRoute && !workspaceSidebars.right.collapsed && workspaceSidebars.right.activeItem !== null ? (
+        {workspaceEnabled && !isWikiRoute && !showMembersOffice && !workspaceSidebars.right.collapsed && workspaceSidebars.right.activeItem !== null ? (
           <div
             ref={rightWorkspaceSidebarResize.panelRef}
             className="relative hidden min-w-0 shrink-0 bg-brutal-cream md:block"
@@ -2341,7 +2350,7 @@ export default function MainLayout() {
             </div>
           </div>
         ) : null}
-        {workspaceEnabled && !isWikiRoute && !isOfficeRoute ? <LeftRail side="right" hidden={mobileShowSidebarInline} /> : null}
+        {workspaceEnabled && !isWikiRoute && !showMembersOffice ? <LeftRail side="right" hidden={mobileShowSidebarInline} /> : null}
       </div>
 
       {/* Mobile bottom bars stay in normal flow at the bottom of the root flex

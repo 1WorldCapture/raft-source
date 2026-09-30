@@ -30,6 +30,7 @@ function demoOf(placement: OfficePlacement) {
     anchorCol: placement.anchorCol,
     anchorRow: placement.anchorRow,
     activity: placement.activity,
+    highlighted: placement.highlighted,
   };
 }
 

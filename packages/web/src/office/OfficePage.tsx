@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useIntl } from "react-intl";
 import { getSocket } from "../api/socket";
 import { useAppNavigate } from "../hooks/useAppNavigate";
-import { useChannelStore } from "../store/channelStore";
 import { useServerStore } from "../store/serverStore";
 import { EditorState } from "../officePixel/office/editor/editorState.js";
 import { OfficeState } from "../officePixel/office/engine/officeState.js";
@@ -19,6 +18,7 @@ import { USE_FAKE_AGENT_OVERVIEW, loadAgentOverview } from "./loadAgentOverview"
 import { loadOfficeAssets } from "./loadOfficeAssets";
 import { paintOffice, raftAgentId } from "./officeScene";
 import { buildOfficeScene } from "./roomLayout";
+import type { OfficeBoss } from "./roomLayout";
 
 export default function OfficePage() {
   const { formatMessage } = useIntl();
@@ -29,6 +29,8 @@ export default function OfficePage() {
   const [error, setError] = useState(false);
   const [tick, setTick] = useState(0);
   const [zoom, setZoom] = useState(3);
+  const [query, setQuery] = useState("");
+  const members = useServerStore((s) => s.members);
   const officeRef = useRef<OfficeState | null>(null);
   const structureRef = useRef<string | null>(null);
   const editorState = useRef(new EditorState());
@@ -103,31 +105,51 @@ export default function OfficePage() {
     return () => window.clearInterval(timer);
   }, []);
 
+  const bosses = useMemo<OfficeBoss[]>(() => {
+    const people = members.map((member) => ({
+      id: member.userId,
+      name: member.displayName || member.name,
+    }));
+    if (people.length > 0 || !USE_FAKE_AGENT_OVERVIEW) return people;
+    return [{ id: "fixture-boss", name: "老板" }];
+  }, [members]);
   const scene = useMemo(() => {
     if (!overview) return null;
     return buildOfficeScene(
       overview,
       calibratedNow(overview.serverTime, receivedAtRef.current + tick - tick),
+      bosses,
+      query,
     );
-  }, [overview, tick]);
+  }, [bosses, overview, query, tick]);
 
   if (assetsReady && scene) {
     if (!officeRef.current) officeRef.current = new OfficeState(scene.layout);
     structureRef.current = paintOffice(officeRef.current, scene, structureRef.current);
   }
 
-  const openAgent = useCallback((numericId: number) => {
-    const agentId = raftAgentId(numericId);
-    if (!agentId || USE_FAKE_AGENT_OVERVIEW) return;
-    void useChannelStore.getState().openDM(agentId).then((channel) => {
-      navigate.toDm(channel.id);
-    }).catch(() => undefined);
-  }, [navigate]);
+  const openCharacter = useCallback((numericId: number) => {
+    const id = raftAgentId(numericId);
+    const placement = scene?.placements.find((item) => item.agentId === id);
+    if (!id || !placement || id === "fixture-boss") return;
+    if (placement.presence !== "boss" && USE_FAKE_AGENT_OVERVIEW) return;
+    if (placement.presence === "boss") navigate.toHuman(id);
+    else navigate.toAgent(id);
+  }, [navigate, scene]);
 
   const officeState = assetsReady && scene ? officeRef.current : null;
 
   return (
     <div className="relative flex h-full min-h-0 w-full flex-col bg-black" data-testid="office-page">
+      <label className="flex items-center gap-2 px-3 py-1 text-xs text-white/80">
+        <span>{formatMessage({ id: "office.search" })}</span>
+        <input
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          className="min-w-0 flex-1 border border-white/30 bg-black px-2 py-0.5 text-white"
+          data-testid="office-search"
+        />
+      </label>
       {USE_FAKE_AGENT_OVERVIEW ? (
         <p className="px-3 py-1 text-xs text-white/80" data-testid="office-preview-notice">
           {formatMessage({ id: "office.previewNotice" })}
@@ -143,7 +165,7 @@ export default function OfficePage() {
         <div className="relative min-h-0 flex-1">
           <OfficeCanvas
             officeState={officeState}
-            onClick={openAgent}
+            onClick={openCharacter}
             isEditMode={false}
             editorState={editorState.current}
             onEditorTileAction={() => undefined}

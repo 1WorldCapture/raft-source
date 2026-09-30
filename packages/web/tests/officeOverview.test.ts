@@ -137,3 +137,14 @@ test("six machines wrap to two rows of three", () => {
   assert.equal(scene.layout.tiles[15 * scene.layout.cols + 1], TileType.WALL);
   assert.equal(scene.layout.tiles[secondRowFloor], TileType.FLOOR_2);
 });
+
+test("human members patrol as bosses and search highlights a name", () => {
+  const overview = fakeAgentOverview();
+  const scene = buildOfficeScene(overview, FAKE_OVERVIEW_SERVER_TIME, [{ id: "human-1", name: "老板" }], "老板");
+  const boss = scene.placements.find((placement) => placement.agentId === "human-1");
+  assert.ok(boss);
+  assert.equal(boss.presence, "boss");
+  assert.equal(boss.seatId, null);
+  assert.equal(boss.highlighted, true);
+  assert.equal(scene.placements.find((placement) => placement.name === "工作短")?.highlighted, false);
+});

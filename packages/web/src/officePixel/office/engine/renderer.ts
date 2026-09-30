@@ -555,7 +555,7 @@ function renderDemoOverlay(
     ctx.lineWidth = 3;
     ctx.strokeStyle = 'rgba(0,0,0,0.9)';
     ctx.strokeText(label, x, y - 20);
-    ctx.fillStyle = '#ffffff';
+    ctx.fillStyle = demo.highlighted ? '#ffe14a' : '#ffffff';
     ctx.fillText(label, x, y - 20);
     if (hoveredAgentId === ch.id && demo.activity) {
       ctx.font = '11px sans-serif';

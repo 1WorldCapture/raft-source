@@ -3403,6 +3403,9 @@ export const en = {
   "layout.leftRail.unreadActivity": "Unread activity",
   "layout.leftRail.computersNeedAttentionSummary": "{count} of {total} needs attention",
 
+  "office.viewOffice": "Office",
+  "office.viewList": "List",
+  "office.search": "Search",
   "office.previewNotice": "Preview data. The live agent overview replaces this after it ships.",
   "office.loading": "Loading the office…",
   "office.loadFailed": "The office could not be loaded.",
