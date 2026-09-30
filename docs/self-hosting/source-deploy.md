@@ -458,8 +458,18 @@ node packages/daemon/dist/raft-daemon.js --server-url <公开地址> --api-key-f
 **重启 daemon 会让本机所有 Agent 掉线**，daemon 起来后它们会自动重连恢复（实测十几秒）。所以：
 
 - 只有 daemon、CLI、computer 相关代码变化时才需要重启它；`deploy.sh` 发现这些目录有变化时只会提示，**不会自动重启 daemon**；
+- **`packages/shared` 也会打进 daemon**：daemon 的产物是打包出来的，Claude Code 等运行时的模型列表（`RUNTIME_MODELS`）、以及 shared 里的其他常量都在 `dist/` 里。所以只改了 shared（例如新增模型）时，`deploy.sh` 只会重启 server 和 worker，**机器上的 daemon 仍然用旧的列表**，模型下拉框（Web 和桌面端都一样）就看不到新模型。这类部署要在部署检查清单里多加一步：重建 daemon 并重启（下面「重建并重启 daemon」）；
 - 重启前通知在这台机器上工作的人；
 - 如果执行重启的正是跑在这个 daemon 上的 Agent，要用脱离当前进程树的后台脚本执行（`setsid nohup ...`），脚本里做健康检查、失败时回退到旧配置，并事先设好提醒，恢复后回来核对结果。
+
+### 重建并重启 daemon
+
+1. 在构建目录（`$RAFT_OPS_HOME/build/<sha>`，`deploy.sh` 已经在那里装好依赖）里 `pnpm --filter @botiverse/raft-daemon build`，**不要**在正在运行的部署目录里直接构建：运行中的 daemon 会按需加载 `dist/` 里的分块文件，构建过程中覆盖它们可能出问题；
+2. 确认新构建里有要上线的内容，例如 `grep -c claude-opus-5-5 packages/daemon/dist/*.js`；
+3. 提前通知这台机器上的人，等大家把改动推送完；
+4. 把旧的 `packages/daemon/dist`、`packages/cli/dist` 改名备份，换成新构建的目录；
+5. `pm2 restart` 这台机器上所有 daemon 进程（每个 server 一个），按上文用脱离当前进程树的方式执行、事先设好提醒；
+6. 恢复后核对：daemon 进程在线、服务端里对应机器的心跳在更新，请人刷新页面确认；确认无误后删除旧的备份目录。
 
 ### 12.1 daemon、Computer 和 CLI 的版本号
 
@@ -498,7 +508,7 @@ ops/self-host/deploy.sh <sha|ref>      # 部署指定提交
    - lockfile 或任何 `package.json`、`patches/` 变了 → 需要在部署目录 `pnpm install`；
    - `packages/server/drizzle` 变了 → 需要迁移；
    - trace worker 或 shared 包变了 → 重启 worker；
-   - daemon/cli/computer 变了 → 只提示。
+   - daemon/cli/computer 变了 → 只提示。**shared 变了也可能影响 daemon**（它打包了 shared，如模型列表），`deploy.sh` 不会提示，要人工判断，见第 12 节。
 2. **构建**（`build.sh`，零影响）。
 3. **备份** `.env`、当前提交和当前 Web 版本到 `$RAFT_OPS_HOME/backups/<时间>/`。
 4. **切换**：checkout 目标提交 → 按需安装依赖 → 按需迁移（此时旧服务端还在运行） → 写入 `RAFT_RELEASE_*` → 切换 Web 软链接 → 重启 `raft-server`（**API 中断从这里开始，实测 3–6 秒**）。
