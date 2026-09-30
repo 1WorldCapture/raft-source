@@ -3318,6 +3318,7 @@ export const zhCn: Record<MessageId, string> = {
   "layout.leftRail.tabHelp": "帮助",
   "layout.leftRail.tabSettings": "设置",
   "layout.leftRail.tabWiki": "Wiki",
+  "layout.leftRail.tabOffice": "办公室",
   "layout.leftRail.enterWorkspace": "进入工作空间",
   "layout.leftRail.exitWorkspace": "退出工作空间",
   "layout.leftRail.helpMenuTitle": "帮助与资源",
@@ -3329,6 +3330,13 @@ export const zhCn: Record<MessageId, string> = {
   "layout.leftRail.unreadMessages": "未读消息",
   "layout.leftRail.unreadActivity": "未读动态",
   "layout.leftRail.computersNeedAttentionSummary": "{count} / {total} 需要处理",
+
+  "office.viewOffice": "办公室",
+  "office.viewList": "列表",
+  "office.search": "搜索",
+  "office.previewNotice": "预览数据。总览接口上线后会换成真实 agent。",
+  "office.loading": "正在加载办公室…",
+  "office.loadFailed": "办公室加载失败。",
 
   // MainLayout.tsx — 移动端底部标签栏
   "layout.mobileTabBar.home": "主页",

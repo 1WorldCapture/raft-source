@@ -3390,6 +3390,7 @@ export const en = {
   "layout.leftRail.tabHelp": "Help",
   "layout.leftRail.tabSettings": "Settings",
   "layout.leftRail.tabWiki": "Wiki",
+  "layout.leftRail.tabOffice": "Office",
   "layout.leftRail.enterWorkspace": "Enter Workspace",
   "layout.leftRail.exitWorkspace": "Exit Workspace",
   "layout.leftRail.helpMenuTitle": "Help & resources",
@@ -3401,6 +3402,13 @@ export const en = {
   "layout.leftRail.unreadMessages": "Unread messages",
   "layout.leftRail.unreadActivity": "Unread activity",
   "layout.leftRail.computersNeedAttentionSummary": "{count} of {total} needs attention",
+
+  "office.viewOffice": "Office",
+  "office.viewList": "List",
+  "office.search": "Search",
+  "office.previewNotice": "Preview data. The live agent overview replaces this after it ships.",
+  "office.loading": "Loading the office…",
+  "office.loadFailed": "The office could not be loaded.",
 
   // MainLayout.tsx — mobile bottom tab bar.
   "layout.mobileTabBar.home": "Home",

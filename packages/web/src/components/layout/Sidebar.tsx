@@ -38,6 +38,8 @@ import { useMachineStore } from "../../store/machineStore";
 import { useShallow } from "zustand/react/shallow";
 import { useAuthStore } from "../../store/authStore";
 import { useServerStore } from "../../store/serverStore";
+import { useMembersSurface, writeMembersSurface } from "../../office/membersSurface";
+import OfficePage from "../../office/OfficePage";
 import { useUIStore } from "../../store/uiStore";
 import { useMessageStore } from "../../store/messageStore";
 import { useThreadStore } from "../../store/threadStore";
@@ -1358,6 +1360,7 @@ export default function Sidebar({ mobileInline, bottomSlot, workspaceRailMode }:
   const showSettingsRail = railMode === "settings";
   const showComputersRail = railMode === "computers";
   const showChatRail = activeTab === "chat";
+  const membersSurface = useMembersSurface(user?.id ?? null);
   const railLabel = railMode === "settings" ? formatMessage({ id: "layout.sidebar.headerSettings" })
     : railMode === "tasks" ? formatMessage({ id: "layout.sidebar.headerTasks" })
     : railMode === "computers" ? formatMessage({ id: "layout.sidebar.headerComputers" })
@@ -3513,11 +3516,19 @@ export default function Sidebar({ mobileInline, bottomSlot, workspaceRailMode }:
                 <NotificationTrigger flavor="mobile-navbar" />
               </>
             ) : (
-              <div className="min-w-0 flex-1">
-                <div className="text-base font-bold text-black truncate">
-                  {railLabel}
+              <>
+                <div className="min-w-0 flex-1">
+                  <div className="text-base font-bold text-black truncate">
+                    {railLabel}
+                  </div>
                 </div>
-              </div>
+                {railMode === "members" ? (
+                  <div className="flex gap-1" data-testid="members-surface-toggle-mobile">
+                    <button type="button" className={`border px-2 py-0.5 text-xs ${membersSurface === "office" ? "border-black bg-white font-bold" : "border-transparent"}`} onClick={() => { writeMembersSurface(user?.id ?? null, "office"); nav.toMembers(); }}>{formatMessage({ id: "office.viewOffice" })}</button>
+                    <button type="button" className={`border px-2 py-0.5 text-xs ${membersSurface === "list" ? "border-black bg-white font-bold" : "border-transparent"}`} onClick={() => writeMembersSurface(user?.id ?? null, "list")}>{formatMessage({ id: "office.viewList" })}</button>
+                  </div>
+                ) : null}
+              </>
             )}
 
             {/* Server switcher menu — only renders on the Chat tab; other
@@ -3549,6 +3560,29 @@ export default function Sidebar({ mobileInline, bottomSlot, workspaceRailMode }:
             <div className={workspaceEnabled ? "text-base font-semibold text-black" : "text-lg font-bold text-black"}>
               {railLabel}
             </div>
+            {railMode === "members" ? (
+              <div className="ml-auto flex gap-1" data-testid="members-surface-toggle">
+                <button
+                  type="button"
+                  data-testid="members-surface-office"
+                  className={`border px-2 py-0.5 text-xs ${membersSurface === "office" ? "border-black bg-white font-bold" : "border-transparent text-black/50"}`}
+                  onClick={() => {
+                    writeMembersSurface(user?.id ?? null, "office");
+                    nav.toMembers();
+                  }}
+                >
+                  {formatMessage({ id: "office.viewOffice" })}
+                </button>
+                <button
+                  type="button"
+                  data-testid="members-surface-list"
+                  className={`border px-2 py-0.5 text-xs ${membersSurface === "list" ? "border-black bg-white font-bold" : "border-transparent text-black/50"}`}
+                  onClick={() => writeMembersSurface(user?.id ?? null, "list")}
+                >
+                  {formatMessage({ id: "office.viewList" })}
+                </button>
+              </div>
+            ) : null}
           </div>
         )}
 
@@ -4096,6 +4130,12 @@ export default function Sidebar({ mobileInline, bottomSlot, workspaceRailMode }:
                 return sidebarDragSections;
               })()}
             </>
+          ) : membersSurface === "office" ? (
+            mobileInline ? (
+              <div className="h-[calc(100dvh-8rem)] min-h-0">
+                <OfficePage />
+              </div>
+            ) : null
           ) : (
             <>
               {/* People tab: Agents, Humans, Computers */}

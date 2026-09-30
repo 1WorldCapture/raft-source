@@ -32,6 +32,7 @@ export function classifyRouteForTab(pathname: string, pathBase: string | null): 
   if (rest.startsWith("/computer/")) return "computers";
   if (rest.startsWith("/machine/")) return "computers"; // legacy
   if (rest === "/computers" || rest.startsWith("/computers/")) return "computers";
+  if (rest === "/office" || rest.startsWith("/office/")) return "members";
   if (rest === "/settings" || rest.startsWith("/settings/")) return "settings";
   if (rest === "/release-notes" || rest.startsWith("/release-notes/")) return "settings";
   return null;
@@ -87,6 +88,7 @@ function isServerSurfaceRoute(pathname: string, pathBase: string): boolean {
   if (rest.startsWith("/computer/")) return true;
   if (rest.startsWith("/machine/")) return true; // legacy
   if (rest === "/computers" || rest.startsWith("/computers/")) return true;
+  if (rest === "/office" || rest.startsWith("/office/")) return true;
   if (rest === "/settings" || rest.startsWith("/settings/")) return true;
   if (rest === "/release-notes" || rest.startsWith("/release-notes/")) return true;
   return false;

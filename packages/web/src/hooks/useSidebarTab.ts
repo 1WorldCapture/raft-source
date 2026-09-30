@@ -35,6 +35,7 @@ function deriveRailModeFromPath(pathname: string, pathBase: string): RailMode {
   if (pathname.startsWith(`${pathBase}/computer/`)) return "computers";
   if (pathname.startsWith(`${pathBase}/machine/`)) return "computers"; // legacy
   if (pathname === `${pathBase}/computers` || pathname.startsWith(`${pathBase}/computers/`)) return "computers";
+  if (pathname === `${pathBase}/office` || pathname.startsWith(`${pathBase}/office/`)) return "members";
   if (pathname.startsWith(`${pathBase}/agent/`)) return "members";
   if (pathname.startsWith(`${pathBase}/human/`)) return "members";
   if (pathname === `${pathBase}/members` || pathname.startsWith(`${pathBase}/members/`)) return "members";
