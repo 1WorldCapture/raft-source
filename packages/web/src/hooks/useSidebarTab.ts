@@ -74,10 +74,15 @@ export function useRailMode() {
       navigate(`${base}/activity`);
       return;
     }
+    // Members opens the members home, not the last agent or human detail.
+    // Leave the office/list choice alone; the default surface is still office.
+    if (mode === "members") {
+      navigate(`${base}/members`);
+      return;
+    }
     const remembered = readTabMemory(serverSlug, mode);
     const fallback = mode === "chat" ? base
       : mode === "wiki" ? `${base}/wiki`
-      : mode === "members" ? `${base}/members`
       : mode === "computers" ? `${base}/computers`
       : mode === "tasks" ? `${base}/tasks`
       : `${base}/settings/account`;

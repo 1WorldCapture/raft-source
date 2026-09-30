@@ -3560,31 +3560,33 @@ export default function Sidebar({ mobileInline, bottomSlot, workspaceRailMode }:
             <div className={workspaceEnabled ? "text-base font-semibold text-black" : "text-lg font-bold text-black"}>
               {railLabel}
             </div>
-            {railMode === "members" ? (
-              <div className="ml-auto flex gap-1" data-testid="members-surface-toggle">
-                <button
-                  type="button"
-                  data-testid="members-surface-office"
-                  className={`border px-2 py-0.5 text-xs ${membersSurface === "office" ? "border-black bg-white font-bold" : "border-transparent text-black/50"}`}
-                  onClick={() => {
-                    writeMembersSurface(user?.id ?? null, "office");
-                    nav.toMembers();
-                  }}
-                >
-                  {formatMessage({ id: "office.viewOffice" })}
-                </button>
-                <button
-                  type="button"
-                  data-testid="members-surface-list"
-                  className={`border px-2 py-0.5 text-xs ${membersSurface === "list" ? "border-black bg-white font-bold" : "border-transparent text-black/50"}`}
-                  onClick={() => writeMembersSurface(user?.id ?? null, "list")}
-                >
-                  {formatMessage({ id: "office.viewList" })}
-                </button>
-              </div>
-            ) : null}
           </div>
         )}
+        {/* Electron hides sidebar-root's first child (the title row). Keep the
+            office/list switch in its own row so that rule does not eat it. */}
+        {!mobileInline && railMode === "members" ? (
+          <div className="flex shrink-0 items-center justify-end gap-1 border-b border-black/25 bg-brutal-cream px-4 py-1.5" data-testid="members-surface-toggle">
+            <button
+              type="button"
+              data-testid="members-surface-office"
+              className={`border px-2 py-0.5 text-xs ${membersSurface === "office" ? "border-black bg-white font-bold" : "border-transparent text-black/50"}`}
+              onClick={() => {
+                writeMembersSurface(user?.id ?? null, "office");
+                nav.toMembers();
+              }}
+            >
+              {formatMessage({ id: "office.viewOffice" })}
+            </button>
+            <button
+              type="button"
+              data-testid="members-surface-list"
+              className={`border px-2 py-0.5 text-xs ${membersSurface === "list" ? "border-black bg-white font-bold" : "border-transparent text-black/50"}`}
+              onClick={() => writeMembersSurface(user?.id ?? null, "list")}
+            >
+              {formatMessage({ id: "office.viewList" })}
+            </button>
+          </div>
+        ) : null}
 
         {/* "Find a conversation…" jump box, pinned above the scroll surface
             (Slack parity, #kabi-desktop). Chat rail only; name-based fuzzy jump
@@ -4130,12 +4132,10 @@ export default function Sidebar({ mobileInline, bottomSlot, workspaceRailMode }:
                 return sidebarDragSections;
               })()}
             </>
-          ) : membersSurface === "office" ? (
-            mobileInline ? (
-              <div className="h-[calc(100dvh-8rem)] min-h-0">
-                <OfficePage />
-              </div>
-            ) : null
+          ) : membersSurface === "office" && mobileInline ? (
+            <div className="h-[calc(100dvh-8rem)] min-h-0">
+              <OfficePage />
+            </div>
           ) : (
             <>
               {/* People tab: Agents, Humans, Computers */}
