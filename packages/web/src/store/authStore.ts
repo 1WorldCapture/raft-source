@@ -31,6 +31,7 @@ import {
   getBackupLastScope,
   getBackupOfflineUser,
 } from "../cache/identityBackup";
+import { touchStorageCanary } from "../cache/storageHealth";
 import {
   deriveInitialAuthRestoreState,
   describeRestoreError,
@@ -255,6 +256,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       clearSlockdevManualLogout();
       localStorage.setItem("slock_access_token", data.accessToken);
       localStorage.setItem("slock_refresh_token", data.refreshToken);
+      // Adjacent to the token writes: a torn journal then drops canary and
+      // tokens together, so the next boot's health check sees the loss.
+      touchStorageCanary(localStorage);
       seedMessageBodyFontSizeFromProfile(data.user.preferredMessageBodyFontSize);
       if (get().user?.id !== data.user.id) useAnnouncementStore.getState().reset();
       rememberOfflineUser(data.user, localStorage);
@@ -281,6 +285,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       const { data } = await api.post("/auth/register", { email, password, ...legalAcceptance });
       localStorage.setItem("slock_access_token", data.accessToken);
       localStorage.setItem("slock_refresh_token", data.refreshToken);
+      // Adjacent to the token writes: a torn journal then drops canary and
+      // tokens together, so the next boot's health check sees the loss.
+      touchStorageCanary(localStorage);
       seedMessageBodyFontSizeFromProfile(data.user.preferredMessageBodyFontSize);
       if (get().user?.id !== data.user.id) useAnnouncementStore.getState().reset();
       rememberOfflineUser(data.user, localStorage);
