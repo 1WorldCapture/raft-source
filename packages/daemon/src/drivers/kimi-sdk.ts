@@ -3,17 +3,39 @@ import { EventEmitter } from "node:events";
 import { mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
-import {
+import { homedir } from "node:os";
+import { createLazyModule } from "../lazyModule.js";
+import type {
   Session as KimiSession,
   createKimiHarness,
-  resolveKimiHome,
   LocalKaos,
-  type Event as KimiSdkEvent,
-  type GoalToolResult,
-  type KimiHarness,
+  Event as KimiSdkEvent,
+  GoalToolResult,
+  KimiHarness,
 } from "@botiverse/kimi-code-sdk";
 
 const requireFromHere = createRequire(import.meta.url);
+
+type KimiCodeSdk = typeof import("@botiverse/kimi-code-sdk");
+const kimiCodeSdk = createLazyModule<KimiCodeSdk>(() => import("@botiverse/kimi-code-sdk"));
+
+/**
+ * The Kimi Code SDK is ~200MB of resident memory once loaded and only
+ * runtime=kimi-sdk agents need it, so it is imported on first use instead of
+ * when the daemon boots. A failed import is not cached: the next launch retries.
+ */
+export function loadKimiCodeSdk(): Promise<KimiCodeSdk> {
+  return kimiCodeSdk.get();
+}
+
+/**
+ * Same rule as the SDK's `resolveKimiHome` (explicit dir, else KIMI_CODE_HOME,
+ * else ~/.kimi-code), without loading the SDK: model detection runs on demand
+ * on daemons that never launch Kimi. A test pins it to the SDK's own resolver.
+ */
+export function resolveKimiHomeWithoutSdk(homeDir?: string): string {
+  return homeDir ?? process.env["KIMI_CODE_HOME"] ?? path.join(homedir(), ".kimi-code");
+}
 
 /**
  * Canonical `kimi-code-cli` UA product — the same product string upstream
@@ -343,7 +365,7 @@ export async function createKimiAgentSessionForContext(
   sessionId: string,
   deps: KimiSessionFactoryDeps = {},
 ): Promise<{ harness: KimiHarness; session: KimiSession; wrapperPath: string }> {
-  const createHarnessImpl = deps.createHarness ?? createKimiHarness;
+  const createHarnessImpl = deps.createHarness ?? (await loadKimiCodeSdk()).createKimiHarness;
   const prepareTransportImpl = deps.prepareTransport ?? prepareCliTransport;
   const sessionDir = buildKimiSessionDir(ctx.workingDirectory);
   mkdirSync(sessionDir, { recursive: true });
@@ -364,7 +386,8 @@ export async function createKimiAgentSessionForContext(
   // stale credential/proxy env is read. Build a tool Kaos that overlays the
   // per-session env; keep persistence on a plain LocalKaos so session files and
   // credentials stay local to the daemon host.
-  const localKaos = await (deps.createLocalKaos ?? LocalKaos.create)();
+  const createLocalKaos = deps.createLocalKaos ?? (await loadKimiCodeSdk()).LocalKaos.create;
+  const localKaos = await createLocalKaos();
   const toolKaos = localKaos.withEnv({
     PATH: `${slockDir}${path.delimiter}${process.env.PATH ?? ""}`,
     NO_COLOR: "1",
@@ -378,7 +401,7 @@ export async function createKimiAgentSessionForContext(
   // detection and session launch cannot silently read different homes. Pass
   // the prepared per-agent override into the SDK's canonical resolver;
   // per-agent env is not installed into the daemon process-wide environment.
-  const homeDir = resolveKimiHome(spawnEnv.KIMI_CODE_HOME);
+  const homeDir = (await loadKimiCodeSdk()).resolveKimiHome(spawnEnv.KIMI_CODE_HOME);
   mkdirSync(homeDir, { recursive: true });
 
   // The harness resolves auth from <homeDir>/credentials/kimi-code.json by
@@ -934,7 +957,7 @@ type KimiSdkDetectOutcome =
   | "read_error";
 
 export function detectKimiSdkModels(
-  home: string = resolveKimiHome(),
+  home: string = resolveKimiHomeWithoutSdk(),
   ctx: RuntimeModelDetectionContext = {},
 ): RuntimeModelSourceOutcome {
   const span = ctx.span;

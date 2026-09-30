@@ -6,6 +6,7 @@ import { mkdtemp, mkdir, readFile, rm, stat, utimes, writeFile } from "node:fs/p
 import os from "node:os";
 import path from "node:path";
 import { onTestFinished, test, vi } from "vitest";
+import { loadPiSdk } from "./drivers/piSdk.js";
 import { fileURLToPath } from "node:url";
 import type { ChildProcess } from "node:child_process";
 import { type AxSurfaceText,
@@ -804,6 +805,8 @@ function assertContentFreeInboxUpdatePrompt(prompt: string, forbiddenContent: st
 }
 
 test("Pi retryable provider errors stay outside APM until the SDK retry settles", async () => {
+  // The pi event mapping requires the SDK a live pi session would have loaded.
+  await loadPiSdk();
   const driver = new FakeCodexDriver({
     id: "pi",
     supportsStdinNotification: true,

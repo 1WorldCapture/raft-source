@@ -1,5 +1,5 @@
 import type { Runtime } from "@botiverse/oar";
-import { claudeRuntime, codexRuntime, kimiRuntime, grokRuntime } from "@botiverse/oar";
+import { createLazyModule } from "../lazyModule.js";
 
 import type { RuntimeAccountUsageProvider, RuntimeAccountUsageSnapshot } from "@botiverse/raft-shared";
 
@@ -11,13 +11,25 @@ import {
 
 const DEFAULT_TIMEOUT_MS = 20_000;
 
-/** Exhaustive mapping: every account-usage provider is read through OAR. */
-const OAR_RUNTIME_BY_PROVIDER = {
-  codex: codexRuntime,
-  claude: claudeRuntime,
-  kimi: kimiRuntime,
-  grok: grokRuntime,
-} as const satisfies Record<RuntimeAccountUsageProvider, Runtime>;
+/**
+ * Exhaustive mapping: every account-usage provider is read through OAR. OAR is
+ * ~170MB of resident memory once loaded and only the server's usage refresh
+ * needs it, so it is imported on the first read instead of at daemon boot. A
+ * failed import is not cached: the next read retries.
+ */
+const oarModule = createLazyModule<typeof import("@botiverse/oar")>(() => import("@botiverse/oar"));
+const loadOar = () => oarModule.get();
+
+/** Exported for tests: resolves a provider's OAR runtime, loading OAR on first use. */
+export async function oarRuntimeForProvider(provider: RuntimeAccountUsageProvider): Promise<Runtime> {
+  const oar = await loadOar();
+  return ({
+    codex: oar.codexRuntime,
+    claude: oar.claudeRuntime,
+    kimi: oar.kimiRuntime,
+    grok: oar.grokRuntime,
+  } as const satisfies Record<RuntimeAccountUsageProvider, Runtime>)[provider];
+}
 
 /** Injectable for tests; production passes the real OAR runtime. */
 export type OarUsageReadDeps = {
@@ -44,7 +56,21 @@ export async function readOarAccountUsage(input: {
   observedAtMs: number;
   deps?: OarUsageReadDeps;
 }): Promise<RuntimeAccountUsageSnapshot> {
-  const runtime = input.deps?.runtime ?? OAR_RUNTIME_BY_PROVIDER[input.provider];
+  const failure = () => projectOarAccountUsageFailure({
+    provider: input.provider,
+    localAccountSlot: input.localAccountSlot,
+    collectorVersion: input.collectorVersion,
+    observedAtMs: input.observedAtMs,
+  });
+  let runtime = input.deps?.runtime;
+  if (!runtime) {
+    try {
+      runtime = await oarRuntimeForProvider(input.provider);
+    } catch {
+      // OAR could not be loaded: an attempt that failed, not an absent reader.
+      return failure();
+    }
+  }
   const project = (snapshot: OarAccountUsageSnapshot): RuntimeAccountUsageSnapshot =>
     projectOarAccountUsageSnapshot({
       provider: input.provider,
@@ -74,12 +100,7 @@ export async function readOarAccountUsage(input: {
   } catch {
     // A thrown read is an explicit error account with no windows. It must never
     // be rendered as zero usage.
-    return projectOarAccountUsageFailure({
-      provider: input.provider,
-      localAccountSlot: input.localAccountSlot,
-      collectorVersion: input.collectorVersion,
-      observedAtMs: input.observedAtMs,
-    });
+    return failure();
   }
 }
 

@@ -33,8 +33,8 @@ class FakeChildProcess extends EventEmitter {
   readonly stderr = new PassThrough();
 }
 
-test("Pi command tool keeps Bash on POSIX", () => {
-  const tool = createPiCommandTool(
+test("Pi command tool keeps Bash on POSIX", async () => {
+  const tool = await createPiCommandTool(
     "/workspace",
     { TASK_ENV: "present" },
     { platform: "linux" },
@@ -45,8 +45,8 @@ test("Pi command tool keeps Bash on POSIX", () => {
   assert.match(tool.description, /bash command/i);
 });
 
-test("Pi command tool overrides Bash with native PowerShell on Windows", () => {
-  const tool = createPiCommandTool(
+test("Pi command tool overrides Bash with native PowerShell on Windows", async () => {
+  const tool = await createPiCommandTool(
     "C:\\workspace",
     { TASK_ENV: "present" },
     { platform: "win32" },
@@ -134,7 +134,7 @@ test(
       runtimeSessionId: "session-real-entrypoint",
     });
     observer.beginRuntimeTurn();
-    const tool = createPiCommandTool(process.cwd(), process.env, {
+    const tool = await createPiCommandTool(process.cwd(), process.env, {
       platform: process.platform,
       observer,
     });
