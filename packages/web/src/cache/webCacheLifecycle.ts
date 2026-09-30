@@ -21,7 +21,14 @@
 
 import { RUNTIME_API_BASE } from "../desktopRuntimeEnvironment";
 import { forgetOfflineUser } from "../utils/offlineSession";
-import { backupLastScope, getBackupLastScope, identityBackupHasData, loadIdentityBackup, resetIdentityBackupMemory } from "./identityBackup";
+import {
+  backupLastScope,
+  getBackupLastScope,
+  getBackupSessionId,
+  loadIdentityBackup,
+  recordBackupSessionId,
+  resetIdentityBackupMemory,
+} from "./identityBackup";
 import { runStorageHealthCheck } from "./storageHealth";
 import { beginDirectoryAttachWait, noteDirectoryAttachSettled, noteDirectorySessionUser } from "./directoryCache";
 import { beginActiveCacheBoot, noteActiveCacheSettled, setActiveCacheProvider } from "./messageCache";
@@ -255,19 +262,21 @@ export async function bootWebCache(): Promise<WebCacheRuntime> {
   // instead of painting an empty pane and never looking at the cache.
   beginActiveCacheBoot();
   try {
-    // Task #12: read the IndexedDB identity backup first (it doubles as the
-    // "prior sessions existed" signal), then check the localStorage canary.
-    // A missing canary over existing cache data means the localStorage
-    // journal is in the hard-kill write-loss loop — the desktop shell has
-    // been asked to wipe it at next boot and relaunch, so stop booting.
+    // Task #12: load the IndexedDB identity backup (it also carries the last
+    // durably recorded session id), then run the canary check. A canary older
+    // than the durable backup means the localStorage journal is in the
+    // hard-kill write-loss loop — the desktop shell has been asked to wipe it
+    // and relaunch. Resolving never (instead of throwing) keeps this out of
+    // the global error reporter; the process is exiting anyway.
     await loadIdentityBackup();
     const health = await runStorageHealthCheck({
       storage: (globalThis as { localStorage?: ScopeIdentityStorage }).localStorage!,
-      cacheHasIdentity: identityBackupHasData(),
+      backupSessionId: getBackupSessionId(),
+      recordBackupSessionId,
     });
     if (health === "wipe-requested") {
       noteActiveCacheSettled();
-      throw new Error("localStorage journal corrupted (boot canary lost); relaunching after wipe");
+      return new Promise<WebCacheRuntime>(() => {});
     }
     const runtime = await initWebCache();
     // Lazy: authStore/serverStore evaluate browser globals at module scope.

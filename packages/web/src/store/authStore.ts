@@ -332,7 +332,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         });
         seedMessageBodyFontSizeFromProfile(data.preferredMessageBodyFontSize);
         rememberOfflineUser(data, localStorage);
-      backupOfflineUser(data as unknown as Record<string, unknown>);
+        backupOfflineUser(data as unknown as Record<string, unknown>);
         set({ user: data, loading: false });
       } catch (error) {
         throw markOnboardingProfileError(error, "profile");

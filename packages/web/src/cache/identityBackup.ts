@@ -5,8 +5,8 @@
 // The cache database (IndexedDB) survived every observed incident, so both
 // records are ALSO written here, under global (scopeId 0) kv rows. Reads are
 // best-effort fallbacks: localStorage stays the primary copy, and the
-// explicit-logout wipe (resetAll) deletes this database wholesale, so the
-// backup dies with everything else on logout.
+// explicit-logout wipe (resetAll, which clears every store in this database)
+// removes these rows with everything else.
 //
 // Tokens are deliberately NOT backed up here — credentials stay in
 // localStorage only (moving them is a separate security decision).
@@ -20,15 +20,28 @@ export type UserLike = Record<string, unknown>;
 const GLOBAL_SCOPE_ID = 0;
 const KEY_OFFLINE_USER = "identity:offlineUser";
 const KEY_LAST_SCOPE = "identity:lastScope";
+const KEY_SESSION_ID = "identity:canarySession";
 
 type KvRow = { scopeId: number; key: string; value: unknown };
 
-let memory: { offlineUser: unknown; lastScope: unknown } | null = null;
-let opened: Promise<IDBDatabase | null> | null = null;
+type BackupMemory = {
+  offlineUser: unknown;
+  lastScope: unknown;
+  sessionId: number | null;
+};
+
+let memory: BackupMemory | null = null;
+let dbHandle: IDBDatabase | null = null;
+let opening: Promise<IDBDatabase | null> | null = null;
+// Bumped synchronously by the explicit-logout wrapper. Any backup write that
+// has not committed yet stands down, so a wipe can never be followed by a
+// late write of the logged-out account's rows (review item 5).
+let logoutEpoch = 0;
 
 function openCacheDb(): Promise<IDBDatabase | null> {
-  if (opened) return opened;
-  const attempt = (async () => {
+  if (dbHandle) return Promise.resolve(dbHandle);
+  if (opening) return opening;
+  opening = (async () => {
     // Never create the database from here: a fresh open would race the
     // runtime's versioned open. Only attach when it already exists.
     try {
@@ -39,7 +52,21 @@ function openCacheDb(): Promise<IDBDatabase | null> {
     }
     return new Promise<IDBDatabase | null>((resolve) => {
       const req = indexedDB.open(WEB_CACHE_DB_NAME);
-      req.onsuccess = () => resolve(req.result);
+      req.onsuccess = () => {
+        const db = req.result;
+        // A connection pinned to an old version would block every future
+        // schema upgrade of the cache database (openGuarded then falls back
+        // to the memory repo on every boot). Close on versionchange so the
+        // upgrade proceeds; the next backup access re-attaches (review item 2).
+        db.onversionchange = () => {
+          if (dbHandle === db) {
+            dbHandle = null;
+            opening = null;
+          }
+          db.close();
+        };
+        resolve(db);
+      };
       req.onerror = () => resolve(null);
       req.onblocked = () => resolve(null);
     });
@@ -47,10 +74,11 @@ function openCacheDb(): Promise<IDBDatabase | null> {
   // Cache only a SUCCESSFUL attach: the boot-time load often runs before the
   // runtime has created the database, and caching that null would silently
   // disable every later backup write for the whole session.
-  void attempt.then((db) => {
-    if (db) opened = Promise.resolve(db);
+  void opening.then((db) => {
+    if (db) dbHandle = db;
+    opening = null;
   });
-  return attempt;
+  return opening;
 }
 
 async function readKv(key: string): Promise<unknown> {
@@ -70,6 +98,7 @@ async function readKv(key: string): Promise<unknown> {
 async function writeKv(key: string, value: unknown): Promise<void> {
   const db = await openCacheDb();
   if (!db) return;
+  const epoch = logoutEpoch;
   try {
     await new Promise<void>((resolve) => {
       const tx = db.transaction("kv", "readwrite");
@@ -80,34 +109,64 @@ async function writeKv(key: string, value: unknown): Promise<void> {
     });
   } catch {
     // Best-effort backup; the localStorage copy remains the primary.
+    return;
+  }
+  // A logout wiped the database while this write was in flight: the row just
+  // landed in a freshly re-created store and must not survive as residue of
+  // the logged-out account. Remove it again.
+  if (epoch !== logoutEpoch) {
+    try {
+      const tx = db.transaction("kv", "readwrite");
+      tx.objectStore("kv").delete([GLOBAL_SCOPE_ID, key]);
+      await new Promise<void>((resolve) => {
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => resolve();
+        tx.onabort = () => resolve();
+      });
+    } catch {
+      // ignore
+    }
   }
 }
 
 /**
- * Load both backup rows into memory once per boot. Safe to call multiple
+ * Load the backup rows into memory once per boot. Safe to call multiple
  * times (idempotent); failures degrade every getter to null.
  */
 export async function loadIdentityBackup(): Promise<void> {
-  const [offlineUser, lastScope] = await Promise.all([
+  const [offlineUser, lastScope, sessionId] = await Promise.all([
     readKv(KEY_OFFLINE_USER),
     readKv(KEY_LAST_SCOPE),
+    readKv(KEY_SESSION_ID),
   ]);
-  if (memory === null) memory = { offlineUser, lastScope };
+  if (memory === null) {
+    memory = {
+      offlineUser,
+      lastScope,
+      sessionId: typeof sessionId === "number" && Number.isFinite(sessionId) ? sessionId : null,
+    };
+  }
 }
 
-/** True when at least one identity row exists — the health check's signal. */
-export function identityBackupHasData(): boolean {
-  return memory !== null && (memory.offlineUser !== null || memory.lastScope !== null);
+/** The last session id whose canary was still provably durable — see storageHealth. */
+export function getBackupSessionId(): number | null {
+  return memory?.sessionId ?? null;
+}
+
+export function recordBackupSessionId(sessionId: number): void {
+  if (memory === null) memory = { offlineUser: null, lastScope: null, sessionId: null };
+  memory.sessionId = sessionId;
+  void writeKv(KEY_SESSION_ID, sessionId);
 }
 
 export function backupOfflineUser(user: UserLike): void {
-  if (memory === null) memory = { offlineUser: null, lastScope: null };
+  if (memory === null) memory = { offlineUser: null, lastScope: null, sessionId: null };
   memory.offlineUser = user;
   void writeKv(KEY_OFFLINE_USER, user);
 }
 
 export function backupLastScope(scope: ScopeIdentity): void {
-  if (memory === null) memory = { offlineUser: null, lastScope: null };
+  if (memory === null) memory = { offlineUser: null, lastScope: null, sessionId: null };
   memory.lastScope = scope;
   void writeKv(KEY_LAST_SCOPE, scope);
 }
@@ -126,8 +185,21 @@ export function getBackupLastScope(): ScopeIdentity | null {
   return null;
 }
 
-/** Drop the in-memory copies (logout wipes the database itself via resetAll). */
+/**
+ * Drop the in-memory copies and stand down in-flight writes (the logout
+ * wrapper calls this in the same synchronous window as the localStorage key
+ * removal). The database itself is cleared by resetAll.
+ */
 export function resetIdentityBackupMemory(): void {
+  logoutEpoch += 1;
   memory = null;
-  opened = null;
+  if (dbHandle) {
+    try {
+      dbHandle.close();
+    } catch {
+      // already closed
+    }
+    dbHandle = null;
+  }
+  opening = null;
 }
