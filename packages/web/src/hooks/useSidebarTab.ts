@@ -1,5 +1,7 @@
 import { useCallback, useMemo } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { writeMembersSurface } from "../office/membersSurface";
+import { useAuthStore } from "../store/authStore";
 import { useServerStore } from "../store/serverStore";
 import { readTabMemory } from "./useTabRouteMemory";
 
@@ -46,6 +48,7 @@ export function useRailMode() {
   const location = useLocation();
   const navigate = useNavigate();
   const serverSlug = useServerStore((s) => s.current?.slug ?? null);
+  const userId = useAuthStore((s) => s.user?.id ?? null);
   const pathBase = serverSlug ? `/s/${serverSlug}` : "";
 
   const railMode = useMemo<RailMode>(
@@ -74,15 +77,21 @@ export function useRailMode() {
       navigate(`${base}/activity`);
       return;
     }
+    // Members always opens the office home. Remembering the last agent or
+    // human detail left the desktop with an empty sidebar and no way back.
+    if (mode === "members") {
+      writeMembersSurface(userId, "office");
+      navigate(`${base}/members`);
+      return;
+    }
     const remembered = readTabMemory(serverSlug, mode);
     const fallback = mode === "chat" ? base
       : mode === "wiki" ? `${base}/wiki`
-      : mode === "members" ? `${base}/members`
       : mode === "computers" ? `${base}/computers`
       : mode === "tasks" ? `${base}/tasks`
       : `${base}/settings/account`;
     navigate(remembered ?? fallback);
-  }, [location.pathname, location.search, serverSlug, navigate]);
+  }, [location.pathname, location.search, serverSlug, userId, navigate]);
 
   return { railMode, selectRailMode };
 }
