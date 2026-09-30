@@ -3334,7 +3334,6 @@ export const zhCn: Record<MessageId, string> = {
   "office.previewNotice": "预览数据。总览接口上线后会换成真实 agent。",
   "office.loading": "正在加载办公室…",
   "office.loadFailed": "办公室加载失败。",
-  "office.unassignedRoom": "未分配",
 
   // MainLayout.tsx — 移动端底部标签栏
   "layout.mobileTabBar.home": "主页",

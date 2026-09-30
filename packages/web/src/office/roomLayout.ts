@@ -66,16 +66,12 @@ function innerHeight(agents: AgentOverviewAgent[]): number {
 export function buildOfficeScene(
   overview: AgentOverview,
   nowMs: number,
-  unassignedLabel: string,
 ): OfficeScene {
   const used = new Set<string>();
   const rooms: RoomInput[] = overview.machines.map((machine) => ({
     label: uniqueLabel(machine.name, used),
     agents: machine.agents,
   }));
-  if (overview.unassignedAgents.length > 0) {
-    rooms.push({ label: uniqueLabel(unassignedLabel, used), agents: overview.unassignedAgents });
-  }
   if (rooms.length === 0) {
     return {
       layout: {

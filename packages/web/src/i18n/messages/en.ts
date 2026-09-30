@@ -3406,7 +3406,6 @@ export const en = {
   "office.previewNotice": "Preview data. The live agent overview replaces this after it ships.",
   "office.loading": "Loading the office…",
   "office.loadFailed": "The office could not be loaded.",
-  "office.unassignedRoom": "Unassigned",
 
   // MainLayout.tsx — mobile bottom tab bar.
   "layout.mobileTabBar.home": "Home",

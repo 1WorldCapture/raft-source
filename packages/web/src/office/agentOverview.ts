@@ -6,7 +6,7 @@ export interface AgentOverviewAgent {
   id: string;
   name: string;
   activity: string;
-  activityDetail: string | null;
+  activityDetail: string;
   activitySince: number | null;
   lifecycleStatus: string;
   lifecycleStatusSince: number | null;
@@ -21,12 +21,14 @@ export interface AgentOverviewMachine {
   isComputer: boolean;
   status: "online" | "offline";
   statusSince: number | null;
-  lastHeartbeat: number | null;
+  /** ISO timestamp. Null when the machine has never been seen. */
+  lastHeartbeat: string | null;
   agents: AgentOverviewAgent[];
 }
 
 export interface AgentOverview {
   serverTime: number;
   machines: AgentOverviewMachine[];
-  unassignedAgents: AgentOverviewAgent[];
+  /** Agents with no machine. Count only — they are not drawn as a room. */
+  unassignedAgents: number;
 }

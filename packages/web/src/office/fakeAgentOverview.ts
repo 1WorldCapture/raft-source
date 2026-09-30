@@ -41,7 +41,7 @@ export function fakeAgentOverview(): AgentOverview {
         isComputer: true,
         status: "online",
         statusSince: FAKE_OVERVIEW_SERVER_TIME - 5 * HOUR,
-        lastHeartbeat: FAKE_OVERVIEW_SERVER_TIME,
+        lastHeartbeat: new Date(FAKE_OVERVIEW_SERVER_TIME).toISOString(),
         agents: [
           agent("agent-work-0", "工作短", "working", 10 * MINUTE, "working", "正在写代码"),
           agent("agent-work-1", "工作中", "working", 60 * MINUTE, "working", "正在改测试"),
@@ -56,7 +56,7 @@ export function fakeAgentOverview(): AgentOverview {
         isComputer: true,
         status: "online",
         statusSince: FAKE_OVERVIEW_SERVER_TIME - 6 * HOUR,
-        lastHeartbeat: FAKE_OVERVIEW_SERVER_TIME,
+        lastHeartbeat: new Date(FAKE_OVERVIEW_SERVER_TIME).toISOString(),
         agents: [
           agent("agent-work-2", "工作长", "working", 3 * HOUR, "thinking", "长时间思考"),
           agent("agent-idle-2", "空闲长", "idle", 4 * HOUR, "online", "穿过门去另一间"),
@@ -65,6 +65,6 @@ export function fakeAgentOverview(): AgentOverview {
         ],
       },
     ],
-    unassignedAgents: [],
+    unassignedAgents: 0,
   };
 }

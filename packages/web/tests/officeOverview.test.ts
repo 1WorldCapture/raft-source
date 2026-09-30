@@ -50,7 +50,7 @@ test("duration tiers follow the configured thresholds", () => {
 
 test("fake overview lays out one room per machine and all nine tiers", () => {
   const overview = fakeAgentOverview();
-  const scene = buildOfficeScene(overview, FAKE_OVERVIEW_SERVER_TIME, "Unassigned");
+  const scene = buildOfficeScene(overview, FAKE_OVERVIEW_SERVER_TIME);
   const labels = scene.layout.areas?.map((area) => area.label);
   assert.deepEqual(labels, ["computer-a", "computer-b"]);
   assert.equal(scene.placements.length, 9);
@@ -81,10 +81,10 @@ test("presence since is kept until presence actually changes", () => {
       isComputer: true,
       status: "online",
       statusSince: 0,
-      lastHeartbeat: 1_000,
+      lastHeartbeat: new Date(1_000).toISOString(),
       agents: [agent],
     }],
-    unassignedAgents: [],
+    unassignedAgents: 0,
   };
   const same = applyActivityEvent(overview, { agentId: "a1", activity: "thinking", detail: "still at it", observedAtMs: 800 }, 0);
   assert.equal(same.machines[0].agents[0].presence, "working");
@@ -127,7 +127,7 @@ test("six machines wrap to two rows of three", () => {
     name: `computer-${index + 1}`,
     agents: [],
   }));
-  const scene = buildOfficeScene({ ...overview, machines, unassignedAgents: [] }, FAKE_OVERVIEW_SERVER_TIME, "Unassigned");
+  const scene = buildOfficeScene({ ...overview, machines, unassignedAgents: 0 }, FAKE_OVERVIEW_SERVER_TIME);
   assert.equal(scene.layout.areas?.length, 6);
   assert.equal(scene.layout.cols, 1 + 3 * 13);
   assert.ok(scene.layout.rows > 16);

@@ -103,15 +103,13 @@ export default function OfficePage() {
     return () => window.clearInterval(timer);
   }, []);
 
-  const unassignedLabel = formatMessage({ id: "office.unassignedRoom" });
   const scene = useMemo(() => {
     if (!overview) return null;
     return buildOfficeScene(
       overview,
       calibratedNow(overview.serverTime, receivedAtRef.current + tick - tick),
-      unassignedLabel,
     );
-  }, [overview, tick, unassignedLabel]);
+  }, [overview, tick]);
 
   if (assetsReady && scene) {
     if (!officeRef.current) officeRef.current = new OfficeState(scene.layout);

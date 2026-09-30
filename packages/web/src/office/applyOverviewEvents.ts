@@ -78,15 +78,6 @@ export function applyActivityEvent(
         return project(updated, machine.status, since);
       }),
     })),
-    unassignedAgents: overview.unassignedAgents.map((agent) => {
-      if (agent.id !== event.agentId) return agent;
-      const updated: AgentOverviewAgent = {
-        ...agent,
-        activity: event.activity,
-        activityDetail: event.detail ?? agent.activityDetail,
-      };
-      return project(updated, "online", since);
-    }),
   };
 }
 
@@ -106,14 +97,6 @@ export function applyLifecycleEvent(overview: AgentOverview, event: LifecycleEve
         }, machine.status, since);
       }),
     })),
-    unassignedAgents: overview.unassignedAgents.map((agent) => {
-      if (agent.id !== event.agentId) return agent;
-      return project({
-        ...agent,
-        lifecycleStatus: event.lifecycleStatus,
-        lifecycleStatusSince: since,
-      }, "online", since);
-    }),
   };
 }
 
