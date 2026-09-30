@@ -152,8 +152,26 @@ test("every agent gets a desk and working agents sit", () => {
   }, FAKE_OVERVIEW_SERVER_TIME);
   const desks = scene.layout.furniture.filter((item) => item.type === "DESK_FRONT");
   assert.equal(desks.length, 8);
-  assert.ok(scene.placements.filter((item) => item.presence === "working").every((item) => item.seatId));
+  assert.ok(scene.placements.filter((item) => item.presence === "working").every((item) => item.seatId?.startsWith("chair-")));
   assert.ok(scene.placements.filter((item) => item.presence === "idle").every((item) => item.seatId === null));
+});
+
+test("offline agents lie on sofas while every agent still has a desk", () => {
+  const overview = fakeAgentOverview();
+  const agents = [
+    bareAgent({ id: "w", name: "w", presence: "working" }),
+    bareAgent({ id: "i", name: "i", presence: "idle" }),
+    bareAgent({ id: "o", name: "o", presence: "offline" }),
+  ];
+  const scene = buildOfficeScene({
+    ...overview,
+    unassignedAgents: 0,
+    machines: [{ ...overview.machines[0], agents }],
+  }, FAKE_OVERVIEW_SERVER_TIME);
+  assert.equal(scene.layout.furniture.filter((item) => item.type === "DESK_FRONT").length, 3);
+  assert.equal(scene.layout.furniture.filter((item) => item.type === "SOFA_FRONT").length, 1);
+  const offline = scene.placements.find((item) => item.agentId === "o");
+  assert.equal(offline?.seatId, "sofa-o");
 });
 
 test("human members patrol as bosses and search highlights a name", () => {

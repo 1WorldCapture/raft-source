@@ -68,11 +68,15 @@ function uniqueLabel(name: string, used: Set<string>): string {
 const DESKS_PER_ROW = 2;
 const DESK_ROW_STRIDE = 5;
 
-/** One desk row per pair of agents. Empty rooms keep the original height. */
-function innerHeight(agentCount: number): number {
-  if (agentCount === 0) return BASE_INNER_H;
-  const deskRows = Math.ceil(agentCount / DESKS_PER_ROW);
-  return Math.max(BASE_INNER_H, 2 + deskRows * DESK_ROW_STRIDE);
+const SOFAS_PER_ROW = 3;
+
+/** Desks fill the room; offline agents also need a sofa row under the desks. */
+function innerHeight(agents: AgentOverviewAgent[]): number {
+  if (agents.length === 0) return BASE_INNER_H;
+  const deskRows = Math.ceil(agents.length / DESKS_PER_ROW);
+  const offline = agents.filter((agent) => agent.presence === "offline").length;
+  const sofaRows = offline === 0 ? 0 : Math.ceil(offline / SOFAS_PER_ROW);
+  return Math.max(BASE_INNER_H, deskRows * DESK_ROW_STRIDE + sofaRows * 2 + 2);
 }
 
 export function buildOfficeScene(
@@ -100,7 +104,7 @@ export function buildOfficeScene(
     };
   }
 
-  const innerH = Math.max(...rooms.map((room) => innerHeight(room.agents.length)));
+  const innerH = Math.max(...rooms.map((room) => innerHeight(room.agents)));
   const gridCols = Math.min(ROOMS_PER_ROW, rooms.length);
   const gridRows = Math.ceil(rooms.length / ROOMS_PER_ROW);
   const cols = 1 + gridCols * ROOM_STRIDE;
@@ -223,17 +227,41 @@ function placeAgents(
   furniture: OfficeLayout["furniture"],
   placements: OfficePlacement[],
 ): void {
+  const deskRows = Math.ceil(agents.length / DESKS_PER_ROW);
+  const sofaRow = roomFloorRow + deskRows * DESK_ROW_STRIDE + 1;
+  let offlineSlot = 0;
   agents.forEach((agent, index) => {
     const tier = durationTier(agent.presence, presenceDurationMs(agent.presenceSince, nowMs));
     const activity = agent.activityDetail?.trim() || agent.activity;
     const col = roomMinCol + 2 + (index % DESKS_PER_ROW) * 5;
     const row = roomFloorRow + Math.floor(index / DESKS_PER_ROW) * DESK_ROW_STRIDE;
-    const seatId = `chair-${agent.id}`;
+    const chairId = `chair-${agent.id}`;
     furniture.push(
-      { uid: seatId, type: "WOODEN_CHAIR_FRONT", col, row },
+      { uid: chairId, type: "WOODEN_CHAIR_FRONT", col, row },
       { uid: `desk-${agent.id}`, type: "DESK_FRONT", col: col - 1, row: row + 2 },
     );
-    const seated = agent.presence === "working" || agent.presence === "offline";
+    if (agent.presence === "offline") {
+      const sofaCol = roomMinCol + 1 + (offlineSlot % SOFAS_PER_ROW) * 4;
+      const sofaAt = sofaRow + Math.floor(offlineSlot / SOFAS_PER_ROW) * 2;
+      const sofaId = `sofa-${agent.id}`;
+      furniture.push({ uid: sofaId, type: "SOFA_FRONT", col: sofaCol, row: sofaAt });
+      offlineSlot += 1;
+      placements.push({
+        agentId: agent.id,
+        name: agent.name,
+        presence: agent.presence,
+        tier,
+        activity,
+        roomMinCol,
+        roomMaxCol,
+        seatId: sofaId,
+        anchorCol: sofaCol,
+        anchorRow: sofaAt,
+        spawnCol: sofaCol,
+        spawnRow: sofaAt,
+      });
+      return;
+    }
     placements.push({
       agentId: agent.id,
       name: agent.name,
@@ -242,9 +270,9 @@ function placeAgents(
       activity,
       roomMinCol,
       roomMaxCol,
-      seatId: seated ? seatId : null,
+      seatId: agent.presence === "working" ? chairId : null,
       anchorCol: col,
-      anchorRow: row,
+      anchorRow: row + 1,
       spawnCol: col,
       spawnRow: row + 1,
     });
