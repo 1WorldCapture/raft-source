@@ -2,24 +2,20 @@ import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { mkdirSync, readdirSync } from "node:fs";
 import path from "node:path";
-import {
-  createAgentSessionFromServices,
-  createAgentSessionServices,
-  getAgentDir,
+import type {
   ModelRegistry,
   ModelRuntime,
-  SessionManager,
   SettingsManager,
-  VERSION as PI_SDK_VERSION,
-  type AgentSession,
-  type AgentSessionServices,
-  type AgentSessionEvent,
+  AgentSession,
+  AgentSessionServices,
+  AgentSessionEvent,
 } from "@earendil-works/pi-coding-agent";
-import {
+import type {
   isContextOverflow,
-  type Model,
-  type ModelThinkingLevel,
+  Model,
+  ModelThinkingLevel,
 } from "@earendil-works/pi-ai";
+import { PI_SDK_VERSION, loadPiSdk, requireLoadedPiSdk } from "./piSdk.js";
 import {
   buildLaunchPlan,
   BUILTIN_RUNTIME_GATEWAY_PROVIDER_ENV_KEYS,
@@ -608,7 +604,7 @@ function addPiServiceTraceEvent(
   services: AgentSessionServices,
   attrs: Record<string, unknown> = {},
 ): void {
-  const modelRegistry = new ModelRegistry(services.modelRuntime);
+  const modelRegistry = new (requireLoadedPiSdk().codingAgent.ModelRegistry)(services.modelRuntime);
   span?.addEvent(name, {
     available_models_count: modelRegistry.getAvailable().length,
     ...piServiceDiagnosticTraceAttrs(services),
@@ -624,12 +620,13 @@ export async function detectPiModels(
     return detectPiModelsFromRegistry(modelRegistry);
   }
 
-  const agentDir = getAgentDir();
-  const services = await createAgentSessionServices({
+  const { codingAgent: pi } = await loadPiSdk();
+  const agentDir = pi.getAgentDir();
+  const services = await pi.createAgentSessionServices({
     cwd: process.cwd(),
     agentDir,
   });
-  const detectedModelRegistry = new ModelRegistry(services.modelRuntime);
+  const detectedModelRegistry = new pi.ModelRegistry(services.modelRuntime);
   logPiServiceDiagnostics("detect_models", services);
   addPiServiceTraceEvent(traceContext.span, "daemon.pi.models.services_ready", services);
   const result = detectPiModelsFromRegistry(detectedModelRegistry);
@@ -894,7 +891,10 @@ function mapPiMessageEndEvent(
     // terminalize the daemon before Pi can compact and retry, and it leaks the
     // provider's raw body into Activity. Preserve any bounded usage telemetry,
     // then wait for compaction_end as the authoritative recovery outcome.
-    if (isContextOverflow(message as Parameters<typeof isContextOverflow>[0])) {
+    // A pi turn only reaches here through a live pi session, which loaded the
+    // SDK. Require it: a mapping call before the load must fail loudly, not
+    // quietly turn a context overflow into a terminal provider error.
+    if (requireLoadedPiSdk().ai.isContextOverflow(message as Parameters<typeof isContextOverflow>[0])) {
       state.pendingProviderError = null;
       state.providerErrorOwnedByCompaction = true;
       return events;
@@ -1176,9 +1176,11 @@ export async function createPiAgentSessionForContext(
 
   try {
     const spawnEnv = await buildPiSpawnEnv(ctx);
-    const agentDir = opts.agentDir ?? spawnEnv.PI_CODING_AGENT_DIR ?? getAgentDir();
+    // First pi launch on this daemon pays the SDK import here, not at boot.
+    const { codingAgent: pi } = await loadPiSdk();
+    const agentDir = opts.agentDir ?? spawnEnv.PI_CODING_AGENT_DIR ?? pi.getAgentDir();
     mkdirSync(agentDir, { recursive: true });
-    const settingsManager = SettingsManager.create(ctx.workingDirectory, agentDir);
+    const settingsManager = pi.SettingsManager.create(ctx.workingDirectory, agentDir);
     const providerEnvScope = opts.isolateHostProviderEnv ? BUILTIN_BLOCKED_HOST_PROVIDER_ENV_KEYS : undefined;
     const sessionCreateEnvPatch = buildPiSessionCreateEnvPatch(runtimeConfig, launchRuntimeFields.envVars);
     const sessionServices = await withProcessEnvPatch(sessionCreateEnvPatch, async () => {
@@ -1187,7 +1189,7 @@ export async function createPiAgentSessionForContext(
         `pi-provider:${randomUUID()}`,
       );
       try {
-        const modelRuntime = await ModelRuntime.create({
+        const modelRuntime = await pi.ModelRuntime.create({
           authPath: path.join(agentDir, "auth.json"),
           modelsPath: path.join(agentDir, "models.json"),
           allowModelNetwork: false,
@@ -1204,7 +1206,7 @@ export async function createPiAgentSessionForContext(
           managedProviderConnection,
           launchRuntimeFields.envVars,
         );
-        const services = await createAgentSessionServices({
+        const services = await pi.createAgentSessionServices({
           cwd: ctx.workingDirectory,
           agentDir,
           modelRuntime,
@@ -1221,7 +1223,7 @@ export async function createPiAgentSessionForContext(
     }, { removeFirst: providerEnvScope });
     const { services } = sessionServices;
     providerHttpClient = sessionServices.providerHttpClient;
-    const modelRegistry = new ModelRegistry(services.modelRuntime);
+    const modelRegistry = new pi.ModelRegistry(services.modelRuntime);
     configureBuiltInGatewayCustomModel(modelRegistry, runtimeConfig, managedProviderConnection);
     applyPiDaemonSettingsOverrides(services.settingsManager);
     logPiServiceDiagnostics("create_session", services);
@@ -1274,8 +1276,8 @@ export async function createPiAgentSessionForContext(
 
     const existingSessionFile = ctx.config.sessionId ? findPiSessionFile(sessionDir, ctx.config.sessionId) : null;
     const sessionManager = existingSessionFile
-      ? SessionManager.open(existingSessionFile, sessionDir, ctx.workingDirectory)
-      : SessionManager.create(ctx.workingDirectory, sessionDir, { id: sessionId });
+      ? pi.SessionManager.open(existingSessionFile, sessionDir, ctx.workingDirectory)
+      : pi.SessionManager.create(ctx.workingDirectory, sessionDir, { id: sessionId });
 
     const toolSpawnEnv = { ...spawnEnv };
     if (opts.exposeLaunchEnvToTools === false) {
@@ -1290,15 +1292,17 @@ export async function createPiAgentSessionForContext(
       onWarning: (message) => console.warn("[%s] %s", logPrefix, message),
     });
 
-    const { session } = await withProcessEnvPatch(sessionCreateEnvPatch, () => createAgentSessionFromServices({
+    const piCommandTool = await createPiCommandTool(ctx.workingDirectory, toolSpawnEnv, {
+      observer: toolExecutionObserver,
+    });
+
+    const { session } = await withProcessEnvPatch(sessionCreateEnvPatch, () => pi.createAgentSessionFromServices({
       services,
       sessionManager,
       model,
       thinkingLevel: launchRuntimeFields.reasoningEffort as ModelThinkingLevel | undefined,
       customTools: [
-        createPiCommandTool(ctx.workingDirectory, toolSpawnEnv, {
-          observer: toolExecutionObserver,
-        }),
+        piCommandTool,
         ...managedMcpTools,
       ],
     }), { removeFirst: providerEnvScope });

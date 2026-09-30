@@ -6,13 +6,14 @@ import {
 import { constants, existsSync } from "node:fs";
 import { access as fsAccess } from "node:fs/promises";
 
-import {
+import type {
   createBashTool,
-  type BashOperations,
+  BashOperations,
 } from "@earendil-works/pi-coding-agent";
 import { clearClockTimeout, setClockTimeout } from "@botiverse/raft-shared";
 
 import { createWindowsPowerShellChildEnv } from "./windowsPowerShellEnv.js";
+import { loadPiSdk } from "./piSdk.js";
 import type { PiToolExecutionObserver } from "./piToolExecutionObservability.js";
 
 const POWERSHELL_STDIN_LOADER = [
@@ -335,13 +336,14 @@ export function createPiPosixOperations(
   };
 }
 
-export function createPiCommandTool(
+export async function createPiCommandTool(
   cwd: string,
   toolSpawnEnv: NodeJS.ProcessEnv,
   deps: PiCommandToolDeps = {},
-): ReturnType<typeof createBashTool> {
+): Promise<ReturnType<typeof createBashTool>> {
   const platform = deps.platform ?? process.platform;
-  const tool = createBashTool(cwd, {
+  const { codingAgent } = await loadPiSdk();
+  const tool = codingAgent.createBashTool(cwd, {
     ...(platform === "win32"
       ? { operations: createPiPowerShellOperations(deps) }
       : deps.observer
