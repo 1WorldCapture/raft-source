@@ -308,6 +308,68 @@ test("agent-overview since keeps heartbeats, resets on real changes, and survive
   assert.equal(restartAgent.presenceSince, t0);
 });
 
+test("agent-overview idle-entry since survives hours of silence, Redis TTL expiry, and a restart", async ({ app }) => {
+  const orchestrator = useRealOrchestrator(app);
+  stubMachineConnected(orchestrator);
+  const seed = await seedPlaywrightScenario();
+  const token = await tokenForHuman(seed.user.email);
+  await getDb().update(agents).set({ status: "active" }).where(eq(agents.id, seed.agent.id));
+  const agentId = seed.agent.id;
+  const broadcast = orchestrator as unknown as {
+    broadcastActivity: (
+      agentId: string,
+      activity: StatusActivity,
+      detail: string,
+      detailKind: string,
+      entries: TrajectoryEntry[] | undefined,
+      nowOverride?: number,
+    ) => unknown;
+  };
+
+  const workingStart = Date.now() - 3 * 60 * 60 * 1_000;
+  const idleStart = workingStart + 60_000;
+
+  // The working stretch opens with an entries-bearing frame (tool work), then
+  // ends the way a real daemon reports it: the idle frame carries its own
+  // status entry (packages/daemon agentProcessManager broadcastActivity always
+  // attaches one), so it persists as a durable row on arrival.
+  broadcast.broadcastActivity(agentId, "working", "Running tool", "running_command", [statusEntry("working")], workingStart);
+  broadcast.broadcastActivity(
+    agentId,
+    "online",
+    "Process idle",
+    "idle",
+    [{ kind: "status", activity: "online", activityKind: "online", detail: "Process idle", detailKind: "idle" }],
+    idleStart,
+  );
+
+  const rows = await getDb()
+    .select({ activity: agentActivityEvents.activity, createdAt: agentActivityEvents.createdAt })
+    .from(agentActivityEvents)
+    .where(eq(agentActivityEvents.agentId, agentId));
+  assert.deepEqual(
+    rows.map((row) => [row.activity, row.createdAt.getTime()]).sort((a, b) => (a[1] as number) - (b[1] as number)),
+    [["working", workingStart], ["online", idleStart]],
+  );
+
+  // Hours of silence follow: nothing writes the agent again. The fresh
+  // orchestrator is the post-restart shape (empty memory, no Redis = the
+  // expired 600s hash), and the idle row is far beyond the 90s freshness
+  // window, so both stamps can only come from the durable-log recovery scan.
+  const restarted = useRealOrchestrator(app);
+  stubMachineConnected(restarted);
+  const res = await getOverview(app.baseUrl, seed.server.id, token);
+  assert.equal(res.status, 200);
+  const body = await res.json() as OverviewResponse;
+  const agent = body.machines[0].agents[0];
+  assert.equal(agent.activity, "online");
+  assert.equal(agent.presence, "idle");
+  // The idle transition instant itself — not the request time, not the older
+  // working row, and not a fabricated fallback.
+  assert.equal(agent.activitySince, idleStart);
+  assert.equal(agent.presenceSince, idleStart);
+});
+
 test("agent-overview is isolated per server: other servers' agents never leak", async ({ app }) => {
   useRealOrchestrator(app);
   const seed = await seedPlaywrightScenario();
