@@ -21,6 +21,15 @@
 
 import { RUNTIME_API_BASE } from "../desktopRuntimeEnvironment";
 import { forgetOfflineUser } from "../utils/offlineSession";
+import {
+  backupLastScope,
+  getBackupLastScope,
+  getBackupSessionId,
+  loadIdentityBackup,
+  recordBackupSessionId,
+  resetIdentityBackupMemory,
+} from "./identityBackup";
+import { runStorageHealthCheck } from "./storageHealth";
 import { beginDirectoryAttachWait, noteDirectoryAttachSettled, noteDirectorySessionUser } from "./directoryCache";
 import { beginActiveCacheBoot, noteActiveCacheSettled, setActiveCacheProvider } from "./messageCache";
 import { initWebCache } from "./webCache";
@@ -68,6 +77,16 @@ function readPersisted(storage: ScopeIdentityStorage): PersistedScope | null {
   }
 }
 
+/**
+ * localStorage first, the IndexedDB backup second. The backup matters when
+ * localStorage is in (or recovering from) the hard-kill write-loss loop —
+ * the cached scope then re-seeds the offline first paint until the user
+ * signs in again (task #12).
+ */
+function readPersistedWithFallback(storage: ScopeIdentityStorage): PersistedScope | null {
+  return readPersisted(storage) ?? getBackupLastScope();
+}
+
 export type WireDeps = {
   storage?: ScopeIdentityStorage;
 };
@@ -111,6 +130,8 @@ export function wireWebCacheLifecycle(
           } catch {
             // Best-effort persistence — the attach itself still worked.
           }
+          // Task #12: IndexedDB survives the localStorage write-loss loop.
+          backupLastScope({ userId, serverId });
         } finally {
           if (wave === attachWave) noteDirectoryAttachSettled();
         }
@@ -134,7 +155,7 @@ export function wireWebCacheLifecycle(
       // Startup before /me, an offline boot, or a 401 session clear — never
       // a wipe (that rides the wrapped logout action). Attach the persisted
       // identity so the cold first paint can read the cache.
-      const persisted = readPersisted(storage);
+      const persisted = readPersistedWithFallback(storage);
       if (persisted && runtime.scopeId === null) {
         attach(persisted.userId, storeServerId ?? persisted.serverId);
       }
@@ -145,7 +166,7 @@ export function wireWebCacheLifecycle(
       // first sync. current stays null until the cached server list seeds,
       // and that list lives in the persisted scope — returning here without
       // attaching it leaves the cold start on "create your first server".
-      const persisted = readPersisted(storage);
+      const persisted = readPersistedWithFallback(storage);
       if (persisted && persisted.userId === storeUserId && runtime.scopeId === null) {
         attach(persisted.userId, persisted.serverId);
       }
@@ -206,18 +227,24 @@ export function wipeOnExplicitLogout(runtime: WebCacheRuntime, auth: AuthLike, d
       // Drop the persisted identity BEFORE the original action clears the
       // user: that user→null transition runs the lifecycle sync, which would
       // otherwise read this id and re-attach (re-creating the scope row and
-      // re-persisting the id) right after the wipe.
+      // re-persisting the id) right after the wipe. The in-memory identity
+      // backup must drop in the same synchronous window for the same reason —
+      // the sync's fallback read consults it (task #12).
       try {
         storage.removeItem(WEB_CACHE_LAST_SCOPE_KEY);
       } catch {
         // ignore
       }
+      resetIdentityBackupMemory();
       void runtime.resetAll().then(() => {
         try {
           storage.removeItem(WEB_CACHE_LAST_SCOPE_KEY);
         } catch {
           // ignore
         }
+        // resetAll deleted the whole cache database (backup rows included);
+        // drop the in-memory copies so this session never re-seeds them.
+        resetIdentityBackupMemory();
       });
       return original(trigger);
     },
@@ -235,6 +262,22 @@ export async function bootWebCache(): Promise<WebCacheRuntime> {
   // instead of painting an empty pane and never looking at the cache.
   beginActiveCacheBoot();
   try {
+    // Task #12: load the IndexedDB identity backup (it also carries the last
+    // durably recorded session id), then run the canary check. A canary older
+    // than the durable backup means the localStorage journal is in the
+    // hard-kill write-loss loop — the desktop shell has been asked to wipe it
+    // and relaunch. Resolving never (instead of throwing) keeps this out of
+    // the global error reporter; the process is exiting anyway.
+    await loadIdentityBackup();
+    const health = await runStorageHealthCheck({
+      storage: (globalThis as { localStorage?: ScopeIdentityStorage }).localStorage!,
+      backupSessionId: getBackupSessionId(),
+      recordBackupSessionId,
+    });
+    if (health === "wipe-requested") {
+      noteActiveCacheSettled();
+      return new Promise<WebCacheRuntime>(() => {});
+    }
     const runtime = await initWebCache();
     // Lazy: authStore/serverStore evaluate browser globals at module scope.
     const [{ useAuthStore }, { useServerStore }] = await Promise.all([

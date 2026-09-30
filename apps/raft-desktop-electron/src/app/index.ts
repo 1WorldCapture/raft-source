@@ -40,6 +40,7 @@ import { MenubarResident, shouldHideOnClose } from "../main/menubarResident.js";
 import { isHiddenLaunch } from "../main/loginItem.js";
 import { armOAuthLoopback, cancelOAuthLoopback, isAllowedAuthorizationUrl } from "./oauthLoopback.js";
 import { buildApiOrigins, isOfficialApiBuild } from "./configuredApiOrigin.js";
+import { requestStorageWipeAndRelaunch, resolvePendingStorageWipe } from "./storageDoctor.js";
 import { createOAuthCoordinator } from "./oauthCoordinator.js";
 import { ComputerHost } from "./computerHost.js";
 import { installStatusMonitorLifecycle } from "../main/statusMonitorLifecycle.js";
@@ -117,6 +118,10 @@ const headlessMode = findHeadlessMode(process.argv);
 const userDataOverride = !app.isPackaged ? process.env.RAFT_DESKTOP_USER_DATA?.trim() : undefined;
 if (userDataOverride) app.setPath("userData", userDataOverride);
 
+
+// Storage doctor (task #12): set once this process holds the single-instance
+// lock and has consumed any pending wipe (see the lock-held branch below).
+let storageWipedThisBoot = false;
 let computerHost: ComputerHost | null = null;
 let menubarResident: MenubarResident | null = null;
 let mainWindow: BrowserWindow | null = null;
@@ -238,6 +243,13 @@ function registerIpcHandlers(): void {
     if (w.isMinimized()) w.restore();
     w.show();
     w.focus();
+  });
+  ipcMain.handle(ELECTRON_IPC_CHANNELS.storageWipeStatus, () => storageWipedThisBoot);
+  ipcMain.on(ELECTRON_IPC_CHANNELS.storageResetRequest, () => {
+    // Renderer-side corruption heuristic fired (canary lost while the
+    // IndexedDB cache clearly has data): schedule the wipe marker and
+    // relaunch so the next boot starts from a clean Local Storage.
+    requestStorageWipeAndRelaunch(app.getPath("userData"), () => app.relaunch(), (code) => app.exit(code));
   });
 }
 
@@ -576,6 +588,12 @@ if (headlessMode?.mode === "__service") {
 } else if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
+  // Storage doctor (task #12): consume a pending wipe only once this process
+  // holds the single-instance lock — a second instance must never delete
+  // Local Storage while the first still has it open. Still module scope,
+  // ahead of app ready and any window/session, so nothing has opened storage.
+  storageWipedThisBoot = resolvePendingStorageWipe(app.getPath("userData"));
+
   if (app.isPackaged) app.setAsDefaultProtocolClient(DEEP_LINK_SCHEME);
 
   // macOS deep links arrive via open-url (may fire before ready).
