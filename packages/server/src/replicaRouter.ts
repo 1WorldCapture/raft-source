@@ -20,8 +20,10 @@ import {
   setClockInterval,
   setClockTimeout,
   clearClockTimeout,
+  isAgentPresence,
   type AgentActivityDetailKind,
   type AgentActivityKind,
+  type AgentPresence,
   type AgentRuntimeErrorState,
   type ServerToMachineMessage,
   type AgentMessage,
@@ -1147,6 +1149,17 @@ export async function releaseWakeLock(agentId: string) {
 // --- Agent activity & maxSeq in Redis ---
 
 /**
+ * Presence/since mirror fields for the activity hash. All three are optional;
+ * a null/undefined value deletes the hash field so an unknown never masquerades
+ * as a recovered timestamp after the hash is read back.
+ */
+export interface AgentActivitySinceMirror {
+  activitySinceMs?: number | null;
+  presence?: AgentPresence | null;
+  presenceSinceMs?: number | null;
+}
+
+/**
  * Store agent activity in Redis for cross-replica consistency.
  */
 export async function setAgentActivity(
@@ -1155,6 +1168,7 @@ export async function setAgentActivity(
   detail: string,
   detailKind: AgentActivityDetailKind,
   observedAtMs?: number,
+  since?: AgentActivitySinceMirror,
 ) {
   if (!isRedisAvailable()) return;
   const redis = getRedis();
@@ -1166,6 +1180,21 @@ export async function setAgentActivity(
   } else {
     pipeline.hdel(key, "observedAtMs");
   }
+  if (since?.activitySinceMs != null) {
+    pipeline.hset(key, "activitySinceMs", String(since.activitySinceMs));
+  } else {
+    pipeline.hdel(key, "activitySinceMs");
+  }
+  if (since?.presence != null) {
+    pipeline.hset(key, "presence", since.presence);
+  } else {
+    pipeline.hdel(key, "presence");
+  }
+  if (since?.presenceSinceMs != null) {
+    pipeline.hset(key, "presenceSinceMs", String(since.presenceSinceMs));
+  } else {
+    pipeline.hdel(key, "presenceSinceMs");
+  }
   pipeline.expire(key, 600); // 10 min TTL
   await pipeline.exec();
 }
@@ -1176,15 +1205,23 @@ export function projectAgentActivityFromRedisHash(data: Record<string, string>):
   detailKind: AgentActivityDetailKind;
   observedAtMs?: number;
   updatedAt: number;
+  activitySinceMs?: number;
+  presence?: AgentPresence;
+  presenceSinceMs?: number;
 } | null {
   if (!data.activity) return null;
   const observedAtMs = Number(data.observedAtMs);
+  const activitySinceMs = Number(data.activitySinceMs);
+  const presenceSinceMs = Number(data.presenceSinceMs);
   return {
     activity: normalizeActivity(data.activity),
     detail: data.detail || "",
     detailKind: normalizeActivityDetailKind(data.detailKind),
     ...(Number.isFinite(observedAtMs) ? { observedAtMs } : {}),
     updatedAt: Number(data.updatedAt) || 0,
+    ...(Number.isFinite(activitySinceMs) ? { activitySinceMs } : {}),
+    ...(isAgentPresence(data.presence) ? { presence: data.presence } : {}),
+    ...(Number.isFinite(presenceSinceMs) ? { presenceSinceMs } : {}),
   };
 }
 
@@ -1193,7 +1230,16 @@ export function projectAgentActivityFromRedisHash(data: Record<string, string>):
  */
 export async function getAgentActivity(
   agentId: string,
-): Promise<{ activity: AgentActivityKind; detail: string; detailKind: AgentActivityDetailKind; observedAtMs?: number; updatedAt: number } | null> {
+): Promise<{
+  activity: AgentActivityKind;
+  detail: string;
+  detailKind: AgentActivityDetailKind;
+  observedAtMs?: number;
+  updatedAt: number;
+  activitySinceMs?: number;
+  presence?: AgentPresence;
+  presenceSinceMs?: number;
+} | null> {
   if (!isRedisAvailable()) return null;
   const redis = getRedis();
   const data = await redis.hgetall(`slock:agent:${agentId}:activity`);

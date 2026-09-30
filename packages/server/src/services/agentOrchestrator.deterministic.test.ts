@@ -2772,6 +2772,34 @@ function startHeartbeat(orchestrator: AgentOrchestrator, machineId: string, conn
   (orchestrator as any).startMachineHeartbeat(machineId, conn);
 }
 
+/**
+ * The mgmt-dashboard #4 presence/since stamps ride along on every
+ * user-visible activity. Check their well-formedness, then strip them so the
+ * strict deep-equals below keep pinning the activity contract itself
+ * (same pattern as withoutStatusSince for the machine:status payload).
+ */
+function withoutPresenceStamps<T extends { presence?: unknown; activitySinceMs?: unknown; presenceSinceMs?: unknown }>(
+  activity: T,
+): Omit<T, "presence" | "activitySinceMs" | "presenceSinceMs"> {
+  assert.ok(
+    activity.presence === "working" || activity.presence === "idle" || activity.presence === "offline",
+    `presence must be a valid AgentPresence, got ${JSON.stringify(activity.presence)}`,
+  );
+  assert.ok(
+    activity.activitySinceMs === null || typeof activity.activitySinceMs === "number",
+    `activitySinceMs must be null or a number, got ${JSON.stringify(activity.activitySinceMs)}`,
+  );
+  assert.ok(
+    activity.presenceSinceMs === null || typeof activity.presenceSinceMs === "number",
+    `presenceSinceMs must be null or a number, got ${JSON.stringify(activity.presenceSinceMs)}`,
+  );
+  const { presence, activitySinceMs, presenceSinceMs, ...rest } = activity;
+  void presence;
+  void activitySinceMs;
+  void presenceSinceMs;
+  return rest;
+}
+
 function makeFakeWs(readyState = 1) {
   return {
     readyState,
@@ -2963,7 +2991,7 @@ test("cross-replica active agent stays online when machine replica heartbeat sti
   seedActiveAgent(orchestrator);
 
   const activity = await orchestrator.getActivity("agent-1");
-  assert.deepEqual(activity, { activity: "online", activityDetail: "" });
+  assert.deepEqual(withoutPresenceStamps(activity), { activity: "online", activityDetail: "" });
 
   orchestrator.shutdown();
 });
@@ -3899,7 +3927,7 @@ test("user-visible machine read model stays offline and agent activity stays off
   const activity = await orchestrator.getActivity("agent-1");
 
   assert.equal(machine.status, "offline");
-  assert.deepEqual(activity, { activity: "offline", activityDetail: "" });
+  assert.deepEqual(withoutPresenceStamps(activity), { activity: "offline", activityDetail: "" });
 
   orchestrator.shutdown();
 });
@@ -3914,7 +3942,7 @@ test("user-visible machine read model stays online and agent activity stays onli
   const activity = await orchestrator.getActivity("agent-1");
 
   assert.equal(machine.status, "online");
-  assert.deepEqual(activity, { activity: "online", activityDetail: "" });
+  assert.deepEqual(withoutPresenceStamps(activity), { activity: "online", activityDetail: "" });
 
   orchestrator.shutdown();
 });
@@ -3927,8 +3955,8 @@ test("presence contract: fresh runtime profile report keeps non-owner read model
   seedActiveAgent(reader, "agent-1", "machine-1", "kimi");
   seedMachineConnection(owner, "machine-1", makeFakeWs(1));
 
-  assert.deepEqual(
-    await reader.getActivity("agent-1"),
+  assert.deepEqual(withoutPresenceStamps(
+    await reader.getActivity("agent-1")),
     { activity: "offline", activityDetail: "" },
     "owner lookup miss starts as offline before a fresh daemon report",
   );
@@ -3945,8 +3973,8 @@ test("presence contract: fresh runtime profile report keeps non-owner read model
     },
   } as MachineToServerMessage);
 
-  assert.deepEqual(
-    await reader.getActivity("agent-1"),
+  assert.deepEqual(withoutPresenceStamps(
+    await reader.getActivity("agent-1")),
     { activity: "online", activityDetail: "" },
     "fresh daemon report must refresh reachability so the read model does not fake offline",
   );
@@ -3963,7 +3991,7 @@ test("presence contract: real working production projects busy across replicas a
   seedActiveAgent(reader, "agent-1", "machine-1", "codex");
   seedMachineConnection(owner, "machine-1", makeFakeWs(1));
 
-  assert.deepEqual(await reader.getActivity("agent-1"), { activity: "offline", activityDetail: "" });
+  assert.deepEqual(withoutPresenceStamps(await reader.getActivity("agent-1")), { activity: "offline", activityDetail: "" });
 
   await owner.handleMachineMessage("machine-1", {
     type: "agent:activity",
@@ -3976,8 +4004,8 @@ test("presence contract: real working production projects busy across replicas a
     clientSeq: 1,
   } as MachineToServerMessage);
 
-  assert.deepEqual(
-    await reader.getActivity("agent-1"),
+  assert.deepEqual(withoutPresenceStamps(
+    await reader.getActivity("agent-1")),
     { activity: "working", activityDetail: "Running tests" },
     "accepted working production must project busy instead of offline/idle",
   );
@@ -4001,8 +4029,8 @@ test("getActivity suppresses weak owner-missing offline when Redis has fresh wor
     updatedAt: clock.now(),
   });
 
-  assert.deepEqual(
-    await reader.getActivity("agent-1"),
+  assert.deepEqual(withoutPresenceStamps(
+    await reader.getActivity("agent-1")),
     { activity: "working", activityDetail: "Running tests" },
     "fresh owner-written activity must beat weak owner-missing reachability",
   );
@@ -4035,8 +4063,8 @@ test("getActivity suppresses weak owner-missing offline when persisted activity 
   );
   seedActiveAgent(reader, "agent-1", "machine-1", "codex");
 
-  assert.deepEqual(
-    await reader.getActivity("agent-1"),
+  assert.deepEqual(withoutPresenceStamps(
+    await reader.getActivity("agent-1")),
     { activity: "working", activityDetail: "Editing file" },
     "fresh persisted/keyed activity must beat weak owner-missing reachability",
   );
@@ -4064,8 +4092,8 @@ test("getActivity lets weak owner-missing offline win after the competing activi
     updatedAt: clock.now() - 91_000,
   });
 
-  assert.deepEqual(
-    await reader.getActivity("agent-1"),
+  assert.deepEqual(withoutPresenceStamps(
+    await reader.getActivity("agent-1")),
     { activity: "offline", activityDetail: "" },
     "suppression is bounded by the activity stale window",
   );
@@ -4087,8 +4115,8 @@ test("getActivity keeps runtime error authoritative over fresh weak-offline comp
     updatedAt: clock.now(),
   });
 
-  assert.deepEqual(
-    await reader.getActivity("agent-1"),
+  assert.deepEqual(withoutPresenceStamps(
+    await reader.getActivity("agent-1")),
     { activity: "error", activityDetail: "Runtime failed" },
     "daemon-reported runtime fatal state remains authoritative",
   );
@@ -4117,7 +4145,7 @@ test("presence contract: stale observed online ingress must not flatten fresh wo
       clientSeq: 1,
       observedAtMs: 200,
     } as MachineToServerMessage);
-    assert.deepEqual(await reader.getActivity("agent-1"), { activity: "working", activityDetail: "Running tests" });
+    assert.deepEqual(withoutPresenceStamps(await reader.getActivity("agent-1")), { activity: "working", activityDetail: "Running tests" });
 
     await owner.handleMachineMessage("machine-1", {
       type: "agent:activity",
@@ -4130,8 +4158,8 @@ test("presence contract: stale observed online ingress must not flatten fresh wo
       observedAtMs: 100,
     } as MachineToServerMessage);
 
-    assert.deepEqual(
-      await reader.getActivity("agent-1"),
+    assert.deepEqual(withoutPresenceStamps(
+      await reader.getActivity("agent-1")),
       { activity: "working", activityDetail: "Running tests" },
       "older accepted online/idle observation must not overwrite fresher working truth",
     );
@@ -4170,7 +4198,7 @@ test("getActivity prefers the fresher cross-replica mirror over a stale-but-rece
   const activity = await orchestrator.getActivity("agent-1");
 
   // Must reflect the fresher mirror, not the stale local shadow.
-  assert.deepEqual(activity, { activity: "working", activityDetail: "fresh-remote" });
+  assert.deepEqual(withoutPresenceStamps(activity), { activity: "working", activityDetail: "fresh-remote" });
 
   orchestrator.shutdown();
 });
@@ -4199,7 +4227,7 @@ test("getActivity does not return a timestamp-newer local shadow over the Redis 
   try {
     const activity = await orchestrator.getActivity("agent-1");
     // Read-through Redis, not the timestamp-newer local shadow.
-    assert.deepEqual(activity, { activity: "working", activityDetail: "owner-truth" });
+    assert.deepEqual(withoutPresenceStamps(activity), { activity: "working", activityDetail: "owner-truth" });
   } finally {
     orchestrator.shutdown();
   }
@@ -4229,7 +4257,7 @@ test("getActivity does not fall back to the local shadow for a remote agent when
     // With Redis down and no authoritative source, the remote agent's reachability
     // cannot be confirmed, so it derives offline — it must NOT surface the shadow.
     assert.notDeepEqual(activity, { activity: "thinking", activityDetail: "stale-shadow" });
-    assert.deepEqual(activity, { activity: "offline", activityDetail: "" });
+    assert.deepEqual(withoutPresenceStamps(activity), { activity: "offline", activityDetail: "" });
   } finally {
     orchestrator.shutdown();
   }
@@ -4268,10 +4296,10 @@ test("getActivity converges divergent replica runtime-error shadows on the Redis
   try {
     const expected = { activity: "error" as const, activityDetail: authoritativeError.message };
     for (let read = 0; read < 5; read += 1) {
-      assert.deepEqual(await Promise.all([
-        replicaA.getActivity("agent-1"),
-        replicaB.getActivity("agent-1"),
-      ]), [expected, expected]);
+      assert.deepEqual([
+        withoutPresenceStamps(await replicaA.getActivity("agent-1")),
+        withoutPresenceStamps(await replicaB.getActivity("agent-1")),
+      ], [expected, expected]);
     }
     assert.deepEqual((replicaA as any).agentStateCache.get("agent-1")?.lastRuntimeError, authoritativeError);
     assert.deepEqual((replicaB as any).agentStateCache.get("agent-1")?.lastRuntimeError, authoritativeError);
@@ -4302,7 +4330,7 @@ test("runtime-error mirror synchronizes awaited writes and explicit clears acros
   try {
     await (owner as any).rememberRuntimeError("agent-1", error);
     assert.deepEqual(store.agentRuntimeErrors.get("agent-1")?.error, error);
-    assert.deepEqual(await reader.getActivity("agent-1"), {
+    assert.deepEqual(withoutPresenceStamps(await reader.getActivity("agent-1")), {
       activity: "error",
       activityDetail: error.message,
     });
@@ -4314,7 +4342,7 @@ test("runtime-error mirror synchronizes awaited writes and explicit clears acros
       fingerprintAgentRuntimeError(null),
     );
     assert.notEqual((reader as any).agentStateCache.get("agent-1")?.lastRuntimeError, null);
-    assert.deepEqual(await reader.getActivity("agent-1"), {
+    assert.deepEqual(withoutPresenceStamps(await reader.getActivity("agent-1")), {
       activity: "online",
       activityDetail: "",
     });
@@ -4418,7 +4446,7 @@ test("runtime-error Redis authority is not published when durable set returns fa
 
       assert.equal(store.agentRuntimeErrors.has("agent-1"), false);
       assert.equal((owner as any).agentStateCache.get("agent-1")?.lastRuntimeError, null);
-      assert.deepEqual(await reader.getActivity("agent-1"), {
+      assert.deepEqual(withoutPresenceStamps(await reader.getActivity("agent-1")), {
         activity: "online",
         activityDetail: "",
       });
@@ -4474,7 +4502,7 @@ test("runtime-error Redis authority is not cleared when durable clear returns fa
 
       assert.deepEqual(store.agentRuntimeErrors.get("agent-1")?.error, error);
       assert.deepEqual((owner as any).agentStateCache.get("agent-1")?.lastRuntimeError, error);
-      assert.deepEqual(await reader.getActivity("agent-1"), {
+      assert.deepEqual(withoutPresenceStamps(await reader.getActivity("agent-1")), {
         activity: "error",
         activityDetail: error.message,
       });
@@ -4507,7 +4535,7 @@ test("getActivity re-sources persistence instead of resurrecting a local runtime
   });
 
   try {
-    assert.deepEqual(await orchestrator.getActivity("agent-1"), {
+    assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), {
       activity: "offline",
       activityDetail: "",
     });
@@ -4845,7 +4873,7 @@ test("machine disconnect within grace then reconnect does not emit user-visible 
   await flushMicrotasks();
 
   assert.equal(await orchestrator.getMachineStatus("machine-1"), "online");
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), { activity: "online", activityDetail: "" });
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), { activity: "online", activityDetail: "" });
   assert.deepEqual(emitted.map((entry) => withoutStatusSince(entry).payload), [
     { machineId: "machine-1", status: "online", statusVersion: 2 },
   ]);
@@ -5067,6 +5095,13 @@ test("trajectory activity events are durably persisted and hydration matches the
     detailKind: "other",
     timestamp: clock.now(),
     serverSeq: 1,
+    // Daemon ingress without an explicit observedAtMs stamps the frame with
+    // the server receive time.
+    observedAtMs: clock.now(),
+    // First observation: both stamps start at this frame's instant (mgmt-dashboard #4).
+    activitySinceMs: clock.now(),
+    presence: "working",
+    presenceSinceMs: clock.now(),
   });
   assert.deepEqual(await orchestrator.listRecentActivityLog("agent-1"), entries.map((entry) => ({
     timestamp: clock.now(),
@@ -5117,6 +5152,12 @@ test("accepted agent:activity ingest threads launchId/clientSeq/probeId/producer
     clientSeq: 123,
     probeId: "P-xyz",
     producerFactId: "daemon_activity:agent-1:L-77:123",
+    // Server receive time — the frame carried no explicit observedAtMs.
+    observedAtMs: clock.now(),
+    // First observation: both stamps start at this frame's instant.
+    activitySinceMs: clock.now(),
+    presence: "working",
+    presenceSinceMs: clock.now(),
   });
 
   orchestrator.shutdown();
@@ -5321,6 +5362,12 @@ test("Kimi runtime activity skips durable activity log persistence while still s
     detailKind: "other",
     timestamp: clock.now(),
     serverSeq: 1,
+    // Server receive time — the frame carried no explicit observedAtMs.
+    observedAtMs: clock.now(),
+    // First observation: both stamps start at this frame's instant.
+    activitySinceMs: clock.now(),
+    presence: "working",
+    presenceSinceMs: clock.now(),
   });
 
   orchestrator.shutdown();
@@ -5344,7 +5391,7 @@ test("Kimi status-only crash loop is circuit-broken before repeated lifecycle pr
   } as MachineToServerMessage);
 
   assert.equal(orchestrator.emittedActivityPayloads.length, 1);
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), {
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), {
     activity: "error",
     activityDetail: "Kimi runtime crashed",
   });
@@ -5362,7 +5409,7 @@ test("Kimi status-only crash loop is circuit-broken before repeated lifecycle pr
   await flushMicrotasks();
 
   assert.equal(orchestrator.emittedActivityPayloads.length, 1);
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), {
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), {
     activity: "error",
     activityDetail: "Kimi runtime crashed",
   });
@@ -5426,6 +5473,12 @@ test("Kimi activity circuit breaker still allows user-visible trajectory entries
     // `clientSeq: 3` (probeId omitted), so the emit must too.
     launchId: "launch-kimi-loop",
     clientSeq: 3,
+    // Server receive time; every frame above shares the same clock instant,
+    // so the carried stamps equal it too (no value change on this frame).
+    observedAtMs: clock.now(),
+    activitySinceMs: clock.now(),
+    presence: "working",
+    presenceSinceMs: clock.now(),
   });
 
   orchestrator.shutdown();
@@ -5489,7 +5542,7 @@ test("Kimi activity circuit breaker suppresses repeated same-launch crash entrie
   await flushMicrotasks();
 
   assert.equal(orchestrator.emittedActivityPayloads.length, 2);
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), {
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), {
     activity: "working",
     activityDetail: "Restarting Kimi runtime",
   });
@@ -5688,7 +5741,7 @@ test("recent persisted transient activity keeps visible agent activity from fall
   seedActiveAgent(orchestrator);
   seedMachineConnection(orchestrator, "machine-1", makeFakeWs());
 
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), {
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), {
     activity: "working",
     activityDetail: "Compiling prompt",
   });
@@ -5707,7 +5760,7 @@ test("stale persisted transient activity still decays back to online", async () 
   seedActiveAgent(orchestrator);
   seedMachineConnection(orchestrator, "machine-1", makeFakeWs());
 
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), {
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), {
     activity: "online",
     activityDetail: "",
   });
@@ -5773,6 +5826,10 @@ test("server-side starting transition without explicit trajectory entries is dur
     detailKind: "starting",
     timestamp: clock.now(),
     serverSeq: 1,
+    // First observation: both stamps start at this frame's instant.
+    activitySinceMs: clock.now(),
+    presence: "working",
+    presenceSinceMs: clock.now(),
   });
 
   orchestrator.shutdown();
@@ -5800,7 +5857,7 @@ test("starting activity log entry is followed by durable idle resolution", async
       entry: { kind: "status", activity: "online", activityKind: "online", detail: "", detailKind: "none" },
     },
   ]);
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), { activity: "online", activityDetail: "" });
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), { activity: "online", activityDetail: "" });
 
   orchestrator.shutdown();
 });
@@ -5985,7 +6042,7 @@ test("APM 1.6 (6a): working/runtime_progress emits live status but is NOT persis
   // POSITIVE (live): the runtime_progress heartbeat reached live status. The
   // in-memory cache is updated synchronously and preserves the detailKind, so
   // the read model reflects working + runtime_progress.
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), {
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), {
     activity: "working",
     activityDetail: "Working",
   });
@@ -5994,6 +6051,9 @@ test("APM 1.6 (6a): working/runtime_progress emits live status but is NOT persis
     detail: "Working",
     detailKind: "runtime_progress",
     updatedAt: clock.now(),
+    activitySinceMs: clock.now(),
+    presence: "working",
+    presenceSinceMs: clock.now(),
   });
 
   // NEGATIVE (durable): no durable activity-log row was written for the
@@ -6160,7 +6220,7 @@ test("buggy cross-replica fallback semantics would misclassify the same agent as
   seedActiveAgent(orchestrator);
 
   const activity = await orchestrator.getActivity("agent-1");
-  assert.deepEqual(activity, { activity: "offline", activityDetail: "" });
+  assert.deepEqual(withoutPresenceStamps(activity), { activity: "offline", activityDetail: "" });
 
   orchestrator.shutdown();
 });
@@ -6170,11 +6230,11 @@ test("pong refresh self-heals a missing machine replica mapping", async () => {
   const orchestrator = new DeterministicAgentOrchestrator(store);
   seedActiveAgent(orchestrator);
 
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), { activity: "offline", activityDetail: "" });
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), { activity: "offline", activityDetail: "" });
 
   await orchestrator.handleMachineMessage("machine-1", { type: "pong" } as MachineToServerMessage);
 
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), { activity: "online", activityDetail: "" });
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), { activity: "online", activityDetail: "" });
 
   orchestrator.shutdown();
 });
@@ -6184,11 +6244,11 @@ test("expire-only refresh semantics would fail to self-heal after pong", async (
   const orchestrator = new DeterministicAgentOrchestrator(store);
   seedActiveAgent(orchestrator);
 
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), { activity: "offline", activityDetail: "" });
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), { activity: "offline", activityDetail: "" });
 
   await orchestrator.handleMachineMessage("machine-1", { type: "pong" } as MachineToServerMessage);
 
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), { activity: "offline", activityDetail: "" });
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), { activity: "offline", activityDetail: "" });
 
   orchestrator.shutdown();
 });
@@ -6203,7 +6263,7 @@ test("fresh remote cached activity does not mask a missing machine replica heart
     updatedAt: Date.now(),
   });
 
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), { activity: "offline", activityDetail: "" });
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), { activity: "offline", activityDetail: "" });
 
   orchestrator.shutdown();
 });
@@ -6219,7 +6279,7 @@ test("fresh remote cached offline state does not mask a recovered online machine
     updatedAt: Date.now(),
   });
 
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), { activity: "online", activityDetail: "" });
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), { activity: "online", activityDetail: "" });
 
   orchestrator.shutdown();
 });
@@ -6239,7 +6299,7 @@ test("local cached activity remains authoritative over remote soft hints while t
     updatedAt: Date.now(),
   });
 
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), {
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), {
     activity: "working",
     activityDetail: "local-run",
   });
@@ -6278,7 +6338,7 @@ test("getActivity does not consult the local shadow for a no-machine agent (de-s
   // (CC-005), the local in-memory shadow has no authority and must NOT be
   // consulted; the agent derives offline from reachability instead of surfacing
   // the stale "working" shadow.
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), {
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), {
     activity: "offline",
     activityDetail: "",
   });
@@ -6315,7 +6375,7 @@ test("getActivity derives offline when an active agent has no machine and no sof
     envVars: null,
   });
 
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), {
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), {
     activity: "offline",
     activityDetail: "",
   });
@@ -6344,7 +6404,7 @@ test("getActivity can link resolve spans to a request parent while keeping the H
     attrs: { route_pattern: "/api/agents" },
   });
 
-  assert.deepEqual(await orchestrator.getActivity("agent-raw-id", { parent: parent.context }), {
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-raw-id", { parent: parent.context })), {
     activity: "offline",
     activityDetail: "",
   });
@@ -6473,7 +6533,7 @@ test("stale agent activity from a previous launch does not overwrite the current
     launchId: launch1,
   });
 
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), {
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), {
     activity: "working",
     activityDetail: "current-launch",
   });
@@ -6553,7 +6613,7 @@ test("legacy lifecycle events are accepted in legacy mode but rejected once the 
     detail: "legacy-accepted",
   });
 
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), {
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), {
     activity: "working",
     activityDetail: "legacy-accepted",
   });
@@ -6569,7 +6629,7 @@ test("legacy lifecycle events are accepted in legacy mode but rejected once the 
     detail: "legacy-rejected-after-guard",
   });
 
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), {
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), {
     activity: "online",
     activityDetail: "",
   });
@@ -6634,7 +6694,7 @@ test("guarded rejected lifecycle signals still resolve optimistic starting activ
     scenario.configureCurrent?.(orchestrator);
 
     assert.equal((orchestrator as any).agentStateCache.get("agent-1").expectedLaunchId, launch1, scenario.name);
-    assert.deepEqual(await orchestrator.getActivity("agent-1"), {
+    assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), {
       activity: "working",
       activityDetail: scenario.name.includes("runtime_starting") ? "Runtime is starting" : "Starting…",
     }, scenario.name);
@@ -6645,7 +6705,7 @@ test("guarded rejected lifecycle signals still resolve optimistic starting activ
     assert.equal(cached.expectedLaunchId, launch1, scenario.name);
     assert.equal(cached.launchGuardMode, "guarded", scenario.name);
     assert.equal(cached.sessionId, null, scenario.name);
-    assert.deepEqual(await orchestrator.getActivity("agent-1"), {
+    assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), {
       activity: "online",
       activityDetail: "",
     }, scenario.name);
@@ -6684,7 +6744,7 @@ test("old daemon without launchId support does not get launch guard", async () =
     activity: "working",
     detail: "old-daemon-working",
   });
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), {
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), {
     activity: "working",
     activityDetail: "old-daemon-working",
   });
@@ -6836,7 +6896,7 @@ test("getActivity resolution order ignores recovered offline hints before fallin
     updatedAt: clock.now(),
   });
 
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), {
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), {
     activity: "working",
     activityDetail: "persisted-run",
   });
@@ -6848,7 +6908,7 @@ test("getActivity resolution order ignores recovered offline hints before fallin
     updatedAt: clock.now() - 91_000,
   });
 
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), {
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), {
     activity: "online",
     activityDetail: "",
   });
@@ -6882,7 +6942,7 @@ test("getActivity resolution order prefers fresh redis activity over recent pers
 
   seedActiveAgent(orchestrator);
 
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), {
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), {
     activity: "working",
     activityDetail: "remote-run",
   });
@@ -6921,7 +6981,7 @@ test("M-22: kernel-enabled non-owner Redis read-through serves the owner mirror 
     };
     (orchestrator as any).agentActivity.set("agent-1", staleLocal);
 
-    assert.deepEqual(await orchestrator.getActivity("agent-1"), {
+    assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), {
       activity: "working",
       activityDetail: "owner-mirror-working",
     });
@@ -6994,7 +7054,7 @@ test("M-22 trace: available Redis miss falls through to persisted activity witho
   );
   seedActiveAgent(orchestrator);
 
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), {
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), {
     activity: "working",
     activityDetail: "persisted-fallback",
   });
@@ -7028,7 +7088,7 @@ test("M-22 trace: unavailable Redis keeps derived fallback without hint decision
     updatedAt: Date.now(),
   });
 
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), {
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), {
     activity: "offline",
     activityDetail: "",
   });
@@ -7069,7 +7129,7 @@ test("getActivity returns persisted runtime error state before derived online st
     },
   });
 
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), {
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), {
     activity: "error",
     activityDetail: "Built-in provider authentication failed. Check this agent's provider API key and region/provider selection, then retry starting this agent.",
   });
@@ -7100,7 +7160,7 @@ test("detailKind-less legacy error remains visible for compatibility but cannot 
   await flushMicrotasks();
 
   assert.equal((orchestrator as any).agentStateCache.get("agent-1").lastRuntimeError, null);
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), {
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), {
     activity: "error",
     activityDetail: "Built-in provider authentication failed",
   });
@@ -7132,7 +7192,7 @@ test("agent:activity status error entry alone cannot set agent runtime error sta
   await flushMicrotasks();
 
   assert.equal((orchestrator as any).agentStateCache.get("agent-1").lastRuntimeError, null);
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), {
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), {
     activity: "working",
     activityDetail: "Message received",
   });
@@ -7174,7 +7234,7 @@ test("runtime_error detailKind is the runtime-error set authority even when lega
     launchId: "launch-auth",
     actionRequired: true,
   });
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), {
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), {
     activity: "error",
     activityDetail: "Provider authentication failed",
   });
@@ -7278,7 +7338,7 @@ test("probe-timeout fallback preserves a runtime error that arrives after the st
     assert.deepEqual((orchestrator as any).agentStateCache.get("agent-1")?.lastRuntimeError, expectedRuntimeError);
     assert.equal((orchestrator as any).agentActivity.get("agent-1")?.activity, "error");
     assert.equal(store.agentActivities.get("agent-1")?.activity, "error");
-    assert.deepEqual(await orchestrator.getActivity("agent-1"), {
+    assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), {
       activity: "error",
       activityDetail: "Built-in provider authentication failed",
     });
@@ -7310,7 +7370,7 @@ test("message received activity does not clear persisted runtime error state", a
     launchId: "launch-auth",
     actionRequired: true,
   });
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), {
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), {
     activity: "error",
     activityDetail: "Built-in provider authentication failed",
   });
@@ -7336,7 +7396,7 @@ test("runtime progress clears persisted runtime error state", async () => {
   await flushMicrotasks();
 
   assert.equal((orchestrator as any).agentStateCache.get("agent-1").lastRuntimeError, null);
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), {
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), {
     activity: "working",
     activityDetail: "Applying patch",
   });
@@ -7365,7 +7425,7 @@ test("same-launch command progress clears persisted runtime error state", async 
   await flushMicrotasks();
 
   assert.equal((orchestrator as any).agentStateCache.get("agent-1").lastRuntimeError, null);
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), {
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), {
     activity: "working",
     activityDetail: "Running command",
   });
@@ -7411,7 +7471,7 @@ test("runtime-progress heartbeat cannot clear persisted runtime error state", as
     launchId: "launch-auth",
     actionRequired: true,
   });
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), {
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), {
     activity: "error",
     activityDetail: "Built-in provider authentication failed",
   });
@@ -7444,7 +7504,7 @@ test("untyped display text and trajectory entries cannot clear persisted runtime
     launchId: "launch-auth",
     actionRequired: true,
   });
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), {
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), {
     activity: "error",
     activityDetail: "Built-in provider authentication failed",
   });
@@ -7476,7 +7536,7 @@ test("unknown activity detailKind fails closed without projection or runtime-err
     launchId: "launch-auth",
     actionRequired: true,
   });
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), {
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), {
     activity: "error",
     activityDetail: "Built-in provider authentication failed",
   });
@@ -7506,7 +7566,7 @@ test("same-launch bookkeeping progress preserves persisted runtime error state",
     launchId: "launch-auth",
     actionRequired: true,
   });
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), {
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), {
     activity: "error",
     activityDetail: "Built-in provider authentication failed",
   });
@@ -7538,7 +7598,7 @@ test("same-launch online activity preserves persisted runtime error state", asyn
     launchId: "launch-auth",
     actionRequired: true,
   });
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), {
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), {
     activity: "error",
     activityDetail: "Built-in provider authentication failed",
   });
@@ -7563,7 +7623,7 @@ test("successful session clears persisted runtime error state", async () => {
   await flushMicrotasks();
 
   assert.equal((orchestrator as any).agentStateCache.get("agent-1").lastRuntimeError, null);
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), {
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), {
     activity: "online",
     activityDetail: "",
   });
@@ -7580,7 +7640,7 @@ test("redis activity does not mask a missing machine replica heartbeat", async (
   const orchestrator = new DeterministicAgentOrchestrator(store);
   seedActiveAgent(orchestrator);
 
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), { activity: "offline", activityDetail: "" });
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), { activity: "offline", activityDetail: "" });
 
   orchestrator.shutdown();
 });
@@ -7601,7 +7661,7 @@ test("stale redis transient activity downgrades to online when the machine is st
   const orchestrator = new DeterministicAgentOrchestrator(store, clock);
   seedActiveAgent(orchestrator);
 
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), { activity: "online", activityDetail: "" });
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), { activity: "online", activityDetail: "" });
 
   orchestrator.shutdown();
 });
@@ -7666,7 +7726,7 @@ test("fresh redis offline state does not mask a recovered online machine", async
   const orchestrator = new DeterministicAgentOrchestrator(store);
   seedActiveAgent(orchestrator);
 
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), { activity: "online", activityDetail: "" });
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), { activity: "online", activityDetail: "" });
 
   orchestrator.shutdown();
 });
@@ -7737,7 +7797,7 @@ test("stale machine disconnect (old socket close after reconnect) does not mark 
   // ws1.close fires after ws2 has already taken over — should be silently ignored
   await orchestrator.handleMachineDisconnect("machine-1", ws1 as never);
 
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), { activity: "online", activityDetail: "" });
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), { activity: "online", activityDetail: "" });
 
   orchestrator.shutdown();
 });
@@ -7756,7 +7816,7 @@ test("without stale socket guard, a reconnect+close race would incorrectly mark 
   // Buggy orchestrator processes the stale ws1 disconnect as if it were legitimate
   await orchestrator.handleMachineDisconnect("machine-1", ws1 as never);
 
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), { activity: "offline", activityDetail: "" });
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), { activity: "offline", activityDetail: "" });
 
   orchestrator.shutdown();
 });
@@ -8589,14 +8649,14 @@ test("stop apply manual immediately surfaces stopped activity when daemon is rea
   await orchestrator.callApplyStopAction("agent-1", "manual");
 
   assert.equal((orchestrator as any).agentStateCache.get("agent-1").status, "stopped");
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), { activity: "offline", activityDetail: "Stopped" });
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), { activity: "offline", activityDetail: "Stopped" });
   assertResolveSpanAgentIdentity(sink, traceId, "agent-1", "stopped-status");
   (orchestrator as any).agentActivity.set("agent-1", {
     activity: "working",
     detail: "stale pre-stop activity",
     updatedAt: Date.now(),
   });
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), { activity: "offline", activityDetail: "Stopped" });
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), { activity: "offline", activityDetail: "Stopped" });
   assert.equal(store.wakeLocks.size, 0);
   assert.deepEqual(
     orchestrator.sentToMachine.map((msg) => msg.type),
@@ -8640,7 +8700,7 @@ test("stop apply internal persists inactive without overwriting pre-stop activit
   assert.equal((orchestrator as any).agentStateCache.get("agent-1").status, "inactive");
   // Reachable-daemon stops are daemon-owned for visible activity. Until the
   // daemon ack arrives, the previous visible activity should remain unchanged.
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), { activity: "working", activityDetail: "Starting…" });
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), { activity: "working", activityDetail: "Starting…" });
   assert.equal(store.wakeLocks.size, 0);
   assert.deepEqual(
     orchestrator.sentToMachine.map((msg) => msg.type),
@@ -8678,7 +8738,7 @@ test("manual stop clears persisted runtime error state", async () => {
   await orchestrator.callApplyStopAction("agent-1", "manual");
 
   assert.equal((orchestrator as any).agentStateCache.get("agent-1").lastRuntimeError, null);
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), { activity: "offline", activityDetail: "Stopped" });
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), { activity: "offline", activityDetail: "Stopped" });
   orchestrator.shutdown();
 });
 
@@ -8696,7 +8756,7 @@ test("internal stop preserves persisted runtime error state", async () => {
     launchId: "launch-auth",
     actionRequired: true,
   });
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), {
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), {
     activity: "error",
     activityDetail: "Built-in provider authentication failed",
   });
@@ -8714,7 +8774,7 @@ test("stop apply emits server-side stopped fallback when machine stop is unreach
   assert.equal(fallbackActivity.activity, "offline");
   assert.equal(fallbackActivity.detail, "Agent stopped by user");
   assert.equal(typeof fallbackActivity.updatedAt, "number");
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), { activity: "offline", activityDetail: "Stopped" });
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), { activity: "offline", activityDetail: "Stopped" });
   assert.deepEqual(
     orchestrator.sentToMachine.map((msg) => msg.type),
     ["agent:stop"],
@@ -8730,7 +8790,7 @@ test("ready reconciliation does not resurrect a manually stopped agent that the 
 
   await orchestrator.stopAgent("agent-1");
   assert.equal((orchestrator as any).agentStateCache.get("agent-1").status, "stopped");
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), { activity: "offline", activityDetail: "Stopped" });
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), { activity: "offline", activityDetail: "Stopped" });
 
   await orchestrator.handleMachineMessage("machine-1", {
     type: "ready",
@@ -8741,7 +8801,7 @@ test("ready reconciliation does not resurrect a manually stopped agent that the 
   } as MachineToServerMessage);
 
   assert.equal((orchestrator as any).agentStateCache.get("agent-1").status, "stopped");
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), { activity: "offline", activityDetail: "Stopped" });
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), { activity: "offline", activityDetail: "Stopped" });
   assert.deepEqual(
     orchestrator.sentToMachine.map((msg) => msg.type),
     ["agent:stop", "agent:stop"],
@@ -9181,7 +9241,7 @@ test("ready reconciliation does not resurrect an agent while a session reset is 
   } as MachineToServerMessage);
 
   assert.equal((orchestrator as any).agentStateCache.get("agent-1").status, "inactive");
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), { activity: "offline", activityDetail: "Stopped" });
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), { activity: "offline", activityDetail: "Stopped" });
   assert.deepEqual(
     orchestrator.sentToMachine.map((msg) => msg.type),
     ["agent:stop", "agent:stop"],
@@ -9201,7 +9261,7 @@ test("ready reconcile apply force-stop keeps the persisted status and emits offl
   await orchestrator.callApplyReadyReconcileAction("machine-1", "agent-1", "force-stop-and-stay-offline");
 
   assert.equal((orchestrator as any).agentStateCache.get("agent-1").status, "stopped");
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), { activity: "offline", activityDetail: "Stopped" });
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), { activity: "offline", activityDetail: "Stopped" });
   assert.deepEqual(
     orchestrator.sentToMachine.map((msg) => msg.type),
     ["agent:stop", "agent:stop"],
@@ -9218,7 +9278,7 @@ test("ready reconcile apply mark-active persists active and emits online", async
   await orchestrator.callApplyReadyReconcileAction("machine-1", "agent-1", "mark-active-online");
 
   assert.equal((orchestrator as any).agentStateCache.get("agent-1").status, "active");
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), { activity: "online", activityDetail: "" });
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), { activity: "online", activityDetail: "" });
   assert.equal(orchestrator.sentToMachine.length, 0);
   orchestrator.shutdown();
 });
@@ -9233,7 +9293,7 @@ test("ready reconcile apply mark-wakeable-not-running preserves active and does 
   const cached = (orchestrator as any).agentStateCache.get("agent-1");
   assert.equal(cached.status, "active");
   assert.equal(cached.runtimeState, "not_running");
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), { activity: "online", activityDetail: "" });
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), { activity: "online", activityDetail: "" });
   assert.equal(orchestrator.sentToMachine.length, 0);
   orchestrator.shutdown();
 });
@@ -9271,6 +9331,10 @@ test("slock CLI producer action is durably persisted and emitted as a slock acti
     detailKind: "none",
     timestamp: clock.now(),
     serverSeq: 1,
+    // First observation: both stamps start at this frame's instant.
+    activitySinceMs: clock.now(),
+    presence: "idle",
+    presenceSinceMs: clock.now(),
   });
 
   orchestrator.shutdown();
@@ -9320,6 +9384,10 @@ test("explicit slock action activity persists status entry for reload recovery",
     detailKind: "slock_action",
     timestamp: clock.now(),
     serverSeq: 1,
+    // First observation: both stamps start at this frame's instant.
+    activitySinceMs: clock.now(),
+    presence: "working",
+    presenceSinceMs: clock.now(),
   });
 
   orchestrator.shutdown();
@@ -9346,6 +9414,9 @@ test("freshness held current terminalizes at daemon inactive boundary", async ()
     detail: "Send held by freshness check",
     detailKind: "slock_action",
     updatedAt: clock.now(),
+    activitySinceMs: clock.now(),
+    presence: "working",
+    presenceSinceMs: clock.now(),
   });
 
   clock.advance(1_000);
@@ -9362,6 +9433,11 @@ test("freshness held current terminalizes at daemon inactive boundary", async ()
     detail: "",
     detailKind: "idle",
     updatedAt: clock.now(),
+    // The inactive lifecycle status projects an offline presence even though
+    // the raw activity reads online.
+    activitySinceMs: clock.now(),
+    presence: "offline",
+    presenceSinceMs: clock.now(),
   });
   const terminalEntry: TrajectoryEntry = {
     kind: "status",
@@ -9385,6 +9461,10 @@ test("freshness held current terminalizes at daemon inactive boundary", async ()
     timestamp: clock.now(),
     producerFactId: "lifecycle_plan:freshness_hold_terminalized",
     serverSeq: 2,
+    // Terminalized while inactive: the offline presence transitions here.
+    activitySinceMs: clock.now(),
+    presence: "offline",
+    presenceSinceMs: clock.now(),
   });
   const terminalizeEvent = sink.getTrace(traceId)
     .flatMap((span) => span.events)
@@ -9428,6 +9508,10 @@ test("freshness held current terminalization is admitted when kernel arbitration
       detailKind: "idle",
       observedAtMs: 46_000,
       updatedAt: clock.now(),
+      activitySinceMs: clock.now(),
+      // The inactive lifecycle status projects an offline presence.
+      presence: "offline",
+      presenceSinceMs: clock.now(),
     });
     assert.equal(orchestrator.emittedActivityPayloads.at(-1)?.activity, "online");
     assert.equal(orchestrator.emittedActivityPayloads.at(-1)?.detailKind, "idle");
@@ -9476,6 +9560,9 @@ test("freshness held current is not terminalized by same-launch active status", 
     detail: "Send held by freshness check",
     detailKind: "slock_action",
     updatedAt: 46_000,
+    activitySinceMs: 46_000,
+    presence: "working",
+    presenceSinceMs: 46_000,
   });
   assert.equal(orchestrator.emittedActivityPayloads.length, emittedBeforeStatus);
 
@@ -9551,6 +9638,10 @@ test("ready reconcile after machine disconnect durably records online recovery",
     detailKind: "none",
     timestamp: 15_000,
     serverSeq: 2,
+    // First online observation on this replica: stamps start here.
+    activitySinceMs: 15_000,
+    presence: "idle",
+    presenceSinceMs: 15_000,
   });
   orchestrator.shutdown();
 });
@@ -9587,8 +9678,8 @@ test("daemon activity after reconnect updates agents that ready reconcile kept w
   assert.equal((orchestrator as any).agentStateCache.get("agent-1").runtimeState, "not_running");
   assert.equal((orchestrator as any).agentStateCache.get("agent-2").status, "active");
   assert.equal((orchestrator as any).agentStateCache.get("agent-2").runtimeState, "not_running");
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), { activity: "online", activityDetail: "" });
-  assert.deepEqual(await orchestrator.getActivity("agent-2"), { activity: "online", activityDetail: "" });
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), { activity: "online", activityDetail: "" });
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-2")), { activity: "online", activityDetail: "" });
 
   clock.advance(5_000);
   await orchestrator.handleMachineMessage("machine-1", {
@@ -9611,8 +9702,8 @@ test("daemon activity after reconnect updates agents that ready reconcile kept w
   assert.equal((orchestrator as any).agentStateCache.get("agent-1").runtimeState, "thinking");
   assert.equal((orchestrator as any).agentStateCache.get("agent-2").status, "active");
   assert.equal((orchestrator as any).agentStateCache.get("agent-2").runtimeState, "working");
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), { activity: "thinking", activityDetail: "Continuing work" });
-  assert.deepEqual(await orchestrator.getActivity("agent-2"), { activity: "working", activityDetail: "Running tool" });
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), { activity: "thinking", activityDetail: "Continuing work" });
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-2")), { activity: "working", activityDetail: "Running tool" });
   assert.deepEqual(await orchestrator.listRecentActivityLog("agent-1"), [
     { timestamp: 12_000, entry: { kind: "status", activity: "offline", activityKind: "offline", detail: "Machine disconnected", detailKind: "machine_disconnected" } },
     { timestamp: 15_000, entry: { kind: "status", activity: "online", activityKind: "online", detail: "", detailKind: "none" } },
@@ -9653,7 +9744,7 @@ test("ready reconcile repeated missing-agent projections do not create offline a
   } as MachineToServerMessage);
 
   assert.deepEqual(await orchestrator.listRecentActivityLog("agent-1"), []);
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), { activity: "online", activityDetail: "" });
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), { activity: "online", activityDetail: "" });
 
   const activityLogProjections = lifecycleProjectionAttrs(sink, traceId)
     .filter((attrs) => attrs.projection_kind === "activity_log" && attrs.label_kind === "ready_wakeable_not_running");
@@ -9714,7 +9805,7 @@ test("machine shutdown intent projects active agents as stopped control intent",
 
   assert.equal((orchestrator as any).agentStateCache.get("agent-1").status, "active");
   assert.equal((orchestrator as any).agentStateCache.get("agent-1").runtimeState, "not_running");
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), { activity: "offline", activityDetail: "Computer stopped" });
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), { activity: "offline", activityDetail: "Computer stopped" });
   assert.deepEqual(await orchestrator.listRecentActivityLog("agent-1"), [
     { timestamp: 12_000, entry: { kind: "status", activity: "offline", activityKind: "offline", detail: "Computer stopped", detailKind: "stopped" } },
   ]);
@@ -9759,7 +9850,7 @@ test("ready reconcile does not overwrite fresh busy activity with idle online", 
   const emittedBeforeReady = orchestrator.emittedActivityPayloads.length;
   await orchestrator.callApplyReadyReconcileAction("machine-1", "agent-1", "mark-active-online");
 
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), {
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), {
     activity: "working",
     activityDetail: "Editing file…",
   });
@@ -9804,7 +9895,7 @@ test("ready reconcile clears stale launch guard so resumed daemon activity is ac
       ? { ...entry, activityKind: entry.activity }
       : entry,
   })));
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), {
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), {
     activity: "working",
     activityDetail: "Message received",
   });
@@ -9886,7 +9977,7 @@ test("activity ingestion trace records accepted activity log and read-model upda
     span.events.find((event) => event.name === "activity.log.persist_scheduled")?.attrs?.entryCount,
     1,
   );
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), {
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), {
     activity: "working",
     activityDetail: "Message received",
   });
@@ -9954,7 +10045,7 @@ test("ready reconcile apply stay-offline preserves non-active status without sen
   await orchestrator.callApplyReadyReconcileAction("machine-1", "agent-1", "stay-offline");
 
   assert.equal((orchestrator as any).agentStateCache.get("agent-1").status, "inactive");
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), { activity: "offline", activityDetail: "Runtime interrupted" });
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), { activity: "offline", activityDetail: "Runtime interrupted" });
   assert.equal(orchestrator.sentToMachine.length, 0);
   orchestrator.shutdown();
 });
@@ -9969,7 +10060,7 @@ test("ready reconcile marks missing active agents wakeable without eager startup
   const cached = (orchestrator as any).agentStateCache.get("agent-1");
   assert.equal(cached.status, "active");
   assert.equal(cached.runtimeState, "not_running");
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), { activity: "online", activityDetail: "" });
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), { activity: "online", activityDetail: "" });
   assert.equal(orchestrator.sentToMachine.length, 0);
   orchestrator.shutdown();
 });
@@ -9993,8 +10084,8 @@ test("ready reconciliation does not eager-start active agents that are missing f
   assert.equal((orchestrator as any).agentStateCache.get("agent-1").runtimeState, "not_running");
   assert.equal((orchestrator as any).agentStateCache.get("agent-2").status, "active");
   assert.equal((orchestrator as any).agentStateCache.get("agent-2").runtimeState, "not_running");
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), { activity: "online", activityDetail: "" });
-  assert.deepEqual(await orchestrator.getActivity("agent-2"), { activity: "online", activityDetail: "" });
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), { activity: "online", activityDetail: "" });
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-2")), { activity: "online", activityDetail: "" });
   assert.equal(orchestrator.sentToMachine.length, 0);
   const readySpan = sink.getTrace(traceId).find((span) => span.name === "server.machine.ready.reconcile");
   assert.ok(readySpan);
@@ -10124,7 +10215,7 @@ test("ready reconciliation fails closed for an invalid persisted status when the
   } as MachineToServerMessage);
 
   assert.equal((orchestrator as any).agentStateCache.get("agent-1").status, "inactive");
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), { activity: "offline", activityDetail: "Stopped" });
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), { activity: "offline", activityDetail: "Stopped" });
   assert.deepEqual(orchestrator.sentToMachine.map((msg) => msg.type), ["agent:stop"]);
   orchestrator.shutdown();
 });
@@ -10143,7 +10234,7 @@ test("ready reconciliation fails closed for an invalid persisted status when the
   } as MachineToServerMessage);
 
   assert.equal((orchestrator as any).agentStateCache.get("agent-1").status, "inactive");
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), { activity: "offline", activityDetail: "Runtime interrupted" });
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), { activity: "offline", activityDetail: "Runtime interrupted" });
   assert.equal(orchestrator.sentToMachine.length, 0);
   orchestrator.shutdown();
 });
@@ -10197,7 +10288,7 @@ test("late agent activity does not overwrite visible activity after a manual sto
   seedMachineConnection(orchestrator, "machine-1", makeFakeWs());
 
   await orchestrator.stopAgent("agent-1");
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), { activity: "offline", activityDetail: "Stopped" });
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), { activity: "offline", activityDetail: "Stopped" });
 
   await orchestrator.handleMachineMessage("machine-1", {
     type: "agent:activity",
@@ -10207,7 +10298,7 @@ test("late agent activity does not overwrite visible activity after a manual sto
     entries: [],
   } as MachineToServerMessage);
 
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), { activity: "offline", activityDetail: "Stopped" });
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), { activity: "offline", activityDetail: "Stopped" });
   orchestrator.shutdown();
 });
 
@@ -10219,7 +10310,7 @@ test("late agent activity does not overwrite visible activity during a session r
   const resetPromise = orchestrator.resetAgent("agent-1", "session");
   await flushMicrotasks();
   assert.equal(orchestrator.inactivePersistEntered, true);
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), { activity: "offline", activityDetail: "" });
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), { activity: "offline", activityDetail: "" });
 
   await orchestrator.handleMachineMessage("machine-1", {
     type: "agent:activity",
@@ -10229,7 +10320,7 @@ test("late agent activity does not overwrite visible activity during a session r
     entries: [],
   } as MachineToServerMessage);
 
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), { activity: "offline", activityDetail: "" });
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), { activity: "offline", activityDetail: "" });
   orchestrator.inactivePersistGate.resolve();
   await resetPromise;
   orchestrator.shutdown();
@@ -10967,15 +11058,15 @@ test("heartbeat tick pings at 30s and times out only after the 60s threshold is 
 
   clock.advance(30_000);
   assert.equal(ws.sent.length, 1);
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), { activity: "online", activityDetail: "" });
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), { activity: "online", activityDetail: "" });
 
   clock.advance(30_000);
   assert.equal(ws.terminated, 0);
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), { activity: "online", activityDetail: "" });
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), { activity: "online", activityDetail: "" });
 
   clock.advance(30_000);
   assert.equal(ws.terminated, 1);
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), { activity: "offline", activityDetail: "" });
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), { activity: "offline", activityDetail: "" });
 
   orchestrator.shutdown();
 });
@@ -10996,11 +11087,11 @@ test("pong before the timeout threshold resets the server-side heartbeat deadlin
 
   clock.advance(31_000);
   assert.equal(ws.terminated, 0);
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), { activity: "online", activityDetail: "" });
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), { activity: "online", activityDetail: "" });
 
   clock.advance(30_000);
   assert.equal(ws.terminated, 1);
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), { activity: "offline", activityDetail: "" });
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), { activity: "offline", activityDetail: "" });
 
   orchestrator.shutdown();
 });
@@ -11033,7 +11124,7 @@ test("accepted non-pong daemon ingress keeps heartbeat projection live when pong
   clock.advance(31_000);
   assert.equal(ws.terminated, 0);
   assert.equal((orchestrator as any).machineConnections.has("machine-1"), true);
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), { activity: "working", activityDetail: "Running tests" });
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), { activity: "working", activityDetail: "Running tests" });
 
   clock.advance(30_001);
   await new Promise((resolve) => setImmediate(resolve));
@@ -11062,7 +11153,7 @@ test("stale heartbeat timeout from an old connection does not disconnect the rep
   clock.advance(61_000);
 
   assert.equal(((orchestrator as any).machineConnections.get("machine-1")?.ws), newWs);
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), { activity: "online", activityDetail: "" });
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), { activity: "online", activityDetail: "" });
 
   orchestrator.shutdown();
 });
@@ -11085,7 +11176,7 @@ test("buggy stale heartbeat timeout semantics would disconnect the replacement c
   clock.advance(61_000);
 
   assert.equal((orchestrator as any).machineConnections.has("machine-1"), false);
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), { activity: "offline", activityDetail: "" });
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), { activity: "offline", activityDetail: "" });
 
   orchestrator.shutdown();
 });
@@ -11268,7 +11359,7 @@ test("agent session resolves optimistic starting activity back to online", async
   seedMachineConnection(orchestrator, "machine-1", makeFakeWs());
 
   await orchestrator.startAgent("agent-1");
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), { activity: "working", activityDetail: "Starting\u2026" });
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), { activity: "working", activityDetail: "Starting\u2026" });
 
   const launchId = orchestrator.startMessages.at(-1)?.launchId;
   assert.ok(launchId);
@@ -11280,7 +11371,7 @@ test("agent session resolves optimistic starting activity back to online", async
     launchId,
   });
 
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), { activity: "online", activityDetail: "" });
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), { activity: "online", activityDetail: "" });
 
   orchestrator.shutdown();
 });
@@ -11290,7 +11381,7 @@ test("guarded startup session resolves starting even while a reset window is clo
   seedMachineConnection(orchestrator, "machine-1", makeFakeWs());
 
   await orchestrator.startAgent("agent-1");
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), { activity: "working", activityDetail: "Starting\u2026" });
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), { activity: "working", activityDetail: "Starting\u2026" });
 
   const launchId = orchestrator.startMessages.at(-1)?.launchId;
   assert.ok(launchId);
@@ -11303,7 +11394,7 @@ test("guarded startup session resolves starting even while a reset window is clo
     launchId,
   });
 
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), { activity: "online", activityDetail: "" });
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), { activity: "online", activityDetail: "" });
 
   orchestrator.shutdown();
 });
@@ -11313,7 +11404,7 @@ test("agent status active also resolves optimistic starting activity back to onl
   seedMachineConnection(orchestrator, "machine-1", makeFakeWs());
 
   await orchestrator.startAgent("agent-1");
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), { activity: "working", activityDetail: "Starting\u2026" });
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), { activity: "working", activityDetail: "Starting\u2026" });
 
   const launchId = orchestrator.startMessages.at(-1)?.launchId;
   assert.ok(launchId);
@@ -11325,7 +11416,7 @@ test("agent status active also resolves optimistic starting activity back to onl
     launchId,
   });
 
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), { activity: "online", activityDetail: "" });
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), { activity: "online", activityDetail: "" });
 
   orchestrator.shutdown();
 });
@@ -11352,7 +11443,7 @@ test("startup confirmation does not overwrite a real post-start working activity
     launchId,
   });
 
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), { activity: "working", activityDetail: "Compiling prompt" });
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), { activity: "working", activityDetail: "Compiling prompt" });
 
   orchestrator.shutdown();
 });
@@ -11809,7 +11900,7 @@ test("broadcastReadyOnline does not overwrite persisted runtime error state", as
   span.end("ok");
   await flushMicrotasks();
 
-  assert.deepEqual(await orchestrator.getActivity("agent-1"), {
+  assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), {
     activity: "error",
     activityDetail: "Built-in provider authentication failed",
   });
@@ -12370,6 +12461,8 @@ test("delivery ack turn-active overlay resolves Starting before first daemon run
     detail: "Starting…",
     detailKind: "starting",
     updatedAt: clock.now() - 1_000,
+    // Mid-session snapshot: presence was already projected before the ack.
+    presence: "working",
   });
   orchestrator.deliverToLocalInbox("agent-1", makeAgentMessage("turn active", 42));
 
@@ -12425,6 +12518,8 @@ test("ack, daemon entry, probe, heartbeat, and stale repair preserve one durable
     detail: "Starting…",
     detailKind: "starting",
     updatedAt: clock.now() - 1_000,
+    // Mid-session snapshot: presence was already projected before the ack.
+    presence: "working",
   });
   orchestrator.deliverToLocalInbox("agent-1", makeAgentMessage("one durable fact", 42));
 
@@ -16014,6 +16109,10 @@ test("heartbeat supersedes a pending non-durable debounce without losing the dur
     producerFactId: "daemon_activity:agent-1:L-1:3",
     isHeartbeat: true,
     isRefreshOnly: true,
+    // No value change on this heartbeat: the 10_000 stamps carry over.
+    activitySinceMs: 10_000,
+    presence: "working",
+    presenceSinceMs: 10_000,
   });
 
   orchestrator.shutdown();
@@ -16494,6 +16593,8 @@ test("gamma-2 starting_resolve shadow: the resolve-race stomp carries a refusing
     detail: "Starting…",
     detailKind: "starting",
     updatedAt: clock.now() - 1_000,
+    // Mid-session snapshot: presence was already projected before the ack.
+    presence: "working",
   });
 
   (orchestrator as any).maybeResolveStartingActivity("agent-1");
@@ -16992,7 +17093,7 @@ test("getActivity returns offline/Stopped for a non-local agent when Redis says 
 
   try {
     const activity = await orchestrator.getActivity("agent-1");
-    assert.deepEqual(activity, { activity: "offline", activityDetail: "Stopped" });
+    assert.deepEqual(withoutPresenceStamps(activity), { activity: "offline", activityDetail: "Stopped" });
   } finally {
     orchestrator.shutdown();
   }
@@ -17045,7 +17146,7 @@ test("getActivity read-through refreshes non-local stale stopped cache after res
 
   try {
     const activity = await orchestrator.getActivity("agent-1");
-    assert.deepEqual(activity, { activity: "online", activityDetail: "" });
+    assert.deepEqual(withoutPresenceStamps(activity), { activity: "online", activityDetail: "" });
     assert.equal((orchestrator as any).agentStateCache.get("agent-1")?.status, "active");
   } finally {
     orchestrator.shutdown();
@@ -17095,7 +17196,7 @@ test("getActivity preserves crash detail after stale stopped cache is refreshed 
   });
 
   try {
-    assert.deepEqual(await orchestrator.getActivity("agent-1"), { activity: "online", activityDetail: "" });
+    assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), { activity: "online", activityDetail: "" });
     assert.equal((orchestrator as any).agentStateCache.get("agent-1")?.status, "active");
 
     dbStatus = "stopped";
@@ -17107,7 +17208,7 @@ test("getActivity preserves crash detail after stale stopped cache is refreshed 
       updatedAt: clock.now(),
     });
 
-    assert.deepEqual(await orchestrator.getActivity("agent-1"), {
+    assert.deepEqual(withoutPresenceStamps(await orchestrator.getActivity("agent-1")), {
       activity: "offline",
       activityDetail: "Crashed(SIGKILL)",
     });

@@ -52,6 +52,7 @@ import {
   type AgentActivity,
   type AgentActivityDetailKind,
   type AgentActivityKind,
+  type AgentPresence,
   type AgentRuntimeErrorState,
   type TraceContext,
   type Tracer,
@@ -69,6 +70,7 @@ import {
   normalizeComputerHostKind,
   AGENT_LIFECYCLE_SOCKET_EVENT,
   type AgentLifecycleSocketPayload,
+  derivePresence,
 } from "@botiverse/raft-shared";
 import {
   appConfigTraceAttrs,
@@ -107,6 +109,7 @@ import {
   type EvaluateComputerBroadcastPolicyInput,
 } from "./computerBroadcastPolicyService.js";
 import type { PersistedAgentActivityHint } from "./agentActivityLogService.js";
+import { recoverAgentPresenceAnchor } from "./agentActivityLogService.js";
 import * as reminderService from "../apps/reminder/service.js";
 import * as wikiService from "./wikiService.js";
 import { WIKI_AGENT_WORKSPACE_PACK } from "../generated/wikiAgentWorkspacePack.js";
@@ -758,6 +761,16 @@ type ActivitySnapshot = {
   detailKind: AgentActivityDetailKind;
   observedAtMs?: number;
   updatedAt: number;
+  /**
+   * Epoch ms of the last raw-activity VALUE change. Heartbeat / refresh frames
+   * reassert the current value and must not reset it. Null = unknown (never
+   * fabricate from the write time).
+   */
+  activitySinceMs?: number | null;
+  /** Presence projected from this snapshot's facts (see derivePresence). */
+  presence?: AgentPresence | null;
+  /** Epoch ms of the last presence VALUE change; null = unknown. */
+  presenceSinceMs?: number | null;
 };
 
 type ActivityClockSnapshot = {
@@ -768,6 +781,11 @@ type ActivityClockSnapshot = {
 type VisibleActivity = {
   activity: AgentActivityKind;
   activityDetail: string;
+  /** Epoch ms of the last activity-value change; null = unknown. */
+  activitySinceMs?: number | null;
+  presence?: AgentPresence | null;
+  /** Epoch ms of the last presence-value change; null = unknown. */
+  presenceSinceMs?: number | null;
 };
 
 type MachineReachability = "local" | "remote" | "offline" | "none" | "external-reported";
@@ -844,6 +862,71 @@ export function planActivityBroadcastAction(input: ActivityBroadcastPlanInput): 
   if (input.isProbeResponse) return "probe-refresh";
   if (input.isDeliveryAckTurnActive) return "delivery-ack-refresh";
   return input.shouldPersistStatusOnly ? "persist-and-emit-now" : "debounce-only";
+}
+
+export interface ActivitySinceResetPlanInput {
+  previousActivity: AgentActivityKind | null;
+  previousActivitySinceMs: number | null | undefined;
+  previousPresence: AgentPresence | null;
+  previousPresenceSinceMs: number | null | undefined;
+  nextActivity: AgentActivityKind;
+  nextPresence: AgentPresence;
+  /**
+   * Observation instant of the incoming frame — the daemon's observedAtMs when
+   * it reported one, otherwise the server write clock. A real value change
+   * resets its since to this instant; a reasserting frame (heartbeat, refresh)
+   * keeps the previous since untouched.
+   */
+  resetAtMs: number;
+}
+
+export interface ActivitySinceResetPlan {
+  activityChanged: boolean;
+  presenceChanged: boolean;
+  activitySinceMs: number | null;
+  presenceSinceMs: number | null;
+}
+
+/**
+ * Since-timestamp semantics (mgmt-dashboard task #4): only an actual VALUE
+ * change resets the corresponding since. Heartbeat / probe / delivery-ack
+ * refresh frames reassert current truth and must keep both stamps. Unknown
+ * previous stamps stay null — a reset is the only path to a concrete value.
+ */
+export function planActivitySinceReset(input: ActivitySinceResetPlanInput): ActivitySinceResetPlan {
+  const activityChanged = input.previousActivity !== input.nextActivity;
+  const presenceChanged = input.previousPresence !== input.nextPresence;
+  return {
+    activityChanged,
+    presenceChanged,
+    activitySinceMs: activityChanged ? input.resetAtMs : input.previousActivitySinceMs ?? null,
+    presenceSinceMs: presenceChanged ? input.resetAtMs : input.previousPresenceSinceMs ?? null,
+  };
+}
+
+export interface PresenceAnchorPersistPlanInput {
+  broadcastAction: ActivityBroadcastPlanAction;
+  activityChanged: boolean;
+  presenceChanged: boolean;
+}
+
+/**
+ * A value change that lands on a refresh frame which would otherwise skip
+ * persistence (heartbeat / probe / delivery-ack) must still reach the durable
+ * activity log, or the post-TTL/restart recovery scan cannot reconstruct the
+ * transition. persist-and-emit-now already writes its own row.
+ *
+ * Debounced status-only frames are excluded on purpose: they carry the
+ * non-persistable liveness stream (runtime_progress progress hearts, plain
+ * online pulses, ready-reconcile projections) whose APM 1.6 (6a) contract is
+ * that they NEVER become durable rows. A liveness-originated stretch simply
+ * recovers with unknown (null) since stamps — never a fabricated timestamp.
+ */
+export function planPresenceAnchorPersist(input: PresenceAnchorPersistPlanInput): boolean {
+  if (!input.activityChanged && !input.presenceChanged) return false;
+  if (input.broadcastAction === "persist-and-emit-now") return false;
+  if (input.broadcastAction === "debounce-only") return false;
+  return true;
 }
 
 export interface RuntimeProfileHeartbeatNudgePlanInput {
@@ -938,6 +1021,7 @@ interface AgentActivitySnapshotWriteResult {
   arbitration: ActivityWriteArbitrationTrace;
   nextActivity: AgentActivityKind;
   previousActivity: AgentActivityKind | null;
+  previousPresence: AgentPresence | null;
   snapshot?: ActivitySnapshot;
 }
 
@@ -1078,6 +1162,15 @@ interface ActivityBroadcastApplyContext {
   probeId?: string;
   producerFactId?: string;
   isHeartbeat?: boolean;
+  /**
+   * Presence/since facts from the snapshot this broadcast wrote
+   * (mgmt-dashboard task #4). Threaded to the Socket.IO `agent:activity`
+   * payload so realtime consumers get the same stamps as REST readers.
+   */
+  observedAtMs?: number;
+  activitySinceMs?: number | null;
+  presence?: AgentPresence | null;
+  presenceSinceMs?: number | null;
 }
 
 type ActivityBroadcastArbitrationInput = {
@@ -11883,6 +11976,9 @@ export class AgentOrchestrator extends EventEmitter {
         detail: string;
         detailKind: AgentActivityDetailKind;
         updatedAt: number;
+        activitySinceMs?: number;
+        presence?: AgentPresence;
+        presenceSinceMs?: number;
       } | null | undefined;
       if (agent?.status === "stopped") {
         if (!hostedLocally && this.replicaStateStore.isAvailable()) {
@@ -11894,7 +11990,7 @@ export class AgentOrchestrator extends EventEmitter {
         }
       }
       if (agent?.status === "stopped") {
-        const stopped = this.formatActivity("offline", "Stopped");
+        const stopped = this.projectVisiblePresence(this.formatActivity("offline", "Stopped"), agent);
         span.end("ok", { attrs: { outcome: stopped.activity, source: "stopped-status" } });
         return stopped;
       }
@@ -11904,19 +12000,26 @@ export class AgentOrchestrator extends EventEmitter {
       localMachineId = agent?.machineId ?? null;
       hostedLocally = localMachineId !== null && this.hasMachineLocally(localMachineId);
       if (agent?.status === "stopped") {
-        const stopped = this.formatActivity("offline", "Stopped");
+        const stopped = this.projectVisiblePresence(this.formatActivity("offline", "Stopped"), agent);
         span.end("ok", { attrs: { outcome: stopped.activity, source: "stopped-status-refresh" } });
         return stopped;
       }
       if (runtimeErrorResolution.activity) {
+        // The error projection has no since authority of its own; attach the
+        // in-memory snapshot stamps only when they describe this same error.
+        const withPresence = this.projectVisiblePresence(
+          runtimeErrorResolution.activity,
+          agent,
+          this.agentActivity.get(agentId),
+        );
         span.end("ok", {
           attrs: {
-            outcome: runtimeErrorResolution.activity.activity,
+            outcome: withPresence.activity,
             source: "runtime-error-state",
             runtime_error_authority: runtimeErrorResolution.source ?? "runtime-error-persisted",
           },
         });
-        return runtimeErrorResolution.activity;
+        return withPresence;
       }
 
       const activityCached = this.agentActivity.get(agentId);
@@ -11926,8 +12029,9 @@ export class AgentOrchestrator extends EventEmitter {
       if (activityCached && hostedLocally) {
         const resolved = await this.resolveActivityHint(agentId, agent, activityCached, "local-cache", span);
         if (resolved) {
-          span.end("ok", { attrs: { outcome: resolved.activity, source: "local-cache" } });
-          return resolved;
+          const withSince = this.projectVisiblePresence(resolved, agent, activityCached);
+          span.end("ok", { attrs: { outcome: withSince.activity, source: "local-cache" } });
+          return withSince;
         }
       }
 
@@ -11949,33 +12053,126 @@ export class AgentOrchestrator extends EventEmitter {
             const redisOfflineDetail = redisActivity.detail.trim();
             const hasSpecificRedisOfflineDetail = redisOfflineDetail !== "" && redisOfflineDetail.toLowerCase() !== "stopped";
             if (freshAgent?.status === "stopped" && !hasSpecificRedisOfflineDetail) {
-              const stopped = this.formatActivity("offline", "Stopped");
+              const stopped = this.projectVisiblePresence(this.formatActivity("offline", "Stopped"), agent);
               span.end("ok", { attrs: { outcome: stopped.activity, source: "redis-stopped-refresh" } });
               return stopped;
             }
           }
           const resolved = await this.resolveActivityHint(agentId, agent, redisActivity, "redis", span);
           if (resolved) {
-            span.end("ok", { attrs: { outcome: resolved.activity, source: "redis" } });
-            return resolved;
+            const withSince = this.projectVisiblePresence(resolved, agent, redisActivity);
+            span.end("ok", { attrs: { outcome: withSince.activity, source: "redis" } });
+            return withSince;
           }
         }
       }
 
+      // Neither live source carried since stamps (Redis miss / restart) — try
+      // the durable log once before giving up (mgmt-dashboard task #4).
       const persisted = await this.resolveRecentPersistedActivity(agentId, agent, span);
       if (persisted) {
-        span.end("ok", { attrs: { outcome: persisted.activity, source: "persisted" } });
-        return persisted;
+        const withRecovered = await this.attachRecoveredPresenceSince(agentId, agent, persisted, span, "persisted");
+        span.end("ok", { attrs: { outcome: withRecovered.activity, source: "persisted" } });
+        return withRecovered;
       }
       const derived = await this.resolveDerivedActivity(agent);
-      span.end("ok", { attrs: { outcome: derived.activity, source: "derived" } });
-      return derived;
+      const derivedWithRecovered = await this.attachRecoveredPresenceSince(agentId, agent, derived, span, "derived");
+      span.end("ok", { attrs: { outcome: derivedWithRecovered.activity, source: "derived" } });
+      return derivedWithRecovered;
     } catch (err) {
       span.addEvent("activity.resolve.failed", {
         error_class: err instanceof Error ? err.name : typeof err,
       });
       span.end("error");
       throw err;
+    }
+  }
+
+  /**
+   * Attach the presence projection to a resolved activity and, when the served
+   * value still matches the hint it came from, carry the hint's since stamps.
+   * A mismatch (e.g. a stale-transient normalization rewrote the served value)
+   * means the stamps describe a value the reader is not getting — null them.
+   */
+  private projectVisiblePresence(
+    result: VisibleActivity,
+    agent: CachedAgentState | null,
+    hint?: {
+      activity: AgentActivityKind;
+      activitySinceMs?: number | null;
+      presence?: AgentPresence | null;
+      presenceSinceMs?: number | null;
+    },
+  ): VisibleActivity {
+    // The read-path machine fact is already folded into the served activity
+    // (unreachable machines resolve to an offline activity upstream), so the
+    // projection only needs the lifecycle status here.
+    const presence = derivePresence({ activity: result.activity, lifecycleStatus: agent?.status ?? null });
+    const stampsMatchHint = hint !== undefined && hint.activity === result.activity;
+    return {
+      ...result,
+      presence,
+      activitySinceMs: stampsMatchHint ? hint.activitySinceMs ?? null : null,
+      presenceSinceMs: stampsMatchHint && hint.presence === presence ? hint.presenceSinceMs ?? null : null,
+    };
+  }
+
+  /**
+   * Last-resort since recovery on a Redis / memory miss: rebuild the anchors
+   * from the durable activity log, write them back to the Redis mirror so the
+   * next read skips the scan, and merge only what matches the served value.
+   * When nothing durable exists the stamps stay null — a write-time timestamp
+   * must never masquerade as a recovered transition time.
+   */
+  private async attachRecoveredPresenceSince(
+    agentId: string,
+    agent: CachedAgentState | null,
+    result: VisibleActivity,
+    span: ActiveSpan,
+    source: "persisted" | "derived",
+  ): Promise<VisibleActivity> {
+    const presence = derivePresence({ activity: result.activity, lifecycleStatus: agent?.status ?? null });
+    const unknown: VisibleActivity = {
+      ...result,
+      presence,
+      activitySinceMs: null,
+      presenceSinceMs: null,
+    };
+    try {
+      const recovered = await recoverAgentPresenceAnchor(agentId, (activity) => derivePresence({
+        activity,
+        lifecycleStatus: agent?.status ?? null,
+      }));
+      if (!recovered) return unknown;
+      // Write the recovered anchor back so subsequent reads hit the Redis
+      // mirror instead of rescanning the log (best-effort, no-op without Redis).
+      this.replicaStateStore.setAgentActivity(
+        agentId,
+        recovered.activity,
+        recovered.detail,
+        recovered.detailKind,
+        recovered.activitySinceMs ?? recovered.presenceSinceMs ?? undefined,
+        {
+          activitySinceMs: recovered.activitySinceMs,
+          presence: recovered.presence,
+          presenceSinceMs: recovered.presenceSinceMs,
+        },
+      ).catch(() => {});
+      span.addEvent("activity.since.recovered", {
+        hint_source: source,
+        recovered_activity: recovered.activity,
+        activity_since_present: recovered.activitySinceMs !== null,
+        presence_since_present: recovered.presenceSinceMs !== null,
+      });
+      const stampsMatchActivity = recovered.activity === result.activity;
+      return {
+        ...result,
+        presence,
+        activitySinceMs: stampsMatchActivity ? recovered.activitySinceMs : null,
+        presenceSinceMs: stampsMatchActivity && recovered.presence === presence ? recovered.presenceSinceMs : null,
+      };
+    } catch {
+      return unknown;
     }
   }
 
@@ -12055,6 +12252,31 @@ export class AgentOrchestrator extends EventEmitter {
       ? (entries ?? [])
       : [{ kind: "status", activity: nextActivity, activityKind: nextActivity, detail: nextDetail, detailKind: nextDetailKind }];
 
+    // Since-survival anchor (mgmt-dashboard task #4): a real activity/presence
+    // value change on a refresh frame that skips normal persistence
+    // (heartbeat / probe / delivery-ack) must still land one durable row,
+    // otherwise the post-TTL / post-restart recovery scan cannot reconstruct
+    // the transition time. persist-and-emit-now already writes its own row,
+    // and debounced liveness frames stay non-durable per APM 1.6 (6a).
+    if (planPresenceAnchorPersist({
+      broadcastAction: action,
+      activityChanged: nextActivity !== writeResult.previousActivity,
+      presenceChanged: snapshot.presence !== undefined && snapshot.presence !== writeResult.previousPresence,
+    })) {
+      const anchorAtMs = snapshot.activitySinceMs ?? snapshot.presenceSinceMs ?? now;
+      this.persistActivityEvent(
+        agentId,
+        nextActivity,
+        nextDetail,
+        [{ kind: "status", activity: nextActivity, activityKind: nextActivity, detail: nextDetail, detailKind: nextDetailKind }],
+        new Date(anchorAtMs),
+        // Semantic idempotency key: identifies exactly this transition
+        // (value + anchor instant), so retries dedupe while the next
+        // transition inserts fresh.
+        `presence-anchor:${agentId}:${nextActivity}:${snapshot.presence ?? "unknown"}:${anchorAtMs}`,
+      ).catch(() => {});
+    }
+
     const persistence = this.applyActivityBroadcastAction({
       action,
       agentId,
@@ -12064,6 +12286,12 @@ export class AgentOrchestrator extends EventEmitter {
       now,
       persistedEntries,
       dedupeKey: options.dedupeKey,
+      // Presence/since facts ride along so the Socket.IO payload can carry the
+      // same stamps the snapshot and Redis mirror hold (mgmt-dashboard #4).
+      ...(snapshot.observedAtMs !== undefined ? { observedAtMs: snapshot.observedAtMs } : {}),
+      ...(snapshot.activitySinceMs !== undefined ? { activitySinceMs: snapshot.activitySinceMs } : {}),
+      ...(snapshot.presence !== undefined ? { presence: snapshot.presence } : {}),
+      ...(snapshot.presenceSinceMs !== undefined ? { presenceSinceMs: snapshot.presenceSinceMs } : {}),
       // Pass-through join keys (task #136). Only attached to the
       // persist-and-emit-now path; status-only debounced emits drop
       // them on purpose so the final-state merge doesn't claim a
@@ -12107,6 +12335,7 @@ export class AgentOrchestrator extends EventEmitter {
     const observedAtMsExplicit = options.observedAtMs !== undefined;
     const current = this.agentActivity.get(agentId);
     const previousActivity = current?.activity ?? null;
+    const previousPresence = current?.presence ?? null;
     const arbitration = options.arbitration ?? {
       observationClass: "observed" as const,
       signalSite: "lifecycle_plan" as const,
@@ -12131,6 +12360,7 @@ export class AgentOrchestrator extends EventEmitter {
           verdictAction: arbitrationDecision.verdict?.action ?? "legacy",
         },
         previousActivity,
+        previousPresence,
         nextActivity: current?.activity ?? activity,
       };
     }
@@ -12139,18 +12369,38 @@ export class AgentOrchestrator extends EventEmitter {
     const nextDetail = arbitrationDecision.detail ?? detail;
     const nextDetailKind = arbitrationDecision.detailKind ?? detailKind;
     const nextObservedAtMs = arbitrationDecision.observedAtMs ?? current?.observedAtMs;
+    const nextPresence = this.derivePresenceForAgentActivity(agentId, nextActivity);
+    // A genuine value change stamps the frame's own observation instant (the
+    // daemon's observedAtMs when reported, else the server write clock) — never
+    // the inherited/current observed clock used for staleness.
+    const since = planActivitySinceReset({
+      previousActivity,
+      previousActivitySinceMs: current?.activitySinceMs,
+      previousPresence,
+      previousPresenceSinceMs: current?.presenceSinceMs,
+      nextActivity,
+      nextPresence,
+      resetAtMs: options.observedAtMs ?? now,
+    });
     const snapshot: ActivitySnapshot = {
       activity: nextActivity,
       detail: nextDetail,
       detailKind: nextDetailKind,
       ...(nextObservedAtMs !== undefined ? { observedAtMs: nextObservedAtMs } : {}),
       updatedAt: now,
+      activitySinceMs: since.activitySinceMs,
+      presence: nextPresence,
+      presenceSinceMs: since.presenceSinceMs,
     };
 
     this.agentActivity.set(agentId, snapshot);
 
     // Mirror to Redis for cross-replica consistency (fire-and-forget)
-    this.replicaStateStore.setAgentActivity(agentId, nextActivity, nextDetail, nextDetailKind, nextObservedAtMs).catch(() => {});
+    this.replicaStateStore.setAgentActivity(agentId, nextActivity, nextDetail, nextDetailKind, nextObservedAtMs, {
+      activitySinceMs: since.activitySinceMs,
+      presence: nextPresence,
+      presenceSinceMs: since.presenceSinceMs,
+    }).catch(() => {});
 
     return {
       action: "map-write",
@@ -12160,9 +12410,28 @@ export class AgentOrchestrator extends EventEmitter {
         verdictAction: arbitrationDecision.verdict?.action ?? "legacy",
       },
       previousActivity,
+      previousPresence,
       nextActivity,
       snapshot,
     };
+  }
+
+  /**
+   * Presence projection for the synchronous snapshot-write path. The lifecycle
+   * status comes from the cached agent row; the machine fact is best-effort
+   * sync — a locally connected machine proves "online", everything else stays
+   * unknown so it cannot fabricate an offline presence here.
+   */
+  private derivePresenceForAgentActivity(agentId: string, activity: AgentActivityKind): AgentPresence {
+    const agent = this.agentStateCache.get(agentId);
+    const machineStatus = agent?.machineId && this.hasMachineLocally(agent.machineId)
+      ? "online"
+      : null;
+    return derivePresence({
+      activity,
+      lifecycleStatus: agent?.status ?? null,
+      machineStatus,
+    });
   }
 
   private isAgentActivityKernelArbitrationEnabled(): boolean {
@@ -12319,6 +12588,12 @@ export class AgentOrchestrator extends EventEmitter {
           ...(context.probeId !== undefined ? { probeId: context.probeId } : {}),
           ...(context.producerFactId !== undefined ? { producerFactId: context.producerFactId } : {}),
         },
+        {
+          ...(context.observedAtMs !== undefined ? { observedAtMs: context.observedAtMs } : {}),
+          ...(context.activitySinceMs !== undefined ? { activitySinceMs: context.activitySinceMs } : {}),
+          ...(context.presence !== undefined ? { presence: context.presence } : {}),
+          ...(context.presenceSinceMs !== undefined ? { presenceSinceMs: context.presenceSinceMs } : {}),
+        },
       );
       return persistence;
     }
@@ -12348,6 +12623,12 @@ export class AgentOrchestrator extends EventEmitter {
           ...(context.action === "heartbeat-refresh" ? { isHeartbeat: true } : {}),
           isRefreshOnly: true,
         },
+        {
+          ...(context.observedAtMs !== undefined ? { observedAtMs: context.observedAtMs } : {}),
+          ...(context.activitySinceMs !== undefined ? { activitySinceMs: context.activitySinceMs } : {}),
+          ...(context.presence !== undefined ? { presence: context.presence } : {}),
+          ...(context.presenceSinceMs !== undefined ? { presenceSinceMs: context.presenceSinceMs } : {}),
+        },
       );
       return undefined;
     }
@@ -12360,7 +12641,21 @@ export class AgentOrchestrator extends EventEmitter {
       this.activityDebounceTimers.delete(context.agentId);
       const latest = this.agentActivity.get(context.agentId);
       if (!latest) return;
-      this.emitActivity(context.agentId, latest.activity, latest.detail, latest.detailKind, this.clock.now());
+      this.emitActivity(
+        context.agentId,
+        latest.activity,
+        latest.detail,
+        latest.detailKind,
+        this.clock.now(),
+        undefined,
+        undefined,
+        {
+          ...(latest.observedAtMs !== undefined ? { observedAtMs: latest.observedAtMs } : {}),
+          ...(latest.activitySinceMs !== undefined ? { activitySinceMs: latest.activitySinceMs } : {}),
+          ...(latest.presence !== undefined ? { presence: latest.presence } : {}),
+          ...(latest.presenceSinceMs !== undefined ? { presenceSinceMs: latest.presenceSinceMs } : {}),
+        },
+      );
     }, AgentOrchestrator.ACTIVITY_DEBOUNCE_MS);
 
     this.activityDebounceTimers.set(context.agentId, timer);
@@ -12543,6 +12838,12 @@ export class AgentOrchestrator extends EventEmitter {
       isHeartbeat?: boolean;
       isRefreshOnly?: boolean;
     },
+    since?: {
+      observedAtMs?: number;
+      activitySinceMs?: number | null;
+      presence?: AgentPresence | null;
+      presenceSinceMs?: number | null;
+    },
   ) {
     const agent = await this.getCachedAgent(agentId);
     if (agent) {
@@ -12564,6 +12865,15 @@ export class AgentOrchestrator extends EventEmitter {
         detailKind,
         timestamp,
         serverSeq: nextSeq,
+        // Daemon-observed instant for this frame when reported; additive field
+        // (mgmt-dashboard task #4) so clients can distinguish observation time
+        // from server broadcast time.
+        ...(since?.observedAtMs !== undefined ? { observedAtMs: since.observedAtMs } : {}),
+        // Presence/since stamps (mgmt-dashboard task #4). Null means the true
+        // transition time is unknown — never a fabricated timestamp.
+        ...(since?.activitySinceMs !== undefined ? { activitySinceMs: since.activitySinceMs } : {}),
+        ...(since?.presence !== undefined ? { presence: since.presence } : {}),
+        ...(since?.presenceSinceMs !== undefined ? { presenceSinceMs: since.presenceSinceMs } : {}),
         // Daemon socket-message join keys (task #136). `serverSeq` is the
         // server-side monotonic identity for THIS broadcast; `clientSeq`
         // is the daemon-side monotonic identity for the inbound message
