@@ -20,6 +20,7 @@ import { applyLoopbackNoProxyEnv } from "./loopbackNoProxy.js";
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { logger } from "./logger.js";
+import { createLazyModule } from "./lazyModule.js";
 
 /**
  * The MCP SDK is ~35MB of resident memory and only an agent that actually calls
@@ -33,23 +34,20 @@ type McpSdk = {
   CallToolRequestSchema: typeof import("@modelcontextprotocol/sdk/types.js").CallToolRequestSchema;
   ListToolsRequestSchema: typeof import("@modelcontextprotocol/sdk/types.js").ListToolsRequestSchema;
 };
-let mcpSdkPromise: Promise<McpSdk> | null = null;
-function loadMcpSdk(): Promise<McpSdk> {
-  mcpSdkPromise ??= Promise.all([
+const mcpSdk = createLazyModule<McpSdk>(async () => {
+  const [serverModule, transportModule, typesModule] = await Promise.all([
     import("@modelcontextprotocol/sdk/server/index.js"),
     import("@modelcontextprotocol/sdk/server/streamableHttp.js"),
     import("@modelcontextprotocol/sdk/types.js"),
-  ]).then(([serverModule, transportModule, typesModule]) => ({
+  ]);
+  return {
     Server: serverModule.Server,
     StreamableHTTPServerTransport: transportModule.StreamableHTTPServerTransport,
     CallToolRequestSchema: typesModule.CallToolRequestSchema,
     ListToolsRequestSchema: typesModule.ListToolsRequestSchema,
-  }), (error: unknown) => {
-    mcpSdkPromise = null;
-    throw error;
-  });
-  return mcpSdkPromise;
-}
+  };
+});
+const loadMcpSdk = () => mcpSdk.get();
 
 const HOST = "127.0.0.1";
 const MAX_REQUEST_BYTES = 1024 * 1024;

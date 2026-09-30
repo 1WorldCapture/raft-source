@@ -4,6 +4,7 @@ import { mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
+import { createLazyModule } from "../lazyModule.js";
 import type {
   Session as KimiSession,
   createKimiHarness,
@@ -16,7 +17,7 @@ import type {
 const requireFromHere = createRequire(import.meta.url);
 
 type KimiCodeSdk = typeof import("@botiverse/kimi-code-sdk");
-let kimiCodeSdkPromise: Promise<KimiCodeSdk> | null = null;
+const kimiCodeSdk = createLazyModule<KimiCodeSdk>(() => import("@botiverse/kimi-code-sdk"));
 
 /**
  * The Kimi Code SDK is ~200MB of resident memory once loaded and only
@@ -24,11 +25,7 @@ let kimiCodeSdkPromise: Promise<KimiCodeSdk> | null = null;
  * when the daemon boots. A failed import is not cached: the next launch retries.
  */
 export function loadKimiCodeSdk(): Promise<KimiCodeSdk> {
-  kimiCodeSdkPromise ??= import("@botiverse/kimi-code-sdk").catch((error: unknown) => {
-    kimiCodeSdkPromise = null;
-    throw error;
-  });
-  return kimiCodeSdkPromise;
+  return kimiCodeSdk.get();
 }
 
 /**

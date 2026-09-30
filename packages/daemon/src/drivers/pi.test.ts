@@ -4,7 +4,7 @@ import { createServer, type Server } from "node:http";
 import { createConnection, type AddressInfo, type Socket } from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { onTestFinished, test } from "vitest";
+import { beforeAll, onTestFinished, test } from "vitest";
 import { BasicTracer, BUILTIN_RUNTIME_HOST_PROVIDER_ENV_SCRUB_KEYS, eventsForSpan, MemoryTraceSink, RUNTIME_CONFIG_VERSION } from "@botiverse/raft-shared";
 import fc from "fast-check";
 import {
@@ -42,6 +42,7 @@ import { streamSimple as streamSimpleAnthropicMessages } from "@earendil-works/p
 import { getGlobalDispatcher } from "undici";
 import net from "node:net";
 import { resolveRuntimeSessionRef } from "./runtimeArtifacts.js";
+import { loadPiSdk } from "./piSdk.js";
 import type { ParsedEvent, SpawnContext } from "./types.js";
 
 function makeSpawnContext(
@@ -115,6 +116,12 @@ async function closeServer(server: Server): Promise<void> {
   await closed;
   serverSockets.delete(server);
 }
+
+// The event mapping runs inside a live pi session, which has loaded the SDK
+// (and it throws if it has not); tests that call it directly load it here.
+beforeAll(async () => {
+  await loadPiSdk();
+});
 
 test("closeServer destroys CONNECT-upgraded sockets before awaiting server close", { timeout: 10_000 }, async () => {
   const server = createServer();

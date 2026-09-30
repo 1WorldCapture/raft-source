@@ -1,4 +1,5 @@
 import type { Runtime } from "@botiverse/oar";
+import { createLazyModule } from "../lazyModule.js";
 
 import type { RuntimeAccountUsageProvider, RuntimeAccountUsageSnapshot } from "@botiverse/raft-shared";
 
@@ -16,14 +17,8 @@ const DEFAULT_TIMEOUT_MS = 20_000;
  * needs it, so it is imported on the first read instead of at daemon boot. A
  * failed import is not cached: the next read retries.
  */
-let oarModule: Promise<typeof import("@botiverse/oar")> | null = null;
-function loadOar(): Promise<typeof import("@botiverse/oar")> {
-  oarModule ??= import("@botiverse/oar").catch((error: unknown) => {
-    oarModule = null;
-    throw error;
-  });
-  return oarModule;
-}
+const oarModule = createLazyModule<typeof import("@botiverse/oar")>(() => import("@botiverse/oar"));
+const loadOar = () => oarModule.get();
 
 /** Exported for tests: resolves a provider's OAR runtime, loading OAR on first use. */
 export async function oarRuntimeForProvider(provider: RuntimeAccountUsageProvider): Promise<Runtime> {

@@ -16,3 +16,8 @@ test("loadPiSdk loads the SDK once and exposes it to code that runs inside a pi 
   assert.equal(typeof first.codingAgent.createAgentSessionServices, "function");
   assert.equal(typeof first.ai.isContextOverflow, "function");
 });
+
+test("two launches asking for the pi SDK at once share one load", async () => {
+  const [a, b] = await Promise.all([loadPiSdk(), loadPiSdk()]);
+  assert.equal(a, b);
+});

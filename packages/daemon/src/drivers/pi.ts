@@ -15,7 +15,7 @@ import type {
   Model,
   ModelThinkingLevel,
 } from "@earendil-works/pi-ai";
-import { PI_SDK_VERSION, loadPiSdk, loadedPiSdk, requireLoadedPiSdk } from "./piSdk.js";
+import { PI_SDK_VERSION, loadPiSdk, requireLoadedPiSdk } from "./piSdk.js";
 import {
   buildLaunchPlan,
   BUILTIN_RUNTIME_GATEWAY_PROVIDER_ENV_KEYS,
@@ -892,8 +892,9 @@ function mapPiMessageEndEvent(
     // provider's raw body into Activity. Preserve any bounded usage telemetry,
     // then wait for compaction_end as the authoritative recovery outcome.
     // A pi turn only reaches here through a live pi session, which loaded the
-    // SDK; without it there is nothing that could have produced an overflow.
-    if (loadedPiSdk()?.ai.isContextOverflow(message as Parameters<typeof isContextOverflow>[0])) {
+    // SDK. Require it: a mapping call before the load must fail loudly, not
+    // quietly turn a context overflow into a terminal provider error.
+    if (requireLoadedPiSdk().ai.isContextOverflow(message as Parameters<typeof isContextOverflow>[0])) {
       state.pendingProviderError = null;
       state.providerErrorOwnedByCompaction = true;
       return events;
