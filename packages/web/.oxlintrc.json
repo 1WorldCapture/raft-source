@@ -1,4 +1,5 @@
 {
+  "ignorePatterns": ["src/officePixel/**"],
   // Oxlint config — JSONC supported (// + /* */ + trailing commas).
   // Reads .oxlintrc.json by default. ESLint v8 schema-compatible.
   //

@@ -701,7 +701,9 @@ function listTargetSourceFiles(absTarget) {
     for (const ent of readdirSync(dir, { withFileTypes: true })) {
       const full = join(dir, ent.name);
       if (ent.isDirectory()) {
-        if (ent.name === "node_modules" || ent.name === "dist") continue;
+        // officePixel is the vendored Pixel Agents renderer. Its catalog
+        // labels are not Raft UI copy.
+        if (ent.name === "node_modules" || ent.name === "dist" || ent.name === "officePixel") continue;
         walk(full);
       } else if (ent.isFile() && SOURCE_FILE_RE.test(ent.name)) {
         out.push(full);

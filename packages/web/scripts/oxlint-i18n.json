@@ -1,4 +1,5 @@
 {
+  "ignorePatterns": ["src/officePixel/**"],
   "jsPlugins": [
     { "name": "formatjs", "specifier": "eslint-plugin-formatjs" },
     "./oxlint-plugins/raft-i18n/index.mjs"
