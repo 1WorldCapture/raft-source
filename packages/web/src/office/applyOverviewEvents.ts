@@ -1,6 +1,6 @@
+import { derivePresence } from "@botiverse/raft-shared";
+import type { AgentPresence } from "@botiverse/raft-shared";
 import type { AgentOverview, AgentOverviewAgent } from "./agentOverview";
-import { derivePresence } from "./derivePresence";
-import type { AgentPresence } from "./derivePresence";
 
 export interface ActivityEvent {
   agentId: string;

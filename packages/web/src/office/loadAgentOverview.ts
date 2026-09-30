@@ -3,11 +3,10 @@ import type { AgentOverview } from "./agentOverview";
 import { fakeAgentOverview } from "./fakeAgentOverview";
 
 /**
- * Task #4 owns the real route. Until that PR merges, the office page reads
- * this fixture, which uses the agreed response shape. Flip the flag to call
- * GET /api/servers/:id/agent-overview.
+ * False calls GET /api/servers/:id/agent-overview. The fixture remains for
+ * layout tests and for forcing the preview without a server.
  */
-export const USE_FAKE_AGENT_OVERVIEW = true;
+export const USE_FAKE_AGENT_OVERVIEW = false;
 
 export async function loadAgentOverview(serverId: string): Promise<AgentOverview> {
   if (USE_FAKE_AGENT_OVERVIEW) return fakeAgentOverview();
