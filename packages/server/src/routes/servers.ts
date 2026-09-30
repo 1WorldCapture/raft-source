@@ -15,7 +15,7 @@ import { countAgents, countMachines, countChannels, getHistoryCutoff } from "../
 import type { AgentOrchestrator } from "../services/agentOrchestrator.js";
 import { planMentionRedriveHttpStatus } from "../services/agentOrchestrator.js";
 import { buildMachineReadModel } from "../services/machineReadModel.js";
-import { getMachineStatusSince } from "../services/lifecycleSinceService.js";
+import { getAgentLifecycleSince, getMachineStatusSince } from "../services/lifecycleSinceService.js";
 import {
   getComputerLinkedMachineAttachers,
   getComputerLinkedMachineCreators,
@@ -48,7 +48,7 @@ import {
   type ServerSetupAction,
 } from "../services/serverSetupStateService.js";
 import { handleMachineLocalRouting, sendMachineAffinityUnavailable } from "../machineLocalReplay.js";
-import { asMachineId, COMPOSER_RESOURCE_REFERENCES_FEATURE_FLAG_KEY, COMPUTER_CAPABILITY_SUPERVISOR_MUTATIONS, currentDate, getEffectiveLimits, INVALID_EMAIL_MESSAGE, PUBLIC_SERVER_FEATURE_FLAG_KEY, RUNTIME_ACCOUNT_USAGE_FEATURE_FLAG_KEY, RUNTIME_ACCOUNT_USAGE_PROVIDERS, SERVER_GUEST_FEATURE_FLAG_KEY, SERVER_SYSTEM_NOTIFICATIONS_CONTRACT_VERSION, validateEmailAddress, validateServerSlug, MANAGEABLE_SERVER_ROLES, type ManageableServerRole, type RuntimeAccountUsageProvider, type ServerCapability, type ServerPlan, type ServerRole } from "@botiverse/raft-shared";
+import { asMachineId, buildAgentOverviewResponse, COMPOSER_RESOURCE_REFERENCES_FEATURE_FLAG_KEY, COMPUTER_CAPABILITY_SUPERVISOR_MUTATIONS, currentDate, derivePresence, getEffectiveLimits, INVALID_EMAIL_MESSAGE, PUBLIC_SERVER_FEATURE_FLAG_KEY, RUNTIME_ACCOUNT_USAGE_FEATURE_FLAG_KEY, RUNTIME_ACCOUNT_USAGE_PROVIDERS, SERVER_GUEST_FEATURE_FLAG_KEY, SERVER_SYSTEM_NOTIFICATIONS_CONTRACT_VERSION, validateEmailAddress, validateServerSlug, MANAGEABLE_SERVER_ROLES, type AgentOverviewAgentFact, type ManageableServerRole, type RuntimeAccountUsageProvider, type ServerCapability, type ServerPlan, type ServerRole } from "@botiverse/raft-shared";
 import { canInspectAgentPrivateSurfaces } from "./agents.js";
 import { actorRoleHasServerCapability, getActorServerRoleInServer } from "../lib/actorPermissions.js";
 import { createScopeAttestation } from "../lib/scopeAttestation.js";
@@ -2724,6 +2724,120 @@ serverRouter.get("/:id/machines", async (req, res) => {
     });
   } catch {
     res.status(500).json({ error: "Failed to list machines" });
+  }
+});
+
+/**
+ * Offline presence starts when the agent went offline for any of its current
+ * reasons: the earliest known start among the causes that hold now (lifecycle
+ * not active, machine offline, activity offline). Null when none is known.
+ */
+export function offlinePresenceSince(input: {
+  lifecycleStatus: string;
+  lifecycleStatusSince: number | null;
+  machineStatus: "online" | "offline" | null;
+  machineStatusSince: number | null;
+  activity: string;
+  activitySince: number | null;
+}): number | null {
+  const starts: number[] = [];
+  if (input.lifecycleStatus !== "active" && input.lifecycleStatusSince !== null) starts.push(input.lifecycleStatusSince);
+  if (input.machineStatus === "offline" && input.machineStatusSince !== null) starts.push(input.machineStatusSince);
+  if (input.activity === "offline" && input.activitySince !== null) starts.push(input.activitySince);
+  return starts.length > 0 ? Math.min(...starts) : null;
+}
+
+// Dashboard agent-overview snapshot (mgmt-dashboard task #4): a machine-
+// grouped view of every agent in the server with activity/presence "since"
+// stamps. Same membership gate as the machines list; guests included — the
+// projection carries only status facts, no private surfaces.
+serverRouter.get("/:id/agent-overview", async (req, res) => {
+  try {
+    const member = await serverService.isMember(req.params.id, req.userId!);
+    if (!member) {
+      res.status(404).json({ error: "Server not found" });
+      return;
+    }
+    const agentOrchestrator = req.app.get("agentOrchestrator") as AgentOrchestrator;
+    const [machineRows, agentRows, computerLinkedMachineIds] = await Promise.all([
+      machineService.listMachines(req.params.id, {
+        traceQuery: createTraceDbQueryTracer("agent_overview.machines.loaded"),
+      }),
+      agentService.listAgents(req.params.id, false, {
+        traceQuery: createTraceDbQueryTracer("agent_overview.agents.loaded"),
+      }),
+      getComputerLinkedMachineIds(req.params.id),
+    ]);
+    const machineReadModels = await Promise.all(machineRows.map((machine) => buildMachineReadModel(machine, agentOrchestrator, {
+      isComputer: computerLinkedMachineIds.has(machine.id),
+    })));
+    const machineStatusById = new Map(machineReadModels.map((machine) => [machine.id, machine.status]));
+    // Both "since" sources are batched reads (one DB round-trip each) — never
+    // per-agent or per-machine queries.
+    const [agentFacts, lifecycleSinceByAgent, statusSinceByMachine] = await Promise.all([
+      Promise.all(agentRows.map(async (agent) => {
+        const activity = await agentOrchestrator.getActivity(agent.id);
+        const machineStatus = agent.machineId !== null ? machineStatusById.get(agent.machineId) ?? null : null;
+        const presence = derivePresence({
+          activity: activity.activity,
+          lifecycleStatus: agent.status,
+          machineStatus,
+        });
+        return {
+          id: agent.id,
+          name: agent.name,
+          machineId: agent.machineId,
+          lifecycleStatus: agent.status,
+          activity: activity.activity,
+          activityDetail: activity.activityDetail,
+          activitySince: activity.activitySinceMs ?? null,
+          presence,
+          presenceSince: activity.presence === presence ? activity.presenceSinceMs ?? null : null,
+        };
+      })),
+      getAgentLifecycleSince(req.params.id, agentRows.map((agent) => agent.id)),
+      getMachineStatusSince(req.params.id, machineReadModels.map((machine) => ({
+        id: machine.id,
+        status: machine.status,
+      }))),
+    ]);
+    addTraceEvent("response.ready", {
+      machines_count: machineReadModels.length,
+      agents_count: agentFacts.length,
+      unassigned_agents_count: agentFacts.filter((agent) => agent.machineId === null).length,
+    });
+    res.set("Cache-Control", "private, no-store");
+    res.json(buildAgentOverviewResponse({
+      serverTime: Date.now(),
+      machines: machineReadModels.map((machine) => ({
+        id: machine.id,
+        name: machine.name,
+        isComputer: machine.isComputer,
+        status: machine.status,
+        statusSince: statusSinceByMachine.get(machine.id) ?? null,
+        lastHeartbeat: machine.lastHeartbeat ? machine.lastHeartbeat.toISOString() : null,
+      })),
+      agents: agentFacts.map((agent) => {
+        // Deleted/unknown agents are absent from the map — null stays honest.
+        const lifecycleStatusSince = lifecycleSinceByAgent.get(agent.id) ?? null;
+        return {
+          ...agent,
+          lifecycleStatusSince,
+          presenceSince: agent.presence === "offline"
+            ? offlinePresenceSince({
+              lifecycleStatus: agent.lifecycleStatus,
+              lifecycleStatusSince,
+              machineStatus: agent.machineId !== null ? machineStatusById.get(agent.machineId) ?? null : null,
+              machineStatusSince: agent.machineId !== null ? statusSinceByMachine.get(agent.machineId) ?? null : null,
+              activity: agent.activity,
+              activitySince: agent.activitySince,
+            })
+            : agent.presenceSince,
+        };
+      }),
+    }));
+  } catch {
+    res.status(500).json({ error: "Failed to build agent overview" });
   }
 });
 

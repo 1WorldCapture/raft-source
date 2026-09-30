@@ -1190,13 +1190,18 @@ agentRouter.get("/", async (req, res) => {
     // of 2N queries. See agentService.batchEnrichAgentsWithCreatorProfile.
     const withActivity = await tracePhase(
       () => Promise.all(scopedList.map(async (a) => {
-        const { activity, activityDetail } = await agentOrchestrator.getActivity(a.id, {
+        const { activity, activityDetail, presence, activitySinceMs, presenceSinceMs } = await agentOrchestrator.getActivity(a.id, {
           parent: getCurrentTraceContext(),
         });
         return {
           ...withServerRoleProjection(withAgentProjection(a), roleByAgent.get(a.id) ?? null),
           activity,
           activityDetail,
+          // Presence/since stamps (mgmt-dashboard task #4). Additive fields;
+          // null means the true transition time is unknown.
+          presence: presence ?? null,
+          activitySince: activitySinceMs ?? null,
+          presenceSince: presenceSinceMs ?? null,
           runtimeProfile: runtimeProfileByAgent.get(a.id) ?? null,
         };
       })),

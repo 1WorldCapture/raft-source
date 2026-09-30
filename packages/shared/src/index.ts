@@ -191,6 +191,8 @@ export interface AgentMessage {
 }
 
 export * from "./activityMute.js";
+export * from "./agentPresence.js";
+export * from "./agentOverview.js";
 export * from "./computerHostKind.js";
 export * from "./unreadSummaryEvent.js";
 export * from "./channelPermissions.js";

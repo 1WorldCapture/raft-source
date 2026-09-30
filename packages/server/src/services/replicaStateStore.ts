@@ -22,10 +22,36 @@ import {
 } from "../replicaRouter.js";
 import { isRedisAvailable } from "../redis.js";
 import type { AgentActivityDetailKind, AgentActivityKind } from "@botiverse/raft-shared";
+import type { AgentPresence } from "@botiverse/raft-shared";
 import type { AgentRuntimeErrorState } from "@botiverse/raft-shared";
 import type { MachineConnectTraceContext } from "../tracing/migrationTraceContext.js";
 
 export type { MachineMeta, AgentRuntimeErrorMirror };
+
+/** Presence/since mirror carried alongside the activity hash write. */
+export interface AgentActivitySinceMirror {
+  activitySinceMs?: number | null;
+  presence?: AgentPresence | null;
+  presenceSinceMs?: number | null;
+  /**
+   * The writer does not know the previous value (first frame after a restart
+   * or on a new replica): keep each stored since field when the stored value
+   * equals the one being written, drop it otherwise. The *SinceMs fields of
+   * this mirror are ignored in this mode.
+   */
+  preserveMatching?: boolean;
+}
+
+export interface AgentActivityMirror {
+  activity: AgentActivityKind;
+  detail: string;
+  detailKind: AgentActivityDetailKind;
+  observedAtMs?: number;
+  updatedAt: number;
+  activitySinceMs?: number;
+  presence?: AgentPresence;
+  presenceSinceMs?: number;
+}
 
 export interface ReplicaStateStore {
   isAvailable(): boolean;
@@ -54,14 +80,9 @@ export interface ReplicaStateStore {
     detail: string,
     detailKind: AgentActivityDetailKind,
     observedAtMs?: number,
+    since?: AgentActivitySinceMirror,
   ): Promise<void>;
-  getAgentActivity(agentId: string): Promise<{
-    activity: AgentActivityKind;
-    detail: string;
-    detailKind: AgentActivityDetailKind;
-    observedAtMs?: number;
-    updatedAt: number;
-  } | null>;
+  getAgentActivity(agentId: string): Promise<AgentActivityMirror | null>;
   setAgentRuntimeError(agentId: string, error: AgentRuntimeErrorState | null): Promise<void>;
   getAgentRuntimeError(agentId: string): Promise<AgentRuntimeErrorMirror | null>;
   setMachineMeta(machineId: string, meta: MachineMeta): Promise<void>;
