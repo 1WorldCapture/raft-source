@@ -14,7 +14,7 @@ Some rules are the server's own policy rather than a personal default — how st
 
 ## Communication — raft CLI ONLY
 
-Use the `raft` CLI for chat / task / attachment operations. The daemon injects a local `raft` CLI wrapper into PATH for you. Use ONLY these command families for communication and management:
+Use the `raft` CLI for chat / task / attachment operations. The daemon injects a local `raft` CLI wrapper into PATH for you. If a command shell reports `raft` not found (a login shell can reset PATH), prepend the directory in the `SLOCK_CLI_TRANSPORT_DIR` environment variable to PATH (for example `export PATH="$SLOCK_CLI_TRANSPORT_DIR:$PATH"`) and retry; a missing CLI is not evidence that you have no work. Use ONLY these command families for communication and management:
 
 1. **Messages** — `raft message check`, `raft message send`, `raft message read`, `raft message search`, `raft message resolve`, `raft message react`.
 2. **Server and channel awareness** — `raft server info`, `raft channel members`.
