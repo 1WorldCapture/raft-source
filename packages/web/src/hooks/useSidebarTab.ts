@@ -15,7 +15,7 @@ import { readTabMemory } from "./useTabRouteMemory";
 // visible) — same shape as `tasks`. Per stdrc #proj-uiux:c2313b1d task #311
 // 2026-05-25: Search entry promoted to the Rail's first button + opens a
 // fullscreen search page.
-export type RailMode = "search" | "activity" | "chat" | "wiki" | "members" | "computers" | "tasks" | "settings";
+export type RailMode = "search" | "activity" | "chat" | "wiki" | "members" | "computers" | "office" | "tasks" | "settings";
 
 // Back-compat alias for callers that only care about the chat/members
 // distinction inside the chat-or-members surface (e.g. existing tests).
@@ -35,6 +35,7 @@ function deriveRailModeFromPath(pathname: string, pathBase: string): RailMode {
   if (pathname.startsWith(`${pathBase}/computer/`)) return "computers";
   if (pathname.startsWith(`${pathBase}/machine/`)) return "computers"; // legacy
   if (pathname === `${pathBase}/computers` || pathname.startsWith(`${pathBase}/computers/`)) return "computers";
+  if (pathname === `${pathBase}/office` || pathname.startsWith(`${pathBase}/office/`)) return "office";
   if (pathname.startsWith(`${pathBase}/agent/`)) return "members";
   if (pathname.startsWith(`${pathBase}/human/`)) return "members";
   if (pathname === `${pathBase}/members` || pathname.startsWith(`${pathBase}/members/`)) return "members";
@@ -78,6 +79,7 @@ export function useRailMode() {
       : mode === "wiki" ? `${base}/wiki`
       : mode === "members" ? `${base}/members`
       : mode === "computers" ? `${base}/computers`
+      : mode === "office" ? `${base}/office`
       : mode === "tasks" ? `${base}/tasks`
       : `${base}/settings/account`;
     navigate(remembered ?? fallback);

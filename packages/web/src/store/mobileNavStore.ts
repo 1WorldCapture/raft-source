@@ -46,6 +46,7 @@ export function railModeToMobileTab(mode: RailMode): MobileTabId {
   if (mode === "search") return "chat";
   if (mode === "activity") return "chat";
   if (mode === "wiki") return "chat";
+  if (mode === "office") return "chat";
   if (mode === "computers") return "settings";
   return mode;
 }

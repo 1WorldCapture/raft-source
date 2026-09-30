@@ -175,6 +175,7 @@ const MemberGraphSection = lazy(() => import("../settings/MemberGraphSection"));
 const ReleaseNotesPanel = lazy(() => import("../settings/ReleaseNotesPanel"));
 const ThreadsInbox = lazy(() => import("../thread/ThreadsInbox"));
 const TasksPanel = lazy(() => import("../task/TasksPanel"));
+const OfficePage = lazy(() => import("../../office/OfficePage"));
 const SavedPanel = lazy(() => import("../saved/SavedPanel"));
 const WikiPanel = lazy(() => import("../wiki/WikiPanel"));
 const ProfilePanel = lazy(() => import("../profile/ProfilePanel"));
@@ -700,6 +701,10 @@ function TasksRoute() {
 }
 
 /** Route: /wiki */
+function OfficeRoute() {
+  return <Suspense fallback={<PanelFallback />}><OfficePage /></Suspense>;
+}
+
 function WikiRoute() {
   const serverSlug = useServerStore((s) => s.current?.slug);
   const wikiFeatureFlag = useServerFeatureFlag(WIKI_FEATURE_FLAG_KEY);
@@ -1841,6 +1846,7 @@ export default function MainLayout() {
   const isInboxRoute = isActivityRoute;
   const isContentRoute = isSearchRoute || isInboxRoute;
   const isWikiRoute = path === `${pathBase}/wiki` || path.startsWith(`${pathBase}/wiki/`);
+  const isOfficeRoute = path === `${pathBase}/office` || path.startsWith(`${pathBase}/office/`);
   const searchSlotOpen = useSearchContentStore((s) => !!s.slot);
   const searchSlotKind = useSearchContentStore((s) => s.slot?.kind ?? null);
   const threadOpenForLayout = useThreadStore((s) => !!s.openParentMessageId);
@@ -2022,7 +2028,7 @@ export default function MainLayout() {
   ) => {
     emitWorkspaceGridDragPanel(event.nativeEvent, ref, source);
   }, []);
-  const hideSidebar = isWikiRoute || (workspaceEnabled
+  const hideSidebar = isWikiRoute || isOfficeRoute || (workspaceEnabled
     ? workspaceSidebars.left.collapsed || workspaceSidebars.left.activeItem === null
     : isTasksRoute || (isContentRoute && !searchMasterDetail));
   const isMobileTabRoot = mobileShowSidebarInline || (!isDesktop && isTasksRoute);
@@ -2270,7 +2276,7 @@ export default function MainLayout() {
               className="thread-main-column flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
               data-testid="thread-main-column"
             >
-              {workspaceEnabled && !isWikiRoute ? (
+              {workspaceEnabled && !isWikiRoute && !isOfficeRoute ? (
                 <Suspense fallback={<PanelFallback />}>
                   <WorkspaceGridDemo initialPanel={workspaceInitialPanel} />
                 </Suspense>
@@ -2289,6 +2295,7 @@ export default function MainLayout() {
                   <Route path="computers" element={<ComputersRoute />} />
                   <Route path="search" element={<SearchContentRoute />} />
                   <Route path="wiki" element={<WikiRoute />} />
+                  <Route path="office" element={<OfficeRoute />} />
                   <Route path="settings/:tab?/*" element={<SettingsRoute />} />
                   <Route path="activity" element={<InboxContentRoute />} />
                   {/* Legacy /inbox + /threads → /activity (stdrc renamed the route
@@ -2309,7 +2316,7 @@ export default function MainLayout() {
 
         </div>
 
-        {workspaceEnabled && !isWikiRoute && !workspaceSidebars.right.collapsed && workspaceSidebars.right.activeItem !== null ? (
+        {workspaceEnabled && !isWikiRoute && !isOfficeRoute && !workspaceSidebars.right.collapsed && workspaceSidebars.right.activeItem !== null ? (
           <div
             ref={rightWorkspaceSidebarResize.panelRef}
             className="relative hidden min-w-0 shrink-0 bg-brutal-cream md:block"
@@ -2334,7 +2341,7 @@ export default function MainLayout() {
             </div>
           </div>
         ) : null}
-        {workspaceEnabled && !isWikiRoute ? <LeftRail side="right" hidden={mobileShowSidebarInline} /> : null}
+        {workspaceEnabled && !isWikiRoute && !isOfficeRoute ? <LeftRail side="right" hidden={mobileShowSidebarInline} /> : null}
       </div>
 
       {/* Mobile bottom bars stay in normal flow at the bottom of the root flex
