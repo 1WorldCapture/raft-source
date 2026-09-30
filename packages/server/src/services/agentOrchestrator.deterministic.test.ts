@@ -5099,9 +5099,9 @@ test("trajectory activity events are durably persisted and hydration matches the
     // the server receive time.
     observedAtMs: clock.now(),
     // First observation: both stamps start at this frame's instant (mgmt-dashboard #4).
-    activitySinceMs: clock.now(),
+    activitySinceMs: null,
     presence: "working",
-    presenceSinceMs: clock.now(),
+    presenceSinceMs: null,
   });
   assert.deepEqual(await orchestrator.listRecentActivityLog("agent-1"), entries.map((entry) => ({
     timestamp: clock.now(),
@@ -5155,9 +5155,9 @@ test("accepted agent:activity ingest threads launchId/clientSeq/probeId/producer
     // Server receive time — the frame carried no explicit observedAtMs.
     observedAtMs: clock.now(),
     // First observation: both stamps start at this frame's instant.
-    activitySinceMs: clock.now(),
+    activitySinceMs: null,
     presence: "working",
-    presenceSinceMs: clock.now(),
+    presenceSinceMs: null,
   });
 
   orchestrator.shutdown();
@@ -5365,9 +5365,9 @@ test("Kimi runtime activity skips durable activity log persistence while still s
     // Server receive time — the frame carried no explicit observedAtMs.
     observedAtMs: clock.now(),
     // First observation: both stamps start at this frame's instant.
-    activitySinceMs: clock.now(),
+    activitySinceMs: null,
     presence: "working",
-    presenceSinceMs: clock.now(),
+    presenceSinceMs: null,
   });
 
   orchestrator.shutdown();
@@ -5827,9 +5827,9 @@ test("server-side starting transition without explicit trajectory entries is dur
     timestamp: clock.now(),
     serverSeq: 1,
     // First observation: both stamps start at this frame's instant.
-    activitySinceMs: clock.now(),
+    activitySinceMs: null,
     presence: "working",
-    presenceSinceMs: clock.now(),
+    presenceSinceMs: null,
   });
 
   orchestrator.shutdown();
@@ -6051,9 +6051,9 @@ test("APM 1.6 (6a): working/runtime_progress emits live status but is NOT persis
     detail: "Working",
     detailKind: "runtime_progress",
     updatedAt: clock.now(),
-    activitySinceMs: clock.now(),
+    activitySinceMs: null,
     presence: "working",
-    presenceSinceMs: clock.now(),
+    presenceSinceMs: null,
   });
 
   // NEGATIVE (durable): no durable activity-log row was written for the
@@ -9332,9 +9332,9 @@ test("slock CLI producer action is durably persisted and emitted as a slock acti
     timestamp: clock.now(),
     serverSeq: 1,
     // First observation: both stamps start at this frame's instant.
-    activitySinceMs: clock.now(),
+    activitySinceMs: null,
     presence: "idle",
-    presenceSinceMs: clock.now(),
+    presenceSinceMs: null,
   });
 
   orchestrator.shutdown();
@@ -9385,9 +9385,9 @@ test("explicit slock action activity persists status entry for reload recovery",
     timestamp: clock.now(),
     serverSeq: 1,
     // First observation: both stamps start at this frame's instant.
-    activitySinceMs: clock.now(),
+    activitySinceMs: null,
     presence: "working",
-    presenceSinceMs: clock.now(),
+    presenceSinceMs: null,
   });
 
   orchestrator.shutdown();
@@ -9414,9 +9414,9 @@ test("freshness held current terminalizes at daemon inactive boundary", async ()
     detail: "Send held by freshness check",
     detailKind: "slock_action",
     updatedAt: clock.now(),
-    activitySinceMs: clock.now(),
+    activitySinceMs: null,
     presence: "working",
-    presenceSinceMs: clock.now(),
+    presenceSinceMs: null,
   });
 
   clock.advance(1_000);
@@ -9560,9 +9560,9 @@ test("freshness held current is not terminalized by same-launch active status", 
     detail: "Send held by freshness check",
     detailKind: "slock_action",
     updatedAt: 46_000,
-    activitySinceMs: 46_000,
+    activitySinceMs: null,
     presence: "working",
-    presenceSinceMs: 46_000,
+    presenceSinceMs: null,
   });
   assert.equal(orchestrator.emittedActivityPayloads.length, emittedBeforeStatus);
 
@@ -16110,9 +16110,9 @@ test("heartbeat supersedes a pending non-durable debounce without losing the dur
     isHeartbeat: true,
     isRefreshOnly: true,
     // No value change on this heartbeat: the 10_000 stamps carry over.
-    activitySinceMs: 10_000,
+    activitySinceMs: null,
     presence: "working",
-    presenceSinceMs: 10_000,
+    presenceSinceMs: null,
   });
 
   orchestrator.shutdown();
