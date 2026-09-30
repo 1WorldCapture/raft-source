@@ -86,14 +86,18 @@ test("presence since is kept until presence actually changes", () => {
     }],
     unassignedAgents: [],
   };
-  const same = applyActivityEvent(overview, { agentId: "a1", activity: "thinking", detail: "still at it", timestamp: 800 });
+  const same = applyActivityEvent(overview, { agentId: "a1", activity: "thinking", detail: "still at it", observedAtMs: 800 }, 0);
   assert.equal(same.machines[0].agents[0].presence, "working");
   assert.equal(same.machines[0].agents[0].presenceSince, 50);
   assert.equal(same.machines[0].agents[0].activityDetail, "still at it");
 
-  const idle = applyActivityEvent(overview, { agentId: "a1", activity: "online", timestamp: 900 });
+  const idle = applyActivityEvent(overview, { agentId: "a1", activity: "online", observedAtMs: 800 }, 100);
   assert.equal(idle.machines[0].agents[0].presence, "idle");
   assert.equal(idle.machines[0].agents[0].presenceSince, 900);
+
+  const unknown = applyActivityEvent(overview, { agentId: "a1", activity: "online" }, 0);
+  assert.equal(unknown.machines[0].agents[0].presence, "idle");
+  assert.equal(unknown.machines[0].agents[0].presenceSince, null);
 
   const stopped = applyLifecycleEvent(idle, {
     agentId: "a1",
@@ -109,4 +113,27 @@ test("presence since is kept until presence actually changes", () => {
   assert.equal(offlineMachine.machines[0].status, "offline");
   assert.equal(offlineMachine.machines[0].agents[0].presence, "offline");
   assert.equal(offlineMachine.machines[0].agents[0].presenceSince, 700);
+
+  const noSince = applyMachineStatusEvent(overview, { machineId: "m", status: "offline" });
+  assert.equal(noSince.machines[0].agents[0].presence, "offline");
+  assert.equal(noSince.machines[0].agents[0].presenceSince, null);
+});
+
+test("six machines wrap to two rows of three", () => {
+  const overview = fakeAgentOverview();
+  const machines = ["m1", "m2", "m3", "m4", "m5", "m6"].map((id, index) => ({
+    ...overview.machines[0],
+    id,
+    name: `computer-${index + 1}`,
+    agents: [],
+  }));
+  const scene = buildOfficeScene({ ...overview, machines, unassignedAgents: [] }, FAKE_OVERVIEW_SERVER_TIME, "Unassigned");
+  assert.equal(scene.layout.areas?.length, 6);
+  assert.equal(scene.layout.cols, 1 + 3 * 13);
+  assert.ok(scene.layout.rows > 16);
+  const door = 6 * scene.layout.cols + 13;
+  assert.equal(scene.layout.tiles[door], TileType.FLOOR_1);
+  const secondRowFloor = 16 * scene.layout.cols + 1;
+  assert.equal(scene.layout.tiles[15 * scene.layout.cols + 1], TileType.WALL);
+  assert.equal(scene.layout.tiles[secondRowFloor], TileType.FLOOR_2);
 });

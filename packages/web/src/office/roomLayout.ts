@@ -7,6 +7,8 @@ import type { OfficeLayout } from "../officePixel/office/types.js";
 const INNER_W = 12;
 const BASE_INNER_H = 14;
 const ROOM_STRIDE = INNER_W + 1;
+/** Three rooms across keeps six machines inside the canvas (cols stay under 64). */
+const ROOMS_PER_ROW = 3;
 
 const FLOOR_COLORS = [
   { h: 28, s: 35, b: 8, c: 0 },
@@ -88,8 +90,11 @@ export function buildOfficeScene(
     };
   }
 
-  const rows = 2 + Math.max(...rooms.map((room) => innerHeight(room.agents)));
-  const cols = 1 + rooms.length * ROOM_STRIDE;
+  const innerH = Math.max(...rooms.map((room) => innerHeight(room.agents)));
+  const gridCols = Math.min(ROOMS_PER_ROW, rooms.length);
+  const gridRows = Math.ceil(rooms.length / ROOMS_PER_ROW);
+  const cols = 1 + gridCols * ROOM_STRIDE;
+  const rows = 1 + gridRows * (innerH + 1);
   const tiles: TileType[] = Array.from({ length: cols * rows }, () => TileType.WALL);
   const tileColors: OfficeLayout["tileColors"] = Array.from({ length: cols * rows }, () => null);
   const areaTiles: Array<string | null> = Array.from({ length: cols * rows }, () => null);
@@ -97,11 +102,14 @@ export function buildOfficeScene(
   const placements: OfficePlacement[] = [];
 
   rooms.forEach((room, index) => {
-    const roomMinCol = 1 + index * ROOM_STRIDE;
+    const gridCol = index % ROOMS_PER_ROW;
+    const gridRow = Math.floor(index / ROOMS_PER_ROW);
+    const roomMinCol = 1 + gridCol * ROOM_STRIDE;
     const roomMaxCol = roomMinCol + INNER_W - 1;
+    const roomFloorRow = 1 + gridRow * (innerH + 1);
     const floor = index % 2 === 0 ? TileType.FLOOR_1 : TileType.FLOOR_2;
     const color = FLOOR_COLORS[index % FLOOR_COLORS.length];
-    for (let row = 1; row < rows - 1; row += 1) {
+    for (let row = roomFloorRow; row < roomFloorRow + innerH; row += 1) {
       for (let col = roomMinCol; col <= roomMaxCol; col += 1) {
         const at = row * cols + col;
         tiles[at] = floor;
@@ -109,17 +117,28 @@ export function buildOfficeScene(
         areaTiles[at] = room.label;
       }
     }
-    if (index < rooms.length - 1) {
+    const hasRightNeighbor = gridCol < gridCols - 1 && index + 1 < rooms.length && Math.floor((index + 1) / ROOMS_PER_ROW) === gridRow;
+    if (hasRightNeighbor) {
       const doorCol = roomMaxCol + 1;
-      for (const doorRow of [6, 7]) {
-        if (doorRow >= rows - 1) continue;
+      for (const doorRow of [roomFloorRow + 5, roomFloorRow + 6]) {
+        if (doorRow >= roomFloorRow + innerH) continue;
         const at = doorRow * cols + doorCol;
         tiles[at] = floor;
         tileColors[at] = color;
         areaTiles[at] = room.label;
       }
     }
-    placeAgents(room.agents, roomMinCol, roomMaxCol, nowMs, furniture, placements);
+    const below = index + ROOMS_PER_ROW;
+    if (below < rooms.length) {
+      const wallRow = roomFloorRow + innerH;
+      for (const doorCol of [roomMinCol + 5, roomMinCol + 6]) {
+        const at = wallRow * cols + doorCol;
+        tiles[at] = floor;
+        tileColors[at] = color;
+        areaTiles[at] = room.label;
+      }
+    }
+    placeAgents(room.agents, roomMinCol, roomMaxCol, roomFloorRow, nowMs, furniture, placements);
   });
 
   const structureKey = rooms
@@ -149,6 +168,7 @@ function placeAgents(
   agents: AgentOverviewAgent[],
   roomMinCol: number,
   roomMaxCol: number,
+  roomFloorRow: number,
   nowMs: number,
   furniture: OfficeLayout["furniture"],
   placements: OfficePlacement[],
@@ -161,7 +181,7 @@ function placeAgents(
     const activity = agent.activityDetail?.trim() || agent.activity;
     if (agent.presence === "working") {
       const col = roomMinCol + 2 + (workSlot % 2) * 5;
-      const row = 1 + Math.floor(workSlot / 2) * 5;
+      const row = roomFloorRow + Math.floor(workSlot / 2) * 5;
       const seatId = `chair-${agent.id}`;
       furniture.push(
         { uid: seatId, type: "WOODEN_CHAIR_FRONT", col, row },
@@ -186,7 +206,7 @@ function placeAgents(
     }
     if (agent.presence === "offline") {
       const col = roomMinCol + 1 + (offlineSlot % 3) * 4;
-      const row = 12;
+      const row = roomFloorRow + 11;
       const seatId = `sofa-${agent.id}`;
       furniture.push({ uid: seatId, type: "SOFA_FRONT", col, row });
       placements.push({
@@ -207,7 +227,7 @@ function placeAgents(
       continue;
     }
     const col = roomMinCol + 3 + (idleSlot % 4) * 2;
-    const row = 8;
+    const row = roomFloorRow + 7;
     placements.push({
       agentId: agent.id,
       name: agent.name,

@@ -78,7 +78,11 @@ export default function OfficePage() {
     const update = (recipe: (prev: AgentOverview) => AgentOverview) => {
       setOverview((prev) => (prev ? recipe(prev) : prev));
     };
-    const onActivity = (data: ActivityEvent) => update((prev) => applyActivityEvent(prev, data));
+    const onActivity = (data: ActivityEvent & { timestamp?: number }) => {
+      const observedAtMs = data.observedAtMs ?? data.timestamp;
+      const offset = (serverTimeRef.current ?? 0) - receivedAtRef.current;
+      update((prev) => applyActivityEvent(prev, { ...data, observedAtMs }, offset));
+    };
     const onLifecycle = (data: LifecycleEvent) => {
       noteServerTime(data.serverTime);
       update((prev) => applyLifecycleEvent(prev, data));

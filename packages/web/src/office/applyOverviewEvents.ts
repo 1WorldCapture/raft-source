@@ -1,110 +1,133 @@
-import type { AgentOverview, AgentOverviewAgent, OfficePresence } from "./agentOverview";
+import type { AgentOverview, AgentOverviewAgent } from "./agentOverview";
+import { derivePresence } from "./derivePresence";
+import type { AgentPresence } from "./derivePresence";
 
 export interface ActivityEvent {
   agentId: string;
   activity: string;
   detail?: string;
-  timestamp?: number;
+  /** Daemon clock (ms epoch). Calibrate with the server offset. Absent → unknown duration. */
+  observedAtMs?: number | null;
 }
 
 export interface LifecycleEvent {
   agentId: string;
   lifecycleStatus: string;
-  since: number;
+  /** Server clock (ms epoch) when this lifecycle began. */
+  since?: number | null;
   serverTime: number;
 }
 
 export interface MachineStatusEvent {
   machineId: string;
   status: "online" | "offline";
+  /** Server clock (ms epoch). Absent → unknown duration. */
   since?: number | null;
 }
 
-function presenceFromActivity(activity: string): OfficePresence | null {
-  if (activity === "thinking" || activity === "working") return "working";
-  if (activity === "online" || activity === "error") return "idle";
-  if (activity === "offline") return "offline";
-  return null;
+function finiteMs(value: number | null | undefined): number | null {
+  if (value == null || !Number.isFinite(value)) return null;
+  return value;
 }
 
-export function derivePresence(
-  agent: Pick<AgentOverviewAgent, "activity" | "lifecycleStatus" | "presence">,
-  machineStatus: "online" | "offline",
-): OfficePresence {
-  if (machineStatus === "offline") return "offline";
-  if (agent.lifecycleStatus !== "active") return "offline";
-  return presenceFromActivity(agent.activity) ?? agent.presence;
+/** Daemon `Date.now()` shifted onto the server clock. Not the browser's current time. */
+export function calibrateObservedAt(observedAtMs: number, clockOffsetMs: number): number {
+  return observedAtMs + clockOffsetMs;
 }
 
 function withPresence(
   agent: AgentOverviewAgent,
-  next: OfficePresence,
+  next: AgentPresence,
   since: number | null,
 ): AgentOverviewAgent {
   if (next === agent.presence) return agent;
   return { ...agent, presence: next, presenceSince: since };
 }
 
-function mapAgents(
+function project(
+  agent: AgentOverviewAgent,
+  machineStatus: "online" | "offline",
+  since: number | null,
+): AgentOverviewAgent {
+  const next = derivePresence({
+    activity: agent.activity,
+    lifecycleStatus: agent.lifecycleStatus,
+    machineStatus,
+  });
+  return withPresence(agent, next, since);
+}
+
+export function applyActivityEvent(
   overview: AgentOverview,
-  visit: (agent: AgentOverviewAgent, machineStatus: "online" | "offline") => AgentOverviewAgent,
+  event: ActivityEvent,
+  clockOffsetMs: number,
 ): AgentOverview {
+  const observed = finiteMs(event.observedAtMs);
+  const since = observed == null ? null : calibrateObservedAt(observed, clockOffsetMs);
   return {
     ...overview,
     machines: overview.machines.map((machine) => ({
       ...machine,
-      agents: machine.agents.map((agent) => visit(agent, machine.status)),
+      agents: machine.agents.map((agent) => {
+        if (agent.id !== event.agentId) return agent;
+        const updated: AgentOverviewAgent = {
+          ...agent,
+          activity: event.activity,
+          activityDetail: event.detail ?? agent.activityDetail,
+        };
+        return project(updated, machine.status, since);
+      }),
     })),
-    unassignedAgents: overview.unassignedAgents.map((agent) => visit(agent, "online")),
-  };
-}
-
-export function applyActivityEvent(overview: AgentOverview, event: ActivityEvent): AgentOverview {
-  return mapAgents(overview, (agent, machineStatus) => {
-    if (agent.id !== event.agentId) return agent;
-    const updated: AgentOverviewAgent = {
-      ...agent,
-      activity: event.activity,
-      activityDetail: event.detail ?? agent.activityDetail,
-    };
-    const next = derivePresence(updated, machineStatus);
-    const since = next === agent.presence ? agent.presenceSince : (event.timestamp ?? overview.serverTime);
-    return withPresence(updated, next, since);
-  });
-}
-
-export function applyLifecycleEvent(overview: AgentOverview, event: LifecycleEvent): AgentOverview {
-  const nextOverview = mapAgents(
-    { ...overview, serverTime: event.serverTime },
-    (agent, machineStatus) => {
+    unassignedAgents: overview.unassignedAgents.map((agent) => {
       if (agent.id !== event.agentId) return agent;
       const updated: AgentOverviewAgent = {
         ...agent,
-        lifecycleStatus: event.lifecycleStatus,
-        lifecycleStatusSince: event.since,
+        activity: event.activity,
+        activityDetail: event.detail ?? agent.activityDetail,
       };
-      const next = derivePresence(updated, machineStatus);
-      return withPresence(updated, next, next === agent.presence ? agent.presenceSince : event.since);
-    },
-  );
-  return nextOverview;
+      return project(updated, "online", since);
+    }),
+  };
+}
+
+export function applyLifecycleEvent(overview: AgentOverview, event: LifecycleEvent): AgentOverview {
+  const since = finiteMs(event.since);
+  return {
+    ...overview,
+    serverTime: event.serverTime,
+    machines: overview.machines.map((machine) => ({
+      ...machine,
+      agents: machine.agents.map((agent) => {
+        if (agent.id !== event.agentId) return agent;
+        return project({
+          ...agent,
+          lifecycleStatus: event.lifecycleStatus,
+          lifecycleStatusSince: since,
+        }, machine.status, since);
+      }),
+    })),
+    unassignedAgents: overview.unassignedAgents.map((agent) => {
+      if (agent.id !== event.agentId) return agent;
+      return project({
+        ...agent,
+        lifecycleStatus: event.lifecycleStatus,
+        lifecycleStatusSince: since,
+      }, "online", since);
+    }),
+  };
 }
 
 export function applyMachineStatusEvent(overview: AgentOverview, event: MachineStatusEvent): AgentOverview {
+  const since = finiteMs(event.since);
   return {
     ...overview,
     machines: overview.machines.map((machine) => {
       if (machine.id !== event.machineId) return machine;
-      const statusSince = event.since ?? machine.statusSince;
       return {
         ...machine,
         status: event.status,
-        statusSince,
-        agents: machine.agents.map((agent) => {
-          const next = derivePresence(agent, event.status);
-          const since = next === agent.presence ? agent.presenceSince : (event.since ?? overview.serverTime);
-          return withPresence(agent, next, since);
-        }),
+        statusSince: since ?? machine.statusSince,
+        agents: machine.agents.map((agent) => project(agent, event.status, since)),
       };
     }),
   };
