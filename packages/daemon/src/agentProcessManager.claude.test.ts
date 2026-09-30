@@ -3351,6 +3351,25 @@ test("mention wake: an occurrence bound to another launch is still rejected as d
   }, { tracer });
 });
 
+test("mention wake: during spawn-fail cooldown the message is buffered but the mention is rejected, not acked", async () => {
+  const { sink, tracer } = makeDeterministicTracer();
+  await withManager(async ({ driver, manager }) => {
+    await manager.startAgent("agent-1", makeConfig({ sessionId: "session-1" }), undefined, undefined, undefined, "launch-1");
+    await parkAgentIdle(manager, driver);
+    (manager as any).recordSpawnFailure("agent-1", "spawn_error");
+    assert.equal((manager as any).agentLifecycleRecord("agent-1")?.kind, "cooldown");
+
+    const out = await deliverTrackedMentionToStoppedAgent(manager, driver, { launchId: "launch-1", sessionId: "session-1" });
+
+    assert.equal(out.result, false);
+    assert.deepEqual(out.terminalErrors, ["DELIVERY_REJECTED"], "an agent that cannot start has not received the mention");
+    assert.equal(out.ackCount(), 0, "no ack: the sender must see it undelivered");
+    assert.ok(((manager as any).startingInboxes.values("agent-1") ?? []).length > 0, "the message itself is still buffered for the next spawn");
+    assert.equal(driver.processes.length, 1, "no spawn during cooldown");
+    assert.equal(lastDeliveryOutcome(sink), "spawn_fail_cooldown_active");
+  }, { tracer });
+});
+
 test("mention wake: an agent with no identity at all (never started) is rejected IDENTITY_UNKNOWN", async () => {
   const { sink, tracer } = makeDeterministicTracer();
   await withManager(async ({ driver, manager }) => {

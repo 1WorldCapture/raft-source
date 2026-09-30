@@ -4343,6 +4343,7 @@ export class AgentProcessManager {
           launchId: queuedStart?.launchId,
         }));
         // Buffered for the start in flight; the spawn drains it into the turn.
+        // TODO: if that start fails, the already-acked occurrence is not re-reported.
         if (trackedBegin === "accepted") this.completeTrackedMentionDelivery(traceContext);
         return true;
       }
@@ -4419,8 +4420,14 @@ export class AgentProcessManager {
             spawn_fail_until_ms: state.untilMs,
             starting_inbox_count: startingInboxCount,
           }));
-          // Buffered for the next spawn, like any other delivery during cooldown.
-          if (trackedBegin === "accepted") this.completeTrackedMentionDelivery(traceContext);
+          // The message stays buffered for the next spawn, but the agent is in
+          // cooldown because its starts keep failing: the mention is not delivered,
+          // so it must not be acked. The server records it undelivered and the
+          // sender can see it pending.
+          if (trackedBegin === "accepted") {
+            traceContext.onMentionTerminalError?.("DELIVERY_REJECTED");
+            return false;
+          }
           return true;
         }
         const restartFromPendingInbox = !transientDelivery && this.startingInboxes.has(agentId);
