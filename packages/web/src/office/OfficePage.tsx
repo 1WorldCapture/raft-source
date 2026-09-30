@@ -4,7 +4,7 @@ import { getSocket } from "../api/socket";
 import { useAppNavigate } from "../hooks/useAppNavigate";
 import { useAuthStore } from "../store/authStore";
 import { useServerStore } from "../store/serverStore";
-import { TILE_SIZE, ZOOM_MAX, ZOOM_MIN } from "../officePixel/constants.js";
+import { fitOfficeZoom } from "./officeFit";
 import { writeMembersSurface } from "./membersSurface";
 import { EditorState } from "../officePixel/office/editor/editorState.js";
 import { OfficeState } from "../officePixel/office/engine/officeState.js";
@@ -136,17 +136,15 @@ export default function OfficePage() {
     const fit = () => {
       const rect = frame.getBoundingClientRect();
       if (rect.width < 32 || rect.height < 32) return;
-      const margin = 24;
-      const fitX = Math.floor((rect.width - margin) / (layoutCols * TILE_SIZE));
-      const fitY = Math.floor((rect.height - margin) / (layoutRows * TILE_SIZE));
-      const next = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, Math.min(fitX, fitY)));
+      const dpr = window.devicePixelRatio || 1;
+      const next = fitOfficeZoom(rect.width * dpr, rect.height * dpr, layoutCols, layoutRows);
       setZoom((current) => (current === next ? current : next));
     };
     fit();
     const observer = new ResizeObserver(fit);
     observer.observe(frame);
     return () => observer.disconnect();
-  }, [layoutCols, layoutRows]);
+  }, [assetsReady, layoutCols, layoutRows]);
 
   if (assetsReady && scene) {
     if (!officeRef.current) officeRef.current = new OfficeState(scene.layout);

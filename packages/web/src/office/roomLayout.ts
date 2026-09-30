@@ -70,12 +70,11 @@ const DESK_ROW_STRIDE = 5;
 
 const SOFAS_PER_ROW = 3;
 
-/** Desks fill the room; offline agents also need a sofa row under the desks. */
+/** Desks fill the room. Every agent also gets a sofa, so going offline stays in this room. */
 function innerHeight(agents: AgentOverviewAgent[]): number {
   if (agents.length === 0) return BASE_INNER_H;
   const deskRows = Math.ceil(agents.length / DESKS_PER_ROW);
-  const offline = agents.filter((agent) => agent.presence === "offline").length;
-  const sofaRows = offline === 0 ? 0 : Math.ceil(offline / SOFAS_PER_ROW);
+  const sofaRows = Math.ceil(agents.length / SOFAS_PER_ROW);
   return Math.max(BASE_INNER_H, deskRows * DESK_ROW_STRIDE + sofaRows * 2 + 2);
 }
 
@@ -229,23 +228,21 @@ function placeAgents(
 ): void {
   const deskRows = Math.ceil(agents.length / DESKS_PER_ROW);
   const sofaRow = roomFloorRow + deskRows * DESK_ROW_STRIDE + 1;
-  let offlineSlot = 0;
   agents.forEach((agent, index) => {
     const tier = durationTier(agent.presence, presenceDurationMs(agent.presenceSince, nowMs));
     const activity = agent.activityDetail?.trim() || agent.activity;
     const col = roomMinCol + 2 + (index % DESKS_PER_ROW) * 5;
     const row = roomFloorRow + Math.floor(index / DESKS_PER_ROW) * DESK_ROW_STRIDE;
     const chairId = `chair-${agent.id}`;
+    const sofaCol = roomMinCol + 1 + (index % SOFAS_PER_ROW) * 4;
+    const sofaAt = sofaRow + Math.floor(index / SOFAS_PER_ROW) * 2;
+    const sofaId = `sofa-${agent.id}`;
     furniture.push(
       { uid: chairId, type: "WOODEN_CHAIR_FRONT", col, row },
       { uid: `desk-${agent.id}`, type: "DESK_FRONT", col: col - 1, row: row + 2 },
+      { uid: sofaId, type: "SOFA_FRONT", col: sofaCol, row: sofaAt },
     );
     if (agent.presence === "offline") {
-      const sofaCol = roomMinCol + 1 + (offlineSlot % SOFAS_PER_ROW) * 4;
-      const sofaAt = sofaRow + Math.floor(offlineSlot / SOFAS_PER_ROW) * 2;
-      const sofaId = `sofa-${agent.id}`;
-      furniture.push({ uid: sofaId, type: "SOFA_FRONT", col: sofaCol, row: sofaAt });
-      offlineSlot += 1;
       placements.push({
         agentId: agent.id,
         name: agent.name,

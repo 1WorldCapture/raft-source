@@ -8,6 +8,7 @@ import {
 import type { AgentOverview, AgentOverviewAgent } from "../src/office/agentOverview";
 import { durationTier, presenceDurationMs } from "../src/office/durationTier";
 import { FAKE_OVERVIEW_SERVER_TIME, fakeAgentOverview } from "../src/office/fakeAgentOverview";
+import { fitOfficeZoom } from "../src/office/officeFit";
 import { buildOfficeScene } from "../src/office/roomLayout";
 import { TileType } from "../src/officePixel/office/types.js";
 
@@ -169,9 +170,49 @@ test("offline agents lie on sofas while every agent still has a desk", () => {
     machines: [{ ...overview.machines[0], agents }],
   }, FAKE_OVERVIEW_SERVER_TIME);
   assert.equal(scene.layout.furniture.filter((item) => item.type === "DESK_FRONT").length, 3);
-  assert.equal(scene.layout.furniture.filter((item) => item.type === "SOFA_FRONT").length, 1);
+  assert.equal(scene.layout.furniture.filter((item) => item.type === "SOFA_FRONT").length, 3);
   const offline = scene.placements.find((item) => item.agentId === "o");
   assert.equal(offline?.seatId, "sofa-o");
+  assert.equal(scene.placements.find((item) => item.agentId === "w")?.seatId, "chair-w");
+});
+
+test("every room has a sofa per agent, including rooms with nobody offline", () => {
+  const overview = fakeAgentOverview();
+  const scene = buildOfficeScene({
+    ...overview,
+    unassignedAgents: 0,
+    machines: [
+      {
+        ...overview.machines[0],
+        name: "lyondeMacBook-Pro",
+        agents: [
+          bareAgent({ id: "mac-1", name: "mac-1", presence: "working" }),
+          bareAgent({ id: "mac-2", name: "mac-2", presence: "idle" }),
+        ],
+      },
+      {
+        ...overview.machines[1],
+        name: "grokbot",
+        agents: [bareAgent({ id: "g-1", name: "g-1", presence: "offline" })],
+      },
+    ],
+  }, FAKE_OVERVIEW_SERVER_TIME);
+  const sofas = scene.layout.furniture.filter((item) => item.type === "SOFA_FRONT");
+  assert.deepEqual(sofas.map((item) => item.uid).sort(), ["sofa-g-1", "sofa-mac-1", "sofa-mac-2"]);
+  const macSofas = sofas.filter((item) => item.uid.startsWith("sofa-mac"));
+  assert.ok(macSofas.every((item) => item.col < 14));
+  assert.ok(sofas.find((item) => item.uid === "sofa-g-1")!.col >= 14);
+});
+
+test("fit leaves room above the top seats for names and the upper wall", () => {
+  const zoom = fitOfficeZoom(1440, 860, 27, 27);
+  const mapH = 27 * 16 * zoom;
+  const offsetY = (860 - mapH) / 2;
+  const nameTop = offsetY + 24 * zoom - 74;
+  const wallTop = offsetY - 16 * zoom;
+  assert.ok(nameTop >= 4, `nameTop ${nameTop} at zoom ${zoom}`);
+  assert.ok(wallTop >= 4, `wallTop ${wallTop} at zoom ${zoom}`);
+  assert.ok(offsetY >= 4, `bottom margin ${offsetY} at zoom ${zoom}`);
 });
 
 test("human members patrol as bosses and search highlights a name", () => {
