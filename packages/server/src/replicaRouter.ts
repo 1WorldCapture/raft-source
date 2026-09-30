@@ -20,8 +20,10 @@ import {
   setClockInterval,
   setClockTimeout,
   clearClockTimeout,
+  isAgentPresence,
   type AgentActivityDetailKind,
   type AgentActivityKind,
+  type AgentPresence,
   type AgentRuntimeErrorState,
   type ServerToMachineMessage,
   type AgentMessage,
@@ -1147,24 +1149,86 @@ export async function releaseWakeLock(agentId: string) {
 // --- Agent activity & maxSeq in Redis ---
 
 /**
+ * Presence/since mirror fields for the activity hash. All three are optional;
+ * a null/undefined value deletes the hash field so an unknown never masquerades
+ * as a recovered timestamp after the hash is read back.
+ */
+export interface AgentActivitySinceMirror {
+  activitySinceMs?: number | null;
+  presence?: AgentPresence | null;
+  presenceSinceMs?: number | null;
+  /** Keep stored since fields whose value is unchanged (writer lacks the previous value). */
+  preserveMatching?: boolean;
+}
+
+/**
  * Store agent activity in Redis for cross-replica consistency.
  */
+const PRESERVE_MATCHING_ACTIVITY_SCRIPT = `
+local key = KEYS[1]
+local oldActivity = redis.call('HGET', key, 'activity')
+local oldPresence = redis.call('HGET', key, 'presence')
+redis.call('HSET', key, 'activity', ARGV[1], 'detail', ARGV[2], 'detailKind', ARGV[3], 'updatedAt', ARGV[4])
+if ARGV[5] ~= '' then redis.call('HSET', key, 'observedAtMs', ARGV[5]) else redis.call('HDEL', key, 'observedAtMs') end
+if oldActivity ~= ARGV[1] then redis.call('HDEL', key, 'activitySinceMs') end
+if ARGV[6] == '' then
+  redis.call('HDEL', key, 'presence', 'presenceSinceMs')
+else
+  redis.call('HSET', key, 'presence', ARGV[6])
+  if oldPresence ~= ARGV[6] then redis.call('HDEL', key, 'presenceSinceMs') end
+end
+redis.call('EXPIRE', key, 600)
+return 1
+`;
+
 export async function setAgentActivity(
   agentId: string,
   activity: AgentActivityKind,
   detail: string,
   detailKind: AgentActivityDetailKind,
   observedAtMs?: number,
+  since?: AgentActivitySinceMirror,
 ) {
   if (!isRedisAvailable()) return;
   const redis = getRedis();
   const key = `slock:agent:${agentId}:activity`;
+  if (since?.preserveMatching) {
+    // Atomic compare-and-keep: the since fields survive only while the value
+    // they describe is unchanged (see AgentActivitySinceMirror.preserveMatching).
+    await redis.eval(
+      PRESERVE_MATCHING_ACTIVITY_SCRIPT,
+      1,
+      key,
+      activity,
+      detail,
+      detailKind,
+      String(Date.now()),
+      observedAtMs !== undefined ? String(observedAtMs) : "",
+      since.presence ?? "",
+    );
+    return;
+  }
   const pipeline = redis.pipeline();
   pipeline.hset(key, "activity", activity, "detail", detail, "detailKind", detailKind, "updatedAt", String(Date.now()));
   if (observedAtMs !== undefined) {
     pipeline.hset(key, "observedAtMs", String(observedAtMs));
   } else {
     pipeline.hdel(key, "observedAtMs");
+  }
+  if (since?.activitySinceMs != null) {
+    pipeline.hset(key, "activitySinceMs", String(since.activitySinceMs));
+  } else {
+    pipeline.hdel(key, "activitySinceMs");
+  }
+  if (since?.presence != null) {
+    pipeline.hset(key, "presence", since.presence);
+  } else {
+    pipeline.hdel(key, "presence");
+  }
+  if (since?.presenceSinceMs != null) {
+    pipeline.hset(key, "presenceSinceMs", String(since.presenceSinceMs));
+  } else {
+    pipeline.hdel(key, "presenceSinceMs");
   }
   pipeline.expire(key, 600); // 10 min TTL
   await pipeline.exec();
@@ -1176,15 +1240,23 @@ export function projectAgentActivityFromRedisHash(data: Record<string, string>):
   detailKind: AgentActivityDetailKind;
   observedAtMs?: number;
   updatedAt: number;
+  activitySinceMs?: number;
+  presence?: AgentPresence;
+  presenceSinceMs?: number;
 } | null {
   if (!data.activity) return null;
   const observedAtMs = Number(data.observedAtMs);
+  const activitySinceMs = Number(data.activitySinceMs);
+  const presenceSinceMs = Number(data.presenceSinceMs);
   return {
     activity: normalizeActivity(data.activity),
     detail: data.detail || "",
     detailKind: normalizeActivityDetailKind(data.detailKind),
     ...(Number.isFinite(observedAtMs) ? { observedAtMs } : {}),
     updatedAt: Number(data.updatedAt) || 0,
+    ...(Number.isFinite(activitySinceMs) ? { activitySinceMs } : {}),
+    ...(isAgentPresence(data.presence) ? { presence: data.presence } : {}),
+    ...(Number.isFinite(presenceSinceMs) ? { presenceSinceMs } : {}),
   };
 }
 
@@ -1193,7 +1265,16 @@ export function projectAgentActivityFromRedisHash(data: Record<string, string>):
  */
 export async function getAgentActivity(
   agentId: string,
-): Promise<{ activity: AgentActivityKind; detail: string; detailKind: AgentActivityDetailKind; observedAtMs?: number; updatedAt: number } | null> {
+): Promise<{
+  activity: AgentActivityKind;
+  detail: string;
+  detailKind: AgentActivityDetailKind;
+  observedAtMs?: number;
+  updatedAt: number;
+  activitySinceMs?: number;
+  presence?: AgentPresence;
+  presenceSinceMs?: number;
+} | null> {
   if (!isRedisAvailable()) return null;
   const redis = getRedis();
   const data = await redis.hgetall(`slock:agent:${agentId}:activity`);
