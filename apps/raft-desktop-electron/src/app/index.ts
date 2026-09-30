@@ -118,12 +118,10 @@ const headlessMode = findHeadlessMode(process.argv);
 const userDataOverride = !app.isPackaged ? process.env.RAFT_DESKTOP_USER_DATA?.trim() : undefined;
 if (userDataOverride) app.setPath("userData", userDataOverride);
 
-// Storage doctor (task #12): consume a pending wipe BEFORE anything can open
-// the profile's Local Storage — this runs at module scope, ahead of app ready
-// and window creation. Deleting the directory is the only way out of the
-// corrupted-journal write-loss loop; IndexedDB (message cache) is untouched.
-const storageWipedThisBoot = resolvePendingStorageWipe(app.getPath("userData"));
 
+// Storage doctor (task #12): set once this process holds the single-instance
+// lock and has consumed any pending wipe (see the lock-held branch below).
+let storageWipedThisBoot = false;
 let computerHost: ComputerHost | null = null;
 let menubarResident: MenubarResident | null = null;
 let mainWindow: BrowserWindow | null = null;
@@ -590,6 +588,12 @@ if (headlessMode?.mode === "__service") {
 } else if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
+  // Storage doctor (task #12): consume a pending wipe only once this process
+  // holds the single-instance lock — a second instance must never delete
+  // Local Storage while the first still has it open. Still module scope,
+  // ahead of app ready and any window/session, so nothing has opened storage.
+  storageWipedThisBoot = resolvePendingStorageWipe(app.getPath("userData"));
+
   if (app.isPackaged) app.setAsDefaultProtocolClient(DEEP_LINK_SCHEME);
 
   // macOS deep links arrive via open-url (may fire before ready).
