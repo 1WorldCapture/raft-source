@@ -213,10 +213,15 @@ test("agent-overview recovers offline since stamps from the durable log after me
   // Recovered from the durable rows — real transition instants, not the
   // request time, and not a fabricated fallback.
   assert.equal(agent.activitySince, t2);
-  assert.equal(agent.presenceSince, t2);
+  // Offline presence starts at the earliest known cause that holds now: the
+  // activity went offline at t2, and the never-connected machine has been
+  // offline since its row was created.
+  const machine = body.machines[0];
+  assert.equal(machine.status, "offline");
+  assert.equal(agent.presenceSince, Math.min(t2, machine.statusSince!));
 });
 
-test("agent-overview returns null since when nothing durable exists — never a fabricated stamp", async ({ app }) => {
+test("agent-overview offline presence takes the earliest known cause when no activity row exists", async ({ app }) => {
   useRealOrchestrator(app);
   const seed = await seedPlaywrightScenario();
   const token = await tokenForHuman(seed.user.email);
@@ -226,8 +231,14 @@ test("agent-overview returns null since when nothing durable exists — never a 
   const body = await res.json() as OverviewResponse;
   const agent = body.machines[0].agents[0];
   assert.equal(agent.activity, "offline");
-  assert.equal(agent.activitySince, null);
-  assert.equal(agent.presenceSince, null);
+  assert.equal(agent.activitySince, null, "no durable activity row: activity since stays unknown");
+  // Offline presence still has known causes: the inactive lifecycle and the
+  // never-connected machine. It takes the earliest of their starts.
+  assert.notEqual(agent.lifecycleStatus, "active");
+  assert.equal(
+    agent.presenceSince,
+    Math.min(agent.lifecycleStatusSince!, body.machines[0].statusSince!),
+  );
 });
 
 test("agent-overview since keeps heartbeats, resets on real changes, and survives a restart-shaped orchestrator swap", async ({ app }) => {

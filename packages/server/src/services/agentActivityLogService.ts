@@ -136,6 +136,8 @@ export interface RecoveredAgentPresenceAnchor {
   presence: AgentPresence;
   /** Epoch ms of the newest presence-value change; null when beyond the cap. */
   presenceSinceMs: number | null;
+  /** Epoch ms of the newest durable row — the observation time of the served value. */
+  newestAtMs: number;
 }
 
 /**
@@ -195,5 +197,6 @@ export async function recoverAgentPresenceAnchor(
     activitySinceMs: resolveRunStartMs((i) => rows[i].activity === currentActivity),
     presence: currentPresence,
     presenceSinceMs: resolveRunStartMs((i) => presenceOf(rows[i].activity) === currentPresence),
+    newestAtMs: times[0],
   };
 }

@@ -1157,11 +1157,30 @@ export interface AgentActivitySinceMirror {
   activitySinceMs?: number | null;
   presence?: AgentPresence | null;
   presenceSinceMs?: number | null;
+  /** Keep stored since fields whose value is unchanged (writer lacks the previous value). */
+  preserveMatching?: boolean;
 }
 
 /**
  * Store agent activity in Redis for cross-replica consistency.
  */
+const PRESERVE_MATCHING_ACTIVITY_SCRIPT = `
+local key = KEYS[1]
+local oldActivity = redis.call('HGET', key, 'activity')
+local oldPresence = redis.call('HGET', key, 'presence')
+redis.call('HSET', key, 'activity', ARGV[1], 'detail', ARGV[2], 'detailKind', ARGV[3], 'updatedAt', ARGV[4])
+if ARGV[5] ~= '' then redis.call('HSET', key, 'observedAtMs', ARGV[5]) else redis.call('HDEL', key, 'observedAtMs') end
+if oldActivity ~= ARGV[1] then redis.call('HDEL', key, 'activitySinceMs') end
+if ARGV[6] == '' then
+  redis.call('HDEL', key, 'presence', 'presenceSinceMs')
+else
+  redis.call('HSET', key, 'presence', ARGV[6])
+  if oldPresence ~= ARGV[6] then redis.call('HDEL', key, 'presenceSinceMs') end
+end
+redis.call('EXPIRE', key, 600)
+return 1
+`;
+
 export async function setAgentActivity(
   agentId: string,
   activity: AgentActivityKind,
@@ -1173,6 +1192,22 @@ export async function setAgentActivity(
   if (!isRedisAvailable()) return;
   const redis = getRedis();
   const key = `slock:agent:${agentId}:activity`;
+  if (since?.preserveMatching) {
+    // Atomic compare-and-keep: the since fields survive only while the value
+    // they describe is unchanged (see AgentActivitySinceMirror.preserveMatching).
+    await redis.eval(
+      PRESERVE_MATCHING_ACTIVITY_SCRIPT,
+      1,
+      key,
+      activity,
+      detail,
+      detailKind,
+      String(Date.now()),
+      observedAtMs !== undefined ? String(observedAtMs) : "",
+      since.presence ?? "",
+    );
+    return;
+  }
   const pipeline = redis.pipeline();
   pipeline.hset(key, "activity", activity, "detail", detail, "detailKind", detailKind, "updatedAt", String(Date.now()));
   if (observedAtMs !== undefined) {

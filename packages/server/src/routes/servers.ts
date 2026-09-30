@@ -2727,6 +2727,26 @@ serverRouter.get("/:id/machines", async (req, res) => {
   }
 });
 
+/**
+ * Offline presence starts when the agent went offline for any of its current
+ * reasons: the earliest known start among the causes that hold now (lifecycle
+ * not active, machine offline, activity offline). Null when none is known.
+ */
+export function offlinePresenceSince(input: {
+  lifecycleStatus: string;
+  lifecycleStatusSince: number | null;
+  machineStatus: "online" | "offline" | null;
+  machineStatusSince: number | null;
+  activity: string;
+  activitySince: number | null;
+}): number | null {
+  const starts: number[] = [];
+  if (input.lifecycleStatus !== "active" && input.lifecycleStatusSince !== null) starts.push(input.lifecycleStatusSince);
+  if (input.machineStatus === "offline" && input.machineStatusSince !== null) starts.push(input.machineStatusSince);
+  if (input.activity === "offline" && input.activitySince !== null) starts.push(input.activitySince);
+  return starts.length > 0 ? Math.min(...starts) : null;
+}
+
 // Dashboard agent-overview snapshot (mgmt-dashboard task #4): a machine-
 // grouped view of every agent in the server with activity/presence "since"
 // stamps. Same membership gate as the machines list; guests included — the
@@ -2797,11 +2817,24 @@ serverRouter.get("/:id/agent-overview", async (req, res) => {
         statusSince: statusSinceByMachine.get(machine.id) ?? null,
         lastHeartbeat: machine.lastHeartbeat ? machine.lastHeartbeat.toISOString() : null,
       })),
-      agents: agentFacts.map((agent) => ({
-        ...agent,
+      agents: agentFacts.map((agent) => {
         // Deleted/unknown agents are absent from the map — null stays honest.
-        lifecycleStatusSince: lifecycleSinceByAgent.get(agent.id) ?? null,
-      })),
+        const lifecycleStatusSince = lifecycleSinceByAgent.get(agent.id) ?? null;
+        return {
+          ...agent,
+          lifecycleStatusSince,
+          presenceSince: agent.presence === "offline"
+            ? offlinePresenceSince({
+              lifecycleStatus: agent.lifecycleStatus,
+              lifecycleStatusSince,
+              machineStatus: agent.machineId !== null ? machineStatusById.get(agent.machineId) ?? null : null,
+              machineStatusSince: agent.machineId !== null ? statusSinceByMachine.get(agent.machineId) ?? null : null,
+              activity: agent.activity,
+              activitySince: agent.activitySince,
+            })
+            : agent.presenceSince,
+        };
+      }),
     }));
   } catch {
     res.status(500).json({ error: "Failed to build agent overview" });

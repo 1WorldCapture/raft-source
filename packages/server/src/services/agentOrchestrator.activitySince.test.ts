@@ -185,7 +185,17 @@ test("writeAgentActivitySnapshot: heartbeats keep since, real changes reset it, 
     return (orch as any).writeAgentActivitySnapshot(agentId, activity, "", "none", at);
   };
 
-  // First observation establishes both stamps.
+  // The very first frame has no previous value in memory (fresh process):
+  // nothing proves a change, so both stamps stay unresolved and the Redis
+  // mirror is asked to keep whatever still matches.
+  const unresolved = write("online", 500);
+  assert.equal(unresolved.previousKnown, false);
+  assert.equal(unresolved.snapshot.activitySinceMs, null);
+  assert.equal(unresolved.snapshot.presenceSinceMs, null);
+  assert.equal(unresolved.snapshot.activitySinceUnresolved, true);
+  assert.equal(store.writes[0].since?.preserveMatching, true);
+
+  // A real change against the now-known value establishes both stamps.
   const first = write("working", 1000);
   assert.equal(first.snapshot.activity, "working");
   assert.equal(first.snapshot.activitySinceMs, 1000);
@@ -213,10 +223,10 @@ test("writeAgentActivitySnapshot: heartbeats keep since, real changes reset it, 
   assert.equal(idleAgain.snapshot.activitySinceMs, 4000);
   assert.equal(idleAgain.snapshot.presenceSinceMs, 4000);
 
-  // The Redis mirror received the same since fields on every write.
-  assert.equal(store.writes.length, 5);
-  assert.deepEqual(store.writes[1].since, { activitySinceMs: 1000, presence: "working", presenceSinceMs: 1000 });
-  assert.deepEqual(store.writes[3].since, { activitySinceMs: 4000, presence: "idle", presenceSinceMs: 4000 });
+  // The Redis mirror received the same since fields on every known write.
+  const known = store.writes.filter((w) => w.since?.preserveMatching !== true);
+  assert.deepEqual(known[1].since, { activitySinceMs: 1000, presence: "working", presenceSinceMs: 1000 });
+  assert.deepEqual(known[3].since, { activitySinceMs: 4000, presence: "idle", presenceSinceMs: 4000 });
 });
 
 test("writeAgentActivitySnapshot: a known non-active lifecycle status projects offline presence", () => {
@@ -225,6 +235,11 @@ test("writeAgentActivitySnapshot: a known non-active lifecycle status projects o
   const orch = new AgentOrchestrator(store as any, clock as any);
   const agentId = "a1a1a1a1-0000-4000-8000-000000000002";
   seedAgent(orch, agentId, { status: "stopped" });
+  // Known previous value (working) so the offline projection is a real change.
+  (orch as any).agentActivity.set(agentId, {
+    activity: "working", detail: "", detailKind: "none", updatedAt: 0,
+    activitySinceMs: 1, presence: "working", presenceSinceMs: 1,
+  });
 
   const result = (orch as any).writeAgentActivitySnapshot(agentId, "online", "", "none", 1000);
   assert.equal(result.snapshot.presence, "offline");

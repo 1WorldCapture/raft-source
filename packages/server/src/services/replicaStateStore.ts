@@ -33,6 +33,13 @@ export interface AgentActivitySinceMirror {
   activitySinceMs?: number | null;
   presence?: AgentPresence | null;
   presenceSinceMs?: number | null;
+  /**
+   * The writer does not know the previous value (first frame after a restart
+   * or on a new replica): keep each stored since field when the stored value
+   * equals the one being written, drop it otherwise. The *SinceMs fields of
+   * this mirror are ignored in this mode.
+   */
+  preserveMatching?: boolean;
 }
 
 export interface AgentActivityMirror {

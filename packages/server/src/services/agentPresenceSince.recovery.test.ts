@@ -288,3 +288,123 @@ test("presence run boundary differs from activity run boundary across an idle ga
   assert.equal(activity.presence, "working");
   assert.equal(activity.presenceSinceMs, t0);
 });
+
+/** Redis-shaped mirror double that honours preserveMatching like the Lua script. */
+function makeMirrorStore(initial?: Record<string, unknown>) {
+  let hash: Record<string, any> | null = initial ? { ...initial } : null;
+  const writes: Array<Record<string, unknown>> = [];
+  return {
+    writes,
+    isAvailable: () => true,
+    getAgentActivity: async () => (hash ? { ...hash } : null),
+    setAgentActivity: async (_id: string, activity: string, detail: string, detailKind: string, observedAtMs: number | undefined, since: any) => {
+      writes.push({ activity, observedAtMs, since });
+      const prev = hash ?? {};
+      const next: Record<string, any> = { activity, detail, detailKind, updatedAt: Date.now() };
+      if (observedAtMs !== undefined) next.observedAtMs = observedAtMs;
+      if (since?.preserveMatching) {
+        if (prev.activity === activity && prev.activitySinceMs !== undefined) next.activitySinceMs = prev.activitySinceMs;
+        if (since.presence) {
+          next.presence = since.presence;
+          if (prev.presence === since.presence && prev.presenceSinceMs !== undefined) next.presenceSinceMs = prev.presenceSinceMs;
+        }
+      } else {
+        if (since?.activitySinceMs != null) next.activitySinceMs = since.activitySinceMs;
+        if (since?.presence != null) next.presence = since.presence;
+        if (since?.presenceSinceMs != null) next.presenceSinceMs = since.presenceSinceMs;
+      }
+      hash = next;
+    },
+  };
+}
+
+async function settle() {
+  for (let i = 0; i < 10; i += 1) await new Promise((resolve) => setTimeout(resolve, 5));
+}
+
+test("restart: the first frame keeps the mirror's since instead of fabricating a new start", async ({ db }) => {
+  void db;
+  const agentId = "40000000-0000-4000-8000-000000000031";
+  await seedAgentRow(agentId, "31");
+  const startedAt = Date.now() - 20 * 60_000;
+  const store = makeMirrorStore({
+    activity: "working", detail: "tool", detailKind: "none", updatedAt: Date.now(),
+    observedAtMs: Date.now() - 5_000, activitySinceMs: startedAt, presence: "working", presenceSinceMs: startedAt,
+  });
+  const orch = makeRecoveryOrchestrator();
+  orch.replicaStateStore = { ...orch.replicaStateStore, ...store };
+  const anchors: string[] = [];
+  const persist = orch.persistActivityEvent.bind(orch);
+  orch.persistActivityEvent = (...args: unknown[]) => {
+    anchors.push(String(args[5] ?? ""));
+    return persist(...args);
+  };
+
+  // Restarted process: memory is empty; a heartbeat reasserts "working".
+  orch.broadcastActivity(agentId, "working", "tool", "none", undefined, undefined, { isHeartbeat: true });
+  await settle();
+
+  const read = await orch.getActivity(agentId);
+  assert.equal(read.activity, "working");
+  assert.equal(read.activitySinceMs, startedAt, "the 20-minute run survives the restart");
+  assert.equal(read.presenceSinceMs, startedAt);
+  assert.deepEqual(anchors.filter((key) => key.startsWith("presence-anchor:")), [], "no fabricated anchor row");
+});
+
+test("restart without Redis: the first frame's since is rebuilt from the durable log", async ({ db }) => {
+  void db;
+  const agentId = "40000000-0000-4000-8000-000000000032";
+  await seedAgentRow(agentId, "32");
+  const startedAt = Date.now() - 20 * 60_000;
+  await appendAgentActivityEvent(agentId, "working", "", [statusEntry("working")], new Date(startedAt));
+  const orch = makeRecoveryOrchestrator();
+
+  orch.broadcastActivity(agentId, "working", "", "none", undefined, undefined, { isHeartbeat: true });
+  await settle();
+
+  const read = await orch.getActivity(agentId);
+  assert.equal(read.activitySinceMs, startedAt);
+  assert.equal(read.presenceSinceMs, startedAt);
+});
+
+test("two reads across the recovery write-back both serve the live working run", async ({ db }) => {
+  void db;
+  const agentId = "40000000-0000-4000-8000-000000000033";
+  await seedAgentRow(agentId, "33");
+  const startedAt = Date.now() - 5 * 60_000;
+  const latest = Date.now() - 10_000;
+  await appendAgentActivityEvent(agentId, "working", "", [statusEntry("working")], new Date(startedAt));
+  await appendAgentActivityEvent(agentId, "working", "tool", [statusEntry("working", "tool")], new Date(latest));
+  const store = makeMirrorStore();
+  const orch = makeRecoveryOrchestrator();
+  orch.hasMachineLocally = () => false; // read through the mirror like a non-owner replica
+  orch.replicaStateStore = { ...orch.replicaStateStore, ...store };
+
+  const first = await orch.getActivity(agentId);
+  assert.equal(first.activity, "working");
+  assert.equal(first.activitySinceMs, startedAt);
+  assert.equal(store.writes.at(-1)?.observedAtMs, latest, "write-back carries the newest row time, not the run start");
+
+  const second = await orch.getActivity(agentId);
+  assert.equal(second.activity, "working", "the written-back mirror is not judged stale");
+  assert.equal(second.activitySinceMs, startedAt);
+  assert.equal(second.presenceSinceMs, startedAt);
+});
+
+test("without Redis the durable-log recovery is cached, not rescanned per read", async ({ db }) => {
+  void db;
+  const agentId = "40000000-0000-4000-8000-000000000034";
+  await seedAgentRow(agentId, "34");
+  await appendAgentActivityEvent(agentId, "working", "", [statusEntry("working")], new Date(Date.now() - 10_000));
+  const orch = makeRecoveryOrchestrator();
+  let scans = 0;
+  const recover = orch.recoverPresenceAnchor.bind(orch);
+  orch.recoverPresenceAnchor = (...args: unknown[]) => {
+    scans += 1;
+    return recover(...args);
+  };
+  await orch.getActivity(agentId);
+  await orch.getActivity(agentId);
+  await orch.getActivity(agentId);
+  assert.equal(scans, 1);
+});

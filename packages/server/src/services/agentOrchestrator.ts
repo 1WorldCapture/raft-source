@@ -110,6 +110,7 @@ import {
 } from "./computerBroadcastPolicyService.js";
 import type { PersistedAgentActivityHint } from "./agentActivityLogService.js";
 import { recoverAgentPresenceAnchor } from "./agentActivityLogService.js";
+import type { RecoveredAgentPresenceAnchor } from "./agentActivityLogService.js";
 import * as reminderService from "../apps/reminder/service.js";
 import * as wikiService from "./wikiService.js";
 import { WIKI_AGENT_WORKSPACE_PACK } from "../generated/wikiAgentWorkspacePack.js";
@@ -771,6 +772,14 @@ type ActivitySnapshot = {
   presence?: AgentPresence | null;
   /** Epoch ms of the last presence VALUE change; null = unknown. */
   presenceSinceMs?: number | null;
+  /**
+   * Set when this snapshot was written with no previous value in memory
+   * (first frame after a restart or on a new replica): its null since means
+   * "not resolved yet", and an async hydration from the Redis mirror / durable
+   * log may fill it while the value is unchanged.
+   */
+  activitySinceUnresolved?: boolean;
+  presenceSinceUnresolved?: boolean;
 };
 
 type ActivityClockSnapshot = {
@@ -863,6 +872,9 @@ export function planActivityBroadcastAction(input: ActivityBroadcastPlanInput): 
   if (input.isDeliveryAckTurnActive) return "delivery-ack-refresh";
   return input.shouldPersistStatusOnly ? "persist-and-emit-now" : "debounce-only";
 }
+
+/** How long a read-path durable-log anchor recovery is reused (no Redis / cold mirror). */
+export const RECOVERED_ANCHOR_CACHE_TTL_MS = 30_000;
 
 export interface ActivitySinceResetPlanInput {
   previousActivity: AgentActivityKind | null;
@@ -1022,6 +1034,8 @@ interface AgentActivitySnapshotWriteResult {
   nextActivity: AgentActivityKind;
   previousActivity: AgentActivityKind | null;
   previousPresence: AgentPresence | null;
+  /** False when memory had no previous value: "changed" cannot be judged. */
+  previousKnown: boolean;
   snapshot?: ActivitySnapshot;
 }
 
@@ -2131,6 +2145,12 @@ export class AgentOrchestrator extends EventEmitter {
   private terminalAgentStartDispatches = new Map<string, AgentStartDispatchTerminalReason>();
   private agentInboxes = new Map<string, AgentInbox>();
   private agentActivity = new Map<string, ActivitySnapshot>();
+  /**
+   * Read-path cache of durable-log anchor recoveries (Redis missing or cold):
+   * without it every overview / agent-list read would rescan up to 500 rows
+   * per agent. Dropped on any snapshot write for the agent.
+   */
+  private recoveredPresenceAnchors = new Map<string, { anchor: RecoveredAgentPresenceAnchor | null; expiresAtMs: number }>();
   private activityDebounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private agentStateCache = new Map<string, CachedAgentState>();
   private resetInProgress = new Map<string, "restart" | "session" | "full">();
@@ -12139,25 +12159,39 @@ export class AgentOrchestrator extends EventEmitter {
       presenceSinceMs: null,
     };
     try {
-      const recovered = await recoverAgentPresenceAnchor(agentId, (activity) => derivePresence({
-        activity,
-        lifecycleStatus: agent?.status ?? null,
-      }));
+      const cached = this.recoveredPresenceAnchors.get(agentId);
+      let recovered: RecoveredAgentPresenceAnchor | null;
+      if (cached && cached.expiresAtMs > this.clock.now()) {
+        recovered = cached.anchor;
+      } else {
+        recovered = await this.recoverPresenceAnchor(agentId, (activity) => derivePresence({
+          activity,
+          lifecycleStatus: agent?.status ?? null,
+        }));
+        this.recoveredPresenceAnchors.set(agentId, {
+          anchor: recovered,
+          expiresAtMs: this.clock.now() + RECOVERED_ANCHOR_CACHE_TTL_MS,
+        });
+        // Write the recovered anchor back so later reads (any replica) hit the
+        // Redis mirror instead of rescanning — only when it describes the value
+        // being served, and stamped with the NEWEST row's time: the run start
+        // would make a live working run look stale on the next read.
+        if (recovered && recovered.activity === result.activity) {
+          this.replicaStateStore.setAgentActivity(
+            agentId,
+            recovered.activity,
+            recovered.detail,
+            recovered.detailKind,
+            recovered.newestAtMs,
+            {
+              activitySinceMs: recovered.activitySinceMs,
+              presence: recovered.presence,
+              presenceSinceMs: recovered.presenceSinceMs,
+            },
+          ).catch(() => {});
+        }
+      }
       if (!recovered) return unknown;
-      // Write the recovered anchor back so subsequent reads hit the Redis
-      // mirror instead of rescanning the log (best-effort, no-op without Redis).
-      this.replicaStateStore.setAgentActivity(
-        agentId,
-        recovered.activity,
-        recovered.detail,
-        recovered.detailKind,
-        recovered.activitySinceMs ?? recovered.presenceSinceMs ?? undefined,
-        {
-          activitySinceMs: recovered.activitySinceMs,
-          presence: recovered.presence,
-          presenceSinceMs: recovered.presenceSinceMs,
-        },
-      ).catch(() => {});
       span.addEvent("activity.since.recovered", {
         hint_source: source,
         recovered_activity: recovered.activity,
@@ -12258,7 +12292,9 @@ export class AgentOrchestrator extends EventEmitter {
     // otherwise the post-TTL / post-restart recovery scan cannot reconstruct
     // the transition time. persist-and-emit-now already writes its own row,
     // and debounced liveness frames stay non-durable per APM 1.6 (6a).
-    if (planPresenceAnchorPersist({
+    // Without a known previous value nothing is proven to have changed, so
+    // no anchor row (it would record a fabricated "now" start).
+    if (writeResult.previousKnown && planPresenceAnchorPersist({
       broadcastAction: action,
       activityChanged: nextActivity !== writeResult.previousActivity,
       presenceChanged: snapshot.presence !== undefined && snapshot.presence !== writeResult.previousPresence,
@@ -12361,6 +12397,7 @@ export class AgentOrchestrator extends EventEmitter {
         },
         previousActivity,
         previousPresence,
+        previousKnown: current !== undefined,
         nextActivity: current?.activity ?? activity,
       };
     }
@@ -12373,15 +12410,26 @@ export class AgentOrchestrator extends EventEmitter {
     // A genuine value change stamps the frame's own observation instant (the
     // daemon's observedAtMs when reported, else the server write clock) — never
     // the inherited/current observed clock used for staleness.
-    const since = planActivitySinceReset({
-      previousActivity,
-      previousActivitySinceMs: current?.activitySinceMs,
-      previousPresence,
-      previousPresenceSinceMs: current?.presenceSinceMs,
-      nextActivity,
-      nextPresence,
-      resetAtMs: options.observedAtMs ?? now,
-    });
+    // With no previous value in memory (restart / new replica) a "change"
+    // cannot be judged: stamping this frame would fabricate a start and
+    // overwrite a still-correct mirror. Keep both stamps unresolved instead
+    // and hydrate them asynchronously below.
+    const previousKnown = current !== undefined;
+    const since = previousKnown
+      ? planActivitySinceReset({
+        previousActivity,
+        previousActivitySinceMs: current?.activitySinceMs,
+        previousPresence,
+        previousPresenceSinceMs: current?.presenceSinceMs,
+        nextActivity,
+        nextPresence,
+        resetAtMs: options.observedAtMs ?? now,
+      })
+      : { activityChanged: false, presenceChanged: false, activitySinceMs: null, presenceSinceMs: null };
+    const activitySinceUnresolved = !previousKnown
+      || (current?.activitySinceUnresolved === true && !since.activityChanged);
+    const presenceSinceUnresolved = !previousKnown
+      || (current?.presenceSinceUnresolved === true && !since.presenceChanged);
     const snapshot: ActivitySnapshot = {
       activity: nextActivity,
       detail: nextDetail,
@@ -12391,16 +12439,26 @@ export class AgentOrchestrator extends EventEmitter {
       activitySinceMs: since.activitySinceMs,
       presence: nextPresence,
       presenceSinceMs: since.presenceSinceMs,
+      ...(activitySinceUnresolved ? { activitySinceUnresolved: true } : {}),
+      ...(presenceSinceUnresolved ? { presenceSinceUnresolved: true } : {}),
     };
 
     this.agentActivity.set(agentId, snapshot);
+    this.recoveredPresenceAnchors.delete(agentId);
 
-    // Mirror to Redis for cross-replica consistency (fire-and-forget)
+    // Mirror to Redis for cross-replica consistency (fire-and-forget). An
+    // unresolved write keeps the mirror's since fields while they still
+    // describe the value being written.
     this.replicaStateStore.setAgentActivity(agentId, nextActivity, nextDetail, nextDetailKind, nextObservedAtMs, {
       activitySinceMs: since.activitySinceMs,
       presence: nextPresence,
       presenceSinceMs: since.presenceSinceMs,
-    }).catch(() => {});
+      ...(activitySinceUnresolved || presenceSinceUnresolved ? { preserveMatching: true } : {}),
+    }).then(() => {
+      if (!previousKnown) void this.hydrateUnresolvedSince(agentId);
+    }, () => {
+      if (!previousKnown) void this.hydrateUnresolvedSince(agentId);
+    });
 
     return {
       action: "map-write",
@@ -12411,9 +12469,74 @@ export class AgentOrchestrator extends EventEmitter {
       },
       previousActivity,
       previousPresence,
+      previousKnown,
       nextActivity,
       snapshot,
     };
+  }
+
+  /**
+   * Resolve the since stamps of a snapshot written without a previous value:
+   * the Redis mirror first (its fields were kept only if they still describe
+   * the value), then the durable log. A stamp is adopted only while the
+   * in-memory value is still the one it describes; what cannot be resolved
+   * stays null (unknown), never "now".
+   */
+  protected async hydrateUnresolvedSince(agentId: string): Promise<void> {
+    const pending = this.agentActivity.get(agentId);
+    if (!pending?.activitySinceUnresolved && !pending?.presenceSinceUnresolved) return;
+    let activitySinceMs: number | null = null;
+    let presenceSinceMs: number | null = null;
+    try {
+      if (this.replicaStateStore.isAvailable()) {
+        const mirror = await this.replicaStateStore.getAgentActivity(agentId);
+        if (mirror?.activity === pending.activity) activitySinceMs = mirror.activitySinceMs ?? null;
+        if (mirror?.presence !== undefined && mirror.presence === pending.presence) presenceSinceMs = mirror.presenceSinceMs ?? null;
+      }
+      if (activitySinceMs === null || presenceSinceMs === null) {
+        const agent = this.agentStateCache.get(agentId);
+        const recovered = await this.recoverPresenceAnchor(agentId, (activity) => derivePresence({
+          activity,
+          lifecycleStatus: agent?.status ?? null,
+        }));
+        if (recovered) {
+          if (activitySinceMs === null && recovered.activity === pending.activity) activitySinceMs = recovered.activitySinceMs;
+          if (presenceSinceMs === null && recovered.presence === pending.presence) presenceSinceMs = recovered.presenceSinceMs;
+        }
+      }
+    } catch {
+      // Unknown stays unknown.
+    }
+    const current = this.agentActivity.get(agentId);
+    if (!current) return;
+    const next: ActivitySnapshot = { ...current };
+    let changed = false;
+    if (current.activitySinceUnresolved && current.activity === pending.activity) {
+      next.activitySinceMs = activitySinceMs;
+      delete next.activitySinceUnresolved;
+      changed = true;
+    }
+    if (current.presenceSinceUnresolved && current.presence === pending.presence) {
+      next.presenceSinceMs = presenceSinceMs;
+      delete next.presenceSinceUnresolved;
+      changed = true;
+    }
+    if (!changed) return;
+    this.agentActivity.set(agentId, next);
+    this.replicaStateStore.setAgentActivity(agentId, next.activity, next.detail, next.detailKind, next.observedAtMs, {
+      activitySinceMs: next.activitySinceMs,
+      presence: next.presence,
+      presenceSinceMs: next.presenceSinceMs,
+      ...(next.activitySinceUnresolved || next.presenceSinceUnresolved ? { preserveMatching: true } : {}),
+    }).catch(() => {});
+  }
+
+  /** Durable-log anchor recovery (overridable seam for tests). */
+  protected recoverPresenceAnchor(
+    agentId: string,
+    presenceOf: (activity: AgentActivityKind) => AgentPresence,
+  ): Promise<RecoveredAgentPresenceAnchor | null> {
+    return recoverAgentPresenceAnchor(agentId, presenceOf);
   }
 
   /**
