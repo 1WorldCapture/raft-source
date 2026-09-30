@@ -17,14 +17,39 @@ import {
   type ManagedMcpRuntimeSnapshot,
 } from "@botiverse/raft-shared";
 import { applyLoopbackNoProxyEnv } from "./loopbackNoProxy.js";
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import {
-  CallToolRequestSchema,
-  ListToolsRequestSchema,
-  type CallToolResult,
-} from "@modelcontextprotocol/sdk/types.js";
+import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { logger } from "./logger.js";
+
+/**
+ * The MCP SDK is ~35MB of resident memory and only an agent that actually calls
+ * a managed MCP tool reaches this proxy, so it is imported on the first
+ * request instead of at daemon boot. A failed import is not cached.
+ */
+type McpSdk = {
+  Server: typeof import("@modelcontextprotocol/sdk/server/index.js").Server;
+  StreamableHTTPServerTransport:
+    typeof import("@modelcontextprotocol/sdk/server/streamableHttp.js").StreamableHTTPServerTransport;
+  CallToolRequestSchema: typeof import("@modelcontextprotocol/sdk/types.js").CallToolRequestSchema;
+  ListToolsRequestSchema: typeof import("@modelcontextprotocol/sdk/types.js").ListToolsRequestSchema;
+};
+let mcpSdkPromise: Promise<McpSdk> | null = null;
+function loadMcpSdk(): Promise<McpSdk> {
+  mcpSdkPromise ??= Promise.all([
+    import("@modelcontextprotocol/sdk/server/index.js"),
+    import("@modelcontextprotocol/sdk/server/streamableHttp.js"),
+    import("@modelcontextprotocol/sdk/types.js"),
+  ]).then(([serverModule, transportModule, typesModule]) => ({
+    Server: serverModule.Server,
+    StreamableHTTPServerTransport: transportModule.StreamableHTTPServerTransport,
+    CallToolRequestSchema: typesModule.CallToolRequestSchema,
+    ListToolsRequestSchema: typesModule.ListToolsRequestSchema,
+  }), (error: unknown) => {
+    mcpSdkPromise = null;
+    throw error;
+  });
+  return mcpSdkPromise;
+}
 
 const HOST = "127.0.0.1";
 const MAX_REQUEST_BYTES = 1024 * 1024;
@@ -330,7 +355,8 @@ async function loadNativeTools(registration: Registration) {
   }));
 }
 
-function createMcpServer(registration: Registration): Server {
+function createMcpServer(registration: Registration, sdk: McpSdk): Server {
+  const { Server, ListToolsRequestSchema, CallToolRequestSchema } = sdk;
   const server = new Server(
     { name: "raft-managed-mcp-runtime", version: "1.0.0" },
     { capabilities: { tools: {} } },
@@ -395,12 +421,17 @@ async function handleRequest(
     return;
   }
 
-  const server = createMcpServer(registration);
-  const transport = new StreamableHTTPServerTransport({
-    sessionIdGenerator: undefined,
-    enableJsonResponse: true,
-  });
+  let transport: InstanceType<McpSdk["StreamableHTTPServerTransport"]> | undefined;
+  let server: Server | undefined;
   try {
+    // A failed SDK import answers this request with the same JSON-RPC 500 as
+    // any other proxy failure; the next request retries the import.
+    const sdk = await loadMcpSdk();
+    server = createMcpServer(registration, sdk);
+    transport = new sdk.StreamableHTTPServerTransport({
+      sessionIdGenerator: undefined,
+      enableJsonResponse: true,
+    });
     const body =
       request.method === "POST" ? await readJsonBody(request) : undefined;
     await server.connect(transport);
@@ -425,8 +456,8 @@ async function handleRequest(
       response.end();
     }
   } finally {
-    await transport.close().catch(() => undefined);
-    await server.close().catch(() => undefined);
+    await transport?.close().catch(() => undefined);
+    await server?.close().catch(() => undefined);
   }
 }
 

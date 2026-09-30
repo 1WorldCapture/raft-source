@@ -338,7 +338,8 @@ test("source guard — kimi-sdk.ts must NOT contain wildcard mapping (every Kimi
   );
   assert.match(
     source,
-    /type Event as KimiSdkEvent/,
+    // Type-only import: the SDK itself is loaded lazily (loadKimiCodeSdk).
+    /import type \{[^}]*\bEvent as KimiSdkEvent\b[^}]*\} from "@botiverse\/kimi-code-sdk"/,
     "kimi-sdk.ts must import the SDK Event type as the closed-mapping input",
   );
 });
@@ -1614,4 +1615,29 @@ test("LocalKaos per-session PATH resolves bare `raft` to the current launch wrap
     }
     rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+test("resolveKimiHomeWithoutSdk follows the SDK's own resolveKimiHome (explicit dir, KIMI_CODE_HOME, default)", async () => {
+  const { loadKimiCodeSdk, resolveKimiHomeWithoutSdk } = await import("./kimi-sdk.js");
+  const sdk = await loadKimiCodeSdk();
+  const saved = process.env.KIMI_CODE_HOME;
+  try {
+    delete process.env.KIMI_CODE_HOME;
+    assert.equal(resolveKimiHomeWithoutSdk(), sdk.resolveKimiHome());
+    assert.equal(resolveKimiHomeWithoutSdk("/explicit/home"), sdk.resolveKimiHome("/explicit/home"));
+    process.env.KIMI_CODE_HOME = "/from/env";
+    assert.equal(resolveKimiHomeWithoutSdk(), sdk.resolveKimiHome());
+    assert.equal(resolveKimiHomeWithoutSdk("/explicit/home"), sdk.resolveKimiHome("/explicit/home"));
+  } finally {
+    if (saved === undefined) delete process.env.KIMI_CODE_HOME;
+    else process.env.KIMI_CODE_HOME = saved;
+  }
+});
+
+test("loadKimiCodeSdk loads the SDK on first use and shares one load", async () => {
+  const { loadKimiCodeSdk } = await import("./kimi-sdk.js");
+  const first = await loadKimiCodeSdk();
+  assert.equal(await loadKimiCodeSdk(), first);
+  assert.equal(typeof first.createKimiHarness, "function");
+  assert.equal(typeof first.LocalKaos.create, "function");
 });

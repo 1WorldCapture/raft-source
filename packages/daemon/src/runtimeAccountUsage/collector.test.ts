@@ -149,3 +149,12 @@ test("every usage provider routes to its OAR runtime and publishes the complete 
     vi.restoreAllMocks();
   }
 });
+
+test("OAR is loaded on the first usage read and maps every provider to a usage-capable runtime", async () => {
+  const { oarRuntimeForProvider } = await import("./collector.js");
+  for (const provider of ["codex", "claude", "kimi", "grok"] as const) {
+    const runtime = await oarRuntimeForProvider(provider);
+    assert.equal(typeof runtime.installation, "function", `${provider} exposes an installation probe`);
+    assert.equal(typeof runtime.accountUsage, "function", `${provider} exposes a usage reader`);
+  }
+});
