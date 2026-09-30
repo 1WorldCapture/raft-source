@@ -220,12 +220,15 @@ export function wipeOnExplicitLogout(runtime: WebCacheRuntime, auth: AuthLike, d
       // Drop the persisted identity BEFORE the original action clears the
       // user: that user→null transition runs the lifecycle sync, which would
       // otherwise read this id and re-attach (re-creating the scope row and
-      // re-persisting the id) right after the wipe.
+      // re-persisting the id) right after the wipe. The in-memory identity
+      // backup must drop in the same synchronous window for the same reason —
+      // the sync's fallback read consults it (task #12).
       try {
         storage.removeItem(WEB_CACHE_LAST_SCOPE_KEY);
       } catch {
         // ignore
       }
+      resetIdentityBackupMemory();
       void runtime.resetAll().then(() => {
         try {
           storage.removeItem(WEB_CACHE_LAST_SCOPE_KEY);
