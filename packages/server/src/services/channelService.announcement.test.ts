@@ -27,6 +27,8 @@ import {
   updateChannel,
   canUserPostToChannel,
   canAgentPostToChannel,
+  getInboxTargetActivityMuteState,
+  setInboxTargetActivityMuteState,
 } from "./channelService.js";
 import { broadcastAndDeliver, listMessagesBySender } from "./messageService.js";
 
@@ -247,4 +249,38 @@ test("listMessagesBySender returns one sender's messages, newest page last, with
   const page2 = await listMessagesBySender(announcement.id, agentA.id, 2, oldestSeq);
   assert.deepEqual(page2.messages.map((m: any) => m.content), ["a-1"]);
   assert.equal(page2.hasMore, false);
+});
+
+test("humans see the announcement channel muted until they explicitly change it; other channels and agents are unaffected", async ({ app }) => {
+  const { owner, member, server, agentA } = await seedServer("ann-mute");
+  const announcement = await announcementOf(server.id);
+  const room = await createChannel(server.id, "plain-room");
+  await addHuman(room.id, member.id);
+
+  type Row = { id: string; activityMuted?: boolean; muteFromSeq?: number | null };
+  const stateOf = async (userId: string, channelId: string) =>
+    ((await listChannels(server.id, userId, { humanActivityMuteEnabled: true })) as Row[]).find((channel) => channel.id === channelId);
+
+  // Never set: muted by default for humans, in the list and in the single-channel read.
+  assert.equal((await stateOf(member.id, announcement.id))?.activityMuted, true);
+  assert.equal((await stateOf(owner.id, announcement.id))?.activityMuted, true);
+  assert.deepEqual(
+    { muted: (await getInboxTargetActivityMuteState("user", member.id, announcement.id)).activityMuted },
+    { muted: true },
+  );
+  // Other channels keep their default (unmuted), and agents are not defaulted.
+  assert.equal((await stateOf(member.id, room.id))?.activityMuted, false);
+  assert.equal((await getInboxTargetActivityMuteState("user", member.id, room.id)).activityMuted, false);
+  assert.equal((await getInboxTargetActivityMuteState("agent", agentA.id, announcement.id)).activityMuted, false);
+
+  // Explicit unmute wins and is per user.
+  await setInboxTargetActivityMuteState({ receiverType: "user", receiverId: member.id, serverId: server.id, sourceChannelId: announcement.id, activityMuted: false });
+  assert.equal((await stateOf(member.id, announcement.id))?.activityMuted, false, "an explicit unmute is returned as unmuted");
+  assert.equal((await stateOf(owner.id, announcement.id))?.activityMuted, true, "another user keeps the default");
+
+  // Muting again writes a real mute row.
+  await setInboxTargetActivityMuteState({ receiverType: "user", receiverId: member.id, serverId: server.id, sourceChannelId: announcement.id, activityMuted: true });
+  const muted = await stateOf(member.id, announcement.id);
+  assert.equal(muted?.activityMuted, true);
+  assert.ok((muted?.muteFromSeq ?? 0) >= 1, "a real mute carries its own boundary");
 });
