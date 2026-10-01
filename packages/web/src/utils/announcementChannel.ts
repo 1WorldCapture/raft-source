@@ -4,22 +4,13 @@ import type { Channel } from "../store/channelStore";
 export const ANNOUNCEMENT_SENDER_QUERY_PARAM = "senderId";
 
 export type AnnouncementChannelLike = {
-  name?: string | null;
-  type?: string | null;
   systemKind?: "all" | "announcement" | null;
   activityMuted?: boolean;
 } | null | undefined;
 
-/**
- * The system announcement channel. `systemKind` wins once the server sends it.
- * Until that field is on the wire, the reserved name `#announcement` is the
- * same channel (the migration deletes a user channel that already used it).
- */
+/** The system announcement channel. Identified only by `systemKind`, never by name. */
 export function isAnnouncementChannel(channel: AnnouncementChannelLike): boolean {
-  if (!channel) return false;
-  if (channel.systemKind === "announcement") return true;
-  if (channel.systemKind != null) return false;
-  return channel.type === "channel" && channel.name === "announcement";
+  return channel?.systemKind === "announcement";
 }
 
 /**
@@ -33,11 +24,13 @@ export function channelExcludedFromUnmutedUnread(channel: AnnouncementChannelLik
   return channel.activityMuted === true;
 }
 
-export function announcementShowsMuted(channel: Pick<Channel, "activityMuted" | "name" | "type" | "systemKind">): boolean {
-  return isAnnouncementChannel(channel) && channel.activityMuted !== false
+export function announcementShowsMuted(channel: Pick<Channel, "activityMuted" | "systemKind">): boolean {
+  return (isAnnouncementChannel(channel) && channel.activityMuted !== false)
     || channel.activityMuted === true;
 }
 
-export function isSystemPostedAnnouncement(message: { postedBySystem?: boolean | null }): boolean {
-  return message.postedBySystem === true;
+export function isSystemPostedAnnouncement(message: {
+  actionMetadata?: { kind?: string } | null;
+}): boolean {
+  return message.actionMetadata?.kind === "announcement-proxy";
 }

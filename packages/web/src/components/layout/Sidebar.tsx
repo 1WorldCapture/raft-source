@@ -773,17 +773,16 @@ const ChannelRow = memo(function ChannelRow({
   onDrop?: (event: React.DragEvent<HTMLButtonElement>, channel: Channel) => void;
   allowWrap?: boolean;
 }) {
-  const storedUnread = useMessageStore((s) => s.unreadCounts[channel.id] || 0);
+  const unread = useMessageStore((s) => s.unreadCounts[channel.id] || 0);
   const mentionMarked = useMessageStore((s) => s.mentionFlags[channel.id] === true);
   const hasDraft = useMessageStore((s) => !!s.drafts[channel.id]);
   // Display-language (react-intl) — the row owns its own marker copy so the
   // memoized leaf does not need a new prop from the parent.
   const { formatMessage } = useIntl();
   const dimmed = !selected && !channel.joined;
-  // #announcement is muted for humans until they explicitly unmute, and that
-  // default does not contribute a badge. Opening the channel is how you read it.
+  // #announcement is muted until the user unmutes it, same quiet unread
+  // number as any other muted channel, and it stays out of the loud total.
   const activityMuted = announcementShowsMuted(channel);
-  const unread = isAnnouncementChannel(channel) && channel.activityMuted !== false ? 0 : storedUnread;
   const showMutedIcon = shouldShowActivityMutedIcon({ activityMuted, joined: channel.joined });
   const { showLoudUnreadBadge, showQuietUnreadCount } = getChannelUnreadIndicatorState({
     unread,

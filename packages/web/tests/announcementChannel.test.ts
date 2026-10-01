@@ -6,26 +6,26 @@ import {
   isSystemPostedAnnouncement,
 } from "../src/utils/announcementChannel.js";
 
-test("recognizes the announcement channel by systemKind, then by reserved name", () => {
-  assert.equal(isAnnouncementChannel({ systemKind: "announcement", name: "announcements", type: "channel" }), true);
-  assert.equal(isAnnouncementChannel({ name: "announcement", type: "channel" }), true);
-  assert.equal(isAnnouncementChannel({ systemKind: "all", name: "announcement", type: "channel" }), false);
-  assert.equal(isAnnouncementChannel({ name: "announcement", type: "private" }), false);
-  assert.equal(isAnnouncementChannel({ name: "all", type: "channel" }), false);
+test("recognizes the announcement channel only by systemKind", () => {
+  assert.equal(isAnnouncementChannel({ systemKind: "announcement" }), true);
+  assert.equal(isAnnouncementChannel({ systemKind: "all" }), false);
+  assert.equal(isAnnouncementChannel({ systemKind: null }), false);
+  assert.equal(isAnnouncementChannel({}), false);
   assert.equal(isAnnouncementChannel(null), false);
 });
 
 test("default-muted announcement channels do not count toward unmuted unread", () => {
-  const announcement = { name: "announcement", type: "channel" as const };
+  const announcement = { systemKind: "announcement" as const };
   assert.equal(channelExcludedFromUnmutedUnread(announcement), true);
   assert.equal(channelExcludedFromUnmutedUnread({ ...announcement, activityMuted: true }), true);
   assert.equal(channelExcludedFromUnmutedUnread({ ...announcement, activityMuted: false }), false);
-  assert.equal(channelExcludedFromUnmutedUnread({ name: "general", type: "channel", activityMuted: true }), true);
-  assert.equal(channelExcludedFromUnmutedUnread({ name: "general", type: "channel" }), false);
+  assert.equal(channelExcludedFromUnmutedUnread({ systemKind: null, activityMuted: true }), true);
+  assert.equal(channelExcludedFromUnmutedUnread({ systemKind: null }), false);
 });
 
-test("system-posted announcements are only the explicit flag", () => {
-  assert.equal(isSystemPostedAnnouncement({ postedBySystem: true }), true);
-  assert.equal(isSystemPostedAnnouncement({ postedBySystem: false }), false);
+test("system-posted announcements use the announcement-proxy metadata kind", () => {
+  assert.equal(isSystemPostedAnnouncement({ actionMetadata: { kind: "announcement-proxy" } }), true);
+  assert.equal(isSystemPostedAnnouncement({ actionMetadata: { kind: "action-card" } }), false);
+  assert.equal(isSystemPostedAnnouncement({ actionMetadata: null }), false);
   assert.equal(isSystemPostedAnnouncement({}), false);
 });

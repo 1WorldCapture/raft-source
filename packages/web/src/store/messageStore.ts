@@ -192,12 +192,6 @@ export interface Message {
    * Read-time projection for a task whose mutable title/details supersede this
    * immutable host message. The original `content` remains visible above it.
    */
-  /**
-   * Idle announcement written by the server in this sender's name.
-   * The announcement channel renders a "系统代发" mark when this is true.
-   * Phase 2 sets it; phase 1 leaves it false.
-   */
-  postedBySystem?: boolean | null;
   taskCurrentProjection?: {
     title: string;
     description: string | null;
