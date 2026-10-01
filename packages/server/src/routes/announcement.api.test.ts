@@ -7,6 +7,7 @@ import { channels, serverMembers, users } from "../db/schema.js";
 import { createServer } from "../services/serverService.js";
 import { createAgent } from "../services/agentService.js";
 import { createMessage } from "../services/messageService.js";
+import { createChannelForAgent } from "./agentChannelCreate.js";
 
 const test = createApiTest({ humanActivityMuteFlagDefaultEnabled: true, onboardingOpenerFlagDefaultEnabled: false });
 
@@ -127,4 +128,14 @@ test("creating a channel with a reserved name answers 400, not 500", async ({ ap
     assert.match(body.error, /reserved/);
   }
   assert.equal((await asOwner("POST", "/api/channels", { name: "deploy" })).status, 200, "an ordinary name still works");
+});
+
+test("an agent creating a channel with a reserved name also gets 400 channel_name_reserved", async ({ app }) => {
+  const { server, agent } = await seed("ann-api-agent-reserved");
+  for (const name of ["announcement", "all"]) {
+    const result = await createChannelForAgent({ actor: { id: agent.id, name: agent.name, serverId: server.id }, serverId: server.id, body: { name } });
+    assert.equal(result.status, 400, `#${name}`);
+    assert.equal((result.body as { code?: string }).code, "channel_name_reserved");
+    assert.match((result.body as { error: string }).error, /reserved/);
+  }
 });

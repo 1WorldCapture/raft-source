@@ -75,13 +75,13 @@ export async function createChannelForAgent(input: {
     });
     return { status: 400, body: { error: nameError } };
   }
-  if (rawName === "all") {
+  if (rawName === "all" || rawName === channelService.SYSTEM_ANNOUNCEMENT_CHANNEL_NAME) {
     addTraceEvent("agent_channel_create.validation.failed", { reason: "reserved_name" });
     addTraceEvent("agent_channel_create.request.failed", {
       reason: "reserved_name",
       status_code: 400,
     });
-    return { status: 400, body: { error: 'Channel name "all" is reserved' } };
+    return { status: 400, body: { error: `Channel name "${rawName}" is reserved`, code: "channel_name_reserved" } };
   }
 
   const type = parseVisibility(payload.visibility);
