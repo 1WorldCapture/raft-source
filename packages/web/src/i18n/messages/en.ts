@@ -2815,6 +2815,13 @@ export const en = {
   "settings.invites.confirmMessage": "Are you sure you want to revoke the invite to {email}? They will no longer be able to join using this invite link.",
   "settings.invites.confirmLabel": "Revoke Invite",
   "settings.invites.revoking": "Revoking…",
+  "settings.jointInvites.sectionLabel": "Joint channel invites",
+  "settings.jointInvites.description": "Accept an invite to add that joint channel to this server.",
+  "channel.jointInvite.banner": "{server} invited you to join joint channel #{channel}",
+  "channel.jointInvite.accept": "Accept",
+  "channel.jointInvite.later": "Later",
+  "channel.jointInvite.accepting": "Accepting…",
+  "channel.jointInvite.failed": "Could not accept this invite",
 
   // --- settings: joinLinks (inherited from #3874 b41c72b4f, AngLee-reviewed) ---
   "settings.joinLinks.sectionLabel": "Invite Links",
