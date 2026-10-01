@@ -244,6 +244,7 @@ export function renderAreaLabels(
   offsetX: number,
   offsetY: number,
   zoom: number,
+  anchor: "center" | "bottom-left" = "center",
 ): void {
   if (!areaTiles || areaTiles.length === 0) return;
   if (!areas || areas.length === 0) return;
@@ -252,8 +253,10 @@ export function renderAreaLabels(
   const colorMap = new Map<string, string>();
   for (const a of areas) colorMap.set(a.label, a.color);
 
-  // Centroid accumulator: label → { sumX, sumY, count }.
+  // Center uses the tile centroid. Bottom-left uses the room's lowest row and
+  // leftmost column so the computer name sits in the corner instead of on people.
   const centroids = new Map<string, { sumX: number; sumY: number; count: number }>();
+  const corners = new Map<string, { minC: number; maxR: number }>();
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
       const label = areaTiles[r * cols + c];
@@ -266,21 +269,38 @@ export function renderAreaLabels(
       } else {
         centroids.set(label, { sumX: c, sumY: r, count: 1 });
       }
+      const corner = corners.get(label);
+      if (corner) {
+        corner.minC = Math.min(corner.minC, c);
+        corner.maxR = Math.max(corner.maxR, r);
+      } else {
+        corners.set(label, { minC: c, maxR: r });
+      }
     }
   }
 
   if (centroids.size === 0) return;
 
-  const fontSize = Math.max(AREA_LABEL_FONT_SIZE_PX * zoom, AREA_LABEL_MIN_FONT_SIZE_PX);
+  const fontSize = anchor === "bottom-left"
+    ? Math.max(11, Math.round(TILE_SIZE * zoom * 0.45))
+    : Math.max(AREA_LABEL_FONT_SIZE_PX * zoom, AREA_LABEL_MIN_FONT_SIZE_PX);
 
   ctx.save();
   ctx.font = `bold ${fontSize}px 'FS Pixel Sans'`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
+  ctx.textAlign = anchor === "bottom-left" ? "left" : "center";
+  ctx.textBaseline = anchor === "bottom-left" ? "bottom" : "middle";
 
-  for (const [label, acc] of centroids) {
-    const cx = offsetX + (acc.sumX / acc.count + 0.5) * s;
-    const cy = offsetY + (acc.sumY / acc.count + 0.5) * s;
+  const labels = anchor === "bottom-left" ? corners.keys() : centroids.keys();
+  for (const label of labels) {
+    const acc = centroids.get(label)!;
+    const corner = corners.get(label)!;
+    const pad = Math.max(2, Math.round(zoom));
+    const cx = anchor === "bottom-left"
+      ? offsetX + corner.minC * s + pad
+      : offsetX + (acc.sumX / acc.count + 0.5) * s;
+    const cy = anchor === "bottom-left"
+      ? offsetY + corner.maxR * s - pad
+      : offsetY + (acc.sumY / acc.count + 0.5) * s;
 
     // Pixel-art drop shadow (1px right + down, no blur).
     ctx.globalAlpha = AREA_LABEL_SHADOW_ALPHA;
@@ -978,6 +998,7 @@ export function renderFrame(
   showAreas?: boolean,
   activeAreaLabel?: string | null,
   pets?: Pet[],
+  areaLabelAnchor: "center" | "bottom-left" = "center",
 ): { offsetX: number; offsetY: number } {
   // Clear
   ctx.clearRect(0, 0, canvasWidth, canvasHeight);
@@ -1045,7 +1066,7 @@ export function renderFrame(
 
   // Area labels (above bubbles + characters, below editor overlays)
   if (showAreas) {
-    renderAreaLabels(ctx, areaTiles, areas, cols, rows, offsetX, offsetY, zoom);
+    renderAreaLabels(ctx, areaTiles, areas, cols, rows, offsetX, offsetY, zoom, areaLabelAnchor);
   }
 
   // Editor overlays
