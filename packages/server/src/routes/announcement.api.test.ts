@@ -68,12 +68,14 @@ test("the channel list exposes systemKind and marks the announcement channel joi
   const asMember = api(app.baseUrl, server.id, await tokenForHuman(member.email));
   const res = await asMember("GET", `/api/channels`);
   assert.equal(res.status, 200);
-  const list = await res.json() as Array<{ name: string; systemKind: string | null; joined: boolean }>;
+  const list = await res.json() as Array<{ name: string; systemKind: string | null; joined: boolean; activityMuted?: boolean }>;
   const announcement = list.find((channel) => channel.systemKind === "announcement");
   assert.ok(announcement, "announcement channel is listed");
   assert.equal(announcement.name, "announcement");
   assert.equal(announcement.joined, true);
+  assert.equal(announcement.activityMuted, true, "humans see it muted until they change it");
   assert.equal(list.find((channel) => channel.name === "all")?.systemKind, "all");
+  assert.equal(list.find((channel) => channel.name === "all")?.activityMuted, false, "other channels keep their default");
 });
 
 test("leave, rename, archive and delete are refused over HTTP", async ({ app }) => {
