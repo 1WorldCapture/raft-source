@@ -1,0 +1,1 @@
+ALTER TABLE "progress_announcement_state" ADD COLUMN "tracked_since" timestamp with time zone;

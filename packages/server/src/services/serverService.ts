@@ -3,7 +3,7 @@ import { createHash } from "crypto";
 import { eq, and, asc, isNull, inArray, sql, count, ne } from "drizzle-orm";
 import { getDb, type DatabaseExecutor } from "../db/index.js";
 import { CURRENT_CONTRACT_VERSION } from "./serverSetupStateService.js";
-import { servers, serverMembers, serverMembershipDepartures, serverMemberRoleAuditEvents, serverAgentMembers, users, channels, channelHumans, messages, agents, subscriptions, threadFollows } from "../db/schema.js";
+import { servers, serverMembers, serverMembershipDepartures, serverMemberRoleAuditEvents, serverAgentMembers, users, channels, channelHumans, messages, agents, subscriptions, threadFollows, progressAnnouncementState } from "../db/schema.js";
 import { ALL_CHANNEL_TEAM_THRESHOLD, canTransitionServerRole, currentDate, hasServerCapability, isAdminOrOwner, isOwnerRole, type ServerRole } from "@botiverse/raft-shared";
 import { untracedDbQuery, type DbQueryTracer } from "../tracing/dbQueryTrace.js";
 import * as serverAgreementService from "./serverAgreementService.js";
@@ -2069,6 +2069,15 @@ export async function updateServerAnnouncementSettings(
   serverId: string,
   updates: ServerAnnouncementSettings,
 ): Promise<ServerAnnouncementSettings | null> {
+  const current = await getServerAnnouncementSettings(serverId);
+  if (updates.announcementsEnabled && current && !current.announcementsEnabled) {
+    // Turning the feature on starts every agent's hourly clock from now, not from
+    // whenever it was last tracked before the switch was turned off.
+    await getDb()
+      .update(progressAnnouncementState)
+      .set({ trackedSince: null, lastNudgedAt: null, updatedAt: new Date() })
+      .where(eq(progressAnnouncementState.serverId, serverId));
+  }
   const [updated] = await getDb()
     .update(servers)
     .set({ progressAnnouncementsEnabled: updates.announcementsEnabled, updatedAt: new Date() })

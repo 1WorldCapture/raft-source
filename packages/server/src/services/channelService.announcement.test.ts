@@ -95,7 +95,7 @@ test("listChannels backfills a missing #announcement and retires a same-named us
   await db.delete(channels).where(and(eq(channels.serverId, server.id), eq(channels.systemKind, "announcement")));
   await db.insert(channels).values({ serverId: server.id, name: "announcement", type: "channel" });
 
-  const listed = await listChannels(server.id, owner.id);
+  const listed = (await listChannels(server.id, owner.id)) as Array<{ id: string; name: string; systemKind: string | null; joined?: boolean }>;
   const system = listed.filter((channel) => channel.systemKind === "announcement");
   assert.equal(system.length, 1, "exactly one system announcement channel");
   assert.equal(system[0]?.joined, true, "implicit membership counts as joined");
