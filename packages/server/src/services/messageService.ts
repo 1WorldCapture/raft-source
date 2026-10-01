@@ -1498,7 +1498,13 @@ async function recordInboxFactsForPersistedMessage(opts: {
     ]);
     const kind = opts.channel.type === "dm" ? "dm" : "channel";
     for (const human of humans) addReceiver("user", human.id, opts.channel.serverId, kind, opts.channel.id);
-    for (const agent of agents) addReceiver("agent", agent.id, opts.channel.serverId, kind, opts.channel.id);
+    // The announcement channel is a broadcast nobody is waiting on: agents get a
+    // fact only when explicitly @mentioned, otherwise every agent's own progress
+    // post would put "new messages" in front of every other agent's next send.
+    const agentsToNotify = channelService.isAnnouncementChannel(opts.channel)
+      ? agents.filter((agent) => mentionKeys.has(`agent:${agent.id}`))
+      : agents;
+    for (const agent of agentsToNotify) addReceiver("agent", agent.id, opts.channel.serverId, kind, opts.channel.id);
   }
 
   const recorded = await opts.deps.recordInboxNotificationFacts(facts, executor);
@@ -4406,6 +4412,11 @@ async function rebuildExternalAgentPendingInner(
       skippedJoint += 1;
       continue;
     }
+    // Announcement broadcasts are never replayed to agents; a mention is delivered live.
+    if (channelService.isAnnouncementChannel(channel)) {
+      skippedNoMembership += 1;
+      continue;
+    }
 
     // Membership recheck at rebuild time: the cursor row may predate a
     // leave/unfollow. Thread delivery goes to followers, not parent members.
@@ -6335,6 +6346,39 @@ export async function listMessages(
   return enriched.reverse();
 }
 
+/**
+ * One sender's messages in a channel, newest page first (returned oldest-first).
+ * Deliberately a separate read from listMessages/listMessagesWithCoverage: it is
+ * not a contiguous channel window, so it must never feed the client message cache.
+ */
+export async function listMessagesBySender(
+  channelId: string,
+  senderId: string,
+  limit = 50,
+  beforeSeq?: number,
+  historyCutoff?: Date,
+  opts: MessageQueryTraceOptions = {},
+): Promise<{ messages: Awaited<ReturnType<typeof enrichWithSenderNames>>; hasMore: boolean }> {
+  const db = getDb();
+  const traceQuery = opts.traceQuery ?? untracedDbQuery;
+  const conditions = [eq(messages.channelId, channelId), eq(messages.senderId, senderId)];
+  if (beforeSeq !== undefined) conditions.push(lt(messages.seq, beforeSeq));
+  if (historyCutoff) conditions.push(gt(messages.createdAt, historyCutoff));
+  const rows = await traceQuery(
+    "messages.channel.by_sender_page",
+    () => db
+      .select()
+      .from(messages)
+      .where(and(...conditions))
+      .orderBy(desc(messages.seq))
+      .limit(limit + 1),
+    () => ({ limit, history_cutoff_present: Boolean(historyCutoff) }),
+  );
+  const hasMore = rows.length > limit;
+  const enriched = await enrichWithSenderNames(rows.slice(0, limit), opts);
+  return { messages: enriched.reverse(), hasMore };
+}
+
 export type MessageWindowCoverage = {
   coveredAfterSeq: number;
   coveredFromSeq: number;
@@ -7572,16 +7616,16 @@ function toLinkedMessageAttachment(
 async function getChannelHumansWithExecutor(
   executor: DatabaseExecutor,
   channelId: string,
-  knownChannel?: Pick<typeof channels.$inferSelect, "id" | "serverId" | "name" | "type">,
+  knownChannel?: Pick<typeof channels.$inferSelect, "id" | "serverId" | "name" | "type" | "systemKind">,
 ): ReturnType<typeof channelService.getChannelHumans> {
   const channel = knownChannel?.id === channelId
     ? knownChannel
     : (await executor
-      .select({ id: channels.id, serverId: channels.serverId, name: channels.name, type: channels.type })
+      .select({ id: channels.id, serverId: channels.serverId, name: channels.name, type: channels.type, systemKind: channels.systemKind })
       .from(channels)
       .where(eq(channels.id, channelId))
       .limit(1))[0];
-  if (channel && channelService.isEnabledAllChannel(channel)) {
+  if (channel && channelService.hasImplicitServerMembership(channel)) {
     const rows = await executor
       .select({
         id: users.id,
@@ -7627,16 +7671,16 @@ async function getChannelHumansWithExecutor(
 async function getChannelAgentsWithExecutor(
   executor: DatabaseExecutor,
   channelId: string,
-  knownChannel?: Pick<typeof channels.$inferSelect, "id" | "serverId" | "name" | "type">,
+  knownChannel?: Pick<typeof channels.$inferSelect, "id" | "serverId" | "name" | "type" | "systemKind">,
 ): ReturnType<typeof channelService.getChannelAgents> {
   const channel = knownChannel?.id === channelId
     ? knownChannel
     : (await executor
-      .select({ id: channels.id, serverId: channels.serverId, name: channels.name, type: channels.type })
+      .select({ id: channels.id, serverId: channels.serverId, name: channels.name, type: channels.type, systemKind: channels.systemKind })
       .from(channels)
       .where(eq(channels.id, channelId))
       .limit(1))[0];
-  if (channel && channelService.isEnabledAllChannel(channel)) {
+  if (channel && channelService.hasImplicitServerMembership(channel)) {
     const rows = await executor
       .select({
         id: agents.id,
@@ -8948,9 +8992,14 @@ export async function broadcastAndDeliver(
         precomputedCandidates: threadAgentDeliveryCandidatesFromFacts,
       })
     : null;
+  // The announcement channel is not pushed to agents (every agent is an implicit
+  // member, so each post would wake all of them). The mention-only branch below
+  // still delivers to, and wakes, an agent a human explicitly @mentioned.
   const channelAgentList: { id: string }[] = threadAgentDeliveryResolution
     ? threadAgentDeliveryResolution.candidates
-    : await deps.getChannelAgents(channelId);
+    : channel && channelService.isAnnouncementChannel(channel)
+      ? []
+      : await deps.getChannelAgents(channelId);
 
   // Resolve the unique sender name (for @mentions) and description for agent-visible metadata.
   const { uniqueName: senderUniqueName, description: senderDescription } = await deps.getSenderIdentity(senderType, senderId, senderName);

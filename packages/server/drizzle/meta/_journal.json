@@ -1877,6 +1877,13 @@
       "when": 1790697977520,
       "tag": "0267_agent_machine_status_since",
       "breakpoints": true
+    },
+    {
+      "idx": 268,
+      "version": "7",
+      "when": 1790820467311,
+      "tag": "0268_announcement_system_channel",
+      "breakpoints": true
     }
   ]
 }

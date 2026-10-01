@@ -183,6 +183,71 @@ export function isEnabledAllChannel(channel: ChannelSystemFields): boolean {
   return isAllSystemChannel(channel) && channel.type === "channel";
 }
 
+export const SYSTEM_ANNOUNCEMENT_CHANNEL_NAME = "announcement";
+
+type ChannelSystemKindFields = Pick<typeof channels.$inferSelect, "type" | "systemKind">;
+
+/** The one-way agent progress channel. Identified by system_kind only, never by name. */
+/** Replies and threads are not allowed in the one-way announcement channel. */
+export class AnnouncementNoThreadsError extends Error {
+  readonly code = "announcement_no_threads";
+  constructor() {
+    super("The #announcement channel is one-way: replies and threads are not allowed");
+    this.name = "AnnouncementNoThreadsError";
+  }
+}
+
+export function isAnnouncementChannel(channel: ChannelSystemKindFields): boolean {
+  return channel.systemKind === "announcement" && channel.type === "channel";
+}
+
+/**
+ * Create the server's #announcement channel if it is missing (new servers, and
+ * servers that predate the channel). Idempotent and safe under concurrent calls:
+ * the partial unique index on (server_id, system_kind) arbitrates. A user channel
+ * that already holds the reserved name is retired first, as the 0268 backfill does.
+ */
+export async function ensureAnnouncementChannel(
+  serverId: string,
+  executor: DatabaseExecutor = getDb(),
+): Promise<typeof channels.$inferSelect> {
+  const live = and(
+    eq(channels.serverId, serverId),
+    eq(channels.systemKind, "announcement"),
+    isNull(channels.deletedAt),
+  );
+  const [existing] = await executor.select().from(channels).where(live).limit(1);
+  if (existing) return existing;
+  await executor.update(channels).set({ deletedAt: currentDate() }).where(and(
+    eq(channels.serverId, serverId),
+    eq(channels.name, SYSTEM_ANNOUNCEMENT_CHANNEL_NAME),
+    inArray(channels.type, ["channel", "private", "joint"]),
+    isNull(channels.systemKind),
+    isNull(channels.deletedAt),
+  ));
+  const [created] = await executor.insert(channels).values({
+    serverId,
+    name: SYSTEM_ANNOUNCEMENT_CHANNEL_NAME,
+    description: "Agent progress announcements",
+    type: "channel",
+    systemKind: "announcement",
+  }).onConflictDoNothing().returning();
+  if (created) return created;
+  const [raced] = await executor.select().from(channels).where(live).limit(1);
+  if (!raced) throw new Error("Failed to ensure the #announcement channel");
+  return raced;
+}
+
+/**
+ * Channels whose audience is every server member, derived from server membership
+ * (no channel_humans / channel_agents rows): the enabled #all and the announcement
+ * channel. Visibility toggles and guest policy stay #all-only; use this only where
+ * the question is "who is a member".
+ */
+export function hasImplicitServerMembership(channel: ChannelSystemFields & ChannelSystemKindFields): boolean {
+  return isEnabledAllChannel(channel) || isAnnouncementChannel(channel);
+}
+
 function requiresExplicitMembership(type: string): boolean {
   return type === "private" || type === "joint";
 }
@@ -307,6 +372,9 @@ async function createChannelWithExecutor(
 ) {
   if (name === SYSTEM_ALL_CHANNEL_KEY) {
     throw new Error('Channel name "all" is reserved');
+  }
+  if (name === SYSTEM_ANNOUNCEMENT_CHANNEL_NAME) {
+    throw new Error('Channel name "announcement" is reserved');
   }
 
   // Check plan quota. Joint projections are intentionally not counted against
@@ -1787,6 +1855,16 @@ export async function listChannels(
     list.push(allChannel);
   }
 
+  // Servers that predate the announcement channel get it on first listing.
+  if (!list.some(isAnnouncementChannel)) {
+    const ensured = await ensureAnnouncementChannel(serverId, db);
+    // A user channel that held the reserved name was retired by the ensure.
+    for (let i = list.length - 1; i >= 0; i -= 1) {
+      if (list[i].name === SYSTEM_ANNOUNCEMENT_CHANNEL_NAME && list[i].systemKind === null) list.splice(i, 1);
+    }
+    list.push(ensured);
+  }
+
   const visibleList = allChannel && !isEnabledAllChannel(allChannel)
     ? list.filter((channel) => channel.id !== allChannel.id)
     : list;
@@ -1827,7 +1905,7 @@ export async function listChannels(
         ...ch,
         joined: serverRole === "guest"
           ? !isAllSystemChannel(ch) && joinedSet.has(ch.id)
-          : isEnabledAllChannel(ch) || joinedSet.has(ch.id),
+          : hasImplicitServerMembership(ch) || joinedSet.has(ch.id),
       }));
     const humanActivityMuteEnabled = opts?.humanActivityMuteEnabled ?? await isHumanActivityMuteEnabled(serverId, userId);
     return attachJointChannelMetadata(
@@ -1899,6 +1977,14 @@ export async function updateChannel(
   }
   if (!isAllSystemChannel(channel) && updates.name === SYSTEM_ALL_CHANNEL_KEY) {
     throw new Error('Channel name "all" is reserved');
+  }
+  if (isAnnouncementChannel(channel)
+    && (updates.name !== undefined || updates.type !== undefined
+      || updates.guestVisible !== undefined || updates.guestJoinable !== undefined)) {
+    throw new Error("Cannot rename or change visibility of the #announcement channel");
+  }
+  if (!isAnnouncementChannel(channel) && updates.name === SYSTEM_ANNOUNCEMENT_CHANNEL_NAME) {
+    throw new Error('Channel name "announcement" is reserved');
   }
   const allSystemVisibilityUpdate = isAllSystemChannel(channel)
     && updates.type !== undefined
@@ -2292,7 +2378,7 @@ export async function getAgentIdsVisibleThroughLocalChannels(
   const db = getDb();
   const visibleAgentIds = new Set<string>();
   const explicitChannelIds = readableChannels
-    .filter((channel) => !isEnabledAllChannel(channel))
+    .filter((channel) => !hasImplicitServerMembership(channel))
     .map((channel) => channel.id);
   if (explicitChannelIds.length > 0) {
     const rows = await db
@@ -2302,7 +2388,7 @@ export async function getAgentIdsVisibleThroughLocalChannels(
       .where(inArray(channelAgents.channelId, explicitChannelIds));
     for (const row of rows) visibleAgentIds.add(row.agentId);
   }
-  if (readableChannels.some(isEnabledAllChannel)) {
+  if (readableChannels.some(hasImplicitServerMembership)) {
     const rows = await db
       .select({ agentId: agents.id })
       .from(agents)
@@ -2807,6 +2893,7 @@ export async function archiveChannel(
   if (!channel) throw new Error("Channel not found");
   if (!REGULAR_CHANNEL_TYPES.includes(channel.type as RegularChannelType) && channel.type !== "joint") throw new Error("Only regular channels can be archived");
   if (isAllSystemChannel(channel)) throw new Error("The #all channel cannot be archived");
+  if (isAnnouncementChannel(channel)) throw new Error("The #announcement channel cannot be archived");
   if (channel.archivedAt) return channel;
   await notifyChannelHumansUnreadChanged(channelId, channel.serverId, db);
 
@@ -3012,6 +3099,9 @@ export async function deleteChannel(channelId: string) {
   // Prevent deletion of the built-in #all channel
   if (isAllSystemChannel(channel)) {
     throw new Error("The #all channel cannot be deleted");
+  }
+  if (isAnnouncementChannel(channel)) {
+    throw new Error("The #announcement channel cannot be deleted");
   }
 
   const now = currentDate();
@@ -3281,7 +3371,7 @@ export async function addAgent(
   if (!agent || agent.serverId !== channel.serverId) {
     throw new Error("Agent is not a member of this channel's server");
   }
-  if (isAllSystemChannel(channel)) {
+  if (isAllSystemChannel(channel) || isAnnouncementChannel(channel)) {
     return false;
   }
   const inserted = await db
@@ -3301,6 +3391,9 @@ export async function removeAgent(channelId: string, agentId: string, executor?:
   // Protect #all channel
   if (channel && isAllSystemChannel(channel)) {
     throw new Error("Cannot remove members from the #all channel");
+  }
+  if (channel && isAnnouncementChannel(channel)) {
+    throw new Error("Cannot remove members from the #announcement channel");
   }
   await db.delete(channelAgents).where(
     and(eq(channelAgents.channelId, channelId), eq(channelAgents.agentId, agentId))
@@ -3373,7 +3466,7 @@ async function getServerAudienceAgents(serverId: string) {
  */
 export async function getChannelAgents(channelId: string) {
   const channel = await getChannel(channelId);
-  if (channel && isEnabledAllChannel(channel)) {
+  if (channel && hasImplicitServerMembership(channel)) {
     return getServerAudienceAgents(channel.serverId);
   }
   return getChannelAgentsRaw(channelId);
@@ -3442,7 +3535,7 @@ export async function listChannelsForAgent(serverId: string, agentId: string) {
     .filter((ch) => !requiresExplicitMembership(ch.type) || joinedSet.has(ch.id))
     .map((ch) => {
       const membership = membershipByChannel.get(ch.id);
-      const joined = isEnabledAllChannel(ch) || Boolean(membership);
+      const joined = hasImplicitServerMembership(ch) || Boolean(membership);
       const supportsChannelRoles = (ch.type === "channel" || ch.type === "private") && !isAllSystemChannel(ch);
       return {
         ...ch,
@@ -4647,7 +4740,7 @@ export async function addHuman(
 ) {
   const db = options.executor ?? getDb();
   const [channel] = await db
-    .select({ id: channels.id, serverId: channels.serverId, name: channels.name, type: channels.type })
+    .select({ id: channels.id, serverId: channels.serverId, name: channels.name, type: channels.type, systemKind: channels.systemKind })
     .from(channels)
     .where(eq(channels.id, channelId));
   if (!channel) {
@@ -4669,6 +4762,12 @@ export async function addHuman(
   if (isAllSystemChannel(channel)) {
     if (member.role === "guest") {
       throw new Error("Guest cannot be added to the #all channel");
+    }
+    return false;
+  }
+  if (isAnnouncementChannel(channel)) {
+    if (member.role === "guest") {
+      throw new Error("Guest cannot be added to the #announcement channel");
     }
     return false;
   }
@@ -4942,6 +5041,9 @@ export async function removeHuman(channelId: string, userId: string, executor?: 
   if (channel && isAllSystemChannel(channel)) {
     throw new Error("Cannot leave or remove from the #all channel");
   }
+  if (channel && isAnnouncementChannel(channel)) {
+    throw new Error("Cannot remove members from, or leave, the #announcement channel");
+  }
   await db.delete(channelHumans).where(
     and(eq(channelHumans.channelId, channelId), eq(channelHumans.userId, userId))
   );
@@ -5030,7 +5132,7 @@ async function getServerAudienceHumans(serverId: string) {
  */
 export async function getChannelHumans(channelId: string) {
   const channel = await getChannel(channelId);
-  if (channel && isEnabledAllChannel(channel)) {
+  if (channel && hasImplicitServerMembership(channel)) {
     return getServerAudienceHumans(channel.serverId);
   }
   return getChannelHumansRaw(channelId);
@@ -5137,7 +5239,7 @@ export async function getChannelMembers(channelId: string) {
     return getChannelMembers(parentMsg.channelId);
   }
 
-  if (channel && isEnabledAllChannel(channel)) {
+  if (channel && hasImplicitServerMembership(channel)) {
     return getVirtualAllChannelMembers(channel.serverId);
   }
 
@@ -5835,6 +5937,10 @@ export async function canAgentReceiveChannelDelivery(
   const channel = await getChannel(channelId);
   if (!channel) return false;
 
+  // Announcement broadcasts reach an agent only when it was explicitly @mentioned;
+  // this also drops already-queued broadcasts at receive time.
+  if (isAnnouncementChannel(channel) && !opts.personalMention) return false;
+
   if (channel.type !== "thread") {
     return canAgentAccessChannel(channelId, agentId);
   }
@@ -5883,7 +5989,7 @@ export async function canUserPostToChannel(channelId: string, userId: string): P
   }
 
   if (isAllSystemChannel(channel) && !isEnabledAllChannel(channel)) return false;
-  if (isEnabledAllChannel(channel)) return isServerHumanMember(channel.serverId, userId);
+  if (hasImplicitServerMembership(channel)) return isServerHumanMember(channel.serverId, userId);
 
   if (channel.type === "thread") {
     const jointThread = await getJointThreadProjectionByLocalThread(channelId, channel.serverId);
@@ -5915,7 +6021,7 @@ export async function canAgentPostToChannel(channelId: string, agentId: string):
   if (!channel) return false;
 
   if (isAllSystemChannel(channel) && !isEnabledAllChannel(channel)) return false;
-  if (isEnabledAllChannel(channel)) return isServerAgent(channel.serverId, agentId);
+  if (hasImplicitServerMembership(channel)) return isServerAgent(channel.serverId, agentId);
 
   if (channel.type === "thread") {
     const jointThread = await getJointThreadProjectionByLocalThread(channelId, channel.serverId);
@@ -6626,10 +6732,13 @@ export async function getOrCreateThread(
 
   // Get parent channel to find serverId
   const [parentChannel] = await db
-    .select({ serverId: channels.serverId })
+    .select({ serverId: channels.serverId, type: channels.type, systemKind: channels.systemKind })
     .from(channels)
     .where(eq(channels.id, parentMsg.channelId));
   if (!parentChannel) throw new Error("Parent channel not found");
+  // Single choke point: every route, agent target, task and attachment comment
+  // that creates a thread goes through here.
+  if (isAnnouncementChannel(parentChannel)) throw new AnnouncementNoThreadsError();
 
   // Create thread channel
   const threadName = `thread-${parentMessageId.slice(0, 8)}`;

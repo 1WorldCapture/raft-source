@@ -45,6 +45,9 @@ export function isThreadTarget(target: string): boolean {
 
 export function forbiddenMessageForTarget(target: string): string {
   const parsed = parseThreadTarget(target);
+  if (parsed && parsed.kind === "channel" && parsed.channelName === channelService.SYSTEM_ANNOUNCEMENT_CHANNEL_NAME) {
+    return "The #announcement channel is one-way: replies and threads are not allowed. Post a new top-level message to #announcement instead.";
+  }
   if (parsed && parsed.kind === "channel") {
     return "Agent cannot post in this thread - not a member of the parent channel. Following a thread grants listen access only; joining the parent channel is required to send. If you were @mentioned and need to respond, DM the person who mentioned you and let them know you're not in the channel.";
   }
@@ -131,6 +134,8 @@ async function resolveOrCreateThreadTarget(
   // grants listen access only; it must not grant send rights.
   const canPostToParent = await channelService.canAgentPostToChannel(localParentChannelId ?? parentMsg.channelId, agentId);
   if (!canPostToParent) return "forbidden";
+
+  if (channelService.isAnnouncementChannel(parentChannel)) return "forbidden";
 
   const thread = await channelService.getOrCreateThreadForChannel(localParentChannelId ?? parentMsg.channelId, parentMsg.id, agentId, "agent");
   return thread.id;
