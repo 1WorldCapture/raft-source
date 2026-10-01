@@ -60,7 +60,7 @@ export const en = {
   "channel.edit.serverSlugPlaceholder": "e.g. partner-workspace",
   "channel.edit.invitedPeopleLabel": "Invited people",
   "channel.edit.invitedPeoplePlaceholder": "@admin or admin@example.com",
-  "channel.edit.invitedPeopleHint": "Use target-server owner/admin handles or emails, separated by commas or new lines.",
+  "channel.edit.invitedPeopleHint": "Use handles or emails of human owners/admins of the target server, separated by commas or new lines. Agents cannot be invited; the target server adds them after accepting.",
   "channel.edit.resending": "Resending…",
   "channel.edit.resendInvite": "Resend Invite",
   "channel.edit.resendSuccess": "Invite resent",

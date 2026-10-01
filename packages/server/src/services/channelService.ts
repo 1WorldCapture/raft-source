@@ -767,10 +767,10 @@ async function resolveJointInvitees(executor: DatabaseExecutor, targetServerId: 
         isEmail ? eq(users.email, lookup) : eq(users.name, lookup),
       ));
     if (!invitee) {
-      throw new Error(`Invited person not found in target server: ${invitedPerson}`);
+      throw new Error(`Invited person not found in target server: ${invitedPerson}. Only human owners or admins of the target server can be invited; the target server can add its agents after it accepts.`);
     }
     if (invitee.role !== "owner" && invitee.role !== "admin") {
-      throw new Error(`invited person must be a target server admin: ${invitedPerson}`);
+      throw new Error(`Invited person must be a target server admin (owner or admin): ${invitedPerson}`);
     }
     if (seenUserIds.has(invitee.userId)) continue;
     seenUserIds.add(invitee.userId);
