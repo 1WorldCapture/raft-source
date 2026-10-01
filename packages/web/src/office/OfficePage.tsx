@@ -222,6 +222,7 @@ export default function OfficePage() {
             onZoomChange={setZoom}
             panRef={panRef}
             showAreas
+            areaLabelAnchor="bottom-left"
             activeAreaLabel={null}
           />
           <ul className="sr-only" data-testid="office-roster">

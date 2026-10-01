@@ -45,6 +45,8 @@ interface OfficeCanvasProps {
   showAreas: boolean;
   /** Currently-selected area label in the editor (alpha-bumped overlay). null otherwise. */
   activeAreaLabel: string | null;
+  /** Members office puts the computer name in the room's lower-left. The editor keeps the centroid. */
+  areaLabelAnchor?: "center" | "bottom-left";
 }
 
 export function OfficeCanvas({
@@ -64,6 +66,7 @@ export function OfficeCanvas({
   panRef,
   showAreas,
   activeAreaLabel,
+  areaLabelAnchor = "center",
 }: OfficeCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -294,6 +297,7 @@ export function OfficeCanvas({
           showAreas,
           activeAreaLabel,
           officeState.pets,
+          areaLabelAnchor,
         );
         offsetRef.current = { x: offsetX, y: offsetY };
 
@@ -317,6 +321,7 @@ export function OfficeCanvas({
     panRef,
     showAreas,
     activeAreaLabel,
+    areaLabelAnchor,
   ]);
 
   // Convert CSS mouse coords to world (sprite pixel) coords
