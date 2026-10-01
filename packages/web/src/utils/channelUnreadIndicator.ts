@@ -1,3 +1,5 @@
+import { channelExcludedFromUnmutedUnread } from "./announcementChannel";
+
 export function getChannelUnreadIndicatorState(opts: {
   unread: number;
   joined: boolean;
@@ -18,6 +20,9 @@ export function shouldShowActivityMutedIcon(opts: {
 export type SectionUnreadChannel = {
   id: string;
   activityMuted?: boolean;
+  name?: string;
+  type?: string;
+  systemKind?: "all" | "announcement" | null;
 };
 
 export function hasUnmutedUnread(
@@ -26,7 +31,7 @@ export function hasUnmutedUnread(
 ): boolean {
   return channels.some((channel) => (
     channel !== undefined
-    && channel.activityMuted !== true
+    && !channelExcludedFromUnmutedUnread(channel)
     && (unreadCounts[channel.id] ?? 0) > 0
   ));
 }

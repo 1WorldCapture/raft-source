@@ -12,6 +12,7 @@ import {
   Switch,
 } from "raft-ui";
 import { useChannelStore } from "../../store/channelStore";
+import { isAnnouncementChannel } from "../../utils/announcementChannel";
 import { useServerStore } from "../../store/serverStore";
 import {
   MAX_JOINT_CHANNEL_SERVERS,
@@ -182,6 +183,8 @@ function GatedEditChannelDialog({
   const nav = useAppNavigate();
 
   const isAllChannel = initialName === "all";
+  const isAnnouncement = isAnnouncementChannel(channel);
+  const identityLocked = isAllChannel || isAnnouncement;
   const canEditChannel = Boolean(effectiveCapabilities.editChannelMetadata
     || effectiveCapabilities.changeChannelVisibility
     || effectiveCapabilities.archiveChannels
@@ -213,13 +216,13 @@ function GatedEditChannelDialog({
     !isJointChannel &&
     (channel?.type === "channel" || channel?.type === "private"),
   );
-  const showLeaveAction = !!onLeaveChannel && !isAllChannel && !isArchived;
+  const showLeaveAction = !!onLeaveChannel && !identityLocked && !isArchived;
   const showManageActions = canEditChannel && !isArchived;
-  const showVisibilityAction = showManageActions && Boolean(effectiveCapabilities.changeChannelVisibility);
+  const showVisibilityAction = showManageActions && Boolean(effectiveCapabilities.changeChannelVisibility) && !isAnnouncement;
   const showConvertAction = showManageActions &&
     canShowConvertToJointEntry &&
     canUseJointChannels &&
-    !isAllChannel &&
+    !identityLocked &&
     !isJointChannel &&
     Boolean(effectiveCapabilities.federateChannels) &&
     (channel?.type === "channel" || channel?.type === "private");
@@ -383,7 +386,7 @@ function GatedEditChannelDialog({
       return true;
     }
 
-    if (!isAllChannel) {
+    if (!identityLocked) {
       const nameError = formatNameValidationError(
         validateNameReason(name),
         "channel.edit.nameFieldName",
@@ -398,7 +401,7 @@ function GatedEditChannelDialog({
     setSaving(true);
     try {
       const updates: { name?: string; description?: string } = {};
-      if (!isAllChannel && name.trim() !== initialName) {
+      if (!identityLocked && name.trim() !== initialName) {
         updates.name = name.trim();
       }
       if (description.trim() !== initialDescription) {
@@ -657,7 +660,7 @@ function GatedEditChannelDialog({
       {convertBusy ? formatMessage({ id: "channel.edit.converting" }) : formatMessage({ id: "channel.edit.convertToJoint" })}
     </button>
   );
-  const lifecycleActionButtons = !isAllChannel && (
+  const lifecycleActionButtons = !identityLocked && (
     <>
       {effectiveCapabilities.archiveChannels && (isArchived ? (
         <button
@@ -739,7 +742,7 @@ function GatedEditChannelDialog({
       testId="channel-settings-convert-action"
     />
   );
-  const archiveActionRow = !isAllChannel && effectiveCapabilities.archiveChannels && (
+  const archiveActionRow = !identityLocked && effectiveCapabilities.archiveChannels && (
     isArchived ? (
       <OverflowActionRow
         icon={<ArchiveRestore size={14} />}
@@ -761,7 +764,7 @@ function GatedEditChannelDialog({
   // action closes the section, after Leave. v2「重量随风险」: the ONLY
   // filled block in the whole drawer — irreversible is what earns fill;
   // reversible actions (visibility/archive/leave/stop) stay outlined.
-  const deleteActionRow = !isAllChannel && effectiveCapabilities.deleteChannels && (
+  const deleteActionRow = !identityLocked && effectiveCapabilities.deleteChannels && (
     isJointChannel ? (
       <OverflowActionRow
         icon={<Unplug size={14} />}
@@ -975,9 +978,11 @@ function GatedEditChannelDialog({
                     hint={
                       isAllChannel
                         ? formatMessage({ id: "channel.edit.allCannotRename" })
-                        : isJointChannel
-                          ? formatMessage({ id: "channel.edit.jointNameShared" })
-                          : undefined
+                        : isAnnouncement
+                          ? formatMessage({ id: "channel.edit.announcementCannotRename" })
+                          : isJointChannel
+                            ? formatMessage({ id: "channel.edit.jointNameShared" })
+                            : undefined
                     }
                   >
                     <input
@@ -993,7 +998,7 @@ function GatedEditChannelDialog({
                       placeholder={formatMessage({ id: "channel.edit.namePlaceholder" })}
                       required
                       autoFocus={!isPanel}
-                      disabled={isAllChannel || isArchived}
+                      disabled={identityLocked || isArchived}
                     />
                   </FormField>
                   <FormField
