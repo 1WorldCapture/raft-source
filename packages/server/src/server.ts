@@ -28,6 +28,7 @@ import { startMobilePushOutboxWorker } from "./services/pushService.js";
 import { startReadMutationWorker } from "./services/readMutationSequencer.js";
 import { startAppNotificationDeliveryWorker } from "./services/appNotificationDeliveryService.js";
 import { startComputerOutageNotificationWorker } from "./services/computerOutageNotificationService.js";
+import { startProgressAnnouncementWorker } from "./services/progressAnnouncementService.js";
 import { startAgentMigrationReceiptOutboxWorker } from "./services/agentMigrationReceiptService.js";
 import { startAgentMigrationRemediationWorker } from "./services/agentMigrationRemediationWorker.js";
 import { startChannelMembershipRoleOutboxWorker } from "./services/channelMembershipRoleOutbox.js";
@@ -194,6 +195,7 @@ async function bootstrap() {
   const readMutationWorker = startReadMutationWorker();
   const appNotificationDeliveryWorker = startAppNotificationDeliveryWorker();
   const computerOutageNotificationWorker = startComputerOutageNotificationWorker();
+  const progressAnnouncementWorker = startProgressAnnouncementWorker({ io, orchestrator: agentOrchestrator });
   const agentMigrationReceiptOutboxWorker = startAgentMigrationReceiptOutboxWorker({
     io,
     orchestrator: agentOrchestrator,
@@ -229,6 +231,7 @@ async function bootstrap() {
     readMutationWorker.stop();
     appNotificationDeliveryWorker.stop();
     computerOutageNotificationWorker.stop();
+    progressAnnouncementWorker.stop();
     agentMigrationReceiptOutboxWorker.stop();
     agentMigrationRemediationWorker.stop();
     channelMembershipRoleOutboxWorker.stop();

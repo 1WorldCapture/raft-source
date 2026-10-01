@@ -1486,6 +1486,9 @@ export const progressAnnouncementState = pgTable("progress_announcement_state", 
   serverId: uuid("server_id").notNull().references(() => servers.id, { onDelete: "cascade" }),
   // Last time the server woke this agent to write an announcement.
   lastNudgedAt: timestamp("last_nudged_at", { withTimezone: true }),
+  // When the sweep first saw this agent online after the switch was turned on or
+  // after it was last offline; the hourly clock never starts before this. NULL = not tracked.
+  trackedSince: timestamp("tracked_since", { withTimezone: true }),
   // Idle epoch (the agent's status_changed_at) the proxy hours are counted from,
   // and how many hourly idle posts were made for it.
   idleSince: timestamp("idle_since", { withTimezone: true }),
