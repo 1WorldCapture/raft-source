@@ -1243,7 +1243,18 @@ async function attachReadState<T extends { id: string }>(
 // announces a mute capability, and an absent type must fail the compile rather
 // than silently default to "supported" (that default is what let DMs claim a
 // control no surface renders — task #473).
-async function attachActivityMuteState<T extends { id: string; type: string }>(
+/**
+ * A human who never touched the announcement channel's mute setting sees it muted:
+ * 50 agents' hourly posts must not read as loud unread. The default is virtual (no
+ * row), so an explicit unmute still wins and is distinguishable by its row.
+ */
+export const ANNOUNCEMENT_DEFAULT_MUTE: { activityMuted: true; muteFromSeq: number; prefsVersion: number } = {
+  activityMuted: true,
+  muteFromSeq: 0,
+  prefsVersion: 0,
+};
+
+async function attachActivityMuteState<T extends { id: string; type: string; systemKind?: string | null }>(
   rows: T[],
   receiverType: "user" | "agent",
   receiverId: string,
@@ -1269,6 +1280,13 @@ async function attachActivityMuteState<T extends { id: string; type: string }>(
   const stateByChannel = new Map(states.map((state) => [state.sourceChannelId, state]));
   return rows.map((row) => {
     const state = stateByChannel.get(row.id);
+    if (!state && receiverType === "user" && row.systemKind === "announcement" && row.type === "channel") {
+      return {
+        ...row,
+        ...ANNOUNCEMENT_DEFAULT_MUTE,
+        activityMuteSupported: channelTypeSupportsActivityMute(row.type),
+      };
+    }
     const activityMuted = !!state?.activityMuted && state.muteFromSeq != null;
     const muteFromSeq = activityMuted ? state!.muteFromSeq : null;
     return {
@@ -14695,9 +14713,18 @@ export async function getInboxTargetActivityMuteState(
     .limit(1);
 
   const activityMuted = !!state?.activityMuted && state.muteFromSeq != null;
+  let fallback: Omit<InboxTargetActivityMuteState, "changed"> = { activityMuted: false, muteFromSeq: null, prefsVersion: 0 };
+  if (!state && receiverType === "user") {
+    const [channel] = await db
+      .select({ type: channels.type, systemKind: channels.systemKind })
+      .from(channels)
+      .where(eq(channels.id, sourceChannelId))
+      .limit(1);
+    if (channel && isAnnouncementChannel(channel)) fallback = { ...ANNOUNCEMENT_DEFAULT_MUTE };
+  }
   const result = state
     ? { activityMuted, muteFromSeq: activityMuted ? state.muteFromSeq : null, prefsVersion: state.prefsVersion }
-    : { activityMuted: false, muteFromSeq: null, prefsVersion: 0 };
+    : fallback;
   recordInboxMuteStateTrace("inbox.mute_state.read", {
     receiverType,
     receiverId,
