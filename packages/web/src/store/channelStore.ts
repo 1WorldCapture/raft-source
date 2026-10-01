@@ -82,6 +82,8 @@ export interface Channel {
   // default ON; undefined = not yet hydrated, treated as collapsing.
   collapseLongMessages?: boolean;
   displayPrefsVersion?: number;
+  /** System channel kind. `announcement` is the hourly progress channel. */
+  systemKind?: "all" | "announcement" | null;
   // DM-specific fields — unified peer model (agent or user)
   peerType?: "agent" | "user";
   peerId?: string;

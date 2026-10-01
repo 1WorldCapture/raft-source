@@ -12,6 +12,7 @@ import {
   Switch,
 } from "raft-ui";
 import { useChannelStore } from "../../store/channelStore";
+import { isAnnouncementChannel } from "../../utils/announcementChannel";
 import { useServerStore } from "../../store/serverStore";
 import { MAX_JOINT_CHANNEL_SERVERS, SERVER_GUEST_FEATURE_FLAG_KEY, validateNameReason } from "@botiverse/raft-shared";
 import {
@@ -140,6 +141,8 @@ export default function LegacyEditChannelDialog({
   const nav = useAppNavigate();
 
   const isAllChannel = initialName === "all";
+  const isAnnouncement = isAnnouncementChannel(channel);
+  const identityLocked = isAllChannel || isAnnouncement;
   const canEditChannel = Boolean(effectiveCapabilities.editChannelMetadata
     || effectiveCapabilities.changeChannelVisibility
     || effectiveCapabilities.archiveChannels
@@ -153,13 +156,13 @@ export default function LegacyEditChannelDialog({
     !isJointChannel &&
     (channel?.type === "channel" || channel?.type === "private"),
   );
-  const showLeaveAction = !!onLeaveChannel && !isAllChannel && !isArchived;
+  const showLeaveAction = !!onLeaveChannel && !identityLocked && !isArchived;
   const showManageActions = canEditChannel && !isArchived;
-  const showVisibilityAction = showManageActions && Boolean(effectiveCapabilities.changeChannelVisibility);
+  const showVisibilityAction = showManageActions && Boolean(effectiveCapabilities.changeChannelVisibility) && !isAnnouncement;
   const showConvertAction = showManageActions && Boolean(effectiveCapabilities.federateChannels) &&
     canShowConvertToJointEntry &&
     canUseJointChannels &&
-    !isAllChannel &&
+    !identityLocked &&
     !isJointChannel &&
     (channel?.type === "channel" || channel?.type === "private");
   const jointServers = channel?.jointServers?.length
@@ -195,7 +198,7 @@ export default function LegacyEditChannelDialog({
       return;
     }
 
-    if (!isAllChannel) {
+    if (!identityLocked) {
       const nameError = formatNameValidationError(
         validateNameReason(name),
         "channel.edit.nameFieldName",
@@ -210,7 +213,7 @@ export default function LegacyEditChannelDialog({
     setSaving(true);
     try {
       const updates: { name?: string; description?: string } = {};
-      if (!isAllChannel && name.trim() !== initialName) {
+      if (!identityLocked && name.trim() !== initialName) {
         updates.name = name.trim();
       }
       if (description.trim() !== initialDescription) {
@@ -465,9 +468,11 @@ export default function LegacyEditChannelDialog({
                     hint={
                       isAllChannel
                         ? formatMessage({ id: "channel.edit.allCannotRename" })
-                        : isJointChannel
-                          ? formatMessage({ id: "channel.edit.jointNameShared" })
-                          : undefined
+                        : isAnnouncement
+                          ? formatMessage({ id: "channel.edit.announcementCannotRename" })
+                          : isJointChannel
+                            ? formatMessage({ id: "channel.edit.jointNameShared" })
+                            : undefined
                     }
                   >
                     <input
@@ -478,7 +483,7 @@ export default function LegacyEditChannelDialog({
                       placeholder={formatMessage({ id: "channel.edit.namePlaceholder" })}
                       required
                       autoFocus
-                      disabled={isAllChannel || isArchived}
+                      disabled={identityLocked || isArchived}
                     />
                   </FormField>
                   <FormField label={formatMessage({ id: "channel.edit.descriptionLabel" })} optional>
@@ -713,7 +718,7 @@ export default function LegacyEditChannelDialog({
                     {convertBusy ? formatMessage({ id: "channel.edit.converting" }) : formatMessage({ id: "channel.edit.convertToJoint" })}
                   </button>
                 )}
-                {!isAllChannel && (
+                {!identityLocked && (
                   <>
                     {!isArchived && <button
                       type="button"

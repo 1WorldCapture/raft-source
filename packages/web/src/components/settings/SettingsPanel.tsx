@@ -7347,12 +7347,103 @@ function BillingTabContent() {
   );
 }
 
+function AnnouncementSettingsSection() {
+  const { formatMessage } = useIntl();
+  const server = useServerStore((s) => s.current);
+  const { capabilities } = useServerPermissions();
+  const [form, setForm] = useState({ enabled: false, baseline: false, saving: false, saved: false, error: "" });
+
+  useEffect(() => {
+    if (!server || !capabilities.editServerSettings) return;
+    let cancelled = false;
+    const serverId = server.id;
+    void api.get(`/servers/${serverId}/announcement-settings`).then(({ data }) => {
+      if (cancelled) return;
+      const next = data?.announcementsEnabled === true;
+      setForm({ enabled: next, baseline: next, saving: false, saved: false, error: "" });
+    }).catch(() => {
+      if (cancelled) return;
+      setForm({ enabled: false, baseline: false, saving: false, saved: false, error: "" });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [capabilities.editServerSettings, server]);
+
+  if (!server || !capabilities.editServerSettings) return null;
+
+  const dirty = form.enabled !== form.baseline;
+
+  const handleSave = async (event: FormEvent) => {
+    event.preventDefault();
+    setForm((current) => ({ ...current, saving: true, saved: false, error: "" }));
+    try {
+      const { data } = await api.patch(`/servers/${server.id}/announcement-settings`, {
+        announcementsEnabled: form.enabled,
+      });
+      const next = data?.announcementsEnabled === true;
+      setForm({ enabled: next, baseline: next, saving: false, saved: true, error: "" });
+      setTimeout(() => setForm((current) => ({ ...current, saved: false })), 2000);
+    } catch (err: any) {
+      setForm((current) => ({
+        ...current,
+        saving: false,
+        error: err.response?.data?.error || formatMessage({ id: "settings.announcements.failedUpdate" }),
+      }));
+    }
+  };
+
+  return (
+    <div className="mb-6">
+      <SectionHeader
+        className="mb-3"
+        icon={<Bell size={16} />}
+        label={formatMessage({ id: "settings.announcements.sectionLabel" })}
+      />
+      <form onSubmit={handleSave} className="border-2 border-black bg-white shadow-brutal-sm p-4 space-y-3" data-testid="announcement-settings">
+        <label className={`flex items-start gap-3 ${form.saving ? "opacity-60" : ""}`}>
+          <Checkbox
+            size="md"
+            checked={form.enabled}
+            disabled={form.saving}
+            onChange={(event) => {
+              const checked = event.currentTarget.checked;
+              setForm((current) => ({ ...current, enabled: checked, saved: false }));
+            }}
+            className="mt-0.5"
+            data-testid="announcement-settings-toggle"
+          />
+          <span className="min-w-0">
+            <span className="block text-sm font-bold text-black">{formatMessage({ id: "settings.announcements.enabledTitle" })}</span>
+            <span className="block text-xs text-black/60 mt-0.5">
+              {formatMessage({ id: "settings.announcements.enabledDescription" })}
+            </span>
+          </span>
+        </label>
+        {form.error && (
+          <Banner intent="warning" density="sm" className="font-bold">{form.error}</Banner>
+        )}
+        <button
+          type="submit"
+          disabled={!dirty || form.saving}
+          className="btn-brutal bg-brutal-pink px-3 py-1.5 text-xs flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {form.saving ? formatMessage({ id: "settings.common.saving" }) : form.saved ? (
+            <><Check size={14} /> {formatMessage({ id: "settings.common.saved" })}</>
+          ) : formatMessage({ id: "settings.common.save" })}
+        </button>
+      </form>
+    </div>
+  );
+}
+
 function AdministrationTabContent() {
   const { capabilities } = useServerPermissions();
   return (
     <>
       {capabilities.changeMemberRoles && <AdminsSection />}
       {capabilities.changeChannelVisibility && <SystemChannelsSection />}
+      {capabilities.editServerSettings && <AnnouncementSettingsSection />}
       <InvitesSection />
       <JoinLinksSection />
       {capabilities.editServerSettings && <PreJoinAgreementSection />}
