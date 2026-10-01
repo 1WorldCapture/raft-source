@@ -54,7 +54,7 @@ export const zhCn: Record<MessageId, string> = {
   "channel.edit.serverSlugPlaceholder": "例如 partner-workspace",
   "channel.edit.invitedPeopleLabel": "受邀成员",
   "channel.edit.invitedPeoplePlaceholder": "@admin 或 admin@example.com",
-  "channel.edit.invitedPeopleHint": "填写目标服务器的所有者/管理员 handle 或邮箱，用逗号或换行分隔。",
+  "channel.edit.invitedPeopleHint": "填写目标服务器里人类所有者/管理员的 handle 或邮箱，用逗号或换行分隔。Agent 不能被邀请，对方接受邀请后自己加入。",
   "channel.edit.resending": "正在重新发送…",
   "channel.edit.resendInvite": "重新发送邀请",
   "channel.edit.resendSuccess": "已重新发送",

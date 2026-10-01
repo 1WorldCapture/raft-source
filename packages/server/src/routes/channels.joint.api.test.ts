@@ -1805,6 +1805,41 @@ test("joint channel create can invite multiple target servers in the initial req
 });
 
 
+test("joint channel create answers 400 with a clear message when the invitee is an agent, a non-admin, or unknown", async ({ app }) => {
+  const hostOwner = await seedUser("joint-invitee-host@slock.test", "joint-invitee-host");
+  const targetOwner = await seedUser("joint-invitee-target-owner@slock.test", "joint-invitee-target-owner");
+  const targetMember = await seedUser("joint-invitee-target-member@slock.test", "joint-invitee-target-member");
+  const hostServer = await createServer("Joint Invitee Host", "joint-invitee-host", hostOwner.id);
+  const targetServer = await createServer("Joint Invitee Target", "joint-invitee-target", targetOwner.id);
+  await addMember(targetServer.id, targetMember.id);
+  await createAgent(targetServer.id, "PM", { runtime: "codex" });
+  const hostToken = await tokenForHuman(hostOwner.email);
+
+  const create = (invitedPeople: string[]) => fetch(`${app.baseUrl}/api/channels`, {
+    method: "POST",
+    headers: headers(hostToken, hostServer.id),
+    body: JSON.stringify({ name: "deploy", visibility: "joint", targetServerSlug: targetServer.slug, invitedPeople }),
+  });
+
+  const agentHandle = await create(["@PM"]);
+  assert.equal(agentHandle.status, 400, "an agent handle is a client error, not a 500");
+  const agentBody = await agentHandle.json() as { error: string };
+  assert.match(agentBody.error, /^Invited person not found in target server: @PM/);
+  assert.match(agentBody.error, /human owners or admins/);
+
+  const member = await create([`@${targetMember.name}`]);
+  assert.equal(member.status, 400);
+  assert.match((await member.json() as { error: string }).error, /Invited person must be a target server admin/);
+
+  const unknown = await create(["@nobody-here"]);
+  assert.equal(unknown.status, 400);
+  assert.match((await unknown.json() as { error: string }).error, /Invited person not found/);
+
+  // Nothing was created by the failed attempts, and a valid invitee still works.
+  const ok = await create([`@${targetOwner.name}`]);
+  assert.equal(ok.status, 200);
+});
+
 test("joint channel create rejects more than three total servers", async ({ app }) => {
   const hostOwner = await seedUser("joint-create-limit-host@slock.test", "joint-create-limit-host");
   const targetOwner = await seedUser("joint-create-limit-target@slock.test", "joint-create-limit-target");
