@@ -34,6 +34,8 @@ import type { OpenThreadRequest } from "../../store/threadStore";
 import Banner from "../ui/Banner";
 import { useProfileStore } from "../../store/profileStore";
 import MessageItem, { buildMentionMap } from "./MessageItem";
+import { AnnouncementMemberFilter, AnnouncementSenderTimeline } from "./AnnouncementChannelChrome";
+import { isAnnouncementChannel } from "../../utils/announcementChannel";
 import HistoryTopState from "./HistoryTopState";
 import MessageInput from "./MessageInput";
 import MessageTimeline, {
@@ -518,6 +520,7 @@ export default function ChatPanel({
   const [newMessageCount, setNewMessageCount] = useState(0);
   const [atBottom, setAtBottom] = useState(true);
   const [expandedSystemMessageGroups, setExpandedSystemMessageGroups] = useState<Set<string>>(() => new Set());
+  const [announcementFilter, setAnnouncementFilter] = useState<{ channelId: string; senderId: string | null } | null>(null);
   const timelineRef = useRef<MessageTimelineHandle>(null);
   const isNearBottomRef = useRef(true);
   const prevMessageCountRef = useRef(0);
@@ -982,6 +985,7 @@ export default function ChatPanel({
   const canReactInChannel = !readOnly
     && !channel?.archivedAt
     && (channel?.type === "dm" || channel?.type === "thread" || channel?.joined === true);
+  const viewingAnnouncement = isAnnouncementChannel(channel);
   const renderChannelItem = useCallback((msg: Message, index: number) => {
     const systemMessageState = systemMessageRenderStates[index];
     const wrapMessageRender = (children: ReactNode) =>
@@ -1064,6 +1068,7 @@ export default function ChatPanel({
             threadSummary={threadSummaries[msg.id]}
             parentChannelId={channel?.id ?? ""}
             mentionComposerChannelId={channel?.id ?? msg.channelId}
+            hideThreadActions={viewingAnnouncement || undefined}
             onBeforeOpenThread={preserveChannelAnchorForThreadOpen}
             onOpenThread={onOpenThread}
             onOpenProfile={onOpenProfile}
@@ -1073,7 +1078,7 @@ export default function ChatPanel({
         </div>
       </>
     );
-  }, [agentById, canReactInChannel, channel?.id, channelId, channels, expandedSystemMessageGroups, memberById, mentionMap, messageRenderScope, messages, messageGrouping, onOpenProfile, onOpenThread, preserveChannelAnchorForThreadOpen, systemMessageRenderStates, taskByMessageId, threadSummaries, toggleSystemMessageGroup]);
+  }, [agentById, canReactInChannel, channel?.id, channelId, channels, expandedSystemMessageGroups, memberById, mentionMap, messageRenderScope, messages, messageGrouping, onOpenProfile, onOpenThread, preserveChannelAnchorForThreadOpen, systemMessageRenderStates, taskByMessageId, threadSummaries, toggleSystemMessageGroup, viewingAnnouncement]);
 
   const channelHeader = useMemo(() => (
     <div className="px-3 pt-3">
@@ -1300,6 +1305,10 @@ export default function ChatPanel({
   // join CTA path and the management chrome that depends on `joined`.
   const isJoinableChannel = isRegularChannel && !isThread;
   const isAllChannel = isJoinableChannel && channel.name === "all";
+  const announcementSenderId = announcementFilter?.channelId === channel.id ? announcementFilter.senderId : null;
+  const setAnnouncementSenderId = (senderId: string | null) => {
+    setAnnouncementFilter({ channelId: channel.id, senderId });
+  };
   const hideAllChannelMembersButton = isAllChannel
     && currentServer?.role === "member"
     && currentServer.hideHumansFromMembers;
@@ -1323,7 +1332,7 @@ export default function ChatPanel({
     && currentServer?.role === "guest"
     && joined === false
     && channel.guestJoinable !== true;
-  const canLeaveChannel = !isAllChannel;
+  const canLeaveChannel = !isAllChannel && !viewingAnnouncement;
   // Stryker disable next-line ConditionalExpression,LogicalOperator: behavior tests pin owner/member/#all/unjoined visibility; equivalent guard mutants time out under instrumented ChatPanel rendering.
   const showChannelOptionsButton = joined === true && (canManageChannels || canLeaveChannel);
   const selectModeScopedHere = selectModeActive && selectModeChannelId === channel.id;
@@ -1565,8 +1574,39 @@ export default function ChatPanel({
               stdrc 2026-05-02 #proj-uiux:95e25b5b e33f2924: main panel
               整个 white 底，messages scroller 也跟上。bg-white 让整个
               主聊天列从 header 到 composer 全白。 */}
+          {viewingAnnouncement && (
+            <AnnouncementMemberFilter
+              agents={mentionChannelAgents}
+              humans={mentionChannelHumans}
+              value={announcementSenderId}
+              onChange={setAnnouncementSenderId}
+            />
+          )}
           <div className="relative flex-1 overflow-hidden bg-white">
-            {loading && !shouldShowMessageTimeline ? (
+            {viewingAnnouncement && announcementSenderId ? (
+              <AnnouncementSenderTimeline
+                channelId={channel.id}
+                senderId={announcementSenderId}
+                renderMessage={(filteredMessage) => (
+                  <MessageItem
+                    message={filteredMessage}
+                    linkedTask={taskByMessageId.get(filteredMessage.id)}
+                    mentionMap={mentionMap}
+                    channels={channels}
+                    previewSenderAgent={filteredMessage.senderType === "agent" ? agentById.get(filteredMessage.senderId) : undefined}
+                    previewSenderMember={filteredMessage.senderType === "user" ? memberById.get(filteredMessage.senderId) : undefined}
+                    channelParticipantAgentsById={agentById}
+                    channelParticipantMembersById={memberById}
+                    parentChannelId={channel.id}
+                    mentionComposerChannelId={channel.id}
+                    hideThreadActions
+                    onOpenThread={onOpenThread}
+                    onOpenProfile={onOpenProfile}
+                    canReact={canReactInChannel}
+                  />
+                )}
+              />
+            ) : loading && !shouldShowMessageTimeline ? (
               <div className="flex-1 flex items-center justify-center py-4">
                 <div className="text-center text-black/40 font-mono text-sm">{formatMessage({ id: "message.chatPanel.loading" })}</div>
               </div>

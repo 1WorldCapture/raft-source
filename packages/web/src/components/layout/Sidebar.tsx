@@ -84,6 +84,7 @@ import {
 } from "./sidebarChannelVisibility";
 import NotificationTrigger from "./NotificationTrigger";
 import { getChannelUnreadIndicatorState, hasUnmutedUnread, shouldShowActivityMutedIcon } from "../../utils/channelUnreadIndicator";
+import { announcementShowsMuted, isAnnouncementChannel } from "../../utils/announcementChannel";
 import {
   getComputerRowDotStatus,
   getComputerRowDotTitleDescriptor,
@@ -772,14 +773,17 @@ const ChannelRow = memo(function ChannelRow({
   onDrop?: (event: React.DragEvent<HTMLButtonElement>, channel: Channel) => void;
   allowWrap?: boolean;
 }) {
-  const unread = useMessageStore((s) => s.unreadCounts[channel.id] || 0);
+  const storedUnread = useMessageStore((s) => s.unreadCounts[channel.id] || 0);
   const mentionMarked = useMessageStore((s) => s.mentionFlags[channel.id] === true);
   const hasDraft = useMessageStore((s) => !!s.drafts[channel.id]);
   // Display-language (react-intl) — the row owns its own marker copy so the
   // memoized leaf does not need a new prop from the parent.
   const { formatMessage } = useIntl();
   const dimmed = !selected && !channel.joined;
-  const activityMuted = channel.activityMuted === true;
+  // #announcement is muted for humans until they explicitly unmute, and that
+  // default does not contribute a badge. Opening the channel is how you read it.
+  const activityMuted = announcementShowsMuted(channel);
+  const unread = isAnnouncementChannel(channel) && channel.activityMuted !== false ? 0 : storedUnread;
   const showMutedIcon = shouldShowActivityMutedIcon({ activityMuted, joined: channel.joined });
   const { showLoudUnreadBadge, showQuietUnreadCount } = getChannelUnreadIndicatorState({
     unread,
@@ -4711,7 +4715,7 @@ export default function Sidebar({ mobileInline, bottomSlot, workspaceRailMode }:
               </MenuItem>
             ) : null;
             // Stryker restore all
-            const isProtected = channel?.name === "all";
+            const isProtected = channel?.name === "all" || isAnnouncementChannel(channel);
             const hasUnread = (useMessageStore.getState().unreadCounts[ctxMenu.id] || 0) > 0;
             const isPinned = hasSidebarPinnedRef(pinnedRefs, { kind: "channel", id: ctxMenu.id });
             const archiveChannelName = channel?.name ?? "";

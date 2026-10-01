@@ -27,6 +27,7 @@ import type { Agent } from "../../store/agentStore";
 import type { ServerMember } from "../../store/serverStore";
 import type { ChannelHuman } from "../../hooks/useChannelMembers";
 import { useChannelStore } from "../../store/channelStore";
+import { isSystemPostedAnnouncement } from "../../utils/announcementChannel";
 import { useMachineStore } from "../../store/machineStore";
 
 import { useTaskStore } from "../../store/taskStore";
@@ -4333,6 +4334,14 @@ const MessageItem = memo(function MessageItem({ message, mentionMap, channels, p
               data-testid={`message-sender-model-${message.id}`}
             >
               {agentModelLabelText}
+            </span>
+          )}
+          {isSystemPostedAnnouncement(message) && (
+            <span
+              className="inline-flex shrink-0 items-center whitespace-nowrap border border-black bg-brutal-yellow px-1.5 py-0.5 text-[10px] font-bold"
+              data-testid={`message-system-posted-${message.id}`}
+            >
+              {formatMessage({ id: "message.announcement.systemPosted" })}
             </span>
           )}
           {isDeactivatedAgent && (
