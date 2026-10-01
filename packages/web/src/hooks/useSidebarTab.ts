@@ -1,5 +1,7 @@
 import { useCallback, useMemo } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { writeMembersSurface } from "../office/membersSurface";
+import { useAuthStore } from "../store/authStore";
 import { useServerStore } from "../store/serverStore";
 import { readTabMemory } from "./useTabRouteMemory";
 
@@ -46,6 +48,7 @@ export function useRailMode() {
   const location = useLocation();
   const navigate = useNavigate();
   const serverSlug = useServerStore((s) => s.current?.slug ?? null);
+  const userId = useAuthStore((s) => s.user?.id ?? null);
   const pathBase = serverSlug ? `/s/${serverSlug}` : "";
 
   const railMode = useMemo<RailMode>(
@@ -74,9 +77,10 @@ export function useRailMode() {
       navigate(`${base}/activity`);
       return;
     }
-    // Members opens the members home, not the last agent or human detail.
-    // Leave the office/list choice alone; the default surface is still office.
+    // The members icon returns to the office. Remembering the last profile
+    // (live web) or keeping the list choice (e783e99) left no way back.
     if (mode === "members") {
+      writeMembersSurface(userId, "office");
       navigate(`${base}/members`);
       return;
     }
@@ -87,7 +91,7 @@ export function useRailMode() {
       : mode === "tasks" ? `${base}/tasks`
       : `${base}/settings/account`;
     navigate(remembered ?? fallback);
-  }, [location.pathname, location.search, serverSlug, navigate]);
+  }, [location.pathname, location.search, serverSlug, userId, navigate]);
 
   return { railMode, selectRailMode };
 }
