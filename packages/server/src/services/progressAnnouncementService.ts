@@ -11,9 +11,10 @@ import { broadcastAndDeliver, deliverSystemNoticeToAgent } from "./messageServic
 //
 // Every server with progress announcements enabled is swept on a fixed tick.
 // Per agent, by presence:
-//   working -> after a full hour of work in which it posted nothing to
-//              #announcement (and was not nudged), wake it with a system notice
-//              carrying the template.
+//   working -> if an hour has passed since the later of its last #announcement
+//              post and when the sweep started tracking it (switch turned on, or
+//              back from offline), wake it with a system notice carrying the
+//              template. Working/idle flicker does not reset this clock.
 //   idle    -> every full hour since it went idle, the system posts "currently
 //              idle" in the agent's name (marked announcement-proxy) and does NOT
 //              wake it.
@@ -85,6 +86,43 @@ async function lastAnnouncementTimes(channelId: string, agentIds: string[]) {
   return result;
 }
 
+/** Per-agent state rows for a server (tracking start, last nudge). */
+async function loadAgentStates(agentIds: string[]) {
+  const result = new Map<string, { trackedSince: Date | null }>();
+  if (agentIds.length === 0) return result;
+  const rows = await getDb()
+    .select({ agentId: progressAnnouncementState.agentId, trackedSince: progressAnnouncementState.trackedSince })
+    .from(progressAnnouncementState)
+    .where(inArray(progressAnnouncementState.agentId, agentIds));
+  for (const row of rows) result.set(row.agentId, { trackedSince: row.trackedSince });
+  return result;
+}
+
+/** Start tracking an agent the first time it is seen online; returns the tracking start. */
+async function beginTracking(serverId: string, agentId: string, now: Date): Promise<Date> {
+  await getDb()
+    .insert(progressAnnouncementState)
+    .values({ agentId, serverId, trackedSince: now, updatedAt: now })
+    .onConflictDoUpdate({
+      target: progressAnnouncementState.agentId,
+      set: { trackedSince: now, serverId, updatedAt: now },
+      setWhere: sql`${progressAnnouncementState.trackedSince} IS NULL`,
+    });
+  const [row] = await getDb()
+    .select({ trackedSince: progressAnnouncementState.trackedSince })
+    .from(progressAnnouncementState)
+    .where(eq(progressAnnouncementState.agentId, agentId));
+  return row?.trackedSince ?? now;
+}
+
+/** An offline agent is not tracked: its clock restarts when it comes back. */
+async function stopTracking(agentId: string, now: Date): Promise<void> {
+  await getDb()
+    .update(progressAnnouncementState)
+    .set({ trackedSince: null, updatedAt: now })
+    .where(and(eq(progressAnnouncementState.agentId, agentId), sql`${progressAnnouncementState.trackedSince} IS NOT NULL`));
+}
+
 /** Win (or lose) the right to nudge this agent now. */
 async function claimNudge(serverId: string, agentId: string, now: Date): Promise<boolean> {
   const cutoff = new Date(now.getTime() - ANNOUNCEMENT_HOUR_MS);
@@ -146,16 +184,22 @@ export async function runProgressAnnouncementTick(deps: ProgressAnnouncementDeps
     result.servers += 1;
     const agentRows = await agentService.listAgents(server.id, false);
     const lastTimes = await lastAnnouncementTimes(server.channelId, agentRows.map((agent) => agent.id));
+    const states = await loadAgentStates(agentRows.map((agent) => agent.id));
     for (const agent of agentRows) {
       try {
         const { presence, presenceSinceMs } = await deps.getPresence(agent.id);
         const last = lastTimes.get(agent.id);
+        if (presence === "offline") {
+          if (states.get(agent.id)?.trackedSince) await stopTracking(agent.id, now);
+          continue;
+        }
+        if (presence !== "working" && presence !== "idle") continue; // unknown: neither track nor reset
+        let trackedSince = states.get(agent.id)?.trackedSince ?? null;
+        if (!trackedSince) trackedSince = await beginTracking(server.id, agent.id, now);
         if (presence === "working") {
-          // Due only after a full hour of work with nothing posted: count from the
-          // later of its last announcement and when this stretch of work began. A
-          // missing start is unknown, never guessed, so it is skipped.
-          if (presenceSinceMs === null) continue;
-          const anchorMs = Math.max(last?.any?.getTime() ?? 0, presenceSinceMs);
+          // Due when an hour has passed since the later of its last announcement and
+          // the start of tracking. Short working/idle stretches do not reset it.
+          const anchorMs = Math.max(last?.any?.getTime() ?? 0, trackedSince.getTime());
           if (now.getTime() - anchorMs < ANNOUNCEMENT_HOUR_MS) continue;
           if (!(await claimNudge(server.id, agent.id, now))) continue;
           await deps.nudge({ serverId: server.id, agentId: agent.id, channelId: server.channelId });

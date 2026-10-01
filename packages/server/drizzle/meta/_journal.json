@@ -1884,6 +1884,13 @@
       "when": 1790820467311,
       "tag": "0268_announcement_system_channel",
       "breakpoints": true
+    },
+    {
+      "idx": 269,
+      "version": "7",
+      "when": 1790823792594,
+      "tag": "0269_announcement_tracked_since",
+      "breakpoints": true
     }
   ]
 }

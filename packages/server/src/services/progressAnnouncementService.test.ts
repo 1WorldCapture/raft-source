@@ -63,17 +63,17 @@ function fakeDeps(start: Date): Fake {
 const T0 = new Date("2026-10-01T09:00:00.000Z");
 const at = (hours: number, minutes = 0) => new Date(T0.getTime() + hours * ANNOUNCEMENT_HOUR_MS + minutes * 60_000);
 
-test("a working agent that has not announced for an hour is nudged once per hour", async ({ app }) => {
+test("a working agent is nudged an hour after tracking began, then once per hour", async ({ app }) => {
   const { server } = await seedServer();
   const agent = await createAgent(server.id, "worker", { runtime: "codex" });
   const fake = fakeDeps(T0);
   fake.setPresence(agent.id, "working", T0.getTime());
 
-  assert.equal((await runProgressAnnouncementTick(fake.deps)).nudged, 0, "just started working: not due yet");
+  assert.equal((await runProgressAnnouncementTick(fake.deps)).nudged, 0, "first sight starts the clock");
   fake.setNow(at(0, 59));
-  assert.equal((await runProgressAnnouncementTick(fake.deps)).nudged, 0, "59 minutes of work is not a full hour");
+  assert.equal((await runProgressAnnouncementTick(fake.deps)).nudged, 0, "59 minutes is not an hour");
   fake.setNow(at(1, 0));
-  assert.equal((await runProgressAnnouncementTick(fake.deps)).nudged, 1, "a full hour of work with nothing posted: nudged");
+  assert.equal((await runProgressAnnouncementTick(fake.deps)).nudged, 1, "an hour without an announcement: nudged");
   assert.deepEqual(fake.nudges, [agent.id]);
 
   fake.setNow(at(1, 5));
@@ -85,40 +85,74 @@ test("a working agent that has not announced for an hour is nudged once per hour
   assert.deepEqual(fake.nudges, [agent.id, agent.id]);
 });
 
-test("a long-idle agent that has just started working is not nudged until it has worked a full hour", async ({ app }) => {
-  const { server, announcement } = await seedServer();
-  const agent = await createAgent(server.id, "interrupted", { runtime: "codex" });
-  const fake = fakeDeps(at(5, 0));
-  // Last announced hours ago, idle until 40 minutes ago, then took a task.
-  await createMessage(announcement.id, "agent", agent.id, "old update");
-  await getDb().update(messages).set({ createdAt: T0 }).where(eq(messages.channelId, announcement.id));
-  fake.setPresence(agent.id, "working", at(4, 20).getTime());
-  assert.equal((await runProgressAnnouncementTick(fake.deps)).nudged, 0, "40 minutes into the new stretch of work");
-  fake.setNow(at(5, 20));
-  assert.equal((await runProgressAnnouncementTick(fake.deps)).nudged, 1, "a full hour of work, nothing posted");
+test("flicker between working and idle, every stretch under an hour, is still nudged after an hour", async ({ app }) => {
+  const { server } = await seedServer();
+  const agent = await createAgent(server.id, "flicker", { runtime: "codex" });
+  const fake = fakeDeps(T0);
+  const tick = async (minutes: number) => {
+    fake.setNow(at(0, minutes));
+    const working = (minutes / 10) % 2 === 0;
+    // 20 min of work, 10 idle ... each segment starts at its own tick, none reaches an hour.
+    fake.setPresence(agent.id, working ? "working" : "idle", at(0, minutes).getTime());
+    return runProgressAnnouncementTick(fake.deps);
+  };
+  for (const minutes of [0, 10, 20, 30, 40, 50]) {
+    const result = await tick(minutes);
+    assert.equal(result.nudged, 0, `minute ${minutes}`);
+    assert.equal(result.idlePosted, 0, `minute ${minutes}: no idle segment lasts an hour`);
+  }
+  const atHour = await tick(60);
+  assert.equal(atHour.nudged, 1, "an hour with nothing announced: nudged although no single stretch lasted an hour");
+  assert.deepEqual(fake.nudges, [agent.id]);
+  assert.equal((await tick(70)).nudged, 0);
 });
 
-test("turning the feature on does not wake every working agent at once, and an unknown work start is skipped", async ({ app }) => {
-  const { server } = await seedServer();
-  const fresh = await createAgent(server.id, "fresh", { runtime: "codex" });
-  const unknownStart = await createAgent(server.id, "nostart", { runtime: "codex" });
-  const fake = fakeDeps(at(0, 10));
-  fake.setPresence(fresh.id, "working", at(0, 2).getTime());
-  fake.setPresence(unknownStart.id, "working", null);
-  assert.equal((await runProgressAnnouncementTick(fake.deps)).nudged, 0);
-  fake.setNow(at(3, 0));
+test("turning the switch on, or coming back from offline, restarts the clock instead of waking everyone", async ({ app }) => {
+  const { server, announcement } = await seedServer();
+  const longSilent = await createAgent(server.id, "silent", { runtime: "codex" });
+  const returning = await createAgent(server.id, "returning", { runtime: "codex" });
+  const unknown = await createAgent(server.id, "unknown", { runtime: "codex" });
+  await createMessage(announcement.id, "agent", longSilent.id, "ancient update");
+  await getDb().update(messages).set({ createdAt: new Date(T0.getTime() - 5 * ANNOUNCEMENT_HOUR_MS) }).where(eq(messages.channelId, announcement.id));
+  const fake = fakeDeps(T0);
+  fake.setPresence(longSilent.id, "working", T0.getTime());
+  fake.setPresence(returning.id, "working", T0.getTime());
+  fake.setPresence(unknown.id, null, null);
+
+  assert.equal((await runProgressAnnouncementTick(fake.deps)).nudged, 0, "last post hours ago, but tracking only just began");
+
+  // returning goes offline for a while; the clock restarts when it is back.
+  fake.setNow(at(0, 30));
+  fake.setPresence(returning.id, "offline", at(0, 30).getTime());
+  await runProgressAnnouncementTick(fake.deps);
+  fake.setNow(at(1, 0));
+  fake.setPresence(returning.id, "working", at(1, 0).getTime());
   const result = await runProgressAnnouncementTick(fake.deps);
-  assert.equal(result.nudged, 1, "only the agent with a known full hour of work");
-  assert.deepEqual(fake.nudges, [fresh.id]);
+  assert.deepEqual(fake.nudges, [longSilent.id], "longSilent has been tracked for an hour; returning only just came back");
+  assert.equal(result.nudged, 1);
+
+  fake.setNow(at(2, 0));
+  await runProgressAnnouncementTick(fake.deps);
+  assert.deepEqual(fake.nudges.sort(), [longSilent.id, returning.id, longSilent.id].sort(), "returning is due an hour after it returned; unknown presence never is");
+
+  // Switch off and on: tracking restarts from the next tick.
+  await updateServerAnnouncementSettings(server.id, { announcementsEnabled: false });
+  await updateServerAnnouncementSettings(server.id, { announcementsEnabled: true });
+  const before = fake.nudges.length;
+  fake.setNow(at(9, 0));
+  await runProgressAnnouncementTick(fake.deps);
+  assert.equal(fake.nudges.length, before, "nobody is due right after the switch is turned back on");
+  fake.setNow(at(10, 0));
+  await runProgressAnnouncementTick(fake.deps);
+  assert.equal(fake.nudges.length, before + 2, "an hour later both working agents are due");
 });
 
 test("a working agent that announced within the hour is left alone", async ({ app }) => {
   const { server, announcement } = await seedServer();
   const agent = await createAgent(server.id, "writer", { runtime: "codex" });
   await createMessage(announcement.id, "agent", agent.id, "doing / done / next");
-  const started = Date.now() - 3 * ANNOUNCEMENT_HOUR_MS; // has been working for hours
   const fake = fakeDeps(new Date());
-  fake.setPresence(agent.id, "working", started);
+  fake.setPresence(agent.id, "working", Date.now());
 
   assert.equal((await runProgressAnnouncementTick(fake.deps)).nudged, 0, "it just announced");
   fake.setNow(new Date(Date.now() + ANNOUNCEMENT_HOUR_MS + 60_000));
@@ -194,9 +228,11 @@ test("two replicas ticking at once nudge and post only once", async ({ app }) =>
   const { server } = await seedServer();
   const worker = await createAgent(server.id, "racer-w", { runtime: "codex" });
   const idle = await createAgent(server.id, "racer-i", { runtime: "codex" });
-  const fake = fakeDeps(at(2, 3));
+  const fake = fakeDeps(T0);
   fake.setPresence(worker.id, "working", T0.getTime());
   fake.setPresence(idle.id, "idle", T0.getTime());
+  await runProgressAnnouncementTick(fake.deps); // starts tracking
+  fake.setNow(at(2, 3));
 
   await Promise.all([runProgressAnnouncementTick(fake.deps), runProgressAnnouncementTick(fake.deps)]);
   assert.deepEqual(fake.nudges, [worker.id]);
@@ -234,7 +270,10 @@ test("the real deps wake a working agent through the orchestrator and post idle 
     },
   } as any;
 
-  const deps = createProgressAnnouncementDeps({ io: chain, orchestrator, now: () => at(1, 3) });
+  let now = T0;
+  const deps = createProgressAnnouncementDeps({ io: chain, orchestrator, now: () => now });
+  await runProgressAnnouncementTick(deps); // starts tracking
+  now = at(1, 3);
   const result = await runProgressAnnouncementTick(deps);
   assert.equal(result.nudged, 1);
   assert.equal(result.idlePosted, 1);
