@@ -1595,6 +1595,55 @@ serverRouter.patch("/:id/translation-settings", async (req, res) => {
   }
 });
 
+// Announcement channel settings (hourly agent progress posts on/off).
+serverRouter.get("/:id/announcement-settings", async (req, res) => {
+  try {
+    const role = await getActorServerRoleInServer(req.params.id, "user", req.userId!);
+    if (!role) {
+      res.status(404).json({ error: "Server not found" });
+      return;
+    }
+    const settings = await serverService.getServerAnnouncementSettings(req.params.id);
+    if (!settings) {
+      res.status(404).json({ error: "Server not found" });
+      return;
+    }
+    res.json({
+      announcementsEnabled: settings.announcementsEnabled,
+      canManageAnnouncements: actorRoleHasServerCapability(role, "editServerSettings"),
+    });
+  } catch {
+    res.status(500).json({ error: "Failed to get announcement settings" });
+  }
+});
+
+serverRouter.patch("/:id/announcement-settings", async (req, res) => {
+  try {
+    const role = await getActorServerRoleInServer(req.params.id, "user", req.userId!);
+    if (!role) {
+      res.status(404).json({ error: "Server not found" });
+      return;
+    }
+    if (!actorRoleHasServerCapability(role, "editServerSettings")) {
+      res.status(403).json({ error: "Only server owners and admins can update announcement settings" });
+      return;
+    }
+    const announcementsEnabled = req.body?.announcementsEnabled;
+    if (typeof announcementsEnabled !== "boolean") {
+      res.status(400).json({ error: "announcementsEnabled must be a boolean" });
+      return;
+    }
+    const settings = await serverService.updateServerAnnouncementSettings(req.params.id, { announcementsEnabled });
+    if (!settings) {
+      res.status(404).json({ error: "Server not found" });
+      return;
+    }
+    res.json({ announcementsEnabled: settings.announcementsEnabled, canManageAnnouncements: true });
+  } catch {
+    res.status(500).json({ error: "Failed to update announcement settings" });
+  }
+});
+
 // Get notification settings for the current member in this server.
 serverRouter.get("/:id/notification-settings", async (req, res) => {
   try {
@@ -1793,7 +1842,7 @@ serverRouter.get("/:id/member-graph", async (req, res) => {
     const visibleChannelIds = visibleChannels.map((channel) => channel.id);
     const virtualAllChannelIds = new Set(
       visibleChannels
-        .filter((channel) => channelService.isEnabledAllChannel(channel))
+        .filter((channel) => channelService.hasImplicitServerMembership(channel))
         .map((channel) => channel.id),
     );
     const memberChannelIds = new Map<string, Set<string>>();

@@ -10,6 +10,7 @@ import * as serverAgreementService from "./serverAgreementService.js";
 import { refreshSubscriptionForServerIfStale } from "./billingService.js";
 import { assertHumanCapacityAvailable, getServerBillingEntitlement, getServerBillingUsage } from "./planService.js";
 import { evaluateFeatureFlag, ONBOARDING_OWNER_WIZARD_FEATURE_FLAG_KEY } from "./featureFlagService.js";
+import * as channelService from "./channelService.js";
 
 export interface SidebarOrderPreferences {
   channelOrder: string[];
@@ -204,7 +205,9 @@ export async function createServer(name: string, slug: string, ownerId: string) 
       name: "all",
       description: "General channel for all members",
       type: openerFlag.enabled ? "private" : "channel",
+      systemKind: "all",
     });
+    await channelService.ensureAnnouncementChannel(server.id, tx);
 
     if (openerFlag.enabled) {
       const [ownerChannel] = await tx.insert(channels).values({
@@ -2048,4 +2051,29 @@ export async function deleteServer(serverId: string) {
       newlyDeleted: Boolean(updated),
     };
   });
+}
+
+export type ServerAnnouncementSettings = { announcementsEnabled: boolean };
+
+/** Server-level switch for the hourly agent progress announcements (timers, reminders, proxy posts). */
+export async function getServerAnnouncementSettings(serverId: string): Promise<ServerAnnouncementSettings | null> {
+  const [server] = await getDb()
+    .select({ enabled: servers.progressAnnouncementsEnabled })
+    .from(servers)
+    .where(and(eq(servers.id, serverId), isNull(servers.deletedAt)));
+  if (!server) return null;
+  return { announcementsEnabled: server.enabled === true };
+}
+
+export async function updateServerAnnouncementSettings(
+  serverId: string,
+  updates: ServerAnnouncementSettings,
+): Promise<ServerAnnouncementSettings | null> {
+  const [updated] = await getDb()
+    .update(servers)
+    .set({ progressAnnouncementsEnabled: updates.announcementsEnabled, updatedAt: new Date() })
+    .where(and(eq(servers.id, serverId), isNull(servers.deletedAt)))
+    .returning({ enabled: servers.progressAnnouncementsEnabled });
+  if (!updated) return null;
+  return { announcementsEnabled: updated.enabled === true };
 }

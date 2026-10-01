@@ -953,6 +953,47 @@ messageRouter.get("/context/:messageId", async (req, res) => {
 });
 
 // List messages for a channel
+// One sender's messages in a channel (announcement "filter by member"). Not a
+// message window: the response carries no coverage and must not be cached as channel history.
+messageRouter.get("/channel/:channelId/by-sender", async (req, res) => {
+  try {
+    const channel = await channelService.getChannel(req.params.channelId);
+    if (!channel || channel.serverId !== req.serverId) {
+      res.status(404).json(CHANNEL_NOT_FOUND_BODY);
+      return;
+    }
+    if (channel.type !== "channel" && channel.type !== "private") {
+      res.status(400).json({ error: "Sender filter is only supported for channels", code: "by_sender_unsupported_channel" });
+      return;
+    }
+    if (!(await channelService.canUserAccessChannel(req.params.channelId, req.userId!, req.serverId!))) {
+      await denyChannelAccess(res, req.userId!, req.params.channelId, "You do not have access to this channel");
+      return;
+    }
+    const senderId = typeof req.query.senderId === "string" ? req.query.senderId.trim() : "";
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(senderId)) {
+      res.status(400).json({ error: "senderId must be a user or agent id", code: "invalid_sender_id" });
+      return;
+    }
+    const beforeSeq = parseMessagePageCursor(req.query.before);
+    if (beforeSeq === "invalid") {
+      res.status(400).json({ error: "Invalid message page cursor", code: "invalid_message_page_cursor" });
+      return;
+    }
+    const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 200);
+    const historyCutoff = getHistoryCutoff(await getServerPlan(req.serverId!));
+    const page = await messageService.listMessagesBySender(req.params.channelId, senderId, limit, beforeSeq, historyCutoff, {
+      traceQuery: createTraceDbQueryTracer("messages.by_sender"),
+      attachmentCommentViewerUserId: req.userId,
+      forwardedBundleViewerUserId: req.userId,
+      forwardedBundleViewerServerId: req.serverId,
+    });
+    res.json({ messages: page.messages, hasMore: page.hasMore });
+  } catch {
+    res.status(500).json({ error: "Failed to list messages" });
+  }
+});
+
 messageRouter.get("/channel/:channelId", async (req, res) => {
   try {
     addTraceEvent("messages.page.started");

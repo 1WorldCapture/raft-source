@@ -83,8 +83,9 @@ test("GET /api/channels records restore-list phases and constant query shape", a
   });
   assert.equal(res.status, 200);
   const body = await res.json() as Array<{ id: string; name: string; joined: boolean; lastMessageAt: string | null }>;
-  assert.equal(body.length, 3);
+  assert.equal(body.length, 4, "#all, #announcement and the two ordinary channels");
   assert.equal(body.find((channel) => channel.name === "all")?.joined, true);
+  assert.equal(body.find((channel) => channel.name === "announcement")?.joined, true);
   assert.equal(body.find((channel) => channel.name === "joined-channel")?.joined, true);
   assert.equal(body.find((channel) => channel.name === "not-joined-channel")?.joined, false);
   assert.equal(body.find((channel) => channel.id === joinedChannel.id)?.lastMessageAt, joinedMessage.createdAt.toISOString());
@@ -125,26 +126,26 @@ test("GET /api/channels records restore-list phases and constant query shape", a
   const dbEventByQuery = new Map(dbEvents.map((event) => [event.attrs?.query_name, event]));
   assert.equal(dbEventByQuery.get("channels.list_by_server")?.attrs?.phase, "channels.loaded");
   assert.equal(dbEventByQuery.get("channels.list_by_server")?.attrs?.archived_filter, "exclude");
-  assert.equal(dbEventByQuery.get("channels.list_by_server")?.attrs?.row_count, 3);
+  assert.equal(dbEventByQuery.get("channels.list_by_server")?.attrs?.row_count, 4);
   assert.equal(dbEventByQuery.get("channels.memberships_by_user")?.attrs?.phase, "channels.loaded");
   assert.equal(dbEventByQuery.get("channels.memberships_by_user")?.attrs?.memberships_count, 1);
   assert.equal(dbEventByQuery.get("channels.last_messages_by_channels")?.attrs?.phase, "channels.loaded");
-  assert.equal(dbEventByQuery.get("channels.last_messages_by_channels")?.attrs?.channels_count, 3);
+  assert.equal(dbEventByQuery.get("channels.last_messages_by_channels")?.attrs?.channels_count, 4);
   assert.equal(dbEventByQuery.get("channels.last_messages_by_channels")?.attrs?.channels_with_messages_count, 2);
   assert.equal(dbEventByQuery.get("channels.external_bridges_by_channels")?.attrs?.phase, "channels.loaded");
-  assert.equal(dbEventByQuery.get("channels.external_bridges_by_channels")?.attrs?.channels_count, 3);
+  assert.equal(dbEventByQuery.get("channels.external_bridges_by_channels")?.attrs?.channels_count, 4);
   assert.equal(dbEventByQuery.get("channels.external_bridges_by_channels")?.attrs?.bridged_channels_count, 0);
 
   const loadedEvent = span.events.find((event) => event.name === "channels.loaded");
   assert.ok(loadedEvent);
   assert.equal(loadedEvent.attrs?.archived_filter, "exclude");
-  assert.equal(loadedEvent.attrs?.channels_count, 3);
-  assert.equal(loadedEvent.attrs?.joined_channels_count, 2);
+  assert.equal(loadedEvent.attrs?.channels_count, 4);
+  assert.equal(loadedEvent.attrs?.joined_channels_count, 3);
 
   const readyEvent = span.events.find((event) => event.name === "response.ready");
   assert.ok(readyEvent);
-  assert.equal(readyEvent.attrs?.channels_count, 3);
-  assert.equal(readyEvent.attrs?.joined_channels_count, 2);
+  assert.equal(readyEvent.attrs?.channels_count, 4);
+  assert.equal(readyEvent.attrs?.joined_channels_count, 3);
   assert.equal(Object.values(span.attrs ?? {}).includes(owner.id), false);
   assert.equal(Object.values(readyEvent.attrs ?? {}).includes(joinedChannel.id), false);
 });

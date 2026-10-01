@@ -1199,7 +1199,7 @@ async function resolveAgentActivityMuteTarget(req: Request, res: Response) {
     res.status(409).json({ error: "This channel is archived", code: "channel_archived" });
     return null;
   }
-  const isMember = channelService.isEnabledAllChannel(channel)
+  const isMember = channelService.hasImplicitServerMembership(channel)
     || await channelService.isChannelAgent(channel.id, actingAgentId);
   if (!isMember) {
     res.status(403).json({ error: "Agent can only mute channels it belongs to" });
