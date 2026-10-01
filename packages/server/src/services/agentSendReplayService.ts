@@ -152,6 +152,31 @@ export async function createOrReplayAgentSend<TInserted = never>(opts: {
   });
 }
 
+/**
+ * Look up an already committed agent send by its idempotency key (fork patch).
+ * Used for send receipts and to replay a retried send before the freshness gate,
+ * so a retry of a committed send always returns the original message instead of
+ * being held by unread messages that arrived after the first attempt.
+ */
+export async function findAgentSendByKey(
+  senderId: string,
+  agentSendKey: string,
+): Promise<typeof messages.$inferSelect | null> {
+  const db = resolveDb();
+  const [row] = await db
+    .select()
+    .from(messages)
+    .where(
+      and(
+        eq(messages.senderType, "agent"),
+        eq(messages.senderId, senderId),
+        eq(messages.agentSendKey, agentSendKey),
+      ),
+    )
+    .limit(1);
+  return row ?? null;
+}
+
 export function __setAgentSendReplayDbForTests(factory: () => Database) {
   dbOverride = factory;
 }

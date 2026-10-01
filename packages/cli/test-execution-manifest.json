@@ -3,8 +3,8 @@
   "package": "@botiverse/raft",
   "runner": "node --import tsx --test",
   "testFileGlob": "src/**/*.test.ts",
-  "fileCount": 103,
-  "total": 918,
+  "fileCount": 104,
+  "total": 926,
   "files": [
     {
       "file": "src/agentApiNoBypass.test.ts",
@@ -2107,6 +2107,30 @@
       ]
     },
     {
+      "file": "src/commands/message/claim.test.ts",
+      "count": 6,
+      "cases": [
+        {
+          "name": "claim ack token round-trips and rejects garbage"
+        },
+        {
+          "name": "message claim prints the batch and a single trailing Claim-Ack line without acking"
+        },
+        {
+          "name": "message claim omits the Claim-Ack line for an empty inbox"
+        },
+        {
+          "name": "message ack reads the token from stdin and posts the batch"
+        },
+        {
+          "name": "message ack rejects an invalid token without a request"
+        },
+        {
+          "name": "message receipt renders sent and not_found"
+        }
+      ]
+    },
+    {
       "file": "src/commands/message/react.test.ts",
       "count": 2,
       "cases": [
@@ -2225,7 +2249,7 @@
     },
     {
       "file": "src/commands/message/send.test.ts",
-      "count": 78,
+      "count": 80,
       "cases": [
         {
           "name": "resolveSendContent reads multiline content from stdin"
@@ -2310,6 +2334,12 @@
         },
         {
           "name": "message send forwards typed mention identity on the Agent API body"
+        },
+        {
+          "name": "message send forwards --idempotency-key and keeps the success line"
+        },
+        {
+          "name": "message send rejects an out-of-range --idempotency-key before any request"
         },
         {
           "name": "classifyMessageSendOutcome fails closed on unsupported send states"

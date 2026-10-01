@@ -1216,6 +1216,40 @@ export const agentApiEventsResponseSchema = passthroughObject({
   has_more: z.boolean(),
 });
 
+/**
+ * Claim-then-ack (fork patch, additive): `events/claim` returns the same batch
+ * `/events` would drain but acknowledges nothing; `ack` is the batch receipt the
+ * caller passes back to `events/ack` once the batch is durably persisted on its
+ * side. Contains only message seqs / ids (no secrets); ack is scoped server-side
+ * to the authenticated agent.
+ */
+export const agentApiEventsAckBatchSchema = passthroughObject({
+  seqs: z.array(z.number().int().positive()).max(500),
+  message_ids: z.array(z.string().trim().min(1)).max(500),
+  third_party_event_ids: z.array(z.string().trim().min(1)).max(500),
+});
+
+export const agentApiEventsClaimResponseSchema = agentApiEventsResponseSchema.extend({
+  ack: agentApiEventsAckBatchSchema,
+});
+
+export const agentApiEventsAckResponseSchema = passthroughObject({
+  ok: z.literal(true),
+  removed_count: z.number().int().nonnegative(),
+});
+
+export const agentApiSendReceiptParamsSchema = passthroughObject({
+  key: z.string().trim().min(1).max(256),
+});
+
+export const agentApiSendReceiptResponseSchema = passthroughObject({
+  status: z.enum(["sent", "not_found"]),
+  message_id: z.string().optional(),
+  message_seq: z.number().finite().optional(),
+  channel_id: z.string().optional(),
+  created_at: z.string().optional(),
+});
+
 export const agentApiHistoryResponseSchema = passthroughObject({
   messages: z.array(agentApiMessageEnvelopeSchema),
   has_more: z.boolean(),
@@ -1740,6 +1774,26 @@ export const agentApiContract = {
     request: { query: agentApiEventsQuerySchema },
     response: { body: agentApiEventsResponseSchema },
   }),
+  eventsClaim: route({
+    key: "eventsClaim",
+    method: "GET",
+    path: "/events/claim",
+    client: { resource: "events", method: "claim" },
+    capability: "read",
+    description: "Return pending events without acknowledging them; acknowledge later via events/ack.",
+    request: { query: agentApiEventsQuerySchema },
+    response: { body: agentApiEventsClaimResponseSchema },
+  }),
+  eventsAck: route({
+    key: "eventsAck",
+    method: "POST",
+    path: "/events/ack",
+    client: { resource: "events", method: "ack" },
+    capability: "read",
+    description: "Acknowledge a previously claimed events batch for the bound agent credential.",
+    request: { body: agentApiEventsAckBatchSchema },
+    response: { body: agentApiEventsAckResponseSchema },
+  }),
   historyRead: route({
     key: "historyRead",
     method: "GET",
@@ -1839,6 +1893,16 @@ export const agentApiContract = {
     description: "Send a message through the versioned typed-mention contract.",
     request: { body: agentApiSendV2BodySchema },
     response: { body: agentApiSendResponseSchema },
+  }),
+  messageSendReceipt: route({
+    key: "messageSendReceipt",
+    method: "GET",
+    path: "/send-receipts/:key",
+    client: { resource: "messages", method: "receipt" },
+    capability: "read",
+    description: "Look up whether a send with the given idempotency key was committed by the bound agent.",
+    request: { params: agentApiSendReceiptParamsSchema },
+    response: { body: agentApiSendReceiptResponseSchema },
   }),
   messageResolve: route({
     key: "messageResolve",
@@ -2660,6 +2724,12 @@ export interface AgentApiEventsResponse {
   [key: string]: unknown;
 }
 
+export type AgentApiEventsAckBatch = z.infer<typeof agentApiEventsAckBatchSchema>;
+export type AgentApiEventsClaimResponse = AgentApiEventsResponse & { ack: AgentApiEventsAckBatch };
+export type AgentApiEventsAckResponse = z.infer<typeof agentApiEventsAckResponseSchema>;
+export type AgentApiSendReceiptParams = z.infer<typeof agentApiSendReceiptParamsSchema>;
+export type AgentApiSendReceiptResponse = z.infer<typeof agentApiSendReceiptResponseSchema>;
+
 export interface AgentApiHistoryResponse {
   messages: AgentApiMessageEnvelope[];
   has_more: boolean;
@@ -2828,6 +2898,9 @@ export type AgentApiRequestParamsByRoute = {
   feedbackLocatorIngest: never;
   feedbackLocatorList: never;
   events: never;
+  eventsClaim: never;
+  eventsAck: never;
+  messageSendReceipt: AgentApiSendReceiptParams;
   historyRead: never;
   knowledgeGet: never;
   knowledgeSearch: never;
@@ -2908,6 +2981,9 @@ export type AgentApiRequestQueryByRoute = {
   feedbackLocatorIngest: never;
   feedbackLocatorList: AgentApiFeedbackLocatorListQuery;
   events: AgentApiEventsQuery;
+  eventsClaim: AgentApiEventsQuery;
+  eventsAck: never;
+  messageSendReceipt: never;
   historyRead: AgentApiHistoryQuery;
   knowledgeGet: AgentApiKnowledgeGetQuery;
   knowledgeSearch: AgentApiKnowledgeSearchQuery;
@@ -2988,6 +3064,9 @@ export type AgentApiRequestBodyByRoute = {
   feedbackLocatorIngest: AgentApiFeedbackLocatorIngestBody;
   feedbackLocatorList: never;
   events: never;
+  eventsClaim: never;
+  eventsAck: AgentApiEventsAckBatch;
+  messageSendReceipt: never;
   historyRead: never;
   knowledgeGet: never;
   knowledgeSearch: never;
@@ -3068,6 +3147,9 @@ export type AgentApiResponseByRoute = {
   feedbackLocatorIngest: AgentApiFeedbackLocatorAcceptance;
   feedbackLocatorList: AgentApiFeedbackLocatorListResponse;
   events: AgentApiEventsResponse;
+  eventsClaim: AgentApiEventsClaimResponse;
+  eventsAck: AgentApiEventsAckResponse;
+  messageSendReceipt: AgentApiSendReceiptResponse;
   historyRead: AgentApiHistoryResponse;
   knowledgeGet: AgentApiKnowledgeGetResponse;
   knowledgeSearch: AgentApiKnowledgeSearchResponse;
