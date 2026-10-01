@@ -264,6 +264,9 @@ export const servers = pgTable("servers", {
   publiclyVisible: boolean("publicly_visible").notNull().default(false),
   plan: text("plan", { enum: ["free", "founder", "partner", "pro"] }).notNull().default("free"),
   translationEnabled: boolean("translation_enabled").notNull().default(false),
+  // Announcement channel (hourly agent progress). Off by default: the channel
+  // always exists, this flag only gates the timers/reminders/proxy posts.
+  progressAnnouncementsEnabled: boolean("progress_announcements_enabled").notNull().default(false),
   planDowngradedAt: timestamp("plan_downgraded_at", { withTimezone: true }),
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -1451,6 +1454,10 @@ export const channels = pgTable("channels", {
   name: text("name").notNull(),
   description: text("description"),
   type: text("type", { enum: ["channel", "private", "joint", "dm", "thread"] }).default("channel").notNull(),
+  // Server-wide system channels with implicit membership. 'all' marks the existing
+  // #all (identification by name elsewhere is unchanged); 'announcement' is the
+  // one-way progress channel and is identified by this column only.
+  systemKind: text("system_kind", { enum: ["all", "announcement"] }),
   guestVisible: boolean("guest_visible").notNull().default(false),
   guestJoinable: boolean("guest_joinable").notNull().default(false),
   parentMessageId: uuid("parent_message_id"),
@@ -1464,10 +1471,28 @@ export const channels = pgTable("channels", {
   // Name uniqueness spans archived and active channels: archive must not
   // release the name. The partial index stays gated only on deleted_at.
   uniqueIndex("idx_channels_server_name_type").on(t.serverId, t.name).where(sql`type in ('channel', 'private', 'joint') and deleted_at is null`),
+  uniqueIndex("idx_channels_server_system_kind").on(t.serverId, t.systemKind).where(sql`system_kind is not null and deleted_at is null`),
   index("idx_channels_parent_message").on(t.parentMessageId),
   uniqueIndex("idx_channels_active_thread_parent").on(t.parentMessageId).where(sql`type = 'thread' and deleted_at is null`),
   index("idx_channels_archived").on(t.serverId, t.archivedAt),
   check("channels_guest_joinable_requires_visible", sql`NOT ${t.guestJoinable} OR ${t.guestVisible}`),
+]);
+
+// Per-agent bookkeeping for the hourly announcement timers (task: announcement
+// phase 2). One row per agent; written with conditional updates so two server
+// replicas never nudge or proxy-post for the same agent twice.
+export const progressAnnouncementState = pgTable("progress_announcement_state", {
+  agentId: uuid("agent_id").primaryKey().references(() => agents.id, { onDelete: "cascade" }),
+  serverId: uuid("server_id").notNull().references(() => servers.id, { onDelete: "cascade" }),
+  // Last time the server woke this agent to write an announcement.
+  lastNudgedAt: timestamp("last_nudged_at", { withTimezone: true }),
+  // Idle epoch (the agent's status_changed_at) the proxy hours are counted from,
+  // and how many hourly idle posts were made for it.
+  idleSince: timestamp("idle_since", { withTimezone: true }),
+  idlePostsMade: integer("idle_posts_made").notNull().default(0),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  index("idx_progress_announcement_state_server").on(t.serverId),
 ]);
 
 // Durable DM provenance. Membership rows are intentionally mutable (for

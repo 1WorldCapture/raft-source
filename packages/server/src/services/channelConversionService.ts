@@ -132,6 +132,9 @@ export async function startChannelToJointConversion(input: {
     if (source.name === "all") {
       throw new ChannelConversionError("The #all channel cannot be converted", "reserved_channel");
     }
+    if (source.systemKind === "announcement") {
+      throw new ChannelConversionError("The #announcement channel cannot be converted", "reserved_channel");
+    }
 
     const [activeJob] = await tracePreJobPhase(input, "active_job_check", () => tx
       .select()

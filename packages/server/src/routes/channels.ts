@@ -1636,6 +1636,10 @@ channelRouter.post("/threads/follow", async (req, res) => {
     await emitThreadFollowersUpdated(req.app.get("io") as SocketServer | undefined, thread.id);
     res.json({ ok: true, threadChannelId: thread.id });
   } catch (err: any) {
+    if (err instanceof channelService.AnnouncementNoThreadsError) {
+      res.status(400).json({ error: err.message, code: err.code });
+      return;
+    }
     if (sendCompatibilityReadPending(res, err, { primaryOutcomeCommitted: true })) return;
     console.error("Failed to follow thread:", serializeErrorForLog(err));
     res.status(500).json({ error: "Failed to follow thread" });
@@ -2316,6 +2320,8 @@ async function resolveMessageDisplayPrefsTarget(req: Request, res: Response) {
   const requesterRole = await getActorServerRoleInServer(req.serverId!, "user", req.userId!);
   const isPrefsMember = channelService.isAllSystemChannel(channel)
     ? requesterRole !== "guest" && channelService.isEnabledAllChannel(channel)
+    : channelService.isAnnouncementChannel(channel)
+      ? requesterRole !== "guest"
     : channel.type === "channel"
       ? await channelService.isChannelHuman(channel.id, req.userId!)
       : await channelService.canUserAccessChannel(channel.id, req.userId!, req.serverId!);
@@ -2468,7 +2474,7 @@ channelRouter.get("/:id", async (req, res) => {
     const requesterRole = await getActorServerRoleInServer(req.serverId!, "user", req.userId!);
     const joined = channel.type === "dm"
       ? true
-      : requesterRole !== "guest" && channelService.isEnabledAllChannel(channel)
+      : requesterRole !== "guest" && channelService.hasImplicitServerMembership(channel)
         ? true
         : channelService.isAllSystemChannel(channel) && requesterRole === "guest"
           ? false
@@ -2575,7 +2581,7 @@ channelRouter.post("/:id/archive", async (req, res) => {
     const msg = err?.message || "";
     if (msg === "Channel capability required") {
       res.status(403).json({ error: "Only admins can archive channels" });
-    } else if (msg.includes("#all") || msg.includes("Only regular")) {
+    } else if (msg.includes("#all") || msg.includes("#announcement") || msg.includes("Only regular")) {
       res.status(400).json({ error: msg });
     } else if (msg === "Channel not found") {
       res.status(404).json({ error: msg });
@@ -3702,7 +3708,7 @@ channelRouter.post("/:id/join", async (req, res) => {
     }
     const actorRole = await getActorServerRoleInServer(req.serverId!, "user", req.userId!);
     const isGuest = actorRole === "guest";
-    const alreadyMember = (!isGuest && channelService.isEnabledAllChannel(channel))
+    const alreadyMember = (!isGuest && channelService.hasImplicitServerMembership(channel))
       || await channelService.isChannelHuman(channel.id, req.userId!);
     if (alreadyMember) {
       res.json({ ok: true });
@@ -4033,6 +4039,10 @@ channelRouter.post("/:id/threads", async (req, res) => {
     const info = await channelService.getThreadInfoForChannel(req.params.id, parentMessageId);
     res.json({ threadChannelId: thread.id, ...info });
   } catch (err: any) {
+    if (err instanceof channelService.AnnouncementNoThreadsError) {
+      res.status(400).json({ error: err.message, code: err.code });
+      return;
+    }
     if (err instanceof channelService.ChannelArchivedError) {
       res.status(409).json({ error: "This channel is archived", code: "channel_archived" });
       return;

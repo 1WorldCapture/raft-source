@@ -144,6 +144,7 @@ export async function getPeerReadHydrate(input: {
     || channel.serverId !== input.serverId
     || !["channel", "private", "dm"].includes(channel.type)
     || channelService.isAllSystemChannel(channel)
+    || channelService.isAnnouncementChannel(channel)
   ) return null;
 
   const members = await listScopeMembers(input.channelId);
@@ -180,6 +181,7 @@ export async function emitScopeReadUpdated(input: {
     || channel.serverId !== input.serverId
     || !["channel", "private", "dm"].includes(channel.type)
     || channelService.isAllSystemChannel(channel)
+    || channelService.isAnnouncementChannel(channel)
   ) return;
 
   // Only agents' reads are broadcast; a human read never reaches other clients.
