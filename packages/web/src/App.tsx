@@ -16,7 +16,8 @@ import HumanLoginSetupPage from "./pages/HumanLoginSetupPage";
 import IntegrationInvitePage from "./pages/IntegrationInvitePage";
 import PublicServerPage from "./pages/PublicServerPage";
 import { useChannelStore } from "./store/channelStore";
-import api from "./api/client";
+import { useJointChannelInviteStore } from "./store/jointChannelInviteStore";
+import { acceptJointChannelInvite } from "./utils/jointChannelInvites";
 import PaletteAuditPage from "./pages/PaletteAuditPage";
 import AccountBootstrapPreviewPage from "./pages/AccountBootstrapPreviewPage";
 import ServerSetupComputerRuntimePreviewPage from "./pages/ServerSetupComputerRuntimePreviewPage";
@@ -552,9 +553,9 @@ export function ServerResolver() {
     if (jointInviteAcceptingRef.current === jointInviteId) return;
 
     jointInviteAcceptingRef.current = jointInviteId;
-    api.post(`/channels/joint-invites/${encodeURIComponent(jointInviteId)}/accept`)
-      .then(async ({ data }) => {
-        const channelId = typeof data?.id === "string" ? data.id : null;
+    acceptJointChannelInvite(jointInviteId)
+      .then(async (channelId) => {
+        useJointChannelInviteStore.getState().remove(jointInviteId);
         if (channelId) {
           await useChannelStore.getState().ensureChannel(channelId);
           appNav.toChannel(channelId);
@@ -570,6 +571,22 @@ export function ServerResolver() {
         console.error("Failed to accept joint channel invite", err);
       });
   }, [appNav, current, jointInviteId, location.pathname, location.search, navigate, server]);
+
+  useEffect(() => {
+    const serverId = current?.id;
+    if (!serverId) return;
+    const refresh = () => {
+      if (document.visibilityState === "hidden") return;
+      void useJointChannelInviteStore.getState().load(serverId);
+    };
+    refresh();
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [current?.id]);
 
   if (loading) {
     return (

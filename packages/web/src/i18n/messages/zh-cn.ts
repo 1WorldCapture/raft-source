@@ -2773,6 +2773,13 @@ export const zhCn: Record<MessageId, string> = {
   "settings.invites.confirmMessage": "确定要撤销发送给 {email} 的邀请吗？他们将无法再使用此邀请链接加入。",
   "settings.invites.confirmLabel": "撤销邀请",
   "settings.invites.revoking": "撤销中…",
+  "settings.jointInvites.sectionLabel": "联合频道邀请",
+  "settings.jointInvites.description": "接受后，这个联合频道会加入当前服务器。",
+  "channel.jointInvite.banner": "{server} 邀请你加入联合频道 #{channel}",
+  "channel.jointInvite.accept": "接受",
+  "channel.jointInvite.later": "稍后",
+  "channel.jointInvite.accepting": "正在接受…",
+  "channel.jointInvite.failed": "无法接受这个邀请",
 
   // --- settings: joinLinks (inherited from #3874 b41c72b4f, AngLee-reviewed) ---
   "settings.joinLinks.sectionLabel": "邀请链接",
