@@ -11,8 +11,9 @@ import { broadcastAndDeliver, deliverSystemNoticeToAgent } from "./messageServic
 //
 // Every server with progress announcements enabled is swept on a fixed tick.
 // Per agent, by presence:
-//   working -> if it has not posted to #announcement (and was not nudged) for an
-//              hour, wake it with a system notice carrying the template.
+//   working -> after a full hour of work in which it posted nothing to
+//              #announcement (and was not nudged), wake it with a system notice
+//              carrying the template.
 //   idle    -> every full hour since it went idle, the system posts "currently
 //              idle" in the agent's name (marked announcement-proxy) and does NOT
 //              wake it.
@@ -150,8 +151,12 @@ export async function runProgressAnnouncementTick(deps: ProgressAnnouncementDeps
         const { presence, presenceSinceMs } = await deps.getPresence(agent.id);
         const last = lastTimes.get(agent.id);
         if (presence === "working") {
-          const anchor = last?.any ?? null;
-          if (anchor && now.getTime() - anchor.getTime() < ANNOUNCEMENT_HOUR_MS) continue;
+          // Due only after a full hour of work with nothing posted: count from the
+          // later of its last announcement and when this stretch of work began. A
+          // missing start is unknown, never guessed, so it is skipped.
+          if (presenceSinceMs === null) continue;
+          const anchorMs = Math.max(last?.any?.getTime() ?? 0, presenceSinceMs);
+          if (now.getTime() - anchorMs < ANNOUNCEMENT_HOUR_MS) continue;
           if (!(await claimNudge(server.id, agent.id, now))) continue;
           await deps.nudge({ serverId: server.id, agentId: agent.id, channelId: server.channelId });
           result.nudged += 1;
@@ -203,7 +208,8 @@ export function createProgressAnnouncementDeps(input: {
         senderId: agentId,
         senderName: agentName,
         content: buildIdleAnnouncement(idleSince),
-        actionMetadata: { kind: ANNOUNCEMENT_PROXY_KIND },
+        // idleSince lets clients show the start in the viewer's local time.
+        actionMetadata: { kind: ANNOUNCEMENT_PROXY_KIND, idleSince: idleSince.toISOString() },
       });
     },
   };

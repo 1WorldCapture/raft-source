@@ -69,26 +69,58 @@ test("a working agent that has not announced for an hour is nudged once per hour
   const fake = fakeDeps(T0);
   fake.setPresence(agent.id, "working", T0.getTime());
 
-  assert.equal((await runProgressAnnouncementTick(fake.deps)).nudged, 1, "no announcement ever: nudged on the first tick");
+  assert.equal((await runProgressAnnouncementTick(fake.deps)).nudged, 0, "just started working: not due yet");
+  fake.setNow(at(0, 59));
+  assert.equal((await runProgressAnnouncementTick(fake.deps)).nudged, 0, "59 minutes of work is not a full hour");
+  fake.setNow(at(1, 0));
+  assert.equal((await runProgressAnnouncementTick(fake.deps)).nudged, 1, "a full hour of work with nothing posted: nudged");
   assert.deepEqual(fake.nudges, [agent.id]);
 
-  fake.setNow(at(0, 5));
+  fake.setNow(at(1, 5));
   assert.equal((await runProgressAnnouncementTick(fake.deps)).nudged, 0, "not again within the hour");
-  fake.setNow(at(0, 59));
+  fake.setNow(at(1, 59));
   assert.equal((await runProgressAnnouncementTick(fake.deps)).nudged, 0);
-  fake.setNow(at(1, 0));
+  fake.setNow(at(2, 0));
   assert.equal((await runProgressAnnouncementTick(fake.deps)).nudged, 1, "an hour after the last nudge: nudged again");
   assert.deepEqual(fake.nudges, [agent.id, agent.id]);
+});
+
+test("a long-idle agent that has just started working is not nudged until it has worked a full hour", async ({ app }) => {
+  const { server, announcement } = await seedServer();
+  const agent = await createAgent(server.id, "interrupted", { runtime: "codex" });
+  const fake = fakeDeps(at(5, 0));
+  // Last announced hours ago, idle until 40 minutes ago, then took a task.
+  await createMessage(announcement.id, "agent", agent.id, "old update");
+  await getDb().update(messages).set({ createdAt: T0 }).where(eq(messages.channelId, announcement.id));
+  fake.setPresence(agent.id, "working", at(4, 20).getTime());
+  assert.equal((await runProgressAnnouncementTick(fake.deps)).nudged, 0, "40 minutes into the new stretch of work");
+  fake.setNow(at(5, 20));
+  assert.equal((await runProgressAnnouncementTick(fake.deps)).nudged, 1, "a full hour of work, nothing posted");
+});
+
+test("turning the feature on does not wake every working agent at once, and an unknown work start is skipped", async ({ app }) => {
+  const { server } = await seedServer();
+  const fresh = await createAgent(server.id, "fresh", { runtime: "codex" });
+  const unknownStart = await createAgent(server.id, "nostart", { runtime: "codex" });
+  const fake = fakeDeps(at(0, 10));
+  fake.setPresence(fresh.id, "working", at(0, 2).getTime());
+  fake.setPresence(unknownStart.id, "working", null);
+  assert.equal((await runProgressAnnouncementTick(fake.deps)).nudged, 0);
+  fake.setNow(at(3, 0));
+  const result = await runProgressAnnouncementTick(fake.deps);
+  assert.equal(result.nudged, 1, "only the agent with a known full hour of work");
+  assert.deepEqual(fake.nudges, [fresh.id]);
 });
 
 test("a working agent that announced within the hour is left alone", async ({ app }) => {
   const { server, announcement } = await seedServer();
   const agent = await createAgent(server.id, "writer", { runtime: "codex" });
   await createMessage(announcement.id, "agent", agent.id, "doing / done / next");
+  const started = Date.now() - 3 * ANNOUNCEMENT_HOUR_MS; // has been working for hours
   const fake = fakeDeps(new Date());
-  fake.setPresence(agent.id, "working", Date.now());
+  fake.setPresence(agent.id, "working", started);
 
-  assert.equal((await runProgressAnnouncementTick(fake.deps)).nudged, 0);
+  assert.equal((await runProgressAnnouncementTick(fake.deps)).nudged, 0, "it just announced");
   fake.setNow(new Date(Date.now() + ANNOUNCEMENT_HOUR_MS + 60_000));
   assert.equal((await runProgressAnnouncementTick(fake.deps)).nudged, 1, "an hour after its own announcement it is due");
 });
@@ -217,7 +249,7 @@ test("the real deps wake a working agent through the orchestrator and post idle 
   assert.equal(posted.length, 1);
   assert.equal(posted[0]?.senderType, "agent");
   assert.equal(posted[0]?.content, "当前空闲（自 09:00 UTC 起）");
-  assert.deepEqual(posted[0]?.actionMetadata, { kind: ANNOUNCEMENT_PROXY_KIND });
+  assert.deepEqual(posted[0]?.actionMetadata, { kind: ANNOUNCEMENT_PROXY_KIND, idleSince: T0.toISOString() });
   // Broadcasts are not pushed to other agents: nobody was delivered the idle line.
   assert.ok(!delivered.some((entry) => entry.content.includes("当前空闲")));
 });
