@@ -85,6 +85,7 @@ import {
 import NotificationTrigger from "./NotificationTrigger";
 import { getChannelUnreadIndicatorState, hasUnmutedUnread, shouldShowActivityMutedIcon } from "../../utils/channelUnreadIndicator";
 import { announcementShowsMuted, isAnnouncementChannel } from "../../utils/announcementChannel";
+import { JointChannelInviteBanner } from "../channel/JointChannelInviteBanner";
 import {
   getComputerRowDotStatus,
   getComputerRowDotTitleDescriptor,
@@ -3564,6 +3565,9 @@ export default function Sidebar({ mobileInline, bottomSlot, workspaceRailMode }:
               {railLabel}
             </div>
           </div>
+        )}
+        {railMode === "chat" && (
+          <JointChannelInviteBanner onOpenChannel={(channelId) => nav.toChannel(channelId)} />
         )}
         {/* Electron hides sidebar-root's first child (the title row). Keep the
             office/list switch in its own row so that rule does not eat it. */}

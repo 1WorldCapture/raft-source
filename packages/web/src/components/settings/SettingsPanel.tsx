@@ -107,6 +107,7 @@ import { avatarUploadApiErrorMessage, isAvatarFileTooLarge, isAvatarTooLargeErro
 import PanelHeader from "../ui/PanelHeader";
 import SectionEyebrow from "../ui/SectionEyebrow";
 import SectionHeader from "../ui/SectionHeader";
+import { JointChannelInvitesSection } from "./JointChannelInvitesSection";
 import Button from "../ui/Button";
 import CopyButton from "../ui/CopyButton";
 import FormField from "../ui/FormField";
@@ -7445,6 +7446,7 @@ function AdministrationTabContent() {
       {capabilities.changeChannelVisibility && <SystemChannelsSection />}
       {capabilities.editServerSettings && <AnnouncementSettingsSection />}
       <InvitesSection />
+      <JointChannelInvitesSection />
       <JoinLinksSection />
       {capabilities.editServerSettings && <PreJoinAgreementSection />}
       <OnboardingAgentSection />
@@ -7465,6 +7467,7 @@ export const ADMINISTRATION_VISUAL_SECTIONS = {
   // admins to match the real route (and Android's canonical order, task #388).
   "system-channels": SystemChannelsSection,
   invites: InvitesSection,
+  "joint-invites": JointChannelInvitesSection,
   "join-links": JoinLinksSection,
   "pre-join-agreement": PreJoinAgreementSection,
   onboarding: OnboardingAgentSection,
