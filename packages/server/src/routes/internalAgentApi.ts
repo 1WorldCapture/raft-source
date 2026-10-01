@@ -148,6 +148,7 @@ import {
   resolveProfileViewForAgent,
 } from "./internal.js";
 import { getDb } from "../db/index.js";
+import { findAgentSendByKey } from "../services/agentSendReplayService.js";
 import {
   attachments,
   channelAgents,
@@ -3201,11 +3202,81 @@ internalAgentApiRouter.get("/wake-hints/stream", requireAgentCapability("read"),
  * without claiming an anchor). If a UUID/short id is passed, v0.8
  * returns 400; msg-id resolution is a later slice.
  */
-registerAgentApiRoute("events", async (req, res) => {
+registerAgentApiRoute("events", (req, res) => handleAgentApiEvents(req, res, "drain"));
+// Fork patch (claim-then-ack): same selection as `/events`, but the batch stays
+// pending until the caller acknowledges it via `events/ack` after persisting it.
+registerAgentApiRoute("eventsClaim", (req, res) => handleAgentApiEvents(req, res, "claim"));
+
+/**
+ * Acknowledge one delivered batch exactly as `/events` always has: drop it from
+ * the volatile inbox, advance the durable per-channel watermark (legacy
+ * checkpoint, membership-filtered), and mark third-party events delivered.
+ * Idempotent: re-acknowledging an already-acked batch is a no-op.
+ */
+async function acknowledgeAgentEventsBatch(
+  agentOrchestrator: AgentOrchestrator,
+  agent: { machineId?: string | null },
+  actingAgentId: string,
+  batch: { seqs: number[]; messageIds: string[]; thirdPartyEventIds: string[] },
+): Promise<{ removedCount: number }> {
+  let removedCount = 0;
+  if (batch.seqs.length > 0 || batch.messageIds.length > 0) {
+    // `/events` is the agent-api equivalent of legacy receive+receive-ack:
+    // claim exactly the returned batch so `slock message check` does not
+    // replay the same inbox forever when using an sk_agent_* credential.
+    removedCount = agentOrchestrator.acknowledgeDeliveredMessages(actingAgentId, batch.seqs, batch.messageIds).removedCount;
+    // Pre-model-seen daemon compatibility: delivery ack also advances the
+    // legacy usability checkpoint until a daemon explicitly advertises true
+    // model-seen boundary support. This remains distinct from freshness
+    // proof; send still requires `seenUpToSeq`.
+    const hasModelSeenBoundaryCapability =
+      typeof agentOrchestrator.hasMachineCapability === "function"
+      && agentOrchestrator.hasMachineCapability(agent.machineId ?? undefined, DAEMON_CAPABILITY_MODEL_SEEN_BOUNDARY);
+    if (!hasModelSeenBoundaryCapability && batch.seqs.length > 0) {
+      await channelService.markAgentLegacyAckCheckpoint(actingAgentId, batch.seqs);
+    }
+  }
+  if (batch.thirdPartyEventIds.length > 0) {
+    await oauthService.markThirdPartyAgentEventsDelivered(batch.thirdPartyEventIds);
+  }
+  return { removedCount };
+}
+
+registerAgentApiRoute("eventsAck", ...agentApiRequestValidators("eventsAck"), async (req, res) => {
   try {
     const actingAgentId = req.actingAgentId!;
     const serverId = req.serverId!;
-    const eventsQuery = validateAgentApiQuery("events", req, res);
+    const body = validateAgentApiBody("eventsAck", req, res);
+    if (!body) return;
+    const agent = await agentService.getAgent(actingAgentId);
+    if (!agent || agent.serverId !== serverId) {
+      res.status(401).json({ error: "Agent no longer exists" });
+      return;
+    }
+    const agentOrchestrator = req.app.get("agentOrchestrator") as AgentOrchestrator;
+    const { removedCount } = await acknowledgeAgentEventsBatch(agentOrchestrator, agent, actingAgentId, {
+      seqs: body.seqs,
+      messageIds: body.message_ids,
+      thirdPartyEventIds: body.third_party_event_ids,
+    });
+    addTraceEvent("external_agent.events.ack.finished", {
+      seq_count: body.seqs.length,
+      message_id_count: body.message_ids.length,
+      third_party_count: body.third_party_event_ids.length,
+      removed_count: removedCount,
+    });
+    res.json({ ok: true, removed_count: removedCount });
+  } catch (err) {
+    console.error("internal.agent-api.events.ack error:", serializeErrorForLog(err));
+    res.status(500).json({ error: "Failed to acknowledge events" });
+  }
+});
+
+async function handleAgentApiEvents(req: Request, res: Response, mode: "drain" | "claim"): Promise<void> {
+  try {
+    const actingAgentId = req.actingAgentId!;
+    const serverId = req.serverId!;
+    const eventsQuery = validateAgentApiQuery(mode === "claim" ? "eventsClaim" : "events", req, res);
     if (!eventsQuery) return;
     const sinceRaw = eventsQuery.since?.trim() ?? "";
     const limit = Math.min(Math.max(Number(eventsQuery.limit) || 50, 1), 200);
@@ -3332,24 +3403,12 @@ registerAgentApiRoute("events", async (req, res) => {
     const ackedThirdPartyEventIds = queuedEvents
       .map(thirdPartyEventIdFromMessage)
       .filter((id): id is string => id !== null);
-    if (ackSeqs.length > 0 || ackMessageIds.length > 0) {
-      // `/events` is the agent-api equivalent of legacy receive+receive-ack:
-      // claim exactly the returned batch so `slock message check` does not
-      // replay the same inbox forever when using an sk_agent_* credential.
-      agentOrchestrator.acknowledgeDeliveredMessages(actingAgentId, ackSeqs, ackMessageIds);
-      // Pre-model-seen daemon compatibility: delivery ack also advances the
-      // legacy usability checkpoint until a daemon explicitly advertises true
-      // model-seen boundary support. This remains distinct from freshness
-      // proof; send still requires `seenUpToSeq`.
-      const hasModelSeenBoundaryCapability =
-        typeof agentOrchestrator.hasMachineCapability === "function"
-        && agentOrchestrator.hasMachineCapability(agent.machineId, DAEMON_CAPABILITY_MODEL_SEEN_BOUNDARY);
-      if (!hasModelSeenBoundaryCapability && ackSeqs.length > 0) {
-        await channelService.markAgentLegacyAckCheckpoint(actingAgentId, ackSeqs);
-      }
-    }
-    if (ackedThirdPartyEventIds.length > 0) {
-      await oauthService.markThirdPartyAgentEventsDelivered(ackedThirdPartyEventIds);
+    if (mode === "drain") {
+      await acknowledgeAgentEventsBatch(agentOrchestrator, agent, actingAgentId, {
+        seqs: ackSeqs,
+        messageIds: ackMessageIds,
+        thirdPartyEventIds: ackedThirdPartyEventIds,
+      });
     }
 
     // last_seen_msgId echo: prefer the newest event's id in this delivery
@@ -3375,9 +3434,10 @@ registerAgentApiRoute("events", async (req, res) => {
       undeliverable_count: undeliverableQueued.length,
       is_external: isExternalAgentRuntime(agent.runtime),
       since_seq: sinceSeq,
+      mode,
     });
 
-    sendAgentApiResponse("events", res, {
+    const eventsBody = {
       events,
       last_seen_msgId: lastSeenMsgId,
       last_seen_seq: lastSeenSeq,
@@ -3386,12 +3446,22 @@ registerAgentApiRoute("events", async (req, res) => {
       pending_notice_ids: [] as string[],
       wake_reason: null as string | null,
       has_more: filtered.length > trimmed.length,
-    });
+    };
+    if (mode === "claim") {
+      // Nothing was acknowledged; hand back the exact batch receipt so the
+      // caller can acknowledge it after persisting the batch on its side.
+      sendAgentApiResponse("eventsClaim", res, {
+        ...eventsBody,
+        ack: { seqs: ackSeqs, message_ids: ackMessageIds, third_party_event_ids: ackedThirdPartyEventIds },
+      });
+      return;
+    }
+    sendAgentApiResponse("events", res, eventsBody);
   } catch (err) {
     console.error("internal.agent-api.events error:", serializeErrorForLog(err));
     res.status(500).json({ error: "Failed to load events" });
   }
-});
+}
 
 registerAgentApiRoute("attachmentDownload", ...agentApiRequestValidators("attachmentDownload"), async (req, res) => {
   let attachmentForLog: typeof attachments.$inferSelect | null = null;
@@ -3674,9 +3744,17 @@ async function handleAgentApiMessageSend(
       res.status(401).json({ error: "Agent no longer exists" });
       return;
     }
+    // Fork patch: a retry whose idempotency key already committed skips the
+    // freshness gate and falls through to the idempotent replay below
+    // (otherwise unread messages that arrived after the first attempt would
+    // hold the retry as a draft even though the message was already delivered).
+    const idempotentKeyCommitted = typeof idempotencyKey === "string" && idempotencyKey.length > 0
+      ? (await findAgentSendByKey(actingAgentId, idempotencyKey)) !== null
+      : false;
+
     const sendFreshnessEnabled = isSendFreshnessEnabled(agent.serverId, actingAgentId);
     const sendFreshnessMode = (process.env.SLOCK_ATTESTED_SEND_MODE ?? "on").trim().toLowerCase();
-    const shouldRunSendFreshness = sendFreshnessEnabled &&
+    const shouldRunSendFreshness = sendFreshnessEnabled && !idempotentKeyCommitted &&
       (requestedSendFreshness || sendFreshnessMode === "force");
     if (!sendFreshnessEnabled && requestedSendFreshness) {
       traceSendRouteFailure("freshness_not_enabled", 403);
@@ -4160,6 +4238,29 @@ async function handleAgentApiMessageSend(
 
 registerAgentApiRoute("messageSend", (req, res) => handleAgentApiMessageSend(req, res, "messageSend"));
 registerAgentApiRoute("messageSendV2", (req, res) => handleAgentApiMessageSend(req, res, "messageSendV2"));
+registerAgentApiRoute("messageSendReceipt", ...agentApiRequestValidators("messageSendReceipt"), async (req, res) => {
+  try {
+    const actingAgentId = req.actingAgentId!;
+    const params = validateAgentApiParams("messageSendReceipt", req, res);
+    if (!params) return;
+    const committed = await findAgentSendByKey(actingAgentId, params.key);
+    if (!committed) {
+      // Not committed: retrying with the same key is safe (server-side dedupe).
+      sendAgentApiResponse("messageSendReceipt", res, { status: "not_found" });
+      return;
+    }
+    sendAgentApiResponse("messageSendReceipt", res, {
+      status: "sent",
+      message_id: committed.id,
+      message_seq: committed.seq,
+      channel_id: committed.channelId,
+      created_at: committed.createdAt instanceof Date ? committed.createdAt.toISOString() : String(committed.createdAt),
+    });
+  } catch (err) {
+    console.error("internal.agent-api.send-receipt error:", serializeErrorForLog(err));
+    res.status(500).json({ error: "Failed to load send receipt" });
+  }
+});
 
 function parseAgentApiAttachmentUpload(req: Request, res: Response, next: NextFunction): void {
   runSingleAttachmentUpload(req, res, next);

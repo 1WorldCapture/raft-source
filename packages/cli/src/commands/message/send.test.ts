@@ -559,6 +559,22 @@ test("message send forwards typed mention identity on the Agent API body", async
   assert.equal(paths[0], "/internal/agent-api/v2/send");
 });
 
+test("message send forwards --idempotency-key and keeps the success line", async () => {
+  const { ctx, bodies, stdout } = sendHarness();
+  await messageSendCommand.handler(ctx, [], { target: "#quiet", idempotencyKey: "zcode:turn-1:0" });
+  assert.equal(bodies[0]?.idempotencyKey, "zcode:turn-1:0");
+  assert.match(stdout.join(""), /^Message sent to #quiet\. Message ID: m1/);
+});
+
+test("message send rejects an out-of-range --idempotency-key before any request", async () => {
+  const { ctx, bodies } = sendHarness();
+  await assert.rejects(
+    () => messageSendCommand.handler(ctx, [], { target: "#quiet", idempotencyKey: "x".repeat(257) }),
+    /--idempotency-key must be 1-256 characters/,
+  );
+  assert.equal(bodies.length, 0);
+});
+
 function assertHeldDraftError(
   err: unknown,
   expected: { effect?: "draft_saved"; json?: boolean } = {},

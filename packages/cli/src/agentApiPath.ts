@@ -376,6 +376,10 @@ export function createAgentApiSurfaceClient(client: CliAgentApiHttpClient) {
     events: {
       get: (query: AgentApiRequestQueryByRoute["events"]) =>
         requestClientAsApiResponse(agentApi.events.get(query)),
+      claim: (query: AgentApiRequestQueryByRoute["eventsClaim"]) =>
+        requestClientAsApiResponse(agentApi.events.claim(query)),
+      ack: (body: AgentApiRequestBodyByRoute["eventsAck"]) =>
+        requestClientAsApiResponse(agentApi.events.ack(body)),
     },
     history: {
       read: (query: AgentApiRequestQueryByRoute["historyRead"]) =>
@@ -468,6 +472,8 @@ export function createAgentApiSurfaceClient(client: CliAgentApiHttpClient) {
         requestClientAsApiResponse(agentApi.messages.sendV2(body)),
       resolve: (params: AgentApiRequestParamsByRoute["messageResolve"]) =>
         requestClientAsApiResponse(agentApi.messages.resolve(params)),
+      receipt: (params: AgentApiRequestParamsByRoute["messageSendReceipt"]) =>
+        requestClientAsApiResponse(agentApi.messages.receipt(params)),
       search: (query: AgentApiRequestQueryByRoute["messageSearch"]) =>
         requestClientAsApiResponse(agentApi.messages.search(query)),
       addReaction: (

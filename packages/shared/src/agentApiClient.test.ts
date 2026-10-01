@@ -75,6 +75,14 @@ const sdkFixtures: Record<AgentApiRouteKey, {
       has_more: false,
     },
   },
+  eventsClaim: {
+    input: [{ since: "latest" }],
+    response: { events: [], last_seen_msgId: null, last_seen_seq: null, reply_target: null, pending_notice_ids: [], wake_reason: null, has_more: false, ack: { seqs: [], message_ids: [], third_party_event_ids: [] } },
+  },
+  eventsAck: {
+    input: [{ seqs: [1], message_ids: [], third_party_event_ids: [] }],
+    response: { ok: true, removed_count: 1 },
+  },
   historyRead: {
     input: [{ channel: "#wg-raft-cli" }],
     response: {
@@ -191,6 +199,10 @@ const sdkFixtures: Record<AgentApiRouteKey, {
   messageSendV2: {
     input: [{ target: "#wg-raft-cli", content: "hello @wenyi", mentions: [{ type: "user", id: "11111111-1111-4111-8111-111111111111", name: "wenyi" }] }],
     response: { ok: true, state: "sent", messageId: "msg-v2", unresolvedMentionHandles: [] },
+  },
+  messageSendReceipt: {
+    input: [{ key: "zcode:send-1" }],
+    response: { status: "not_found" },
   },
   messageResolve: {
     input: [{ msgId: asMessageId("msg/with space") }],
