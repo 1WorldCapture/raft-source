@@ -115,3 +115,16 @@ test("by-sender returns one sender's messages without a message window", async (
 
   assert.equal((await asMember("GET", `/api/messages/channel/${announcement.id}/by-sender?senderId=nope`)).status, 400);
 });
+
+test("creating a channel with a reserved name answers 400, not 500", async ({ app }) => {
+  const { owner, server } = await seed("ann-api-reserved");
+  const asOwner = api(app.baseUrl, server.id, await tokenForHuman(owner.email));
+  for (const name of ["announcement", "all"]) {
+    const res = await asOwner("POST", "/api/channels", { name });
+    assert.equal(res.status, 400, `#${name}`);
+    const body = await res.json() as { error: string; code: string };
+    assert.equal(body.code, "channel_name_reserved");
+    assert.match(body.error, /reserved/);
+  }
+  assert.equal((await asOwner("POST", "/api/channels", { name: "deploy" })).status, 200, "an ordinary name still works");
+});

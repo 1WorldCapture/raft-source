@@ -767,7 +767,7 @@ channelRouter.post("/", async (req, res) => {
       return;
     }
     if (typeof name === "string" && name.trim() === "all") {
-      res.status(400).json({ error: 'Channel name "all" is reserved' });
+      res.status(400).json({ error: 'Channel name "all" is reserved', code: "channel_name_reserved" });
       return;
     }
     if (parsedVisibility === "joint" && selectedJointInviteRequests.some((request) => !request.targetServerSlug)) {
@@ -907,7 +907,10 @@ channelRouter.post("/", async (req, res) => {
       res.status(403).json({ error: msg });
     } else if (msg.includes("Target server") || msg.includes("Cannot invite") || msg.includes("already in this joint channel") || msg.includes("invited person") || msg.includes("maximum of")) {
       res.status(400).json({ error: msg });
+    } else if (/^Channel name ".+" is reserved$/.test(msg)) {
+      res.status(400).json({ error: msg, code: "channel_name_reserved" });
     } else {
+      console.error("Failed to create channel:", serializeErrorForLog(err));
       res.status(500).json({ error: "Failed to create channel" });
     }
   }
