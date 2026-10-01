@@ -65,6 +65,48 @@ export const AGENT_API_ROUTE_MANIFEST = [
     }
   },
   {
+    "key": "eventsClaim",
+    "method": "GET",
+    "path": "/events/claim",
+    "fullPath": "/internal/agent-api/events/claim",
+    "client": {
+      "resource": "events",
+      "method": "claim"
+    },
+    "capability": "read",
+    "description": "Return pending events without acknowledging them; acknowledge later via events/ack.",
+    "request": {
+      "params": false,
+      "query": true,
+      "body": false
+    },
+    "response": {
+      "kind": "json",
+      "body": true
+    }
+  },
+  {
+    "key": "eventsAck",
+    "method": "POST",
+    "path": "/events/ack",
+    "fullPath": "/internal/agent-api/events/ack",
+    "client": {
+      "resource": "events",
+      "method": "ack"
+    },
+    "capability": "read",
+    "description": "Acknowledge a previously claimed events batch for the bound agent credential.",
+    "request": {
+      "params": false,
+      "query": false,
+      "body": true
+    },
+    "response": {
+      "kind": "json",
+      "body": true
+    }
+  },
+  {
     "key": "historyRead",
     "method": "GET",
     "path": "/history",
@@ -268,6 +310,27 @@ export const AGENT_API_ROUTE_MANIFEST = [
       "params": false,
       "query": false,
       "body": true
+    },
+    "response": {
+      "kind": "json",
+      "body": true
+    }
+  },
+  {
+    "key": "messageSendReceipt",
+    "method": "GET",
+    "path": "/send-receipts/:key",
+    "fullPath": "/internal/agent-api/send-receipts/:key",
+    "client": {
+      "resource": "messages",
+      "method": "receipt"
+    },
+    "capability": "read",
+    "description": "Look up whether a send with the given idempotency key was committed by the bound agent.",
+    "request": {
+      "params": true,
+      "query": false,
+      "body": false
     },
     "response": {
       "kind": "json",

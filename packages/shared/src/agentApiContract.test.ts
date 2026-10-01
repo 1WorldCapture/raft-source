@@ -331,6 +331,9 @@ test("agent-api response contracts parse representative envelopes", () => {
       wake_reason: null,
       has_more: false,
     },
+    eventsClaim: { events: [], last_seen_msgId: null, last_seen_seq: null, reply_target: null, pending_notice_ids: [], wake_reason: null, has_more: false, ack: { seqs: [], message_ids: [], third_party_event_ids: [] } },
+    eventsAck: { ok: true, removed_count: 0 },
+    messageSendReceipt: { status: "sent", message_id: "msg-1", message_seq: 1, channel_id: "chan-1", created_at: "2026-06-27T02:55:00.000Z" },
     historyRead: {
       messages: [{
         seq: 1,

@@ -67,6 +67,7 @@ interface SendOpts extends ReviewerIsolationOpts {
   anyway?: boolean;
   targetConfirmed?: boolean;
   json?: boolean;
+  idempotencyKey?: string;
 }
 
 const MESSAGE_HEREDOC_DELIMITER = "RAFTMSG";
@@ -449,6 +450,9 @@ async function handleMessageSend(
   if (!target) {
     throw cliError("INVALID_ARG", "--target is required");
   }
+  if (opts.idempotencyKey !== undefined && (opts.idempotencyKey.length === 0 || opts.idempotencyKey.length > 256)) {
+    throw cliError("INVALID_ARG", "--idempotency-key must be 1-256 characters");
+  }
   const reviewerIsolation = reviewerIsolationEnabled(opts, ctx.env);
 
   try {
@@ -592,6 +596,9 @@ async function handleMessageSend(
   }
   if (seenUpToSeq !== undefined) {
     body.seenUpToSeq = seenUpToSeq;
+  }
+  if (opts.idempotencyKey !== undefined) {
+    body.idempotencyKey = opts.idempotencyKey;
   }
   if (opts.sendDraft) {
     body.sendDraft = true;
@@ -785,6 +792,10 @@ export const messageSendCommand = defineCommand(
       },
       reviewerIsolationOption,
       { flags: "--json", description: "Emit the Agent API send response as JSON" },
+      {
+        flags: "--idempotency-key <key>",
+        description: "Dedupe key (1-256 chars): a retry with the same key returns the original message; check with `raft message receipt <key>`.",
+      },
       { flags: "--content <content>", description: "Unsupported. Pipe message content to stdin instead." },
       {
         flags: "--attachment-id <id>",

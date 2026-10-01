@@ -299,6 +299,9 @@ export const routeAuthPolicy: readonly RouteAuthPolicyEntry[] = [
     principal: "sk_agent",
     note: "RFC v0.8 — catch-up envelope (cursor: since=<messageSeq>|latest)",
   },
+  { method: "GET", path: "/internal/agent-api/events/claim", principal: "sk_agent", note: "fork patch — claim pending events without acknowledging them" },
+  { method: "POST", path: "/internal/agent-api/events/ack", principal: "sk_agent", note: "fork patch — acknowledge a claimed events batch" },
+  { method: "GET", path: "/internal/agent-api/send-receipts/:key", principal: "sk_agent", note: "fork patch — query whether an idempotency-keyed send committed" },
   {
     method: "GET",
     path: "/internal/agent-api/wake-hints",
