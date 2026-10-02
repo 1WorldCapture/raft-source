@@ -18,6 +18,11 @@ export type RunLoginOptions = {
 };
 
 export async function runLogin(opts: RunLoginOptions): Promise<void> {
+  // An omitted browser stub is a test bug. Reject before requesting a grant,
+  // outside the best-effort device-code event handlers that swallow errors.
+  if (process.env.VITEST && !opts.openUrl) {
+    throw new Error("HERMETIC_BROWSER_VIOLATION: login tests must inject openUrl before device authorization");
+  }
   const api = createComputerApi(resolveRaftHome());
   const input = opts.input ?? process.stdin;
   const openUrl = opts.openUrl ?? openUrlInBrowser;

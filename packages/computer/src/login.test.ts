@@ -282,7 +282,7 @@ test("runLogin: device-authorize transport failure → DEVICE_AUTHORIZE_FAILED w
     const cap = captureOut();
     try {
       await assert.rejects(
-        () => runLogin({ serverUrl: baseUrl }),
+        () => runLogin({ serverUrl: baseUrl, openUrl: () => {} }),
         (e) => (e as { name?: string }).name === "CliExit",
       );
     } finally {
@@ -303,7 +303,7 @@ test("runLogin: DEVICE_AUTHORIZE_FAILED preserves underlying transport reason as
     const baseUrl = "http://127.0.0.1:1";
     const cap = captureOut();
     try {
-      await assert.rejects(() => runLogin({ serverUrl: baseUrl }));
+      await assert.rejects(() => runLogin({ serverUrl: baseUrl, openUrl: () => {} }));
     } finally {
       cap.restore();
     }
@@ -318,4 +318,9 @@ test("runLogin: DEVICE_AUTHORIZE_FAILED preserves underlying transport reason as
     assert.match(out, /\nState: No local Computer state change was confirmed by this command\.\n/);
     assert.match(out, /\nHelp: https:\/\/app\.raft\.build\/s\/community\/\n/);
   });
+});
+
+
+test("runLogin: a missing browser stub fails before authorization, outside the event catch", async () => {
+  await assert.rejects(() => runLogin({}), /HERMETIC_BROWSER_VIOLATION: login tests must inject openUrl/);
 });

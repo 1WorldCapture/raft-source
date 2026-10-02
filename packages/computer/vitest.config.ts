@@ -9,10 +9,10 @@ export default defineConfig({
     // business module, BOTH home variables point at a throwaway temp root,
     // so an inherited RAFT_HOME (e.g. a managed agent terminal pointing at a
     // live ~/.slock-raft) can never leak state writes into a real home.
-    setupFiles: ["src/test/hermeticStateRootSetup.ts"],
-    // The previous Node runner imposed no per-test or per-hook timeout. Keep
-    // that contract and let the existing job watchdogs bound hangs.
-    testTimeout: 0,
-    hookTimeout: 0,
+    setupFiles: ["src/test/hermeticStateRootSetup.ts", "src/test/hermeticSideEffectsSetup.ts"],
+    // Bound forgotten authentication waits and fixture cleanup. Blocking the
+    // side effect is primary; a missing mock must not leave CI hung forever.
+    testTimeout: 120_000,
+    hookTimeout: 120_000,
   },
 });
