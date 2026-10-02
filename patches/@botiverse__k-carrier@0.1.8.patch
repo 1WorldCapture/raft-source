@@ -93,16 +93,17 @@ index 89b9dfae9b281b42ad2af21ce59112ded1de120a..6fec07dd6fe7699d70347bcb6fc669a6
  
  export interface ReleaseSource {
 diff --git a/core/src/index.ts b/core/src/index.ts
-index 9b5d2b842f18f803fb02b5df0f492581e51c4fbe..f72b455683f18966523cc936dfe7d7ac81b7bb0f 100644
+index 9b5d2b842f18f803fb02b5df0f492581e51c4fbe..b37830d9dd888f343365972bfe7c3b87203a4e46 100644
 --- a/core/src/index.ts
 +++ b/core/src/index.ts
-@@ -27,3 +27,4 @@ export * from "./lifecycle/hostAdapter.ts";
+@@ -27,3 +27,5 @@ export * from "./lifecycle/hostAdapter.ts";
  
  // The built-in invariants and their types (WorldSnapshot, Invariant, ...).
  export * from "./invariants.ts";
 +export * from "./txn/lock.ts";
++export * from "./txn/fileEffects.ts";
 diff --git a/core/src/platform/posix.ts b/core/src/platform/posix.ts
-index 1041212ff31843bd72a7803a8a40fc5e3f4ab87f..e2e8a55bd03796f4cfad7d9f0c03c9a86c9b5e45 100644
+index 1041212ff31843bd72a7803a8a40fc5e3f4ab87f..c8b263c2c7adc3efe366637b6d1b745d74f8d2d4 100644
 --- a/core/src/platform/posix.ts
 +++ b/core/src/platform/posix.ts
 @@ -4,6 +4,8 @@
@@ -158,7 +159,7 @@ index 1041212ff31843bd72a7803a8a40fc5e3f4ab87f..e2e8a55bd03796f4cfad7d9f0c03c9a8
 +    return null;
 +  }
 +  if (run.error || run.status !== 0) return null;
-+  return run.stdout.trim().slice(0, 1) || null;
++  return String(run.stdout ?? "").trim().slice(0, 1) || null;
 +}
 +
 +/**

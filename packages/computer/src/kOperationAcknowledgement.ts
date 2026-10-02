@@ -398,3 +398,206 @@ export async function acknowledgeTerminalUpgradeReceipt(
     acknowledgedAt: new Date(after.operation.acknowledgedAtMs).toISOString(),
   };
 }
+
+
+/** Journal evidence for the bounded recovery path (task #11 G2). */
+interface HandoverEvidence {
+  operationRecorded: boolean;
+  priorStartId: string | null;
+}
+
+/**
+ * Read the journal's handing-over record for THIS operation's target
+ * version, extracting the priorStartId the engine wrote BEFORE the
+ * handover. This is the server's own trusted history — written by the
+ * transaction that ran, never by the client.
+ */
+async function readHandoverEvidence(slockHome: string): Promise<HandoverEvidence> {
+  let text: string;
+  try {
+    text = await readFile(join(kStateDir(slockHome), "journal.jsonl"), "utf8");
+  } catch {
+    return { operationRecorded: false, priorStartId: null };
+  }
+  let priorStartId: string | null = null;
+  for (const line of text.split("\n")) {
+    if (!line.trim()) continue;
+    let entry: unknown;
+    try {
+      entry = JSON.parse(line);
+    } catch {
+      break; // torn tail line: entries before it stand
+    }
+    if (
+      typeof entry === "object" && entry !== null
+      && (entry as { intent?: unknown }).intent === "handing-over"
+    ) {
+      const detail = (entry as { detail?: unknown }).detail;
+      const candidate = typeof detail === "object" && detail !== null
+        ? (detail as { priorStartId?: unknown }).priorStartId
+        : undefined;
+      priorStartId = typeof candidate === "string" && candidate.length > 0 ? candidate : null;
+    }
+  }
+  return { operationRecorded: true, priorStartId };
+}
+
+export interface ReceiptRecoveryDeps extends TerminalUpgradeReceiptAcknowledgementDeps {
+  /** Test seam over the journal read. Defaults to the real file. */
+  readHandover?: (slockHome: string) => Promise<HandoverEvidence>;
+  /** Test seam over the audit sink. Defaults to console.log. */
+  audit?: (line: string) => void;
+}
+
+/**
+ * EXPLICIT, BOUNDED, AUDITABLE recovery for a terminal receipt whose
+ * operation record lacks predecessor process identities (task #11 G2:
+ * transactions completed by crash-redo never recorded them, and the normal
+ * acknowledgement refuses — leaving the machine unable to start the NEXT
+ * upgrade without manual state surgery).
+ *
+ * This is NOT a relaxation of the normal path. Every gate must pass:
+ *   1. exact same operation id (no cross-operation recovery);
+ *   2. the identities really are absent (records that HAVE them must use
+ *      the normal acknowledgement);
+ *   3. bounded outcome whitelist: promoted or rolled-back only;
+ *   4. TRUSTED history: the journal's handing-over record carries a
+ *      priorStartId, and the CURRENT live service attests a DIFFERENT
+ *      generation — the handover actually happened and the successor is a
+ *      different incarnation. The priorStartId is generation evidence, NOT
+ *      a process-exit proof, which is why it may only ENABLE this explicit
+ *      path, never substitute for the checks below;
+ *   5. stable live service readback (two agreeing attestations) at the
+ *      version the outcome demands;
+ *   6. no live predecessor: the coordinator pid and any upgrade.lock
+ *      holder must be gone (an alive predecessor refuses recovery).
+ * Any failure throws typed and consumes nothing. A successful recovery is
+ * audited before the receipt is delivered.
+ */
+export async function recoverTerminalUpgradeReceiptMissingPredecessors(
+  slockHome: string,
+  operationId: string,
+  deps: ReceiptRecoveryDeps = {},
+): Promise<TerminalUpgradeReceiptAcknowledgement> {
+  const stateDir = kStateDir(slockHome);
+  const load = deps.load ?? loadOperation;
+  const before = await load(stateDir);
+  if (before.kind === "genesis") {
+    throw new ComputerError(
+      "UPGRADE_RECEIPT_NOT_FOUND",
+      `No K operation receipt exists; there is nothing to recover.`,
+    );
+  }
+  if (before.kind === "unreadable") {
+    throw new ComputerError(
+      "UPGRADE_RECEIPT_UNREADABLE",
+      `The K operation receipt is unreadable (${before.reason}). Run \`raft-computer doctor\` before changing it.`,
+    );
+  }
+  if (before.operation.id !== operationId) {
+    throw new ComputerError(
+      "UPGRADE_RECEIPT_ID_MISMATCH",
+      `K currently holds operation ${before.operation.id}, not ${operationId}; recovery is bound to the exact operation.`,
+    );
+  }
+  const operation = before.operation;
+  if (operation.outcome === null) {
+    throw new ComputerError(
+      "UPGRADE_RECEIPT_ACTIVE",
+      `K operation ${operationId} is still active in phase ${operation.phase}; it cannot be recovered.`,
+    );
+  }
+  if (operation.acknowledgedAtMs !== null) {
+    return {
+      status: "already-acknowledged",
+      operationId,
+      outcome: operation.outcome,
+      acknowledgedAt: new Date(operation.acknowledgedAtMs).toISOString(),
+    };
+  }
+  if (predecessorPids(operation) !== null) {
+    throw new ComputerError(
+      "UPGRADE_RECEIPT_IDENTITY_PRESENT",
+      `K operation ${operationId} DOES carry predecessor process identities; use the normal acknowledgement — the recovery path is bounded to records that lack them.`,
+    );
+  }
+  if (operation.outcome !== "promoted" && operation.outcome !== "rolled-back") {
+    throw new ComputerError(
+      "UPGRADE_RECEIPT_RECOVERY_OUTCOME_UNSUPPORTED",
+      `K operation ${operationId} ended \`${operation.outcome}\`; the bounded recovery path accepts only promoted or rolled-back receipts (failed outcomes keep the strict normal path).`,
+    );
+  }
+
+  // Gate 6 first (cheapest refusals): no live predecessor may exist.
+  const alive = deps.isProcessAliveFn ?? isProcessAlive;
+  const quiescent = deps.isKQuiescentFn
+    ?? ((home: string, record: OperationRecord) => defaultKQuiescent(home, record, alive));
+  if (!await quiescent(slockHome, operation)) {
+    throw new ComputerError(
+      "UPGRADE_RECEIPT_K_ACTIVE",
+      `K operation ${operationId} still has an active coordinator or lock holder; recovery refused.`,
+    );
+  }
+
+  // Gate 4: trusted history — the handover record plus a DIFFERENT live
+  // generation. Same generation means the handover never happened (or the
+  // successor never started): refuse.
+  const readHandover = deps.readHandover ?? readHandoverEvidence;
+  const evidence = await readHandover(slockHome);
+  if (!evidence.operationRecorded || evidence.priorStartId === null) {
+    throw new ComputerError(
+      "UPGRADE_RECEIPT_RECOVERY_HISTORY_MISSING",
+      `K operation ${operationId} has no journal handing-over record with a priorStartId; the trusted-history gate refuses recovery.`,
+    );
+  }
+  const readAttestation = deps.readServiceAttestationFn
+    ?? ((home: string) => readMachineServiceAttestation(home));
+  const first = await readAttestation(slockHome);
+  const second = await readAttestation(slockHome);
+  if (!first || !second || !sameStableService(first, second)) {
+    throw new ComputerError(
+      "UPGRADE_RECEIPT_SERVICE_UNSTABLE",
+      `K operation ${operationId} has no stable live Computer service readback; recovery refused.`,
+    );
+  }
+  if (first.serviceGeneration === evidence.priorStartId) {
+    throw new ComputerError(
+      "UPGRADE_RECEIPT_RECOVERY_SAME_GENERATION",
+      `The live service still attests the journal's priorStartId generation; the handover successor is not running — recovery refused.`,
+    );
+  }
+
+  // Gate 5: the stable service must run the version this outcome demands.
+  const expectedVersion = operation.outcome === "promoted"
+    ? operation.targetVersion
+    : operation.fromVersion;
+  if (first.computerVersion !== expectedVersion) {
+    throw new ComputerError(
+      "UPGRADE_RECEIPT_VERSION_MISMATCH",
+      `The live Computer is not the exact ${operation.outcome === "promoted" ? "successor" : "restored"} version ${expectedVersion}; recovery refused.`,
+    );
+  }
+
+  // Auditable: the recovery is visible before the receipt is delivered.
+  const audit = deps.audit ?? ((line: string) => console.log(line));
+  audit(
+    `[k-operation ${operationId}] RECEIPT_RECOVERED_MISSING_PREDECESSORS outcome=${operation.outcome} ` +
+    `expectedVersion=${expectedVersion} priorStartId=${evidence.priorStartId} ` +
+    `liveGeneration=${first.serviceGeneration} servicePid=${first.servicePid}`,
+  );
+
+  const acknowledge = deps.acknowledge ?? acknowledgeOperation;
+  const result = await acknowledge(stateDir, operationId, (deps.nowMs ?? currentTimeMs)());
+  if (result !== "acknowledged") {
+    throw new ComputerError(
+      "UPGRADE_RECEIPT_CHANGED",
+      `K operation ${operationId} changed during recovery (${result}); nothing was consumed. Re-run \`raft-computer status\`.`,
+    );
+  }
+  return {
+    status: "acknowledged",
+    operationId,
+    outcome: operation.outcome,
+    acknowledgedAt: new Date((deps.nowMs ?? currentTimeMs)()).toISOString(),
+  };
+}

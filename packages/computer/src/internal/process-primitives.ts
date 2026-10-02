@@ -73,7 +73,7 @@ export function readDarwinProcessState(pid: number): string | null {
     return null;
   }
   if (run.error || run.status !== 0) return null;
-  return run.stdout.trim().slice(0, 1) || null;
+  return String(run.stdout ?? "").trim().slice(0, 1) || null;
 }
 
 /**

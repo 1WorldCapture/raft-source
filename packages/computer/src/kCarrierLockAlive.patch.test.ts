@@ -58,7 +58,7 @@ interface ZombieFixture {
 async function manufactureZombie(): Promise<ZombieFixture> {
   const parent = spawn(python3!, ["-c", PYTHON_PARENT], {
     stdio: ["pipe", "pipe", "inherit"],
-  }) as ChildProcessWithoutNullStreams;
+  }) as unknown as ChildProcessWithoutNullStreams;
   let out = "";
   parent.stdout.on("data", (chunk: Buffer) => { out += chunk.toString(); });
   const deadline = Date.now() + 3_000;
@@ -147,7 +147,7 @@ test.skipIf(!isPosix || !pythonAvailable)(
   async () => {
     const parent = spawn(python3!, ["-c", "import sys; sys.stdin.readline()"], {
       stdio: ["pipe", "inherit", "inherit"],
-    }) as ChildProcessWithoutNullStreams;
+    }) as unknown as ChildProcessWithoutNullStreams;
     const stateDir = await tempStateDir();
     try {
       await writeLockRecord(stateDir, parent.pid!);
