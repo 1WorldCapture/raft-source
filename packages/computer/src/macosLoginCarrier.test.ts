@@ -1205,7 +1205,7 @@ test("forward-deadline abort during bootout still recovers — the recovery ride
   }
 });
 
-test("caller-level cancellation during bootout degrades honestly — no false 'restored' claim, pending kept", async () => {
+test("caller-level cancellation during bootout still recovers — the recovery budget is independent of the caller signal", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "raft-macos-login-abort-parent-"));
   const home = path.join(root, "user");
   const slockHome = path.join(home, ".slock");
@@ -1228,14 +1228,16 @@ test("caller-level cancellation during bootout degrades honestly — no false 'r
         dispatcherPath: path.join(home, ".local", "bin", "raft-computer-next"),
         signal: callerSignal.signal,
         runCommand: async (command, args, signal) => {
-          if (args[0] === "bootout") {
-            await harness.run(command, args, signal);
-            callerSignal.abort();
+          // Signal-bound calls (the forward path) refuse once the caller
+          // cancelled; the recovery rides the raw runner and still runs.
+          if (signal?.aborted) {
             const abortError = new Error("operation aborted");
             abortError.name = "AbortError";
             throw abortError;
           }
-          if (signal?.aborted) {
+          if (args[0] === "bootout") {
+            await harness.run(command, args, signal);
+            callerSignal.abort();
             const abortError = new Error("operation aborted");
             abortError.name = "AbortError";
             throw abortError;
@@ -1248,12 +1250,11 @@ test("caller-level cancellation during bootout degrades honestly — no false 'r
         return true;
       },
     );
-    // Honest degraded state: the recovery could not run under the cancelled
-    // caller signal, so the pending record is the durable anchor and the
-    // error does NOT claim restoration. A later converge lands the recovery.
-    assert.equal((await readHostLifecycleRecoveryStatus(slockHome))?.status, "pending-replace");
-    await convergeCliHostLifecycle(slockHome, "enabled", baseDeps);
+    // The caller cancelled, but the recovery budget is independent: the
+    // previous carrier is live again and nothing is left pending.
+    assert.equal(harness.jobs.size, 1);
     assert.ok([...harness.jobs.values()][0]!.includes(originalDispatcher));
+    assert.equal((await readHostLifecycleMarker(slockHome))?.dispatcherPath, originalDispatcher);
     assert.equal(await readHostLifecycleRecoveryStatus(slockHome), null);
   } finally {
     await rm(root, { recursive: true, force: true });

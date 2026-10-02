@@ -873,6 +873,13 @@ async function enableCliCarrier(
     forwardDeadline?.signal ?? deps.signal,
   );
 
+  // Integrity-cleanup runner: bound to NO external signal (neither the
+  // forward deadline nor the caller's cancellation). Restoring the previous
+  // carrier is a bounded finish-it-or-degrade step of the failed operation
+  // itself; a caller that cancels must not also cancel the machine's chance
+  // to get its login carrier back. Boundedness comes from the per-command
+  // timeout the raw runner already applies.
+  const recoveryRunCommand = baseRunCommand;
   const restorePreviousCarrier = async (): Promise<void> => {
     if (rollback === null) return;
     try {
@@ -880,15 +887,15 @@ async function enableCliCarrier(
       // only to clear a half-dead registration. "not loaded" (and even an
       // error on an already-absent job) is fine — bootstrap below is the
       // authoritative step.
-      await bootoutCarrier(spec, runCommand).catch(() => "not-loaded" as const);
+      await bootoutCarrier(spec, recoveryRunCommand).catch(() => "not-loaded" as const);
       await mkdir(path.dirname(spec.definitionPath), { recursive: true, mode: 0o700 });
       await writeDurableTextFile(spec.definitionPath, rollback.definition);
-      await runCommand("/bin/launchctl", [
+      await recoveryRunCommand("/bin/launchctl", [
         "bootstrap",
         spec.domain,
         spec.definitionPath,
       ]);
-      const restored = await printJob(spec, runCommand);
+      const restored = await printJob(spec, recoveryRunCommand);
       if (
         restored === null
         || !restored.includes(spec.label)
@@ -940,7 +947,7 @@ async function enableCliCarrier(
       // report failure AFTER unloading the job (late error). Verify the
       // actual state before claiming a safe no-op — an unloaded job means
       // the pending record must STAY as the durable recovery anchor.
-      const jobStillLoaded = await printJob(spec, forwardRunCommand).catch(() => null);
+      const jobStillLoaded = await printJob(spec, recoveryRunCommand).catch(() => null);
       if (jobStillLoaded === null) {
         // The unload DID happen despite the error. At this point the on-disk
         // definition is still the PREVIOUS one (the destructive definition
@@ -949,17 +956,18 @@ async function enableCliCarrier(
         // job is live again. Only a failed recovery may fall back to leaving
         // the pending record as the durable degraded anchor.
         try {
-          // Deliberately NOT forwardRunCommand: when the bootout failed
-          // because the forward deadline aborted it, a recovery bound to the
-          // same signal would be stillborn. The recovery rides the
-          // caller-level signal and stays bounded by the per-command timeout,
-          // like the rollback path below.
-          await runCommand("/bin/launchctl", [
+          // Deliberately bound to NO external signal: neither the forward
+          // deadline (whose abort may be why bootout failed) nor the
+          // caller's cancellation may stillborn the machine's chance to get
+          // its previous carrier back. The raw runner's per-command timeout
+          // keeps this bounded — a failed or exhausted recovery degrades to
+          // the pending record.
+          await recoveryRunCommand("/bin/launchctl", [
             "bootstrap",
             spec.domain,
             spec.definitionPath,
           ]);
-          const recovered = await printJob(spec, runCommand);
+          const recovered = await printJob(spec, recoveryRunCommand);
           const previousDispatcher = previousMarker?.dispatcherPath
             ?? dispatcherFromDefinition(
               (await readFile(spec.definitionPath, "utf8").catch(() => "")) ?? "",
