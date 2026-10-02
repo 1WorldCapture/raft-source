@@ -23,9 +23,12 @@ import { randomBytes, createHmac } from "node:crypto";
 import argon2 from "argon2";
 import { eq, and, isNull, desc } from "drizzle-orm";
 import { makeIsMember } from "@botiverse/raft-shared";
-import { getDb } from "../db/index.js";
-import { agentCredentials, agentBootstrapTokens, agents, servers } from "../db/schema.js";
+import { getDb, type DatabaseExecutor, type Database } from "../db/index.js";
+import { agentCredentials, agentBootstrapTokens, agents, servers, externalAgentConnections } from "../db/schema.js";
 import { addTraceEvent } from "../tracing/semanticTrace.js";
+
+import { databaseNow, readConnection, requireHumanManagement, withAgentTransaction } from "./agentTransactionAuthority.js";
+import { revokeConnectionExecution } from "./externalAgentDelegationState.js";
 
 const API_KEY_PREFIX_LENGTH = 16;
 const RAW_KEY_BYTES = 32;
@@ -297,6 +300,7 @@ export interface MintAgentCredentialInput {
  */
 export async function mintAgentCredential(
   input: MintAgentCredentialInput,
+  executor: DatabaseExecutor = getDb(),
 ): Promise<{
   credentialId: string;
   apiKey: string;
@@ -305,7 +309,7 @@ export async function mintAgentCredential(
   serverId: string;
   agentName: string;
 }> {
-  const db = getDb();
+  const db = executor;
 
   // Resolve agent + soft-delete check + server liveness in one go.
   const [agentRow] = await db
@@ -371,8 +375,7 @@ export async function revokeAgentCredential(input: {
   serverId?: string;
   reason: string;
   revokedByUserId?: string;
-}): Promise<boolean> {
-  const db = getDb();
+}, db: Database = getDb()): Promise<boolean> {
   const [row] = await db
     .select({
       id: agentCredentials.id,
@@ -384,19 +387,36 @@ export async function revokeAgentCredential(input: {
     .innerJoin(agents, eq(agents.id, agentCredentials.agentId))
     .where(eq(agentCredentials.id, input.credentialId));
   if (!row) return false;
-  if (input.agentId && row.agentId !== input.agentId) return false;
-  if (input.serverId && row.serverId !== input.serverId) return false;
-  if (row.revokedAt) return true;
-
-  await db
-    .update(agentCredentials)
-    .set({
-      revokedAt: new Date(),
-      revokedReason: input.reason,
+  // Credential ownership is immutable. This lookup only chooses the stable
+  // gate; all authority and effect checks below run in the commit transaction.
+  return withAgentTransaction([row.agentId], async (context) => {
+    const [current] = await context.tx.select({
+      id: agentCredentials.id, agentId: agentCredentials.agentId,
+      revokedAt: agentCredentials.revokedAt, serverId: agents.serverId,
+    }).from(agentCredentials).innerJoin(agents, eq(agents.id, agentCredentials.agentId))
+      .where(eq(agentCredentials.id, input.credentialId));
+    if (!current || current.agentId !== row.agentId
+      || (input.agentId && current.agentId !== input.agentId)
+      || (input.serverId && current.serverId !== input.serverId)) return false;
+    if (input.revokedByUserId) {
+      await requireHumanManagement(context, { serverId: current.serverId, userId: input.revokedByUserId }, current.agentId, "issueAgentCredentials");
+    }
+    if (current.revokedAt) return true;
+    const connection = await readConnection(context, current.agentId);
+    const now = await databaseNow(context);
+    if (connection?.boundCredentialId === current.id) {
+      await revokeConnectionExecution(context, connection);
+      await context.tx.update(externalAgentConnections).set({
+        enabled: false, pauseReason: "credential_revoked", epoch: connection.epoch + 1n,
+        revision: connection.revision + 1, currentRunId: null, updatedAt: now,
+      }).where(eq(externalAgentConnections.id, connection.id));
+    }
+    await context.tx.update(agentCredentials).set({
+      revokedAt: now, revokedReason: input.reason,
       ...(input.revokedByUserId ? { revokedByUserId: input.revokedByUserId } : {}),
-    })
-    .where(eq(agentCredentials.id, input.credentialId));
-  return true;
+    }).where(eq(agentCredentials.id, input.credentialId));
+    return true;
+  }, db);
 }
 
 // ----------------------------------------------------------------------------

@@ -85,7 +85,7 @@ export async function updateServerProfileForAgent(input: {
     return { status: 400, body: { error: "At least one field is required" } };
   }
 
-  const updated = await serverService.updateServerProfile(input.serverId, updates);
+  const updated = await serverService.updateServerProfile(input.serverId, updates, input.actor.id);
   if (!updated) {
     addTraceEvent("agent_server_profile.request.failed", {
       reason: "server_not_found",

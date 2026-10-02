@@ -1,3 +1,4 @@
+import { DelegationError, readConnection, requireLegacyAgentActor, withExpandingAgentTransaction } from "./agentTransactionAuthority.js";
 import { and, desc, eq, gt, gte, inArray, isNull, lt, or } from "drizzle-orm";
 import { asServerId } from "@botiverse/raft-shared";
 
@@ -11,6 +12,7 @@ import {
   messages,
   serverMembers,
   threadFollows,
+  externalAgentConnections,
 } from "../db/schema.js";
 import {
   actorHasChannelCapability,
@@ -398,7 +400,9 @@ async function executeMentionActionForRow(
     }
   }
 
-  if (action === "notify" && row.targetType === "agent") {
+  const [targetConnection] = row.targetType === "agent" ? await getDb().select({ mode: externalAgentConnections.consumptionMode }).from(externalAgentConnections).where(eq(externalAgentConnections.agentId, row.targetId)) : [];
+  const delegatedTarget = targetConnection?.mode === "delegated";
+  if (action === "notify" && row.targetType === "agent" && !delegatedTarget) {
     if (!options.notifyAgent) {
       return { ...base, status: "dropped", reason: "delivery_unavailable" };
     }
@@ -448,7 +452,12 @@ async function executeMentionActionForRow(
 
   const deliveredAt = new Date();
   const cutoff = new Date(Date.now() - PENDING_MENTION_TTL_MS);
-  const dedupedResolutionIds = await db.transaction(async (tx) => {
+  const dedupedResolutionIds = await withExpandingAgentTransaction([
+    ...(actorType === "agent" ? [actorId] : []), ...(row.targetType === "agent" ? [row.targetId] : []),
+  ], async (context) => {
+    const tx = context.tx;
+    if (actorType === "agent") await requireLegacyAgentActor(context, actorId);
+    if (row.targetType === "agent" && ((await readConnection(context, row.targetId))?.consumptionMode === "delegated") !== delegatedTarget) throw new DelegationError("source_mode_changed", 409);
     if (action === "add") {
       const membershipChannelId = row.channelType === "thread" ? threadAddParentChannelId! : row.channelId;
       const [lockedChannel] = await tx
@@ -568,6 +577,7 @@ async function recordQueuedMentionActionFacts(
       senderType: messages.senderType,
       senderId: messages.senderId,
       createdAt: messages.createdAt,
+      notifiedAction: messageMentions.notifiedAction,
     })
     .from(messageMentions)
     .innerJoin(messages, eq(messages.id, messageMentions.messageId))
@@ -587,6 +597,7 @@ async function recordQueuedMentionActionFacts(
       activityAt: row.createdAt,
       personalMention: true,
       unreadEligible: !(row.senderType === row.targetType && row.senderId === row.targetId),
+      ...(row.notifiedAction === "add" || row.notifiedAction === "notify_only" ? { occurrence: { resolutionId: row.id, action: row.notifiedAction === "add" ? "add" as const : "notify" as const } } : {}),
     } satisfies InboxNotificationFactInput));
   await recordInboxNotificationFacts(facts, executor);
 }

@@ -1,3 +1,4 @@
+import { agentTransactionForExecutor, requireLegacyAgentActor, withAgentTransaction } from "./agentTransactionAuthority.js";
 import { revokeSocketAccess } from "../socket/accessRevocation.js";
 import { createHash } from "crypto";
 import { eq, and, asc, isNull, inArray, sql, count, ne } from "drizzle-orm";
@@ -544,8 +545,19 @@ export async function updateServerOnboardingSettings(
   });
 }
 
-export async function updateServerProfile(serverId: string, updates: ServerProfileUpdates) {
-  const db = getDb();
+export async function updateServerProfile(serverId: string, updates: ServerProfileUpdates, actorAgentId?: string, executor?: DatabaseExecutor): Promise<typeof servers.$inferSelect | null> {
+  if (actorAgentId) {
+    if (!executor) return withAgentTransaction([actorAgentId], async (context) => {
+      await requireLegacyAgentActor(context, actorAgentId);
+      return updateServerProfile(serverId, updates, actorAgentId, context.tx);
+    });
+    const context = agentTransactionForExecutor(executor);
+    if (!context) throw new Error("agent_transaction_required");
+    await requireLegacyAgentActor(context, actorAgentId);
+    const actor = await executor.select({ role: serverAgentMembers.role }).from(serverAgentMembers).where(and(eq(serverAgentMembers.serverId, serverId), eq(serverAgentMembers.agentId, actorAgentId))).for("share");
+    if (!actor[0] || !hasServerCapability(actor[0].role, "editServerSettings")) throw new Error("Server capability required");
+  }
+  const db = executor ?? getDb();
   const values: Partial<typeof servers.$inferInsert> = {
     updatedAt: new Date(),
   };

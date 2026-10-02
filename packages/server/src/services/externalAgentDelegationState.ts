@@ -1,8 +1,9 @@
-import { randomUUID } from "node:crypto";
 import { and, count, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { wakeLiveStateValues } from "@botiverse/raft-shared";
 import { externalAgentClaims as claims, externalAgentConnections as connections, externalAgentInboxReceipts as receipts, externalAgentRuns as runs, externalAgentWakes as wakes, productEvents } from "../db/schema.js";
 import { assertAgentTransaction, databaseNow, DelegationError, type AgentTransaction, type ConnectionRow, type HumanIdentity, type RunRow } from "./agentTransactionAuthority.js";
+
+import { recordExternalAgentRecoveryEvent, type ExternalAgentRecoveryOperation } from "./productEventsService.js";
 
 export type WakeRow = typeof wakes.$inferSelect;
 export function proxyPolicy(connection: ConnectionRow) {
@@ -37,9 +38,16 @@ export async function ensureWakeForPending(context: AgentTransaction, connection
   // Terminal exhausted remains the authoritative cycle and blocks new input.
   if (existing && existing.state !== "settled" && existing.state !== "superseded") return existing;
   const now = await databaseNow(context);
+  const [previous] = existing ? [existing] : await context.tx.select().from(wakes)
+    .where(eq(wakes.connectionId, connection.id)).orderBy(desc(wakes.cycle), desc(wakes.connectionEpoch)).limit(1);
+  const carryBudget = !!previous && previous.state !== "settled";
+  const state = carryBudget && previous.exhaustedReason ? "exhausted" : carryBudget && previous.blockReason ? "blocked" : "queued";
   const [wake] = await context.tx.insert(wakes).values({
     connectionId: connection.id, connectionEpoch: connection.epoch, generationAtCreation: connection.pendingGeneration,
-    cycle: existing ? existing.cycle + 1n : 0n,
+    cycle: previous ? previous.cycle + (carryBudget ? 0n : 1n) : 0n,
+    attemptCount: carryBudget ? previous.attemptCount : 0,
+    state, blockReason: state === "blocked" ? previous?.blockReason : null,
+    exhaustedReason: state === "exhausted" ? previous?.exhaustedReason : null,
     nextAttemptAt: new Date(now.getTime() + proxyPolicy(connection).debounceMs),
   }).returning();
   return wake;
@@ -70,7 +78,11 @@ export async function revokeConnectionExecution(context: AgentTransaction, conne
     .where(and(eq(wakes.connectionId, connection.id), inArray(wakes.state, [...wakeLiveStateValues])));
 }
 export async function countRunStarts(context: AgentTransaction, wakeId: string): Promise<number> {
-  const [row] = await context.tx.select({ total: count() }).from(runs).where(eq(runs.wakeId, wakeId));
+  const [wake] = await context.tx.select().from(wakes).where(eq(wakes.id, wakeId)).limit(1);
+  if (!wake) throw new DelegationError("wake_missing", 404);
+  // A pause/configuration epoch does not implicitly reset a retry cycle.
+  const [row] = await context.tx.select({ total: count() }).from(runs).innerJoin(wakes, eq(wakes.id, runs.wakeId))
+    .where(and(eq(wakes.connectionId, wake.connectionId), eq(wakes.cycle, wake.cycle)));
   return Number(row.total);
 }
 export async function queueOrExhaust(context: AgentTransaction, connection: ConnectionRow, wake: WakeRow) {
@@ -87,20 +99,26 @@ export async function queueOrExhaust(context: AgentTransaction, connection: Conn
   return updated;
 }
 
-export async function recordRecovery(context: AgentTransaction, connection: ConnectionRow, identity: HumanIdentity, operation: string, requestKey: string, previousWakeId?: string) {
+export async function recoveryReplay(context: AgentTransaction, connection: ConnectionRow, identity: HumanIdentity, operation: ExternalAgentRecoveryOperation, requestKey: string, requestRevision: number) {
   assertAgentTransaction(context, connection.agentId);
   if (!requestKey || requestKey.length > 200) throw new DelegationError("request_key_invalid", 400);
-  const [existing] = await context.tx.select().from(productEvents).where(and(
+  const [event] = await context.tx.select().from(productEvents).where(and(
     eq(productEvents.subjectType, "external_agent_connection"), eq(productEvents.subjectId, connection.id),
     eq(productEvents.eventType, `external_agent.${operation}`), eq(productEvents.idempotencyKey, requestKey),
   )).limit(1);
-  if (existing) return existing;
-  const [event] = await context.tx.insert(productEvents).values({
-    id: randomUUID(), subjectType: "external_agent_connection", subjectId: connection.id,
-    eventType: `external_agent.${operation}`, actorType: "user", actorId: identity.userId,
-    source: "server", idempotencyKey: requestKey,
-    metadata: { serverId: connection.serverId, agentId: connection.agentId, epoch: connection.epoch.toString(), revision: connection.revision, previousWakeId: previousWakeId ?? null },
-    occurredAt: await databaseNow(context),
-  }).returning();
+  if (!event) return null;
+  const metadata = event.metadata as { serverId?: unknown; agentId?: unknown; requestRevision?: unknown };
+  if (event.actorType !== "human" || event.actorId !== identity.userId || metadata.serverId !== identity.serverId
+    || metadata.agentId !== connection.agentId || metadata.requestRevision !== requestRevision) throw new DelegationError("recovery_conflict");
   return event;
+}
+export async function recordRecovery(context: AgentTransaction, connection: ConnectionRow, identity: HumanIdentity, operation: ExternalAgentRecoveryOperation, requestKey: string, requestRevision: number, previousWakeId?: string, cutoverProof?: "same_transaction_new_agent" | "durable_receipts") {
+  const replay = await recoveryReplay(context, connection, identity, operation, requestKey, requestRevision);
+  if (replay) return replay;
+  return recordExternalAgentRecoveryEvent(context.tx, {
+    connectionId: connection.id, serverId: connection.serverId, agentId: connection.agentId,
+    userId: identity.userId, operation, requestKey, requestRevision,
+    epoch: connection.epoch.toString(), revision: connection.revision, previousWakeId: previousWakeId ?? null,
+    cutoverManifest: cutoverProof ? { version: 1, proof: cutoverProof, legacyCandidateIds: [] } : null,
+  });
 }

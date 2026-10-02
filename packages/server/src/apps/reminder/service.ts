@@ -1,3 +1,4 @@
+import { agentTransactionForExecutor, requireLegacyAgentActor, withAgentTransaction, withExpandingAgentTransaction, requireSourceAgentPlan, readConnection, DelegationError } from "../../services/agentTransactionAuthority.js";
 import { and, asc, desc, eq, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import type {
@@ -9,7 +10,7 @@ import type {
   RaftTargetString,
 } from "@botiverse/raft-shared";
 import { getDb, type DatabaseExecutor } from "../../db/index.js";
-import { agents, reminders, reminderEvents, servers, messages, channels } from "../../db/schema.js";
+import { agents, reminders, reminderEvents, servers, messages, channels, externalAgentConnections } from "../../db/schema.js";
 import { reminderSourceAcknowledgements } from "./sourceAckSchema.js";
 import * as channelService from "../../services/channelService.js";
 import * as messageService from "../../services/messageService.js";
@@ -187,11 +188,40 @@ function getClock(opts: ReminderServiceOptions): TimeProvider {
   return opts.clock ?? systemTimeProvider;
 }
 
+// Refuse an unsupported source at scheduling time, including human producers.
+// Existing legacy transactions remain compatible; legacy cutover is refused
+// elsewhere unless the identity is born in the same branded transaction.
+async function requireReminderSourceOwner(ownerAgentId: string, executor: DatabaseExecutor) {
+  const context = agentTransactionForExecutor(executor);
+  if (context) {
+    requireSourceAgentPlan(executor, [ownerAgentId]);
+    if ((await readConnection(context, ownerAgentId))?.consumptionMode === "delegated") {
+      throw new DelegationError("reminder_source_unsupported", 422);
+    }
+  } else {
+    const [connection] = await executor.select({ consumptionMode: externalAgentConnections.consumptionMode })
+      .from(externalAgentConnections).where(eq(externalAgentConnections.agentId, ownerAgentId)).for("share");
+    if (connection?.consumptionMode === "delegated") throw new DelegationError("reminder_source_unsupported", 422);
+  }
+}
+
 export async function createReminder(
   input: CreateReminderInput,
   opts: ReminderServiceOptions = {},
 ): Promise<ReminderRow> {
+  const actor = input.createdBy;
+  if (!opts.executor || opts.executor === getDb()) return withExpandingAgentTransaction(
+    [input.ownerAgentId, ...(actor.type === "agent" ? [actor.id] : [])],
+    (context) => createReminder(input, { ...opts, executor: context.tx }),
+  );
+  if (actor.type === "agent") {
+    const context = agentTransactionForExecutor(opts.executor);
+    if (!context) throw new DelegationError("agent_transaction_required", 409);
+    requireSourceAgentPlan(opts.executor, [actor.id]);
+    await requireLegacyAgentActor(context, actor.id);
+  }
   const db = getExecutor(opts);
+  await requireReminderSourceOwner(input.ownerAgentId, db);
   const now = getClock(opts).now();
   const [row] = await db
     .insert(reminders)
@@ -246,7 +276,19 @@ export async function replaceReminder(
   input: ReminderReplaceInput,
   opts: ReminderMutationOptions,
 ): Promise<ReminderRow | null> {
+  const actor = opts.actor ?? input.createdBy;
+  if (!opts.executor || opts.executor === getDb()) return withExpandingAgentTransaction(
+    [input.ownerAgentId, ...(actor.type === "agent" && actor.id ? [actor.id] : [])],
+    (context) => replaceReminder(reminderId, input, { ...opts, executor: context.tx }),
+  );
+  if (actor.type === "agent" && actor.id) {
+    const context = agentTransactionForExecutor(opts.executor);
+    if (!context) throw new DelegationError("agent_transaction_required", 409);
+    requireSourceAgentPlan(opts.executor, [actor.id]);
+    await requireLegacyAgentActor(context, actor.id);
+  }
   const db = getExecutor(opts);
+  await requireReminderSourceOwner(input.ownerAgentId, db);
   const now = getClock(opts).now();
   const [row] = await db
     .update(reminders)
@@ -329,6 +371,16 @@ export async function cancelReminder(
   reminderId: string,
   opts: ReminderMutationOptions,
 ): Promise<ReminderRow | null> {
+  const actor = opts.actor;
+  if (actor?.type === "agent" && actor.id) {
+    if (!opts.executor || opts.executor === getDb()) return withAgentTransaction([actor.id], async (context) => {
+      await requireLegacyAgentActor(context, actor.id!);
+      return cancelReminder(reminderId, { ...opts, executor: context.tx });
+    });
+    const context = agentTransactionForExecutor(opts.executor);
+    if (!context) throw new DelegationError("agent_transaction_required", 409);
+    await requireLegacyAgentActor(context, actor.id);
+  }
   const db = getExecutor(opts);
   const now = getClock(opts).now();
   const [current] = await db.select().from(reminders).where(eq(reminders.id, reminderId));
@@ -366,6 +418,16 @@ export async function snoozeReminder(
 ): Promise<ReminderRow | null> {
   if (!Number.isFinite(delaySeconds) || !Number.isInteger(delaySeconds) || delaySeconds <= 0) {
     throw new Error("delaySeconds must be a positive integer");
+  }
+  const actor = opts.actor;
+  if (actor?.type === "agent" && actor.id) {
+    if (!opts.executor || opts.executor === getDb()) return withAgentTransaction([actor.id], async (context) => {
+      await requireLegacyAgentActor(context, actor.id!);
+      return snoozeReminder(reminderId, delaySeconds, { ...opts, executor: context.tx });
+    });
+    const context = agentTransactionForExecutor(opts.executor);
+    if (!context) throw new DelegationError("agent_transaction_required", 409);
+    await requireLegacyAgentActor(context, actor.id);
   }
   const db = getExecutor(opts);
   const now = getClock(opts).now();
@@ -413,6 +475,16 @@ export async function updateReminder(
   patch: ReminderUpdatePatch,
   opts: ReminderMutationOptions,
 ): Promise<ReminderRow | null> {
+  const actor = opts.actor;
+  if (actor?.type === "agent" && actor.id) {
+    if (!opts.executor || opts.executor === getDb()) return withAgentTransaction([actor.id], async (context) => {
+      await requireLegacyAgentActor(context, actor.id!);
+      return updateReminder(reminderId, patch, { ...opts, executor: context.tx });
+    });
+    const context = agentTransactionForExecutor(opts.executor);
+    if (!context) throw new DelegationError("agent_transaction_required", 409);
+    await requireLegacyAgentActor(context, actor.id);
+  }
   const db = getExecutor(opts);
   const now = getClock(opts).now();
   const [current] = await db.select().from(reminders).where(eq(reminders.id, reminderId));
@@ -964,6 +1036,13 @@ export async function ackAuthorizedReminderFire(input: {
 }): Promise<ReminderSourceAckResult> {
   const opts = input.opts ?? {};
   const root = getExecutor(opts);
+  if (!opts.executor || opts.executor === getDb()) return withAgentTransaction([input.actingAgentId], async (context) => {
+    await requireLegacyAgentActor(context, input.actingAgentId);
+    return ackAuthorizedReminderFire({ ...input, opts: { ...opts, executor: context.tx } });
+  });
+  const authority = agentTransactionForExecutor(root);
+  if (authority) await requireLegacyAgentActor(authority, input.actingAgentId);
+  else throw new DelegationError("agent_transaction_required", 409);
   const now = getClock(opts).now();
 
   const acknowledge = async (db: DatabaseExecutor): Promise<ReminderSourceAckResult> => {

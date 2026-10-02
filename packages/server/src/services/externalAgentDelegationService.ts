@@ -3,7 +3,7 @@ import { and, count, eq, gte, isNull } from "drizzle-orm";
 import { runDtoSchema, wakePayloadSchema, type RunFinishOutcome } from "@botiverse/raft-shared";
 import { getDb, type Database } from "../db/index.js";
 import { agentCredentials, externalAgentClaims as claims, externalAgentConnections as connections, externalAgentRuns as runs, externalAgentWakeAttempts as attempts, externalAgentWakes as wakes } from "../db/schema.js";
-import { databaseNow, DelegationError, readConnection, requireAgent, requireCredential, requireCurrentExecution, tokenHash, withAgentTransaction, type AgentIdentity, type ExecutionContext, type RunRow } from "./agentTransactionAuthority.js";
+import { databaseNow, DelegationError, readConnection, requireAgent, requireCredential, requireCurrentExecution, requireOwnedRun, hashMatches, tokenHash, withAgentTransaction, type AgentIdentity, type ExecutionContext, type RunRow } from "./agentTransactionAuthority.js";
 import { countRunStarts, currentWake, endRun, ensureWakeForPending, maxRunStarts, proxyPolicy, queueOrExhaust } from "./externalAgentDelegationState.js";
 
 export function runDto(row: RunRow) {
@@ -31,11 +31,13 @@ export class ExternalAgentDelegationService {
       const [replay] = await context.tx.select().from(runs).where(and(eq(runs.connectionId, connection.id), eq(runs.connectionEpoch, connection.epoch), eq(runs.beginRequestKey, input.beginRequestKey))).for("update");
       await requireCredential(context, identity, "read");
       if (replay) {
-        if (replay.beginRequestDigest !== digest || replay.ownerTokenHash !== hash) throw new DelegationError("begin_conflict");
+        if (!hashMatches(replay.beginRequestDigest, digest) || !hashMatches(replay.ownerTokenHash, hash)) throw new DelegationError("begin_conflict");
         // Replay never renews or revives authority; expired/blocked rows stay so.
         const now = await databaseNow(context);
         if (replay.state === "active" && (replay.leaseExpiresAt <= now || replay.maxEndsAt <= now)) {
           await endRun(context, replay, "expired");
+          const current = await currentWake(context, connection);
+          if (current?.id === replay.wakeId && current.state === "active") await queueOrExhaust(context, connection, current);
           const [expired] = await context.tx.select().from(runs).where(eq(runs.id, replay.id));
           return { kind: "replayed" as const, run: runDto(expired) };
         }
@@ -80,6 +82,12 @@ export class ExternalAgentDelegationService {
   async blockRun(identity: AgentIdentity, execution: ExecutionContext, reasonCode: string) {
     if (!/^[a-z][a-z0-9_]{0,79}$/.test(reasonCode)) throw new DelegationError("block_reason_invalid", 400);
     return withAgentTransaction([identity.agentId], async (context) => {
+      const owned = await requireOwnedRun(context, identity, execution, "read");
+      if (owned.run.state === "blocked") {
+        const wake = await currentWake(context, owned.connection);
+        if (wake?.id !== owned.run.wakeId || wake.state !== "blocked" || wake.blockReason !== reasonCode) throw new DelegationError("finish_conflict");
+        return runDto(owned.run);
+      }
       const { connection, run } = await requireCurrentExecution(context, identity, execution, "read");
       await requireCurrentExecution(context, identity, execution, "read");
       await endRun(context, run, "blocked", "waiting_user");
@@ -94,6 +102,11 @@ export class ExternalAgentDelegationService {
     if (outcome === "waiting_user") return this.blockRun(identity, execution, "waiting_user");
     if (!["drained", "yielded", "failed"].includes(outcome)) throw new DelegationError("finish_outcome_invalid", 400);
     return withAgentTransaction([identity.agentId], async (context) => {
+      const owned = await requireOwnedRun(context, identity, execution, "read");
+      if (owned.run.state === "finished") {
+        if (owned.run.finishOutcome !== outcome) throw new DelegationError("finish_conflict");
+        return runDto(owned.run);
+      }
       const { connection, run } = await requireCurrentExecution(context, identity, execution, "read");
       const wake = await currentWake(context, connection);
       if (!wake || wake.id !== run.wakeId) throw new DelegationError("wake_stale", 403);
@@ -123,6 +136,7 @@ export class ExternalAgentDelegationService {
         }
       }
       if (!connection.enabled || !wake || ["blocked", "exhausted", "settled", "superseded"].includes(wake.state)) return wake ?? null;
+      if (wake.state === "active" && !connection.currentRunId) return queueOrExhaust(context, connection, wake);
       if (wake.state === "dispatching" && wake.dispatchLeaseUntil && wake.dispatchLeaseUntil <= now) {
         await context.tx.update(attempts).set({ outcome: "unknown", errorCode: "dispatch_lease_expired", finishedAt: now }).where(and(eq(attempts.wakeId, wake.id), eq(attempts.dispatchFence, wake.dispatchFence), isNull(attempts.finishedAt)));
         const [updated] = await context.tx.update(wakes).set({ state: "awaiting_agent", dispatchOwner: null, dispatchLeaseUntil: null }).where(eq(wakes.id, wake.id)).returning();

@@ -324,7 +324,7 @@ test("every shape can be deleted, and deleting one never removes another", async
   for (const shape of SHAPES) {
     const owned = await taskService.resolveTaskById(made[shape].id);
     assert.ok(owned, `${shape} must resolve before delete`);
-    await taskService.deleteTaskByOwner(owned!);
+    await taskService.deleteTaskByOwner(owned!, "user", owner.id);
 
     remaining.shift();
     const listed = await taskService.listTasks(channel.id);

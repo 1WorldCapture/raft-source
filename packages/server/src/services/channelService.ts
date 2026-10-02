@@ -1,3 +1,4 @@
+import { agentTransactionForExecutor, requireSourceAgentPlan, requireLegacyAgentActor, withExpandingAgentTransaction, withAgentTransaction, type AgentTransaction } from "./agentTransactionAuthority.js";
 import { revokeSocketAccess } from "../socket/accessRevocation.js";
 import { notifyUnreadSummaryChanged } from "./unreadSummaryNotifier.js";
 import { createHash, randomInt, randomUUID } from "crypto";
@@ -303,63 +304,66 @@ export async function createChannel(
   },
 ) {
   // Atomic quota check + insert under advisory lock (namespace 3 = channels)
-  return withServerLock(serverId, 3, async (tx) => {
-    const channel = await createChannelWithExecutor(tx, serverId, name, description, type);
-    if (creator && type !== "joint") {
-      if (creator.type === "user") {
-        await tx.insert(channelHumans).values({
-          channelId: channel.id,
-          userId: creator.id,
-          role: "admin",
-        });
-      } else {
-        await tx.insert(channelAgents).values({
-          channelId: channel.id,
-          agentId: creator.id,
-          role: "admin",
-        });
-      }
-      const initialUserIds = [...new Set(creator.initialUserIds ?? [])]
-        .filter((userId) => creator.type !== "user" || userId !== creator.id);
-      const initialAgentIds = [...new Set(creator.initialAgentIds ?? [])]
-        .filter((agentId) => creator.type !== "agent" || agentId !== creator.id);
-      if (initialUserIds.length > 0) {
-        const validUsers = await tx.select({ id: serverMembers.userId })
-          .from(serverMembers)
-          .where(and(
-            eq(serverMembers.serverId, serverId),
-            inArray(serverMembers.userId, initialUserIds),
-          ))
-          .for("update");
-        if (validUsers.length !== initialUserIds.length) {
-          throw new Error("One or more initial users are not members of this server");
+  return withExpandingAgentTransaction(creator?.type === "agent" ? [creator.id] : [], async (context) => {
+    if (creator?.type === "agent") await requireLegacyAgentActor(context, creator.id);
+    return withServerLock(serverId, 3, async (tx) => {
+      const channel = await createChannelWithExecutor(tx, serverId, name, description, type);
+      if (creator && type !== "joint") {
+        if (creator.type === "user") {
+          await tx.insert(channelHumans).values({
+            channelId: channel.id,
+            userId: creator.id,
+            role: "admin",
+          });
+        } else {
+          await tx.insert(channelAgents).values({
+            channelId: channel.id,
+            agentId: creator.id,
+            role: "admin",
+          });
         }
-        await tx.insert(channelHumans).values(initialUserIds.map((userId) => ({
-          channelId: channel.id,
-          userId,
-          role: "member" as const,
-        })));
-      }
-      if (initialAgentIds.length > 0) {
-        const validAgents = await tx.select({ id: agents.id })
-          .from(agents)
-          .where(and(
-            eq(agents.serverId, serverId),
-            isNull(agents.deletedAt),
-            inArray(agents.id, initialAgentIds),
-          ))
-          .for("update");
-        if (validAgents.length !== initialAgentIds.length) {
-          throw new Error("One or more initial agents are not active in this server");
+        const initialUserIds = [...new Set(creator.initialUserIds ?? [])]
+          .filter((userId) => creator.type !== "user" || userId !== creator.id);
+        const initialAgentIds = [...new Set(creator.initialAgentIds ?? [])]
+          .filter((agentId) => creator.type !== "agent" || agentId !== creator.id);
+        if (initialUserIds.length > 0) {
+          const validUsers = await tx.select({ id: serverMembers.userId })
+            .from(serverMembers)
+            .where(and(
+              eq(serverMembers.serverId, serverId),
+              inArray(serverMembers.userId, initialUserIds),
+            ))
+            .for("update");
+          if (validUsers.length !== initialUserIds.length) {
+            throw new Error("One or more initial users are not members of this server");
+          }
+          await tx.insert(channelHumans).values(initialUserIds.map((userId) => ({
+            channelId: channel.id,
+            userId,
+            role: "member" as const,
+          })));
         }
-        await tx.insert(channelAgents).values(initialAgentIds.map((agentId) => ({
-          channelId: channel.id,
-          agentId,
-          role: "member" as const,
-        })));
+        if (initialAgentIds.length > 0) {
+          const validAgents = await tx.select({ id: agents.id })
+            .from(agents)
+            .where(and(
+              eq(agents.serverId, serverId),
+              isNull(agents.deletedAt),
+              inArray(agents.id, initialAgentIds),
+            ))
+            .for("update");
+          if (validAgents.length !== initialAgentIds.length) {
+            throw new Error("One or more initial agents are not active in this server");
+          }
+          await tx.insert(channelAgents).values(initialAgentIds.map((agentId) => ({
+            channelId: channel.id,
+            agentId,
+            role: "member" as const,
+          })));
+        }
       }
-    }
-    return channel;
+      return channel;
+    }, context.tx);
   });
 }
 
@@ -2284,7 +2288,7 @@ async function listActiveJointThreadProjectionRows(
   if (input.canonicalThreadChannelId) filters.push(eq(jointChannels.canonicalChannelId, input.canonicalThreadChannelId));
   if (input.serverId) filters.push(eq(jointChannelServers.serverId, input.serverId));
 
-  const rows = await db
+  const query = db
     .select({
       jointThreadId: jointChannels.id,
       localThreadChannelId: jointChannelServers.localChannelId,
@@ -2309,6 +2313,7 @@ async function listActiveJointThreadProjectionRows(
     .where(and(...filters))
     .orderBy(asc(jointChannelServers.joinedAt));
 
+  const rows = await (agentTransactionForExecutor(db) ? query.for("share") : query);
   return rows
     .filter((row): row is typeof row & { canonicalParentMessageId: string } => Boolean(row.canonicalParentMessageId))
     .map((row) => ({ ...row, role: row.role as "host" | "participant" }));
@@ -2676,7 +2681,8 @@ export async function getChannel(
   if (!opts?.includeDeleted) {
     conditions.push(isNull(channels.deletedAt));
   }
-  const [channel] = await db.select().from(channels).where(and(...conditions));
+  const query = db.select().from(channels).where(and(...conditions));
+  const [channel] = await (agentTransactionForExecutor(db) ? query.for("share") : query);
   return channel || null;
 }
 
@@ -2756,8 +2762,9 @@ export async function resolveChannelAccess(input: {
   serverId: string;
   channelId: string;
   includeDeleted?: boolean;
+  executor?: DatabaseExecutor;
 }): Promise<ChannelAccessResolution | null> {
-  const channel = await getChannel(input.channelId, { includeDeleted: input.includeDeleted });
+  const channel = await getChannel(input.channelId, { includeDeleted: input.includeDeleted, executor: input.executor });
   if (!channel) return null;
   if (channel.serverId !== input.serverId) return null;
 
@@ -2771,8 +2778,8 @@ export async function resolveChannelAccess(input: {
     };
   }
 
-  const db = getDb();
-  const [projection] = await db
+  const db = input.executor ?? getDb();
+  const query = db
     .select({
       jointChannelId: jointChannelServers.jointChannelId,
       localChannelId: jointChannelServers.localChannelId,
@@ -2791,6 +2798,7 @@ export async function resolveChannelAccess(input: {
       eq(jointChannels.status, "active"),
     ));
 
+  const [projection] = await (agentTransactionForExecutor(db) ? query.for("share") : query);
   if (!projection) return null;
 
   return {
@@ -3056,25 +3064,25 @@ export async function unarchiveChannel(channelId: string, executor?: DatabaseExe
  * exists and is archived. Threads inherit their parent's archived state, so
  * archiving a channel also freezes all of its threads.
  */
-export async function isChannelArchived(channelId: string): Promise<boolean> {
-  const channel = await getChannel(channelId);
+export async function isChannelArchived(channelId: string, executor: DatabaseExecutor = getDb()): Promise<boolean> {
+  const channel = await getChannel(channelId, { executor });
   if (!channel) return false;
   if (channel.archivedAt) return true;
   if (channel.type === "thread") {
-    const jointThread = await getJointThreadProjectionByLocalThread(channelId, channel.serverId);
+    const jointThread = await getJointThreadProjectionByLocalThread(channelId, channel.serverId, executor);
     if (jointThread) {
-      return isChannelArchived(jointThread.localParentChannelId);
+      return isChannelArchived(jointThread.localParentChannelId, executor);
     }
   }
 
   if (channel.type === "thread" && channel.parentMessageId) {
-    const db = getDb();
+    const db = executor;
     const [parentMsg] = await db
       .select({ channelId: messages.channelId })
       .from(messages)
       .where(eq(messages.id, channel.parentMessageId));
     if (!parentMsg) return false;
-    return isChannelArchived(parentMsg.channelId);
+    return isChannelArchived(parentMsg.channelId, executor);
   }
   return false;
 }
@@ -3372,9 +3380,17 @@ async function deletePrivateChannelIfEmpty(channelId: string, db: DatabaseExecut
 export async function addAgent(
   channelId: string,
   agentId: string,
-  options: { role?: "member" | "admin"; executor?: DatabaseExecutor } = {},
-) {
-  const db = options.executor ?? getDb();
+  options: { role?: "member" | "admin"; executor?: DatabaseExecutor; actorAgentId?: string } = {},
+): Promise<boolean> {
+  if (!options.executor) return withExpandingAgentTransaction([agentId, ...(options.actorAgentId ? [options.actorAgentId] : [])], (context) => addAgent(channelId, agentId, { ...options, executor: context.tx }));
+  const context = agentTransactionForExecutor(options.executor);
+  if (context) requireSourceAgentPlan(context.tx, [agentId]);
+  if (options.actorAgentId) {
+    if (!context) throw new Error("agent_transaction_required");
+    requireSourceAgentPlan(context.tx, [options.actorAgentId]);
+    await requireLegacyAgentActor(context, options.actorAgentId);
+  }
+  const db = options.executor;
   const channel = await getChannel(channelId, { executor: db });
   if (!channel) {
     throw new Error("Channel not found");
@@ -3400,8 +3416,16 @@ export async function addAgent(
   return inserted.length > 0;
 }
 
-export async function removeAgent(channelId: string, agentId: string, executor?: DatabaseExecutor) {
-  const db = executor ?? getDb();
+export async function removeAgent(channelId: string, agentId: string, executor?: DatabaseExecutor, actorAgentId?: string): Promise<void> {
+  if (!executor) return withExpandingAgentTransaction([agentId, ...(actorAgentId ? [actorAgentId] : [])], (context) => removeAgent(channelId, agentId, context.tx, actorAgentId));
+  const context = agentTransactionForExecutor(executor);
+  if (context) requireSourceAgentPlan(context.tx, [agentId]);
+  if (actorAgentId) {
+    if (!context) throw new Error("agent_transaction_required");
+    requireSourceAgentPlan(context.tx, [actorAgentId]);
+    await requireLegacyAgentActor(context, actorAgentId);
+  }
+  const db = executor;
   const channel = await getChannel(channelId, { executor: db });
   if (channel?.type === "thread") {
     throw new Error("Thread membership is managed via follow/unfollow, not channel_agents");
@@ -5691,10 +5715,11 @@ export async function isChannelAgent(
   executor: DatabaseExecutor = getDb(),
 ): Promise<boolean> {
   const db = executor;
-  const [row] = await db
+  const query = db
     .select({ agentId: channelAgents.agentId })
     .from(channelAgents)
     .where(and(eq(channelAgents.channelId, channelId), eq(channelAgents.agentId, agentId)));
+  const [row] = await (agentTransactionForExecutor(db) ? query.for("share") : query);
   return !!row;
 }
 
@@ -5707,8 +5732,8 @@ async function isServerHumanMember(serverId: string, userId: string): Promise<bo
   return !!row;
 }
 
-async function isServerAgent(serverId: string, agentId: string): Promise<boolean> {
-  const db = getDb();
+async function isServerAgent(serverId: string, agentId: string, executor: DatabaseExecutor = getDb()): Promise<boolean> {
+  const db = executor;
   const [row] = await db
     .select({ id: agents.id })
     .from(agents)
@@ -5721,36 +5746,36 @@ async function isServerAgent(serverId: string, agentId: string): Promise<boolean
  * Public channels: all server agents can view.
  * Private, joint channels, and DMs: only participating agents can view.
  */
-export async function canAgentAccessChannel(channelId: string, agentId: string): Promise<boolean> {
-  const channel = await getChannel(channelId);
+export async function canAgentAccessChannel(channelId: string, agentId: string, executor: DatabaseExecutor = getDb()): Promise<boolean> {
+  const channel = await getChannel(channelId, { executor });
   if (!channel) return false;
 
   if (isAllSystemChannel(channel) && !isEnabledAllChannel(channel)) return false;
 
   if (channel.type === "channel") return true;
 
-  if (channel.type === "joint" && !await resolveChannelAccess({ serverId: channel.serverId, channelId })) {
+  if (channel.type === "joint" && !await resolveChannelAccess({ serverId: channel.serverId, channelId, executor })) {
     return false;
   }
 
   if (channel.type === "thread") {
-    const jointThread = await getJointThreadProjectionByLocalThread(channelId, channel.serverId);
+    const jointThread = await getJointThreadProjectionByLocalThread(channelId, channel.serverId, executor);
     if (jointThread) {
-      return canAgentAccessChannel(jointThread.localParentChannelId, agentId);
+      return canAgentAccessChannel(jointThread.localParentChannelId, agentId, executor);
     }
   }
 
   if (channel.type === "thread" && channel.parentMessageId) {
-    const db = getDb();
+    const db = executor;
     const [parentMsg] = await db
       .select({ channelId: messages.channelId })
       .from(messages)
       .where(eq(messages.id, channel.parentMessageId));
     if (!parentMsg) return false;
-    return canAgentAccessChannel(parentMsg.channelId, agentId);
+    return canAgentAccessChannel(parentMsg.channelId, agentId, executor);
   }
 
-  return isChannelAgent(channelId, agentId);
+  return isChannelAgent(channelId, agentId, executor);
 }
 
 /**
@@ -5865,9 +5890,9 @@ export async function listAgentFacingTaskChannelRefs(
   return refs;
 }
 
-export async function isAgentActivelyFollowingThread(threadChannelId: string, agentId: string): Promise<boolean> {
-  const db = getDb();
-  const [row] = await db
+export async function isAgentActivelyFollowingThread(threadChannelId: string, agentId: string, executor: DatabaseExecutor = getDb()): Promise<boolean> {
+  const db = executor;
+  const query = db
     .select({ followerId: threadFollows.followerId })
     .from(threadFollows)
     .where(and(
@@ -5877,11 +5902,12 @@ export async function isAgentActivelyFollowingThread(threadChannelId: string, ag
       isNull(threadFollows.unfollowedAt),
     ))
     .limit(1);
+  const [row] = await (agentTransactionForExecutor(db) ? query.for("share") : query);
   return Boolean(row);
 }
 
-async function canAgentAccessThreadParentForDelivery(threadChannelId: string, agentId: string): Promise<boolean> {
-  const db = getDb();
+async function canAgentAccessThreadParentForDelivery(threadChannelId: string, agentId: string, executor: DatabaseExecutor = getDb()): Promise<boolean> {
+  const db = executor;
   const [threadChannel] = await db
     .select({ id: channels.id, serverId: channels.serverId })
     .from(channels)
@@ -5893,8 +5919,12 @@ async function canAgentAccessThreadParentForDelivery(threadChannelId: string, ag
     .limit(1);
   if (!threadChannel) return false;
 
-  const jointThread = await getJointThreadProjectionByLocalThread(threadChannelId, threadChannel.serverId);
+  const jointThread = await getJointThreadProjectionByLocalThread(threadChannelId, threadChannel.serverId, executor);
   if (jointThread) {
+    if (agentTransactionForExecutor(db)) {
+      await getChannel(jointThread.localParentChannelId, { executor });
+      await isChannelAgent(jointThread.localParentChannelId, agentId, executor);
+    }
     const jointParentChannels = alias(channels, "agent_thread_delivery_joint_parent_channels");
     const [row] = await db
       .select({ agentId: channelAgents.agentId })
@@ -5915,6 +5945,14 @@ async function canAgentAccessThreadParentForDelivery(threadChannelId: string, ag
     return Boolean(row);
   }
 
+  if (agentTransactionForExecutor(db)) {
+    const [parentMessage] = await db.select({ channelId: messages.channelId }).from(messages)
+      .innerJoin(channels, eq(channels.parentMessageId, messages.id)).where(eq(channels.id, threadChannelId)).limit(1);
+    if (parentMessage) {
+      await getChannel(parentMessage.channelId, { executor });
+      await isChannelAgent(parentMessage.channelId, agentId, executor);
+    }
+  }
   const parentMessages = alias(messages, "agent_thread_delivery_parent_messages");
   const parentChannels = alias(channels, "agent_thread_delivery_parent_channels");
   const parentChannelAgents = alias(channelAgents, "agent_thread_delivery_parent_channel_agents");
@@ -5950,9 +5988,10 @@ async function canAgentAccessThreadParentForDelivery(threadChannelId: string, ag
 export async function canAgentReceiveChannelDelivery(
   channelId: string,
   agentId: string,
-  opts: { personalMention?: boolean } = {},
+  opts: { personalMention?: boolean; executor?: DatabaseExecutor } = {},
 ): Promise<boolean> {
-  const channel = await getChannel(channelId);
+  const executor = opts.executor ?? getDb();
+  const channel = await getChannel(channelId, { executor });
   if (!channel) return false;
 
   // Announcement broadcasts reach an agent only when it was explicitly @mentioned;
@@ -5960,15 +5999,15 @@ export async function canAgentReceiveChannelDelivery(
   if (isAnnouncementChannel(channel) && !opts.personalMention) return false;
 
   if (channel.type !== "thread") {
-    return canAgentAccessChannel(channelId, agentId);
+    return canAgentAccessChannel(channelId, agentId, executor);
   }
 
   if (opts.personalMention) {
-    return canAgentAccessThreadParentForDelivery(channelId, agentId);
+    return canAgentAccessThreadParentForDelivery(channelId, agentId, executor);
   }
 
-  return await isAgentActivelyFollowingThread(channelId, agentId)
-    && await canAgentAccessThreadParentForDelivery(channelId, agentId);
+  return await isAgentActivelyFollowingThread(channelId, agentId, executor)
+    && await canAgentAccessThreadParentForDelivery(channelId, agentId, executor);
 }
 
 /**
@@ -6034,31 +6073,31 @@ export async function canUserPostToChannel(channelId: string, userId: string): P
  * Threads recurse to parent channel/DM membership; being in thread_follows
  * never grants post permission.
  */
-export async function canAgentPostToChannel(channelId: string, agentId: string): Promise<boolean> {
-  const channel = await getChannel(channelId);
+export async function canAgentPostToChannel(channelId: string, agentId: string, executor: DatabaseExecutor = getDb()): Promise<boolean> {
+  const channel = await getChannel(channelId, { executor });
   if (!channel) return false;
 
   if (isAllSystemChannel(channel) && !isEnabledAllChannel(channel)) return false;
-  if (hasImplicitServerMembership(channel)) return isServerAgent(channel.serverId, agentId);
+  if (hasImplicitServerMembership(channel)) return isServerAgent(channel.serverId, agentId, executor);
 
   if (channel.type === "thread") {
-    const jointThread = await getJointThreadProjectionByLocalThread(channelId, channel.serverId);
+    const jointThread = await getJointThreadProjectionByLocalThread(channelId, channel.serverId, executor);
     if (jointThread) {
-      return canAgentPostToChannel(jointThread.localParentChannelId, agentId);
+      return canAgentPostToChannel(jointThread.localParentChannelId, agentId, executor);
     }
   }
 
   if (channel.type === "thread" && channel.parentMessageId) {
-    const db = getDb();
+    const db = executor;
     const [parentMsg] = await db
       .select({ channelId: messages.channelId })
       .from(messages)
       .where(eq(messages.id, channel.parentMessageId));
     if (!parentMsg) return false;
-    return canAgentPostToChannel(parentMsg.channelId, agentId);
+    return canAgentPostToChannel(parentMsg.channelId, agentId, executor);
   }
 
-  return isChannelAgent(channelId, agentId);
+  return isChannelAgent(channelId, agentId, executor);
 }
 
 /**
@@ -14483,7 +14522,9 @@ export async function unfollowThreadForFollower(
     ?? (await getJointThreadProjectionByLocalThread(threadChannelId))?.canonicalParentMessageId;
   if (!parentMessageId) return;
 
-  await db.transaction(async (tx) => {
+  await withAgentTransaction(followerType === "agent" ? [followerId] : [], async (context) => {
+    if (followerType === "agent") await requireLegacyAgentActor(context, followerId);
+    const tx = context.tx;
     const now = new Date();
     await tx.insert(threadFollows).values({
       threadChannelId,
@@ -14660,23 +14701,23 @@ export async function markRead(
   return readStateResultFromAckScope(scope);
 }
 
-async function getMessageStorageChannelId(channelId: string): Promise<string> {
-  const channel = await getChannel(channelId);
+async function getMessageStorageChannelId(channelId: string, executor: DatabaseExecutor = getDb()): Promise<string> {
+  const channel = await getChannel(channelId, { executor });
   if (!channel) return channelId;
   if (channel.type === "thread") {
-    const jointThread = await getJointThreadProjectionByLocalThread(channelId, channel.serverId);
+    const jointThread = await getJointThreadProjectionByLocalThread(channelId, channel.serverId, executor);
     return jointThread?.canonicalThreadChannelId ?? channelId;
   }
   if (channel.type === "joint") {
-    const resolved = await resolveChannelAccess({ serverId: channel.serverId, channelId });
+    const resolved = await resolveChannelAccess({ serverId: channel.serverId, channelId, executor });
     return resolved?.kind === "joint" ? resolved.canonicalChannelId : channelId;
   }
   return channelId;
 }
 
-async function getLatestMessageSeq(channelId: string): Promise<number> {
-  const db = getDb();
-  const storageChannelId = await getMessageStorageChannelId(channelId);
+async function getLatestMessageSeq(channelId: string, executor: DatabaseExecutor = getDb()): Promise<number> {
+  const db = executor;
+  const storageChannelId = await getMessageStorageChannelId(channelId, executor);
   const [latest] = await db
     .select({ seq: sql<number>`MAX(${messages.seq})::int` })
     .from(messages)
@@ -14696,8 +14737,9 @@ export async function getInboxTargetActivityMuteState(
   receiverType: "user" | "agent",
   receiverId: string,
   sourceChannelId: string,
+  executor: DatabaseExecutor = getDb(),
 ): Promise<InboxTargetActivityMuteState> {
-  const db = getDb();
+  const db = executor;
   const [state] = await db
     .select({
       activityMuted: inboxTargetMuteStates.activityMuted,
@@ -14742,10 +14784,19 @@ export async function setInboxTargetActivityMuteState(opts: {
   serverId: string;
   sourceChannelId: string;
   activityMuted: boolean;
-}): Promise<InboxTargetActivityMuteState> {
-  const db = getDb();
+}, executor?: DatabaseExecutor): Promise<InboxTargetActivityMuteState> {
+  if (opts.receiverType === "agent") {
+    if (!executor) return withAgentTransaction([opts.receiverId], async (context) => {
+      await requireLegacyAgentActor(context, opts.receiverId);
+      return setInboxTargetActivityMuteState(opts, context.tx);
+    });
+    const context = agentTransactionForExecutor(executor);
+    if (!context) throw new Error("agent_transaction_required");
+    await requireLegacyAgentActor(context, opts.receiverId);
+  }
+  const db = executor ?? getDb();
   const now = new Date();
-  const current = await getInboxTargetActivityMuteState(opts.receiverType, opts.receiverId, opts.sourceChannelId);
+  const current = await getInboxTargetActivityMuteState(opts.receiverType, opts.receiverId, opts.sourceChannelId, db);
   if (current.activityMuted === opts.activityMuted) {
     return { ...current, changed: false };
   }
@@ -14795,7 +14846,7 @@ export async function setInboxTargetActivityMuteState(opts: {
     return { activityMuted: false, muteFromSeq: null, prefsVersion: state.prefsVersion, changed: true };
   }
 
-  const muteFromSeq = await getLatestMessageSeq(opts.sourceChannelId) + 1;
+  const muteFromSeq = await getLatestMessageSeq(opts.sourceChannelId, db) + 1;
   const [state] = await db
     .insert(inboxTargetMuteStates)
     .values({
@@ -15553,7 +15604,14 @@ export async function getAgentLegacyReadCursors(
  * provenance instead.
  */
 export async function markAgentLegacyRead(agentId: string, channelId: string, seq: number) {
-  const db = getDb();
+  return withAgentTransaction([agentId], async (context) => {
+    await requireLegacyAgentActor(context, agentId);
+    return markAgentLegacyReadInTransaction(context, agentId, channelId, seq);
+  });
+}
+
+async function markAgentLegacyReadInTransaction(context: AgentTransaction, agentId: string, channelId: string, seq: number) {
+  const db = context.tx;
   const result = await db.execute(sql`
     INSERT INTO agent_channel_read_cursors (agent_id, channel_id, last_read_seq, updated_at)
     VALUES (${agentId}, ${channelId}, ${seq}, now())
@@ -15570,7 +15628,7 @@ export async function markAgentLegacyRead(agentId: string, channelId: string, se
     receiverType: "agent",
     receiverId: agentId,
     sourceChannelId: channelId,
-  }]);
+  }], db);
   if (advanced) return { ...advanced, changed: true };
 
   await db

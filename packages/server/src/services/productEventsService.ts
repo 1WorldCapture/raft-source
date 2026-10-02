@@ -350,3 +350,38 @@ export function classifyExecuteError(err: unknown): ActionCardEventMetadata {
 
 // Re-export the SQL helper for tests that want to count rows.
 export { sql };
+
+// Delegation recovery is an authorization audit, rather than a best-effort
+// funnel signal. Its typed write shares the state transaction and must fail
+// atomically; the public telemetry route cannot emit these event types.
+export type ExternalAgentRecoveryOperation = "cutover" | "pause" | "unbind" | "rollback" | "resume" | "redrive";
+export async function recordExternalAgentRecoveryEvent(tx: DatabaseTransaction, input: {
+  connectionId: string; serverId: string; agentId: string; userId: string;
+  operation: ExternalAgentRecoveryOperation; requestKey: string;
+  requestRevision: number; revision: number; epoch: string; previousWakeId: string | null;
+  cutoverManifest: { version: 1; proof: "same_transaction_new_agent" | "durable_receipts"; legacyCandidateIds: [] } | null;
+}) {
+  const { externalRecoveryEventSchema } = await import("./externalAgentAuditContract.js");
+  const parsed = externalRecoveryEventSchema.parse(input);
+  const [row] = await tx.insert(productEvents).values({
+    subjectType: "external_agent_connection", subjectId: parsed.connectionId,
+    eventType: `external_agent.${parsed.operation}`, actorType: "human", actorId: parsed.userId,
+    source: "server", idempotencyKey: parsed.requestKey,
+    metadata: { serverId: parsed.serverId, agentId: parsed.agentId, epoch: parsed.epoch,
+      revision: parsed.revision, requestRevision: parsed.requestRevision, previousWakeId: parsed.previousWakeId, cutoverManifest: parsed.cutoverManifest },
+  }).returning();
+  return row;
+}
+export async function recordExternalAgentHandoffEvent(tx: DatabaseTransaction, input: {
+  receiptId: string; serverId: string; agentId: string; taskId: string; userId: string;
+}) {
+  const { externalHandoffEventSchema } = await import("./externalAgentAuditContract.js");
+  const parsed = externalHandoffEventSchema.parse(input);
+  const [row] = await tx.insert(productEvents).values({
+    subjectType: "external_agent_receipt", subjectId: parsed.receiptId,
+    eventType: "external_agent.durable_handoff", actorType: "human", actorId: parsed.userId,
+    source: "server", idempotencyKey: parsed.taskId,
+    metadata: { taskId: parsed.taskId, responsibleUserId: parsed.userId, agentId: parsed.agentId, serverId: parsed.serverId },
+  }).onConflictDoNothing().returning();
+  return row;
+}

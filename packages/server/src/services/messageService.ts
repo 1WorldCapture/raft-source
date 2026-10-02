@@ -1,3 +1,4 @@
+import { agentTransactionForExecutor, AgentGatePlanConflict, DelegationError, requireAgentOperation, requireAgentMessageTarget, withExpandingAgentTransaction, type AgentOperationAuthority } from "./agentTransactionAuthority.js";
 import { serializeErrorForLog } from "../tracing/safeErrorLog.js";
 import { withUnreadSummaryCadence } from "./unreadSummaryNotifier.js";
 import { randomUUID } from "node:crypto";
@@ -1210,7 +1211,9 @@ export class UserRandomIdConflictError extends Error {
 }
 
 function isMessageRouteDomainError(error: unknown): boolean {
-  return error instanceof channelService.ChannelArchivedError
+  return error instanceof AgentGatePlanConflict
+    || error instanceof DelegationError
+    || error instanceof channelService.ChannelArchivedError
     || error instanceof MentionValidationError
     || error instanceof UserRandomIdConflictError
     || error instanceof AttachmentLinkError;
@@ -1608,6 +1611,8 @@ export async function recordInboxFactsForPersistedMessages(
           channelService.getActiveJointThreadProjectionsByCanonicalThread(channelId, executor),
         getJointThreadProjectionForMember: (channelId, followerType, followerId) =>
           channelService.getJointThreadProjectionForMember(channelId, followerType, followerId, executor),
+        getActiveJointChannelProjectionsByLocalChannel: (channelId) =>
+          channelService.getActiveJointChannelProjectionsByLocalChannel(channelId, executor),
       }
     : baseDeps;
   const mentionsByMessage = opts.targetVisibleMentionsByMessageId
@@ -1632,17 +1637,6 @@ export async function recordInboxFactsForPersistedMessages(
         ? (await executor.select().from(channels).where(eq(channels.id, message.channelId)).limit(1))[0]
         : await deps.getChannel(message.channelId);
     if (!channel) continue;
-    if (
-      executor
-      && channel.type === "thread"
-      && !opts.allowExecutorThread
-      && !opts.jointThreadProjection
-    ) {
-      throw new Error(`Executor-backed persisted facts do not support ${channel.type} channels`);
-    }
-    if (executor && channel.type === "joint" && !opts.jointProjections) {
-      throw new Error("Executor-backed persisted facts for joint channels require frozen projections");
-    }
     if (opts.inboxFactPolicy.mode === "skip") {
       addTraceEvent("message_pipeline.persisted_message_inbox_notification_facts.skipped", {
         target_type: channel.type,
@@ -1665,19 +1659,17 @@ export async function recordInboxFactsForPersistedMessages(
     const inboxFactStart = currentTimeMs();
     const jointThreadProjection = opts.jointThreadProjection !== undefined
       ? opts.jointThreadProjection
-      : channel.type === "thread" && !executor
-        ? await channelService.getJointThreadProjectionByLocalThread(message.channelId)
+      : channel.type === "thread"
+        ? await channelService.getJointThreadProjectionByLocalThread(message.channelId, undefined, executor ?? getDb())
           ?? null
         : null;
     const jointProjectionChannelId = jointThreadProjection?.canonicalThreadChannelId
       ?? (channel.type === "thread" || channel.type === "dm" ? null : message.channelId);
     const jointProjections = opts.jointProjections
       ? [...opts.jointProjections]
-      : executor
-        ? []
-        : jointProjectionChannelId
-          ? await getJointProjectionsForChannel(jointProjectionChannelId)
-          : [];
+      : jointProjectionChannelId
+        ? await getJointProjectionsForChannel(jointProjectionChannelId)
+        : [];
     const persistedSenderType = message.messageType === "system"
       ? "system" as const
       : message.senderType;
@@ -1793,7 +1785,16 @@ async function addMemberWithMembershipSystemMessage(
     });
     return { added: true, message };
   };
-  return input.executor ? apply(input.executor) : getDb().transaction(apply);
+  return input.executor ? apply(input.executor) : withExpandingAgentTransaction(
+    [
+      ...(input.memberType === "agent" ? [input.memberId] : []),
+      ...(input.causalActor.type === "agent" ? [input.causalActor.id] : []),
+    ],
+    async (context) => {
+      if (input.causalActor.type === "agent") await requireAgentOperation(context, input.causalActor.id, "channels");
+      return apply(context.tx);
+    },
+  );
 }
 
 export async function addHumanWithMembershipSystemMessage(input: {
@@ -1979,7 +1980,17 @@ export async function createMessage(
   taskFields?: { taskStatus: "todo"; taskNumber: number },
   extraFields?: { threadId?: string | null; agentSendKey?: string | null; randomId?: string | null; actionMetadata?: unknown | null },
   executor: DatabaseExecutor = getDb(),
-) {
+  authority?: AgentOperationAuthority,
+): Promise<typeof messages.$inferSelect> {
+  const context = agentTransactionForExecutor(executor);
+  if (senderType === "agent") {
+    if (!context) {
+      if (executor !== getDb()) throw new DelegationError("agent_transaction_required", 500);
+      return withExpandingAgentTransaction([senderId], (owned) => createMessage(channelId, senderType, senderId, content, messageType, taskFields, extraFields, owned.tx, authority));
+    }
+    await requireAgentOperation(context, senderId, "send", authority);
+    if (authority) await requireAgentMessageTarget(context, channelId, channelId, authority);
+  }
   const db = executor;
   const [message] = await db
     .insert(messages)
@@ -2000,6 +2011,7 @@ export async function createMessage(
       eq(userChannelInboxStates.channelId, channelId),
       isNotNull(userChannelInboxStates.doneAt),
     ));
+  if (senderType === "agent") await requireAgentOperation(context!, senderId, "send", authority);
   return message;
 }
 
@@ -2329,9 +2341,11 @@ async function createOrReplayUserRandomSend(opts: {
   jointThreadProjection: channelService.JointThreadProjection | null;
   ordinaryExternalProjectionDecision: OrdinaryMessageExternalProjectionDecision;
   deps: MessageServiceDeps;
+  participatingAgentIds: readonly string[];
 }) {
   const db = getDb();
-  return db.transaction(async (tx) => {
+  return withExpandingAgentTransaction(opts.participatingAgentIds, async (context) => {
+    const tx = context.tx;
     await runSlackBridgeOutboundAdmissionStage(
       "conversation_lock",
       () => lockOrdinaryMessageExternalDeliveryAdmission({
@@ -3122,10 +3136,37 @@ export async function broadcastSystemMessage(
   ) {
     throw new Error("Persisted system message does not match broadcast request");
   }
-  const messageWasPersisted = opts.persistedMessage !== undefined;
-  const message = opts.persistedMessage
-    ?? await deps.createMessage(channelId, "user", "system", content, "system");
   const personalAttentionTargets = opts.personalAttentionTargets ?? [];
+  let persistedMessage = opts.persistedMessage;
+  if (!persistedMessage && messageServiceDepsOverride === null) {
+    const seedAgents = personalAttentionTargets.filter((target) => target.type === "agent").map((target) => target.id);
+    if (opts.causalActor?.type === "agent") seedAgents.push(opts.causalActor.id);
+    persistedMessage = await withExpandingAgentTransaction(seedAgents, async (context) => {
+      const channel = await deps.getChannel(channelId, { executor: context.tx });
+      if (!channel) throw new Error("System message channel is unavailable");
+      const message = await deps.createMessage(channelId, "user", "system", content, "system", undefined, undefined, context.tx);
+      if (personalAttentionTargets.length) await insertMentionRowsWithExecutor(context.tx, personalAttentionTargets.map((target) => ({
+        messageId: message.id, messageSeq: message.seq, serverId: channel.serverId, channelId,
+        targetType: target.type, targetId: target.id, handleAtSendTime: target.name,
+        source: "send_path" as const, confidence: "exact" as const, notifiableAtSend: true,
+      })));
+      const jointProjections = await channelService.getActiveJointChannelProjectionsByLocalChannel(channelId, context.tx);
+      const jointThreadProjections = channel.type === "thread"
+        ? await channelService.getActiveJointThreadProjectionsByCanonicalThread(channelId, context.tx) : [];
+      await recordInboxFactsForPersistedMessages([message], {
+        inboxFactPolicy: opts.inboxFactPolicy, executor: context.tx, channel,
+        allowExecutorThread: channel.type === "thread" && !jointThreadProjections.length,
+        jointProjections, recordJointLocalFace: true,
+        jointThreadProjection: jointThreadProjections[0] ?? null,
+        causalActorByMessageId: opts.causalActor ? new Map([[message.id, opts.causalActor]]) : undefined,
+        targetVisibleMentionsByMessageId: new Map([[message.id, personalAttentionTargets]]),
+        dedupeLogicalReceiverAcrossJointProjections: opts.dedupeLogicalReceiverAcrossJointProjections,
+      });
+      return message;
+    });
+  }
+  const messageWasPersisted = persistedMessage !== undefined;
+  const message = persistedMessage ?? await deps.createMessage(channelId, "user", "system", content, "system");
   const enriched = {
     ...message,
     senderName: "System",
@@ -8152,6 +8193,7 @@ export async function broadcastAndDeliver(
     mentionContract?: "v1" | "v2";
     attachmentIds?: string[];
     agentSendKey?: string;
+    agentAuthority?: AgentOperationAuthority;
     randomId?: string;
     actionMetadata?: unknown | null;
     asTask?: boolean;
@@ -8390,6 +8432,22 @@ export async function broadcastAndDeliver(
     };
   };
 
+  const participantChannelIds = [...new Set([storageChannelId, channelId,
+    ...jointProjections.map((projection) => projection.localChannelId),
+    ...(jointThreadProjection ? [jointThreadProjection.localParentChannelId, jointThreadProjection.localThreadChannelId] : []),
+  ])];
+  if (channel?.parentMessageId) {
+    const [parent] = await getDb().select({ channelId: messages.channelId }).from(messages).where(eq(messages.id, channel.parentMessageId)).limit(1);
+    if (parent) participantChannelIds.push(parent.channelId);
+  }
+  const participatingAgentIds = useAtomicMessageTransaction
+    ? [...new Set([
+      ...(senderType === "agent" ? [senderId] : []),
+      ...((await getDb().select({ id: channelAgents.agentId }).from(channelAgents).where(inArray(channelAgents.channelId, participantChannelIds))).map((row) => row.id)),
+      ...((await getDb().select({ id: threadFollows.followerId }).from(threadFollows).where(and(inArray(threadFollows.threadChannelId, participantChannelIds), eq(threadFollows.followerType, "agent")))).map((row) => row.id)),
+      ...(mentionResolution?.targets.filter((target) => target.targetType === "agent").map((target) => target.targetId) ?? []),
+    ])] : [];
+
   const persistStart = Date.now();
   const persistence = await traceQuerySpan({
     queryName: "messages.insert",
@@ -8423,6 +8481,9 @@ export async function broadcastAndDeliver(
         dbOperation: "transaction",
       }, () => createOrReplayAgentSend({
         channelId: storageChannelId,
+        participatingAgentIds,
+        permissionChannelId: channelId,
+        authority: opts.agentAuthority,
         senderId,
         content,
         agentSendKey,
@@ -8480,6 +8541,7 @@ export async function broadcastAndDeliver(
         dbOperation: "transaction",
       }, () => createOrReplayUserRandomSend({
         channelId: storageChannelId,
+        participatingAgentIds,
         authorityChannelId: externalDeliveryAuthorityChannelId,
         requestedChannelId: channelId,
         senderId,
@@ -8523,6 +8585,7 @@ export async function broadcastAndDeliver(
         undefined,
         { actionMetadata: actionMetadata ?? null },
         executor,
+        opts.agentAuthority,
       );
       const linked = executor && attachmentIds && attachmentIds.length > 0
         ? await linkAttachmentRowsToMessageWithExecutor(
@@ -8573,7 +8636,8 @@ export async function broadcastAndDeliver(
         phase: "message_pipeline.persist",
         queryName: "messages.direct_send_transaction",
         dbOperation: "transaction",
-      }, () => getDb().transaction(async (tx) => {
+      }, () => withExpandingAgentTransaction(participatingAgentIds, async (context) => {
+        const tx = context.tx;
         await lockOrdinaryMessageExternalDeliveryAdmission({
           executor: tx,
           authorityChannelId: externalDeliveryAuthorityChannelId,

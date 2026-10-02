@@ -1,3 +1,4 @@
+import { withExpandingAgentTransaction, requireLegacyAgentActor } from "./agentTransactionAuthority.js";
 import { publishChannelUpdate } from "./channelRealtimeEvents.js";
 import { socketUserServerRoom } from "../socket/platformScope.js";
 // Operation cards (B-mode approval replacement).
@@ -466,7 +467,9 @@ export async function prepareActionCard(args: PrepareActionCardArgs): Promise<{
   // We dual-write to the `action_cards` table for queryability + audit (per
   // stdrc msg=22a82192 / msg=174b7e16 — DB persistence, minimum schema).
   const db = getDb();
-  const out = await db.transaction(async (tx) => {
+  const out = await withExpandingAgentTransaction([args.requesterAgentId], async (context) => {
+    await requireLegacyAgentActor(context, args.requesterAgentId);
+    const tx = context.tx;
     const [msg] = await tx
       .insert(messages)
       .values({
@@ -488,16 +491,17 @@ export async function prepareActionCard(args: PrepareActionCardArgs): Promise<{
         payload: action,
         state: "prepared",
       });
+    await messageService.recordInboxFactsForPersistedMessages([msg], {
+      executor: tx,
+      inboxFactPolicy: {
+        mode: "record",
+        producer: "action_card.carrier",
+        reason: "action-card carrier messages are delivered chat rows and count as channel activity",
+      },
+    });
     return msg;
   });
 
-  await messageService.recordInboxFactsForPersistedMessages([out], {
-    inboxFactPolicy: {
-      mode: "record",
-      producer: "action_card.carrier",
-      reason: "action-card carrier messages are delivered chat rows and count as channel activity",
-    },
-  });
   messageService.updateMaxSeq(args.serverId, out.seq);
 
   if (args.io && out) {
