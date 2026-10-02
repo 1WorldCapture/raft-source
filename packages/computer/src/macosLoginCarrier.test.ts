@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
 import {
   mkdir,
@@ -334,11 +335,13 @@ test("refresh replacement failure restores the last verified CLI carrier and pro
             );
             assert.equal((await stat(anchorPath)).mode & 0o777, 0o600);
             assert.equal((await readHostLifecycleRecoveryStatus(slockHome))?.status, "pending-replace");
-            assert.equal(await readHostLifecycleMarker(slockHome), null);
+            // The owner marker is intentionally kept until the new carrier is
+            // verified — it still truthfully describes the installed one.
+            assert.deepEqual(await readHostLifecycleMarker(slockHome), previousMarker);
             anchorObservedBeforeBootout = true;
           }
           if (args[0] === "bootstrap" && !rejectedReplacement) {
-            assert.equal(await readHostLifecycleMarker(slockHome), null);
+            assert.deepEqual(await readHostLifecycleMarker(slockHome), previousMarker);
             rejectedReplacement = true;
             throw new Error("bootstrap denied");
           }
@@ -408,7 +411,7 @@ test("refresh readback mismatch rolls back the prior job, definition, and owner"
   }
 });
 
-test("rollback failure removes the enabled marker and surfaces one durable degraded receipt", async () => {
+test("rollback failure keeps the enabled marker as the recovery anchor and surfaces one durable degraded receipt", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "raft-macos-login-rollback-red-"));
   const home = path.join(root, "user");
   const slockHome = path.join(home, ".slock");
@@ -437,7 +440,10 @@ test("rollback failure removes the enabled marker and surfaces one durable degra
         return true;
       },
     );
-    assert.equal(await readHostLifecycleMarker(slockHome), null);
+    // The forward path no longer deletes the marker before the swap: a failed
+    // rollback leaves the marker as the durable anchor describing the carrier
+    // the recovery record can reinstall.
+    assert.equal((await readHostLifecycleMarker(slockHome))?.dispatcherPath, baseDeps.dispatcherPath);
     assert.equal((await readHostLifecycleRecoveryStatus(slockHome))?.status, "degraded");
     assert.equal(
       (await stat(path.join(slockHome, "computer", "host-lifecycle-pending-replace.json"))).mode & 0o777,
@@ -834,6 +840,170 @@ test("remove seam fails closed for App ownership unless Electron removal is read
     });
     assert.equal(openAtLogin, false);
     assert.equal(await readHostLifecycleMarker(slockHome), null);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("healthy carrier with a different but still-valid dispatcher defers the swap (2026-10-02 outage shape)", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "raft-macos-login-defer-"));
+  const home = path.join(root, "user");
+  const slockHome = path.join(home, ".slock");
+  const harness = launchctlHarness();
+  const originalDispatcher = path.join(home, ".local", "bin", "raft-computer");
+  const baseDeps = {
+    platform: "darwin" as const,
+    userHome: home,
+    uid: 501,
+    dispatcherPath: originalDispatcher,
+    legacyDesktopBundlePath: path.join(root, "Applications", "Raft Computer.app"),
+    runCommand: harness.run,
+  };
+  try {
+    await convergeCliHostLifecycle(slockHome, "enabled", baseDeps);
+    const markerBefore = await readHostLifecycleMarker(slockHome);
+    const definitionBefore = await readFile(markerBefore!.definitionPath!, "utf8");
+    const callsBefore = harness.calls.length;
+    // The dispatcher binary still exists and is executable — a start/restart
+    // resolving a DIFFERENT path must not tear down the running login job.
+    await mkdir(path.dirname(originalDispatcher), { recursive: true });
+    await writeFile(originalDispatcher, "#!/bin/sh\n", { mode: 0o755 });
+    const result = await convergeCliHostLifecycle(slockHome, "enabled", {
+      ...baseDeps,
+      dispatcherPath: path.join(home, ".local", "bin", "raft-computer-next"),
+    });
+    assert.equal(result.deferredRefresh?.liveDispatcher, originalDispatcher);
+    assert.equal(
+      result.deferredRefresh?.wantedDispatcher,
+      path.join(home, ".local", "bin", "raft-computer-next"),
+    );
+    const mutating = harness.calls
+      .slice(callsBefore)
+      .filter((c) => c[1] === "bootout" || c[1] === "bootstrap").length;
+    assert.equal(mutating, 0, "no launchctl mutation may happen");
+    assert.deepEqual(await readHostLifecycleMarker(slockHome), markerBefore);
+    assert.equal(await readFile(markerBefore!.definitionPath!, "utf8"), definitionBefore);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("invalidated dispatcher still forces the real swap", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "raft-macos-login-swap-"));
+  const home = path.join(root, "user");
+  const slockHome = path.join(home, ".slock");
+  const harness = launchctlHarness();
+  const originalDispatcher = path.join(home, ".local", "bin", "raft-computer");
+  const nextDispatcher = path.join(home, ".local", "bin", "raft-computer-next");
+  const baseDeps = {
+    platform: "darwin" as const,
+    userHome: home,
+    uid: 501,
+    dispatcherPath: originalDispatcher,
+    legacyDesktopBundlePath: path.join(root, "Applications", "Raft Computer.app"),
+    runCommand: harness.run,
+  };
+  try {
+    await convergeCliHostLifecycle(slockHome, "enabled", baseDeps);
+    // Old dispatcher binary is GONE — the deferral guard must not fire and
+    // the carrier must actually move to the new dispatcher.
+    const result = await convergeCliHostLifecycle(slockHome, "enabled", {
+      ...baseDeps,
+      dispatcherPath: nextDispatcher,
+    });
+    assert.equal(result.deferredRefresh, undefined);
+    assert.equal((await readHostLifecycleMarker(slockHome))?.dispatcherPath, nextDispatcher);
+    assert.ok([...harness.jobs.values()][0]!.includes(nextDispatcher));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("bootout failure is a safe no-op: definition intact, marker kept, no pending residue", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "raft-macos-login-bootout-red-"));
+  const home = path.join(root, "user");
+  const slockHome = path.join(home, ".slock");
+  const harness = launchctlHarness();
+  const originalDispatcher = path.join(home, ".local", "bin", "raft-computer");
+  const baseDeps = {
+    platform: "darwin" as const,
+    userHome: home,
+    uid: 501,
+    dispatcherPath: originalDispatcher,
+    legacyDesktopBundlePath: path.join(root, "Applications", "Raft Computer.app"),
+    runCommand: harness.run,
+  };
+  try {
+    await convergeCliHostLifecycle(slockHome, "enabled", baseDeps);
+    const markerBefore = await readHostLifecycleMarker(slockHome);
+    const definitionBefore = await readFile(markerBefore!.definitionPath!, "utf8");
+    await assert.rejects(
+      refreshCliLoginCarrierIfOwned(slockHome, {
+        ...baseDeps,
+        dispatcherPath: path.join(home, ".local", "bin", "raft-computer-next"),
+        runCommand: async (command, args, signal) => {
+          if (args[0] === "bootout") throw new Error("bootout denied");
+          return harness.run(command, args, signal);
+        },
+      }),
+      (error: unknown) => {
+        assert.equal((error as { code?: string }).code, "HOST_LIFECYCLE_BOOTOUT_FAILED");
+        return true;
+      },
+    );
+    // Old carrier fully intact, marker still truthful, no recovery record.
+    assert.deepEqual(await readHostLifecycleMarker(slockHome), markerBefore);
+    assert.equal(await readFile(markerBefore!.definitionPath!, "utf8"), definitionBefore);
+    assert.ok([...harness.jobs.values()][0]!.includes(originalDispatcher));
+    assert.equal(await readHostLifecycleRecoveryStatus(slockHome), null);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("pending recovery with the old carrier actually intact repairs bookkeeping only", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "raft-macos-login-intact-"));
+  const home = path.join(root, "user");
+  const slockHome = path.join(home, ".slock");
+  const harness = launchctlHarness();
+  const originalDispatcher = path.join(home, ".local", "bin", "raft-computer");
+  const baseDeps = {
+    platform: "darwin" as const,
+    userHome: home,
+    uid: 501,
+    dispatcherPath: originalDispatcher,
+    legacyDesktopBundlePath: path.join(root, "Applications", "Raft Computer.app"),
+    runCommand: harness.run,
+  };
+  try {
+    await convergeCliHostLifecycle(slockHome, "enabled", baseDeps);
+    const markerBefore = await readHostLifecycleMarker(slockHome);
+    // Forge the stranded state the owner hit on 2026-10-02: a pending replace
+    // record exists, but the OLD carrier was never actually destroyed.
+    const previousDefinition = await readFile(markerBefore!.definitionPath!, "utf8");
+    await rm(path.join(slockHome, "computer", "host-lifecycle-owner.json"), { force: true });
+    await writeFile(
+      path.join(slockHome, "computer", "host-lifecycle-pending-replace.json"),
+      `${JSON.stringify({
+        formatVersion: 1,
+        phase: "rollback-failed",
+        previousMarker: markerBefore,
+        previousDefinition,
+        previousDefinitionSha256: createHash("sha256").update(previousDefinition).digest("hex"),
+        targetDefinitionSha256: "0".repeat(64),
+        errorCode: "HOST_LIFECYCLE_BOOTOUT_FAILED",
+      })}\n`,
+    );
+    const callsBefore = harness.calls.length;
+    // Any lifecycle command reads the record and recovers; with the job still
+    // live and the definition matching, recovery must not touch launchd.
+    await convergeCliHostLifecycle(slockHome, "enabled", baseDeps);
+    const mutating = harness.calls
+      .slice(callsBefore)
+      .filter((c) => c[1] === "bootout" || c[1] === "bootstrap").length;
+    assert.equal(mutating, 0, "intact carrier needs no launchctl write");
+    assert.deepEqual(await readHostLifecycleMarker(slockHome), markerBefore);
+    assert.equal(await readHostLifecycleRecoveryStatus(slockHome), null);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
