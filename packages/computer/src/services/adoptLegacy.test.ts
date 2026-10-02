@@ -4,6 +4,7 @@
 //
 // Companion: ../adopt.test.ts asserts the CLI adapter's resolveLegacyKey
 // (4-channel exactly-one-source) + info()/fail() lines stay byte-identical.
+import { assertStateRootHermetic } from "../test/hermeticAssertions.js";
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdtemp, mkdir, readFile, rm, writeFile, stat } from "node:fs/promises";
@@ -38,9 +39,12 @@ async function withHome<T>(
   opts: { writeSession?: boolean; sessionOverride?: unknown } = {},
 ): Promise<T> {
   const home = await mkdtemp(join(tmpdir(), "raft-computer-adopt-svc-"));
-  const old = process.env.SLOCK_HOME;
+  const oldSlock = process.env.SLOCK_HOME;
+  const oldRaft = process.env.RAFT_HOME;
   process.env.SLOCK_HOME = home;
+  process.env.RAFT_HOME = home;
   try {
+    assertStateRootHermetic(home, "withHome");
     if (opts.writeSession !== false) {
       await mkdir(join(home, "computer"), { recursive: true });
       await writeFile(
@@ -59,8 +63,10 @@ async function withHome<T>(
     }
     return await fn(home);
   } finally {
-    if (old === undefined) delete process.env.SLOCK_HOME;
-    else process.env.SLOCK_HOME = old;
+    if (oldSlock === undefined) delete process.env.SLOCK_HOME;
+    else process.env.SLOCK_HOME = oldSlock;
+    if (oldRaft === undefined) delete process.env.RAFT_HOME;
+    else process.env.RAFT_HOME = oldRaft;
     await rm(home, { recursive: true, force: true });
   }
 }

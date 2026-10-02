@@ -1,3 +1,4 @@
+import { assertStateRootHermetic } from "./test/hermeticAssertions.js";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
@@ -82,13 +83,18 @@ const SERVER_B = "22222222-2222-4222-8222-222222222222";
 
 async function withHome<T>(fn: (home: string) => Promise<T>): Promise<T> {
   const home = await mkdtemp(join(tmpdir(), "raft-computer-sup-"));
-  const old = process.env.SLOCK_HOME;
+  const oldSlock = process.env.SLOCK_HOME;
+  const oldRaft = process.env.RAFT_HOME;
   process.env.SLOCK_HOME = home;
+  process.env.RAFT_HOME = home;
   try {
+    assertStateRootHermetic(home, "withHome");
     return await fn(home);
   } finally {
-    if (old === undefined) delete process.env.SLOCK_HOME;
-    else process.env.SLOCK_HOME = old;
+    if (oldSlock === undefined) delete process.env.SLOCK_HOME;
+    else process.env.SLOCK_HOME = oldSlock;
+    if (oldRaft === undefined) delete process.env.RAFT_HOME;
+    else process.env.RAFT_HOME = oldRaft;
     await rm(home, { recursive: true, force: true });
   }
 }

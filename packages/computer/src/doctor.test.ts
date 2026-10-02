@@ -1,3 +1,4 @@
+import { assertStateRootHermetic } from "./test/hermeticAssertions.js";
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
@@ -36,14 +37,19 @@ const FP_A = "1234567890abcdef";
 
 async function withHome<T>(fn: (home: string) => Promise<T>): Promise<T> {
   const home = await mkdtemp(join(tmpdir(), "raft-computer-doctor-"));
-  const old = process.env.SLOCK_HOME;
+  const oldSlock = process.env.SLOCK_HOME;
+  const oldRaft = process.env.RAFT_HOME;
   const oldExit = process.exitCode;
   process.env.SLOCK_HOME = home;
+  process.env.RAFT_HOME = home;
   try {
+    assertStateRootHermetic(home, "withHome");
     return await fn(home);
   } finally {
-    if (old === undefined) delete process.env.SLOCK_HOME;
-    else process.env.SLOCK_HOME = old;
+    if (oldSlock === undefined) delete process.env.SLOCK_HOME;
+    else process.env.SLOCK_HOME = oldSlock;
+    if (oldRaft === undefined) delete process.env.RAFT_HOME;
+    else process.env.RAFT_HOME = oldRaft;
     process.exitCode = oldExit;
     await rm(home, { recursive: true, force: true });
   }
