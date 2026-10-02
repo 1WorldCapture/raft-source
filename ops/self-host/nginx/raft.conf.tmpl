@@ -2,9 +2,10 @@ upstream raft_server { server 127.0.0.1:@@RAFT_SERVER_PORT@@; keepalive 32; }
 
 map $http_upgrade $connection_upgrade { default upgrade; '' close; }
 
-server {
+@@HTTP_SERVER@@server {
 @@LISTEN@@
-    server_name _;
+    server_name @@SERVER_NAME@@;
+@@TLS_SETUP@@
 
     access_log logs/access.log raft;
     error_log  logs/error.log warn;
@@ -33,6 +34,20 @@ server {
     }
     location = /sw.js { add_header Cache-Control "no-cache"; try_files $uri =404; }
     location = /desktop-manifest.json { default_type application/json; add_header Cache-Control "no-cache, must-revalidate"; try_files $uri =404; }
+
+    # Self-hosted Computer release files (RAFT_COMPUTER_WEB_ROOT). The root
+    # manifest.json is the "latest" pointer and the install scripts are the
+    # entry points, so both must always revalidate; per-version directories
+    # are immutable once published (publish-computer.sh refuses divergent
+    # republishes), so they cache for a year. Regex locations win over the
+    # plain prefix below, which only 404s unrecognised paths (e.g. /computer/
+    # itself) instead of falling through to the SPA index.
+    location = /computer/manifest.json { default_type application/json; add_header Cache-Control "no-cache, must-revalidate"; alias @@RAFT_COMPUTER_WEB_ROOT@@/manifest.json; }
+    location = /computer/install.sh { default_type text/plain; add_header Cache-Control "no-cache, must-revalidate"; alias @@RAFT_COMPUTER_WEB_ROOT@@/install.sh; }
+    location = /computer/install.ps1 { default_type text/plain; add_header Cache-Control "no-cache, must-revalidate"; alias @@RAFT_COMPUTER_WEB_ROOT@@/install.ps1; }
+    location ~ ^/computer/([0-9][^/]+/.+)$ { add_header Cache-Control "public, immutable, max-age=31536000"; alias @@RAFT_COMPUTER_WEB_ROOT@@/$1; }
+    location /computer/ { return 404; }
+
     location / { add_header Cache-Control "no-cache"; try_files $uri $uri/ /index.html; }
 }
 @@REDIRECT_SERVERS@@
