@@ -1,10 +1,12 @@
 import { createHash } from "node:crypto";
-import { and, count, eq, gte, isNull } from "drizzle-orm";
+import { and, asc, count, eq, gte, isNull } from "drizzle-orm";
 import { runDtoSchema, wakePayloadSchema, type RunFinishOutcome } from "@botiverse/raft-shared";
 import { getDb, type Database } from "../db/index.js";
 import { agentCredentials, externalAgentClaims as claims, externalAgentConnections as connections, externalAgentRuns as runs, externalAgentWakeAttempts as attempts, externalAgentWakes as wakes } from "../db/schema.js";
 import { databaseNow, DelegationError, readConnection, requireAgent, requireCredential, requireCurrentExecution, requireOwnedRun, hashMatches, tokenHash, withAgentTransaction, type AgentIdentity, type ExecutionContext, type RunRow } from "./agentTransactionAuthority.js";
 import { countRunStarts, currentWake, endRun, ensureWakeForPending, maxRunStarts, proxyPolicy, queueOrExhaust } from "./externalAgentDelegationState.js";
+
+import { classifyDispatchResult, DISPATCH_LEASE_MS } from "./externalAgentDispatchPolicy.js";
 
 export function runDto(row: RunRow) {
   return runDtoSchema.parse({ id: row.id, connectionId: row.connectionId, connectionEpoch: row.connectionEpoch.toString(), agentId: row.agentId,
@@ -135,14 +137,14 @@ export class ExternalAgentDelegationService {
           if (wake?.id === run.wakeId && connection.enabled) return queueOrExhaust(context, connection, wake);
         }
       }
-      if (!connection.enabled || !wake || ["blocked", "exhausted", "settled", "superseded"].includes(wake.state)) return wake ?? null;
+      if (!connection.enabled || connection.consumptionMode !== "delegated" || !wake || ["blocked", "exhausted", "settled", "superseded"].includes(wake.state)) return wake ?? null;
       if (wake.state === "active" && !connection.currentRunId) return queueOrExhaust(context, connection, wake);
       if (wake.state === "dispatching" && wake.dispatchLeaseUntil && wake.dispatchLeaseUntil <= now) {
         await context.tx.update(attempts).set({ outcome: "unknown", errorCode: "dispatch_lease_expired", finishedAt: now }).where(and(eq(attempts.wakeId, wake.id), eq(attempts.dispatchFence, wake.dispatchFence), isNull(attempts.finishedAt)));
         const [updated] = await context.tx.update(wakes).set({ state: "awaiting_agent", dispatchOwner: null, dispatchLeaseUntil: null }).where(eq(wakes.id, wake.id)).returning();
         return updated;
       }
-      if (wake.state === "awaiting_agent" && wake.startupDeadline && wake.startupDeadline <= now) return queueOrExhaust(context, connection, wake);
+      if (wake.state === "awaiting_agent" && wake.startupDeadline && wake.startupDeadline <= now && wake.nextAttemptAt <= now) return queueOrExhaust(context, connection, wake);
       return wake;
     }, this.db);
   }
@@ -164,7 +166,9 @@ export class ExternalAgentDelegationService {
       const [rate] = await context.tx.select({ total: count() }).from(attempts).innerJoin(wakes, eq(wakes.id, attempts.wakeId))
         .where(and(eq(wakes.connectionId, connection.id), gte(attempts.startedAt, new Date(now.getTime() - 3600000))));
       if (rate.total >= proxyPolicy(connection).maxWakesPerHour) {
-        await context.tx.update(wakes).set({ nextAttemptAt: new Date(now.getTime() + 60000) }).where(eq(wakes.id, wake.id));
+        const [oldest] = await context.tx.select({ startedAt: attempts.startedAt }).from(attempts).innerJoin(wakes, eq(wakes.id, attempts.wakeId))
+          .where(and(eq(wakes.connectionId, connection.id), gte(attempts.startedAt, new Date(now.getTime() - 3600000)))).orderBy(asc(attempts.startedAt)).limit(1);
+        await context.tx.update(wakes).set({ nextAttemptAt: new Date(oldest.startedAt.getTime() + 3600001) }).where(eq(wakes.id, wake.id));
         return null;
       }
       const [attempt] = await context.tx.insert(attempts).values({ wakeId: wake.id, attemptNumber: wake.attemptCount + 1,
@@ -174,12 +178,19 @@ export class ExternalAgentDelegationService {
       const requestDigest = createHash("sha256").update(JSON.stringify(payload)).digest("hex");
       await context.tx.update(attempts).set({ requestDigest }).where(eq(attempts.id, attempt.id));
       await context.tx.update(wakes).set({ state: "dispatching", attemptCount: attempt.attemptNumber, dispatchOwner,
-        dispatchFence: attempt.dispatchFence, dispatchLeaseUntil: new Date(now.getTime() + 15000), startupDeadline: new Date(now.getTime() + proxyPolicy(connection).startupTimeoutMs) }).where(eq(wakes.id, wake.id));
-      return { payload, attemptId: attempt.id, dispatchFence: attempt.dispatchFence.toString(), dispatchOwner };
+        dispatchFence: attempt.dispatchFence, dispatchLeaseUntil: new Date(now.getTime() + DISPATCH_LEASE_MS), startupDeadline: new Date(now.getTime() + proxyPolicy(connection).startupTimeoutMs) }).where(eq(wakes.id, wake.id));
+      return { payload, attemptId: attempt.id, dispatchFence: attempt.dispatchFence.toString(), dispatchOwner, attemptNumber: attempt.attemptNumber };
     }, this.db);
   }
 
-  async finishDispatchAttempt(serverId: string, agentId: string, input: { attemptId: string; dispatchOwner: string; dispatchFence: string; outcome: "accepted" | "rejected" | "unknown"; httpStatus?: number; errorCode?: string }) {
+  async completeDispatch(serverId: string, agentId: string, reservation: { attemptId: string; dispatchOwner: string; dispatchFence: string; attemptNumber: number }, result: unknown, jitterUnit = Math.random()) {
+    const decision = classifyDispatchResult(result, reservation.attemptNumber, jitterUnit);
+    return this.finishDispatchAttempt(serverId, agentId, { ...reservation, ...decision });
+  }
+
+  async finishDispatchAttempt(serverId: string, agentId: string, input: { attemptId: string; dispatchOwner: string; dispatchFence: string; outcome: "accepted" | "rejected" | "unknown"; httpStatus?: number; errorCode?: string; retryDelayMs?: number; blockReason?: string }) {
+    if (input.retryDelayMs !== undefined && (!Number.isSafeInteger(input.retryDelayMs) || input.retryDelayMs < 0 || input.retryDelayMs > 300000)) throw new DelegationError("dispatch_delay_invalid", 400);
+    if (input.blockReason && !["provider_auth_rejected", "provider_endpoint_unavailable"].includes(input.blockReason)) throw new DelegationError("dispatch_block_invalid", 400);
     if (input.errorCode && !/^[a-z][a-z0-9_]{0,79}$/.test(input.errorCode)) throw new DelegationError("dispatch_error_invalid", 400);
     if (!["accepted", "rejected", "unknown"].includes(input.outcome) || (input.httpStatus !== undefined && (!Number.isInteger(input.httpStatus) || input.httpStatus < 100 || input.httpStatus > 599))) throw new DelegationError("dispatch_result_invalid", 400);
     return withAgentTransaction([agentId], async (context) => {
@@ -193,9 +204,15 @@ export class ExternalAgentDelegationService {
       const now = await databaseNow(context);
       await context.tx.update(attempts).set({ outcome: input.outcome, finishedAt: now, httpStatus: input.httpStatus ?? null, errorCode: input.errorCode ?? null, providerRunId: null }).where(eq(attempts.id, attempt.id));
       // Record late transport facts without downgrading an already active run.
-      if (wake.connectionEpoch === connection.epoch && wake.state === "dispatching" && wake.dispatchFence === attempt.dispatchFence && wake.dispatchOwner === input.dispatchOwner) {
-        if (input.outcome === "rejected") await queueOrExhaust(context, connection, wake);
-        else await context.tx.update(wakes).set({ state: "awaiting_agent", dispatchOwner: null, dispatchLeaseUntil: null }).where(eq(wakes.id, wake.id));
+      if (wake.connectionEpoch === connection.epoch && wake.state === "dispatching" && wake.dispatchFence === attempt.dispatchFence && wake.dispatchOwner === input.dispatchOwner && wake.dispatchLeaseUntil && wake.dispatchLeaseUntil > now) {
+        if (input.blockReason) {
+          await context.tx.update(wakes).set({ state: "blocked", blockReason: input.blockReason, dispatchOwner: null, dispatchLeaseUntil: null }).where(eq(wakes.id, wake.id));
+          await context.tx.update(connections).set({ pauseReason: input.blockReason, updatedAt: now }).where(eq(connections.id, connection.id));
+        } else if (input.outcome === "rejected") {
+          const updated = await queueOrExhaust(context, connection, wake);
+          if (updated.state === "queued") await context.tx.update(wakes).set({ nextAttemptAt: new Date(now.getTime() + Math.max(proxyPolicy(connection).debounceMs, input.retryDelayMs ?? 0)) }).where(eq(wakes.id, wake.id));
+        } else await context.tx.update(wakes).set({ state: "awaiting_agent", dispatchOwner: null, dispatchLeaseUntil: null,
+          nextAttemptAt: new Date(now.getTime() + (input.retryDelayMs ?? 0)) }).where(eq(wakes.id, wake.id));
       }
       return { recorded: true };
     }, this.db);

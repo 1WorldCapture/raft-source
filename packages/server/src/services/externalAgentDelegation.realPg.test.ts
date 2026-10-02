@@ -338,3 +338,74 @@ realTest("real database clock expiry during a business transaction rolls the mes
   assert.equal(reachedWrite, true);
   assert.equal((await db.select().from(messages).where(eq(messages.senderId, f.agent.id))).length, 0);
 }, 30000);
+
+realTest("A04 two workers contend on the real gate; no adapter before reservation commit", async () => {
+  const { ExternalAgentDelegationWorker } = await import("./externalAgentDelegationWorker.js");
+  const { DeterministicFakeWakeAdapter } = await import("./externalAgentFakeAdapter.js");
+  const f = await delegationFixture(db); await f.input();
+  const entered = deferred(), release = deferred();
+  const delayed = new Proxy(db, { get(target, property, receiver) {
+    if (property !== "transaction") return Reflect.get(target, property, receiver);
+    return async (work: Parameters<Database["transaction"]>[0]) => target.transaction(async (tx) => {
+      const value = await work(tx);
+      if (value && typeof value === "object" && "attemptId" in value) { entered.resolve(); await release.promise; }
+      return value;
+    });
+  } });
+  const adapter = new DeterministicFakeWakeAdapter([{ result: { kind: "http", status: 200 } }]);
+  const registry = new Map([["grokbot_webhook", adapter]]);
+  const a = new ExternalAgentDelegationWorker(delayed, registry, { serverId: f.server.id });
+  const b = new ExternalAgentDelegationWorker(db, registry, { serverId: f.server.id });
+  const first = a.runOnce(); let second: ReturnType<typeof b.runOnce> | undefined;
+  try { await bounded(entered.promise); second = b.runOnce(); await observedWait(); assert.equal(adapter.calls.length, 0); }
+  finally { release.resolve(); await first; }
+  await second;
+  assert.equal(adapter.calls.length, 1);
+  assert.equal((await db.select().from(schema.externalAgentWakeAttempts).innerJoin(externalAgentWakes, eq(externalAgentWakes.id, schema.externalAgentWakeAttempts.wakeId)).where(eq(externalAgentWakes.connectionId, f.connection.id))).length, 1);
+}, 30000);
+
+realTest("A05 lost worker lease recovers durably; stale result cannot overwrite new dispatch", async () => {
+  const f = await delegationFixture(db); await f.input();
+  const old = await f.delegation.reserveDispatch(f.server.id, f.agent.id, "lost-worker"); assert.ok(old);
+  await db.update(externalAgentWakes).set({ dispatchLeaseUntil: new Date(0), startupDeadline: new Date(0), nextAttemptAt: new Date(0) }).where(eq(externalAgentWakes.id, old.payload.wakeId));
+  const recovered = new ExternalAgentDelegationService(db);
+  await recovered.reconcileConnection(f.server.id, f.agent.id);
+  await recovered.reconcileConnection(f.server.id, f.agent.id);
+  const fresh = await recovered.reserveDispatch(f.server.id, f.agent.id, "replacement"); assert.ok(fresh);
+  assert.ok(BigInt(fresh.dispatchFence) > BigInt(old.dispatchFence));
+  const before = (await db.select().from(externalAgentWakes).where(eq(externalAgentWakes.id, old.payload.wakeId)))[0];
+  assert.deepEqual(await recovered.completeDispatch(f.server.id, f.agent.id, old, { kind: "http", status: 200 }), { recorded: false });
+  assert.deepEqual((await db.select().from(externalAgentWakes).where(eq(externalAgentWakes.id, old.payload.wakeId)))[0], before);
+  const history = await db.select().from(schema.externalAgentWakeAttempts).where(eq(schema.externalAgentWakeAttempts.wakeId, old.payload.wakeId));
+  assert.equal(history.length, 2);
+  const expired = history.find((item) => item.id === old.attemptId)!;
+  assert.equal(expired.outcome, "unknown"); assert.equal(expired.errorCode, "dispatch_lease_expired");
+}, 30000);
+
+realTest("A28 pause during provider I/O keeps late accepted audit but never revives superseded wake", async () => {
+  const { ExternalAgentDelegationWorker } = await import("./externalAgentDelegationWorker.js");
+  const { DeterministicFakeWakeAdapter } = await import("./externalAgentFakeAdapter.js");
+  const f = await delegationFixture(db); await f.input(); const entered = deferred(), release = deferred();
+  const adapter = new DeterministicFakeWakeAdapter([{ result: { kind: "http", status: 200 }, onWake: async () => { entered.resolve(); await release.promise; } }]);
+  const worker = new ExternalAgentDelegationWorker(db, new Map([["grokbot_webhook", adapter]]), { serverId: f.server.id });
+  const tick = worker.runOnce();
+  try { await bounded(entered.promise); await f.connectionService.pause(f.human, f.agent.id, f.connection.revision, randomUUID()); }
+  finally { release.resolve(); await tick; }
+  const [wake] = await db.select().from(externalAgentWakes).where(eq(externalAgentWakes.connectionId, f.connection.id));
+  assert.equal(wake.state, "superseded");
+  assert.equal((await db.select().from(schema.externalAgentWakeAttempts).where(eq(schema.externalAgentWakeAttempts.wakeId, wake.id)))[0].outcome, "accepted");
+  assert.equal((await db.select().from(externalAgentInboxReceipts).where(eq(externalAgentInboxReceipts.agentId, f.agent.id)))[0].state, "pending");
+  assert.equal(adapter.pendingCalls, 0);
+}, 30000);
+
+realTest("A27 hourly cap spans workers and retry cycles; rate rejection does not spend attempt budget", async () => {
+  const f = await delegationFixture(db); await f.input();
+  if (f.connection.activation.strategy !== "proxy_delegation") throw new Error("fixture strategy");
+  await db.update(externalAgentConnections).set({ activation: { ...f.connection.activation, policy: { ...f.connection.activation.policy, maxWakesPerHour: 1 } } }).where(eq(externalAgentConnections.id, f.connection.id));
+  const reservation = await f.delegation.reserveDispatch(f.server.id, f.agent.id, "hourly-first"); assert.ok(reservation);
+  await f.delegation.completeDispatch(f.server.id, f.agent.id, reservation, { kind: "http", status: 500 }, 0.5);
+  await db.update(externalAgentWakes).set({ nextAttemptAt: new Date(0) }).where(eq(externalAgentWakes.id, reservation.payload.wakeId));
+  assert.equal(await new ExternalAgentDelegationService(db).reserveDispatch(f.server.id, f.agent.id, "hourly-next"), null);
+  const [wake] = await db.select().from(externalAgentWakes).where(eq(externalAgentWakes.id, reservation.payload.wakeId));
+  assert.equal(wake.attemptCount, 1); assert.ok(wake.nextAttemptAt.getTime() > Date.now() + 3500000);
+}, 30000);
