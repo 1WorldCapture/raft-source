@@ -96,4 +96,13 @@ test("start() success clears a failed converge notice; enable() does too", async
   release();
   await starting;
 
+  let finishQuit!: () => void;
+  const quitWait = new Promise<void>((resolve) => { finishQuit = resolve; });
+  const quitting = guarded.runQuitAttempt(async () => { await quitWait; return true; });
+  await assert.rejects(guarded.connectCurrentDeployment({
+    confirm: async () => true, authenticate: async () => {},
+  }), /正在处理操作/);
+  finishQuit();
+  assert.equal(await quitting, true);
+
 });

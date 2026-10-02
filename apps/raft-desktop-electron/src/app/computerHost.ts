@@ -182,6 +182,12 @@ class ComputerHost {
 
   async waitForConnection(): Promise<void> { await this.connectionSettled; }
 
+  async runQuitAttempt(attempt: () => Promise<boolean>): Promise<boolean> {
+    // Keep the selected root stable through confirmation and the full ladder,
+    // including the window after stop() has returned but tools remain alive.
+    return this.control(attempt);
+  }
+
   async assertCanControl(): Promise<void> {
     if (this.connecting) throw new Error("正在连接当前部署，请完成或取消认证后再操作 Computer。");
     if (this.selectionError) throw this.selectionError;

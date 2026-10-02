@@ -634,27 +634,31 @@ if (headlessMode?.mode === "__service") {
   });
 
   const quitController = createQuitController({
-    attempt: () => runQuitFlow({
-      anythingRunning: async () => {
-        const host = computerHost;
-        if (!host) return false;
-        await host.waitForConnection();
-        if (!(await host.canShutdown())) return false;
-        const snapshot = await host.readProcesses();
-        host.processScope.assertRoots(snapshot);
-        return host.processScope.observe(snapshot).length > 0;
-      },
-      agentCount: async () => {
-        const host = computerHost;
-        if (!host) return null;
-        const owned = host.processScope.observe(await host.readProcesses());
-        return owned.filter((row) => row.agent).length;
-      },
-      prefs: () => ({ quitNoConfirm: loadQuitNoConfirm() }),
-      savePrefs: (prefs) => saveQuitNoConfirm(prefs.quitNoConfirm),
-      orchestrateShutdown: orchestrateQuitShutdown,
-      quit: () => app.quit(),
-    }),
+    attempt: async () => {
+      const host = computerHost;
+      const attempt = () => runQuitFlow({
+        anythingRunning: async () => {
+          const host = computerHost;
+          if (!host) return false;
+          await host.waitForConnection();
+          if (!(await host.canShutdown())) return false;
+          const snapshot = await host.readProcesses();
+          host.processScope.assertRoots(snapshot);
+          return host.processScope.observe(snapshot).length > 0;
+        },
+        agentCount: async () => {
+          const host = computerHost;
+          if (!host) return null;
+          const owned = host.processScope.observe(await host.readProcesses());
+          return owned.filter((row) => row.agent).length;
+        },
+        prefs: () => ({ quitNoConfirm: loadQuitNoConfirm() }),
+        savePrefs: (prefs) => saveQuitNoConfirm(prefs.quitNoConfirm),
+        orchestrateShutdown: orchestrateQuitShutdown,
+        quit: () => app.quit(),
+      });
+      return host ? host.runQuitAttempt(attempt) : attempt();
+    },
     complete: () => {
       menubarResident?.destroy();
       computerStatusMonitor?.setActive(false);
