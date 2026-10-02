@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { deriveConvergeNotice } from "./thisComputerLogic";
+import { deriveConvergeNotice, freshInstallCommand } from "./thisComputerLogic";
 
 test("no notice while pending or healthy (byte-stable for old hosts)", () => {
   assert.equal(deriveConvergeNotice(undefined), null);
@@ -44,3 +44,14 @@ test("everything else offers a generic converge retry", () => {
 function notifyAction(notice: ReturnType<typeof deriveConvergeNotice>): string | null {
   return notice?.action ?? null;
 }
+
+test("session origin mismatch offers explicit deployment connection, never an automatic retry", () => {
+  assert.equal(deriveConvergeNotice({ ok: false, code: "SESSION_ORIGIN_MISMATCH", message: "old deployment" })?.action, "connect-deployment");
+});
+
+
+test("manual upgrade binds both variables to the selected root with shell-safe quoting", () => {
+  const command = freshInstallCommand("1.2.3", undefined, "/tmp/owner's computer");
+  const root = "'/tmp/owner'\"'\"'s computer'";
+  assert.ok(command.includes(`RAFT_HOME=${root} SLOCK_HOME=${root}`));
+});

@@ -109,6 +109,7 @@ contextBridge.exposeInMainWorld("raftDesktop", {
     // with the user before invoking this.
     recycle: (): Promise<void> => ipcRenderer.invoke("computer:recycle"),
     // Re-run the startup host converge (generic failure retry path).
+    connectCurrentDeployment: (userId?: string): Promise<void> => ipcRenderer.invoke("computer:connect-deployment", userId),
     retryConverge: (): Promise<void> => ipcRenderer.invoke("computer:retry-converge"),
     // The latest Computer version on the CDN — the renderer compares it to the
     // running service version to decide whether to offer a local update.

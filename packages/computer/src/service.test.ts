@@ -2965,3 +2965,15 @@ test("resolveResidentSlockCliPath: non-SEA + no env → undefined (normal node i
   // empty string is treated as unset (falsy), not a bogus path
   assert.equal(resolveResidentSlockCliPath(false, { [RESIDENT_CLI_PATH_ENV_VAR]: "" }), undefined);
 });
+
+test("buildResidentSpawn: packaged Electron dispatches mode directly without treating __service as a script", () => {
+  assert.deepEqual(buildResidentSpawn("__service", null, "__service", [], false, process.execPath, "packaged"), {
+    command: process.execPath, args: ["__service"],
+  });
+  assert.deepEqual(buildResidentSpawn("__run", SERVER_A, "--hidden", [], false, process.execPath, "packaged"), {
+    command: process.execPath, args: ["__run", SERVER_A],
+  });
+  assert.deepEqual(buildResidentSpawn("__service", null, "/dev/app", [], false, process.execPath, "development"), {
+    command: process.execPath, args: ["/dev/app", "__service"],
+  });
+});

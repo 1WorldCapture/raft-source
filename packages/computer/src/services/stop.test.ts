@@ -363,3 +363,27 @@ test("stop service: source has exactly one graceful process.kill(SIGTERM) author
   assert.match(src, /process\.kill\s*\([^)]*,\s*["']SIGTERM["']\s*\)/);
   assert.equal(src.match(/\b(?:process\.)?kill\s*\([^)]*,\s*(?:9|["']SIGKILL["'])/g), null);
 });
+
+test("stop awaits asynchronous identity verification before committing the signal", async () => {
+  await withHome(async (home) => {
+    let killed = false;
+    const result = await stop({ slockHome: home }, {
+      readPidfile: async () => 12345,
+      isProcessAlive: () => !killed,
+      killService: async () => { await new Promise<void>((resolve) => setImmediate(resolve)); killed = true; },
+    });
+    assert.equal(killed, true);
+    assert.equal(result.status, "stopped");
+  });
+});
+
+test("failed asynchronous identity verification preserves pidfile and sends no signal", async () => {
+  await withHome(async (home) => {
+    await writePidfile(home, 12345);
+    await assert.rejects(stop({ slockHome: home }, {
+      readPidfile: async () => 12345, isProcessAlive: () => true,
+      killService: async () => { throw new Error("identity changed"); },
+    }), /identity changed/);
+    assert.equal(await readFile(servicePidPath(home), "utf8"), "12345");
+  });
+});

@@ -2,8 +2,7 @@
 // `@botiverse/raft-computer/lib` (aside from the `__service`/`__run` argv guard
 // in index.ts). It makes this app the OS-supervised host of the local Computer
 // service without becoming the runtime owner: the heavy `__service`/`__run`
-// daemon tree is detached and login-item supervised, so quitting the app never
-// stops running agents. This module only *controls* it (converge lifecycle,
+// daemon tree is detached; real app quit explicitly stops its verified tree. This module only *controls* it (converge lifecycle,
 // attach, start/stop) and *observes* it (status polling), exactly the surface
 // the CLI drives.
 //
@@ -35,7 +34,15 @@ import {
 import { createUpgradeInfoReader } from "../main/upgradeInfo.js";
 import { cleanupLegacyLoginAgents, getLoginItemAtLogin, setLoginItemAtLogin } from "../main/loginItem.js";
 import { isValidEnableInput, type EnableComputerInput } from "./enableInput.js";
+import {
+  checkSessionOrigin,
+  describeSessionOriginMismatch,
+  SESSION_ORIGIN_MISMATCH_CODE,
+} from "./sessionOriginGuard.js";
 import { reduceConvergeFailure, type ConvergeState } from "./convergeState.js";
+import { ComputerProcessScope, readComputerProcesses, type ComputerProcessSnapshot } from "../main/computerProcesses.js";
+import { connectDeployment, readDeploymentSelection, type DeploymentConnectionPlan } from "./deploymentConnection.js";
+import { CONFIGURED_API_ORIGIN } from "./configuredApiOrigin.js";
 import { runServiceRecycle } from "./serviceRecycle.js";
 
 // Mirrors `paths.ts` CURRENT_SCHEMA_VERSION (readers tolerate a missing value,
@@ -69,8 +76,24 @@ export interface ComputerHostSnapshot {
 
 class ComputerHost {
   /** Shared with the quit orchestration (task #7) to locate pidfiles. */
-  readonly slockHome = resolveRaftHome();
-  private readonly api: ComputerApi = createComputerApi(this.slockHome, { hostLifecycleOwner: "app" });
+  slockHome: string;
+  processScope: ComputerProcessScope;
+  readonly readProcesses: () => Promise<ComputerProcessSnapshot>;
+  private api: ComputerApi;
+  private readonly configuredOrigin: string;
+  private connecting = false;
+  private controlInFlight = 0;
+  private connectionSettled: Promise<void> = Promise.resolve();
+  private selectionError: Error | null = null;
+  private readonly storageDirectory: string;
+  constructor(options: { home?: string; configuredOrigin?: string; readProcesses?: () => Promise<ComputerProcessSnapshot>; storageDirectory?: string } = {}) {
+    this.slockHome = options.home ?? resolveRaftHome();
+    this.configuredOrigin = options.configuredOrigin ?? CONFIGURED_API_ORIGIN;
+    this.storageDirectory = options.storageDirectory ?? `${app.getPath("userData")}/computer-deployments`;
+    this.processScope = new ComputerProcessScope(this.slockHome);
+    this.readProcesses = options.readProcesses ?? (() => readComputerProcesses(this.slockHome));
+    this.api = createComputerApi(this.slockHome, { hostLifecycleOwner: "app" });
+  }
   private readonly readUpgradeInfo = createUpgradeInfoReader(
     () => fetchCdnLatestVersion(DEFAULT_UPGRADE_BASE_URL),
   );
@@ -91,8 +114,109 @@ class ComputerHost {
    * lifecycle hiccup never blocks the chat app from starting — but they ARE
    * recorded in convergeState for the renderer.
    */
-  async converge(): Promise<{ ok: boolean; error?: string }> {
+  /**
+   * Fail-closed takeover gate: a persisted session in this state root that
+   * belongs to a DIFFERENT deployment (origin ≠ the build's baked
+   * CONFIGURED_API_ORIGIN) must never be adopted, stopped, or recycled by
+   * this app — the 2026-10-02 incident had a self-hosted build drive a
+   * leftover session (and a sibling state root) it had no business touching.
+   */
+  private async sessionOriginMismatch(): Promise<string | null> {
+    const check = await checkSessionOrigin(this.slockHome, this.configuredOrigin);
+    if (check.status === "ok" || check.status === "none") return null;
+    return describeSessionOriginMismatch(check);
+  }
+
+  private selectHome(home: string): void {
+    this.slockHome = home;
+    this.processScope = new ComputerProcessScope(home);
+    this.api = createComputerApi(home, { hostLifecycleOwner: "app" });
+    this.lastStatus = null;
+  }
+
+  async restoreSelection(): Promise<void> {
     try {
+      const selected = await readDeploymentSelection(this.storageDirectory, this.configuredOrigin);
+      if (selected) this.selectHome(selected);
+    } catch {
+      this.selectionError = Object.assign(new Error("无法读取桌面 Computer 状态目录选择，请通过连接当前部署恢复；原服务未接管。"), { code: SESSION_ORIGIN_MISMATCH_CODE });
+    }
+  }
+
+  async connectCurrentDeployment(deps: {
+    confirm(plan: DeploymentConnectionPlan): Promise<boolean>;
+    authenticate(home: string, origin: string): Promise<void>;
+    targetUserId?: string;
+    signal?: AbortSignal;
+  }): Promise<void> {
+    if (this.connecting) throw new Error("正在连接当前部署，请完成或取消本次认证。");
+    if (this.controlInFlight > 0) throw new Error("Computer 正在处理操作，请完成后再连接当前部署。");
+    this.connecting = true;
+    let settle!: () => void;
+    this.connectionSettled = new Promise<void>((resolve) => { settle = resolve; });
+    try {
+      const check = await checkSessionOrigin(this.slockHome, this.configuredOrigin);
+      const status = await this.api.getStatus();
+      const selected = await connectDeployment({
+        currentOrigin: check.sessionOrigin ?? (check.status === "ok" ? this.configuredOrigin : "未知"),
+        targetOrigin: this.configuredOrigin,
+        currentHome: this.slockHome,
+        storageDirectory: this.storageDirectory,
+        connections: status.servers.map((server) => server.serverId),
+        targetUserId: deps.targetUserId,
+      }, deps);
+      if (selected) {
+        this.selectHome(selected);
+        this.selectionError = null;
+        // Authentication does not start a service or transfer any attachments.
+        this.convergeState = { ok: true };
+      }
+    } finally { this.connecting = false; settle(); }
+  }
+
+  private async control<T>(operation: () => Promise<T>): Promise<T> {
+    this.controlInFlight++;
+    try { return await operation(); }
+    finally { this.controlInFlight--; }
+  }
+
+  async waitForConnection(): Promise<void> { await this.connectionSettled; }
+
+  async runQuitAttempt(attempt: () => Promise<boolean>): Promise<boolean> {
+    // Keep the selected root stable through confirmation and the full ladder,
+    // including the window after stop() has returned but tools remain alive.
+    return this.control(attempt);
+  }
+
+  async assertCanControl(): Promise<void> {
+    if (this.connecting) throw new Error("正在连接当前部署，请完成或取消认证后再操作 Computer。");
+    if (this.selectionError) throw this.selectionError;
+    const mismatch = await this.sessionOriginMismatch();
+    if (mismatch !== null) throw Object.assign(new Error(mismatch), { code: SESSION_ORIGIN_MISMATCH_CODE });
+    this.processScope.assertRoots(await this.readProcesses());
+  }
+
+  /** Origin mismatch means this GUI never adopted the existing Computer. */
+  async canShutdown(): Promise<boolean> {
+    return !this.selectionError && (await this.sessionOriginMismatch()) === null;
+  }
+
+  async converge(): Promise<{ ok: boolean; error?: string }> {
+    return this.control(() => this.convergeInternal());
+  }
+
+  private async convergeInternal(): Promise<{ ok: boolean; error?: string }> {
+    try {
+      const mismatch = await this.sessionOriginMismatch();
+      if (mismatch !== null) {
+        // Block BEFORE any lifecycle action — no login-item convergence, no
+        // service stop/start, nothing that touches the foreign session.
+        this.convergeState = { ok: false, code: SESSION_ORIGIN_MISMATCH_CODE, message: mismatch };
+        return { ok: false, error: mismatch };
+      }
+
+      await this.assertCanControl();
+
       // Task #7 login item: on macOS the login start is OUR LaunchAgent
       // running `open -a "Raft Desktop" --args --hidden` (the OS-native
       // setLoginItemSettings cannot carry args there, and wasOpenedAtLogin is
@@ -155,12 +279,12 @@ class ComputerHost {
     }
   }
 
-  async getStatus(): Promise<ComputerStatusReport & { converge?: ConvergeState }> {
+  async getStatus(): Promise<ComputerStatusReport & { converge?: ConvergeState; controlHome: string }> {
     const status = await this.api.getStatus();
     this.lastStatus = status;
     // converge rides the existing status snapshot — no new IPC channel. It is
     // omitted while null so pre-converge frames look exactly like before.
-    return this.convergeState === null ? status : { ...status, converge: this.convergeState };
+    return { ...status, controlHome: this.slockHome, ...(this.convergeState === null ? {} : { converge: this.convergeState }) };
   }
 
   /**
@@ -169,10 +293,32 @@ class ComputerHost {
    * from the passed tokens, attaches, then starts the service for the new server.
    */
   async enable(input: EnableComputerInput): Promise<AttachResult> {
+    return this.control(() => this.enableInternal(input));
+  }
+
+  private async enableInternal(input: EnableComputerInput): Promise<AttachResult> {
     // Validate BEFORE touching the shared session on disk — never overwrite a
     // working session with an empty/garbage one from a malformed call.
     if (!isValidEnableInput(input)) throw new Error("enable_missing_fields");
-    await this.writeUserSession(input);
+    let inputOrigin: string | null = null;
+    try { inputOrigin = new URL(input.serverUrl).origin; } catch { /* invalid URL */ }
+    if (inputOrigin !== this.configuredOrigin) {
+      throw Object.assign(new Error(`请登录当前部署 ${this.configuredOrigin} 后启用这台计算机。`), { code: SESSION_ORIGIN_MISMATCH_CODE });
+    }
+    await this.assertCanControl();
+    // Existing device authorization remains authoritative. Web tokens must
+    // never replace a saved Computer identity, including after recovery.
+    const sessionCheck = await checkSessionOrigin(this.slockHome, this.configuredOrigin);
+    if (sessionCheck.status === "none") {
+      await this.writeUserSession(input);
+    } else {
+      const saved = JSON.parse(await readFile(userSessionPath(this.slockHome), "utf8")) as { userId?: unknown };
+      if (input.userId && saved.userId !== input.userId) {
+        const message = "本地 Computer 授权账号与当前桌面账号不同，请连接当前部署并用当前账号认证；原会话和挂载会保留。";
+        this.convergeState = { ok: false, code: SESSION_ORIGIN_MISMATCH_CODE, message };
+        throw Object.assign(new Error(message), { code: SESSION_ORIGIN_MISMATCH_CODE });
+      }
+    }
     const attached = await this.api.attach({
       serverSlug: input.serverSlug,
       serverUrl: input.serverUrl,
@@ -186,6 +332,11 @@ class ComputerHost {
   }
 
   async start(): Promise<void> {
+    return this.control(() => this.startInternal());
+  }
+
+  private async startInternal(): Promise<void> {
+    await this.assertCanControl();
     await this.api.start({ serverId: null, serverLabel: null });
     // Any action that leaves the local service running clears a stale
     // converge/recycle failure notice (e.g. the start-only retry offered after
@@ -193,12 +344,34 @@ class ComputerHost {
     this.convergeState = { ok: true };
   }
 
-  async stop(): Promise<void> {
-    await this.api.stop();
+  async stop(signal?: AbortSignal): Promise<void> {
+    return this.control(() => this.stopInternal(signal));
+  }
+
+  private async stopInternal(signal?: AbortSignal): Promise<void> {
+    await this.assertCanControl();
+    const expected = this.processScope.observe(await this.readProcesses());
+    await this.api.stop(undefined, {
+      signal,
+      killService: async (pid) => {
+        const identity = expected.find((row) => row.pid === pid && row.root);
+        const current = (await this.readProcesses()).rows.find((row) => row.pid === pid);
+        if (!identity || !this.processScope.matches(identity, current)) {
+          throw new Error(`进程 ${pid} 的归属或启动身份已变化，未发送停止信号。`);
+        }
+        signal?.throwIfAborted();
+        process.kill(pid, "SIGTERM");
+      },
+    });
   }
 
   /** Bring a degraded service back (the reference app's "restart"). */
   async restart(): Promise<void> {
+    return this.control(() => this.restartInternal());
+  }
+
+  private async restartInternal(): Promise<void> {
+    await this.assertCanControl();
     await this.api.resetService();
   }
 
@@ -212,9 +385,14 @@ class ComputerHost {
    * leaves the machine stopped, so the retry must be start-only).
    */
   async recycleService(): Promise<void> {
+    return this.control(() => this.recycleServiceInternal());
+  }
+
+  private async recycleServiceInternal(): Promise<void> {
+    await this.assertCanControl();
     await runServiceRecycle({
       stop: async () => {
-        await this.api.stop();
+        await this.stop();
       },
       start: async () => {
         await this.api.start({ serverId: null, serverLabel: null });
@@ -255,6 +433,11 @@ class ComputerHost {
    * reports progress through getStatus().upgrade (polled + pushed to the card).
    */
   async upgrade(): Promise<void> {
+    return this.control(() => this.upgradeInternal());
+  }
+
+  private async upgradeInternal(): Promise<void> {
+    await this.assertCanControl();
     const latest = await fetchCdnLatestVersion(DEFAULT_UPGRADE_BASE_URL);
     if (!latest) throw new Error("no_update_available");
     const result = await this.api.tryUpgradeViaService(latest, undefined, { trigger: "tray" });
@@ -304,6 +487,11 @@ class ComputerHost {
    * standalone install; install.sh restarts the resident onto the new bytes.
    */
   async upgradeViaFreshInstall(version: string): Promise<void> {
+    return this.control(() => this.upgradeViaFreshInstallInternal(version));
+  }
+
+  private async upgradeViaFreshInstallInternal(version: string): Promise<void> {
+    await this.assertCanControl();
     if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?$/.test(version)) throw new Error("bad_version");
     // Defense in depth at the execution boundary (the renderer router already
     // guards): the installer provisions a STANDALONE binary, so refuse unless we
@@ -313,7 +501,10 @@ class ComputerHost {
     if (model !== "standalone") throw new Error("not_standalone_computer");
     const command = `curl -fsSL ${DEFAULT_UPGRADE_BASE_URL}/install.sh | RAFT_COMPUTER_VERSION=${version} sh`;
     await new Promise<void>((resolve, reject) => {
-      execFile("/bin/sh", ["-c", command], { timeout: FRESH_INSTALL_TIMEOUT_MS }, (error, _stdout, stderr) => {
+      execFile("/bin/sh", ["-c", command], {
+        timeout: FRESH_INSTALL_TIMEOUT_MS,
+        env: { ...process.env, RAFT_HOME: this.slockHome, SLOCK_HOME: this.slockHome },
+      }, (error, _stdout, stderr) => {
         if (error) reject(new Error(`fresh_install_failed: ${String(stderr || error.message).slice(0, 400)}`));
         else resolve();
       });

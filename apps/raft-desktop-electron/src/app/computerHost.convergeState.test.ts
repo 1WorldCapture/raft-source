@@ -6,8 +6,13 @@
 // both are module-mocked; the api stub's start() is scripted per phase.
 import assert from "node:assert/strict";
 import test from "node:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 test("start() success clears a failed converge notice; enable() does too", async (t) => {
+  const testHome = await mkdtemp(path.join(tmpdir(), "raft-host-converge-"));
+  t.after(() => rm(testHome, { recursive: true, force: true }));
   const starts: string[] = [];
   let failNextStart = true;
   const api = {
@@ -30,8 +35,13 @@ test("start() success clears a failed converge notice; enable() does too", async
     app: {
       getLoginItemSettings: () => ({ openAtLogin: true }),
       setLoginItemSettings: () => {},
-      getPath: () => "/tmp/raft-host-test",
+      getPath: () => testHome,
     },
+  } });
+  t.mock.module("./sessionOriginGuard.js", { namedExports: {
+    checkSessionOrigin: async () => ({ status: "none", configuredOrigin: "https://example.invalid" }),
+    describeSessionOriginMismatch: () => "",
+    SESSION_ORIGIN_MISMATCH_CODE: "SESSION_ORIGIN_MISMATCH",
   } });
   t.mock.module("@botiverse/raft-computer/lib", { namedExports: {
     connectService: async () => { throw new Error("unused"); },
@@ -41,12 +51,12 @@ test("start() success clears a failed converge notice; enable() does too", async
     rebindParentEvidence: async () => {},
     DEFAULT_UPGRADE_BASE_URL: "https://example.invalid/computer",
     fetchCdnLatestVersion: async () => null,
-    resolveRaftHome: () => "/tmp/raft-host-test",
+    resolveRaftHome: () => testHome,
     userSessionPath: (home: string) => `${home}/user-session.json`,
   } });
 
   const { ComputerHost } = await import("./computerHost.ts");
-  const host = new ComputerHost();
+  const host = new ComputerHost({ home: testHome, configuredOrigin: "http://example.invalid", readProcesses: async () => ({rootPids: [], rows: []}) });
 
   // Simulate the failure state the card surfaces: a recycle whose start threw.
   // stop succeeds, the service reports not-running, then start fails.
@@ -73,4 +83,26 @@ test("start() success clears a failed converge notice; enable() does too", async
 
   // Ordering sanity: recycle stopped once, then starts went all → failed → (via retry) all.
   assert.deepEqual(starts, ["stop", "start:all", "start:all", "start:s1"]);
+
+  // Rebinding must not swap the API/root underneath an admitted operation.
+  let release!: () => void;
+  const paused = new Promise<void>((resolve) => { release = resolve; });
+  const guarded = new ComputerHost({ home: testHome, configuredOrigin: "http://example.invalid",
+    readProcesses: async () => { await paused; return { rootPids: [], rows: [] }; } });
+  const starting = guarded.start();
+  await assert.rejects(guarded.connectCurrentDeployment({
+    confirm: async () => true, authenticate: async () => {},
+  }), /正在处理操作/);
+  release();
+  await starting;
+
+  let finishQuit!: () => void;
+  const quitWait = new Promise<void>((resolve) => { finishQuit = resolve; });
+  const quitting = guarded.runQuitAttempt(async () => { await quitWait; return true; });
+  await assert.rejects(guarded.connectCurrentDeployment({
+    confirm: async () => true, authenticate: async () => {},
+  }), /正在处理操作/);
+  finishQuit();
+  assert.equal(await quitting, true);
+
 });

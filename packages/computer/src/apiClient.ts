@@ -6,6 +6,34 @@ import { fetch } from "undici";
 import { computerFetch } from "./proxy.js";
 import { classifyAdoptLegacyAccessResponse, type AdoptLegacyAccessResult } from "./lib/adoptLegacyResponse.js";
 
+export interface AuthRequestOptions {
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}
+
+/** Keep the deadline alive until the response body has been consumed. */
+async function authRequest<T>(options: AuthRequestOptions, request: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  options.signal?.throwIfAborted();
+  const controller = new AbortController();
+  const cancel = () => controller.abort(options.signal?.reason);
+  options.signal?.addEventListener("abort", cancel, { once: true });
+  const timer = setTimeout(() => controller.abort(new DOMException("Computer authentication request timed out", "TimeoutError")),
+    options.timeoutMs ?? 15_000);
+  try {
+    const result = await request(controller.signal);
+    controller.signal.throwIfAborted();
+    return result;
+  } catch (error) {
+    controller.signal.throwIfAborted();
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    options.signal?.removeEventListener("abort", cancel);
+    // Also close any unconsumed body on an error-status early return.
+    controller.abort();
+  }
+}
+
 export interface DeviceAuthorizeResult {
   deviceCode: string;
   userCode: string;
@@ -29,47 +57,47 @@ export class DeviceAuthClient {
     return new URL(p, this.baseUrl).toString();
   }
 
-  async authorize(clientName: string): Promise<DeviceAuthorizeResult> {
-    const res = await computerFetch(this.url("/api/auth/device/authorize"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ clientName }),
+  async authorize(clientName: string, options: AuthRequestOptions = {}): Promise<DeviceAuthorizeResult> {
+    return authRequest<DeviceAuthorizeResult>(options, async (signal) => {
+      const res = await computerFetch(this.url("/api/auth/device/authorize"), {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clientName }), signal,
+      });
+      if (res.status === 404) {
+        throw new Error(
+          "device login is not enabled on this server (ask an admin to unset SLOCK_DEVICE_LOGIN_ENABLED or set it back to a non-false value; this surface is on by default since PR-G — upgrade the server if you are on an older build)",
+        );
+      }
+      if (res.status !== 201) {
+        throw new Error(`device authorize failed (HTTP ${res.status}) — check --server-url / server version`);
+      }
+      const body = (await res.json().catch(() => null)) as DeviceAuthorizeResult | null;
+      if (!body || typeof body.deviceCode !== "string" || typeof body.userCode !== "string") {
+        throw new Error("device authorize returned an unexpected response — server may be incompatible");
+      }
+      return body;
     });
-    if (res.status === 404) {
-      throw new Error(
-        "device login is not enabled on this server (ask an admin to unset SLOCK_DEVICE_LOGIN_ENABLED or set it back to a non-false value; this surface is on by default since PR-G — upgrade the server if you are on an older build)",
-      );
-    }
-    if (res.status !== 201) {
-      throw new Error(`device authorize failed (HTTP ${res.status}) — check --server-url / server version`);
-    }
-    const body = (await res.json().catch(() => null)) as DeviceAuthorizeResult | null;
-    if (!body || typeof body.deviceCode !== "string" || typeof body.userCode !== "string") {
-      throw new Error("device authorize returned an unexpected response — server may be incompatible");
-    }
-    return body;
   }
 
-  async token(deviceCode: string): Promise<DeviceTokenResult> {
-    const res = await computerFetch(this.url("/api/auth/device/token"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ deviceCode }),
+  async token(deviceCode: string, options: AuthRequestOptions = {}): Promise<DeviceTokenResult> {
+    return authRequest<DeviceTokenResult>(options, async (signal) => {
+      const res = await computerFetch(this.url("/api/auth/device/token"), {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deviceCode }), signal,
+      });
+      const body = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+      if (res.status === 200 && body && typeof body.accessToken === "string") {
+        return {
+          status: "success", accessToken: body.accessToken,
+          refreshToken: String(body.refreshToken ?? ""), userId: String(body.userId ?? ""),
+        };
+      }
+      const code = body && typeof body.code === "string" ? body.code : `http_${res.status}`;
+      if (code === "authorization_pending") return { status: "pending" };
+      if (code === "access_denied") return { status: "denied" };
+      if (code === "expired_token") return { status: "expired" };
+      return { status: "error", code };
     });
-    const body = (await res.json().catch(() => null)) as Record<string, unknown> | null;
-    if (res.status === 200 && body && typeof body.accessToken === "string") {
-      return {
-        status: "success",
-        accessToken: body.accessToken as string,
-        refreshToken: String(body.refreshToken ?? ""),
-        userId: String(body.userId ?? ""),
-      };
-    }
-    const code = body && typeof body.code === "string" ? (body.code as string) : `http_${res.status}`;
-    if (code === "authorization_pending") return { status: "pending" };
-    if (code === "access_denied") return { status: "denied" };
-    if (code === "expired_token") return { status: "expired" };
-    return { status: "error", code };
   }
 }
 // --- Computer attach (RFC v0.8 contract v3 §6/§9) ---
@@ -507,8 +535,8 @@ export type UserIdentityResult =
   | { status: "error"; code: string };
 
 /** Reads the signed-in user's profile for display. Mirrors `ServersClient`:
- *  bearer the user access token, never throws — failures map to the closed
- *  result union so the caller (login-time enrichment) can degrade gracefully. */
+ *  bearer the user access token; failures map to the closed result union so
+ *  login-time enrichment can degrade gracefully. Explicit cancellation throws. */
 export class AuthClient {
   constructor(
     private readonly baseUrl: string,
@@ -519,36 +547,44 @@ export class AuthClient {
     return new URL(p, this.baseUrl).toString();
   }
 
-  async me(): Promise<UserIdentityResult> {
-    let res: Awaited<ReturnType<typeof fetch>>;
+  async me(options: AuthRequestOptions = {}): Promise<UserIdentityResult> {
     try {
-      res = await computerFetch(this.url("/api/auth/me"), {
-        method: "GET",
-        headers: { Authorization: `Bearer ${this.accessToken}` },
+      return await authRequest<UserIdentityResult>(options, async (signal) => {
+        let res: Awaited<ReturnType<typeof fetch>>;
+        try {
+          res = await computerFetch(this.url("/api/auth/me"), {
+            method: "GET",
+            headers: { Authorization: `Bearer ${this.accessToken}` },
+            signal,
+          });
+        } catch {
+          return { status: "error", code: "request_failed" };
+        }
+        if (res.status === 401) return { status: "auth_required" };
+        const body = (await res.json().catch(() => null)) as unknown;
+        if (res.status === 200 && body && typeof body === "object") {
+          const u = body as Record<string, unknown>;
+          if (typeof u.id === "string" && typeof u.email === "string" && typeof u.name === "string") {
+            return {
+              status: "success",
+              user: {
+                id: u.id,
+                email: u.email,
+                name: u.name,
+                displayName: typeof u.displayName === "string" ? u.displayName : null,
+              },
+            };
+          }
+          return { status: "error", code: "unexpected_shape" };
+        }
+        const errBody = body as Record<string, unknown> | null;
+        const code = errBody && typeof errBody.code === "string" ? (errBody.code as string) : `http_${res.status}`;
+        return { status: "error", code };
       });
     } catch {
+      options.signal?.throwIfAborted();
       return { status: "error", code: "request_failed" };
     }
-    if (res.status === 401) return { status: "auth_required" };
-    const body = (await res.json().catch(() => null)) as unknown;
-    if (res.status === 200 && body && typeof body === "object") {
-      const u = body as Record<string, unknown>;
-      if (typeof u.id === "string" && typeof u.email === "string" && typeof u.name === "string") {
-        return {
-          status: "success",
-          user: {
-            id: u.id,
-            email: u.email,
-            name: u.name,
-            displayName: typeof u.displayName === "string" ? u.displayName : null,
-          },
-        };
-      }
-      return { status: "error", code: "unexpected_shape" };
-    }
-    const errBody = body as Record<string, unknown> | null;
-    const code = errBody && typeof errBody.code === "string" ? (errBody.code as string) : `http_${res.status}`;
-    return { status: "error", code };
   }
 }
 

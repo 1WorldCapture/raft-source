@@ -51,6 +51,7 @@ function friendlyError(raw: string): string {
 export default function ThisComputerCard() {
   const bridge = getComputerBridge();
   const currentServer = useServerStore((s) => s.current);
+  const userId = useAuthStore((s) => s.user?.id);
   const selfMachine = useSelfMachine();
   const nav = useAppNavigate();
   const [status, setStatus] = useState<ComputerStatusReport | null>(null);
@@ -184,7 +185,7 @@ export default function ThisComputerCard() {
         try {
           await bridge.upgradeViaFreshInstall!(freshTarget);
         } catch (e) {
-          setManualCmd(freshInstallCommand(freshTarget));
+          setManualCmd(status?.controlHome ? freshInstallCommand(freshTarget, undefined, status.controlHome) : null);
           throw e;
         }
       });
@@ -269,6 +270,10 @@ export default function ThisComputerCard() {
                       {actionLabel("start", "Start")}
                     </Button>
                   </div>
+                ) : notice.action === "connect-deployment" && bridge.connectCurrentDeployment ? (
+                  <Button size="xs" disabled={busy != null} className="mt-1" onClick={() => runAction("retry", () => bridge.connectCurrentDeployment!(userId))}>
+                    连接当前部署
+                  </Button>
                 ) : notice.action === "retry-converge" && bridge.retryConverge ? (
                   <Button size="xs" disabled={busy != null} className="mt-1" onClick={() => runAction("retry", () => bridge.retryConverge!())}>
                     {actionLabel("retry", "Retry")}
@@ -359,6 +364,8 @@ export default function ThisComputerCard() {
 
   // STATE 2/3 — not attached to the active server: a lightweight enable row.
   const hasInstall = (status?.servers?.length ?? 0) > 0 || !!status?.service?.running;
+  const notice = deriveConvergeNotice(status?.converge);
+  const needsConnection = notice?.action === "connect-deployment" && !!bridge.connectCurrentDeployment;
   return (
     <div
       className="mb-1.5 flex w-full items-center gap-2.5 border-2 border-transparent px-2.5 py-2"
@@ -369,8 +376,8 @@ export default function ThisComputerCard() {
       </div>
       <div className="min-w-0 flex-1">
         <div className="truncate text-sm font-bold text-black">{deviceName}</div>
-        <div className="mt-0.5 truncate text-[11px] text-black/50">
-          {error ? friendlyError(error) : hasInstall ? `Not connected to ${currentServer.name}` : "Not enabled"}
+        <div className="mt-0.5 text-[11px] text-black/50">
+          {notice?.message ?? (error ? friendlyError(error) : hasInstall ? `Not connected to ${currentServer.name}` : "Not enabled")}
         </div>
       </div>
       <Button
@@ -378,10 +385,10 @@ export default function ThisComputerCard() {
         emphasis="high"
         size="xs"
         disabled={busy != null}
-        onClick={onEnable}
+        onClick={needsConnection ? () => runAction("retry", () => bridge.connectCurrentDeployment!(userId)) : onEnable}
         className="shrink-0"
       >
-        {busy === "enable" ? "Enabling…" : "Enable"}
+        {busy != null ? "处理中…" : needsConnection ? "连接当前部署" : "Enable"}
       </Button>
     </div>
   );
