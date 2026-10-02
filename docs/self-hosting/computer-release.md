@@ -26,7 +26,7 @@
 ├── install.sh             # 入口脚本（shell）
 ├── install.ps1            # 入口脚本（PowerShell）
 └── <version>/             # 版本目录：不可变
-    ├── manifest.json      # 该版本清单（targets + photonWasm，含 sha256/size_bytes）
+    ├── manifest.json      # 该版本清单（targets + photonWasm，含 sha256/size）
     ├── raft-computer-<target>...   # 各平台二进制（含可选 gz 边车）
     └── photon_rs_bg.wasm  # 图像处理 wasm 边车
 ```
@@ -39,17 +39,27 @@ nginx 模板（`ops/self-host/nginx/raft.conf.tmpl`）的缓存策略：
 
 ## 2. 运维配置 env.local
 
-`ops/self-host/env.example` 新增一项，复制到 `env.local` 后按需调整：
+`ops/self-host/env.example` 新增一项，复制到 `env.local` 后按需调整（可不设，默认 `/srv/raft-computer`）：
 
 ```bash
 RAFT_COMPUTER_WEB_ROOT=/srv/raft-computer
 ```
 
-改完后重渲染并热加载 nginx（改模板，不要手改 `$RAFT_OPS_HOME/nginx/` 里的渲染产物）：
+**重渲染 nginx 的安全路径**：不要手改 `$RAFT_OPS_HOME/nginx/` 里的渲染产物，也**不要在 TLS 配置未进模板变量时盲目重渲染**——渲染会覆盖手工加进渲染产物的 HTTPS 配置。正确做法是把 TLS 通过变量表达进 `env.local`，再渲染：
 
 ```bash
-ops/self-host/render-nginx.sh --reload
+# env.local 中（三项需同时设置；证书文件须已存在）
+RAFT_TLS_SERVER_NAME=raft.example.internal
+RAFT_TLS_CERT=/var/lib/raft-ops/certs/raft.example.internal.crt
+RAFT_TLS_KEY=/var/lib/raft-ops/certs/raft.example.internal.key
 ```
+
+```bash
+ops/self-host/render-nginx.sh          # 渲染 + nginx -t 校验
+ops/self-host/render-nginx.sh --reload  # 校验通过后热加载
+```
+
+TLS 变量齐全时：主站监听 `443 ssl http2`、80 端口 301 跳转 https（`/health` 仍可在 80 探活）；未设置时保持原有纯端口行为不变。已有手工 TLS 定制的部署，先把证书路径与域名填入上述变量（与手工配置等价）再重渲染，HTTPS 不会丢失。
 
 ## 3. 服务端配置 packages/server/.env
 
@@ -69,7 +79,7 @@ RAFT_COMPUTER_PINNED_VERSION=                      # 可选，映射 pinned:<ver
 
 使用 `ops/self-host/publish-computer.sh <staging-dir>`。staging 目录按第 1 节布局准备（恰好一个 `<version>/` 目录 + 可选入口脚本），脚本按契约顺序执行：
 
-1. **校验**：解析版本目录的 `manifest.json`，逐文件核对 sha256 与 size_bytes（targets、gz 边车、photonWasm），多余未引用文件也拒绝——损坏或不完整的 staging 在任何线上变更之前失败；
+1. **校验**：解析版本目录的 `manifest.json`，逐文件核对 sha256 与 size（targets、gz 边车、photonWasm；字段缺失即拒绝，不做跳过），多余未引用文件也拒绝——损坏或不完整的 staging 在任何线上变更之前失败；
 2. **发布版本目录**：拷贝到临时目录并二次核对后原子 `mv` 为 `<version>/`，并去除写权限；
 3. **入口脚本**：内容有变化则原子替换（本机有 shellcheck 时先过一遍 `install.sh`）；
 4. **最后切换 latest 指针**：生成 `{"version": "<version>"}`，回读解析无误后原子 `os.replace` 到根 `manifest.json`。
@@ -82,8 +92,8 @@ RAFT_COMPUTER_PINNED_VERSION=                      # 可选，映射 pinned:<ver
 
 ## 5. 首版约束
 
-- `/computer/` 下的 `install.sh` / `install.ps1` **必须是支持持久化契约的新版脚本**（安装即写入 `release-source.json`、统一安装/升级变量）。直接镜像官方旧脚本不足以完成引导闭环——首个可用版本 = 新脚本 + 该版本全部产物 + manifest，三者同批落库；
-- 官方旧版本目录可以直接复用其产物**仅当**入口脚本已是新版（产物本身与来源无关，校验逻辑不变）；
+- 首个可用版本要求**入口脚本与二进制都支持持久化契约**：`install.sh` / `install.ps1` 负责安装即写入 `release-source.json`、统一安装/升级变量，而读取持久化来源、Hands origin、统一升级配置都在新版 Computer 二进制中——只换脚本不换二进制无法获得这些能力，不可作为首版；
+- 发布脚本强制：**首次发布必须同时提供两种入口脚本**（install.sh + install.ps1）与该版本产物、manifest 同批落库；后续发布可省略入口脚本（复用已发布的版本），镜像官方旧产物不满足首版要求；
 - 新引导发布前必须完成 A/B/C 联调（全新安装 → 注册 → 服务重启 → 升级），见契约「PR 与交付」节。
 
 ## 6. 网络可达性（Tailscale）
