@@ -13,19 +13,6 @@ interface ComputerCommandGuideProps {
   className?: string;
   macLinuxDaemonCommand: string;
   windowsDaemonCommand: string;
-  /**
-   * Contract v1: the runtime deployment config is still loading. While true,
-   * no command rows are rendered yet — the guide shows a preparing state so
-   * the user never copies a stale or official-fallback command.
-   */
-  deploymentLoading?: boolean;
-  /**
-   * Contract v1: the deployment config is not ready (missing/invalid config,
-   * network failure, unknown schema). Non-null carries the user-facing reason;
-   * ALL command rows and copy buttons are replaced by a visible error.
-   * Commands must never silently fall back to official sources.
-   */
-  deploymentLockReason?: string | null;
   onPlatformChange?: (platform: ComputerCommandPlatform) => void;
   onRequestWindowsDaemonCommand?: () => void;
   windowsDaemonCommandPending?: boolean;
@@ -130,8 +117,6 @@ export default function ComputerCommandGuide({
   className = "",
   macLinuxDaemonCommand,
   windowsDaemonCommand,
-  deploymentLoading = false,
-  deploymentLockReason = null,
   onPlatformChange,
   onRequestWindowsDaemonCommand,
   windowsDaemonCommandPending = false,
@@ -140,36 +125,6 @@ export default function ComputerCommandGuide({
   const { formatMessage } = useIntl();
   const [platform, setPlatform] = useState<ComputerCommandPlatform>("mac-linux");
   const [copiedCommand, setCopiedCommand] = useState<CopyTarget | null>(null);
-
-  // Contract v1 lock: a non-ready deployment config replaces every command row
-  // (Computer AND legacy daemon — both embed deployment URLs) with a visible
-  // error, so there is nothing copyable that could point at the wrong server.
-  if (deploymentLockReason) {
-    return (
-      <div className={className} data-testid="computer-guide-deployment-error">
-        <div className="mb-2 flex items-center gap-2">
-          <Terminal size={16} className="text-black" />
-          <SectionEyebrow as="div">{formatMessage({ id: "machine.commandGuide.connectCommand" })}</SectionEyebrow>
-        </div>
-        <div className="border-2 border-black bg-brutal-pink px-3 py-2 text-xs font-bold text-black">
-          {deploymentLockReason}
-        </div>
-      </div>
-    );
-  }
-  if (deploymentLoading) {
-    return (
-      <div className={className} data-testid="computer-guide-deployment-loading">
-        <div className="mb-2 flex items-center gap-2">
-          <Terminal size={16} className="text-black" />
-          <SectionEyebrow as="div">{formatMessage({ id: "machine.commandGuide.connectCommand" })}</SectionEyebrow>
-        </div>
-        <div className="border-2 border-black/30 bg-white px-3 py-2 text-xs font-bold text-black/50">
-          {formatMessage({ id: "machine.commandGuide.deploymentLoading" })}
-        </div>
-      </div>
-    );
-  }
 
   const isComputerGuide = Boolean(
     computerCommand || computerInstallCommand || windowsComputerCommand || windowsComputerInstallCommand,

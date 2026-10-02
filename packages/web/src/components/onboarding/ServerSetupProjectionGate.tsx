@@ -12,8 +12,8 @@ import ServerSetupComputerRuntimeStep from "./ServerSetupComputerRuntimeStep";
 import type { ServerSetupComputer } from "./ServerSetupComputerRuntimeStep";
 import ServerSetupHandoffStep from "./ServerSetupHandoffStep";
 import ServerSetupSurveyStep from "./ServerSetupSurveyStep";
-import { getComputerCommandsFromDeployment, getDaemonConnectCommand, isIsolatedDeploymentEnv } from "../../utils/computerSetupCommand";
-import { useDeploymentComputerSetup } from "../../hooks/useDeploymentComputerSetup";
+import { getComputerCommands, getDaemonConnectCommand } from "../../utils/computerSetupCommand";
+import { getServerUrl } from "../../utils/server";
 import { emitHostEvent, hasRaftHostEventBridge, readRaftHostOnboardingContext } from "../../embed/hostBridge";
 import { NATIVE_ONBOARDING_CONTRACT_VERSION } from "../../embed/nativeOnboarding";
 import {
@@ -95,10 +95,6 @@ export default function ServerSetupProjectionGate({
   // reveal the retained Daemon / Legacy fallback.
   const [windowsApiKey, setWindowsApiKey] = useState("");
   const [windowsKeyPending, setWindowsKeyPending] = useState(false);
-  // Contract v1: onboarding commands come from the runtime deployment config.
-  // Called before any conditional return (rules of hooks); the derived values
-  // are consumed by the Computer runtime step below.
-  const { setup: deploymentSetup, loading: deploymentLoading } = useDeploymentComputerSetup();
 
   const ensureWindowsApiKey = useCallback(async () => {
     if (windowsApiKey || windowsKeyPending) return;
@@ -455,31 +451,19 @@ export default function ServerSetupProjectionGate({
     await navigator.clipboard.writeText(command).catch(() => undefined);
   };
 
-  // Contract v1: onboarding commands come from the runtime deployment config,
-  // never from build-time constants. A non-ready config locks the guide with a
-  // visible error instead of degrading to official sources.
-  const deploymentConfig = deploymentSetup?.kind === "ready" ? deploymentSetup.config : null;
-  const deploymentLockReason = deploymentSetup?.kind === "unavailable"
-    ? formatMessage({ id: "machine.commandGuide.deploymentUnavailable" })
-    : null;
-  // staging/slockdev QA builds isolate the tester's Computer home; sources stay
-  // in the deployment config either way.
-  const isolatedHomeSlug = isIsolatedDeploymentEnv(import.meta.env?.VITE_DEPLOYMENT_ENV) ? serverSlug : null;
-  const computerCommands = deploymentConfig
-    ? getComputerCommandsFromDeployment({ deployment: deploymentConfig, serverSlug, isolatedHomeSlug })
-    : null;
-  const windowsComputerCommands = deploymentConfig
-    ? getComputerCommandsFromDeployment({ deployment: deploymentConfig, serverSlug, platform: "windows", isolatedHomeSlug })
-    : null;
-  const daemonDistTag = import.meta.env?.VITE_DEPLOYMENT_ENV === "staging" ? "staging" : "latest";
-  const daemonCommandFor = (platform: "mac-linux" | "windows") => deploymentConfig
-    ? getDaemonConnectCommand({
-      apiKey: windowsApiKey,
-      distTag: daemonDistTag,
-      platform,
-      serverUrl: deploymentConfig.serverUrl,
-    })
-    : "";
+  const serverUrl = getServerUrl();
+  const deploymentEnv = import.meta.env?.VITE_DEPLOYMENT_ENV;
+  const computerCommands = getComputerCommands(serverSlug, deploymentEnv, serverUrl);
+  const windowsComputerCommands = getComputerCommands(serverSlug, deploymentEnv, serverUrl, {
+    platform: "windows",
+  });
+  const daemonDistTag = deploymentEnv === "staging" ? "staging" : "latest";
+  const daemonCommandFor = (platform: "mac-linux" | "windows") => getDaemonConnectCommand({
+    apiKey: windowsApiKey,
+    distTag: daemonDistTag,
+    platform,
+    serverUrl,
+  });
 
   // The confirm dialog. Rendered ALONGSIDE whichever surface is up (Meet Cindy or Screen B),
   // never nested inside its Modal — a confirm nested in an onboarding Modal never mounted at
@@ -548,8 +532,6 @@ export default function ServerSetupProjectionGate({
         showOwnApiKey={false}
         loading={loading}
         error={error || gateMessage(projection.gateReason, formatMessage)}
-        deploymentLoading={deploymentLoading}
-        deploymentLockReason={deploymentLockReason}
         setupCommand={computerCommands?.setup ?? null}
         computerInstallCommand={computerCommands?.install}
         windowsComputerSetupCommand={windowsComputerCommands?.setup ?? null}

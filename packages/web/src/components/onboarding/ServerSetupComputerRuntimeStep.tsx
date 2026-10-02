@@ -123,14 +123,6 @@ export type ServerSetupComputerRuntimeStepProps = {
   showOwnApiKey?: boolean;
   loading?: boolean;
   error?: string;
-  /** True while the runtime deployment config (`/api/deployment/computer-setup`) is still loading. */
-  deploymentLoading?: boolean;
-  /**
-   * Contract v1: when the deployment config is not ready, the guide must show
-   * a visible error and command copy stays disabled — no official fallback.
-   * Non-null carries the user-facing reason.
-   */
-  deploymentLockReason?: string | null;
   setupCommand?: string | null;
   macLinuxDaemonCommand?: string;
   windowsComputerInstallCommand?: string;
@@ -204,8 +196,6 @@ export default function ServerSetupComputerRuntimeStep({
   showOwnApiKey = true,
   loading = false,
   error = "",
-  deploymentLoading = false,
-  deploymentLockReason = null,
   setupCommand = null,
   computerInstallCommand = "",
   macLinuxDaemonCommand = "",
@@ -349,8 +339,6 @@ export default function ServerSetupComputerRuntimeStep({
               serverSlug={serverSlug ?? null}
               macLinuxDaemonCommand={macLinuxDaemonCommand}
               windowsDaemonCommand={windowsDaemonCommand}
-              deploymentLoading={deploymentLoading}
-              deploymentLockReason={deploymentLockReason}
               onRequestWindowsDaemonCommand={onRequestWindowsDaemonCommand}
               windowsDaemonCommandPending={windowsDaemonCommandPending}
               canReset={canReset}
@@ -366,8 +354,6 @@ export default function ServerSetupComputerRuntimeStep({
                 windowsComputerInstallCommand={windowsComputerInstallCommand}
                 macLinuxDaemonCommand={macLinuxDaemonCommand}
                 windowsDaemonCommand={windowsDaemonCommand}
-                deploymentLoading={deploymentLoading}
-                deploymentLockReason={deploymentLockReason}
                 onPlatformChange={setPlatform}
                 onRequestWindowsDaemonCommand={onRequestWindowsDaemonCommand}
                 windowsDaemonCommandPending={windowsDaemonCommandPending}
@@ -536,8 +522,6 @@ function OfflineComputerRecovery({
   serverSlug,
   macLinuxDaemonCommand,
   windowsDaemonCommand,
-  deploymentLoading = false,
-  deploymentLockReason = null,
   onRequestWindowsDaemonCommand,
   windowsDaemonCommandPending = false,
   canReset = false,
@@ -547,8 +531,6 @@ function OfflineComputerRecovery({
   serverSlug: string | null;
   macLinuxDaemonCommand: string;
   windowsDaemonCommand: string;
-  deploymentLoading?: boolean;
-  deploymentLockReason?: string | null;
   onRequestWindowsDaemonCommand?: () => void;
   windowsDaemonCommandPending?: boolean;
   canReset?: boolean;
@@ -619,8 +601,6 @@ function OfflineComputerRecovery({
             computerInstallCommand={null}
             macLinuxDaemonCommand={macLinuxDaemonCommand}
             windowsDaemonCommand={windowsDaemonCommand}
-            deploymentLoading={deploymentLoading}
-            deploymentLockReason={deploymentLockReason}
             onRequestWindowsDaemonCommand={onRequestWindowsDaemonCommand}
             windowsDaemonCommandPending={windowsDaemonCommandPending}
           />
