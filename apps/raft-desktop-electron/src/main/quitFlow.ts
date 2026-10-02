@@ -2,7 +2,7 @@
 // process. The flow is: optional confirmation (skipped when the OS is already
 // shutting down, when "don't ask again" is set, or when there is nothing
 // running to stop), then the shutdown ladder from shutdown.ts (IPC stop →
-// group SIGTERM → group SIGKILL), then the real app quit. Pure decision
+// verified-PID SIGTERM → SIGKILL), then the real app quit. Pure decision
 // helpers stay unit-testable; `runQuitFlow` wires them to Electron.
 import { dialog, powerMonitor } from "electron";
 import { PRODUCT_NAME } from "./productName.js";
@@ -40,7 +40,7 @@ export function quitDialogCopy(agentCount: number | null): QuitDialogCopy {
   const who = agentCount === null ? "all local agents" : `${agentCount} local ${noun}`;
   return {
     message: `Quit ${PRODUCT_NAME}?`,
-    detail: `Quitting stops the background service and ${who} running on this Mac. They restart when you open ${PRODUCT_NAME} again.`,
+    detail: `Quitting stops this app's Computer service and ${who} owned by it. They restart when you open ${PRODUCT_NAME} again.`,
     checkboxLabel: "Don't ask again",
   };
 }
@@ -52,8 +52,8 @@ export interface QuitFlowDeps {
   agentCount(): number | null | Promise<number | null>;
   prefs(): QuitConfirmPrefs;
   savePrefs(prefs: QuitConfirmPrefs): void;
-  /** The shutdown ladder: IPC stop already issued + escalation to group
-   * kills. Receives the OS-shutdown flag so timeouts compress when logout
+  /** The shutdown ladder: IPC stop already issued + escalation to verified
+   * process termination. Receives the OS-shutdown flag so timeouts compress when logout
    * must not stall. */
   orchestrateShutdown(systemShutdown: boolean): Promise<void>;
   quit(): void;
@@ -83,9 +83,8 @@ export async function runQuitFlow(deps: QuitFlowDeps): Promise<boolean> {
     if (choice.response !== 0) return false;
     if (choice.checkboxChecked) deps.savePrefs({ quitNoConfirm: true });
   }
-  if (anythingRunning || osShuttingDown) {
-    await deps.orchestrateShutdown(osShuttingDown);
-  }
+  // Status can be stale or omit orphaned agents. Always inspect the tree.
+  await deps.orchestrateShutdown(osShuttingDown);
   return true;
 }
 
@@ -105,4 +104,30 @@ function powerMonitorIsShuttingDown(): boolean {
     }
   }
   return shutdownSeen;
+}
+
+/** Single-flight quit: repeated requests stay intercepted until cleanup really
+ * finishes. Cancellation/error reopens the gate so a later attempt can retry. */
+export function createQuitController(options: {
+  attempt(): Promise<boolean>;
+  complete(): void;
+  failed(error: unknown): void;
+}) {
+  let state: "idle" | "running" | "ready" = "idle";
+  return {
+    beforeQuit(event: { preventDefault(): void }): void {
+      if (state === "ready") return;
+      event.preventDefault();
+      if (state === "running") return;
+      state = "running";
+      void Promise.resolve().then(() => options.attempt()).then((proceed) => {
+        if (!proceed) { state = "idle"; return; }
+        state = "ready";
+        options.complete();
+      }).catch((error: unknown) => {
+        state = "idle";
+        options.failed(error);
+      });
+    },
+  };
 }

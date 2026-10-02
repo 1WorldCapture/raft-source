@@ -5,9 +5,8 @@
 // baked at build time. Before any takeover action (converge/start/stop/
 // recycle), compare the persisted user session's serverUrl origin with
 // CONFIGURED_API_ORIGIN; a mismatch blocks the action so the user is sent to
-// re-login instead of the app driving a Computer that talks to a stranger
-// backend. Sessions are never deleted or rewritten here — re-login (enable)
-// is the explicit migration path.
+// explicit deployment connection instead of silently controlling the old
+// backend. Recovery authenticates in a separate root; this guard never writes.
 
 import { readFile } from "node:fs/promises";
 import { userSessionPath } from "@botiverse/raft-computer/lib";
@@ -18,11 +17,11 @@ export const SESSION_ORIGIN_MISMATCH_CODE = "SESSION_ORIGIN_MISMATCH";
 export interface SessionOriginCheck {
   /**
    * - "ok": persisted session's origin matches the build's configured origin.
-   * - "none": no readable session (fresh machine, or session without a
-   *   parsable serverUrl) — nothing to protect, takeover may proceed.
+   * - "none": no session file on a fresh machine.
+   * - "invalid": unreadable/corrupt session; block rather than assume fresh.
    * - "mismatch": session belongs to another deployment — block.
    */
-  status: "ok" | "none" | "mismatch";
+  status: "ok" | "none" | "mismatch" | "invalid";
   sessionOrigin?: string;
   configuredOrigin: string;
 }
@@ -45,24 +44,22 @@ export async function checkSessionOrigin(
   let raw: string;
   try {
     raw = await read(userSessionPath(slockHome), "utf8");
-  } catch {
-    return { status: "none", configuredOrigin };
+  } catch (error) {
+    return { status: (error as NodeJS.ErrnoException).code === "ENOENT" ? "none" : "invalid", configuredOrigin };
   }
   let parsed: { serverUrl?: unknown };
   try {
     parsed = JSON.parse(raw) as { serverUrl?: unknown };
   } catch {
-    // An unparseable session carries no origin evidence to protect.
-    return { status: "none", configuredOrigin };
+    return { status: "invalid", configuredOrigin };
   }
-  const sessionOrigin = originOf(typeof parsed.serverUrl === "string" ? parsed.serverUrl : undefined);
-  if (sessionOrigin === null) return { status: "none", configuredOrigin };
+  const sessionOrigin = originOf(typeof parsed?.serverUrl === "string" ? parsed.serverUrl : undefined);
+  if (sessionOrigin === null) return { status: "invalid", configuredOrigin };
   if (sessionOrigin === configuredOrigin) return { status: "ok", configuredOrigin };
   return { status: "mismatch", sessionOrigin, configuredOrigin };
 }
 
 export function describeSessionOriginMismatch(check: SessionOriginCheck): string {
-  return `This Mac's local Computer session belongs to ${check.sessionOrigin}, `
-    + `but this build of Raft Desktop is configured for ${check.configuredOrigin}. `
-    + `Sign out of the old deployment and sign in to ${check.configuredOrigin} before using This Computer.`;
+  if (check.status === "invalid") return "无法读取本地 Computer 登录信息，未接管服务；请检查状态目录权限或点击“连接当前部署”独立认证。";
+  return `本地 Computer 登录在 ${check.sessionOrigin}，当前桌面应用连接 ${check.configuredOrigin}。请点击“连接当前部署”独立认证后再启用这台计算机；旧服务器挂载和数据会保留。`;
 }

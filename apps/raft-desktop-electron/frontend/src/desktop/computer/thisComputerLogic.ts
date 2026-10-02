@@ -24,6 +24,7 @@ export interface ServiceState {
 
 // The subset of the local host status the card reads (secret-free).
 export interface ComputerStatusReport {
+  controlHome?: string;
   servers?: { serverId: string; serverSlug: string | null }[];
   service?: ServiceState;
   upgrade?: UpgradeRecord | null;
@@ -35,7 +36,7 @@ export interface ComputerStatusReport {
  *  recovery action it offers. Derived purely from the converge state. */
 export interface ConvergeNotice {
   message: string;
-  action: "recycle" | "start" | "retry-converge" | null;
+  action: "recycle" | "start" | "retry-converge" | "connect-deployment" | null;
 }
 
 const VERSION_SKEW_CODES = new Set(["SERVICE_VERSION_SKEW", "SERVICE_VERSION_SKEW_SUSPECT"]);
@@ -44,6 +45,7 @@ export function deriveConvergeNotice(converge: ComputerStatusReport["converge"])
   if (!converge || converge.ok) return null;
   const code = converge.code ?? "CONVERGE_FAILED";
   const message = converge.message ?? "Local Computer service takeover failed.";
+  if (code === "SESSION_ORIGIN_MISMATCH") return { message, action: "connect-deployment" };
   if (VERSION_SKEW_CODES.has(code)) {
     // A resident from a different install refuses adoption; only a real
     // stop→start recycle replaces it (the card's Restart clears degraded
@@ -173,8 +175,10 @@ export function routeUpdateAction(input: UpdateRouteInput): UpdateAction {
 
 /** The official installer one-liner (shown only as the last-resort manual
  *  fallback if the app-run fresh install fails). Mirrors the web command. */
-export function freshInstallCommand(version: string, baseUrl = "https://cdn.raft.build/computer"): string {
-  return `curl -fsSL ${baseUrl}/install.sh | RAFT_COMPUTER_VERSION=${version} sh`;
+export function freshInstallCommand(version: string, baseUrl = "https://cdn.raft.build/computer", home?: string): string {
+  const quoted = home ? "'" + home.replace(/'/g, "'\"'\"'") + "'" : null;
+  const roots = quoted ? `RAFT_HOME=${quoted} SLOCK_HOME=${quoted} ` : "";
+  return `curl -fsSL ${baseUrl}/install.sh | ${roots}RAFT_COMPUTER_VERSION=${version} sh`;
 }
 
 export function deriveControls(input: ControlsInput, now: number = Date.now(), ablate?: AblationFlags): Controls {

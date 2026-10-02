@@ -54,8 +54,8 @@ test("converge() blocks BEFORE any lifecycle action when the session belongs to 
 
   // The gate applies to the operator actions too — a foreign session must
   // never be stopped/started/recycled by this build.
-  await assert.rejects(() => host.start(), /SESSION_ORIGIN_MISMATCH/);
-  await assert.rejects(() => host.stop(), /SESSION_ORIGIN_MISMATCH/);
-  await assert.rejects(() => host.recycleService(), /SESSION_ORIGIN_MISMATCH/);
+  await assert.rejects(() => host.start(), (error: {code?: string}) => error.code === "SESSION_ORIGIN_MISMATCH");
+  await assert.rejects(() => host.stop(), (error: {code?: string}) => error.code === "SESSION_ORIGIN_MISMATCH");
+  await assert.rejects(() => host.recycleService(), (error: {code?: string}) => error.code === "SESSION_ORIGIN_MISMATCH");
   assert.equal(calls.includes("convergeAppHostLifecycle"), false, "no lifecycle writes ever ran");
 });

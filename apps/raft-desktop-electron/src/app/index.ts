@@ -15,9 +15,9 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
-import { BrowserWindow, app, ipcMain, nativeImage, protocol, session, shell } from "electron";
+import { BrowserWindow, app, dialog, ipcMain, nativeImage, protocol, session, shell } from "electron";
 import { ELECTRON_IPC_CHANNELS } from "@raft/desktop-contract";
-import { runResident, runService } from "@botiverse/raft-computer/lib";
+import { createComputerApi, runResident, runService } from "@botiverse/raft-computer/lib";
 import { installApplicationMenu } from "../main/appMenu.js";
 import {
   applyDownloadedUpdate,
@@ -30,17 +30,8 @@ import {
 import { INITIAL_LIFECYCLE_STATE, reduceLifecycle } from "../main/lifecycle.js";
 import type { LifecycleEvent } from "../main/lifecycle.js";
 import { loadQuitNoConfirm, loadZoomLevel, saveQuitNoConfirm, saveZoomLevel } from "../main/viewPrefs.js";
-import { runQuitFlow } from "../main/quitFlow.js";
-import {
-  filterRootsByRaftHome,
-  parsePsTable,
-  readPidFile,
-  resolveSurvivors,
-  runShutdownTree,
-} from "../main/shutdown.js";
-import { readFile, readdir } from "node:fs/promises";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { createQuitController, runQuitFlow } from "../main/quitFlow.js";
+import { runShutdownTree } from "../main/shutdown.js";
 import { loadWindowState, trackWindowState } from "../main/windowState.js";
 import { MenubarResident, shouldHideOnClose } from "../main/menubarResident.js";
 import { isHiddenLaunch } from "../main/loginItem.js";
@@ -296,6 +287,66 @@ function registerComputerIpc(host: ComputerHost): void {
   // on this machine.
   ipcMain.handle("computer:recycle", () => monitor.afterOperation(() => host.recycleService()));
   ipcMain.handle("computer:retry-converge", () => monitor.afterOperation(() => host.retryConverge()));
+  ipcMain.handle("computer:connect-deployment", (_event, userId: unknown) => monitor.afterOperation(async () => {
+    const abort = new AbortController();
+    const cancelOnQuit = () => abort.abort();
+    app.once("before-quit", cancelOnQuit);
+    try {
+      await host.connectCurrentDeployment({
+        signal: abort.signal,
+        targetUserId: typeof userId === "string" && userId.length <= 256 ? userId : undefined,
+        confirm: async (plan) => {
+          const choice = await dialog.showMessageBox({
+            type: "warning", buttons: ["连接当前部署", "取消"], defaultId: 1, cancelId: 1,
+            signal: abort.signal,
+            message: "连接当前部署？",
+            detail: `当前部署：${plan.currentOrigin}\n目标部署：${plan.targetOrigin}\n当前状态目录：${plan.currentHome}\n新状态目录将在 ${plan.storageDirectory} 下创建。\n旧连接（${plan.connections.length}）：${plan.connections.join("、") || "无"}\n旧会话、数据和连接会保留，原 Computer 不会被停止。你需要独立认证并重新添加有权限的连接。`,
+          });
+          return choice.response === 0;
+        },
+        authenticate: async (home, origin) => {
+          const dialogAbort = new AbortController();
+          const closeOnAbort = () => dialogAbort.abort();
+          abort.signal.addEventListener("abort", closeOnAbort, { once: true });
+          try {
+            await createComputerApi(home).login({ serverUrl: origin }, (event) => {
+              if (event.kind !== "login.device-code") return;
+              // A deployment can serve approval on a separate web origin. Show
+              // that destination for explicit consent before opening the browser.
+              void (async () => {
+                const url = new URL(event.verifyUrl);
+                if (!["https:", "http:"].includes(url.protocol) || url.username || url.password) {
+                  abort.abort();
+                  return;
+                }
+                const approval = await dialog.showMessageBox({
+                  type: "info", message: "打开 Computer 授权页面？",
+                  detail: `部署：${origin}\n授权页面：${url.href}\n授权码：${event.userCode}\n请核对页面地址，并使用当前桌面账号登录。`,
+                  buttons: ["打开授权页面", "取消连接"], defaultId: 1, cancelId: 1,
+                  signal: dialogAbort.signal,
+                });
+                if (dialogAbort.signal.aborted || abort.signal.aborted) return;
+                if (approval.response !== 0) { abort.abort(); return; }
+                await shell.openExternal(url.href);
+                if (dialogAbort.signal.aborted || abort.signal.aborted) return;
+                const waiting = await dialog.showMessageBox({
+                  type: "info", message: "请在浏览器确认 Computer 登录",
+                  detail: `部署：${origin}\n授权码：${event.userCode}`,
+                  buttons: ["等待浏览器授权", "取消连接"], cancelId: 1,
+                  signal: dialogAbort.signal,
+                });
+                if (!dialogAbort.signal.aborted && waiting.response === 1) abort.abort();
+              })().catch(() => { if (!dialogAbort.signal.aborted) abort.abort(); });
+            }, { signal: abort.signal });
+          } finally {
+            dialogAbort.abort();
+            abort.signal.removeEventListener("abort", closeOnAbort);
+          }
+        },
+      });
+    } finally { app.removeListener("before-quit", cancelOnQuit); }
+  }));
+
   ipcMain.handle("computer:upgrade-info", () => host.getUpgradeInfo());
   ipcMain.handle("computer:upgrade", () => monitor.afterOperation(() => host.upgrade()));
   ipcMain.handle("computer:upgrade-fresh-install", (_e, version: unknown) =>
@@ -463,73 +514,26 @@ function revealMainWindow(): void {
   }
 }
 
-// Task #7: stop request through the card's Stop path, then the escalation
-// ladder from shutdown.ts. Survivors are the TRUSTED pidfile roots (service,
-// per-server runners) plus everything the ps table shows under them — their
-// descendant closure and their process groups. Nothing is matched by command
-// line: the user's own editor/tail inside ~/.slock/agents must never be a
-// target. Signals go to whole process groups (negative pid) so agent children
-// can never survive their runner.
-const execFileAsync = promisify(execFile);
+// The same root/identity registry guards takeover and real app quit.
 async function orchestrateQuitShutdown(systemShutdown: boolean): Promise<void> {
-  const slockHome = computerHost?.slockHome;
-  if (!slockHome) return;
+  const host = computerHost;
+  if (!host || !(await host.canShutdown())) return;
+  const abort = new AbortController();
   try {
-    await computerHost?.stop();
-  } catch {
-    // The ladder escalates regardless of how the stop request lands.
+    const complete = await runShutdownTree({
+      scope: host.processScope,
+      snapshot: host.readProcesses,
+      requestStop: () => host.stop(abort.signal),
+      now: () => Date.now(),
+      sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+      signal: (pid, signal) => process.kill(pid, signal),
+      logFile: path.join(host.slockHome, "computer", "run", "shutdown.log"),
+      systemShutdown,
+    });
+    if (!complete) throw new Error("这台计算机仍有进程未完成退出，请重试。无法确认归属的进程未被终止。");
+  } finally {
+    abort.abort();
   }
-  const runDir = path.join(slockHome, "computer", "run");
-  const serversDir = path.join(slockHome, "computer", "servers");
-  await runShutdownTree({
-    now: () => Date.now(),
-    sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
-    signal: (pid, signal) => {
-      try {
-        process.kill(-pid, signal); // process group: runner + its agents
-      } catch {
-        try {
-          process.kill(pid, signal); // not a group leader — fall back
-        } catch {
-          // Already gone between probe and signal.
-        }
-      }
-    },
-    survivors: async () => {
-      const rootPids: number[] = [];
-      const servicePid = await readPidFile({ readFile }, path.join(runDir, "service.pid"));
-      if (servicePid) rootPids.push(servicePid);
-      try {
-        for (const entry of await readdir(serversDir, { withFileTypes: true })) {
-          if (!entry.isDirectory()) continue;
-          const pid = await readPidFile({ readFile }, path.join(serversDir, entry.name, "runner.pid"));
-          if (pid) rootPids.push(pid);
-        }
-      } catch {
-        // No servers directory — service pidfile still covers the tree root.
-      }
-      // Root isolation (2026-10-02 incident): every pidfile root must PROVE
-      // it belongs to this app's state root before it can seed the kill set —
-      // a recycled pid, an unmarked legacy tree, or another root's service
-      // sharing this Mac is skipped, never signalled.
-      const ownedRootPids = await filterRootsByRaftHome(rootPids, slockHome, {
-        onForeign: (pid, reason) => {
-          console.warn(`[raft-desktop] shutdown ladder skipped pid ${pid}: ${reason}`);
-        },
-      });
-      let psTable = "";
-      try {
-        const { stdout } = await execFileAsync("ps", ["-axo", "pid=,ppid=,pgid=,lstart=,command="]);
-        psTable = stdout;
-      } catch {
-        // ps unavailable: an empty table makes the roots themselves the only
-        // known survivors — the ladder still clears them.
-      }
-      return { rootPids: ownedRootPids, psTable };
-    },
-    logFile: path.join(runDir, "shutdown.log"),
-    systemShutdown,
-  });
 }
 
 function zoom(direction: "in" | "out" | "reset"): void {
@@ -629,61 +633,40 @@ if (headlessMode?.mode === "__service") {
     if (link) deliverDeepLink(link);
   });
 
-  // Task #7: a real quit stops the whole local background tree first. The
-  // first before-quit is intercepted (confirm → orchestrate), the second —
-  // re-entered by our own app.quit() once the tree is down — runs the
-  // original teardown. powerMonitor-driven OS shutdown skips the dialog.
-  let quitFlowStarted = false;
-  app.on("before-quit", (event) => {
-    if (quitFlowStarted) return;
-    event.preventDefault();
-    quitFlowStarted = true;
-    void (async () => {
-      const proceed = await runQuitFlow({
-        anythingRunning: async () => {
-          const status = computerStatusMonitor ? await computerStatusMonitor.read() : null;
-          return Boolean(status?.service?.running || (status?.servers?.length ?? 0) > 0);
-        },
-        // Live count, not a cached file: agent runtimes alive under the
-        // service/runner roots right now (tree closure minus the roots
-        // themselves). Returns null when the roots cannot be read.
-        agentCount: async () => {
-          const home = computerHost?.slockHome;
-          if (!home) return null;
-          const rootPids: number[] = [];
-          const servicePid = await readPidFile({ readFile }, path.join(home, "computer", "run", "service.pid"));
-          if (servicePid) rootPids.push(servicePid);
-          try {
-            for (const entry of await readdir(path.join(home, "computer", "servers"), { withFileTypes: true })) {
-              if (!entry.isDirectory()) continue;
-              const pid = await readPidFile({ readFile }, path.join(home, "computer", "servers", entry.name, "runner.pid"));
-              if (pid) rootPids.push(pid);
-            }
-          } catch { /* no servers dir */ }
-          if (rootPids.length === 0) return null;
-          try {
-            const { stdout } = await execFileAsync("ps", ["-axo", "pid=,ppid=,pgid=,lstart=,command="]);
-            const survivors = await resolveSurvivors(parsePsTable(stdout), rootPids, undefined, undefined, home);
-            return survivors.pids.length - survivors.roots.length;
-          } catch {
-            return null;
-          }
-        },
-        prefs: () => ({ quitNoConfirm: loadQuitNoConfirm() }),
-        savePrefs: (prefs) => saveQuitNoConfirm(prefs.quitNoConfirm),
-        orchestrateShutdown: (systemShutdown) => orchestrateQuitShutdown(systemShutdown),
-        quit: () => app.quit(),
-      });
-      if (!proceed) {
-        quitFlowStarted = false;
-        return;
-      }
+  const quitController = createQuitController({
+    attempt: () => runQuitFlow({
+      anythingRunning: async () => {
+        const host = computerHost;
+        if (!host) return false;
+        await host.waitForConnection();
+        if (!(await host.canShutdown())) return false;
+        const snapshot = await host.readProcesses();
+        host.processScope.assertRoots(snapshot);
+        return host.processScope.observe(snapshot).length > 0;
+      },
+      agentCount: async () => {
+        const host = computerHost;
+        if (!host) return null;
+        const owned = host.processScope.observe(await host.readProcesses());
+        return owned.filter((row) => row.agent).length;
+      },
+      prefs: () => ({ quitNoConfirm: loadQuitNoConfirm() }),
+      savePrefs: (prefs) => saveQuitNoConfirm(prefs.quitNoConfirm),
+      orchestrateShutdown: orchestrateQuitShutdown,
+      quit: () => app.quit(),
+    }),
+    complete: () => {
       menubarResident?.destroy();
       computerStatusMonitor?.setActive(false);
       applyLifecycle({ type: "before-quit" });
       app.quit();
-    })();
+    },
+    failed: (error) => {
+      const detail = error instanceof Error ? error.message : "请重试退出。";
+      void dialog.showMessageBox({ type: "error", message: "退出尚未完成", detail, buttons: ["知道了"] });
+    },
   });
+  app.on("before-quit", (event) => quitController.beforeQuit(event));
   app.on("window-all-closed", () => applyLifecycle({ type: "window-all-closed" }));
   // activate (Dock icon / app re-focus) reveals the window. This replaces the
   // reducer's old activate→reboot wiring: with hide-to-menubar the window is
@@ -694,7 +677,7 @@ if (headlessMode?.mode === "__service") {
     process.on(signal, () => app.quit());
   }
 
-  void app.whenReady().then(() => {
+  void app.whenReady().then(async () => {
     // In dev (unpacked), macOS shows the default Electron dock icon — the real
     // brand mark only ships inside the packaged .app (build/icon.icns). Set it
     // explicitly so `pnpm start` also shows the Raft icon. Packaged builds get
@@ -736,6 +719,7 @@ if (headlessMode?.mode === "__service") {
     // machine that already runs a Computer service. Default is enabled.
     if (process.env.RAFT_DESKTOP_DISABLE_COMPUTER_HOST !== "1") {
       computerHost = new ComputerHost();
+      await computerHost.restoreSelection();
       registerComputerIpc(computerHost);
       // Read-only mode observes + surfaces an already-installed Computer (the
       // "adopt" path) but does NOT converge host lifecycle — no launch-at-login

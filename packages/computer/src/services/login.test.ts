@@ -9,6 +9,7 @@ import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "vitest";
+import { userSessionPath } from "../paths.js";
 
 import { ComputerServiceError } from "./errors.js";
 import { login } from "./login.js";
@@ -324,5 +325,19 @@ test("login service: AbortSignal aborts the polling loop without throwing Comput
     } finally {
       await stop(ctx.server);
     }
+  });
+});
+
+test("device authorization cancelled during token response never writes a session", async () => {
+  await withHome(async (home) => {
+    const ctx = await startDeviceServer({});
+    const abort = new AbortController();
+    try {
+      await assert.rejects(login({ serverUrl: ctx.baseUrl, slockHome: home }, {
+        signal: abort.signal,
+        onEvent: (event) => { if (event.kind === "login.polling") abort.abort(); },
+      }));
+      await assert.rejects(readFile(userSessionPath(home), "utf8"), (error: NodeJS.ErrnoException) => error.code === "ENOENT");
+    } finally { await stop(ctx.server); }
   });
 });

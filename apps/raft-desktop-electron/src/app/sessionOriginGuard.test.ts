@@ -36,7 +36,7 @@ test("checkSessionOrigin: foreign deployment session → mismatch (the 2026-10-0
   const text = describeSessionOriginMismatch(check);
   assert.match(text, /grokbot\.example\.net:3001/);
   assert.match(text, /raft\.example\.com/);
-  assert.match(text, /Sign out/);
+  assert.match(text, /连接当前部署/);
 });
 
 test("checkSessionOrigin: missing session file → none (fresh machine)", async () => {
@@ -44,16 +44,16 @@ test("checkSessionOrigin: missing session file → none (fresh machine)", async 
   assert.equal(check.status, "none");
 });
 
-test("checkSessionOrigin: garbage JSON → none (no origin evidence)", async () => {
+test("checkSessionOrigin: garbage JSON → invalid", async () => {
   const deps = fs({ [SESSION]: "{not json" });
   const check = await checkSessionOrigin(HOME, "https://raft.example.com", deps);
-  assert.equal(check.status, "none");
+  assert.equal(check.status, "invalid");
 });
 
-test("checkSessionOrigin: session without serverUrl → none", async () => {
+test("checkSessionOrigin: session without serverUrl → invalid", async () => {
   const deps = fs({ [SESSION]: JSON.stringify({ kind: "user-session" }) });
   const check = await checkSessionOrigin(HOME, "https://raft.example.com", deps);
-  assert.equal(check.status, "none");
+  assert.equal(check.status, "invalid");
 });
 
 test("checkSessionOrigin: path/query in serverUrl is dropped (origin compare)", async () => {
@@ -66,4 +66,9 @@ test("checkSessionOrigin: trailing slash matches (origin normalize)", async () =
   const deps = fs({ [SESSION]: JSON.stringify({ serverUrl: "https://raft.example.com/" }) });
   const check = await checkSessionOrigin(HOME, "https://raft.example.com", deps);
   assert.equal(check.status, "ok");
+});
+
+test("checkSessionOrigin: unreadable file fails closed", async () => {
+  const readFile = (async () => { throw Object.assign(new Error("denied"), { code: "EACCES" }); }) as typeof import("node:fs/promises").readFile;
+  assert.equal((await checkSessionOrigin(HOME, "https://raft.example.com", { readFile })).status, "invalid");
 });

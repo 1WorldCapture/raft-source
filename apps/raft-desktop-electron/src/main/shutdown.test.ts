@@ -1,231 +1,149 @@
-// Pins the quit-shutdown ladder (task #7): a graceful window after the stop
-// request, then SIGTERM to whole process groups, then SIGKILL; everything
-// gone at any tick completes without escalating; SIGKILL-exhausted reports
-// the stragglers instead of claiming success; the OS-shutdown mode uses the
-// compressed timeouts. Survivor identification is TRUSTED-ROOTS-ONLY: live
-// roots are pinned by pid + start time (a reused pid can never pass as a
-// root), the descendant closure runs from live roots alone, dead runners'
-// launchd-adopted orphans (ppid 1) are counted only after a Raft-identity
-// check, and nothing is ever matched by command line.
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { ComputerProcessScope, parseComputerProcesses, type ComputerProcess } from "./computerProcesses.ts";
+import { nextShutdownAction, parsePsTable, runShutdownTree, tuningFor } from "./shutdown.ts";
 
-const LS = (n: number) => `Mon Sep 27 1${n}:00:00 2026`;
-
-test("shutdown ladder: graceful → group SIGTERM → group SIGKILL → complete/incomplete", async (t) => {
-  const { tuningFor, nextShutdownAction, parsePsTable, collectSurvivorPlan, resolveSurvivors, pidAlive, readPidFile, runShutdownTree } =
-    await import("./shutdown.ts");
-
-  await t.test("tuning shrinks for system shutdown", () => {
-    const normal = tuningFor(false);
-    const system = tuningFor(true);
-    assert.ok(system.gracefulTimeoutMs < normal.gracefulTimeoutMs);
-    assert.ok(system.termTimeoutMs < normal.termTimeoutMs);
-  });
-
-  await t.test("all-clear during the graceful window completes without escalating", () => {
-    const state = { phase: "stopping" as const, phaseElapsedMs: 0 };
-    const step = nextShutdownAction({ state, tuning: tuningFor(false), anyAlive: false });
-    assert.equal(step.action, "complete");
-    assert.equal(step.state.phase, "done");
-  });
-
-  await t.test("graceful timeout escalates to group SIGTERM, then SIGKILL, then reports stragglers", () => {
-    const tuning = { gracefulTimeoutMs: 1_000, termTimeoutMs: 500 };
-    let state: import("./shutdown.ts").ShutdownState = { phase: "stopping", phaseElapsedMs: 0 };
-    let step = nextShutdownAction({ state, tuning, anyAlive: true });
-    assert.equal(step.action, "wait");
-    state = step.state;
-    step = nextShutdownAction({ state: { ...state, phaseElapsedMs: 1_000 }, tuning, anyAlive: true });
-    assert.equal(step.action, "sigterm-group");
-    assert.equal(step.state.phase, "force-term");
-    state = { phase: "force-term", phaseElapsedMs: 500 };
-    step = nextShutdownAction({ state, tuning, anyAlive: true });
-    assert.equal(step.action, "sigkill-group");
-    assert.equal(step.state.phase, "force-kill");
-    state = { phase: "force-kill", phaseElapsedMs: 500 };
-    step = nextShutdownAction({ state, tuning, anyAlive: true });
-    assert.equal(step.action, "incomplete");
-    step = nextShutdownAction({ state, tuning, anyAlive: false });
-    assert.equal(step.action, "complete");
-  });
-
-  await t.test("parsePsTable parses pid/ppid/pgid/lstart/command and skips junk", () => {
-    const ps = [
-      `  9001     1  9001 ${LS(0)} Raft Desktop __service`,
-      "not a ps row",
-      "",
-    ].join("\n");
-    const rows = parsePsTable(ps);
-    assert.equal(rows.length, 1);
-    assert.deepEqual(rows[0], { pid: 9001, ppid: 1, pgid: 9001, lstart: LS(0), command: "Raft Desktop __service" });
-  });
-
-  await t.test("survivor plan: pinned live roots; recycled pid degrades to dead root; orphans are candidates only", () => {
-    // Layout: service(9001) → runner(9002, group 9002) → claude agent(9003,
-    // group 9002) and a detached agent child(9004, own group 9004 — caught by
-    // the closure). DEAD runner 8000: its agent child(8001) was adopted by
-    // launchd (ppid 1) and still sits in group 8000 → candidate. pid 8000 was
-    // REUSED by a stranger (same pid, DIFFERENT lstart) whose own child(8002)
-    // must never be matched. The user's vim(9100) edits an agents-workspace
-    // file but is not ours.
-    const rows = parsePsTable([
-      `  9001     1  9001 ${LS(0)} Raft Desktop __service`,
-      `  9002  9001  9002 ${LS(1)} Raft Desktop __run abc`,
-      `  9003  9002  9002 ${LS(2)} /usr/local/bin/claude --cwd x`,
-      `  9004  9002  9004 ${LS(3)} node detached-child-of-runner`,
-      `  9100   420   420 ${LS(4)} vim /Users/x/.slock/agents/107a1ceb/MEMORY.md`,
-      `  8001     1  8000 ${LS(5)} /usr/local/bin/claude --cwd orphan-after-runner-died`,
-      `  8000   420   420 ${LS(9)} /usr/bin/unrelated-reused-pid`,
-      `  8002  8000   420 ${LS(9)} child-of-the-stranger`,
-    ].join("\n"));
-    const pin = new Map([
-      [9001, LS(0)],
-      [9002, LS(1)],
-      // 8000 was recorded with ITS OWN old lstart; the current table shows a
-      // different one → reused pid → dead root, never a live root.
-      [8000, LS(6)],
-    ]);
-    const plan = collectSurvivorPlan(rows, [9001, 9002, 8000], pin);
-    assert.deepEqual([...plan.owned].sort((a, b) => a - b), [9001, 9002, 9003, 9004]);
-    assert.deepEqual(plan.groups, [9001, 9002]);
-    assert.deepEqual(plan.orphanCandidates.map((row) => row.pid), [8001], "ppid-1 process in the dead root's group is a candidate");
-    assert.ok(!plan.owned.includes(8000), "reused pid itself is not owned");
-    assert.ok(!plan.owned.includes(8002), "the stranger's child is not owned");
-  });
-
-  await t.test("resolveSurvivors: candidates count only with a Raft identity; unreadable fails closed", async () => {
-    const rows = parsePsTable([
-      `  8001     1  8000 ${LS(5)} /usr/local/bin/claude --cwd orphan`,
-      `  8005     1  8000 ${LS(7)} /usr/local/bin/someone-else-in-recycled-group`,
-    ].join("\n"));
-    const verified: number[] = [];
-    const survivors = await resolveSurvivors(rows, [8000], async (row) => {
-      verified.push(row.pid);
-      return row.pid === 8001; // only the first carries SLOCK_AGENT_ID
-    });
-    assert.deepEqual(verified, [8001, 8005], "every candidate is checked");
-    assert.deepEqual(survivors.orphanPids, [8001]);
-    assert.deepEqual(survivors.pids, [8001]);
-    const closed = await resolveSurvivors(rows, [8000], async () => {
-      throw new Error("ps eww failed");
-    });
-    assert.deepEqual(closed.orphanPids, [], "fail closed on unreadable identity");
-  });
-
-  await t.test("pidAlive and readPidFile tolerate races and malformed input", async () => {
-    const killThrows = (code: string) => (_pid: number, _sig: 0) => {
-      const error = new Error("probe") as NodeJS.ErrnoException;
-      error.code = code;
-      throw error;
-    };
-    assert.equal(pidAlive(() => {}, 42), true);
-    assert.equal(pidAlive(killThrows("ESRCH"), 42), false);
-    assert.equal(pidAlive(killThrows("EPERM"), 42), true, "EPERM means alive, not ours");
-    assert.equal(pidAlive(() => {}, 0), false);
-
-    const dir = await mkdtemp(path.join(tmpdir(), "raft-shutdown-"));
-    t.after(() => rm(dir, { recursive: true, force: true }));
-    const pidFile = path.join(dir, "service.pid");
-    const { readFile: fsReadFile } = await import("node:fs/promises");
-    await writeFile(pidFile, "12345\n");
-    assert.equal(await readPidFile({ readFile: fsReadFile }, pidFile), 12345);
-    await writeFile(pidFile, "garbage");
-    assert.equal(await readPidFile({ readFile: fsReadFile }, pidFile), null);
-    assert.equal(await readPidFile({ readFile: fsReadFile }, path.join(dir, "missing.pid")), null);
-  });
-
-  await t.test("runShutdownTree: SIGTERM root, SIGKILL verified orphan; stragglers logged on exhaustion", async (t2) => {
-    const dir = await mkdtemp(path.join(tmpdir(), "raft-shutdown-run-"));
-    t2.after(() => rm(dir, { recursive: true, force: true }));
-    const logFile = path.join(dir, "shutdown.log");
-    const signaled: Array<[number, string]> = [];
-    // Root runner 9002 dies after SIGTERM. Its agent child 9003 is then
-    // launchd-adopted (ppid 1) but stays in group 9002 — the real orphan
-    // shape — and ignores SIGKILL (D-state stand-in).
-    const psOf = (runnerAlive: boolean, agentAlive: boolean) =>
-      [
-        runnerAlive ? `  9002     1  9002 ${LS(1)} runner` : "",
-        agentAlive ? `  9003     1  9002 ${LS(2)} /usr/local/bin/claude orphan-agent` : "",
-      ]
-        .filter(Boolean)
-        .join("\n");
-    let runnerAlive = true;
-    const agentAlive = true;
-    await runShutdownTree({
-      now: () => Date.now(),
-      sleep: async () => {}, // phaseElapsed advances per tick, no real waiting
-      signal: (pid, signal) => {
-        signaled.push([pid, signal]);
-        if (signal === "SIGTERM" && pid === 9002) runnerAlive = false;
-      },
-      survivors: async () => ({ rootPids: [9002], psTable: psOf(runnerAlive, agentAlive) }),
-      verifyOrphan: async (row) => row.pid === 9003, // carries SLOCK_AGENT_ID
-      logFile,
-      systemShutdown: true, // compressed timeouts so the ladder runs fast
-    });
-    assert.ok(signaled.some(([pid, sig]) => pid === 9002 && sig === "SIGTERM"));
-    assert.ok(signaled.some(([pid, sig]) => pid === 9003 && sig === "SIGKILL"), "verified orphan escalated to SIGKILL");
-    const log = await readFile(logFile, "utf8");
-    assert.ok(log.includes("sigterm-group"), "timeline records the escalation");
-    assert.match(log, /INCOMPLETE: could not terminate \[9003\]/, "stragglers named, never claimed clean");
-  });
+const home = "/tmp/raft-owned";
+const foreign = "/tmp/raft-owned-other";
+const start = "Fri Oct 2 14:00:00 2026";
+const row = (pid: number, changes: Partial<ComputerProcess> = {}): ComputerProcess => ({
+  pid, ppid: 1, pgid: 50, lstart: start, command: "node __service", home, agent: false, root: true, ...changes,
 });
-test("root isolation: every kill-set member must prove its state root (2026-10-02 incident)", async (t) => {
-  const { parsePsTable, resolveSurvivors, psLineBelongsToRaftHome, filterRootsByRaftHome } =
-    await import("./shutdown.ts");
 
-  await t.test("psLineBelongsToRaftHome: RAFT_HOME env form matches exactly", () => {
-    const line = "node /x/raft-computer.js __run 32e0 SLOCK_AGENT_ID=a RAFT_HOME=/Users/t/.slock";
-    assert.equal(psLineBelongsToRaftHome(line, "/Users/t/.slock"), true);
-    assert.equal(psLineBelongsToRaftHome(line, "/Users/t/.slock-raft"), false);
-  });
+test("ps parses a padded single-digit day and strips environment from process identity", () => {
+  const rows = parseComputerProcesses(`100 1 50 Fri Oct  2 14:00:00 2026 node __service RAFT_HOME=${home} SLOCK_HOME=${home} TOKEN=secret`);
+  assert.equal(rows[0].home, home);
+  assert.equal(rows[0].lstart, start);
+  assert.equal(rows[0].command, "node __service");
+  assert.equal(parsePsTable("junk").length, 0);
+});
 
-  await t.test("psLineBelongsToRaftHome: prefix look-alike roots never match", () => {
-    const line = "SLOCK_AGENT_ID=a RAFT_HOME=/Users/t/.slock-raft";
-    assert.equal(psLineBelongsToRaftHome(line, "/Users/t/.slock"), false);
-  });
+test("root evidence requires an exact path; conflicting or missing roots fail closed", () => {
+  const parse = (command: string) => parseComputerProcesses(`100 1 50 ${start} ${command}`)[0];
+  assert.equal(parse(`node __run abc RAFT_HOME=${foreign}`).home, foreign);
+  assert.equal(parse(`node __service --slock-home ${home}`).home, home);
+  assert.equal(parse(`node __service RAFT_HOME=${home} SLOCK_HOME=${foreign}`).home, null);
+  assert.equal(parse("node __service SLOCK_AGENT_ID=a").home, null);
+  assert.equal(parse(`node __service RAFT_HOME=${home} with spaces NEXT=value`).home, `${home} with spaces`);
+});
 
-  await t.test("psLineBelongsToRaftHome: SLOCK_HOME legacy env and --slock-home argv both count", () => {
-    assert.equal(psLineBelongsToRaftHome("x SLOCK_HOME=/Users/t/.slock", "/Users/t/.slock"), true);
-    assert.equal(psLineBelongsToRaftHome("/app __service --slock-home /Users/t/.slock", "/Users/t/.slock"), true);
-  });
+test("mixed PGID: descendants are owned, foreign root, unknown member and GUI never are", () => {
+  const scope = new ComputerProcessScope(home, 7);
+  const snapshot = { rootPids: [100], rows: [row(100), row(101, { ppid: 100, root: false, command: "tool" }),
+    row(200, { home: foreign }), row(201, { ppid: 100, home: foreign }),
+    row(300, { root: false, home: null }), row(7), row(8, { ppid: 7, agent: true, root: false, command: "GUI Helper" })] };
+  scope.assertRoots(snapshot);
+  assert.deepEqual(scope.observe(snapshot).map((p) => p.pid), [100, 101]);
+});
 
-  await t.test("psLineBelongsToRaftHome: no root marker fails closed", () => {
-    assert.equal(psLineBelongsToRaftHome("tail -f /Users/t/.slock/computer/run/service.log", "/Users/t/.slock"), false);
-    assert.equal(psLineBelongsToRaftHome("SLOCK_AGENT_ID=a", "/Users/t/.slock"), false);
-  });
+test("retains a detached tool after root death and pidfile deletion; verifies root-bound orphan agents", () => {
+  const scope = new ComputerProcessScope(home, 7);
+  scope.observe({ rootPids: [100], rows: [row(100), row(101, { ppid: 100, command: "tool", root: false })] });
+  const owned = scope.observe({ rootPids: [], rows: [row(101, { ppid: 1, pgid: 101, command: "tool", root: false }),
+    row(102, { command: "agent", agent: true, root: false }), row(200, { home: foreign, agent: true, root: false })] });
+  assert.deepEqual(owned.map((p) => p.pid), [101, 102]);
+});
 
-  await t.test("filterRootsByRaftHome: foreign and unreachable roots are dropped and reported", async () => {
-    const seen: string[] = [];
-    const kept = await filterRootsByRaftHome(
-      [101, 202, 303],
-      "/Users/t/.slock",
-      {
-        ps: async (pid) => {
-          if (pid === 101) return "node svc __service --slock-home /Users/t/.slock";
-          if (pid === 202) return "node svc __service --slock-home /Users/t/.slock-raft";
-          throw new Error("gone");
-        },
-        onForeign: (pid, reason) => seen.push(pid + ":" + reason),
-      },
-    );
-    assert.deepEqual(kept, [101]);
-    assert.equal(seen.length, 2);
-    assert.match(seen.join(","), /202:not-bound/);
-    assert.match(seen.join(","), /303:ps-unreachable/);
-  });
+test("same-root PID reuse never inherits ownership or a signal", () => {
+  const scope = new ComputerProcessScope(home, 7);
+  const identity = row(100);
+  scope.observe({ rootPids: [100], rows: [identity] });
+  const reused = row(100, { lstart: "Fri Oct 2 15:00:00 2026" });
+  assert.equal(scope.matches(identity, reused), false);
+  assert.deepEqual(scope.observe({ rootPids: [100], rows: [reused] }), []);
+  assert.throws(() => scope.assertRoots({ rootPids: [100], rows: [reused] }), /启动|无法确认/);
+});
 
-  await t.test("resolveSurvivors with raftHome: sibling-root orphan fails closed even with SLOCK_AGENT_ID", async () => {
-    const rows = parsePsTable(
-      [
-        "9001 1 8000 Thu Oct  2 14:00:00 2026 node agent SLOCK_AGENT_ID=a RAFT_HOME=/Users/t/.slock-raft",
-      ].join("\n"),
-    );
-    const scoped = await resolveSurvivors(rows, [8000], undefined, undefined, "/Users/t/.slock");
-    assert.equal(scoped.orphanPids.length, 0, "sibling-root agent must not be adopted");
+test("foreign or unreadable pidfile root blocks before any stop action", async () => {
+  const scope = new ComputerProcessScope(home, 7);
+  for (const item of [row(100, { home: foreign }), row(100, { home: null }), row(7)]) {
+    scope.assertRoots({ rootPids: [], rows: [] });
+    assert.throws(() => scope.assertRoots({ rootPids: [item.pid], rows: [item] }), /未接管或停止/);
+  }
+});
+
+test("graceful all-clear exits early, system shutdown has shorter deadlines", () => {
+  assert.equal(nextShutdownAction({ state: { phase: "stopping", phaseElapsedMs: 0 }, tuning: tuningFor(false), anyAlive: false }).action, "complete");
+  assert.ok(tuningFor(true).gracefulTimeoutMs < tuningFor(false).gracefulTimeoutMs);
+});
+
+test("shutdown captures before stop, retains child after pidfile removal, escalates only positive owned PIDs", async (t) => {
+  const dir = await mkdtemp(path.join(tmpdir(), "raft-shutdown-test-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const scope = new ComputerProcessScope(home, 7);
+  let now = 0;
+  let rootLive = true;
+  let childLive = true;
+  let stopRequested = false;
+  const signals: Array<[number, string]> = [];
+  const foreignRow = row(200, { home: foreign });
+  const complete = await runShutdownTree({
+    scope,
+    snapshot: async () => ({ rootPids: rootLive ? [100] : [], rows: [
+      ...(rootLive ? [row(100)] : []),
+      ...(childLive ? [row(101, { ppid: rootLive ? 100 : 1, pgid: 101, command: "tool", root: false })] : []),
+      foreignRow, row(7), row(300, { home: null, root: false }),
+    ] }),
+    requestStop: async () => { stopRequested = true; rootLive = false; },
+    signal: (pid, signal) => { signals.push([pid, signal]); if (pid === 101 && signal === "SIGKILL") childLive = false; },
+    now: () => now, sleep: async (ms) => { now += ms; }, logFile: path.join(dir, "shutdown.log"),
+    tuning: { gracefulTimeoutMs: 500, termTimeoutMs: 500 }, systemShutdown: false,
   });
+  assert.equal(stopRequested, true);
+  assert.equal(complete, true);
+  assert.deepEqual(signals, [[101, "SIGTERM"], [101, "SIGKILL"]]);
+  assert.match(await readFile(path.join(dir, "shutdown.log"), "utf8"), /shutdown complete/);
+});
+
+test("fresh pre-signal snapshot prevents a same-root PID replacement from receiving either signal", async (t) => {
+  const dir = await mkdtemp(path.join(tmpdir(), "raft-shutdown-race-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  let reads = 0;
+  let now = 0;
+  const signals: number[] = [];
+  const complete = await runShutdownTree({
+    scope: new ComputerProcessScope(home, 7),
+    snapshot: async () => {
+      reads++;
+      // First capture + first escalation see the old process; the immediate
+      // pre-signal read sees its PID reused, even though the root is identical.
+      return { rootPids: reads < 3 ? [100] : [], rows: [row(100, reads < 3 ? {} : { lstart: "Fri Oct 2 15:00:00 2026" })] };
+    },
+    requestStop: async () => {}, signal: (pid) => signals.push(pid),
+    now: () => now, sleep: async (ms) => { now += ms; }, logFile: path.join(dir, "shutdown.log"),
+    tuning: { gracefulTimeoutMs: 0, termTimeoutMs: 500 }, systemShutdown: false,
+  });
+  assert.equal(complete, true);
+  assert.deepEqual(signals, []);
+});
+
+test("identity becomes unreadable: no signal and incomplete is reported", async (t) => {
+  const dir = await mkdtemp(path.join(tmpdir(), "raft-shutdown-unreadable-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  let now = 0;
+  let reads = 0;
+  const signals: number[] = [];
+  const result = await runShutdownTree({
+    scope: new ComputerProcessScope(home, 7),
+    snapshot: async () => ({ rootPids: [100], rows: [row(100, ++reads > 1 ? { home: null } : {})] }),
+    requestStop: async () => {}, signal: (pid) => signals.push(pid), now: () => now,
+    sleep: async (ms) => { now += ms; }, logFile: path.join(dir, "shutdown.log"),
+    tuning: { gracefulTimeoutMs: 500, termTimeoutMs: 500 }, systemShutdown: false,
+  });
+  assert.equal(result, false);
+  assert.deepEqual(signals, []);
+  assert.match(await readFile(path.join(dir, "shutdown.log"), "utf8"), /INCOMPLETE/);
+});
+
+
+test("unreadable descendant remains unresolved after parent exit and is never claimed", () => {
+  const scope = new ComputerProcessScope(home, 7);
+  const child = row(101, { home: null, ppid: 100, root: false, command: "tool" });
+  assert.deepEqual(scope.observe({ rootPids: [100], rows: [row(100), child] }).map((p) => p.pid), [100]);
+  const detached = { rootPids: [], rows: [{ ...child, ppid: 1 }] };
+  assert.deepEqual(scope.observe(detached), []);
+  assert.deepEqual(scope.unverified(detached), [101]);
 });

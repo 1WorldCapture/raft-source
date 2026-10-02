@@ -146,6 +146,7 @@ export async function login(input: LoginInput, options: LoginOptions = {}): Prom
       // best-effort; leave identity empty
     }
 
+    options.signal?.throwIfAborted?.();
     const file = userSessionPath(input.slockHome);
     await mkdir(dirname(file), { recursive: true });
     await writeFile(

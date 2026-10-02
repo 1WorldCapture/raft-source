@@ -77,7 +77,7 @@ export interface StopDeps {
    *  through the adapter. */
   readPidfile?: typeof readPidfileAt;
   isProcessAlive?: typeof isProcessAlive;
-  killService?: (pid: number) => void;
+  killService?: (pid: number) => void | Promise<void>;
   sleep?: (ms: number) => Promise<void>;
   pollIntervalMs?: number;
   timeoutMs?: number;
@@ -191,7 +191,7 @@ export async function stop(
   //    pidfile-absence because pidfile clear is best-effort during
   //    emergency shutdown.
   try {
-    killer(pid);
+    await killer(pid);
   } catch (err) {
     const cause = err instanceof Error ? err : new Error(String(err));
     throw new ComputerServiceError(
