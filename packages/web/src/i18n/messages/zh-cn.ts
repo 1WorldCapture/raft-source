@@ -1382,6 +1382,8 @@ export const zhCn: Record<MessageId, string> = {
   "machine.commandGuide.windowsX64": "Windows x64",
   "machine.commandGuide.windows": "Windows",
   "machine.commandGuide.windowsComputerDescription": "从 PowerShell 安装 Raft Computer，然后将这台 Windows x64 机器连接到服务器。",
+  "machine.commandGuide.windowsPwsh7Prerequisite":
+    "需要 PowerShell 7（pwsh）。以下命令使用严格 JSON 读取器，要求 pwsh 7 及以上版本；旧版 Windows PowerShell 5.1 不受支持。",
   "machine.commandGuide.macLinuxComputerDescription": "在这台 macOS 或 Linux 机器上安装 Raft Computer CLI，然后将它连接到此服务器。",
   "machine.commandGuide.generateFreshConnect": "生成新的连接命令以继续。",
   "machine.commandGuide.windowsDaemonDescription": "从 PowerShell 运行这个旧守护进程命令，将这台 Windows 机器连接到服务器。",

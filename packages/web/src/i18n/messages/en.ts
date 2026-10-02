@@ -1394,6 +1394,8 @@ export const en = {
   "machine.commandGuide.windows": "Windows",
   "machine.commandGuide.windowsComputerDescription":
     "Install Raft Computer from PowerShell, then connect this Windows x64 machine to the server.",
+  "machine.commandGuide.windowsPwsh7Prerequisite":
+    "Requires PowerShell 7 (pwsh). These commands use a strict JSON reader that needs pwsh 7 or newer; Windows PowerShell 5.1 is not supported.",
   "machine.commandGuide.macLinuxComputerDescription":
     "Install the Raft Computer CLI on this macOS or Linux machine, then connect it to this server.",
   "machine.commandGuide.generateFreshConnect": "Generate a fresh connect command to continue.",
