@@ -228,9 +228,9 @@ export class ExternalAgentConnectionService {
       const connection = checkRevision(current, expectedRevision);
       const wake = await currentWake(context, connection);
       if (!connection.enabled || connection.consumptionMode !== "delegated" || wake?.state !== "blocked") throw new DelegationError("not_blocked");
-      const event = await recordRecovery(context, connection, identity, "resume", requestKey, expectedRevision, wake.id);
-      await context.tx.update(wakes).set({ state: "queued", blockReason: null, recoveryAuditRef: event.id, nextAttemptAt: await databaseNow(context) }).where(eq(wakes.id, wake.id));
       const [row] = await context.tx.update(connections).set({ pauseReason: null, revision: connection.revision + 1, updatedAt: await databaseNow(context) }).where(eq(connections.id, connection.id)).returning();
+      const event = await recordRecovery(context, row, identity, "resume", requestKey, expectedRevision, wake.id);
+      await context.tx.update(wakes).set({ state: "queued", blockReason: null, recoveryAuditRef: event.id, nextAttemptAt: await databaseNow(context) }).where(eq(wakes.id, wake.id));
       return connectionDto(row);
     }, this.db);
   }
@@ -247,9 +247,9 @@ export class ExternalAgentConnectionService {
       const now = await databaseNow(context);
       const [rate] = await context.tx.select({ total: count() }).from(productEvents).where(and(eq(productEvents.subjectId, connection.id), eq(productEvents.eventType, "external_agent.redrive"), gte(productEvents.occurredAt, new Date(now.getTime() - 3600000))));
       if (rate.total >= 5) throw new DelegationError("redrive_rate_limited", 429);
-      const event = await recordRecovery(context, connection, identity, "redrive", requestKey, expectedRevision, wake.id);
-      await context.tx.insert(wakes).values({ connectionId: connection.id, connectionEpoch: connection.epoch, generationAtCreation: connection.pendingGeneration, cycle: wake.cycle + 1n, recoveryAuditRef: event.id, nextAttemptAt: now });
       const [row] = await context.tx.update(connections).set({ pauseReason: null, revision: connection.revision + 1, updatedAt: now }).where(eq(connections.id, connection.id)).returning();
+      const event = await recordRecovery(context, row, identity, "redrive", requestKey, expectedRevision, wake.id);
+      await context.tx.insert(wakes).values({ connectionId: connection.id, connectionEpoch: connection.epoch, generationAtCreation: connection.pendingGeneration, cycle: wake.cycle + 1n, recoveryAuditRef: event.id, nextAttemptAt: now });
       return connectionDto(row);
     }, this.db);
   }

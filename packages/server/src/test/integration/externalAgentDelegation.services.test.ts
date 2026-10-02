@@ -79,6 +79,10 @@ dbTest("block stops old execution; new input cannot wake; explicit resume preser
   await f.connectionService.resumeBlocked(f.human, f.agent.id, f.connection.revision, "approved");
   const [after] = await db.select().from(externalAgentWakes); assert.equal(after.id, before.id); assert.equal(after.attemptCount, before.attemptCount); assert.equal(after.state, "queued");
   assert.ok(after.recoveryAuditRef);
+  const [audit] = await db.select().from(productEvents).where(eq(productEvents.id, after.recoveryAuditRef));
+  const [connection] = await db.select().from(externalAgentConnections).where(eq(externalAgentConnections.agentId, f.agent.id));
+  assert.equal((audit.metadata as Record<string, unknown>).revision, connection.revision);
+  assert.equal((audit.metadata as Record<string, unknown>).requestRevision, f.connection.revision);
 }, 180000);
 
 dbTest("exhausted terminal wake blocks input and scanner; explicit redrive is linked and idempotent", async ({ db }) => {
@@ -93,6 +97,9 @@ dbTest("exhausted terminal wake blocks input and scanner; explicit redrive is li
   await f.connectionService.redriveExhausted(f.human, f.agent.id, f.connection.revision, "redrive-once");
   const rows = await db.select().from(externalAgentWakes); assert.equal(rows.length, 2);
   const fresh = rows.find((r) => r.id !== old.id)!; assert.equal(fresh.cycle, old.cycle + 1n); assert.equal(fresh.attemptCount, 0); assert.ok(fresh.recoveryAuditRef);
+  const [audit] = await db.select().from(productEvents).where(eq(productEvents.id, fresh.recoveryAuditRef));
+  assert.equal((audit.metadata as Record<string, unknown>).revision, updated.revision);
+  assert.equal((audit.metadata as Record<string, unknown>).requestRevision, f.connection.revision);
 }, 180000);
 
 dbTest("pause and unbind retain delegated mode; explicit rollback alone admits legacy writers", async ({ db }) => {
