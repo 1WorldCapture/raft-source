@@ -12,7 +12,7 @@
 // portably), a Python parent deterministically owns the zombie and
 // deterministically reaps it. Tests skip explicitly when python3 is absent.
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { readFileSync } from "node:fs";
+
 import assert from "node:assert/strict";
 import { test, vi } from "vitest";
 import {
@@ -24,6 +24,8 @@ import {
 } from "./process-primitives.js";
 
 const isLinux = process.platform === "linux";
+const isDarwin = process.platform === "darwin";
+const isPosix = isLinux || isDarwin;
 
 // fork a child that exits at once; report its pid; HOLD the zombie until one
 // stdin line arrives; then actually waitpid() it and exit cleanly.
@@ -66,12 +68,18 @@ async function manufactureZombie(): Promise<ZombieFixture | "skip"> {
   }) as ChildProcessWithoutNullStreams;
   let out = "";
   parent.stdout.on("data", (chunk: Buffer) => { out += chunk.toString(); });
-  while (!out.trim() && parent.exitCode === null) {
+  const deadline = Date.now() + 3_000;
+  while (!out.trim() && parent.exitCode === null && Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
   const zombiePid = Number.parseInt(out.trim().split("\n")[0]!, 10);
   if (!Number.isInteger(zombiePid) || zombiePid <= 0) {
-    parent.kill("SIGKILL");
+    const closed = new Promise<void>((resolve) => {
+      if (parent.exitCode !== null || parent.signalCode !== null) resolve();
+      else parent.once("close", () => resolve());
+    });
+    parent.stdin.end("\n");
+    await closed;
     throw new Error(`python parent reported pid "${out.trim()}"`);
   }
   // Wait past the child's exit while the never-waiting parent still lives.
@@ -80,16 +88,34 @@ async function manufactureZombie(): Promise<ZombieFixture | "skip"> {
 }
 
 /** Review round 3: teardown runs in finally — parent waits child, we wait parent. */
+function assertPidGone(pid: number): void {
+  assert.throws(() => process.kill(pid, 0), (error: unknown) =>
+    (error as NodeJS.ErrnoException).code === "ESRCH",
+    `pid ${pid} must no longer exist, including as a zombie`);
+}
+
 async function reapFixture(fixture: ZombieFixture): Promise<void> {
-  if (fixture.parent.exitCode === null && !fixture.parent.stdin.destroyed) {
-    try { fixture.parent.stdin.write("\n"); } catch { /* already gone */ }
-  }
-  await new Promise<void>((resolve) => {
-    const timer = setTimeout(resolve, 3_000);
-    fixture.parent.once("close", () => { clearTimeout(timer); resolve(); });
+  const parent = fixture.parent;
+  const closed = new Promise<void>((resolve, reject) => {
+    if (parent.exitCode !== null || parent.signalCode !== null) { resolve(); return; }
+    parent.once("close", () => resolve());
+    parent.once("error", reject);
   });
-  if (fixture.parent.exitCode === null) {
-    try { fixture.parent.kill("SIGKILL"); } catch { /* already gone */ }
+  // EOF also releases readline; install the close listener before ending stdin.
+  parent.stdin.end("\n");
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      closed,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error("fixture waitpid did not finish")), 3_000);
+      }),
+    ]);
+    assert.equal(parent.exitCode, 0, "parent must finish waitpid successfully");
+    assertPidGone(parent.pid!);
+    assertPidGone(fixture.zombiePid);
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }
 
@@ -125,13 +151,21 @@ test("isProcessAlive: rejects non-pid values before any kernel call", () => {
   assert.equal(isProcessAlive(Number.NaN), false);
 });
 
-test("isProcessAlive: a pid with no process reads as dead", () => {
-  // Above the kernel pid ceiling there is never a process; signal 0 must
-  // answer ESRCH on every platform.
-  const maxPid = isLinux
-    ? Number.parseInt(readFileSync("/proc/sys/kernel/pid_max", "utf8").trim(), 10)
-    : 999_999_999;
-  assert.equal(isProcessAlive(maxPid + 1), false);
+test("isProcessAlive: a real exited child is reaped", async () => {
+  const child = spawn(process.execPath, ["-e", "process.exit(0)"]);
+  const pid = child.pid!;
+  await new Promise<void>((resolve, reject) => {
+    child.once("error", reject);
+    child.once("close", () => resolve());
+  });
+  try {
+    process.kill(pid, 0);
+    // A reused PID is covered deterministically by the state mocks below.
+    assert.equal(isProcessAlive(pid), true);
+  } catch (error) {
+    assert.equal((error as NodeJS.ErrnoException).code, "ESRCH");
+    assert.equal(isProcessAlive(pid), false);
+  }
 });
 
 test("isProcessAlive: EPERM on signal 0 stays conservatively alive", () => {
@@ -149,7 +183,7 @@ test("isProcessAlive: EPERM on signal 0 stays conservatively alive", () => {
   }
 });
 
-test("isProcessAlive on Linux: /proc read failure keeps the alive verdict", async () => {
+test.skipIf(!isLinux)("isProcessAlive on Linux: /proc read failure keeps the alive verdict", async () => {
   if (!isLinux) return;
   // A RUNNING self, with the /proc read forced to fail: the predicate must
   // fall back to the signal-0 answer (alive), never guess "exited". The fs
@@ -172,7 +206,7 @@ test("isProcessAlive on Linux: /proc read failure keeps the alive verdict", asyn
   }
 });
 
-test("Darwin: ps failure AND timeout both stay conservatively alive (parameterized)", async () => {
+test.skipIf(!isDarwin)("Darwin: ps failure AND timeout both stay conservatively alive (parameterized)", async () => {
   if (process.platform !== "darwin") return; // darwin refinement only
   // Both unusable-ps shapes must read as "no answer" (null state), keeping
   // the signal-0 verdict for a running process — never guessing "exited".
@@ -197,7 +231,7 @@ test("Darwin: ps failure AND timeout both stay conservatively alive (parameteriz
   }
 });
 
-test("state evidence decides: a RUNNING successor on a live pid reads alive, a Z reads dead (mocked, deterministic)", async () => {
+test.skipIf(!isPosix)("state evidence decides: a RUNNING successor on a live pid reads alive, a Z reads dead (mocked, deterministic)", async () => {
   // PID reuse is decided by STATE EVIDENCE, not by kernel luck: with signal 0
   // succeeding and the state reader answering a running state, the pid reads
   // alive (the conservative direction for a reused pid); with a Z state it
@@ -261,10 +295,9 @@ test("state evidence decides: a RUNNING successor on a live pid reads alive, a Z
   }
 });
 
-test("isProcessAlive: a fork-held unreaped zombie reads as dead; fixture reaps itself in finally", { timeout: 20_000 }, async () => {
-  if (process.platform === "win32") return; // zombie semantics under test are POSIX
+test.skipIf(!isPosix)("isProcessAlive: a fork-held unreaped zombie reads as dead; fixture reaps itself in finally", { timeout: 20_000 }, async (context) => {
   const fixture = await manufactureZombie();
-  if (fixture === "skip") return; // python3 unavailable: explicit skip (see header)
+  if (fixture === "skip") { context.skip(); return; }
   try {
     // The zombie really exists and really exited (positive evidence both ways).
     if (isLinux) {
@@ -287,12 +320,10 @@ test("isProcessAlive: a fork-held unreaped zombie reads as dead; fixture reaps i
     // no-residue claims below are checked outside the assertion block.
     await reapFixture(fixture);
   }
-  // No residue: both the parent and the reaped zombie are gone.
-  assert.equal(isProcessAlive(fixture.parent.pid!), false, "parent must exit after waitpid");
-  assert.equal(isProcessAlive(fixture.zombiePid), false, "zombie must be reaped by the parent");
+  // reapFixture asserts ESRCH for both PIDs even when an earlier assertion fails.
 });
 
-test("readLinuxProcessState: parses the self stat line on Linux", () => {
+test.skipIf(!isLinux)("readLinuxProcessState: parses the self stat line on Linux", () => {
   if (!isLinux) return; // /proc/<pid>/stat is a Linux contract
   const state = readLinuxProcessState(process.pid);
   assert.ok(state !== null, "self /proc/<pid>/stat must be readable on Linux");
