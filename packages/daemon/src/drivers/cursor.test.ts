@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import path from "node:path";
+import os from "node:os";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import {
   CursorDriver,
   buildCursorArgs,
@@ -8,6 +10,7 @@ import {
   buildCursorModelProbeEnv,
   buildCursorSpawnEnv,
   detectCursorModels,
+  detectCursorModelSource,
   parseCursorModelsOutput,
 } from "./cursor.js";
 import type { SpawnContext } from "./types.js";
@@ -315,8 +318,8 @@ test("parseCursorModelsOutput parses cursor-agent models output", () => {
   assert.equal(result!.default, "composer-2-fast");
 });
 
-test("detectCursorModels returns null when cursor-agent models fails", () => {
-  assert.equal(detectCursorModels(() => ({
+test("detectCursorModels returns null when cursor-agent models fails", async () => {
+  assert.equal(await detectCursorModels(() => ({
     status: 1,
     stdout: "",
     error: new Error("keychain locked"),
@@ -363,4 +366,72 @@ test("parseLine: full turn lifecycle", () => {
   assert.equal(all[1]!.kind, "text");
   assert.equal(all[2]!.kind, "tool_call");
   assert.equal(all[3]!.kind, "turn_end");
+});
+
+test("slow Cursor model discovery succeeds without blocking daemon timers", async () => {
+  if (process.platform === "win32") return;
+  const directory = mkdtempSync(path.join(os.tmpdir(), "raft-cursor-models-"));
+  const command = path.join(directory, "cursor-agent");
+  writeFileSync(command, `#!${process.execPath}
+setTimeout(() => {
+  process.stdout.write(${JSON.stringify(["Available models", "auto - Auto (default)", ""].join("\n"))});
+}, 6000);
+`);
+  chmodSync(command, 0o755);
+  const oldPath = process.env.PATH;
+  let timerRan = false;
+  const timer = setTimeout(() => { timerRan = true; }, 20);
+  try {
+    process.env.PATH = `${directory}${path.delimiter}${oldPath ?? ""}`;
+    const outcome = await new CursorDriver().detectModels();
+    assert.equal(timerRan, true, "model probes must leave the daemon event loop responsive");
+    assert.deepEqual(outcome, {
+      kind: "live",
+      value: { models: [{ id: "auto", label: "Auto", verified: "launchable" }], default: "auto" },
+    });
+  } finally {
+    clearTimeout(timer);
+    if (oldPath === undefined) delete process.env.PATH;
+    else process.env.PATH = oldPath;
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("Cursor model discovery reports CLI failure without accepting partial stdout", async () => {
+  assert.deepEqual(await detectCursorModelSource(() => ({
+    status: 1,
+    stdout: "auto - Auto (default)",
+    error: new Error("failed to load models"),
+  })), { kind: "error", retryable: true });
+});
+
+test("timed-out Cursor probe exits its child and rejects partial or late catalogs", async () => {
+  if (process.platform === "win32") return;
+  const directory = mkdtempSync(path.join(os.tmpdir(), "raft-cursor-timeout-"));
+  const command = path.join(directory, "cursor-agent");
+  const pidFile = path.join(directory, "pid");
+  writeFileSync(command, `#!${process.execPath}
+const fs = require("node:fs");
+fs.writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));
+process.stdout.write(${JSON.stringify("auto - Auto (default)\n")});
+setTimeout(() => process.stdout.write(${JSON.stringify("late-model - Late model\n")}), 21000);
+`);
+  chmodSync(command, 0o755);
+  const oldPath = process.env.PATH;
+  let pid: number | undefined;
+  try {
+    process.env.PATH = `${directory}${path.delimiter}${oldPath ?? ""}`;
+    const outcome = await new CursorDriver().detectModels();
+    pid = Number(readFileSync(pidFile, "utf8"));
+    assert.deepEqual(outcome, { kind: "error", retryable: true });
+    assert.throws(() => process.kill(pid!, 0), { code: "ESRCH" });
+    pid = undefined;
+  } finally {
+    if (pid !== undefined) {
+      try { process.kill(pid, "SIGKILL"); } catch { /* The probe normally already exited. */ }
+    }
+    if (oldPath === undefined) delete process.env.PATH;
+    else process.env.PATH = oldPath;
+    rmSync(directory, { recursive: true, force: true });
+  }
 });

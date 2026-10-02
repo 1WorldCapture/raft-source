@@ -19,6 +19,7 @@ import {
   failpoints,
   formatTraceparent,
   getStaticRuntimeModelSourceSet,
+  getRuntimeModelDetectionTimeoutMs,
   getToolActivityLabel,
   hydrateRuntimeConfig,
   isAgentActivityDetailKind,
@@ -10522,7 +10523,7 @@ export class AgentOrchestrator extends EventEmitter {
       const requestId = crypto.randomUUID();
       const response = await this.getMachineResponseRelay().request({
         requestId, machineId, type: "machine:runtime_models:result",
-      }, 5_000, () => this.sendRequiredToMachine(machineId, {
+      }, getRuntimeModelDetectionTimeoutMs(runtime), () => this.sendRequiredToMachine(machineId, {
         type: "machine:runtime_models:detect", requestId, runtime,
       }), (event, attrs) => this.recordMachineResponseRelay(event, attrs));
       if (response.type !== "machine:runtime_models:result") throw new Error("Unexpected model response");
@@ -10561,7 +10562,7 @@ export class AgentOrchestrator extends EventEmitter {
         // Server-structural classification: we waited and the daemon never
         // answered. This is knowable at the throw site, so tag it.
         reject(new RouteFailureError("daemon_timeout", "Runtime model detect request timed out"));
-      }, 5_000);
+      }, getRuntimeModelDetectionTimeoutMs(runtime));
 
       const handler = (msg: MachineToServerMessage) => {
         if (msg.type === "machine:runtime_models:result" && msg.requestId === requestId) {
