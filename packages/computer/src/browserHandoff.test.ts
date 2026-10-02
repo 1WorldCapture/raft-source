@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { PassThrough } from "node:stream";
 import { test } from "vitest";
 
-import { canInstallEnterToOpenUrl, installEnterToOpenUrl } from "./browserHandoff.js";
+import { canInstallEnterToOpenUrl, installEnterToOpenUrl} from "./browserHandoff.js";
 
 test("installEnterToOpenUrl opens the URL on Enter and only once", () => {
   const input = new PassThrough() as PassThrough & { isTTY: boolean };

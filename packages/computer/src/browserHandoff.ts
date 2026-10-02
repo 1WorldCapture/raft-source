@@ -12,6 +12,12 @@ export function canInstallEnterToOpenUrl(input: NodeJS.ReadableStream | undefine
 }
 
 export function openUrlInBrowser(url: string): void {
+  // NOTE: real-side-effect prevention for the test suite lives in
+  // src/test/sideEffectGuard.mjs (PR #135): it intercepts at the actual
+  // network/browser/subprocess boundaries and records the denial, so a
+  // forgotten openUrl stub fails CI with the named case. An earlier
+  // function-level throw here shadowed those boundary events and broke the
+  // guard's own regressions, so this function stays side-effect-faithful.
   const platform = process.platform;
   let command: string;
   let args: string[];
