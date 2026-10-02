@@ -51,6 +51,8 @@ function ackedBusyOccurrence(): MentionDeliveryOccurrenceRow {
     version: 5,
     redriveCount: 0,
     lastRedriveAt: null,
+    deliveryRetryAttempts: 0,
+    deliveryRetryNextAllowedAt: null,
     createdAt: at,
     updatedAt: at,
   };

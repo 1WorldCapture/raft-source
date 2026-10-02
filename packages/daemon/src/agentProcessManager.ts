@@ -4213,6 +4213,15 @@ export class AgentProcessManager {
       const lastRejectedAt = this.mentionRejectMemory.get(tracked.occurrenceId) ?? 0;
       const fresh = now - lastRejectedAt > 5 * 60_000;
       if (fresh) {
+        // Bounded memory (task #8 review): entries older than the silence
+        // window are dead weight — sweep them whenever the map grows past
+        // capacity so a long-lived daemon cannot accumulate one entry per
+        // historical occurrence forever.
+        if (this.mentionRejectMemory.size >= 10_000) {
+          for (const [k, ts] of this.mentionRejectMemory) {
+            if (now - ts > 5 * 60_000) this.mentionRejectMemory.delete(k);
+          }
+        }
         this.mentionRejectMemory.set(tracked.occurrenceId, now);
         // A rejected mention is a missed wake; it must leave a log line and a routed
         // trace, not just the bare "Delivery received".

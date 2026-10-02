@@ -5763,6 +5763,12 @@ export const mentionDeliveryOccurrences = pgTable("mention_delivery_occurrences"
   terminalErrorAt: timestamp("terminal_error_at", { withTimezone: true }),
   terminalErrorCode: text("terminal_error_code"),
   pendingCoalescedCount: integer("pending_coalesced_count").notNull().default(0),
+  // Server-side send budget for this occurrence (task #8 review): attempts
+  // counts REAL sends across every tracker lifetime, redrive and process
+  // restart; nextAllowedAt gates the next send. Never reset implicitly — only
+  // the controlled recovery entry clears them.
+  deliveryRetryAttempts: integer("delivery_retry_attempts").notNull().default(0),
+  deliveryRetryNextAllowedAt: timestamp("delivery_retry_next_allowed_at", { withTimezone: true }),
   version: integer("version").notNull().default(0),
   redriveCount: integer("redrive_count").notNull().default(0),
   lastRedriveAt: timestamp("last_redrive_at", { withTimezone: true }),
