@@ -1146,3 +1146,116 @@ test("bootout late error whose in-call recovery also fails degrades to the durab
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("forward-deadline abort during bootout still recovers — the recovery rides the caller signal, not the dead deadline", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "raft-macos-login-abort-fwd-"));
+  const home = path.join(root, "user");
+  const slockHome = path.join(home, ".slock");
+  const harness = launchctlHarness();
+  const originalDispatcher = path.join(home, ".local", "bin", "raft-computer");
+  const baseDeps = {
+    platform: "darwin" as const,
+    userHome: home,
+    uid: 501,
+    dispatcherPath: originalDispatcher,
+    legacyDesktopBundlePath: path.join(root, "Applications", "Raft Computer.app"),
+    runCommand: harness.run,
+  };
+  try {
+    await convergeCliHostLifecycle(slockHome, "enabled", baseDeps);
+    const markerBefore = await readHostLifecycleMarker(slockHome);
+    // Refresh with a shared deadline that aborts exactly when bootout runs:
+    // bootout REALLY unloads, then the abort fires. The recovery must still
+    // execute (caller-level signal) and the error must describe the real
+    // outcome — carrier restored.
+    const deadline = new AbortController();
+    await assert.rejects(
+      refreshCliLoginCarrierIfOwned(slockHome, {
+        ...baseDeps,
+        dispatcherPath: path.join(home, ".local", "bin", "raft-computer-next"),
+        signal: deadline.signal,
+        deadlineAtMs: Date.now() + 60_000,
+        runCommand: async (command, args, signal) => {
+          if (args[0] === "bootout") {
+            await harness.run(command, args, signal);
+            deadline.abort();
+            const abortError = new Error("operation aborted");
+            abortError.name = "AbortError";
+            throw abortError;
+          }
+          return harness.run(command, args, signal);
+        },
+      }),
+      (error: unknown) => {
+        // The in-call recovery succeeded, so the outer handler reports the
+        // forward timeout with its accurate "restored the last verified
+        // carrier" text — the restoration claim is real here.
+        const err = error as { code?: string; message?: string };
+        assert.equal(err.code, "HOST_LIFECYCLE_REFRESH_TIMEOUT");
+        return true;
+      },
+    );
+    // The old carrier is live again and nothing is left pending.
+    assert.equal(harness.jobs.size, 1);
+    assert.ok([...harness.jobs.values()][0]!.includes(originalDispatcher));
+    assert.equal((await readHostLifecycleMarker(slockHome))?.dispatcherPath, originalDispatcher);
+    assert.equal(await readHostLifecycleRecoveryStatus(slockHome), null);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("caller-level cancellation during bootout degrades honestly — no false 'restored' claim, pending kept", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "raft-macos-login-abort-parent-"));
+  const home = path.join(root, "user");
+  const slockHome = path.join(home, ".slock");
+  const harness = launchctlHarness();
+  const originalDispatcher = path.join(home, ".local", "bin", "raft-computer");
+  const baseDeps = {
+    platform: "darwin" as const,
+    userHome: home,
+    uid: 501,
+    dispatcherPath: originalDispatcher,
+    legacyDesktopBundlePath: path.join(root, "Applications", "Raft Computer.app"),
+    runCommand: harness.run,
+  };
+  try {
+    await convergeCliHostLifecycle(slockHome, "enabled", baseDeps);
+    const callerSignal = new AbortController();
+    await assert.rejects(
+      refreshCliLoginCarrierIfOwned(slockHome, {
+        ...baseDeps,
+        dispatcherPath: path.join(home, ".local", "bin", "raft-computer-next"),
+        signal: callerSignal.signal,
+        runCommand: async (command, args, signal) => {
+          if (args[0] === "bootout") {
+            await harness.run(command, args, signal);
+            callerSignal.abort();
+            const abortError = new Error("operation aborted");
+            abortError.name = "AbortError";
+            throw abortError;
+          }
+          if (signal?.aborted) {
+            const abortError = new Error("operation aborted");
+            abortError.name = "AbortError";
+            throw abortError;
+          }
+          return harness.run(command, args, signal);
+        },
+      }),
+      (error: unknown) => {
+        assert.equal((error as { code?: string }).code, "HOST_LIFECYCLE_BOOTOUT_FAILED");
+        return true;
+      },
+    );
+    // Honest degraded state: the recovery could not run under the cancelled
+    // caller signal, so the pending record is the durable anchor and the
+    // error does NOT claim restoration. A later converge lands the recovery.
+    assert.equal((await readHostLifecycleRecoveryStatus(slockHome))?.status, "pending-replace");
+    await convergeCliHostLifecycle(slockHome, "enabled", baseDeps);
+    assert.ok([...harness.jobs.values()][0]!.includes(originalDispatcher));
+    assert.equal(await readHostLifecycleRecoveryStatus(slockHome), null);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
