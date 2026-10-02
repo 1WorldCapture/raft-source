@@ -1851,6 +1851,14 @@ export interface RuntimeModelInfo {
   verified?: "launchable" | "suggestion_only";
 }
 
+// Cursor performs remote catalog requests after CLI startup and credential loading.
+export const CURSOR_MODEL_PROBE_TIMEOUT_MS = 20_000;
+
+/** Leave transport time for a Cursor probe to finish before the Server gives up. */
+export function getRuntimeModelDetectionTimeoutMs(runtime: string): number {
+  return runtime === "cursor" ? CURSOR_MODEL_PROBE_TIMEOUT_MS + 5_000 : 5_000;
+}
+
 /**
  * A runtime's model catalog as reported by a specific machine, or declared by
  * a runtime whose source is an explicit closed static catalog. The `default`
