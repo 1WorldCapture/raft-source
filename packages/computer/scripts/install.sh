@@ -78,9 +78,10 @@ manifest_latest_version() {
   # Refuse forbidden control bytes BEFORE awk sees the document: macOS
   # awk drops NUL inside records, so the parser alone cannot be trusted
   # with them. Delete printable ASCII, the three JSON-legal whitespace
-  # bytes and non-ASCII UTF-8; any surviving byte is a control byte JSON
-  # forbids anywhere (NUL, U+0001-U+0008, U+000B/U+000C, U+000E-U+001F).
-  _mlv_forbidden="$(LC_ALL=C tr -d '\011\012\015\040-\176\200-\377' < "$_mlv_input" | wc -c | tr -d '[:space:]')" \
+  # bytes, DEL and non-ASCII UTF-8; any surviving byte is a control byte
+  # JSON forbids anywhere (NUL, U+0001-U+0008, U+000B/U+000C, U+000E-U+001F).
+  # DEL (0x7F) itself is LEGAL inside JSON strings, so it stays deleted.
+  _mlv_forbidden="$(LC_ALL=C tr -d '\011\012\015\040-\177\200-\377' < "$_mlv_input" | wc -c | tr -d '[:space:]')" \
     || { [ -z "$_mlv_tmp" ] || rm -f "$_mlv_tmp"; echo '[manifest] error: could not read manifest' >&2; return 2; }
   if [ "$_mlv_forbidden" != "0" ]; then
     [ -z "$_mlv_tmp" ] || rm -f "$_mlv_tmp"
@@ -141,15 +142,24 @@ manifest_latest_version() {
             n = hextonum(hex)
             if (length(hex) != 4 || n < 0) fail()
             pos += 6
+            # Surrogate handling mirrors JSON.parse exactly: a PAIRED
+            # high+low combination becomes its astral code point; a LONE
+            # surrogate (high without a low, or a bare low) is replaced
+            # with U+FFFD — JSON.parse does NOT reject the document.
             if (n >= 55296 && n <= 56319) {
-              # high surrogate: must be followed by \uDC00-\uDFFF
-              if (substr(s, pos, 2) != "\\u") fail()
-              lo = hextonum(substr(s, pos + 2, 4))
-              if (lo < 56320 || lo > 57343) fail()
-              pos += 6
-              n = 65536 + (n - 55296) * 1024 + (lo - 56320)
-            } else if (n >= 56320 && n <= 57343) fail()
-            out = out utf8encode(n)
+              if (substr(s, pos, 2) == "\\u") {
+                lo = hextonum(substr(s, pos + 2, 4))
+                if (lo >= 56320 && lo <= 57343) {
+                  pos += 6
+                  n = 65536 + (n - 55296) * 1024 + (lo - 56320)
+                }
+              }
+              out = out utf8encode(n >= 55296 && n <= 56319 ? 65533 : n)
+            } else if (n >= 56320 && n <= 57343) {
+              out = out utf8encode(65533)
+            } else {
+              out = out utf8encode(n)
+            }
           } else if (esc == "\"") { out = out "\""; pos += 2 }
           else if (esc == "\\") { out = out "\\"; pos += 2 }
           else if (esc == "/") { out = out "/"; pos += 2 }

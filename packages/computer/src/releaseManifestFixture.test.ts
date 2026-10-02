@@ -64,6 +64,12 @@ const CASES: FixtureCase[] = [
   { file: "release-root-manifest.nul-byte.fixture.json", expect: { ok: false, reason: "network" } },
   { file: "release-root-manifest.trailing-comma.fixture.json", expect: { ok: false, reason: "network" } },
   { file: "release-root-manifest.comment.fixture.json", expect: { ok: false, reason: "network" } },
+  // Review round 6: LEGAL documents an unrelated note field must not block.
+  // DEL (U+007F) is a legal JSON string character, and lone surrogates are
+  // replaced with U+FFFD by JSON.parse rather than rejected — the version
+  // resolves everywhere despite the exotic bytes in another field.
+  { file: "release-root-manifest.del-char.fixture.json", expect: { ok: true, version: "1.2.3" } },
+  { file: "release-root-manifest.lone-surrogates.fixture.json", expect: { ok: true, version: "1.2.3" } },
 ];
 
 async function fixtureBody(file: string): Promise<string> {
