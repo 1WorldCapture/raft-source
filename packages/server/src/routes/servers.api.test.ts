@@ -1929,40 +1929,6 @@ test("receiver-state push kill-switch suppresses pinned emits but leaves version
   }
 });
 
-/**
- * Contract v1: computerVersionService resolves through deployment config and
- * never a hardcoded official CDN. Tests that need a resolvable latest version
- * install a loopback manifest deployment and stub its configured URL.
- */
-function setDeploymentComputerEnv(vars: {
-  RAFT_PUBLIC_ORIGIN: string;
-  RAFT_COMPUTER_RELEASE_BASE: string;
-  RAFT_COMPUTER_RELEASE_BACKEND: string;
-  RAFT_COMPUTER_HANDS_ORIGIN?: string;
-  RAFT_COMPUTER_PINNED_VERSION?: string;
-}): () => void {
-  const keys = [
-    "RAFT_PUBLIC_ORIGIN",
-    "RAFT_COMPUTER_RELEASE_BASE",
-    "RAFT_COMPUTER_RELEASE_BACKEND",
-    "RAFT_COMPUTER_HANDS_ORIGIN",
-    "RAFT_COMPUTER_PINNED_VERSION",
-  ] as const;
-  const saved: Record<string, string | undefined> = {};
-  for (const key of keys) {
-    saved[key] = process.env[key];
-    const value = vars[key];
-    if (value === undefined) delete process.env[key];
-    else process.env[key] = value;
-  }
-  return () => {
-    for (const key of keys) {
-      if (saved[key] === undefined) delete process.env[key];
-      else process.env[key] = saved[key];
-    }
-  };
-}
-
 async function seedRoleFixture(serverSlug: string) {
   const db = getDb();
   const seed = async (email: string) => {
@@ -4739,11 +4705,6 @@ test("GET /api/servers/:id/machines projects one source-aware policy decision pe
 
   const originalFetch = globalThis.fetch;
   __resetLatestComputerVersionForTest();
-  const restoreDeploymentEnv = setDeploymentComputerEnv({
-    RAFT_PUBLIC_ORIGIN: "http://localhost:9765",
-    RAFT_COMPUTER_RELEASE_BASE: "http://localhost:9765/computer",
-    RAFT_COMPUTER_RELEASE_BACKEND: "manifest",
-  });
   try {
     const { owner, server } = await seedRoleFixture("machines-computer-upgrade-state");
     const db = getDb();
@@ -4828,7 +4789,7 @@ test("GET /api/servers/:id/machines projects one source-aware policy decision pe
     });
     globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-      if (url === "http://localhost:9765/computer/manifest.json") {
+      if (url === "https://cdn.raft.build/computer/manifest.json") {
         return new Response(JSON.stringify({ version: "9.9.9" }), {
           status: 200,
           headers: { "Content-Type": "application/json" },
@@ -4922,7 +4883,6 @@ test("GET /api/servers/:id/machines projects one source-aware policy decision pe
     });
   } finally {
     globalThis.fetch = originalFetch;
-    restoreDeploymentEnv();
     __resetLatestComputerVersionForTest();
     await app.close();
   }
@@ -5327,16 +5287,11 @@ test("POST /computer/:action — historical Restart resolves an available Hands 
 
   const originalFetch = globalThis.fetch;
   let handsAvailable = false;
-  const restoreDeploymentEnv = setDeploymentComputerEnv({
-    RAFT_PUBLIC_ORIGIN: "http://localhost:9765",
-    RAFT_COMPUTER_RELEASE_BASE: "http://localhost:9765/computer",
-    RAFT_COMPUTER_RELEASE_BACKEND: "manifest",
-  });
   try {
     __resetLatestComputerVersionForTest();
     globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-      if (url === "http://localhost:9765/computer/manifest.json") {
+      if (url === "https://cdn.raft.build/computer/manifest.json") {
         return new Response(JSON.stringify({ version: "0.72.10" }), {
           status: 200,
           headers: { "Content-Type": "application/json" },
@@ -5433,7 +5388,6 @@ test("POST /computer/:action — historical Restart resolves an available Hands 
     );
   } finally {
     globalThis.fetch = originalFetch;
-    restoreDeploymentEnv();
     __resetLatestComputerVersionForTest();
     await app.close();
   }

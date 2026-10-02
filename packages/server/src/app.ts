@@ -44,7 +44,6 @@ import { managedMcpOAuthCallbackRouter, managedMcpRouter } from "./routes/manage
 import { providerConnectionRouter } from "./routes/providerConnections.js";
 import { productFeedbackRouter } from "./routes/productFeedback.js";
 import { mobileDownloadRouter } from "./routes/mobileDownload.js";
-import { deploymentComputerSetupRouter } from "./routes/deploymentComputerSetup.js";
 import { featureFlagsRouter } from "./routes/featureFlags.js";
 import { readMutationRouter } from "./routes/readMutations.js";
 import { wikiRouter } from "./routes/wiki.js";
@@ -433,9 +432,6 @@ export function createApp(options: CreateAppOptions = {}): Express {
   // phone scanning it has no session. Requiring auth would land every scan on a
   // login wall. Artifacts behind it are public app builds.
   app.use("/api/mobile-download", authLimiter, mobileDownloadRouter);
-  // Public by design (contract v1): the onboarding machine has no session. See
-  // the route file for the no-store / field-names-only payload contract.
-  app.use("/api/deployment", authLimiter, deploymentComputerSetupRouter);
   app.use("/api/product-feedback", requireAuth, requireVerified, productFeedbackLimiter, productFeedbackRouter);
 
   // Rate limiter for billing mutation endpoints (checkout/portal create Stripe sessions)
