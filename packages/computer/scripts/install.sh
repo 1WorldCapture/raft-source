@@ -62,14 +62,14 @@ DISPATCHER_PUBLISHED="0"
 manifest_latest_version() {
   _mlv_input="${1:-}"
   if [ "$_mlv_input" = "-" ]; then
-    # Same newline collapse as the file branch: JSON strings cannot contain
-    # literal newlines, so removing them only reunifies a pretty-printed
-    # document for the single-line awk scan — stdin and file inputs must
-    # resolve identically.
-    _mlv_body="$(cat | tr -d '\n')"
+    # Same newline folding as the file branch: awk is line-oriented, so
+    # structural newlines become \001 (whitespace to the parser), while a
+    # newline INSIDE a JSON string remains a control character and fails
+    # exactly like JSON.parse on the original bytes.
+    _mlv_body="$(cat | tr '\n' '\001')"
   else
     [ -n "$_mlv_input" ] || { echo '[manifest] error: no manifest path given' >&2; return 2; }
-    _mlv_body="$(tr -d '\n' < "$_mlv_input")" || { echo '[manifest] error: could not read manifest' >&2; return 2; }
+    _mlv_body="$(tr '\n' '\001' < "$_mlv_input")" || { echo '[manifest] error: could not read manifest' >&2; return 2; }
   fi
   # Depth-aware extraction of the ROOT-LEVEL "version" string: a `"version"`
   # key at brace depth 1 only. Nested "version" keys (per-version target
@@ -93,7 +93,7 @@ manifest_latest_version() {
     # never a version.
     function fail() { bad = 1; exit }
     function skipws() {
-      while (pos <= len && substr(s, pos, 1) ~ /[ \t\r\n]/) pos++
+      while (pos <= len && substr(s, pos, 1) ~ /[ \t\r\001]/) pos++
     }
     function hextonum(h,    i, d, v) {
       v = 0
@@ -171,7 +171,7 @@ manifest_latest_version() {
       }
       return "num"
     }
-    function parse_object(isroot,    key, first, c) {
+    function parse_object(isroot,    key, first, c, vtype) {
       pos++
       first = 1
       while (1) {
@@ -189,8 +189,8 @@ manifest_latest_version() {
         skipws()
         if (substr(s, pos, 1) != ":") fail()
         pos++
-        parse_value()
-        if (isroot && key == "version") rootVersion = (g_type == "str") ? g_str : ""
+        vtype = parse_value()
+        if (isroot && key == "version") rootVersion = (vtype == "str") ? g_str : ""
       }
     }
     function parse_array(    first, c) {
@@ -208,16 +208,21 @@ manifest_latest_version() {
         parse_value()
       }
     }
-    function parse_value(    c) {
+    function parse_value(    c, wasroot) {
       skipws()
       c = substr(s, pos, 1)
-      if (c == "{") { parse_object(isroot); isroot = 0; return }
-      if (c == "[") { isroot = 0; parse_array(); return }
-      if (c == "\"") { g_type = "str"; g_str = parse_string(); return }
-      if (c == "-" || c ~ /[0-9]/) { g_type = "num"; parse_number(); return }
-      if (substr(s, pos, 4) == "true") { pos += 4; g_type = "lit"; return }
-      if (substr(s, pos, 5) == "false") { pos += 5; g_type = "lit"; return }
-      if (substr(s, pos, 4) == "null") { pos += 4; g_type = "lit"; return }
+      if (c == "{") {
+        wasroot = isroot
+        isroot = 0
+        parse_object(wasroot)
+        return "obj"
+      }
+      if (c == "[") { isroot = 0; parse_array(); return "arr" }
+      if (c == "\"") { g_str = parse_string(); return "str" }
+      if (c == "-" || c ~ /[0-9]/) { parse_number(); return "num" }
+      if (substr(s, pos, 4) == "true") { pos += 4; return "lit" }
+      if (substr(s, pos, 5) == "false") { pos += 5; return "lit" }
+      if (substr(s, pos, 4) == "null") { pos += 4; return "lit" }
       fail()
     }
     {
@@ -226,7 +231,6 @@ manifest_latest_version() {
       pos = 1
       bad = 0
       rootVersion = ""
-      g_type = ""
       g_str = ""
       isroot = 1
       skipws()

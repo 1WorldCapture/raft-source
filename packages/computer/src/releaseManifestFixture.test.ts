@@ -46,6 +46,15 @@ const CASES: FixtureCase[] = [
   // is a number everywhere, so no surface may resolve a version from it
   // (TS maps it to its publishing failure, shell/PS refuse).
   { file: "release-root-manifest.nonstring-version.fixture.json", expect: { ok: false, reason: "publishing" } },
+  // Review round 3: a nested "version" after the root one must not leak up
+  // (the root flag must not survive recursion), and an array/object version
+  // value is not a string anywhere.
+  { file: "release-root-manifest.nested-after-root.fixture.json", expect: { ok: true, version: "1.2.3" } },
+  { file: "release-root-manifest.array-version.fixture.json", expect: { ok: false, reason: "publishing" } },
+  // A raw newline INSIDE a JSON string is invalid input everywhere — the
+  // shell surface folds structural newlines for its line-oriented scan but
+  // must keep in-string newlines fatal (TS: catch-all network failure).
+  { file: "release-root-manifest.raw-newline.fixture.json", expect: { ok: false, reason: "network" } },
 ];
 
 async function fixtureBody(file: string): Promise<string> {
@@ -78,6 +87,11 @@ test("shell: the install.sh manifest_latest_version block resolves the shared fi
 
   for (const testCase of CASES) {
     const body = await fixtureBody(testCase.file);
+    // Execution errors and assertion failures are handled SEPARATELY: a
+    // fixture expected to fail that (wrongly) resolves must fail this test,
+    // never be swallowed by the execution catch.
+    let stdout = "";
+    let executionError: unknown = null;
     try {
       const run = await execFileAsync("sh", [
         "-c",
@@ -86,11 +100,21 @@ test("shell: the install.sh manifest_latest_version block resolves the shared fi
         body,
         match[0],
       ]) as unknown as { stdout: string | Buffer };
-      const stdout = typeof run.stdout === "string" ? run.stdout : run.stdout.toString();
-      assert.ok(testCase.expect.ok, `fixture ${testCase.file} must fail in shell but resolved: ${stdout}`);
-      assert.equal(stdout, testCase.expect.version, `fixture ${testCase.file}`);
+      stdout = typeof run.stdout === "string" ? run.stdout : run.stdout.toString();
     } catch (error) {
-      assert.ok(!testCase.expect.ok, `fixture ${testCase.file} must resolve in shell but failed: ${error}`);
+      executionError = error;
+      const partial = (error as { stdout?: string | Buffer }).stdout;
+      if (typeof partial === "string") stdout = partial;
+      else if (Buffer.isBuffer(partial)) stdout = partial.toString();
+    }
+    if (testCase.expect.ok) {
+      assert.equal(executionError, null, `fixture ${testCase.file} must resolve in shell but failed: ${executionError}`);
+      assert.equal(stdout, testCase.expect.version, `fixture ${testCase.file}`);
+    } else {
+      assert.ok(
+        executionError !== null || stdout.trim().length === 0,
+        `fixture ${testCase.file} must refuse to resolve a version in shell but resolved: ${JSON.stringify(stdout)}`,
+      );
     }
   }
 }, { timeout: 30_000 });
@@ -110,10 +134,18 @@ test("PowerShell: the install.ps1 ConvertFrom-Json access resolves the shared fi
     "$cases = @(",
     caseLines.map((line) => `  ${line}`).join(",\n"),
     ")",
+    "  $JSON_CTRL = '\"(?:[^\"\\]|\\.)*[\\x00-\\x1F]'",
     "$failed = $false",
     "foreach ($c in $cases) {",
     "  $v = $null",
-    "  try { $m = Get-Content -Raw -LiteralPath $c.file | ConvertFrom-Json; $v = $m.version } catch { $v = $null }",
+    "  $raw = Get-Content -Raw -LiteralPath $c.file",
+    "  try {",
+    "    [void][System.Text.Json.JsonDocument]::Parse($raw)",
+    "    $m = $raw | ConvertFrom-Json",
+    "    $v = $m.version",
+    "  } catch [System.Management.Automation.RuntimeException] {",
+    "    if (-not [regex]::Match($raw, $JSON_CTRL).Success) { $m = $raw | ConvertFrom-Json; $v = $m.version }",
+    "  } catch { $v = $null }",
     "  if ($c.mustResolve) {",
     "    if (-not $v -or $v -isnot [string] -or $v -ne $c.expect) { Write-Output \"MISMATCH $($c.file): got '$v' want '$($c.expect)'\"; $failed = $true }",
     "  } else {",

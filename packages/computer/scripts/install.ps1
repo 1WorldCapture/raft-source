@@ -140,6 +140,20 @@ function Read-Json([string]$Uri) {
   if ($content -is [byte[]]) {
     $content = [System.Text.Encoding]::UTF8.GetString($content)
   }
+  # Strictness gate: JSON strings may not carry raw control characters
+  # (spec). ConvertFrom-Json is lenient about them, so validate with the
+  # strict .NET reader first — the same line JSON.parse and the shell parser
+  # draw. Older PowerShell without System.Text.Json falls back to a targeted
+  # regex pre-check for that one spec violation.
+  try {
+    [void][System.Text.Json.JsonDocument]::Parse($content)
+  } catch [System.Management.Automation.RuntimeException] {
+    if ([regex]::Match($content, '"(?:[^"\\]|\\.)*[\x00-\x1F]').Success) {
+      Fail "invalid JSON from $Uri: raw control character inside a string"
+    }
+  } catch {
+    Fail "invalid JSON from $Uri: $($_.Exception.Message)"
+  }
   return $content | ConvertFrom-Json
 }
 
