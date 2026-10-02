@@ -92,15 +92,19 @@ dbTest("at most one non-terminal wake per connection (§3.3 partial unique)", as
   const ids = await seedConnection(db);
   const base = { connectionId: ids.connectionId, connectionEpoch: 1n, generationAtCreation: 1n, cycle: 0n, state: "queued" as const };
   await db.insert(externalAgentWakes).values(base);
-  for (const state of ["queued", "active", "blocked"] as const) {
+  // Each conflict uses a DIFFERENT cycle: the §12 cycle-unique cannot be the
+  // blocker here, so the rejection can only come from the live-wake partial
+  // unique. Covers all five live states (first-review correction).
+  let cycle = 1n;
+  for (const state of ["queued", "dispatching", "awaiting_agent", "active", "blocked"] as const) {
     await assert.rejects(
-      db.insert(externalAgentWakes).values({ ...base, state }),
+      db.insert(externalAgentWakes).values({ ...base, state, cycle: cycle++ }),
       /Failed query|unique|duplicate/i,
     );
   }
-  // Terminal wakes coexist freely with a live one.
-  await db.insert(externalAgentWakes).values({ ...base, state: "settled", cycle: 1n });
-  await db.insert(externalAgentWakes).values({ ...base, state: "exhausted", cycle: 2n });
+  // Terminal wakes coexist with a live one — each in its own cycle slot.
+  await db.insert(externalAgentWakes).values({ ...base, state: "settled", cycle: 10n });
+  await db.insert(externalAgentWakes).values({ ...base, state: "exhausted", cycle: 11n });
 });
 
 dbTest("attempts are unique per (wake, attemptNumber) (§3.3)", async ({ db }) => {
