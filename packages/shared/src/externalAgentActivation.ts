@@ -64,6 +64,10 @@ export const proxyDeliveryPolicySchema = z.strictObject({
   leaseTtlMs: z.number().int().positive(),
   maxRunDurationMs: z.number().int().positive(),
   maxDeliveryAttempts: z.number().int().positive(),
+  /** v1.1 §6.3: run-start budget per retry cycle — covers "HTTP deliveries
+   * succeeded but every run failed"; NOT interchangeable with delivery
+   * attempts. Counted from the current wake's runs under the agent gate. */
+  maxRunStartsPerCycle: z.number().int().positive(),
   maxWakesPerHour: z.number().int().positive(),
 });
 

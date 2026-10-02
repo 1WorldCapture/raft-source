@@ -52,7 +52,7 @@ async function seedConnection(db: import("../../db/index.js").Database): Promise
     activation: {
       strategy: "proxy_delegation",
       delivery: { adapter: "grokbot_webhook", protocolVersion: 1, endpointUrl: "https://api2.cursor.sh/automations/webhook/x" },
-      policy: { debounceMs: 1500, startupTimeoutMs: 120000, leaseTtlMs: 300000, maxRunDurationMs: 1800000, maxDeliveryAttempts: 5, maxWakesPerHour: 30 },
+      policy: { debounceMs: 1500, startupTimeoutMs: 120000, leaseTtlMs: 300000, maxRunDurationMs: 1800000, maxDeliveryAttempts: 5, maxRunStartsPerCycle: 5, maxWakesPerHour: 30 },
     },
   }).returning();
   return { serverId: server.id, agentId: agent.id, connectionId: connection.id };

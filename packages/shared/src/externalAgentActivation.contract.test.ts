@@ -41,6 +41,7 @@ function connectionDto(overrides: Record<string, unknown> = {}): Record<string, 
         leaseTtlMs: 300000,
         maxRunDurationMs: 1800000,
         maxDeliveryAttempts: 5,
+        maxRunStartsPerCycle: 5,
         maxWakesPerHour: 30,
       },
     },
@@ -165,4 +166,18 @@ test("v1.1 §12: consumptionMode is an explicit field — legacy default, delega
   const pausedDelegated = externalAgentConnectionDtoSchema.parse(connectionDto({ consumptionMode: "delegated", enabled: false }));
   assert.equal(pausedDelegated.consumptionMode, "delegated");
   assert.equal(externalAgentConnectionDtoSchema.safeParse(connectionDto({ consumptionMode: "rogue" })).success, false);
+});
+
+test("v1.1 §6.3: maxRunStartsPerCycle is a required policy member, distinct from delivery attempts", () => {
+  const withBudget = externalAgentConnectionDtoSchema.parse(connectionDto());
+  assert.equal(withBudget.activation.strategy, "proxy_delegation");
+  if (withBudget.activation.strategy === "proxy_delegation") {
+    assert.equal(withBudget.activation.policy.maxRunStartsPerCycle, 5);
+    assert.equal(withBudget.activation.policy.maxDeliveryAttempts, 5);
+  }
+  // Omitting the run-start budget must be rejected — it cannot fall back to
+  // the delivery-attempt budget.
+  const missing = connectionDto() as { activation: Record<string, unknown> & { policy: Record<string, unknown> } };
+  delete missing.activation.policy.maxRunStartsPerCycle;
+  assert.equal(externalAgentConnectionDtoSchema.safeParse(missing).success, false);
 });
