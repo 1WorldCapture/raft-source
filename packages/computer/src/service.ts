@@ -965,7 +965,12 @@ export async function runService(deps: RunServiceDeps = {}): Promise<void> {
     const child = spawn(command, args, {
       stdio: ["ignore", logFd.fd, logFd.fd],
       windowsHide: true,
-      env: childEnv,
+      // Pin the state root explicitly: supervisor-managed processes must be
+      // attributable to THIS root from the outside (ps eww) — the desktop
+      // quit-ladder and any future root-isolation check key off
+      // RAFT_HOME/SLOCK_HOME, and an inherited-but-unset env (GUI-launched
+      // app) would leave a runner indistinguishable from another root's.
+      env: { ...childEnv, RAFT_HOME: slockHome },
     });
     await logFd.close();
     if (!child.pid) {

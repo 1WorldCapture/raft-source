@@ -33,6 +33,11 @@ test("start() success clears a failed converge notice; enable() does too", async
       getPath: () => "/tmp/raft-host-test",
     },
   } });
+  t.mock.module("./sessionOriginGuard.js", { namedExports: {
+    checkSessionOrigin: async () => ({ status: "none", configuredOrigin: "https://example.invalid" }),
+    describeSessionOriginMismatch: () => "",
+    SESSION_ORIGIN_MISMATCH_CODE: "SESSION_ORIGIN_MISMATCH",
+  } });
   t.mock.module("@botiverse/raft-computer/lib", { namedExports: {
     connectService: async () => { throw new Error("unused"); },
     convergeAppHostLifecycle: async () => ({ owner: "app", enabled: true, status: "converged", label: null, definitionPath: null, definition: null }),

@@ -174,3 +174,58 @@ test("shutdown ladder: graceful → group SIGTERM → group SIGKILL → complete
     assert.match(log, /INCOMPLETE: could not terminate \[9003\]/, "stragglers named, never claimed clean");
   });
 });
+test("root isolation: every kill-set member must prove its state root (2026-10-02 incident)", async (t) => {
+  const { parsePsTable, resolveSurvivors, psLineBelongsToRaftHome, filterRootsByRaftHome } =
+    await import("./shutdown.ts");
+
+  await t.test("psLineBelongsToRaftHome: RAFT_HOME env form matches exactly", () => {
+    const line = "node /x/raft-computer.js __run 32e0 SLOCK_AGENT_ID=a RAFT_HOME=/Users/t/.slock";
+    assert.equal(psLineBelongsToRaftHome(line, "/Users/t/.slock"), true);
+    assert.equal(psLineBelongsToRaftHome(line, "/Users/t/.slock-raft"), false);
+  });
+
+  await t.test("psLineBelongsToRaftHome: prefix look-alike roots never match", () => {
+    const line = "SLOCK_AGENT_ID=a RAFT_HOME=/Users/t/.slock-raft";
+    assert.equal(psLineBelongsToRaftHome(line, "/Users/t/.slock"), false);
+  });
+
+  await t.test("psLineBelongsToRaftHome: SLOCK_HOME legacy env and --slock-home argv both count", () => {
+    assert.equal(psLineBelongsToRaftHome("x SLOCK_HOME=/Users/t/.slock", "/Users/t/.slock"), true);
+    assert.equal(psLineBelongsToRaftHome("/app __service --slock-home /Users/t/.slock", "/Users/t/.slock"), true);
+  });
+
+  await t.test("psLineBelongsToRaftHome: no root marker fails closed", () => {
+    assert.equal(psLineBelongsToRaftHome("tail -f /Users/t/.slock/computer/run/service.log", "/Users/t/.slock"), false);
+    assert.equal(psLineBelongsToRaftHome("SLOCK_AGENT_ID=a", "/Users/t/.slock"), false);
+  });
+
+  await t.test("filterRootsByRaftHome: foreign and unreachable roots are dropped and reported", async () => {
+    const seen: string[] = [];
+    const kept = await filterRootsByRaftHome(
+      [101, 202, 303],
+      "/Users/t/.slock",
+      {
+        ps: async (pid) => {
+          if (pid === 101) return "node svc __service --slock-home /Users/t/.slock";
+          if (pid === 202) return "node svc __service --slock-home /Users/t/.slock-raft";
+          throw new Error("gone");
+        },
+        onForeign: (pid, reason) => seen.push(pid + ":" + reason),
+      },
+    );
+    assert.deepEqual(kept, [101]);
+    assert.equal(seen.length, 2);
+    assert.match(seen.join(","), /202:not-bound/);
+    assert.match(seen.join(","), /303:ps-unreachable/);
+  });
+
+  await t.test("resolveSurvivors with raftHome: sibling-root orphan fails closed even with SLOCK_AGENT_ID", async () => {
+    const rows = parsePsTable(
+      [
+        "9001 1 8000 Thu Oct  2 14:00:00 2026 node agent SLOCK_AGENT_ID=a RAFT_HOME=/Users/t/.slock-raft",
+      ].join("\n"),
+    );
+    const scoped = await resolveSurvivors(rows, [8000], undefined, undefined, "/Users/t/.slock");
+    assert.equal(scoped.orphanPids.length, 0, "sibling-root agent must not be adopted");
+  });
+});

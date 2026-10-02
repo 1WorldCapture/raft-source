@@ -35,6 +35,11 @@ import {
 import { createUpgradeInfoReader } from "../main/upgradeInfo.js";
 import { cleanupLegacyLoginAgents, getLoginItemAtLogin, setLoginItemAtLogin } from "../main/loginItem.js";
 import { isValidEnableInput, type EnableComputerInput } from "./enableInput.js";
+import {
+  checkSessionOrigin,
+  describeSessionOriginMismatch,
+  SESSION_ORIGIN_MISMATCH_CODE,
+} from "./sessionOriginGuard.js";
 import { reduceConvergeFailure, type ConvergeState } from "./convergeState.js";
 import { runServiceRecycle } from "./serviceRecycle.js";
 
@@ -91,8 +96,29 @@ class ComputerHost {
    * lifecycle hiccup never blocks the chat app from starting — but they ARE
    * recorded in convergeState for the renderer.
    */
+  /**
+   * Fail-closed takeover gate: a persisted session in this state root that
+   * belongs to a DIFFERENT deployment (origin ≠ the build's baked
+   * CONFIGURED_API_ORIGIN) must never be adopted, stopped, or recycled by
+   * this app — the 2026-10-02 incident had a self-hosted build drive a
+   * leftover session (and a sibling state root) it had no business touching.
+   */
+  private async sessionOriginMismatch(): Promise<string | null> {
+    const check = await checkSessionOrigin(this.slockHome);
+    if (check.status !== "mismatch") return null;
+    return describeSessionOriginMismatch(check);
+  }
+
   async converge(): Promise<{ ok: boolean; error?: string }> {
     try {
+      const mismatch = await this.sessionOriginMismatch();
+      if (mismatch !== null) {
+        // Block BEFORE any lifecycle action — no login-item convergence, no
+        // service stop/start, nothing that touches the foreign session.
+        this.convergeState = { ok: false, code: SESSION_ORIGIN_MISMATCH_CODE, message: mismatch };
+        return { ok: false, error: mismatch };
+      }
+
       // Task #7 login item: on macOS the login start is OUR LaunchAgent
       // running `open -a "Raft Desktop" --args --hidden` (the OS-native
       // setLoginItemSettings cannot carry args there, and wasOpenedAtLogin is
@@ -186,6 +212,8 @@ class ComputerHost {
   }
 
   async start(): Promise<void> {
+    const mismatch = await this.sessionOriginMismatch();
+    if (mismatch !== null) throw new Error(`${SESSION_ORIGIN_MISMATCH_CODE}: ${mismatch}`);
     await this.api.start({ serverId: null, serverLabel: null });
     // Any action that leaves the local service running clears a stale
     // converge/recycle failure notice (e.g. the start-only retry offered after
@@ -194,6 +222,8 @@ class ComputerHost {
   }
 
   async stop(): Promise<void> {
+    const mismatch = await this.sessionOriginMismatch();
+    if (mismatch !== null) throw new Error(`${SESSION_ORIGIN_MISMATCH_CODE}: ${mismatch}`);
     await this.api.stop();
   }
 
@@ -212,6 +242,8 @@ class ComputerHost {
    * leaves the machine stopped, so the retry must be start-only).
    */
   async recycleService(): Promise<void> {
+    const mismatch = await this.sessionOriginMismatch();
+    if (mismatch !== null) throw new Error(`${SESSION_ORIGIN_MISMATCH_CODE}: ${mismatch}`);
     await runServiceRecycle({
       stop: async () => {
         await this.api.stop();
@@ -255,6 +287,8 @@ class ComputerHost {
    * reports progress through getStatus().upgrade (polled + pushed to the card).
    */
   async upgrade(): Promise<void> {
+    const mismatch = await this.sessionOriginMismatch();
+    if (mismatch !== null) throw new Error(`${SESSION_ORIGIN_MISMATCH_CODE}: ${mismatch}`);
     const latest = await fetchCdnLatestVersion(DEFAULT_UPGRADE_BASE_URL);
     if (!latest) throw new Error("no_update_available");
     const result = await this.api.tryUpgradeViaService(latest, undefined, { trigger: "tray" });

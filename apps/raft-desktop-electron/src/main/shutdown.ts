@@ -193,15 +193,17 @@ export function collectSurvivorPlan(
 export async function resolveSurvivors(
   rows: ReadonlyArray<PsRow>,
   rootPids: ReadonlyArray<number>,
-  verifyOrphan: (row: PsRow) => Promise<boolean> = defaultVerifyOrphan,
+  verifyOrphan?: (row: PsRow) => Promise<boolean>,
   expectedRootLstart?: ReadonlyMap<number, string>,
+  raftHome?: string,
 ): Promise<TreeSurvivors> {
+  const verify = verifyOrphan ?? ((row: PsRow) => defaultVerifyOrphan(row, raftHome));
   const plan = collectSurvivorPlan(rows, rootPids, expectedRootLstart);
   const orphanPids: number[] = [];
   for (const candidate of plan.orphanCandidates) {
     let isOurs = false;
     try {
-      isOurs = await verifyOrphan(candidate);
+      isOurs = await verify(candidate);
     } catch {
       isOurs = false; // unreadable → not verified → not a target
     }
@@ -215,15 +217,79 @@ export async function resolveSurvivors(
   };
 }
 
+/**
+ * Prove a `ps eww -o command=` line (command + environment, space-separated)
+ * belongs to the given Raft state root. Accepted evidence, matching how the
+ * service tree is spawned:
+ *  - an explicit `RAFT_HOME=<root>` / `SLOCK_HOME=<root>` environment
+ *    assignment (the service exports its root to `__run` children), or
+ *  - a `--slock-home <root>` argv (the `__service` dispatcher form).
+ * The value must end at whitespace/EOL so `.slock` never matches `.slock-x`.
+ * Lines with NO root marker (processes from older builds, or the user's own
+ * editor/tail inside a root's agents dir) fail closed: not ours.
+ */
+export function psLineBelongsToRaftHome(line: string, raftHome: string): boolean {
+  const escaped = raftHome.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const env = new RegExp(`(?:^|\\s)(?:RAFT_HOME|SLOCK_HOME)=${escaped}(?=\\s|$)`);
+  if (env.test(line)) return true;
+  const argv = new RegExp(`(?:^|\\s)--slock-home\\s+${escaped}(?=\\s|$)`);
+  return argv.test(line);
+}
+
 /** Default identity check: SLOCK_AGENT_ID in the process environment
- * (`ps eww` prints the environment after the command). Unreadable → false. */
-export async function defaultVerifyOrphan(row: PsRow): Promise<boolean> {
+ * (`ps eww` prints the environment after the command). Unreadable → false.
+ *
+ * With `raftHome`, the check is root-scoped: SLOCK_AGENT_ID alone matches
+ * agents of EVERY Raft state root on the machine, so the 2026-10-02 incident
+ * had a desktop quit-ladder claim (and kill) a sibling root's agents as
+ * "ours". The line must ALSO prove binding to this app's root.
+ */
+export async function defaultVerifyOrphan(row: PsRow, raftHome?: string): Promise<boolean> {
   try {
     const { stdout } = await execFileAsync("ps", ["eww", "-o", "command=", "-p", String(row.pid)]);
-    return stdout.includes("SLOCK_AGENT_ID=");
+    if (!stdout.includes("SLOCK_AGENT_ID=")) return false;
+    if (raftHome === undefined) return true;
+    return psLineBelongsToRaftHome(stdout, raftHome);
   } catch {
     return false;
   }
+}
+
+/**
+ * Filter trusted pidfile roots down to the ones whose live process proves it
+ * belongs to `raftHome` (see psLineBelongsToRaftHome). A root that cannot be
+ * proven ours — a recycled pid, an unmarked legacy process, or a service of
+ * ANOTHER state root sharing this machine — is dropped and reported through
+ * `onForeign`, never signalled. This is the hard boundary that keeps the
+ * quit ladder inside the state root this app was built to manage.
+ */
+export async function filterRootsByRaftHome(
+  rootPids: ReadonlyArray<number>,
+  raftHome: string,
+  deps: {
+    ps?: (pid: number) => Promise<string>;
+    onForeign?: (pid: number, reason: string) => void;
+  } = {},
+): Promise<number[]> {
+  const ps = deps.ps ?? ((pid: number) =>
+    execFileAsync("ps", ["eww", "-o", "command=", "-p", String(pid)]).then((r) => r.stdout));
+  const verified: number[] = [];
+  for (const pid of rootPids) {
+    let line: string;
+    try {
+      line = await ps(pid);
+    } catch {
+      // ps cannot see it → the pid is gone; not a root for the ladder.
+      deps.onForeign?.(pid, "ps-unreachable");
+      continue;
+    }
+    if (psLineBelongsToRaftHome(line, raftHome)) {
+      verified.push(pid);
+    } else {
+      deps.onForeign?.(pid, "not-bound-to-" + raftHome);
+    }
+  }
+  return verified;
 }
 
 // ─── liveness inputs ─────────────────────────────────────────────────────────

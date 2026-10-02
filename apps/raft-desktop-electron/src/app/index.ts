@@ -31,7 +31,13 @@ import { INITIAL_LIFECYCLE_STATE, reduceLifecycle } from "../main/lifecycle.js";
 import type { LifecycleEvent } from "../main/lifecycle.js";
 import { loadQuitNoConfirm, loadZoomLevel, saveQuitNoConfirm, saveZoomLevel } from "../main/viewPrefs.js";
 import { runQuitFlow } from "../main/quitFlow.js";
-import { parsePsTable, readPidFile, resolveSurvivors, runShutdownTree } from "../main/shutdown.js";
+import {
+  filterRootsByRaftHome,
+  parsePsTable,
+  readPidFile,
+  resolveSurvivors,
+  runShutdownTree,
+} from "../main/shutdown.js";
 import { readFile, readdir } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -502,6 +508,15 @@ async function orchestrateQuitShutdown(systemShutdown: boolean): Promise<void> {
       } catch {
         // No servers directory — service pidfile still covers the tree root.
       }
+      // Root isolation (2026-10-02 incident): every pidfile root must PROVE
+      // it belongs to this app's state root before it can seed the kill set —
+      // a recycled pid, an unmarked legacy tree, or another root's service
+      // sharing this Mac is skipped, never signalled.
+      const ownedRootPids = await filterRootsByRaftHome(rootPids, slockHome, {
+        onForeign: (pid, reason) => {
+          console.warn(`[raft-desktop] shutdown ladder skipped pid ${pid}: ${reason}`);
+        },
+      });
       let psTable = "";
       try {
         const { stdout } = await execFileAsync("ps", ["-axo", "pid=,ppid=,pgid=,lstart=,command="]);
@@ -510,7 +525,7 @@ async function orchestrateQuitShutdown(systemShutdown: boolean): Promise<void> {
         // ps unavailable: an empty table makes the roots themselves the only
         // known survivors — the ladder still clears them.
       }
-      return { rootPids, psTable };
+      return { rootPids: ownedRootPids, psTable };
     },
     logFile: path.join(runDir, "shutdown.log"),
     systemShutdown,
@@ -648,7 +663,7 @@ if (headlessMode?.mode === "__service") {
           if (rootPids.length === 0) return null;
           try {
             const { stdout } = await execFileAsync("ps", ["-axo", "pid=,ppid=,pgid=,lstart=,command="]);
-            const survivors = await resolveSurvivors(parsePsTable(stdout), rootPids);
+            const survivors = await resolveSurvivors(parsePsTable(stdout), rootPids, undefined, undefined, home);
             return survivors.pids.length - survivors.roots.length;
           } catch {
             return null;
