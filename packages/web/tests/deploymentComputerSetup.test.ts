@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  DEPLOYMENT_COMPUTER_SETUP_PATH,
   fetchDeploymentComputerSetup,
   validateDeploymentComputerSetupResponse,
 } from "../src/utils/deploymentComputerSetup";
@@ -33,6 +34,13 @@ const READY_HANDS_ALPHA = {
   ...READY_HANDS,
   installChannel: "alpha",
 };
+
+test("setup path is api-relative (axios baseURL already carries /api)", () => {
+  // Joint-test S1 regression: "/api/..." here produced /api/api/... in the real
+  // page and failed closed as an unavailable config. Call-site paths must not
+  // repeat the api client's base prefix.
+  assert.ok(!DEPLOYMENT_COMPUTER_SETUP_PATH.startsWith("/api/"));
+});
 
 test("validate accepts a manifest-backend ready payload", () => {
   const validated = validateDeploymentComputerSetupResponse(READY_MANIFEST);
@@ -141,5 +149,5 @@ test("fetch maps every failure mode to an explicit unavailable reason", async ()
   } finally {
     api.get = originalGet;
   }
-  assert.equal(calls[0]?.[0], "/api/deployment/computer-setup");
+  assert.equal(calls[0]?.[0], "/deployment/computer-setup");
 });
