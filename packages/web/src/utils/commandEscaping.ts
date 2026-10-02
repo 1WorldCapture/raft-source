@@ -25,3 +25,24 @@ export function shellQuote(value: string): string {
 export function powerShellQuote(value: string): string {
   return `'${value.replaceAll("'", "''")}'`;
 }
+
+/**
+ * Escape one path SEGMENT for interpolation inside a POSIX double-quoted
+ * string. Inside double quotes the shell expands `$` and backticks, so both
+ * are backslash-escaped here along with `"` and `\`. Used when a value must
+ * keep an intentional variable reference (e.g. a literal `$HOME` prefix) while
+ * user-influenced data stays inert.
+ */
+export function shellDoubleQuoteSegment(segment: string): string {
+  return segment.replace(/([\\`"$])/g, "\\$1");
+}
+
+/**
+ * Escape one path SEGMENT for interpolation inside a PowerShell double-quoted
+ * string. PowerShell's escape character is the backtick; `$`, `"` and the
+ * backtick itself must be escaped so only the intended variable reference
+ * (e.g. `$env:USERPROFILE`) expands.
+ */
+export function powerShellDoubleQuoteSegment(segment: string): string {
+  return segment.replace(/([`"$])/g, "`$1");
+}

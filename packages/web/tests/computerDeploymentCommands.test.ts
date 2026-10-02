@@ -160,12 +160,12 @@ test("isolated home scoping keeps URLs from the deployment config", () => {
   // RAFT_HOME rides the sh side of the pipe so the installer sees it.
   assert.match(
     mac.install,
-    /^curl -fsSL 'https:\/\/raft\.example\.private\/computer\/install\.sh' \| RAFT_HOME='\$HOME\/\.raft-computer-acme' RAFT_COMPUTER_INSTALL_DIR='\$HOME\/\.raft-computer-acme\/bin' /,
+    /^curl -fsSL 'https:\/\/raft\.example\.private\/computer\/install\.sh' \| RAFT_HOME="\$HOME\/\.raft-computer-acme" RAFT_COMPUTER_INSTALL_DIR="\$HOME\/\.raft-computer-acme\/bin" /,
   );
   // Every binary invocation shares the isolated state root and binary path.
   assert.match(
     mac.setup,
-    /^RAFT_HOME='\$HOME\/\.raft-computer-acme' RAFT_COMPUTER_INSTALL_DIR='\$HOME\/\.raft-computer-acme\/bin' '\$HOME\/\.raft-computer-acme\/bin\/raft-computer' setup/,
+    /^RAFT_HOME="\$HOME\/\.raft-computer-acme" RAFT_COMPUTER_INSTALL_DIR="\$HOME\/\.raft-computer-acme\/bin" "\$HOME\/\.raft-computer-acme\/bin\/raft-computer" setup/,
   );
   assert.match(mac.status, /^RAFT_HOME=/);
   assert.doesNotMatch(mac.install, /raft-computer-\$|raft-computer-acme\/bin\/raft-computer'/);
@@ -177,10 +177,53 @@ test("isolated home scoping keeps URLs from the deployment config", () => {
     isolatedHomeSlug: "acme",
   });
   assert.ok(win);
-  assert.match(win.install, /^\$env:RAFT_HOME = '\$env:USERPROFILE\\\.raft-computer-acme'; /);
+  assert.match(win.install, /^\$env:RAFT_HOME = "\$env:USERPROFILE\\\.raft-computer-acme"; /);
   assert.match(win.setup, /^& "\$env:RAFT_COMPUTER_INSTALL_DIR\\raft-computer\.exe" setup/);
   // The URL source stays the deployment config, not an env-keyed constant.
   assert.match(win.install, /https:\/\/raft\.example\.private\/computer\/install\.ps1/);
+});
+
+test("isolated home expands the real home directory while the slug stays inert", () => {
+  // Contract review fix: single quotes made $HOME / $env:USERPROFILE literal.
+  // The variable reference must sit in double quotes; only the dynamic slug
+  // segment is escaped.
+  const mac = getComputerCommandsFromDeployment({
+    deployment: DEPLOYMENT,
+    serverSlug: "acme",
+    isolatedHomeSlug: "acme",
+  });
+  assert.ok(mac);
+  assert.match(mac.setup, /RAFT_HOME="\$HOME\/\.raft-computer-acme"/);
+  assert.doesNotMatch(mac.setup, /RAFT_HOME='\$HOME/);
+
+  const sneaky = getComputerCommandsFromDeployment({
+    deployment: DEPLOYMENT,
+    serverSlug: "acme",
+    isolatedHomeSlug: "x$(rm -rf /)y",
+  });
+  assert.ok(sneaky);
+  // The injected $ is escaped inside the double quotes; the $HOME prefix still expands.
+  assert.match(sneaky.setup, /RAFT_HOME="\$HOME\/\.raft-computer-x\\\$\(?rm -rf \/\)?y"/);
+
+  const win = getComputerCommandsFromDeployment({
+    deployment: DEPLOYMENT,
+    serverSlug: "acme",
+    platform: "windows",
+    isolatedHomeSlug: "a`b\"c",
+  });
+  assert.ok(win);
+  assert.match(win.install, /^\$env:RAFT_HOME = "\$env:USERPROFILE\\\.raft-computer-a``b`"c"; /);
+});
+
+test("the hands alpha QA channel passes through as RAFT_COMPUTER_INSTALL_CHANNEL=alpha", () => {
+  const commands = getComputerCommandsFromDeployment({
+    deployment: { ...HANDS_DEPLOYMENT, installChannel: "alpha" },
+    serverSlug: "acme",
+  });
+  assert.ok(commands);
+  assert.match(commands.install, /RAFT_COMPUTER_INSTALL_CHANNEL='alpha'/);
+  assert.doesNotMatch(commands.install, /RAFT_COMPUTER_VERSION/);
+  assert.doesNotMatch(commands.install, /INSTALL_CHANNEL='pinned:/);
 });
 
 test("a missing slug yields no commands at all", () => {

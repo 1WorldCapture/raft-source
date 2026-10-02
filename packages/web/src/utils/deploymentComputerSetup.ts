@@ -19,11 +19,12 @@ export const DEPLOYMENT_COMPUTER_SETUP_SCHEMA_VERSION = 1;
 export type DeploymentReleaseBackend = "hands" | "manifest";
 
 /**
- * `latest` or `pinned:<semver>`. The deployment response never carries `alpha`:
- * the alpha debug channel stays a build-scoped QA surface, and the manifest
- * backend must error on alpha instead of silently substituting latest.
+ * `latest`, `alpha` (hands-backend QA channel served by the deployment) or
+ * `pinned:<semver>`. Contract: the manifest backend has no alpha channel — a
+ * manifest+alpha payload is contract-invalid and must surface as an explicit
+ * error, never as latest wearing alpha's name.
  */
-export type DeploymentInstallChannel = "latest" | `pinned:${string}`;
+export type DeploymentInstallChannel = "latest" | "alpha" | `pinned:${string}`;
 
 export interface DeploymentComputerSetupReady {
   schemaVersion: typeof DEPLOYMENT_COMPUTER_SETUP_SCHEMA_VERSION;
@@ -69,8 +70,9 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 
 const PINNED_CHANNEL_PATTERN = /^pinned:\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 
-function isValidInstallChannel(value: unknown): value is DeploymentInstallChannel {
-  return value === "latest" || (typeof value === "string" && PINNED_CHANNEL_PATTERN.test(value));
+function isKnownInstallChannel(value: unknown): value is DeploymentInstallChannel {
+  return value === "latest" || value === "alpha"
+    || (typeof value === "string" && PINNED_CHANNEL_PATTERN.test(value));
 }
 
 /**
@@ -104,7 +106,16 @@ export function validateDeploymentComputerSetupResponse(
   if (!releaseBase) return null;
   const handsOrigin = typeof releaseSource.handsOrigin === "string" ? releaseSource.handsOrigin : undefined;
   if (backend === "hands" && !handsOrigin) return null;
-  if (!isValidInstallChannel(payload.installChannel)) return null;
+  if (!isKnownInstallChannel(payload.installChannel)) return null;
+  // Contract: the manifest backend has no alpha channel. Reject the combination
+  // explicitly (as an invalid deployment config) — never substitute latest.
+  if (backend === "manifest" && payload.installChannel === "alpha") {
+    return {
+      schemaVersion: DEPLOYMENT_COMPUTER_SETUP_SCHEMA_VERSION,
+      status: "invalid",
+      fields: ["RAFT_COMPUTER_RELEASE_BACKEND", "installChannel"],
+    };
+  }
 
   return {
     schemaVersion: DEPLOYMENT_COMPUTER_SETUP_SCHEMA_VERSION,

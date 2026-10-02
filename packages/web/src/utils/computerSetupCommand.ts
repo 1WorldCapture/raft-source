@@ -2,7 +2,12 @@ export const STAGING_COMPUTER_SERVER_URL = "https://api-aws-staging.botiverse.de
 export const DEFAULT_COMPUTER_SERVER_URL = "https://api.raft.build";
 export const LEGACY_DEFAULT_COMPUTER_SERVER_URL = "https://api.slock.ai";
 
-import { powerShellQuote, shellQuote } from "./commandEscaping";
+import {
+  powerShellDoubleQuoteSegment,
+  powerShellQuote,
+  shellDoubleQuoteSegment,
+  shellQuote,
+} from "./commandEscaping";
 import type { DeploymentComputerSetupReady } from "./deploymentComputerSetup";
 
 // The Computer ships as a self-contained SEA binary installed by the native
@@ -290,11 +295,17 @@ export function getComputerCommandsFromDeployment({
 
   // Isolated-home plumbing (test surfaces only). `slug` is the canonical setup
   // slug, so the isolated home matches across web-generated commands and
-  // manual QA. paths.ts reads RAFT_HOME || SLOCK_HOME.
+  // manual QA. paths.ts reads RAFT_HOME || SLOCK_HOME. The home MUST keep the
+  // runtime variable reference ($HOME / $env:USERPROFILE — the browser cannot
+  // know the target machine's home), so the path embeds inside DOUBLE quotes
+  // where that reference expands, with the user-influenced slug segment
+  // escaped for the double-quoted context (a single-quoted path would carry
+  // the variable as a literal string).
   const isolationSlug = isolatedHomeSlug?.trim().replace(/^\/+/, "") || null;
-  const home = platform === "windows"
-    ? `$env:USERPROFILE\\.raft-computer-${isolationSlug}`
-    : `$HOME/.raft-computer-${isolationSlug}`;
+  const homeInner = platform === "windows"
+    ? `$env:USERPROFILE\\.raft-computer-${powerShellDoubleQuoteSegment(isolationSlug ?? "")}`
+    : `$HOME/.raft-computer-${shellDoubleQuoteSegment(isolationSlug ?? "")}`;
+  const home = `"${homeInner}"`;
 
   if (platform === "windows") {
     const envLines = [
@@ -311,8 +322,8 @@ export function getComputerCommandsFromDeployment({
     const isolated = Boolean(isolationSlug);
     const isolationEnvLines = isolated
       ? [
-        `$env:RAFT_HOME = ${powerShellQuote(home)}`,
-        `$env:RAFT_COMPUTER_INSTALL_DIR = ${powerShellQuote(`${home}\\bin`)}`,
+        `$env:RAFT_HOME = ${home}`,
+        `$env:RAFT_COMPUTER_INSTALL_DIR = "${homeInner}\\bin"`,
       ]
       : [];
     const binary = isolated
@@ -338,8 +349,8 @@ export function getComputerCommandsFromDeployment({
   const envPairs = [
     ...(isolated
       ? [
-          `RAFT_HOME=${shellQuote(home)}`,
-          `RAFT_COMPUTER_INSTALL_DIR=${shellQuote(`${home}/bin`)}`,
+          `RAFT_HOME=${home}`,
+          `RAFT_COMPUTER_INSTALL_DIR="${homeInner}/bin"`,
         ]
       : []),
     `RAFT_COMPUTER_RELEASE_BACKEND=${shellQuote(backend)}`,
@@ -351,9 +362,9 @@ export function getComputerCommandsFromDeployment({
   const installUrl = `${releaseBase}/install.sh`;
   // Every command that runs the installed binary needs the same state root.
   const binaryEnvPrefix = isolated
-    ? `RAFT_HOME=${shellQuote(home)} RAFT_COMPUTER_INSTALL_DIR=${shellQuote(`${home}/bin`)} `
+    ? `RAFT_HOME=${home} RAFT_COMPUTER_INSTALL_DIR="${homeInner}/bin" `
     : "";
-  const binary = isolated ? shellQuote(`${home}/bin/raft-computer`) : "raft-computer";
+  const binary = isolated ? `"${homeInner}/bin/raft-computer"` : "raft-computer";
   return {
     install: `curl -fsSL ${shellQuote(installUrl)} | ${envPairs.join(" ")} sh`,
     setup: `${binaryEnvPrefix}${binary} setup ${shellQuote(`/${slug}`)} --server-url ${shellQuote(serverUrl)}${machineArg}`,

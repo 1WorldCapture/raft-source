@@ -29,6 +29,11 @@ const READY_HANDS = {
   installChannel: "pinned:1.2.3",
 };
 
+const READY_HANDS_ALPHA = {
+  ...READY_HANDS,
+  installChannel: "alpha",
+};
+
 test("validate accepts a manifest-backend ready payload", () => {
   const validated = validateDeploymentComputerSetupResponse(READY_MANIFEST);
   assert.ok(validated);
@@ -68,13 +73,30 @@ test("validate passes through declared missing/invalid states with their fields"
   }
 });
 
+test("hands+alpha ready payloads are accepted; manifest+alpha is an explicit invalid config", () => {
+  const validated = validateDeploymentComputerSetupResponse(READY_HANDS_ALPHA);
+  assert.ok(validated);
+  assert.equal(validated.status, "ready");
+  if (validated.status === "ready") {
+    assert.equal(validated.installChannel, "alpha");
+  }
+
+  const manifestAlpha = validateDeploymentComputerSetupResponse({ ...READY_MANIFEST, installChannel: "alpha" });
+  assert.ok(manifestAlpha);
+  assert.equal(manifestAlpha.status, "invalid");
+  assert.deepEqual(manifestAlpha.status === "ready" ? [] : manifestAlpha.fields, [
+    "RAFT_COMPUTER_RELEASE_BACKEND",
+    "installChannel",
+  ]);
+});
+
 test("validate rejects unknown schema versions and malformed ready payloads", () => {
   assert.equal(validateDeploymentComputerSetupResponse(null), null);
   assert.equal(validateDeploymentComputerSetupResponse("nope"), null);
   assert.equal(validateDeploymentComputerSetupResponse({ schemaVersion: 2, status: "ready" }), null);
   assert.equal(validateDeploymentComputerSetupResponse({ ...READY_MANIFEST, serverUrl: "" }), null);
-  assert.equal(validateDeploymentComputerSetupResponse({ ...READY_MANIFEST, installChannel: "alpha" }), null);
   assert.equal(validateDeploymentComputerSetupResponse({ ...READY_MANIFEST, installChannel: "pinned:notasemver" }), null);
+  assert.equal(validateDeploymentComputerSetupResponse({ ...READY_HANDS_ALPHA, installChannel: "beta" }), null);
   assert.equal(
     validateDeploymentComputerSetupResponse({ ...READY_MANIFEST, releaseSource: { backend: "ftp", releaseBase: "x" } }),
     null,

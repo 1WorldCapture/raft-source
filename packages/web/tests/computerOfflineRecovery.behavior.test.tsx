@@ -264,7 +264,7 @@ test("online Computer without remote Upgrade shows a version-pinned fresh-instal
       commands.restartService,
     );
     assert.match(commands.install, /RAFT_COMPUTER_VERSION='1\.0\.14'/);
-    assert.match(commands.restartService, /raft-computer'? restart$/);
+    assert.match(commands.restartService, /raft-computer"? restart$/);
     assert.doesNotMatch(commands.restartService, /\/acme/);
 
     fireEvent.click(
