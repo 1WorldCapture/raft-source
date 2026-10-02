@@ -15,6 +15,7 @@ import { fetchCdnLatestVersionResult } from "./computerRelease.js";
 
 const execFileAsync = promisify(execFile);
 const fixturesDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "scripts", "fixtures");
+const windowsInstallScriptPath = path.join(fixturesDir, "..", "install.ps1");
 
 interface FixtureCase {
   file: string;
@@ -55,6 +56,14 @@ const CASES: FixtureCase[] = [
   // shell surface folds structural newlines for its line-oriented scan but
   // must keep in-string newlines fatal (TS: catch-all network failure).
   { file: "release-root-manifest.raw-newline.fixture.json", expect: { ok: false, reason: "network" } },
+  // Review round 4: control bytes must be refused on the ORIGINAL input
+  // before any rewriting (raw U+0001, NUL — which command substitution
+  // would otherwise strip), and trailing commas / comments are invalid
+  // documents everywhere (the PS gate covers them via the strict reader).
+  { file: "release-root-manifest.raw-u0001.fixture.json", expect: { ok: false, reason: "network" } },
+  { file: "release-root-manifest.nul-byte.fixture.json", expect: { ok: false, reason: "network" } },
+  { file: "release-root-manifest.trailing-comma.fixture.json", expect: { ok: false, reason: "network" } },
+  { file: "release-root-manifest.comment.fixture.json", expect: { ok: false, reason: "network" } },
 ];
 
 async function fixtureBody(file: string): Promise<string> {
@@ -119,10 +128,32 @@ test("shell: the install.sh manifest_latest_version block resolves the shared fi
   }
 }, { timeout: 30_000 });
 
-test("PowerShell: the install.ps1 ConvertFrom-Json access resolves the shared fixtures", async () => {
-  // One pwsh process evaluates every fixture (cold starts are slow); the
-  // script performs exactly the access install.ps1 performs — ConvertFrom-Json
-  // then the top-level .version property.
+test("PowerShell: install.ps1 parses with zero syntax errors", async () => {
+  // The strictness-gate round shipped \$Uri: inside a double-quoted string,
+  // which pwsh reads as a drive-qualified variable and refuses to even
+  // parse — guard the WHOLE script so the installer can never ship
+  // unparseable again.
+  const script = [
+    "$err = $null",
+    "[void][System.Management.Automation.Language.Parser]::ParseFile(",
+    `  '${windowsInstallScriptPath.replace(/'/g, "''")}', [ref]$null, [ref]$err)`,
+    "if ($err -and $err.Count -gt 0) { $err | ForEach-Object { Write-Output ($_.Extent.StartLineNumber.ToString() + ': ' + $_.Message) }; exit 1 }",
+    "Write-Output 'PSH-PARSE-OK'",
+  ].join("\n");
+  const run = await execFileAsync("pwsh", ["-NoProfile", "-Command", script], { timeout: 60_000 }) as unknown as { stdout: string | Buffer };
+  const text = (typeof run.stdout === "string" ? run.stdout : run.stdout.toString()).trim();
+  assert.equal(text, "PSH-PARSE-OK", "install.ps1 must parse cleanly");
+}, { timeout: 90_000 });
+
+test("PowerShell: the REAL install.ps1 Read-Json resolves the shared fixtures", async () => {
+  // Extract the actual Read-Json function from install.ps1 and execute it
+  // against local files (Invoke-WebRequest stubbed to serve the fixture
+  // bytes) — the parity must cover the shipping implementation, not a
+  // hand-mirrored fragment of it.
+  const installer = await readFile(windowsInstallScriptPath, "utf8");
+  const fn = installer.match(/function Read-Json\(\[string\]\$Uri\) \{[\s\S]*?\n\}/);
+  assert.ok(fn, "install.ps1 must keep the extractable Read-Json function");
+
   const caseLines = CASES.map((testCase) => {
     const file = path.join(fixturesDir, testCase.file).replace(/'/g, "''");
     if (testCase.expect.ok) {
@@ -134,17 +165,18 @@ test("PowerShell: the install.ps1 ConvertFrom-Json access resolves the shared fi
     "$cases = @(",
     caseLines.map((line) => `  ${line}`).join(",\n"),
     ")",
-    "  $JSON_CTRL = '\"(?:[^\"\\]|\\.)*[\\x00-\\x1F]'",
+    // Stub the transport before the real function is defined.
+    "function Invoke-WebRequest { param([string]$Uri, [switch]$UseBasicParsing) ",
+    "  $bytes = [System.IO.File]::ReadAllBytes($Uri)",
+    "  [pscustomobject]@{ Content = $bytes } }",
+    "function Fail([string]$Message) { throw $Message }",
+    fn[0],
     "$failed = $false",
     "foreach ($c in $cases) {",
     "  $v = $null",
-    "  $raw = Get-Content -Raw -LiteralPath $c.file",
     "  try {",
-    "    [void][System.Text.Json.JsonDocument]::Parse($raw)",
-    "    $m = $raw | ConvertFrom-Json",
-    "    $v = $m.version",
-    "  } catch [System.Management.Automation.RuntimeException] {",
-    "    if (-not [regex]::Match($raw, $JSON_CTRL).Success) { $m = $raw | ConvertFrom-Json; $v = $m.version }",
+    "    $m = Read-Json $c.file",
+    "    if ($null -ne $m) { $v = $m.version }",
     "  } catch { $v = $null }",
     "  if ($c.mustResolve) {",
     "    if (-not $v -or $v -isnot [string] -or $v -ne $c.expect) { Write-Output \"MISMATCH $($c.file): got '$v' want '$($c.expect)'\"; $failed = $true }",
@@ -159,3 +191,4 @@ test("PowerShell: the install.ps1 ConvertFrom-Json access resolves the shared fi
   const text = (typeof run.stdout === "string" ? run.stdout : run.stdout.toString()).trim();
   assert.equal(text.endsWith("PSH-OK") ? "PSH-OK" : text, "PSH-OK");
 }, { timeout: 120_000 });
+

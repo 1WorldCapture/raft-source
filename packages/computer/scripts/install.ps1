@@ -140,19 +140,23 @@ function Read-Json([string]$Uri) {
   if ($content -is [byte[]]) {
     $content = [System.Text.Encoding]::UTF8.GetString($content)
   }
-  # Strictness gate: JSON strings may not carry raw control characters
-  # (spec). ConvertFrom-Json is lenient about them, so validate with the
-  # strict .NET reader first — the same line JSON.parse and the shell parser
-  # draw. Older PowerShell without System.Text.Json falls back to a targeted
-  # regex pre-check for that one spec violation.
+  # Strictness gate (contract parity): validate with the strict .NET JSON
+  # reader BEFORE the lenient ConvertFrom-Json conversion — raw control
+  # characters in strings, trailing commas and comments are all rejected,
+  # the same line JSON.parse and the shell parser draw. "Assembly/reader
+  # unavailable" and "document invalid" are handled separately: a
+  # MethodInvocationException wrapping JsonException means the reader ran
+  # and refused the document; only a plain RuntimeException (type not
+  # found on legacy hosts) falls back to the targeted pre-check.
   try {
     [void][System.Text.Json.JsonDocument]::Parse($content)
-  } catch [System.Management.Automation.RuntimeException] {
-    if ([regex]::Match($content, '"(?:[^"\\]|\\.)*[\x00-\x1F]').Success) {
-      Fail "invalid JSON from $Uri: raw control character inside a string"
-    }
   } catch {
-    Fail "invalid JSON from $Uri: $($_.Exception.Message)"
+    if ($_.Exception -is [System.Management.Automation.MethodInvocationException]) {
+      Fail "invalid JSON from ${Uri}: $($_.Exception.InnerException.Message)"
+    }
+    if ([regex]::Match($content, '"(?:[^"\\]|\\.)*[\x00-\x1F]').Success) {
+      Fail "invalid JSON from ${Uri}: raw control character inside a string"
+    }
   }
   return $content | ConvertFrom-Json
 }
