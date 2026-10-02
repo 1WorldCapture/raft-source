@@ -19,7 +19,9 @@ const TSX = path.join(ROOT, "node_modules/tsx/dist/cli.mjs");
 // filter_env: true drops everything inherited from the shell that runs `pm2 start`
 // (it may carry DATABASE_URL, JWT_SECRET, ... from an old `source .env`); each app only
 // gets the env below plus its own .env file.
-const BASE = { filter_env: true };
+// pm2 prefixes every log line with a millisecond timestamp and the UTC offset, so server/worker logs can be
+// lined up with the database and daemon logs (they had no timestamps before).
+const BASE = { filter_env: true, log_date_format: "YYYY-MM-DD HH:mm:ss.SSS Z" };
 const HOME = process.env.HOME;
 
 const apps = [
