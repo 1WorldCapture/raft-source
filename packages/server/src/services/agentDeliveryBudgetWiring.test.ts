@@ -35,7 +35,7 @@ interface Wiring {
 /** Real orchestrator, fake clock, stubbed transport and scheduling. */
 function wiredOrchestrator(): Wiring {
   const now = { ms: at.getTime() };
-  const orch = new AgentOrchestrator(undefined as never, {
+  const orch: any = new AgentOrchestrator(undefined as never, {
     now: () => now.ms,
     setTimeout: ((fn: () => void) => { fn(); return null as never; }),
     clearTimeout: () => {},

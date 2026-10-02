@@ -7650,32 +7650,45 @@ export class AgentOrchestrator extends EventEmitter {
 
       case "agent:delivery:terminal_error": {
         const agent = await this.validateMachineAgentMessage(machineId, conn?.serverId ?? null, msg.agentId, msg.type);
-        // The reporting generation decides which tracked attempt may stop:
-        // clearPendingAgentDeliveryAck compares machine/launch/session
-        // against the tracked message's own snapshot, so an old process's
-        // late error can never cancel a delivery a new process took over
-        // (task #8).
+        // Authenticated-identity closure (task #8 review r1 finding 3): the
+        // ATTEMPT a terminal_error may stop is located by TRUSTED context
+        // only — the authenticated connection's machineId plus the server's
+        // own tracked snapshot. Payload machineId/launchId/sessionId
+        // participate ONLY as consistency evidence and NEVER as the clearing
+        // credential: a machine B reporting machine A's exact payload must
+        // change nothing. An old process's late error still cannot cancel a
+        // delivery a new process took over (launch/session vs the tracked
+        // snapshot inside clearPendingAgentDeliveryAck).
         const stopThisAttempt = () => this.clearPendingAgentDeliveryAck({
           agentId: msg.agentId,
           seq: 0,
           deliveryId: msg.mentionDelivery.occurrenceId,
         }, {
-          machineId: msg.mentionDelivery.machineId,
+          // The AUTHENTICATED machine — never msg.mentionDelivery.machineId.
+          machineId,
           launchId: msg.mentionDelivery.launchId,
           sessionId: msg.mentionDelivery.sessionId,
         });
-        if (
-          !agent
-          || msg.mentionDelivery.machineId !== machineId
-        ) {
-          // Sender identity cannot be confirmed: STOP the current attempt
-          // (the re-send storm has no payload) but keep the durable
-          // occurrence recoverable — no terminal mark here; machine-ready
-          // recovery re-delivers the unread message once the agent is back.
-          stopThisAttempt();
+        if (!agent) {
+          // No such agent under this server: rejected with ZERO state
+          // change — a report about a nonexistent agent cannot cancel
+          // anyone's attempt (the pre-fix code stopped the tracked attempt
+          // here on an unconfirmable identity).
           console.warn(
-            `[Agent ${msg.agentId}] terminal_error ${msg.code} from an unconfirmable identity ` +
-            `(occurrence ${msg.mentionDelivery.occurrenceId}): stopped this attempt, occurrence stays recoverable`,
+            `[Agent ${msg.agentId}] terminal_error ${msg.code} reported by machine ${machineId} ` +
+            `for a nonexistent/unverifiable agent (occurrence ${msg.mentionDelivery.occurrenceId}); rejected with zero state change`,
+          );
+          break;
+        }
+        if (msg.mentionDelivery.machineId !== machineId) {
+          // Payload machine differs from the AUTHENTICATED sender: rejected
+          // with ZERO state change. The trusted-context stop above requires
+          // the authenticated machineId to ALSO match the server's tracked
+          // snapshot, so a machine B forging A's payload now fails both the
+          // payload consistency check here and the tracked-snapshot match.
+          console.warn(
+            `[Agent ${msg.agentId}] terminal_error ${msg.code} from machine ${machineId} claims machine ` +
+            `${msg.mentionDelivery.machineId} (occurrence ${msg.mentionDelivery.occurrenceId}); rejected with zero state change`,
           );
           break;
         }
