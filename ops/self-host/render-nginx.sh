@@ -15,12 +15,13 @@ for p in ${RAFT_REDIRECT_PORTS:-}; do
 done
 cp "$SRC/nginx.conf.tmpl" "$OUT/nginx.conf"
 cp "$SRC/raft-proxy.conf" "$OUT/raft-proxy.conf"
-python3 - "$SRC/raft.conf.tmpl" "$OUT/raft.conf" "$LISTEN" "$RAFT_SERVER_PORT" "$RAFT_WEB_CURRENT" "$RAFT_CLIENT_MAX_BODY" "$REDIRECT" <<'PY'
+python3 - "$SRC/raft.conf.tmpl" "$OUT/raft.conf" "$LISTEN" "$RAFT_SERVER_PORT" "$RAFT_WEB_CURRENT" "$RAFT_CLIENT_MAX_BODY" "$REDIRECT" "$RAFT_COMPUTER_WEB_ROOT" <<'PY'
 import sys
-src, dst, listen, port, web, body, redirect = sys.argv[1:]
+src, dst, listen, port, web, body, redirect, computer_root = sys.argv[1:]
 s = open(src).read()
 s = (s.replace('@@LISTEN@@\n', listen).replace('@@RAFT_SERVER_PORT@@', port)
-      .replace('@@RAFT_WEB_CURRENT@@', web).replace('@@RAFT_CLIENT_MAX_BODY@@', body).replace('@@REDIRECT_SERVERS@@', redirect))
+      .replace('@@RAFT_WEB_CURRENT@@', web).replace('@@RAFT_CLIENT_MAX_BODY@@', body).replace('@@REDIRECT_SERVERS@@', redirect)
+      .replace('@@RAFT_COMPUTER_WEB_ROOT@@', computer_root))
 assert '@@' not in s, 'unrendered placeholder'
 open(dst, 'w').write(s)
 PY
