@@ -62,7 +62,11 @@ DISPATCHER_PUBLISHED="0"
 manifest_latest_version() {
   _mlv_input="${1:-}"
   if [ "$_mlv_input" = "-" ]; then
-    _mlv_body="$(cat)"
+    # Same newline collapse as the file branch: JSON strings cannot contain
+    # literal newlines, so removing them only reunifies a pretty-printed
+    # document for the single-line awk scan — stdin and file inputs must
+    # resolve identically.
+    _mlv_body="$(cat | tr -d '\n')"
   else
     [ -n "$_mlv_input" ] || { echo '[manifest] error: no manifest path given' >&2; return 2; }
     _mlv_body="$(tr -d '\n' < "$_mlv_input")" || { echo '[manifest] error: could not read manifest' >&2; return 2; }
@@ -71,32 +75,77 @@ manifest_latest_version() {
   # key at brace depth 1 only. Nested "version" keys (per-version target
   # blocks, evidence objects) can never satisfy the depth gate — the same
   # anchoring discipline the target-body extraction below applies.
+  # STRING-AWARE + STRUCTURE-VALIDATING: braces and quotes inside JSON
+  # strings (values like "}" or escaped \") neither change depth nor open
+  # keys, and the found value is only emitted when the WHOLE document is
+  # structurally usable (balanced braces, no top-level garbage, no
+  # unterminated string) — the same accept/reject line as TS JSON.parse and
+  # PowerShell ConvertFrom-Json, so all three resolution surfaces agree.
   _mlv_version="$(printf '%s' "$_mlv_body" | awk '
     {
       s = $0
       len = length(s)
       depth = 0
-      for (i = 1; i <= len; i++) {
+      in_str = 0
+      esc = 0
+      garbage = 0
+      found = ""
+      i = 1
+      while (i <= len) {
         c = substr(s, i, 1)
-        if (c == "{") depth++
-        else if (c == "}") { depth--; continue }
-        if (depth != 1) continue
-        if (substr(s, i, 9) != "\"version\"") continue
-        j = i + 9
-        while (j <= len && substr(s, j, 1) ~ /[[:space:]]/) j++
-        if (substr(s, j, 1) != ":") continue
-        j++
-        while (j <= len && substr(s, j, 1) ~ /[[:space:]]/) j++
-        if (substr(s, j, 1) != "\"") continue
-        j++
-        out = ""
-        for (; j <= len; j++) {
-          d = substr(s, j, 1)
-          if (d == "\"") { print out; exit }
-          out = out d
+        if (in_str) {
+          if (esc) esc = 0
+          else if (c == "\\") esc = 1
+          else if (c == "\"") in_str = 0
+          i++
+          continue
         }
-        exit
+        if (c == "{") { depth++; i++; continue }
+        if (c == "}") { depth--; i++; continue }
+        if (depth == 0 && c !~ /[[:space:]]/) { garbage = 1; exit }
+        if (c == "\"") {
+          # Read the complete JSON string starting at i (escape-aware).
+          j = i + 1
+          tok = ""
+          tok_esc = 0
+          while (j <= len) {
+            d = substr(s, j, 1)
+            if (tok_esc) { tok = tok d; tok_esc = 0; j++; continue }
+            if (d == "\\") { tok = tok d; tok_esc = 1; j++; continue }
+            if (d == "\"") break
+            tok = tok d
+            j++
+          }
+          if (j > len) exit # unterminated string: not valid JSON
+          if (tok == "version" && depth == 1) {
+            k = j + 1
+            while (k <= len && substr(s, k, 1) ~ /[[:space:]]/) k++
+            if (substr(s, k, 1) != ":") exit
+            k++
+            while (k <= len && substr(s, k, 1) ~ /[[:space:]]/) k++
+            if (substr(s, k, 1) != "\"") exit
+            k++
+            out = ""
+            val_esc = 0
+            while (k <= len) {
+              d = substr(s, k, 1)
+              if (val_esc) { out = out d; val_esc = 0; k++; continue }
+              if (d == "\\") { out = out d; val_esc = 1; k++; continue }
+              if (d == "\"") break
+              out = out d
+              k++
+            }
+            if (k > len) exit # unterminated value string
+            # JSON.parse keeps the LAST duplicate key; match that.
+            found = out
+          }
+          i = j + 1
+          continue
+        }
+        i++
       }
+      # Emit only from a structurally balanced document.
+      if (depth == 0 && !garbage) print found
       exit
     }
   ')"
@@ -776,6 +825,7 @@ SIZE="$(extract_num "$outer_block" size)"
 assert_hands_manifest_identity
 WASM_FILE="$(extract_str "$photon_block" file)"
 WASM_WANT_SHA="$(extract_str "$photon_block" sha256)"
+WASM_SIZE="$(extract_num "$photon_block" size)"
 [ "$WASM_FILE" = "$PHOTON_WASM_NAME" ] && [ -n "$WASM_WANT_SHA" ] \
   || err "manifest photonWasm entry missing ${PHOTON_WASM_NAME}/sha256"
 
@@ -792,11 +842,37 @@ if command -v sha256sum >/dev/null 2>&1; then SHA_CMD="sha256sum";
 elif command -v shasum >/dev/null 2>&1; then SHA_CMD="shasum -a 256";
 else err "need sha256sum or shasum to verify the download"; fi
 
+# --- attested-size gate (contract v1) ---
+# The hands and manifest backends promise sha256+size for every required
+# file; a hash alone does not discharge that promise. Sizes must be declared
+# as valid integers, and the downloaded byte count must match the attestation
+# BEFORE anything is staged, replaced, or handed to K convergence. The
+# legacy-cdn escape hatch keeps its exact historical behavior (sha only).
+is_attested_uint() {
+  case "$1" in ''|*[!0-9]*) return 1 ;; *) return 0 ;; esac
+}
+SIZE_NOTE=""
+if [ "$RELEASE_BACKEND" != "legacy-cdn" ]; then
+  SIZE_NOTE="+size"
+  is_attested_uint "$SIZE"     || err "manifest entry for ${TARGET} must declare a valid integer size (contract v1: sha256+size are both mandatory)"
+  is_attested_uint "$WASM_SIZE"     || err "manifest photonWasm entry must declare a valid integer size (contract v1: sha256+size are both mandatory)"
+  if [ -n "$gz_inner" ]; then
+    is_attested_uint "$GZ_SIZE"       || err "manifest gz sidecar for ${TARGET} must declare a valid integer size (contract v1: sha256+size are both mandatory)"
+  fi
+fi
+verify_attested_size() {
+  # $1 = downloaded file, $2 = attested size, $3 = label
+  [ "$RELEASE_BACKEND" = "legacy-cdn" ] && return 0
+  _vas_got="$(wc -c < "$1" | tr -d '[:space:]')"
+  [ "$_vas_got" = "$2" ]     || err "size mismatch for ${3}: downloaded ${_vas_got} bytes but the manifest attests ${2}"
+}
+
 info "downloading ${WASM_FILE} (image processing resource)…"
 $DLO "$tmp/$WASM_FILE" "${BASE}/${WASM_FILE}" || err "failed to download ${WASM_FILE}"
 GOT_WASM_SHA="$($SHA_CMD "$tmp/$WASM_FILE" | awk '{print $1}')"
 [ "$GOT_WASM_SHA" = "$WASM_WANT_SHA" ] || err "sha256 mismatch for ${WASM_FILE} (got ${GOT_WASM_SHA}, want ${WASM_WANT_SHA})"
-info "image processing resource sha256 verified"
+verify_attested_size "$tmp/$WASM_FILE" "$WASM_SIZE" "${WASM_FILE}"
+info "image processing resource sha256${SIZE_NOTE} verified"
 
 if [ -n "$GZ_FILE" ] && [ -n "$GZ_WANT_SHA" ] && command -v gunzip >/dev/null 2>&1; then
   # Gzipped path: ~3× smaller download (e.g. 143MB → ~42MB). Verify the .gz
@@ -807,13 +883,15 @@ if [ -n "$GZ_FILE" ] && [ -n "$GZ_WANT_SHA" ] && command -v gunzip >/dev/null 2>
   $DLP "$tmp/$GZ_FILE" "${BASE}/${GZ_FILE}" || err "failed to download ${GZ_FILE}"
   GOT_GZ_SHA="$($SHA_CMD "$tmp/$GZ_FILE" | awk '{print $1}')"
   [ "$GOT_GZ_SHA" = "$GZ_WANT_SHA" ] || err "sha256 mismatch for ${GZ_FILE} (got ${GOT_GZ_SHA}, want ${GZ_WANT_SHA})"
-  info "downloaded gzip sha256 verified"
+  verify_attested_size "$tmp/$GZ_FILE" "$GZ_SIZE" "${GZ_FILE}"
+  info "downloaded gzip sha256${SIZE_NOTE} verified"
   info "decompressing…"
   gunzip -c "$tmp/$GZ_FILE" > "$tmp/$FILE" || err "failed to gunzip ${GZ_FILE}"
   rm -f "$tmp/$GZ_FILE"
   GOT_SHA="$($SHA_CMD "$tmp/$FILE" | awk '{print $1}')"
   [ "$GOT_SHA" = "$WANT_SHA" ] || err "sha256 mismatch for ${FILE} after decompression (got ${GOT_SHA}, want ${WANT_SHA})"
-  info "binary sha256 verified"
+  verify_attested_size "$tmp/$FILE" "$SIZE" "${FILE} (decompressed)"
+  info "binary sha256${SIZE_NOTE} verified"
 else
   # Direct (uncompressed) path. Used when the manifest has no gz sidecar
   # (older releases) or `gunzip` isn't available on this host.
@@ -821,7 +899,8 @@ else
   $DLP "$tmp/$FILE" "${BASE}/${FILE}" || err "failed to download ${FILE}"
   GOT_SHA="$($SHA_CMD "$tmp/$FILE" | awk '{print $1}')"
   [ "$GOT_SHA" = "$WANT_SHA" ] || err "sha256 mismatch for ${FILE} (got ${GOT_SHA}, want ${WANT_SHA})"
-  info "sha256 verified"
+  verify_attested_size "$tmp/$FILE" "$SIZE" "${FILE}"
+  info "sha256${SIZE_NOTE} verified"
 fi
 
 # --- defense-in-depth: verify the downloaded binary's platform + arch ---
@@ -913,10 +992,20 @@ release_source_args() {
   fi
 }
 if [ -n "${RAFT_COMPUTER_RELEASE_BASE:-}" ] && [ -x "$existing" ] \
-  && SLOCK_HOME="$STATE_HOME" RAFT_HOME="$STATE_HOME" "$existing" release-source show >/dev/null 2>&1; then
+  && SLOCK_HOME="$STATE_HOME" RAFT_HOME="$STATE_HOME" "$existing" release-source --help >/dev/null 2>&1; then
+  # Contract-aware binary present. Capability (the --help probe above) is now
+  # SEPARATE from config validation, so a corrupt file or an invalid env group
+  # can no longer masquerade as a pre-contract binary and skip these checks:
+  #  1. the onboarding env group itself must resolve (show fails on an
+  #     incomplete group, e.g. RELEASE_BASE without HANDS_ORIGIN for hands);
+  #  2. the persisted source must accept this onboarding first-writer-wins —
+  #     a different source or a corrupt file fails HERE, before this
+  #     installer replaces any byte or state (contract).
+  SLOCK_HOME="$STATE_HOME" RAFT_HOME="$STATE_HOME" "$existing" release-source show >/dev/null 2>&1 \
+    || err "release-source environment group is invalid (e.g. RAFT_COMPUTER_RELEASE_BASE set without RAFT_COMPUTER_HANDS_ORIGIN for the hands backend, or conflicting legacy variables). Fix the onboarding environment and re-run this installer."
   # shellcheck disable=SC2086
   SLOCK_HOME="$STATE_HOME" RAFT_HOME="$STATE_HOME" "$existing" release-source init $(release_source_args) \
-    || err "release-source conflict: this Computer already tracks a different release source. Resolve it explicitly with 'raft-computer release-source set' before re-running this installer."
+    || err "release-source pre-flight failed: this Computer already tracks a different or corrupt release source. Resolve it explicitly with 'raft-computer release-source set' before re-running this installer."
 fi
 
 # --- stage and verify all install files before stopping the service ---

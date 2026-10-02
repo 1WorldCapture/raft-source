@@ -86,10 +86,14 @@ $InstallChannel = if ($PSBoundParameters.ContainsKey('Channel')) {
 $Force = $env:RAFT_COMPUTER_FORCE -eq '1'
 $NoModifyPath = $env:RAFT_COMPUTER_NO_MODIFY_PATH -eq '1'
 $RequireGitBash = $env:RAFT_COMPUTER_REQUIRE_GIT_BASH -eq '1'
-$StateHome = if ($env:SLOCK_HOME) {
-  [System.IO.Path]::GetFullPath($env:SLOCK_HOME)
-} elseif ($env:RAFT_HOME) {
+# Same precedence as the CLI's resolveRaftHome(): RAFT_HOME wins over
+# SLOCK_HOME. The reverse order would init/persist into one root while the
+# installed binary resolves the other (contract: one selected root for every
+# installer subcommand — they all run with BOTH variables pinned to it).
+$StateHome = if ($env:RAFT_HOME) {
   [System.IO.Path]::GetFullPath($env:RAFT_HOME)
+} elseif ($env:SLOCK_HOME) {
+  [System.IO.Path]::GetFullPath($env:SLOCK_HOME)
 } else {
   Join-Path $env:USERPROFILE '.slock'
 }
@@ -207,6 +211,29 @@ function Test-Sha256([string]$Path, [string]$Expected) {
   $actual = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
   if ($actual -ne $Expected.ToLowerInvariant()) {
     Fail "sha256 mismatch for $([System.IO.Path]::GetFileName($Path)) (got $actual, want $Expected)"
+  }
+}
+
+# Attested-size gate (contract v1): the hands and manifest backends promise
+# sha256+size for every required file, so a declared size must be a valid
+# integer and the downloaded byte count must match it BEFORE anything is
+# staged, replaced, or handed to K convergence. The legacy-cdn escape hatch
+# keeps its exact historical behavior (sha only).
+$SizeNote = if ($ReleaseBackend -ne 'legacy-cdn') { '+size' } else { '' }
+
+function Assert-DeclaredSize([object]$Expected, [string]$Label) {
+  if ($ReleaseBackend -eq 'legacy-cdn') { return }
+  if ($null -eq $Expected -or "$Expected" -notmatch '^[0-9]+$') {
+    Fail "manifest entry for $Label must declare a valid integer size (contract v1: sha256+size are both mandatory)"
+  }
+}
+
+function Test-AttestedSize([string]$Path, [object]$Expected, [string]$Label) {
+  if ($ReleaseBackend -eq 'legacy-cdn') { return }
+  Assert-DeclaredSize $Expected $Label
+  $actual = (Get-Item -LiteralPath $Path).Length
+  if ($actual -ne [int64]"$Expected") {
+    Fail "size mismatch for ${Label}: downloaded $actual bytes but the manifest attests $Expected"
   }
 }
 
@@ -644,25 +671,31 @@ try {
 
   # Release-source pre-flight (contract v1): a contract-aware existing binary
   # must accept the onboarding's release source BEFORE this installer replaces
-  # any binary or state. A pre-contract binary has no `release-source`
-  # subcommand — and no file to conflict with — so the probe is skipped and
-  # the post-install init writes it.
+  # any binary or state. Capability (the --help probe) is SEPARATE from config
+  # validation: a pre-contract binary has no `release-source` subcommand — and
+  # no file to conflict with — so only it skips these checks; a contract-aware
+  # binary must pass BOTH the env-group validation (show) and the persisted-
+  # source acceptance (init) or the install refuses before touching anything.
   $destination = Join-Path $InstallDir $BinaryName
   if ($env:RAFT_COMPUTER_RELEASE_BASE -and (Test-Path -LiteralPath $destination)) {
-    $releaseSourceProbe = @('release-source', 'show')
-    $probeOk = $false
+    $capabilityProbe = @('release-source', '--help')
+    $capable = $false
     try {
       $priorSlockHome = $env:SLOCK_HOME
       $priorRaftHome = $env:RAFT_HOME
       $env:SLOCK_HOME = $StateHome
       $env:RAFT_HOME = $StateHome
-      & $destination @releaseSourceProbe *> $null
-      $probeOk = ($LASTEXITCODE -eq 0)
-    } catch { $probeOk = $false } finally {
+      & $destination @capabilityProbe *> $null
+      $capable = ($LASTEXITCODE -eq 0)
+    } catch { $capable = $false } finally {
       if ($null -ne $priorSlockHome) { $env:SLOCK_HOME = $priorSlockHome } else { Remove-Item Env:SLOCK_HOME -ErrorAction SilentlyContinue }
       if ($null -ne $priorRaftHome) { $env:RAFT_HOME = $priorRaftHome } else { Remove-Item Env:RAFT_HOME -ErrorAction SilentlyContinue }
     }
-    if ($probeOk) {
+    if ($capable) {
+      & $destination @('release-source', 'show') *> $null
+      if ($LASTEXITCODE -ne 0) {
+        Fail "release-source environment group is invalid (e.g. RAFT_COMPUTER_RELEASE_BASE set without RAFT_COMPUTER_HANDS_ORIGIN for the hands backend, or conflicting legacy variables). Fix the onboarding environment and re-run this installer."
+      }
       $releaseSourceArgs = if ($ReleaseBackend -eq 'hands') {
         @('release-source', 'init', '--backend', 'hands', '--release-base', $ReleaseBase, '--hands-origin', $HandsOrigin)
       } else {
@@ -672,7 +705,7 @@ try {
       }
       & $destination @releaseSourceArgs
       if ($LASTEXITCODE -ne 0) {
-        Fail "release-source conflict: this Computer already tracks a different release source. Resolve it explicitly with 'raft-computer release-source set' before re-running this installer."
+        Fail "release-source pre-flight failed: this Computer already tracks a different or corrupt release source. Resolve it explicitly with 'raft-computer release-source set' before re-running this installer."
       }
     }
   }
@@ -703,6 +736,11 @@ try {
   if (-not $file -or [System.IO.Path]::GetFileName($file) -ne $file -or $file -notmatch '^raft-computer-win32-(x64|arm64)\.exe$') {
     Fail "invalid Windows asset name in manifest: $file"
   }
+  Assert-DeclaredSize $entry.size "target $target"
+  Assert-DeclaredSize $photonWasm.size 'photonWasm'
+  if ($entry.gz -and $entry.gz.file -and $entry.gz.sha256) {
+    Assert-DeclaredSize $entry.gz.size 'gz sidecar'
+  }
 
   $tempDir = Join-Path $env:TEMP ("raft-computer-install-" + [guid]::NewGuid().ToString('N'))
   New-Item -ItemType Directory -Path $tempDir | Out-Null
@@ -717,13 +755,15 @@ try {
       Write-Step "downloading $base/$gzipFile"
       Invoke-Download "$base/$gzipFile" $downloadedGzip
       Test-Sha256 $downloadedGzip $entry.gz.sha256
-      Write-Step 'compressed sha256 verified; decompressing'
+      Test-AttestedSize $downloadedGzip $entry.gz.size 'gz sidecar'
+      Write-Step "compressed sha256$($SizeNote) verified; decompressing"
       Expand-Gzip $downloadedGzip $downloadedBinary
     } else {
       Write-Step "downloading $base/$file"
       Invoke-Download "$base/$file" $downloadedBinary
     }
     Test-Sha256 $downloadedBinary $entry.sha256
+    Test-AttestedSize $downloadedBinary $entry.size 'binary' 
     Assert-PeTarget $downloadedBinary $target
     $candidateVersion = Get-BinarySelfVersion $downloadedBinary
     if ($candidateVersion -ne $Version) {
@@ -734,7 +774,7 @@ try {
     Write-Step "downloading $base/$PhotonWasmName (image processing resource)"
     Invoke-Download "$base/$PhotonWasmName" $downloadedPhotonWasm
     Test-Sha256 $downloadedPhotonWasm $photonWasm.sha256
-    Write-Step 'image processing resource sha256 verified'
+    Write-Step "image processing resource sha256$($SizeNote) verified"
 
     # K consumes these exact manifest-verified local bytes before any install
     # directory mutation. The hidden candidate-only mode owns the K lock,

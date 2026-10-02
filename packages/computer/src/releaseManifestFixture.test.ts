@@ -25,7 +25,14 @@ const CASES: FixtureCase[] = [
   { file: "release-root-manifest.fixture.json", expect: { ok: true, version: "1.0.42" } },
   // Nested target "version" keys and prose mentions must never shadow the root.
   { file: "release-root-manifest.nested-first.fixture.json", expect: { ok: true, version: "2.0.0" } },
+  // Braces/escaped quotes inside strings and real document line breaks must
+  // not confuse any of the three parsers (shell keeps a string-aware scanner).
+  { file: "release-root-manifest.string-braces.fixture.json", expect: { ok: true, version: "1.2.3" } },
   { file: "release-root-manifest.no-version.fixture.json", expect: { ok: false, reason: "publishing" } },
+  // Structurally invalid JSON (unterminated object) resolves NOWHERE — a
+  // failed look is never a version. The TS surface maps a body that will not
+  // parse to its catch-all network failure.
+  { file: "release-root-manifest.invalid.fixture.json", expect: { ok: false, reason: "network" } },
 ];
 
 async function fixtureBody(file: string): Promise<string> {
@@ -92,8 +99,8 @@ test("PowerShell: the install.ps1 ConvertFrom-Json access resolves the shared fi
     ")",
     "$failed = $false",
     "foreach ($c in $cases) {",
-    "  $m = Get-Content -Raw -LiteralPath $c.file | ConvertFrom-Json",
-    "  $v = $m.version",
+    "  $v = $null",
+    "  try { $m = Get-Content -Raw -LiteralPath $c.file | ConvertFrom-Json; $v = $m.version } catch { $v = $null }",
     "  if ($c.mustResolve) {",
     "    if (-not $v -or $v -isnot [string] -or $v -ne $c.expect) { Write-Output \"MISMATCH $($c.file): got '$v' want '$($c.expect)'\"; $failed = $true }",
     "  } else {",

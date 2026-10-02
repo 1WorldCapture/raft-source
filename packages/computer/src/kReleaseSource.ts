@@ -35,6 +35,7 @@ import type {
 } from "@botiverse/k-carrier";
 import { ComputerServiceError } from "./services/errors.js";
 import { readChannel, type Channel } from "./lib/channelState.js";
+import { resolveRuntimeReleaseSourceSync } from "./lib/releaseSource.js";
 import { resolveRaftHome } from "./paths.js";
 import { HANDS_API_ORIGIN, HANDS_COMPUTER_APP_SLUG } from "./releaseAuthority.js";
 
@@ -460,6 +461,27 @@ export function createComputerReleaseSource(
     channelProvider: deps.channelProvider ?? (() => readChannel(resolveRaftHome())),
     createHandsUpdaterFn: deps.createHandsUpdaterFn ?? createHandsUpdater,
     getHandsDeviceIdFn: deps.getHandsDeviceIdFn ?? getHandsDeviceId,
+  });
+}
+
+/**
+ * Build K's ReleaseSource from the RUNTIME release source (contract v1):
+ * validated env group > persisted release-source.json > official default.
+ * This is the one construction the download/verify factory must consume —
+ * after persisting a private source, restarts, explicit-version upgrades and
+ * recovery keep downloading from that source and never query the official
+ * Hands/CDN endpoints. A corrupt persisted file is a hard error here, not a
+ * fallback to the official default.
+ */
+export function createRuntimeComputerReleaseSource(
+  slockHome: string,
+  deps: KReleaseSourceDeps = {},
+): KReleaseSource {
+  const { source } = resolveRuntimeReleaseSourceSync(process.env, slockHome);
+  return createComputerReleaseSource(source.releaseBase, {
+    ...deps,
+    backend: source.backend === "manifest" ? "manifest" : "hands",
+    ...(source.handsOrigin !== undefined ? { handsApiOrigin: source.handsOrigin } : {}),
   });
 }
 

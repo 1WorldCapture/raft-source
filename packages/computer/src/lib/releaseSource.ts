@@ -19,6 +19,7 @@
 // Audit fields (writtenAt/writtenBy) are informational and deliberately
 // excluded from source equivalence.
 
+import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { computerDir } from "../paths.js";
@@ -243,6 +244,85 @@ function trimmedEnv(env: NodeJS.ProcessEnv, key: string): string {
 }
 
 /**
+ * Pure env-group resolution shared by BOTH runtime entry points: a COMPLETE
+ * validated group wins, and conflicts with the legacy variable names throw
+ * instead of guessing which one wins. Returns null when no override is set.
+ */
+function resolveEnvReleaseSourceGroup(env: NodeJS.ProcessEnv): ReleaseSource | null {
+  const newBase = trimmedEnv(env, RAFT_COMPUTER_RELEASE_BASE_ENV);
+  const rawBackend = trimmedEnv(env, RAFT_COMPUTER_RELEASE_BACKEND_ENV);
+  const handsOriginRaw = trimmedEnv(env, RAFT_COMPUTER_HANDS_ORIGIN_ENV);
+  const legacyBase = trimmedEnv(env, RAFT_COMPUTER_UPGRADE_BASE_URL_ENV);
+  if (!newBase && !rawBackend && !handsOriginRaw && !legacyBase) return null;
+
+  if (newBase && legacyBase && newBase !== legacyBase) {
+    throw new ComputerError(
+      "RELEASE_SOURCE_ENV_CONFLICT",
+      `${RAFT_COMPUTER_RELEASE_BASE_ENV} and ${RAFT_COMPUTER_UPGRADE_BASE_URL_ENV} are both set but differ (${newBase} vs ${legacyBase}). Keep exactly one.`,
+    );
+  }
+  const releaseBaseRaw = newBase || legacyBase;
+  if (!releaseBaseRaw) {
+    throw new ComputerError(
+      "RELEASE_SOURCE_ENV_INVALID",
+      `A release-source environment override is set but ${RAFT_COMPUTER_RELEASE_BASE_ENV} is missing.`,
+    );
+  }
+  const releaseBase = parseReleaseBaseValue(releaseBaseRaw);
+  if (!releaseBase) {
+    throw new ComputerError(
+      "RELEASE_SOURCE_ENV_INVALID",
+      `${RAFT_COMPUTER_RELEASE_BASE_ENV} must be an http(s) URL without credentials, query, or fragment (HTTPS unless loopback): ${releaseBaseRaw}`,
+    );
+  }
+
+  // legacy-cdn is the pre-contract name for the self-manifest backend.
+  const backend: ReleaseBackend | null =
+    !rawBackend || rawBackend === "hands" ? "hands"
+    : rawBackend === "manifest" || rawBackend === LEGACY_RELEASE_BACKEND_VALUE ? "manifest"
+    : null;
+  if (!backend) {
+    throw new ComputerError(
+      "RELEASE_SOURCE_ENV_INVALID",
+      `${RAFT_COMPUTER_RELEASE_BACKEND_ENV} must be "hands" or "manifest" (legacy "legacy-cdn" maps to manifest): ${rawBackend}`,
+    );
+  }
+
+  let handsOrigin: string | undefined;
+  if (backend === "hands") {
+    const parsed = handsOriginRaw ? parseOriginValue(handsOriginRaw) : null;
+    if (!parsed) {
+      throw new ComputerError(
+        "RELEASE_SOURCE_ENV_INVALID",
+        `The hands backend requires ${RAFT_COMPUTER_HANDS_ORIGIN_ENV} to be set (origin-only http(s) URL) alongside the override.`,
+      );
+    }
+    handsOrigin = parsed;
+  } else if (handsOriginRaw) {
+    throw new ComputerError(
+      "RELEASE_SOURCE_ENV_INVALID",
+      `${RAFT_COMPUTER_HANDS_ORIGIN_ENV} is set but the backend is "manifest", which never uses it.`,
+    );
+  }
+
+  return {
+    schemaVersion: RELEASE_SOURCE_SCHEMA_VERSION,
+    backend,
+    releaseBase,
+    ...(handsOrigin !== undefined ? { handsOrigin } : {}),
+  };
+}
+
+function stripAuditFields(source: PersistedReleaseSource): ReleaseSource {
+  return {
+    schemaVersion: source.schemaVersion,
+    backend: source.backend,
+    releaseBase: source.releaseBase,
+    ...(source.handsOrigin !== undefined ? { handsOrigin: source.handsOrigin } : {}),
+  };
+}
+
+/**
  * Resolve the effective release source for the CLI, the resident service,
  * and the upgrade coordinator — the ONE precedence chain they must all share
  * (contract): validated env debug override, then the persisted file, then
@@ -254,85 +334,46 @@ export async function resolveRuntimeReleaseSource(
   env: NodeJS.ProcessEnv = process.env,
   slockHome: string,
 ): Promise<ResolvedRuntimeReleaseSource> {
-  const newBase = trimmedEnv(env, RAFT_COMPUTER_RELEASE_BASE_ENV);
-  const rawBackend = trimmedEnv(env, RAFT_COMPUTER_RELEASE_BACKEND_ENV);
-  const handsOriginRaw = trimmedEnv(env, RAFT_COMPUTER_HANDS_ORIGIN_ENV);
-  const legacyBase = trimmedEnv(env, RAFT_COMPUTER_UPGRADE_BASE_URL_ENV);
-  const anyEnvSet = Boolean(newBase || rawBackend || handsOriginRaw || legacyBase);
-
-  if (anyEnvSet) {
-    if (newBase && legacyBase && newBase !== legacyBase) {
-      throw new ComputerError(
-        "RELEASE_SOURCE_ENV_CONFLICT",
-        `${RAFT_COMPUTER_RELEASE_BASE_ENV} and ${RAFT_COMPUTER_UPGRADE_BASE_URL_ENV} are both set but differ (${newBase} vs ${legacyBase}). Keep exactly one.`,
-      );
-    }
-    const releaseBaseRaw = newBase || legacyBase;
-    if (!releaseBaseRaw) {
-      throw new ComputerError(
-        "RELEASE_SOURCE_ENV_INVALID",
-        `A release-source environment override is set but ${RAFT_COMPUTER_RELEASE_BASE_ENV} is missing.`,
-      );
-    }
-    const releaseBase = parseReleaseBaseValue(releaseBaseRaw);
-    if (!releaseBase) {
-      throw new ComputerError(
-        "RELEASE_SOURCE_ENV_INVALID",
-        `${RAFT_COMPUTER_RELEASE_BASE_ENV} must be an http(s) URL without credentials, query, or fragment (HTTPS unless loopback): ${releaseBaseRaw}`,
-      );
-    }
-
-    // legacy-cdn is the pre-contract name for the self-manifest backend.
-    const backend: ReleaseBackend | null =
-      !rawBackend || rawBackend === "hands" ? "hands"
-      : rawBackend === "manifest" || rawBackend === LEGACY_RELEASE_BACKEND_VALUE ? "manifest"
-      : null;
-    if (!backend) {
-      throw new ComputerError(
-        "RELEASE_SOURCE_ENV_INVALID",
-        `${RAFT_COMPUTER_RELEASE_BACKEND_ENV} must be "hands" or "manifest" (legacy "legacy-cdn" maps to manifest): ${rawBackend}`,
-      );
-    }
-
-    let handsOrigin: string | undefined;
-    if (backend === "hands") {
-      const parsed = handsOriginRaw ? parseOriginValue(handsOriginRaw) : null;
-      if (!parsed) {
-        throw new ComputerError(
-          "RELEASE_SOURCE_ENV_INVALID",
-          `The hands backend requires ${RAFT_COMPUTER_HANDS_ORIGIN_ENV} to be set (origin-only http(s) URL) alongside the override.`,
-        );
-      }
-      handsOrigin = parsed;
-    } else if (handsOriginRaw) {
-      throw new ComputerError(
-        "RELEASE_SOURCE_ENV_INVALID",
-        `${RAFT_COMPUTER_HANDS_ORIGIN_ENV} is set but the backend is "manifest", which never uses it.`,
-      );
-    }
-
-    return {
-      source: {
-        schemaVersion: RELEASE_SOURCE_SCHEMA_VERSION,
-        backend,
-        releaseBase,
-        ...(handsOrigin !== undefined ? { handsOrigin } : {}),
-      },
-      origin: "env-override",
-    };
-  }
-
+  const envGroup = resolveEnvReleaseSourceGroup(env);
+  if (envGroup) return { source: envGroup, origin: "env-override" };
   const persisted = await readReleaseSource(slockHome);
   if (persisted.status === "present") {
-    return {
-      source: {
-        schemaVersion: persisted.source.schemaVersion,
-        backend: persisted.source.backend,
-        releaseBase: persisted.source.releaseBase,
-        ...(persisted.source.handsOrigin !== undefined ? { handsOrigin: persisted.source.handsOrigin } : {}),
-      },
-      origin: "persisted",
-    };
+    return { source: stripAuditFields(persisted.source), origin: "persisted" };
   }
   return { source: officialReleaseSource(), origin: "official-default" };
+}
+
+/**
+ * Synchronous twin of resolveRuntimeReleaseSource for construction seams that
+ * cannot await (createComputerUpgrader builds K's ReleaseSource synchronously).
+ * Same precedence, same env group, same corrupt-file hard error — a present
+ * but corrupt file must NEVER silently degrade to the official default.
+ */
+export function resolveRuntimeReleaseSourceSync(
+  env: NodeJS.ProcessEnv = process.env,
+  slockHome: string,
+): ResolvedRuntimeReleaseSource {
+  const envGroup = resolveEnvReleaseSourceGroup(env);
+  if (envGroup) return { source: envGroup, origin: "env-override" };
+
+  let raw: string;
+  try {
+    raw = readFileSync(releaseSourcePath(slockHome), "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return { source: officialReleaseSource(), origin: "official-default" };
+    }
+    throw new ComputerError(
+      "RELEASE_SOURCE_UNREADABLE",
+      `The release source at ${releaseSourcePath(slockHome)} could not be read: ${error instanceof Error ? error.message : String(error)}.`,
+    );
+  }
+  const parsed = parseReleaseSource(raw);
+  if (!parsed) {
+    throw new ComputerError(
+      "RELEASE_SOURCE_CORRUPT",
+      `The release source at ${releaseSourcePath(slockHome)} is corrupt or uses an unknown schema. Refusing to fall back to the official source — repair it with \`raft-computer release-source set\`.`,
+    );
+  }
+  return { source: stripAuditFields(parsed), origin: "persisted" };
 }
