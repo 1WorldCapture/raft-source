@@ -6514,3 +6514,151 @@ export const productFeedbackLocators = pgTable("product_feedback_locators", {
   check("product_feedback_locators_event_kind", sql`${t.eventKind} = 'feedback-locator:created'`),
   check("product_feedback_locators_schema_version", sql`${t.schemaVersion} = 'raft.feedback.locator.v0'`),
 ]);
+
+
+// --- External Agent Proxy Delegation (design v1.1 §3, grokbot-integration
+// task #4 / Phase A1). Six domain records: configuration, input consumption,
+// wake intent, transport attempts, run ownership, batch claims. bigint
+// columns use mode:"string" so JSON surfaces stay exact decimal strings.
+
+export const externalAgentConnections = pgTable("external_agent_connections", {
+  id: uuid("id").primaryKey().$defaultFn(() => randomUUID()),
+  serverId: uuid("server_id").notNull().references(() => servers.id, { onDelete: "cascade" }),
+  agentId: uuid("agent_id").notNull().references(() => agents.id, { onDelete: "cascade" }),
+  schemaVersion: integer("schema_version").notNull().default(1),
+  activation: jsonb("activation").$type<import("@botiverse/raft-shared").ExternalActivationConfig>().notNull(),
+  enabled: boolean("enabled").notNull().default(false),
+  // v1.1: explicit pause/waiting reason; never implied by `enabled` and never
+  // a claim that the external process is alive.
+  pauseReason: text("pause_reason"),
+  revision: integer("revision").notNull().default(0),
+  epoch: bigint("epoch", { mode: "bigint" }).notNull().default(sql`0`),
+  boundCredentialId: uuid("bound_credential_id"),
+  // AES-GCM material, server-private; AAD binds purpose/server/agent/connection.
+  webhookSecret: jsonb("webhook_secret").$type<import("@botiverse/raft-shared").EncryptedSecret>(),
+  pendingGeneration: bigint("pending_generation", { mode: "bigint" }).notNull().default(sql`0`),
+  nextFence: bigint("next_fence", { mode: "bigint" }).notNull().default(sql`0`),
+  currentRunId: uuid("current_run_id"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  // One current connection config per agent (design §3.1).
+  uniqueIndex("idx_external_agent_connections_agent").on(t.agentId),
+  index("idx_external_agent_connections_server").on(t.serverId),
+]);
+
+export const externalAgentInboxReceipts = pgTable("external_agent_inbox_receipts", {
+  id: uuid("id").primaryKey().$defaultFn(() => randomUUID()),
+  serverId: uuid("server_id").notNull().references(() => servers.id, { onDelete: "cascade" }),
+  agentId: uuid("agent_id").notNull().references(() => agents.id, { onDelete: "cascade" }),
+  source: jsonb("source").$type<import("@botiverse/raft-shared").InboxReceiptSource>().notNull(),
+  // Stable producer-defined event identity; never derived from seq.
+  sourceEventKey: text("source_event_key").notNull(),
+  admittedGeneration: bigint("admitted_generation", { mode: "bigint" }).notNull(),
+  state: text("state", { enum: ["pending", "claimed", "acked", "suppressed"] }).notNull().default("pending"),
+  currentClaimId: uuid("current_claim_id"),
+  ackDisposition: text("ack_disposition", { enum: ["processed", "durable_handoff"] }),
+  suppressReason: text("suppress_reason"),
+  resultRefs: jsonb("result_refs").$type<string[]>().notNull().default([]),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  ackedAt: timestamp("acked_at", { withTimezone: true }),
+}, (t) => [
+  // Consumption-dedup identity: re-delivery of the same event collapses onto
+  // the same row; legitimate later occurrences use a different key (§3.2).
+  uniqueIndex("idx_external_agent_inbox_receipts_agent_event").on(t.agentId, t.sourceEventKey),
+  // Ready/pending scan projection (worker picks up oldest pending first).
+  index("idx_external_agent_inbox_receipts_pending").on(t.agentId, t.state, t.createdAt),
+]);
+
+export const externalAgentWakes = pgTable("external_agent_wakes", {
+  id: uuid("id").primaryKey().$defaultFn(() => randomUUID()),
+  connectionId: uuid("connection_id").notNull().references(() => externalAgentConnections.id, { onDelete: "cascade" }),
+  connectionEpoch: bigint("connection_epoch", { mode: "bigint" }).notNull(),
+  generationAtCreation: bigint("generation_at_creation", { mode: "bigint" }).notNull(),
+  state: text("state", {
+    enum: ["queued", "dispatching", "awaiting_agent", "active", "blocked", "settled", "superseded", "exhausted"],
+  }).notNull().default("queued"),
+  nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
+  attemptCount: integer("attempt_count").notNull().default(0),
+  dispatchOwner: text("dispatch_owner"),
+  dispatchFence: bigint("dispatch_fence", { mode: "bigint" }).notNull().default(sql`0`),
+  dispatchLeaseUntil: timestamp("dispatch_lease_until", { withTimezone: true }),
+  startupDeadline: timestamp("startup_deadline", { withTimezone: true }),
+  blockReason: text("block_reason"),
+  exhaustedReason: text("exhausted_reason"),
+  recoveryAuditRef: text("recovery_audit_ref"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  // At most one non-terminal wake per connection. The live set is an explicit
+  // state list — no now() or dynamic expiry inside the unique index (§3.3).
+  uniqueIndex("idx_external_agent_wakes_connection_live").on(t.connectionId)
+    .where(sql`state in ('queued','dispatching','awaiting_agent','active','blocked')`),
+  // Worker ready scan: due live wakes oldest-first.
+  index("idx_external_agent_wakes_ready").on(t.state, t.nextAttemptAt),
+]);
+
+export const externalAgentWakeAttempts = pgTable("external_agent_wake_attempts", {
+  id: uuid("id").primaryKey().$defaultFn(() => randomUUID()),
+  wakeId: uuid("wake_id").notNull().references(() => externalAgentWakes.id, { onDelete: "cascade" }),
+  attemptNumber: integer("attempt_number").notNull(),
+  connectionRevision: integer("connection_revision").notNull(),
+  connectionEpoch: bigint("connection_epoch", { mode: "bigint" }).notNull(),
+  dispatchFence: bigint("dispatch_fence", { mode: "bigint" }).notNull(),
+  startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+  finishedAt: timestamp("finished_at", { withTimezone: true }),
+  outcome: text("outcome", { enum: ["accepted", "rejected", "unknown"] }),
+  httpStatus: integer("http_status"),
+  errorCode: text("error_code"),
+  // Grok v1 provides no provider run id — stays null; never fabricated.
+  providerRunId: text("provider_run_id"),
+  requestDigest: text("request_digest").notNull(),
+}, (t) => [
+  uniqueIndex("idx_external_agent_wake_attempts_number").on(t.wakeId, t.attemptNumber),
+  index("idx_external_agent_wake_attempts_wake").on(t.wakeId),
+]);
+
+export const externalAgentRuns = pgTable("external_agent_runs", {
+  id: uuid("id").primaryKey().$defaultFn(() => randomUUID()),
+  connectionId: uuid("connection_id").notNull().references(() => externalAgentConnections.id, { onDelete: "cascade" }),
+  connectionEpoch: bigint("connection_epoch", { mode: "bigint" }).notNull(),
+  agentId: uuid("agent_id").notNull().references(() => agents.id, { onDelete: "cascade" }),
+  credentialId: uuid("credential_id").notNull(),
+  wakeId: uuid("wake_id").notNull().references(() => externalAgentWakes.id, { onDelete: "cascade" }),
+  fence: bigint("fence", { mode: "bigint" }).notNull(),
+  // v1.1 begin idempotency: same binding/epoch/key replays to the original run.
+  beginRequestKey: text("begin_request_key").notNull(),
+  beginRequestDigest: text("begin_request_digest").notNull(),
+  // Only the hash is stored; the owner token itself never persists in clear.
+  ownerTokenHash: text("owner_token_hash").notNull(),
+  state: text("state", { enum: ["active", "blocked", "finished", "expired", "revoked"] }).notNull().default("active"),
+  leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }).notNull(),
+  maxEndsAt: timestamp("max_ends_at", { withTimezone: true }).notNull(),
+  lastHeartbeatAt: timestamp("last_heartbeat_at", { withTimezone: true }).notNull().defaultNow(),
+  finishedAt: timestamp("finished_at", { withTimezone: true }),
+  finishOutcome: text("finish_outcome", { enum: ["drained", "waiting_user", "yielded", "failed"] }),
+}, (t) => [
+  uniqueIndex("idx_external_agent_runs_begin_key").on(t.connectionId, t.connectionEpoch, t.beginRequestKey),
+  index("idx_external_agent_runs_connection").on(t.connectionId, t.state),
+]);
+
+export const externalAgentClaims = pgTable("external_agent_claims", {
+  id: uuid("id").primaryKey().$defaultFn(() => randomUUID()),
+  serverId: uuid("server_id").notNull().references(() => servers.id, { onDelete: "cascade" }),
+  agentId: uuid("agent_id").notNull().references(() => agents.id, { onDelete: "cascade" }),
+  connectionEpoch: bigint("connection_epoch", { mode: "bigint" }).notNull(),
+  runId: uuid("run_id").notNull().references(() => externalAgentRuns.id, { onDelete: "cascade" }),
+  fence: bigint("fence", { mode: "bigint" }).notNull(),
+  requestKey: text("request_key").notNull(),
+  // Bounded batch (first version caps at 200); per-receipt ack
+  // disposition/resultRefs live on the receipt rows (§3.5 equivalent storage).
+  receiptIds: jsonb("receipt_ids").$type<string[]>().notNull(),
+  state: text("state", { enum: ["open", "acked", "released"] }).notNull().default("open"),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  // Claim replay: a timed-out fetch re-issues the SAME batch, never a new one.
+  uniqueIndex("idx_external_agent_claims_run_request").on(t.runId, t.requestKey),
+  // D3 (v1.1 §6): at most one open claim per run.
+  uniqueIndex("idx_external_agent_claims_run_open").on(t.runId).where(sql`state = 'open'`),
+  index("idx_external_agent_claims_agent_state").on(t.agentId, t.state),
+]);
