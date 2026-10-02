@@ -12,6 +12,16 @@ export function canInstallEnterToOpenUrl(input: NodeJS.ReadableStream | undefine
 }
 
 export function openUrlInBrowser(url: string): void {
+  // Test-suite hard stop: a login-flow test that forgets to inject its
+  // openUrl stub falls back to HERE and opens a real browser — and when its
+  // serverUrl is also missing, straight at the official deployment's device
+  // authorization page (the 2026-10-02 08:34Z incident shape). Fail the test
+  // loudly instead of performing the real side effect.
+  if (process.env.VITEST !== undefined) {
+    throw new Error(
+      `openUrlInBrowser(${url}) must not run under vitest — inject an openUrl stub in the test`,
+    );
+  }
   const platform = process.platform;
   let command: string;
   let args: string[];
