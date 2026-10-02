@@ -405,7 +405,7 @@ test("Cursor model discovery reports CLI failure without accepting partial stdou
   })), { kind: "error", retryable: true });
 });
 
-test("timed-out Cursor probe exits its child and rejects partial or late catalogs", async () => {
+test("timed-out Cursor probe kills a SIGTERM-resistant child and rejects partial catalogs", async () => {
   if (process.platform === "win32") return;
   const directory = mkdtempSync(path.join(os.tmpdir(), "raft-cursor-timeout-"));
   const command = path.join(directory, "cursor-agent");
@@ -413,20 +413,32 @@ test("timed-out Cursor probe exits its child and rejects partial or late catalog
   writeFileSync(command, `#!${process.execPath}
 const fs = require("node:fs");
 fs.writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));
+process.on("SIGTERM", () => {});
 process.stdout.write(${JSON.stringify("auto - Auto (default)\n")});
-setTimeout(() => process.stdout.write(${JSON.stringify("late-model - Late model\n")}), 21000);
+setInterval(() => process.stdout.write(${JSON.stringify("late-model - Late model\n")}), 50000);
 `);
   chmodSync(command, 0o755);
   const oldPath = process.env.PATH;
   let pid: number | undefined;
+  let watchdogForcedExit = false;
+  // Keep a regression failure from leaving an intentionally uncooperative child alive.
+  const watchdog = setTimeout(() => {
+    watchdogForcedExit = true;
+    try {
+      pid = Number(readFileSync(pidFile, "utf8"));
+      process.kill(pid, "SIGKILL");
+    } catch { /* Startup failure or the child already exited. */ }
+  }, 24_000);
   try {
     process.env.PATH = `${directory}${path.delimiter}${oldPath ?? ""}`;
     const outcome = await new CursorDriver().detectModels();
     pid = Number(readFileSync(pidFile, "utf8"));
+    assert.equal(watchdogForcedExit, false, "the probe must settle before its server deadline");
     assert.deepEqual(outcome, { kind: "error", retryable: true });
     assert.throws(() => process.kill(pid!, 0), { code: "ESRCH" });
     pid = undefined;
   } finally {
+    clearTimeout(watchdog);
     if (pid !== undefined) {
       try { process.kill(pid, "SIGKILL"); } catch { /* The probe normally already exited. */ }
     }

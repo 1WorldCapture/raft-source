@@ -272,6 +272,8 @@ function runCursorModelsCommand(): Promise<CursorModelsCommandResult> {
       env: buildCursorModelProbeEnv(),
       encoding: "utf8",
       timeout: CURSOR_MODEL_PROBE_TIMEOUT_MS,
+      // A model-only probe must terminate even if the CLI ignores SIGTERM.
+      killSignal: "SIGKILL",
     }, (error, stdout) => {
       resolve({ status: error ? null : 0, stdout, error: error ?? undefined });
     });
