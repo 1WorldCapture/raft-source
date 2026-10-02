@@ -319,10 +319,13 @@ semver_compare() {
 RELEASE_BASE="${RAFT_COMPUTER_RELEASE_BASE:-https://cdn.raft.build/computer}"
 RELEASE_BACKEND="${RAFT_COMPUTER_RELEASE_BACKEND:-hands}"
 case "$RELEASE_BACKEND" in
-  hands) ;;
-  manifest|legacy-cdn) RELEASE_BACKEND="manifest" ;;
-  *) err "invalid RAFT_COMPUTER_RELEASE_BACKEND: ${RAFT_COMPUTER_RELEASE_BACKEND} (expected hands or manifest)" ;;
+  hands|manifest|legacy-cdn) ;;
+  *) err "invalid RAFT_COMPUTER_RELEASE_BACKEND: ${RAFT_COMPUTER_RELEASE_BACKEND} (expected hands, manifest, or legacy-cdn)" ;;
 esac
+# Only the contract-v1 "manifest" backend carries the strict requirements;
+# "legacy-cdn" is the pre-contract offline escape hatch and keeps its exact
+# historical behavior (alpha channel allowed, latest still resolves through
+# Hands, pinned installs skip authority attestation).
 if [ "$RELEASE_BACKEND" = "manifest" ] && [ -z "${RAFT_COMPUTER_RELEASE_BASE:-}" ]; then
   err "RAFT_COMPUTER_RELEASE_BACKEND=manifest requires RAFT_COMPUTER_RELEASE_BASE (self-managed manifests cannot resolve from the official CDN root)"
 fi
@@ -568,7 +571,7 @@ trap cleanup EXIT
 # Exact versions need an independent identity too. The explicit legacy-CDN
 # backend remains an operator-owned escape hatch for offline/custom releases,
 # matching the runtime updater; pinning a version alone never selects it.
-if [ -z "$HANDS_LATEST_BODY" ] && [ "$RELEASE_BACKEND" != "manifest" ]; then
+if [ -z "$HANDS_LATEST_BODY" ] && [ "$RELEASE_BACKEND" = "hands" ]; then
   HANDS_CHANNEL="pinned:${VERSION}"
   hands_query_version="$(printf '%s' "$VERSION" | sed 's/+/%2B/g')"
   hands_url="${HANDS_ORIGIN%/}/public/v2/apps/${HANDS_APP}/updates/check?product_type=cli-binary&current_version=0.0.0&channel=main&platform=${PLAT}&arch=${ARCH}&sdk_version=0.5.1&version=${hands_query_version}"
@@ -904,6 +907,8 @@ release_source_args() {
   if [ "$RELEASE_BACKEND" = "hands" ]; then
     printf '%s' "--backend hands --release-base $RELEASE_BASE --hands-origin $HANDS_ORIGIN"
   else
+    # manifest and the legacy-cdn alias both persist as the manifest backend
+    # (release-source.json has no legacy spelling).
     printf '%s' "--backend manifest --release-base $RELEASE_BASE"
   fi
 }

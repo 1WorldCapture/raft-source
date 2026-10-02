@@ -568,11 +568,12 @@ try {
   Write-Step "detected target: $target"
   Assert-GitBashRequirement
 
-  # Normalize and validate the release backend (contract v1). "legacy-cdn" is
-  # the pre-contract alias for the self-managed manifest backend.
-  if ($ReleaseBackend -in @('manifest', 'legacy-cdn')) { $ReleaseBackend = 'manifest' }
-  elseif ($ReleaseBackend -ne 'hands') {
-    Fail "invalid RAFT_COMPUTER_RELEASE_BACKEND: $ReleaseBackend (expected hands or manifest)"
+  # Validate the release backend (contract v1). "manifest" carries the strict
+  # contract requirements; "legacy-cdn" is the pre-contract offline escape
+  # hatch and keeps its exact historical behavior (alpha allowed, latest still
+  # resolves through Hands, pinned installs skip authority attestation).
+  if ($ReleaseBackend -notin @('hands', 'manifest', 'legacy-cdn')) {
+    Fail "invalid RAFT_COMPUTER_RELEASE_BACKEND: $ReleaseBackend (expected hands, manifest, or legacy-cdn)"
   }
   if ($ReleaseBackend -eq 'manifest' -and -not $env:RAFT_COMPUTER_RELEASE_BASE) {
     Fail 'RAFT_COMPUTER_RELEASE_BACKEND=manifest requires RAFT_COMPUTER_RELEASE_BASE (self-managed manifests cannot resolve from the official CDN root)'
@@ -662,8 +663,13 @@ try {
       if ($null -ne $priorRaftHome) { $env:RAFT_HOME = $priorRaftHome } else { Remove-Item Env:RAFT_HOME -ErrorAction SilentlyContinue }
     }
     if ($probeOk) {
-      $releaseSourceArgs = @('release-source', 'init', '--backend', $ReleaseBackend, '--release-base', $ReleaseBase)
-      if ($ReleaseBackend -eq 'hands') { $releaseSourceArgs += @('--hands-origin', $HandsOrigin) }
+      $releaseSourceArgs = if ($ReleaseBackend -eq 'hands') {
+        @('release-source', 'init', '--backend', 'hands', '--release-base', $ReleaseBase, '--hands-origin', $HandsOrigin)
+      } else {
+        # manifest and the legacy-cdn alias both persist as the manifest
+        # backend (release-source.json has no legacy spelling).
+        @('release-source', 'init', '--backend', 'manifest', '--release-base', $ReleaseBase)
+      }
       & $destination @releaseSourceArgs
       if ($LASTEXITCODE -ne 0) {
         Fail "release-source conflict: this Computer already tracks a different release source. Resolve it explicitly with 'raft-computer release-source set' before re-running this installer."
@@ -671,7 +677,7 @@ try {
     }
   }
 
-  if (-not $handsLatest -and $ReleaseBackend -ne 'manifest') {
+  if (-not $handsLatest -and $ReleaseBackend -eq 'hands') {
     $handsChannel = "pinned:$Version"
     $encodedVersion = [Uri]::EscapeDataString($Version)
     $targetParts = @($target -split '-', 2)
@@ -760,8 +766,13 @@ try {
     # freshly installed binary initializes it first-writer-wins; PowerShell
     # never hand-writes the JSON — the binary's validated writer does.
     if ($env:RAFT_COMPUTER_RELEASE_BASE) {
-      $releaseSourceArgs = @('release-source', 'init', '--backend', $ReleaseBackend, '--release-base', $ReleaseBase)
-      if ($ReleaseBackend -eq 'hands') { $releaseSourceArgs += @('--hands-origin', $HandsOrigin) }
+      $releaseSourceArgs = if ($ReleaseBackend -eq 'hands') {
+        @('release-source', 'init', '--backend', 'hands', '--release-base', $ReleaseBase, '--hands-origin', $HandsOrigin)
+      } else {
+        # manifest and the legacy-cdn alias both persist as the manifest
+        # backend (release-source.json has no legacy spelling).
+        @('release-source', 'init', '--backend', 'manifest', '--release-base', $ReleaseBase)
+      }
       $priorSlockHome = $env:SLOCK_HOME
       $priorRaftHome = $env:RAFT_HOME
       $env:SLOCK_HOME = $StateHome
