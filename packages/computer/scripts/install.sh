@@ -23,8 +23,13 @@
 #                                which version to install; default =
 #                                https://hands.build. Pins also require this
 #                                authority; unreachable/mismatched identity fails.
-#   RAFT_COMPUTER_RELEASE_BACKEND  explicit legacy-cdn permits unattested pinned
-#                                custom/offline releases; default = hands.
+#   RAFT_COMPUTER_RELEASE_BACKEND  release authority: "hands" (default) or
+#                                "manifest" (the release root's own
+#                                manifest.json resolves latest; pinned versions
+#                                skip authority attestation and keep the
+#                                per-version sha256+size verification).
+#                                "legacy-cdn" is the pre-contract alias for
+#                                manifest. No fallback between backends.
 #   RAFT_COMPUTER_HANDS_APP     Hands app slug; default = raft-computer-cli.
 #   RAFT_COMPUTER_INSTALL_CHANNEL  persist a release channel after successful
 #                                install (`alpha` for staging, `latest`, or
@@ -51,6 +56,220 @@ K_STATE_DIR="${STATE_HOME}/computer/k"
 K_RESET_BACKUP=""
 K_RESET_RESIDENT="0"
 DISPATCHER_PUBLISHED="0"
+
+# --- manifest-latest shared block start (fixture tests extract and eval this
+# exact block from install.sh — keep it self-contained POSIX sh) ---
+manifest_latest_version() {
+  _mlv_input="${1:-}"
+  _mlv_tmp=""
+  if [ "$_mlv_input" = "-" ]; then
+    # Stage stdin to a temp file FIRST: the byte-level control check below
+    # and the awk parse must both see the ORIGINAL bytes, and a stream can
+    # only be consumed once (command substitution would also strip NUL).
+    _mlv_tmp="$(mktemp 2>/dev/null)" \
+      || { echo '[manifest] error: could not create a temp staging file' >&2; return 2; }
+    cat > "$_mlv_tmp" \
+      || { rm -f "$_mlv_tmp"; echo '[manifest] error: could not read manifest' >&2; return 2; }
+    _mlv_input="$_mlv_tmp"
+  else
+    [ -n "$_mlv_input" ] || { echo '[manifest] error: no manifest path given' >&2; return 2; }
+    [ -r "$_mlv_input" ] || { echo '[manifest] error: could not read manifest' >&2; return 2; }
+  fi
+  # Refuse forbidden control bytes BEFORE awk sees the document: macOS
+  # awk drops NUL inside records, so the parser alone cannot be trusted
+  # with them. Delete printable ASCII, the three JSON-legal whitespace
+  # bytes, DEL and non-ASCII UTF-8; any surviving byte is a control byte
+  # JSON forbids anywhere (NUL, U+0001-U+0008, U+000B/U+000C, U+000E-U+001F).
+  # DEL (0x7F) itself is LEGAL inside JSON strings, so it stays deleted.
+  _mlv_forbidden="$(LC_ALL=C tr -d '\011\012\015\040-\177\200-\377' < "$_mlv_input" | wc -c | tr -d '[:space:]')" \
+    || { [ -z "$_mlv_tmp" ] || rm -f "$_mlv_tmp"; echo '[manifest] error: could not read manifest' >&2; return 2; }
+  if [ "$_mlv_forbidden" != "0" ]; then
+    [ -z "$_mlv_tmp" ] || rm -f "$_mlv_tmp"
+    echo '[manifest] error: raw control byte in manifest (invalid JSON); refusing' >&2
+    return 1
+  fi
+  # The awk program accumulates every record and parses the original
+  # bytes; the input file is passed as a direct awk argument because a
+  # redirect on the assignment is not portable across shells.
+  _mlv_version="$(awk '
+    # A complete, strict JSON parser (recursive descent) over the ORIGINAL
+    # bytes — the shell surface
+    # must accept and reject EXACTLY what JSON.parse / ConvertFrom-Json do:
+    # full structure validation (commas, colons, single root, no trailing
+    # content, legal numbers and literals, no raw control characters inside
+    # strings) plus escape decoding including \uXXXX surrogate pairs. The
+    # root-object LAST "version" string wins (JSON.parse duplicate-key
+    # semantics); a non-string or nested "version" never satisfies the
+    # lookup, and an invalid document yields NOTHING — a failed look is
+    # never a version.
+    function fail() { bad = 1; exit }
+    function skipws() {
+      while (pos <= len && substr(s, pos, 1) ~ /[ \t\n\r]/) pos++
+    }
+    function hextonum(h,    i, d, v) {
+      v = 0
+      for (i = 1; i <= length(h); i++) {
+        d = index("0123456789abcdef", tolower(substr(h, i, 1))) - 1
+        if (d < 0) return -1
+        v = v * 16 + d
+      }
+      return v
+    }
+    function utf8encode(n,    out) {
+      if (n < 128) return sprintf("%c", n)
+      if (n < 2048) { out = sprintf("%c", 192 + int(n / 64)); return out sprintf("%c", 128 + n % 64) }
+      if (n < 65536) {
+        out = sprintf("%c", 224 + int(n / 4096))
+        out = out sprintf("%c", 128 + int(n / 64) % 64)
+        return out sprintf("%c", 128 + n % 64)
+      }
+      out = sprintf("%c", 240 + int(n / 262144))
+      out = out sprintf("%c", 128 + int(n / 4096) % 64)
+      out = out sprintf("%c", 128 + int(n / 64) % 64)
+      return out sprintf("%c", 128 + n % 64)
+    }
+    function parse_string(    c, esc, hex, n, lo) {
+      pos++
+      out = ""
+      while (pos <= len) {
+        c = substr(s, pos, 1)
+        if (c == "\"") { pos++; return out }
+        if (c < " ") fail()
+        if (c == "\\") {
+          esc = substr(s, pos + 1, 1)
+          if (esc == "u") {
+            hex = substr(s, pos + 2, 4)
+            n = hextonum(hex)
+            if (length(hex) != 4 || n < 0) fail()
+            pos += 6
+            # Surrogate handling mirrors JSON.parse exactly: a PAIRED
+            # high+low combination becomes its astral code point; a LONE
+            # surrogate (high without a low, or a bare low) is replaced
+            # with U+FFFD — JSON.parse does NOT reject the document.
+            if (n >= 55296 && n <= 56319) {
+              if (substr(s, pos, 2) == "\\u") {
+                lo = hextonum(substr(s, pos + 2, 4))
+                if (lo >= 56320 && lo <= 57343) {
+                  pos += 6
+                  n = 65536 + (n - 55296) * 1024 + (lo - 56320)
+                }
+              }
+              out = out utf8encode(n >= 55296 && n <= 56319 ? 65533 : n)
+            } else if (n >= 56320 && n <= 57343) {
+              out = out utf8encode(65533)
+            } else {
+              out = out utf8encode(n)
+            }
+          } else if (esc == "\"") { out = out "\""; pos += 2 }
+          else if (esc == "\\") { out = out "\\"; pos += 2 }
+          else if (esc == "/") { out = out "/"; pos += 2 }
+          else if (esc == "b") { out = out sprintf("%c", 8); pos += 2 }
+          else if (esc == "f") { out = out sprintf("%c", 12); pos += 2 }
+          else if (esc == "n") { out = out sprintf("%c", 10); pos += 2 }
+          else if (esc == "r") { out = out sprintf("%c", 13); pos += 2 }
+          else if (esc == "t") { out = out sprintf("%c", 9); pos += 2 }
+          else fail()
+        } else { out = out c; pos++ }
+      }
+      fail()
+    }
+    function parse_number(    c) {
+      if (substr(s, pos, 1) == "-") pos++
+      if (substr(s, pos, 1) == "0") pos++
+      else if (substr(s, pos, 1) ~ /[1-9]/) { while (substr(s, pos, 1) ~ /[0-9]/) pos++ }
+      else fail()
+      if (substr(s, pos, 1) == ".") {
+        pos++
+        if (substr(s, pos, 1) !~ /[0-9]/) fail()
+        while (substr(s, pos, 1) ~ /[0-9]/) pos++
+      }
+      if (substr(s, pos, 1) ~ /[eE]/) {
+        pos++
+        if (substr(s, pos, 1) ~ /[+-]/) pos++
+        if (substr(s, pos, 1) !~ /[0-9]/) fail()
+        while (substr(s, pos, 1) ~ /[0-9]/) pos++
+      }
+      return "num"
+    }
+    function parse_object(isroot,    key, first, c, vtype) {
+      pos++
+      first = 1
+      while (1) {
+        skipws()
+        c = substr(s, pos, 1)
+        if (c == "}") { pos++; return }
+        if (!first) {
+          if (c != ",") fail()
+          pos++
+          skipws()
+        }
+        first = 0
+        if (substr(s, pos, 1) != "\"") fail()
+        key = parse_string()
+        skipws()
+        if (substr(s, pos, 1) != ":") fail()
+        pos++
+        vtype = parse_value()
+        if (isroot && key == "version") rootVersion = (vtype == "str") ? g_str : ""
+      }
+    }
+    function parse_array(    first, c) {
+      pos++
+      first = 1
+      while (1) {
+        skipws()
+        c = substr(s, pos, 1)
+        if (c == "]") { pos++; return }
+        if (!first) {
+          if (c != ",") fail()
+          pos++
+        }
+        first = 0
+        parse_value()
+      }
+    }
+    function parse_value(    c, wasroot) {
+      skipws()
+      c = substr(s, pos, 1)
+      if (c == "{") {
+        wasroot = isroot
+        isroot = 0
+        parse_object(wasroot)
+        return "obj"
+      }
+      if (c == "[") { isroot = 0; parse_array(); return "arr" }
+      if (c == "\"") { g_str = parse_string(); return "str" }
+      if (c == "-" || c ~ /[0-9]/) { parse_number(); return "num" }
+      if (substr(s, pos, 4) == "true") { pos += 4; return "lit" }
+      if (substr(s, pos, 5) == "false") { pos += 5; return "lit" }
+      if (substr(s, pos, 4) == "null") { pos += 4; return "lit" }
+      fail()
+    }
+    {
+      buf = buf $0 "\n"
+    }
+    END {
+      s = buf
+      len = length(s)
+      pos = 1
+      bad = 0
+      rootVersion = ""
+      g_str = ""
+      isroot = 1
+      skipws()
+      parse_value()
+      skipws()
+      if (pos <= len) fail()
+      if (rootVersion != "") print rootVersion
+    }
+  ' "$_mlv_input"
+)" \
+    || { [ -z "$_mlv_tmp" ] || rm -f "$_mlv_tmp"; echo '[manifest] error: could not read manifest' >&2; return 2; }
+  [ -z "$_mlv_tmp" ] || rm -f "$_mlv_tmp"
+  [ -n "$_mlv_version" ] || return 1
+  printf '%s' "$_mlv_version"
+}
+# --- manifest-latest shared block end ---
 
 err() {
   printf '[install] error: %s\n' "$1" >&2
@@ -250,13 +469,32 @@ semver_compare() {
 }
 
 # --- resolve base + version ---
-# Bytes come from the CDN distribution (cdn.raft.build by default; override via
-# RAFT_COMPUTER_RELEASE_BASE, e.g. the staging bucket): the per-version subdir
-# holds that version's manifest + binaries. WHICH version to install is decided
-# by the Hands release authority (channel latest/alpha), so activating a release
-# in Hands is what makes installers pick it up. A pinned RAFT_COMPUTER_VERSION
-# or pinned:<semver> channel selects exact bytes attested by Hands.
+# Bytes come from the release-file root (cdn.raft.build by default; override
+# via RAFT_COMPUTER_RELEASE_BASE, e.g. a private /computer/ mirror): the
+# per-version subdir holds that version's manifest + binaries. WHICH version
+# to install is decided by the release authority for the configured backend
+# (contract v1):
+#   hands (default)   — the Hands release authority resolves the channel
+#                       (latest/alpha) and attests pinned versions;
+#   manifest          — the release root's own manifest.json top-level
+#                       `version` IS the latest pointer; pinned versions skip
+#                       authority attestation and keep the per-version
+#                       sha256+size verification (the operator owns the trust
+#                       of the release directory).
+#   legacy-cdn        — pre-contract alias for manifest (same behavior).
 RELEASE_BASE="${RAFT_COMPUTER_RELEASE_BASE:-https://cdn.raft.build/computer}"
+RELEASE_BACKEND="${RAFT_COMPUTER_RELEASE_BACKEND:-hands}"
+case "$RELEASE_BACKEND" in
+  hands|manifest|legacy-cdn) ;;
+  *) err "invalid RAFT_COMPUTER_RELEASE_BACKEND: ${RAFT_COMPUTER_RELEASE_BACKEND} (expected hands, manifest, or legacy-cdn)" ;;
+esac
+# Only the contract-v1 "manifest" backend carries the strict requirements;
+# "legacy-cdn" is the pre-contract offline escape hatch and keeps its exact
+# historical behavior (alpha channel allowed, latest still resolves through
+# Hands, pinned installs skip authority attestation).
+if [ "$RELEASE_BACKEND" = "manifest" ] && [ -z "${RAFT_COMPUTER_RELEASE_BASE:-}" ]; then
+  err "RAFT_COMPUTER_RELEASE_BACKEND=manifest requires RAFT_COMPUTER_RELEASE_BASE (self-managed manifests cannot resolve from the official CDN root)"
+fi
 HANDS_ORIGIN="${RAFT_COMPUTER_HANDS_ORIGIN:-https://hands.build}"
 HANDS_APP="${RAFT_COMPUTER_HANDS_APP:-raft-computer-cli}"
 VERSION="${CLI_VERSION:-${RAFT_COMPUTER_VERSION:-}}"
@@ -409,6 +647,20 @@ if [ -z "$VERSION" ]; then
     pinned:*) VERSION="${SELECT_CHANNEL#pinned:}" ;;
   esac
 fi
+if [ -z "$VERSION" ] && [ "$RELEASE_BACKEND" = "manifest" ]; then
+  # Contract v1 manifest backend: the release root's own manifest.json IS the
+  # latest pointer. alpha is a Hands-only debug channel — refuse rather than
+  # passing latest off as alpha.
+  [ "$SELECT_CHANNEL" = "alpha" ] \
+    && err "the manifest backend has no alpha channel; RAFT_COMPUTER_INSTALL_CHANNEL=alpha requires hands"
+  _mlv="$(mktemp)"
+  $DLO "$_mlv" "${RELEASE_BASE%/}/manifest.json" \
+    || err "could not download the release manifest (${RELEASE_BASE%/}/manifest.json); refusing to continue"
+  VERSION="$(manifest_latest_version "$_mlv")" \
+    || err "the release manifest at ${RELEASE_BASE%/}/manifest.json carries no usable top-level version; refusing to continue"
+  rm -f "$_mlv"
+  info "resolved latest release from the self-managed manifest: ${VERSION}"
+fi
 if [ -z "$VERSION" ]; then
   case "$SELECT_CHANNEL" in
     alpha) HANDS_CHANNEL="alpha" ;;
@@ -485,7 +737,7 @@ trap cleanup EXIT
 # Exact versions need an independent identity too. The explicit legacy-CDN
 # backend remains an operator-owned escape hatch for offline/custom releases,
 # matching the runtime updater; pinning a version alone never selects it.
-if [ -z "$HANDS_LATEST_BODY" ] && [ "${RAFT_COMPUTER_RELEASE_BACKEND:-hands}" != "legacy-cdn" ]; then
+if [ -z "$HANDS_LATEST_BODY" ] && [ "$RELEASE_BACKEND" = "hands" ]; then
   HANDS_CHANNEL="pinned:${VERSION}"
   hands_query_version="$(printf '%s' "$VERSION" | sed 's/+/%2B/g')"
   hands_url="${HANDS_ORIGIN%/}/public/v2/apps/${HANDS_APP}/updates/check?product_type=cli-binary&current_version=0.0.0&channel=main&platform=${PLAT}&arch=${ARCH}&sdk_version=0.5.1&version=${hands_query_version}"
@@ -690,6 +942,7 @@ SIZE="$(extract_num "$outer_block" size)"
 assert_hands_manifest_identity
 WASM_FILE="$(extract_str "$photon_block" file)"
 WASM_WANT_SHA="$(extract_str "$photon_block" sha256)"
+WASM_SIZE="$(extract_num "$photon_block" size)"
 [ "$WASM_FILE" = "$PHOTON_WASM_NAME" ] && [ -n "$WASM_WANT_SHA" ] \
   || err "manifest photonWasm entry missing ${PHOTON_WASM_NAME}/sha256"
 
@@ -706,11 +959,37 @@ if command -v sha256sum >/dev/null 2>&1; then SHA_CMD="sha256sum";
 elif command -v shasum >/dev/null 2>&1; then SHA_CMD="shasum -a 256";
 else err "need sha256sum or shasum to verify the download"; fi
 
+# --- attested-size gate (contract v1) ---
+# The hands and manifest backends promise sha256+size for every required
+# file; a hash alone does not discharge that promise. Sizes must be declared
+# as valid integers, and the downloaded byte count must match the attestation
+# BEFORE anything is staged, replaced, or handed to K convergence. The
+# legacy-cdn escape hatch keeps its exact historical behavior (sha only).
+is_attested_uint() {
+  case "$1" in ''|*[!0-9]*) return 1 ;; *) return 0 ;; esac
+}
+SIZE_NOTE=""
+if [ "$RELEASE_BACKEND" != "legacy-cdn" ]; then
+  SIZE_NOTE="+size"
+  is_attested_uint "$SIZE"     || err "manifest entry for ${TARGET} must declare a valid integer size (contract v1: sha256+size are both mandatory)"
+  is_attested_uint "$WASM_SIZE"     || err "manifest photonWasm entry must declare a valid integer size (contract v1: sha256+size are both mandatory)"
+  if [ -n "$gz_inner" ]; then
+    is_attested_uint "$GZ_SIZE"       || err "manifest gz sidecar for ${TARGET} must declare a valid integer size (contract v1: sha256+size are both mandatory)"
+  fi
+fi
+verify_attested_size() {
+  # $1 = downloaded file, $2 = attested size, $3 = label
+  [ "$RELEASE_BACKEND" = "legacy-cdn" ] && return 0
+  _vas_got="$(wc -c < "$1" | tr -d '[:space:]')"
+  [ "$_vas_got" = "$2" ]     || err "size mismatch for ${3}: downloaded ${_vas_got} bytes but the manifest attests ${2}"
+}
+
 info "downloading ${WASM_FILE} (image processing resource)…"
 $DLO "$tmp/$WASM_FILE" "${BASE}/${WASM_FILE}" || err "failed to download ${WASM_FILE}"
 GOT_WASM_SHA="$($SHA_CMD "$tmp/$WASM_FILE" | awk '{print $1}')"
 [ "$GOT_WASM_SHA" = "$WASM_WANT_SHA" ] || err "sha256 mismatch for ${WASM_FILE} (got ${GOT_WASM_SHA}, want ${WASM_WANT_SHA})"
-info "image processing resource sha256 verified"
+verify_attested_size "$tmp/$WASM_FILE" "$WASM_SIZE" "${WASM_FILE}"
+info "image processing resource sha256${SIZE_NOTE} verified"
 
 if [ -n "$GZ_FILE" ] && [ -n "$GZ_WANT_SHA" ] && command -v gunzip >/dev/null 2>&1; then
   # Gzipped path: ~3× smaller download (e.g. 143MB → ~42MB). Verify the .gz
@@ -721,13 +1000,15 @@ if [ -n "$GZ_FILE" ] && [ -n "$GZ_WANT_SHA" ] && command -v gunzip >/dev/null 2>
   $DLP "$tmp/$GZ_FILE" "${BASE}/${GZ_FILE}" || err "failed to download ${GZ_FILE}"
   GOT_GZ_SHA="$($SHA_CMD "$tmp/$GZ_FILE" | awk '{print $1}')"
   [ "$GOT_GZ_SHA" = "$GZ_WANT_SHA" ] || err "sha256 mismatch for ${GZ_FILE} (got ${GOT_GZ_SHA}, want ${GZ_WANT_SHA})"
-  info "downloaded gzip sha256 verified"
+  verify_attested_size "$tmp/$GZ_FILE" "$GZ_SIZE" "${GZ_FILE}"
+  info "downloaded gzip sha256${SIZE_NOTE} verified"
   info "decompressing…"
   gunzip -c "$tmp/$GZ_FILE" > "$tmp/$FILE" || err "failed to gunzip ${GZ_FILE}"
   rm -f "$tmp/$GZ_FILE"
   GOT_SHA="$($SHA_CMD "$tmp/$FILE" | awk '{print $1}')"
   [ "$GOT_SHA" = "$WANT_SHA" ] || err "sha256 mismatch for ${FILE} after decompression (got ${GOT_SHA}, want ${WANT_SHA})"
-  info "binary sha256 verified"
+  verify_attested_size "$tmp/$FILE" "$SIZE" "${FILE} (decompressed)"
+  info "binary sha256${SIZE_NOTE} verified"
 else
   # Direct (uncompressed) path. Used when the manifest has no gz sidecar
   # (older releases) or `gunzip` isn't available on this host.
@@ -735,7 +1016,8 @@ else
   $DLP "$tmp/$FILE" "${BASE}/${FILE}" || err "failed to download ${FILE}"
   GOT_SHA="$($SHA_CMD "$tmp/$FILE" | awk '{print $1}')"
   [ "$GOT_SHA" = "$WANT_SHA" ] || err "sha256 mismatch for ${FILE} (got ${GOT_SHA}, want ${WANT_SHA})"
-  info "sha256 verified"
+  verify_attested_size "$tmp/$FILE" "$SIZE" "${FILE}"
+  info "sha256${SIZE_NOTE} verified"
 fi
 
 # --- defense-in-depth: verify the downloaded binary's platform + arch ---
@@ -809,6 +1091,40 @@ reset_k_state() {
   info "K state reset; complete previous state saved to $K_RESET_BACKUP/k"
 }
 
+# --- release-source pre-flight (contract v1) ---
+# When the onboarding command carries a release-source configuration, an
+# existing contract-aware binary must accept it BEFORE this installer touches
+# any binary or state: a different persisted source is a conflict that needs
+# a deliberate `raft-computer release-source set`, and a corrupt persisted
+# source must surface now, not after a half-replaced install. A pre-contract
+# binary has no `release-source` subcommand; the file cannot exist without
+# one, so the pre-flight is skipped and the post-install init writes it.
+release_source_args() {
+  if [ "$RELEASE_BACKEND" = "hands" ]; then
+    printf '%s' "--backend hands --release-base $RELEASE_BASE --hands-origin $HANDS_ORIGIN"
+  else
+    # manifest and the legacy-cdn alias both persist as the manifest backend
+    # (release-source.json has no legacy spelling).
+    printf '%s' "--backend manifest --release-base $RELEASE_BASE"
+  fi
+}
+if [ -n "${RAFT_COMPUTER_RELEASE_BASE:-}" ] && [ -x "$existing" ] \
+  && SLOCK_HOME="$STATE_HOME" RAFT_HOME="$STATE_HOME" "$existing" release-source --help >/dev/null 2>&1; then
+  # Contract-aware binary present. Capability (the --help probe above) is now
+  # SEPARATE from config validation, so a corrupt file or an invalid env group
+  # can no longer masquerade as a pre-contract binary and skip these checks:
+  #  1. the onboarding env group itself must resolve (show fails on an
+  #     incomplete group, e.g. RELEASE_BASE without HANDS_ORIGIN for hands);
+  #  2. the persisted source must accept this onboarding first-writer-wins —
+  #     a different source or a corrupt file fails HERE, before this
+  #     installer replaces any byte or state (contract).
+  SLOCK_HOME="$STATE_HOME" RAFT_HOME="$STATE_HOME" "$existing" release-source show >/dev/null 2>&1 \
+    || err "release-source environment group is invalid (e.g. RAFT_COMPUTER_RELEASE_BASE set without RAFT_COMPUTER_HANDS_ORIGIN for the hands backend, or conflicting legacy variables). Fix the onboarding environment and re-run this installer."
+  # shellcheck disable=SC2086
+  SLOCK_HOME="$STATE_HOME" RAFT_HOME="$STATE_HOME" "$existing" release-source init $(release_source_args) \
+    || err "release-source pre-flight failed: this Computer already tracks a different or corrupt release source. Resolve it explicitly with 'raft-computer release-source set' before re-running this installer."
+fi
+
 # --- stage and verify all install files before stopping the service ---
 mkdir -p "$INSTALL_DIR" || err "failed to create install directory ${INSTALL_DIR}"
 install_stage="$INSTALL_DIR/.${BIN_NAME}.install.$$"
@@ -831,6 +1147,14 @@ INSTALLED_SHA="$($SHA_CMD "$INSTALL_DIR/$BIN_NAME" | awk '{print $1}')"
 INSTALLED_VERSION="$(binary_self_version "$INSTALL_DIR/$BIN_NAME" || true)"
 [ "$INSTALLED_VERSION" = "$VERSION" ] || err "installed dispatcher reported version '${INSTALLED_VERSION}', expected '${VERSION}'"
 info "installed to ${INSTALL_DIR}/${BIN_NAME}"
+# Persist the release source BEFORE any service start (contract v1): the
+# freshly installed binary initializes it first-writer-wins. The shell never
+# hand-writes the JSON — the binary's validated, atomic writer does.
+if [ -n "${RAFT_COMPUTER_RELEASE_BASE:-}" ]; then
+  # shellcheck disable=SC2086
+  SLOCK_HOME="$STATE_HOME" RAFT_HOME="$STATE_HOME" "$INSTALL_DIR/$BIN_NAME" release-source init $(release_source_args) \
+    || err "installed $VERSION but could not persist the release source; run 'raft-computer release-source init' manually and re-run setup"
+fi
 persist_install_channel
 persist_shell_path
 retire_legacy_supervisor

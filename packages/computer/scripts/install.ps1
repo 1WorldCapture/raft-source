@@ -67,6 +67,10 @@ $HandsOrigin = if ($env:RAFT_COMPUTER_HANDS_ORIGIN) {
   'https://hands.build'
 }
 $HandsApp = if ($env:RAFT_COMPUTER_HANDS_APP) { $env:RAFT_COMPUTER_HANDS_APP } else { 'raft-computer-cli' }
+# Contract v1: hands (default) resolves through the Hands authority; manifest
+# resolves latest from the release root's own manifest.json. Validated and
+# normalized in the main block (Fail is not yet defined here).
+$ReleaseBackend = if ($env:RAFT_COMPUTER_RELEASE_BACKEND) { $env:RAFT_COMPUTER_RELEASE_BACKEND } else { 'hands' }
 $VersionArgumentProvided = $PSBoundParameters.ContainsKey('Version')
 if (-not $VersionArgumentProvided) {
   $Version = $env:RAFT_COMPUTER_VERSION
@@ -82,10 +86,14 @@ $InstallChannel = if ($PSBoundParameters.ContainsKey('Channel')) {
 $Force = $env:RAFT_COMPUTER_FORCE -eq '1'
 $NoModifyPath = $env:RAFT_COMPUTER_NO_MODIFY_PATH -eq '1'
 $RequireGitBash = $env:RAFT_COMPUTER_REQUIRE_GIT_BASH -eq '1'
-$StateHome = if ($env:SLOCK_HOME) {
-  [System.IO.Path]::GetFullPath($env:SLOCK_HOME)
-} elseif ($env:RAFT_HOME) {
+# Same precedence as the CLI's resolveRaftHome(): RAFT_HOME wins over
+# SLOCK_HOME. The reverse order would init/persist into one root while the
+# installed binary resolves the other (contract: one selected root for every
+# installer subcommand — they all run with BOTH variables pinned to it).
+$StateHome = if ($env:RAFT_HOME) {
   [System.IO.Path]::GetFullPath($env:RAFT_HOME)
+} elseif ($env:SLOCK_HOME) {
+  [System.IO.Path]::GetFullPath($env:SLOCK_HOME)
 } else {
   Join-Path $env:USERPROFILE '.slock'
 }
@@ -131,6 +139,26 @@ function Read-Json([string]$Uri) {
   $content = $response.Content
   if ($content -is [byte[]]) {
     $content = [System.Text.Encoding]::UTF8.GetString($content)
+  }
+  # Strictness gate (contract parity): validate with the strict .NET JSON
+  # reader BEFORE the lenient ConvertFrom-Json conversion — raw control
+  # characters in strings, trailing commas and comments are all rejected,
+  # the same line JSON.parse and the shell parser draw. "Assembly/reader
+  # unavailable" and "document invalid" are handled separately: a
+  # MethodInvocationException wrapping JsonException means the reader ran
+  # and refused the document; only a plain RuntimeException (type not
+  # found on legacy hosts) falls back to the targeted pre-check.
+  try {
+    [void][System.Text.Json.JsonDocument]::Parse($content)
+  } catch {
+    if ($_.Exception -is [System.Management.Automation.MethodInvocationException]) {
+      Fail "invalid JSON from ${Uri}: $($_.Exception.InnerException.Message)"
+    }
+    # Strict reader unavailable on this host: refuse rather than guess. A
+    # regex pre-check cannot validate the full grammar, and shipping a
+    # weaker line than the other installer surfaces would silently change
+    # what counts as a manifest (task: installer JSON parity).
+    Fail "a strict JSON reader (System.Text.Json) is not available in this PowerShell; run the installer under a PowerShell that provides it (pwsh 7+)"
   }
   return $content | ConvertFrom-Json
 }
@@ -203,6 +231,29 @@ function Test-Sha256([string]$Path, [string]$Expected) {
   $actual = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
   if ($actual -ne $Expected.ToLowerInvariant()) {
     Fail "sha256 mismatch for $([System.IO.Path]::GetFileName($Path)) (got $actual, want $Expected)"
+  }
+}
+
+# Attested-size gate (contract v1): the hands and manifest backends promise
+# sha256+size for every required file, so a declared size must be a valid
+# integer and the downloaded byte count must match it BEFORE anything is
+# staged, replaced, or handed to K convergence. The legacy-cdn escape hatch
+# keeps its exact historical behavior (sha only).
+$SizeNote = if ($ReleaseBackend -ne 'legacy-cdn') { '+size' } else { '' }
+
+function Assert-DeclaredSize([object]$Expected, [string]$Label) {
+  if ($ReleaseBackend -eq 'legacy-cdn') { return }
+  if ($null -eq $Expected -or "$Expected" -notmatch '^[0-9]+$') {
+    Fail "manifest entry for $Label must declare a valid integer size (contract v1: sha256+size are both mandatory)"
+  }
+}
+
+function Test-AttestedSize([string]$Path, [object]$Expected, [string]$Label) {
+  if ($ReleaseBackend -eq 'legacy-cdn') { return }
+  Assert-DeclaredSize $Expected $Label
+  $actual = (Get-Item -LiteralPath $Path).Length
+  if ($actual -ne [int64]"$Expected") {
+    Fail "size mismatch for ${Label}: downloaded $actual bytes but the manifest attests $Expected"
   }
 }
 
@@ -563,6 +614,18 @@ try {
   $target = Get-Target
   Write-Step "detected target: $target"
   Assert-GitBashRequirement
+
+  # Validate the release backend (contract v1). "manifest" carries the strict
+  # contract requirements; "legacy-cdn" is the pre-contract offline escape
+  # hatch and keeps its exact historical behavior (alpha allowed, latest still
+  # resolves through Hands, pinned installs skip authority attestation).
+  if ($ReleaseBackend -notin @('hands', 'manifest', 'legacy-cdn')) {
+    Fail "invalid RAFT_COMPUTER_RELEASE_BACKEND: $ReleaseBackend (expected hands, manifest, or legacy-cdn)"
+  }
+  if ($ReleaseBackend -eq 'manifest' -and -not $env:RAFT_COMPUTER_RELEASE_BASE) {
+    Fail 'RAFT_COMPUTER_RELEASE_BACKEND=manifest requires RAFT_COMPUTER_RELEASE_BASE (self-managed manifests cannot resolve from the official CDN root)'
+  }
+
   $handsLatest = $null
   $handsChannel = $null
 
@@ -583,8 +646,17 @@ try {
       }
     }
     if ($selectChannel -and $selectChannel.StartsWith('pinned:')) {
-      # A pin selects an exact version; Hands still attests its identity.
+      # A pin selects an exact version; Hands still attests its identity on
+      # the hands backend (the manifest backend keeps per-version hashes).
       $Version = $selectChannel.Substring(7)
+    } elseif ($ReleaseBackend -eq 'manifest') {
+      # Contract v1 manifest backend: the release root's own manifest.json IS
+      # the latest pointer. alpha is a Hands-only debug channel.
+      if ($selectChannel -eq 'alpha') { Fail 'the manifest backend has no alpha channel; RAFT_COMPUTER_INSTALL_CHANNEL=alpha requires hands' }
+      Write-Step "resolving latest release from the self-managed manifest ($ReleaseBase/manifest.json)"
+      $rootManifest = Read-Json "$ReleaseBase/manifest.json"
+      $Version = $rootManifest.version
+      if (-not $Version) { Fail "the release manifest at $ReleaseBase/manifest.json carries no usable top-level version; refusing to continue" }
     } else {
       $handsChannel = if ($selectChannel -eq 'alpha') { 'alpha' } else { 'main' }
       $handsUrl = "$HandsOrigin/public/v2/apps/$HandsApp/latest?channel=$handsChannel&product_type=cli-binary"
@@ -617,7 +689,48 @@ try {
     }
   }
 
-  if (-not $handsLatest -and $env:RAFT_COMPUTER_RELEASE_BACKEND -ne 'legacy-cdn') {
+  # Release-source pre-flight (contract v1): a contract-aware existing binary
+  # must accept the onboarding's release source BEFORE this installer replaces
+  # any binary or state. Capability (the --help probe) is SEPARATE from config
+  # validation: a pre-contract binary has no `release-source` subcommand — and
+  # no file to conflict with — so only it skips these checks; a contract-aware
+  # binary must pass BOTH the env-group validation (show) and the persisted-
+  # source acceptance (init) or the install refuses before touching anything.
+  $destination = Join-Path $InstallDir $BinaryName
+  if ($env:RAFT_COMPUTER_RELEASE_BASE -and (Test-Path -LiteralPath $destination)) {
+    $capabilityProbe = @('release-source', '--help')
+    $capable = $false
+    try {
+      $priorSlockHome = $env:SLOCK_HOME
+      $priorRaftHome = $env:RAFT_HOME
+      $env:SLOCK_HOME = $StateHome
+      $env:RAFT_HOME = $StateHome
+      & $destination @capabilityProbe *> $null
+      $capable = ($LASTEXITCODE -eq 0)
+    } catch { $capable = $false } finally {
+      if ($null -ne $priorSlockHome) { $env:SLOCK_HOME = $priorSlockHome } else { Remove-Item Env:SLOCK_HOME -ErrorAction SilentlyContinue }
+      if ($null -ne $priorRaftHome) { $env:RAFT_HOME = $priorRaftHome } else { Remove-Item Env:RAFT_HOME -ErrorAction SilentlyContinue }
+    }
+    if ($capable) {
+      & $destination @('release-source', 'show') *> $null
+      if ($LASTEXITCODE -ne 0) {
+        Fail "release-source environment group is invalid (e.g. RAFT_COMPUTER_RELEASE_BASE set without RAFT_COMPUTER_HANDS_ORIGIN for the hands backend, or conflicting legacy variables). Fix the onboarding environment and re-run this installer."
+      }
+      $releaseSourceArgs = if ($ReleaseBackend -eq 'hands') {
+        @('release-source', 'init', '--backend', 'hands', '--release-base', $ReleaseBase, '--hands-origin', $HandsOrigin)
+      } else {
+        # manifest and the legacy-cdn alias both persist as the manifest
+        # backend (release-source.json has no legacy spelling).
+        @('release-source', 'init', '--backend', 'manifest', '--release-base', $ReleaseBase)
+      }
+      & $destination @releaseSourceArgs
+      if ($LASTEXITCODE -ne 0) {
+        Fail "release-source pre-flight failed: this Computer already tracks a different or corrupt release source. Resolve it explicitly with 'raft-computer release-source set' before re-running this installer."
+      }
+    }
+  }
+
+  if (-not $handsLatest -and $ReleaseBackend -eq 'hands') {
     $handsChannel = "pinned:$Version"
     $encodedVersion = [Uri]::EscapeDataString($Version)
     $targetParts = @($target -split '-', 2)
@@ -643,6 +756,11 @@ try {
   if (-not $file -or [System.IO.Path]::GetFileName($file) -ne $file -or $file -notmatch '^raft-computer-win32-(x64|arm64)\.exe$') {
     Fail "invalid Windows asset name in manifest: $file"
   }
+  Assert-DeclaredSize $entry.size "target $target"
+  Assert-DeclaredSize $photonWasm.size 'photonWasm'
+  if ($entry.gz -and $entry.gz.file -and $entry.gz.sha256) {
+    Assert-DeclaredSize $entry.gz.size 'gz sidecar'
+  }
 
   $tempDir = Join-Path $env:TEMP ("raft-computer-install-" + [guid]::NewGuid().ToString('N'))
   New-Item -ItemType Directory -Path $tempDir | Out-Null
@@ -657,13 +775,15 @@ try {
       Write-Step "downloading $base/$gzipFile"
       Invoke-Download "$base/$gzipFile" $downloadedGzip
       Test-Sha256 $downloadedGzip $entry.gz.sha256
-      Write-Step 'compressed sha256 verified; decompressing'
+      Test-AttestedSize $downloadedGzip $entry.gz.size 'gz sidecar'
+      Write-Step "compressed sha256$($SizeNote) verified; decompressing"
       Expand-Gzip $downloadedGzip $downloadedBinary
     } else {
       Write-Step "downloading $base/$file"
       Invoke-Download "$base/$file" $downloadedBinary
     }
     Test-Sha256 $downloadedBinary $entry.sha256
+    Test-AttestedSize $downloadedBinary $entry.size 'binary' 
     Assert-PeTarget $downloadedBinary $target
     $candidateVersion = Get-BinarySelfVersion $downloadedBinary
     if ($candidateVersion -ne $Version) {
@@ -674,7 +794,7 @@ try {
     Write-Step "downloading $base/$PhotonWasmName (image processing resource)"
     Invoke-Download "$base/$PhotonWasmName" $downloadedPhotonWasm
     Test-Sha256 $downloadedPhotonWasm $photonWasm.sha256
-    Write-Step 'image processing resource sha256 verified'
+    Write-Step "image processing resource sha256$($SizeNote) verified"
 
     # K consumes these exact manifest-verified local bytes before any install
     # directory mutation. The hidden candidate-only mode owns the K lock,
@@ -702,6 +822,29 @@ try {
     $script:KEffectiveTarget = $null
     Persist-InstallChannel
     Add-ToUserPath $InstallDir
+    # Persist the release source BEFORE any service start (contract v1): the
+    # freshly installed binary initializes it first-writer-wins; PowerShell
+    # never hand-writes the JSON — the binary's validated writer does.
+    if ($env:RAFT_COMPUTER_RELEASE_BASE) {
+      $releaseSourceArgs = if ($ReleaseBackend -eq 'hands') {
+        @('release-source', 'init', '--backend', 'hands', '--release-base', $ReleaseBase, '--hands-origin', $HandsOrigin)
+      } else {
+        # manifest and the legacy-cdn alias both persist as the manifest
+        # backend (release-source.json has no legacy spelling).
+        @('release-source', 'init', '--backend', 'manifest', '--release-base', $ReleaseBase)
+      }
+      $priorSlockHome = $env:SLOCK_HOME
+      $priorRaftHome = $env:RAFT_HOME
+      $env:SLOCK_HOME = $StateHome
+      $env:RAFT_HOME = $StateHome
+      try {
+        & $destination @releaseSourceArgs
+        if ($LASTEXITCODE -ne 0) { Fail "installed $Version but could not persist the release source; run 'raft-computer release-source init' manually and re-run setup" }
+      } finally {
+        if ($null -ne $priorSlockHome) { $env:SLOCK_HOME = $priorSlockHome } else { Remove-Item Env:SLOCK_HOME -ErrorAction SilentlyContinue }
+        if ($null -ne $priorRaftHome) { $env:RAFT_HOME = $priorRaftHome } else { Remove-Item Env:RAFT_HOME -ErrorAction SilentlyContinue }
+      }
+    }
     if ($needsLegacyMigration) {
       Retire-LegacySupervisor $destination
     }

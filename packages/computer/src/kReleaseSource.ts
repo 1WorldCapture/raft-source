@@ -35,6 +35,7 @@ import type {
 } from "@botiverse/k-carrier";
 import { ComputerServiceError } from "./services/errors.js";
 import { readChannel, type Channel } from "./lib/channelState.js";
+import { resolveRuntimeReleaseSourceSync } from "./lib/releaseSource.js";
 import { resolveRaftHome } from "./paths.js";
 import { HANDS_API_ORIGIN, HANDS_COMPUTER_APP_SLUG } from "./releaseAuthority.js";
 
@@ -50,8 +51,13 @@ export interface KReleaseSourceDeps {
   fetchFn?: typeof fetch;
   /** Per-request deadline; the release authority answers in ms or is broken. */
   timeoutMs?: number;
-  /** Legacy CDN is opt-in; Hands is the production default. */
-  backend?: "hands" | "legacy-cdn";
+  /**
+   * Legacy CDN is opt-in; Hands is the production default. "manifest" is the
+   * contract-v1 name for the self-managed manifest backend — same resolution
+   * path as the legacy CDN source ("legacy-cdn" remains as a pre-contract
+   * alias so old env values keep working).
+   */
+  backend?: "hands" | "legacy-cdn" | "manifest";
   handsApiOrigin?: string;
   handsAppSlug?: string;
   channelProvider?: () => Channel | Promise<Channel>;
@@ -63,10 +69,14 @@ export const RELEASE_BACKEND_ENV = "RAFT_COMPUTER_RELEASE_BACKEND";
 
 function resolveBackend(deps: KReleaseSourceDeps): "hands" | "legacy-cdn" {
   const configured = deps.backend ?? process.env[RELEASE_BACKEND_ENV] ?? "hands";
-  if (configured === "hands" || configured === "legacy-cdn") return configured;
+  if (configured === "hands") return "hands";
+  // "manifest" (contract v1) and "legacy-cdn" (pre-contract) both select the
+  // self-managed manifest source; the persisted release-source file already
+  // normalized legacy values, this accepts both spellings at the env seam.
+  if (configured === "legacy-cdn" || configured === "manifest") return "legacy-cdn";
   throw new ComputerServiceError(
     "K_SOURCE_BACKEND_INVALID",
-    `K_SOURCE_BACKEND_INVALID: ${RELEASE_BACKEND_ENV} must be "hands" or "legacy-cdn"`,
+    `K_SOURCE_BACKEND_INVALID: ${RELEASE_BACKEND_ENV} must be "hands" or "manifest"`,
   );
 }
 
@@ -451,6 +461,27 @@ export function createComputerReleaseSource(
     channelProvider: deps.channelProvider ?? (() => readChannel(resolveRaftHome())),
     createHandsUpdaterFn: deps.createHandsUpdaterFn ?? createHandsUpdater,
     getHandsDeviceIdFn: deps.getHandsDeviceIdFn ?? getHandsDeviceId,
+  });
+}
+
+/**
+ * Build K's ReleaseSource from the RUNTIME release source (contract v1):
+ * validated env group > persisted release-source.json > official default.
+ * This is the one construction the download/verify factory must consume —
+ * after persisting a private source, restarts, explicit-version upgrades and
+ * recovery keep downloading from that source and never query the official
+ * Hands/CDN endpoints. A corrupt persisted file is a hard error here, not a
+ * fallback to the official default.
+ */
+export function createRuntimeComputerReleaseSource(
+  slockHome: string,
+  deps: KReleaseSourceDeps = {},
+): KReleaseSource {
+  const { source } = resolveRuntimeReleaseSourceSync(process.env, slockHome);
+  return createComputerReleaseSource(source.releaseBase, {
+    ...deps,
+    backend: source.backend === "manifest" ? "manifest" : "hands",
+    ...(source.handsOrigin !== undefined ? { handsApiOrigin: source.handsOrigin } : {}),
   });
 }
 
