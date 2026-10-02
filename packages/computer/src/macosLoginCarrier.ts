@@ -81,6 +81,13 @@ export interface MacosHostLifecycleDeps {
   setTimeoutFn?: typeof setClockTimeout;
   clearTimeoutFn?: typeof clearClockTimeout;
   runCommand?: HostLifecycleCommandRunner;
+  /**
+   * "converge" (default): the healthy-carrier deferral may skip a swap whose
+   * only difference is the resolved dispatcher path. "refresh": an explicit
+   * carrier refresh (post-upgrade) MUST land the new dispatcher — deferral
+   * would report success while the job still runs the old entry.
+   */
+  carrierMode?: "converge" | "refresh";
 }
 
 interface HostLifecyclePendingReplace {
@@ -790,7 +797,11 @@ async function enableCliCarrier(
   // restart resolved a new dispatcher path and tore down the login item to
   // install an equivalent one). Defer the swap: keep the marker describing
   // the carrier that is actually installed, touch nothing.
-  if (existingJob !== null && existingDefinition !== null) {
+  if (
+    (deps.carrierMode ?? "converge") === "converge"
+    && existingJob !== null
+    && existingDefinition !== null
+  ) {
     const liveDispatcher = dispatcherFromDefinition(existingDefinition);
     if (
       liveDispatcher !== null
@@ -925,6 +936,18 @@ async function enableCliCarrier(
     try {
       await bootoutCarrier(spec, forwardRunCommand);
     } catch (error) {
+      // A launchctl error does not prove nothing happened: bootout can
+      // report failure AFTER unloading the job (late error). Verify the
+      // actual state before claiming a safe no-op — an unloaded job means
+      // the pending record must STAY as the durable recovery anchor.
+      const jobStillLoaded = await printJob(spec, forwardRunCommand).catch(() => null);
+      if (jobStillLoaded === null) {
+        throw new ComputerServiceError(
+          "HOST_LIFECYCLE_BOOTOUT_FAILED",
+          "Raft Computer failed to unload the macOS post-login job, but the job is no longer loaded. The login definition and owner marker are intact and the recovery record is kept; the next lifecycle command recovers from it.",
+          error,
+        );
+      }
       await rm(pendingReplacePath(spec.slockHome), { force: true });
       throw new ComputerServiceError(
         "HOST_LIFECYCLE_BOOTOUT_FAILED",
@@ -1085,7 +1108,7 @@ export async function refreshCliLoginCarrierIfOwned(
   const marker = await readHostLifecycleMarker(slockHome);
   const pending = await readPendingReplace(slockHome);
   if (pending === null && (marker?.owner !== "cli" || !marker.enabled)) return;
-  const hostDeps = { ...deps, platform };
+  const hostDeps = { ...deps, platform, carrierMode: "refresh" as const };
   if (hostDeps.dispatcherPath === undefined) {
     hostDeps.dispatcherPath = resolveStableDispatcherPath(slockHome);
   }

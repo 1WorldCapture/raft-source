@@ -1008,3 +1008,91 @@ test("pending recovery with the old carrier actually intact repairs bookkeeping 
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("bootout late error (job actually unloaded) keeps the pending record as the recovery anchor", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "raft-macos-login-late-red-"));
+  const home = path.join(root, "user");
+  const slockHome = path.join(home, ".slock");
+  const harness = launchctlHarness();
+  const originalDispatcher = path.join(home, ".local", "bin", "raft-computer");
+  const baseDeps = {
+    platform: "darwin" as const,
+    userHome: home,
+    uid: 501,
+    dispatcherPath: originalDispatcher,
+    legacyDesktopBundlePath: path.join(root, "Applications", "Raft Computer.app"),
+    runCommand: harness.run,
+  };
+  try {
+    await convergeCliHostLifecycle(slockHome, "enabled", baseDeps);
+    const markerBefore = await readHostLifecycleMarker(slockHome);
+    const definitionBefore = await readFile(markerBefore!.definitionPath!, "utf8");
+    await assert.rejects(
+      refreshCliLoginCarrierIfOwned(slockHome, {
+        ...baseDeps,
+        dispatcherPath: path.join(home, ".local", "bin", "raft-computer-next"),
+        runCommand: async (command, args, signal) => {
+          // bootout REALLY unloads, then reports failure — the late-error
+          // shape launchd can produce. The code must not treat this as a
+          // provable no-op: the recovery record has to survive.
+          if (args[0] === "bootout") {
+            await harness.run(command, args, signal);
+            throw new Error("bootout failed late");
+          }
+          return harness.run(command, args, signal);
+        },
+      }),
+      (error: unknown) => {
+        assert.equal((error as { code?: string }).code, "HOST_LIFECYCLE_BOOTOUT_FAILED");
+        return true;
+      },
+    );
+    // Job is gone, but definition + marker are intact and the pending record
+    // is KEPT — the next lifecycle command recovers from it.
+    assert.equal(harness.jobs.size, 0);
+    assert.equal(await readFile(markerBefore!.definitionPath!, "utf8"), definitionBefore);
+    assert.equal((await readHostLifecycleMarker(slockHome))?.dispatcherPath, originalDispatcher);
+    assert.equal((await readHostLifecycleRecoveryStatus(slockHome))?.status, "pending-replace");
+    // And recovery does land: the intact-carrier fast path sees the job is
+    // NOT live, so it re-bootstraps the saved definition.
+    await convergeCliHostLifecycle(slockHome, "enabled", baseDeps);
+    assert.ok([...harness.jobs.values()][0]!.includes(originalDispatcher));
+    assert.equal((await readHostLifecycleMarker(slockHome))?.dispatcherPath, originalDispatcher);
+    assert.equal(await readHostLifecycleRecoveryStatus(slockHome), null);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("explicit carrier refresh (mode=refresh) must land the new dispatcher despite a healthy old one", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "raft-macos-login-refresh-mode-"));
+  const home = path.join(root, "user");
+  const slockHome = path.join(home, ".slock");
+  const harness = launchctlHarness();
+  const originalDispatcher = path.join(home, ".local", "bin", "raft-computer");
+  const nextDispatcher = path.join(home, ".local", "bin", "raft-computer-next");
+  const baseDeps = {
+    platform: "darwin" as const,
+    userHome: home,
+    uid: 501,
+    dispatcherPath: originalDispatcher,
+    legacyDesktopBundlePath: path.join(root, "Applications", "Raft Computer.app"),
+    runCommand: harness.run,
+  };
+  try {
+    await convergeCliHostLifecycle(slockHome, "enabled", baseDeps);
+    // Old dispatcher exists and is executable — the converge-mode deferral
+    // would skip; the explicit refresh (upgrade path) must NOT.
+    await mkdir(path.dirname(originalDispatcher), { recursive: true });
+    await writeFile(originalDispatcher, "#!/bin/sh\n", { mode: 0o755 });
+    await refreshCliLoginCarrierIfOwned(slockHome, {
+      ...baseDeps,
+      dispatcherPath: nextDispatcher,
+    });
+    assert.equal((await readHostLifecycleMarker(slockHome))?.dispatcherPath, nextDispatcher);
+    assert.ok([...harness.jobs.values()][0]!.includes(nextDispatcher));
+    assert.equal(await readHostLifecycleRecoveryStatus(slockHome), null);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
