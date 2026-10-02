@@ -190,3 +190,57 @@ test('direct native clients reject URL overrides and never follow a fixture redi
   assert.equal(events.length, 5);
   assert.ok(events.every(event => event.kind === 'network'));
 });
+
+
+test('a SIGKILLed fixture loses its port ownership before an unrelated process reuses it', async () => {
+  const events = await probe(`
+    import assert from 'node:assert/strict';
+    import { createServer, get } from 'node:http';
+    import { spawn } from 'node:child_process';
+    const child = spawn(process.execPath, ['--input-type=module', '-e',
+      "import { createServer, get } from 'node:http'; const server = createServer((_, r) => r.end('fixture')); server.listen(0, '127.0.0.1', () => console.log(server.address().port));"],
+      { stdio: ['ignore', 'pipe', 'pipe'] });
+    try {
+      const port = await new Promise((resolve, reject) => {
+        child.stdout.once('data', data => resolve(Number(data.toString().trim())));
+        child.once('error', reject);
+        child.once('exit', () => reject(new Error('fixture exited before listening')));
+      });
+      assert.equal(await (await fetch('http://127.0.0.1:' + port)).text(), 'fixture');
+      const exited = new Promise(resolve => child.once('exit', resolve));
+      child.kill('SIGKILL'); await exited;
+      let contacted = false;
+      const foreign = createServer((_, response) => { contacted = true; response.end('foreign'); });
+      await new Promise(resolve => foreign.listen.original.call(foreign, port, '127.0.0.1', resolve));
+      try {
+        await assert.rejects(() => new Promise((resolve, reject) => {
+          try { get('http://127.0.0.1:' + port, { agent: false }, resolve).on('error', reject); }
+          catch (error) { reject(error); }
+        }));
+        assert.equal(contacted, false, 'dead fixture registration must not authorize a new service');
+      } finally { foreign.closeAllConnections(); await new Promise(resolve => foreign.close(resolve)); }
+    } finally { child.kill('SIGKILL'); }
+  `);
+  assert.deepEqual(events, []);
+});
+
+
+test('a live PID with a different recorded start identity cannot authorize a fixture port', async () => {
+  const events = await probe(`
+    import assert from 'node:assert/strict';
+    import { createServer } from 'node:http';
+    import { writeFileSync } from 'node:fs';
+    import path from 'node:path';
+    let contacted = false;
+    const server = createServer((_, response) => { contacted = true; response.end(); });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    const port = server.address().port;
+    writeFileSync(path.join(process.env.RAFT_TEST_SIDE_EFFECT_ROOT, 'ports', process.pid + '-' + port),
+      JSON.stringify({ state: 'live', pid: process.pid, identity: 'different process generation' }));
+    try {
+      await assert.rejects(() => fetch('http://127.0.0.1:' + port));
+      assert.equal(contacted, false);
+    } finally { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
+  `);
+  assert.deepEqual(events, []);
+});

@@ -50,17 +50,53 @@ export function installSideEffectGuard(root) {
     appendFileSync(path.join(root, 'violations.jsonl'), JSON.stringify(event) + '\n');
     throw new Error(`HERMETIC_${kind.toUpperCase()}_VIOLATION: ${target}`);
   };
+  const inspect = cp.execFileSync.original ?? cp.execFileSync;
+  const processIdentity = (pid) => {
+    try {
+      process.kill(pid, 0);
+      if (process.platform === 'linux') {
+        const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+        const fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+        return fields[0] === 'Z' ? null : fields[19]; // Kernel start ticks.
+      }
+      if (process.platform === 'darwin') {
+        const line = inspect('/bin/ps', ['-p', String(pid), '-o', 'stat=', '-o', 'lstart='],
+          { encoding: 'utf8', timeout: 1000 }).trim();
+        const status = line.split(/\s+/)[0];
+        return status && !status.includes('Z') ? line.slice(status.length).trim() : null;
+      }
+      if (process.platform === 'win32') {
+        return inspect('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+          `(Get-Process -Id ${pid} -ErrorAction Stop).StartTime.ToUniversalTime().Ticks`],
+          { encoding: 'utf8', timeout: 3000 }).trim() || null;
+      }
+    } catch { /* Missing or unreadable process identity fails closed. */ }
+    return null;
+  };
+  const ownIdentity = processIdentity(process.pid);
+  const writeRegistration = (file, state) => writeFileSync(file,
+    JSON.stringify({ state, pid: process.pid, identity: ownIdentity }));
   const portState = (port) => {
     const entries = readdirSync(ports).filter((name) => name.endsWith(`-${port}`));
-    if (entries.some((name) => readFileSync(path.join(ports, name), 'utf8') === 'live')) return 'live';
+    for (const name of entries) {
+      try {
+        const entry = JSON.parse(readFileSync(path.join(ports, name), 'utf8'));
+        if (entry.state !== 'live' || !Number.isSafeInteger(entry.pid) || !entry.identity) continue;
+        // A killed fixture never emits close. Check its OS start identity at
+        // connection time; PID reuse must not keep an old registration alive.
+        const identity = entry.pid === process.pid ? ownIdentity : processIdentity(entry.pid);
+        if (identity && identity === entry.identity) return 'live';
+      } catch { /* Incomplete registration never permits a connection. */ }
+    }
     return entries.length ? 'closed' : 'unknown';
   };
   const checkAddress = (host, port) => {
     const normalized = String(host ?? 'localhost').replace(/^\[|\]$/g, '').toLowerCase();
-    if (!['localhost', '127.0.0.1', '::1'].includes(normalized) || portState(port) === 'unknown') {
+    const state = portState(port);
+    if (!['localhost', '127.0.0.1', '::1'].includes(normalized) || state === 'unknown') {
       denied('network', `${normalized}:${port}`);
     }
-    if (portState(port) === 'closed') {
+    if (state === 'closed') {
       // Cancellation can cause a pool reconnect after fixture teardown. Refuse
       // without opening a socket or blaming a legitimate cleanup path. This
       // also prevents an unrelated service reusing the closed port being hit.
@@ -74,10 +110,10 @@ export function installSideEffectGuard(root) {
       const address = this.address();
       if (address && typeof address === 'object') {
         registration = path.join(ports, `${process.pid}-${address.port}`);
-        writeFileSync(registration, 'live');
+        writeRegistration(registration, 'live');
       }
     });
-    this.once('close', () => { if (registration) writeFileSync(registration, 'closed'); });
+    this.once('close', () => { if (registration) writeRegistration(registration, 'closed'); });
     return listen.apply(this, args);
   };
   guardedListen.original = listen;
