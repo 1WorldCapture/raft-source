@@ -949,12 +949,17 @@ async function enableCliCarrier(
         // job is live again. Only a failed recovery may fall back to leaving
         // the pending record as the durable degraded anchor.
         try {
-          await forwardRunCommand("/bin/launchctl", [
+          // Deliberately NOT forwardRunCommand: when the bootout failed
+          // because the forward deadline aborted it, a recovery bound to the
+          // same signal would be stillborn. The recovery rides the
+          // caller-level signal and stays bounded by the per-command timeout,
+          // like the rollback path below.
+          await runCommand("/bin/launchctl", [
             "bootstrap",
             spec.domain,
             spec.definitionPath,
           ]);
-          const recovered = await printJob(spec, forwardRunCommand);
+          const recovered = await printJob(spec, runCommand);
           const previousDispatcher = previousMarker?.dispatcherPath
             ?? dispatcherFromDefinition(
               (await readFile(spec.definitionPath, "utf8").catch(() => "")) ?? "",
