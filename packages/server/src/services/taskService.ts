@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { eq, and, gt, inArray, sql, asc, isNotNull, isNull, or, type SQL } from "drizzle-orm";
-import { getDb, type DatabaseTransaction, type DatabaseExecutor } from "../db/index.js";
+import { getDb, type DatabaseExecutor } from "../db/index.js";
 import {
   messages,
   users,
@@ -35,31 +35,6 @@ import {
 } from "./channelService.js";
 import { resolveTaskChannelSurface } from "./taskChannelSurface.js";
 import { loadTaskCurrentProjectionsByTaskId } from "./messageTaskProjection.js";
-
-import { withExpandingAgentTransaction, requireAgentOperation, requireAgentMessageTarget, agentTransactionForExecutor, type AgentOperationAuthority } from "./agentTransactionAuthority.js";
-
-// The stable Agent gate is acquired before task/channel locks and remains held
-// until every task fact, event and notification projection commits.
-async function withTaskActorTransaction<T>(
-  actorType: "user" | "agent",
-  actorId: string,
-  work: (tx: DatabaseTransaction) => Promise<T>,
-  authority?: AgentOperationAuthority,
-): Promise<T> {
-  return withExpandingAgentTransaction(actorType === "agent" ? [actorId] : [], async (context) => {
-    if (actorType === "agent") await requireAgentOperation(context, actorId, "tasks", authority);
-    const result = await work(context.tx);
-    if (actorType === "agent") await requireAgentOperation(context, actorId, "tasks", authority);
-    return result;
-  });
-}
-
-async function requireTaskRunTarget(tx: DatabaseTransaction, channelId: string, authority?: AgentOperationAuthority) {
-  if (authority) {
-    const context = agentTransactionForExecutor(tx)!;
-    await requireAgentMessageTarget(context, channelId, authority.permissionChannelId ?? channelId, authority);
-  }
-}
 
 type MessageRow = typeof messages.$inferSelect;
 
@@ -1472,7 +1447,7 @@ export async function amendTask(
     observedRevision: observed.revision,
   });
 
-  return withTaskActorTransaction(requesterType, requesterId, async (tx) => {
+  return getDb().transaction(async (tx) => {
     // Membership is the explicit collaboration boundary. Re-lock it inside
     // the write transaction so a member removed after the optimistic read
     // cannot amend with stale authority. Free-text @mentions never grant it.
@@ -1577,7 +1552,7 @@ export async function createTasks(
   const db = getDb();
 
   // Use a transaction with advisory lock on channel to prevent task number collisions
-  const created = await withTaskActorTransaction(createdByType, createdById, async (tx) => {
+  const created = await db.transaction(async (tx) => {
     // Advisory lock keyed on channel UUID to serialize task number allocation
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${channelId}))`);
 
@@ -1654,15 +1629,18 @@ export async function createTasks(
       taskRows.push(taskRow);
     }
 
-    const { recordInboxFactsForPersistedMessages } = await import("./messageService.js");
-    await recordInboxFactsForPersistedMessages(hostMessages, {
-      inboxFactPolicy: { mode: "record", producer: "task.body", reason: "durable task activity" },
-      executor: tx,
-      dedupeLogicalReceiverAcrossJointProjections: true,
-    });
     return { hostMessages, taskRows };
   });
 
+  const { recordInboxFactsForPersistedMessages } = await import("./messageService.js");
+  await recordInboxFactsForPersistedMessages(created.hostMessages, {
+    inboxFactPolicy: {
+      mode: "record",
+      producer: "task.body",
+      reason: "task body messages are durable shared work items and count as channel activity",
+    },
+    dedupeLogicalReceiverAcrossJointProjections: true,
+  });
 
   const enrichedTasks = await enrichTaskRows(created.taskRows);
   return { tasks: enrichedTasks, hostMessages: created.hostMessages };
@@ -1696,7 +1674,7 @@ export async function createTasksWithAssignmentReceipt(
   if (items.length === 0) throw new Error("Assigned task creation requires at least one task");
   const db = getDb();
 
-  return withTaskActorTransaction(createdByType, createdById, async (tx) => {
+  return db.transaction(async (tx) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${channelId}))`);
 
     // Establish the immutable server/type lookup without taking the channel
@@ -1930,14 +1908,10 @@ export async function claimTaskDetailed(
   taskId: string,
   claimedByType: "user" | "agent",
   claimedById: string,
-  authority?: AgentOperationAuthority,
 ): Promise<TaskClaimOutcome> {
   const owner = await resolveTaskById(taskId);
   if (!owner) return { result: "task not found" };
-  const written = await withTaskActorTransaction(claimedByType, claimedById, async (tx) => {
-    await requireTaskRunTarget(tx, owner.row.channelId, authority);
-    return writeCanonicalClaim(tx, owner.row, claimedByType, claimedById);
-  }, authority);
+  const written = await writeCanonicalClaim(getDb(), owner.row, claimedByType, claimedById);
   if (isTaskClaimRejection(written)) {
     // Deterministic seam for the temporal-congruence tooth: state may change
     // here (between the writer forming its rejection and this function
@@ -1953,9 +1927,8 @@ export async function claimTask(
   taskId: string,
   claimedByType: "user" | "agent",
   claimedById: string,
-  authority?: AgentOperationAuthority,
 ): Promise<TaskMutationResult> {
-  return (await claimTaskDetailed(taskId, claimedByType, claimedById, authority)).result;
+  return (await claimTaskDetailed(taskId, claimedByType, claimedById)).result;
 }
 
 /**
@@ -1996,8 +1969,7 @@ export async function batchClaimTasks(
   const db = getDb();
   const results: Awaited<ReturnType<typeof batchClaimTasks>> = [];
 
-  await withTaskActorTransaction(claimedByType, claimedById, async (tx) => {
-    results.length = 0;
+  await db.transaction(async (tx) => {
     for (const num of taskNumbers) {
       // Canonical first: if a `tasks` row owns this number, the message-task
       // columns are a stale shadow and must not be claimed instead.
@@ -2047,14 +2019,10 @@ export async function unclaimTask(
   taskId: string,
   requesterType: "user" | "agent",
   requesterId: string,
-  authority?: AgentOperationAuthority,
 ): Promise<TaskMutationResult> {
   const owner = await resolveTaskById(taskId);
   if (!owner) return "task not found";
-  return wrapCanonical(await withTaskActorTransaction(requesterType, requesterId, async (tx) => {
-    await requireTaskRunTarget(tx, owner.row.channelId, authority);
-    return writeCanonicalUnclaim(tx, owner.row, requesterType, requesterId);
-  }, authority));
+  return wrapCanonical(await writeCanonicalUnclaim(getDb(), owner.row, requesterType, requesterId));
 }
 
 /**
@@ -2107,7 +2075,7 @@ export async function assignTask(
     : observed.claimedById === null;
   if (sameAssignee) return wrapCanonical(observed);
 
-  return wrapCanonical(await withTaskActorTransaction(actorType, actorId, async (tx) => {
+  return wrapCanonical(await getDb().transaction(async (tx) => {
     const [channel] = await tx
       .select()
       .from(channels)
@@ -2175,15 +2143,11 @@ export async function updateTaskStatus(
   newStatus: TaskStatus,
   requesterId: string,
   requesterType?: "user" | "agent",
-  authority?: AgentOperationAuthority,
 ): Promise<TaskMutationResult> {
   const owner = await resolveTaskById(taskId);
   if (!owner) return "task not found";
   return wrapCanonical(
-    await withTaskActorTransaction(requesterType ?? "user", requesterId, async (tx) => {
-      await requireTaskRunTarget(tx, owner.row.channelId, authority);
-      return writeCanonicalStatus(tx, owner.row, newStatus, { requesterId, requesterType });
-    }, authority),
+    await writeCanonicalStatus(getDb(), owner.row, newStatus, { requesterId, requesterType }),
   );
 }
 
@@ -2210,11 +2174,11 @@ export async function forceUpdateTaskStatus(
 ): Promise<TaskMutationResult> {
   const owner = await resolveTaskById(taskId);
   if (!owner) return "task not found";
-  return wrapCanonical(await withTaskActorTransaction(actorType, actorId, (tx) => writeCanonicalStatus(tx, owner.row, newStatus, {
+  return wrapCanonical(await writeCanonicalStatus(getDb(), owner.row, newStatus, {
     force: true,
     requesterType: actorType,
     requesterId: actorId,
-  })));
+  }));
 }
 
 /**
@@ -2263,7 +2227,7 @@ export async function convertMessageToTask(
 
   // v1.4 (tasks-table-canonical): create a canonical tasks row linked to the
   // message; the message itself stays a plain message (task_status untouched).
-  const created = await withTaskActorTransaction(convertedByType, convertedById, async (tx) => {
+  const created = await db.transaction(async (tx) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${msg.channelId}))`);
 
     // Check both messages and tasks tables to avoid number collisions
@@ -2376,14 +2340,9 @@ export async function resolveMessageInChannel(channelId: string, idOrPrefix: str
  * keeps the frozen rollback snapshot honest, since a rolled-back 1.6.2 reads
  * `messages.task_*` directly and would otherwise list a task the user deleted.
  */
-export async function deleteTaskByOwner(owner: TaskOwner, actorType: "user" | "agent", actorId: string) {
-  await withTaskActorTransaction(actorType, actorId, async (tx) => {
-    if (!await isTaskAmendActorChannelMember(tx, owner.row.channelId, actorType, actorId)) {
-      throw new Error(TASK_AMEND_MEMBERSHIP_ERROR);
-    }
-    if (owner.row.messageId) await deleteTask(owner.row.messageId, tx);
-    await deleteLegacyTask(owner.row.id, tx);
-  });
+export async function deleteTaskByOwner(owner: TaskOwner) {
+  if (owner.row.messageId) await deleteTask(owner.row.messageId);
+  await deleteLegacyTask(owner.row.id);
 }
 
 /** Delete a message-task — clears task fields (does NOT delete the message). */
@@ -2416,7 +2375,8 @@ export async function deleteTaskByOwner(owner: TaskOwner, actorType: "user" | "a
  * leftover legacy write: removing it would silently degrade the snapshot the
  * rollback ledger is tracking.
  */
-async function deleteTask(taskId: string, db: DatabaseTransaction) {
+export async function deleteTask(taskId: string) {
+  const db = getDb();
   await db
     .update(messages)
     .set({
@@ -2878,7 +2838,7 @@ export async function recordTaskResourceReceipt(
   if (typeof normalized === "string") return normalized;
 
   const db = getDb();
-  return withTaskActorTransaction(input.actorType, input.actorId, async (tx) => {
+  return db.transaction(async (tx) => {
     const [observed] = await tx
       .select()
       .from(tasks)
@@ -2963,7 +2923,8 @@ export async function getLegacyTask(taskId: string) {
 }
 
 /** Delete a canonical task row (task_events cascade with it). */
-async function deleteLegacyTask(taskId: string, db: DatabaseTransaction) {
+export async function deleteLegacyTask(taskId: string) {
+  const db = getDb();
   await db.delete(tasks).where(eq(tasks.id, taskId));
 }
 

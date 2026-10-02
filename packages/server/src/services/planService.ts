@@ -436,13 +436,12 @@ export async function withServerLock<T>(
   serverId: string,
   namespace: number,
   fn: (tx: DatabaseTransaction) => Promise<T>,
-  executor?: DatabaseTransaction,
 ): Promise<T> {
-  const execute = async (tx: DatabaseTransaction) => {
+  const db = getDb();
+  return db.transaction(async (tx) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(${serverIdToLockKey(serverId)}, ${namespace})`);
     return fn(tx);
-  };
-  return executor ? execute(executor) : getDb().transaction(execute);
+  });
 }
 
 /**
@@ -463,10 +462,9 @@ export function __setAgentCreateLockObserverForTests(
 export function withAgentCreateLock<T>(
   serverId: string,
   fn: (tx: DatabaseTransaction) => Promise<T>,
-  executor?: DatabaseTransaction,
 ): Promise<T> {
   agentCreateLockObserverForTests?.(serverId);
-  return withServerLock(serverId, AGENT_CREATE_LOCK_NAMESPACE, fn, executor);
+  return withServerLock(serverId, AGENT_CREATE_LOCK_NAMESPACE, fn);
 }
 
 /**

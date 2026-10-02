@@ -1,4 +1,3 @@
-import { requireLegacyAgentActor, withAgentTransaction } from "./agentTransactionAuthority.js";
 import { and, eq, sql } from "drizzle-orm";
 import { currentTimeMs } from "@botiverse/raft-shared";
 import { getDb } from "../db/index.js";
@@ -200,9 +199,7 @@ export async function patchRapAppConfig(input: {
   }
   await assertOwnerBinding(input.serverId, input.subjectAgentId);
 
-  return withAgentTransaction([input.subjectAgentId], async (context) => {
-    await requireLegacyAgentActor(context, input.subjectAgentId);
-    const tx = context.tx;
+  return getDb().transaction(async (tx) => {
     const [observed] = await tx.select({
       overrides: rapAppConfigs.overrides,
       revision: rapAppConfigs.revision,

@@ -1,5 +1,3 @@
-import { agentTransactionForExecutor, DelegationError, requireSourceAgentPlan, withExpandingAgentTransaction } from "./agentTransactionAuthority.js";
-import { admitNotificationFact } from "./externalAgentInboxReceiptService.js";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { notifyUnreadSummaryChanged } from "./unreadSummaryNotifier.js";
 
@@ -8,7 +6,6 @@ import {
   agentChannelReadCursors,
   channels,
   inboxNotificationFacts,
-  externalAgentConnections,
   inboxServingRows,
   inboxSuppressionStates,
   inboxTargetMuteStates,
@@ -49,7 +46,6 @@ export type InboxNotificationFactInput = {
   personalMention?: boolean;
   unreadEligible?: boolean;
   suppressionReason?: "unfollowed_thread_ordinary";
-  occurrence?: { resolutionId: string; action: "notify" | "add" };
 };
 
 export type InboxServingTarget = {
@@ -353,18 +349,6 @@ export async function recordInboxNotificationFacts(
   executor: DatabaseExecutor = getDb(),
 ): Promise<number> {
   if (facts.length === 0) return 0;
-  const receiverAgentIds = [...new Set(facts.filter((fact) => fact.receiverType === "agent").map((fact) => fact.receiverId))];
-  if (executor === getDb()) {
-    return withExpandingAgentTransaction(receiverAgentIds, (context) => recordInboxNotificationFacts(facts, context.tx));
-  }
-  const agentContext = agentTransactionForExecutor(executor);
-  if (agentContext) requireSourceAgentPlan(executor, receiverAgentIds);
-  else if (receiverAgentIds.length) {
-    const [delegated] = await executor.select({ id: externalAgentConnections.id }).from(externalAgentConnections)
-      .where(and(inArray(externalAgentConnections.agentId, receiverAgentIds), eq(externalAgentConnections.consumptionMode, "delegated"))).limit(1);
-    if (delegated) throw new DelegationError("source_transaction_required", 500);
-  }
-
   const muteStateCandidates = facts.filter((fact) => fact.kind !== "thread");
   let filteredFacts = facts;
   let muteByTarget = new Map<string, number | null>();
@@ -397,7 +381,7 @@ export async function recordInboxNotificationFacts(
     return !suppressedByMute && !isSuppressedByUnfollowedThreadOrdinary(fact);
   });
   if (filteredFacts.length === 0) return 0;
-  const persistedFacts = await executor
+  await executor
     .insert(inboxNotificationFacts)
     .values(filteredFacts.map((fact) => ({
       receiverType: fact.receiverType,
@@ -426,16 +410,7 @@ export async function recordInboxNotificationFacts(
         personalMention: sql`${inboxNotificationFacts.personalMention} OR excluded.personal_mention`,
         unreadEligible: sql`${inboxNotificationFacts.unreadEligible} AND excluded.unread_eligible`,
       },
-    }).returning();
-
-  if (agentContext) {
-    for (const fact of persistedFacts) {
-      if (fact.receiverType === "agent" && fact.unreadEligible) {
-        const matching = filteredFacts.filter((candidate) => candidate.receiverType === fact.receiverType && candidate.receiverId === fact.receiverId && candidate.sourceChannelId === fact.sourceChannelId && candidate.messageId === fact.messageId);
-        for (const candidate of matching) await admitNotificationFact(agentContext, fact.serverId, fact.receiverId, fact.id, candidate.occurrence);
-      }
-    }
-  }
+    });
 
   await rebuildInboxServingRowsForReceiverTargets(filteredFacts.map((fact) => ({
     receiverType: fact.receiverType,

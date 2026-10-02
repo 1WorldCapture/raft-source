@@ -18,7 +18,6 @@ import {
   userChannelInboxStates,
   userChannelReadCursors,
 } from "../db/schema.js";
-import { DelegationError, readConnection, withAgentTransaction, type AgentTransaction } from "./agentTransactionAuthority.js";
 import { rebuildInboxServingRowsForReceiverTargets } from "./inboxNotificationService.js";
 import {
   assertChannelDoneFrontier,
@@ -27,14 +26,6 @@ import {
   writeChannelInboxSuppression,
   writeThreadDoneSuppression,
 } from "./inboxSuppressionWriters.js";
-
-// The Agent gate precedes the older per-principal read-authority lock.
-// Durable compatibility intents never carry delegated execution authority.
-function withReadPrincipalTransaction<T>(kind: ReadMutationPrincipalKind, id: string, work: (tx: DatabaseTransaction, agentContext?: AgentTransaction) => Promise<T>): Promise<T> {
-  return kind === "agent"
-    ? withAgentTransaction([id], (context) => work(context.tx, context))
-    : getDb().transaction((tx) => work(tx));
-}
 
 export const READ_MUTATION_RECOVERY_HORIZON_MS = 90 * 24 * 60 * 60 * 1_000;
 const DEFAULT_LEASE_MS = 30_000;
@@ -639,10 +630,7 @@ export async function admitReadMutation(input: ReadMutationAdmissionInput): Prom
   if (mutation.kind === "done" && principalKind !== "human") {
     throw new ReadMutationError("INVALID_MUTATION_PAYLOAD", "Done mutations are human-only");
   }
-  return withReadPrincipalTransaction(principalKind, input.principalId, async (tx, agentContext) => {
-    if (agentContext && (await readConnection(agentContext, input.principalId))?.consumptionMode === "delegated") {
-      throw new DelegationError("legacy_read_unsupported", 403);
-    }
+  return getDb().transaction(async (tx) => {
     const authority = await lockAuthority(tx, input.serverId, principalKind, input.principalId);
     const [live] = await tx.select().from(readMutations).where(and(
       eq(readMutations.serverId, input.serverId),
@@ -1510,8 +1498,7 @@ export async function executeReadMutationClaim(input: {
   const now = input.now ?? currentDate();
   if (input.failpoint === "before_effect") throw new ReadMutationFailpointError(input.failpoint);
 
-  const ack = await withReadPrincipalTransaction(input.claim.principalKind, input.claim.principalId, async (tx, agentContext) => {
-    const delegated = agentContext && (await readConnection(agentContext, input.claim.principalId))?.consumptionMode === "delegated";
+  const ack = await getDb().transaction(async (tx) => {
     await lockAuthority(tx, input.claim.serverId, input.claim.principalKind, input.claim.principalId);
     const [minimum] = await tx.select().from(readMutations).where(and(
       eq(readMutations.serverId, input.claim.serverId),
@@ -1526,11 +1513,7 @@ export async function executeReadMutationClaim(input: {
     let applyBroadDoneMarker = false;
     let doneFrontierBeyondLatest = false;
     try {
-      if (delegated) {
-        // A pre-cutover intent may survive a restart. Retire it with an
-        // authorization-revoked receipt, without advancing any cursor.
-        captured = null;
-      } else if (minimum.kind === "done") {
+      if (minimum.kind === "done") {
         const capturedDone = await captureDoneBoundary(tx, minimum);
         captured = capturedDone.boundary;
         applyBroadDoneMarker = capturedDone.applyBroadDoneMarker;

@@ -1,4 +1,3 @@
-import { withExpandingAgentTransaction } from "./agentTransactionAuthority.js";
 import { createHash } from "node:crypto";
 
 import { and, asc, eq, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
@@ -963,8 +962,7 @@ export async function processExternalInboundEventOnce(input: {
   let commitBlockReason = "commit_authority_lost_or_root_unavailable";
   let committed: ExternalInboundWorkerResult | null = null;
   try {
-    committed = await withExpandingAgentTransaction([], async (context): Promise<ExternalInboundWorkerResult | null> => {
-      const executor = context.tx;
+    committed = await input.db.transaction(async (executor): Promise<ExternalInboundWorkerResult | null> => {
       const [event] = await executor.select().from(externalInboundEvents).where(and(
         eq(externalInboundEvents.id, claim.id),
         eq(externalInboundEvents.status, "processing"),
@@ -1125,7 +1123,7 @@ export async function processExternalInboundEventOnce(input: {
       await executor.update(externalInboundEvents).set(terminalErase(event, status, result.message.id, commitAt))
         .where(eq(externalInboundEvents.id, event.id));
       return { kind: status, eventId: event.id, messageId: result.message.id };
-    }, input.db);
+    });
   } catch (error) {
     if (error instanceof ExternalInboundTargetUnavailableError) {
       await releaseClaim(commitBlockReason);

@@ -1,6 +1,5 @@
-import { DelegationError, requireAgentOperation, requireAgentMessageTarget, withExpandingAgentTransaction, type AgentOperationAuthority } from "./agentTransactionAuthority.js";
 import { and, eq } from "drizzle-orm";
-import { getDb, type Database, type DatabaseExecutor, type DatabaseTransaction } from "../db/index.js";
+import { getDb, type Database, type DatabaseExecutor } from "../db/index.js";
 import { attachments, messages } from "../db/schema.js";
 import { buildSearchText } from "./searchService.js";
 import { getThumbnailUrl, normalizeAttachmentFilename, resolveAttachmentMimeType } from "../routes/attachments.js";
@@ -59,9 +58,6 @@ export async function createOrReplayAgentSend<TInserted = never>(opts: {
   senderId: string;
   content: string;
   agentSendKey: string;
-  participatingAgentIds?: readonly string[];
-  permissionChannelId?: string;
-  authority?: AgentOperationAuthority;
   attachmentIds?: string[];
   /**
    * Runs at the start of the transaction, before the source insert attempts to
@@ -83,7 +79,7 @@ export async function createOrReplayAgentSend<TInserted = never>(opts: {
   const { channelId, senderId, content, agentSendKey, attachmentIds = [] } = opts;
   const db = resolveDb();
 
-  const persist = async (tx: DatabaseTransaction) => {
+  return db.transaction(async (tx) => {
     if (opts.beforeInsert) await opts.beforeInsert(tx);
     const [insertedMessage] = await tx
       .insert(messages)
@@ -138,9 +134,6 @@ export async function createOrReplayAgentSend<TInserted = never>(opts: {
       throw new Error("Agent send replay lookup failed after idempotency conflict");
     }
 
-    if (replayedMessage.channelId !== channelId || replayedMessage.content !== content) {
-      throw new DelegationError("send_request_conflict", 409);
-    }
     const linkedAttachments = await linkAttachmentsToMessageWithExecutor(
       tx,
       attachmentIds,
@@ -156,18 +149,7 @@ export async function createOrReplayAgentSend<TInserted = never>(opts: {
       transactionData,
       insertedTransactionResult: null,
     };
-  };
-  // Existing structural mocks exercise replay serialization only. Production
-  // and real-database tests always use the stable Agent commit gate.
-  if (dbOverride) return db.transaction(persist);
-  return withExpandingAgentTransaction([senderId, ...(opts.participatingAgentIds ?? [])], async (context) => {
-    await requireAgentOperation(context, senderId, "send", opts.authority);
-    if (opts.authority) await requireAgentMessageTarget(context, channelId, opts.permissionChannelId ?? channelId, opts.authority);
-    const result = await persist(context.tx);
-    if (opts.authority) await requireAgentMessageTarget(context, channelId, opts.permissionChannelId ?? channelId, opts.authority);
-    await requireAgentOperation(context, senderId, "send", opts.authority);
-    return result;
-  }, db);
+  });
 }
 
 /**

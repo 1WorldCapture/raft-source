@@ -14,15 +14,6 @@ import {
 } from "../db/schema.js";
 import { enrichSingleLegacyTask } from "./taskService.js";
 
-import { withExpandingAgentTransaction, requireLegacyAgentActor } from "./agentTransactionAuthority.js";
-
-async function withWorkflowActorTransaction<T>(actorType: ActorType, actorId: string, work: (tx: DatabaseExecutor) => Promise<T>) {
-  return withExpandingAgentTransaction(actorType === "agent" ? [actorId] : [], async (context) => {
-    if (actorType === "agent") await requireLegacyAgentActor(context, actorId);
-    return work(context.tx);
-  });
-}
-
 type ActorType = "user" | "agent";
 
 export class WorkflowInputError extends Error {
@@ -49,8 +40,7 @@ export async function createWorkflowTemplate(
   actorId: string,
   input: { name: string; steps: WorkflowTemplateStep[] },
 ) {
-  return withWorkflowActorTransaction(actorType, actorId, async (tx) => {
-  const [template] = await tx
+  const [template] = await getDb()
     .insert(workflowTemplates)
     .values({
       serverId,
@@ -61,7 +51,6 @@ export async function createWorkflowTemplate(
     })
     .returning();
   return template;
-  });
 }
 
 async function createWorkflowTask(
@@ -132,7 +121,7 @@ async function createWorkflowTask(
   return { task, hostMessage };
 }
 
-async function recordWorkflowTaskInbox(hostMessages: (typeof messages.$inferSelect)[], executor: DatabaseExecutor) {
+async function recordWorkflowTaskInbox(hostMessages: (typeof messages.$inferSelect)[]) {
   if (hostMessages.length === 0) return;
   const { recordInboxFactsForPersistedMessages } = await import("./messageService.js");
   await recordInboxFactsForPersistedMessages(hostMessages, {
@@ -142,7 +131,6 @@ async function recordWorkflowTaskInbox(hostMessages: (typeof messages.$inferSele
       reason: "workflow-created task messages are durable shared work items",
     },
     dedupeLogicalReceiverAcrossJointProjections: true,
-    executor,
   });
 }
 
@@ -152,7 +140,8 @@ export async function startWorkflowInstance(
   actorId: string,
   input: { templateId: string; channelId: string },
 ) {
-  const result = await withWorkflowActorTransaction(actorType, actorId, async (tx) => {
+  const hostMessages: (typeof messages.$inferSelect)[] = [];
+  const result = await getDb().transaction(async (tx) => {
     const [template] = await tx
       .select()
       .from(workflowTemplates)
@@ -188,6 +177,7 @@ export async function startWorkflowInstance(
       .returning();
 
     const created = await createWorkflowTask(tx, channel.id, actorType, actorId, firstStep);
+    hostMessages.push(created.hostMessage);
 
     const [step] = await tx
       .insert(workflowStepInstances)
@@ -200,9 +190,9 @@ export async function startWorkflowInstance(
       })
       .returning();
 
-    await recordWorkflowTaskInbox([created.hostMessage], tx);
     return { template, instance, step, task: created.task };
   });
+  await recordWorkflowTaskInbox(hostMessages);
   return { ...result, task: await enrichSingleLegacyTask(result.task) };
 }
 
@@ -213,8 +203,9 @@ export async function completeCurrentWorkflowStep(
   instanceId: string,
   input: { taskId: string; output?: WorkflowStepOutput },
 ) {
+  const hostMessages: (typeof messages.$inferSelect)[] = [];
 
-  const result = await withWorkflowActorTransaction(actorType, actorId, async (tx) => {
+  const result = await getDb().transaction(async (tx) => {
     const [instance] = await tx
       .select()
       .from(workflowInstances)
@@ -283,6 +274,7 @@ export async function completeCurrentWorkflowStep(
     }
 
     const created = await createWorkflowTask(tx, instance.channelId, actorType, actorId, nextStepTemplate);
+    hostMessages.push(created.hostMessage);
     const [nextStep] = await tx
       .insert(workflowStepInstances)
       .values({
@@ -302,7 +294,6 @@ export async function completeCurrentWorkflowStep(
       .where(eq(workflowInstances.id, instance.id))
       .returning();
 
-    await recordWorkflowTaskInbox([created.hostMessage], tx);
     return {
       instance: updatedInstance,
       completedStep,
@@ -310,6 +301,7 @@ export async function completeCurrentWorkflowStep(
       nextTask: created.task,
     };
   });
+  await recordWorkflowTaskInbox(hostMessages);
   return {
     ...result,
     nextTask: result.nextTask ? await enrichSingleLegacyTask(result.nextTask) : null,

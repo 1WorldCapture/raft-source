@@ -1,4 +1,3 @@
-import { assertAgentTransaction, DelegationError, readConnection, requireLegacyAgentActor, withAgentTransaction, type AgentTransaction } from "./agentTransactionAuthority.js";
 import { randomBytes, randomUUID, createHash, timingSafeEqual } from "node:crypto";
 import sharp from "sharp";
 import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, not, or, sql, type SQL } from "drizzle-orm";
@@ -3591,15 +3590,8 @@ export async function createThirdPartyAgentEvent(input: {
   externalEventId?: unknown;
   ttlSeconds?: unknown;
   resource: string;
-}, sourceContext?: AgentTransaction): Promise<{ event: ThirdPartyAgentEventRecord; message: AgentMessage; created: boolean; shouldDeliver: boolean }> {
-  if (!sourceContext && getDbForService === getDb) {
-    return withAgentTransaction([input.agentId], (context) => createThirdPartyAgentEvent(input, context));
-  }
-  if (sourceContext) {
-    assertAgentTransaction(sourceContext, input.agentId);
-    if ((await readConnection(sourceContext, input.agentId))?.consumptionMode === "delegated") throw new DelegationError("third_party_event_source_unsupported", 422);
-  }
-  const db = sourceContext?.tx ?? getDbForService();
+}) {
+  const db = getDbForService();
   const now = new Date();
   const kind = normalizeThirdPartyEventKind(input.kind);
   const summary = normalizeThirdPartyEventSummary(input.summary);
@@ -3662,20 +3654,10 @@ export async function markThirdPartyAgentEventDelivered(eventId: string) {
   await markThirdPartyAgentEventsDelivered([eventId]);
 }
 
-export async function markThirdPartyAgentEventsDelivered(eventIds: string[], authority?: AgentTransaction): Promise<void> {
+export async function markThirdPartyAgentEventsDelivered(eventIds: string[]) {
   const ids = [...new Set(eventIds.filter(Boolean))];
   if (ids.length === 0) return;
-  const root = getDbForService();
-  if (!authority && root === getDb()) {
-    const ownerRows = await root.select({ agentId: thirdPartyAgentEvents.agentId }).from(thirdPartyAgentEvents).where(inArray(thirdPartyAgentEvents.id, eventIds));
-    const agentIds = ownerRows.map((row) => row.agentId);
-    return withAgentTransaction(agentIds, (context) => markThirdPartyAgentEventsDelivered(eventIds, context));
-  }
-  if (authority) {
-    const ownerRows = await authority.tx.select({ agentId: thirdPartyAgentEvents.agentId }).from(thirdPartyAgentEvents).where(inArray(thirdPartyAgentEvents.id, eventIds));
-    for (const row of ownerRows) await requireLegacyAgentActor(authority, row.agentId);
-  }
-  const db = authority?.tx ?? root;
+  const db = getDbForService();
   const now = new Date();
   await db.update(thirdPartyAgentEvents)
     .set({
@@ -3696,16 +3678,8 @@ export async function rebuildPendingThirdPartyAgentEventMessages(input: {
   agentId: string;
   excludeEventIds?: string[];
   limit?: number;
-}, authority?: AgentTransaction): Promise<AgentMessage[]> {
-  const root = getDbForService();
-  if (!authority && root === getDb()) {
-    const agentIds = [input.agentId];
-    return withAgentTransaction(agentIds, (context) => rebuildPendingThirdPartyAgentEventMessages(input, context));
-  }
-  if (authority) {
-    await requireLegacyAgentActor(authority, input.agentId);
-  }
-  const db = authority?.tx ?? root;
+}): Promise<AgentMessage[]> {
+  const db = getDbForService();
   const now = new Date();
   const excludeIds = [...new Set(input.excludeEventIds?.filter(Boolean) ?? [])];
   const whereClauses: SQL[] = [
@@ -3753,18 +3727,8 @@ export async function rebuildPendingThirdPartyAgentEventMessages(input: {
   }));
 }
 
-export async function claimQueuedThirdPartyAgentEventForDelivery(eventId: string, authority?: AgentTransaction): Promise<typeof thirdPartyAgentEvents.$inferSelect | null> {
-  const root = getDbForService();
-  if (!authority && root === getDb()) {
-    const ownerRows = await root.select({ agentId: thirdPartyAgentEvents.agentId }).from(thirdPartyAgentEvents).where(eq(thirdPartyAgentEvents.id, eventId));
-    const agentIds = ownerRows.map((row) => row.agentId);
-    return withAgentTransaction(agentIds, (context) => claimQueuedThirdPartyAgentEventForDelivery(eventId, context));
-  }
-  if (authority) {
-    const ownerRows = await authority.tx.select({ agentId: thirdPartyAgentEvents.agentId }).from(thirdPartyAgentEvents).where(eq(thirdPartyAgentEvents.id, eventId));
-    for (const row of ownerRows) await requireLegacyAgentActor(authority, row.agentId);
-  }
-  const db = authority?.tx ?? root;
+export async function claimQueuedThirdPartyAgentEventForDelivery(eventId: string) {
+  const db = getDbForService();
   const now = new Date();
   const [event] = await db.update(thirdPartyAgentEvents)
     .set({
@@ -3779,18 +3743,8 @@ export async function claimQueuedThirdPartyAgentEventForDelivery(eventId: string
   return event ?? null;
 }
 
-export async function releaseThirdPartyAgentEventDeliveryClaim(eventId: string, authority?: AgentTransaction): Promise<void> {
-  const root = getDbForService();
-  if (!authority && root === getDb()) {
-    const ownerRows = await root.select({ agentId: thirdPartyAgentEvents.agentId }).from(thirdPartyAgentEvents).where(eq(thirdPartyAgentEvents.id, eventId));
-    const agentIds = ownerRows.map((row) => row.agentId);
-    return withAgentTransaction(agentIds, (context) => releaseThirdPartyAgentEventDeliveryClaim(eventId, context));
-  }
-  if (authority) {
-    const ownerRows = await authority.tx.select({ agentId: thirdPartyAgentEvents.agentId }).from(thirdPartyAgentEvents).where(eq(thirdPartyAgentEvents.id, eventId));
-    for (const row of ownerRows) await requireLegacyAgentActor(authority, row.agentId);
-  }
-  const db = authority?.tx ?? root;
+export async function releaseThirdPartyAgentEventDeliveryClaim(eventId: string) {
+  const db = getDbForService();
   const now = new Date();
   await db.update(thirdPartyAgentEvents)
     .set({

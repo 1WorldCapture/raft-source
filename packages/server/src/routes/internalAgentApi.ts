@@ -238,10 +238,7 @@ import {
   queryFeedbackLocators,
 } from "../services/productFeedbackLocatorService.js";
 
-import { guardLegacyAgentConsumption } from "../middleware/legacyAgentConsumption.js";
-
 export const internalAgentApiRouter: RouterType = Router();
-internalAgentApiRouter.use(guardLegacyAgentConsumption);
 
 async function syncReminderToComputer(
   req: Request,
@@ -1815,7 +1812,7 @@ internalAgentApiRouter.post("/server/avatar", requireAgentCapability("server"), 
     }
 
     const avatarUrl = await storeServerAvatar(server.id, server.avatarUrl, uploaded.buffer);
-    const updated = await serverService.updateServerProfile(server.id, { avatarUrl }, req.actingAgentId!);
+    const updated = await serverService.updateServerProfile(server.id, { avatarUrl });
     if (!updated) {
       res.status(404).json({ error: "Server not found" });
       return;
@@ -2565,7 +2562,7 @@ registerAgentApiRoute("channelJoin", ...agentApiRequestValidators("channelJoin")
       return;
     }
 
-    await channelService.addAgent(channel.id, actingAgentId, { actorAgentId: actingAgentId });
+    await channelService.addAgent(channel.id, actingAgentId);
     if (!wasAgentMember) {
       const io = req.app.get("io") as SocketServer | undefined;
       const agentOrchestrator = req.app.get("agentOrchestrator") as AgentOrchestrator | undefined;
@@ -2629,7 +2626,7 @@ registerAgentApiRoute("channelLeave", ...agentApiRequestValidators("channelLeave
       return;
     }
 
-    await channelService.removeAgent(channel.id, actingAgentId, undefined, actingAgentId);
+    await channelService.removeAgent(channel.id, actingAgentId);
     if (channel.type !== "channel") {
       const agentOrchestrator = req.app.get("agentOrchestrator") as AgentOrchestrator;
       await agentOrchestrator.purgeAgentInboxForChannelTree(
@@ -4893,7 +4890,7 @@ registerAgentApiRoute("profileUpdate", ...agentApiRequestValidators("profileUpda
       fields.description = value;
     }
 
-    const updated = await agentService.updateAgent(agentId, fields, { type: "agent", id: agentId });
+    const updated = await agentService.updateAgent(agentId, fields);
     if (!updated) {
       res.status(404).json({ error: "Agent not found" });
       return;
@@ -4934,7 +4931,7 @@ registerAgentApiRoute("profileAvatarUpdate", async (req, res) => {
     const avatarUrl = await storeAgentAvatar(serverId, agent.avatarUrl, uploaded.buffer);
     const agentOrchestrator = req.app.get("agentOrchestrator") as AgentOrchestrator | undefined;
     agentOrchestrator?.evictCache(agentId);
-    await agentService.updateAgent(agentId, { avatarUrl }, { type: "agent", id: agentId });
+    await agentService.updateAgent(agentId, { avatarUrl });
 
     const profile = await buildAgentProfileView(agentId, agentId, agentOrchestrator);
     if (!profile) {
@@ -6823,7 +6820,7 @@ registerAgentApiRoute("taskDelete", ...agentApiRequestValidators("taskDelete"), 
     }
 
     const title = owner.row.title;
-    await taskService.deleteTaskByOwner(owner, "agent", agentId);
+    await taskService.deleteTaskByOwner(owner);
 
     const io: SocketServer = req.app.get("io");
     const targets = await getTaskRealtimeSurfaceTargets(ctx.surface);

@@ -5598,7 +5598,7 @@ export const productEvents = pgTable("product_events", {
   // Day-1 whitelist. Widening this requires a migration + Dozy/meichen review.
   check(
     "product_events_subject_type_whitelist",
-    sql`${t.subjectType} IN ('action_card', 'onboarding_wizard', 'server', 'external_agent_connection', 'external_agent_receipt')`,
+    sql`${t.subjectType} IN ('action_card', 'onboarding_wizard', 'server')`,
   ),
   check(
     "product_events_event_type_whitelist",
@@ -5615,14 +5615,7 @@ export const productEvents = pgTable("product_events", {
       'onboarding_wizard.dismissed',
       'onboarding_wizard.completed',
       'onboarding_wizard.error',
-      'agent.second_created',
-      'external_agent.cutover',
-      'external_agent.pause',
-      'external_agent.unbind',
-      'external_agent.rollback',
-      'external_agent.resume',
-      'external_agent.redrive',
-      'external_agent.durable_handoff'
+      'agent.second_created'
     )`,
   ),
   // actor_type, when set, must be one of the recognised principals.
