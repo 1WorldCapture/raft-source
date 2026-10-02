@@ -23,18 +23,34 @@
 // identity (backend + base + authority + channel): a config change drops the
 // old value instead of serving a version resolved under the previous source.
 // Network failures keep the last value only under the SAME identity.
+//
+// Concurrency: every in-flight refresh carries the generation it was started
+// under. A late response from a previous generation (config changed, pin
+// engaged, config invalidated, or test reset) can neither commit its result
+// nor clear the newer generation's bookkeeping. Each request also carries a
+// hard deadline covering fetch AND body parsing, so a hanging upstream can
+// never permanently occupy the refresh slot.
 
 import {
   computerReleaseIdentity,
   readComputerDeploymentConfig,
   type ComputerDeploymentSetupConfig,
 } from "../config/computerDeploymentConfig.js";
-import { bothComputerVersionsKnown, isComputerOutdated } from "@botiverse/raft-shared";
+import {
+  bothComputerVersionsKnown,
+  clearClockTimeout,
+  isComputerOutdated,
+  setClockTimeout,
+} from "@botiverse/raft-shared";
 
 /** Hands app slug shared with install.sh and the CLI release authority. */
 const HANDS_COMPUTER_APP_SLUG = "raft-computer-cli";
 
-const REFRESH_INTERVAL_MS = 60 * 60 * 1000;
+const DEFAULT_REFRESH_INTERVAL_MS = 60 * 60 * 1000;
+/** Hard deadline for one version lookup, covering response wait and body read. */
+const DEFAULT_FETCH_DEADLINE_MS = 10_000;
+
+let fetchDeadlineMs = DEFAULT_FETCH_DEADLINE_MS;
 
 interface LatestVersionCache {
   identity: string;
@@ -45,26 +61,42 @@ interface LatestVersionCache {
 let cache: LatestVersionCache | null = null;
 let refreshPromise: Promise<void> | null = null;
 let refreshIdentity: string | null = null;
+/**
+ * Monotonic generation of the resolve context. Bumped whenever the effective
+ * source changes (identity switch, pin, invalidation, test reset) so stale
+ * in-flight requests can detect they no longer own the cache.
+ */
+let refreshGeneration = 0;
+let refreshIntervalMs = DEFAULT_REFRESH_INTERVAL_MS;
+
+function bumpGeneration(): void {
+  refreshGeneration += 1;
+  refreshPromise = null;
+  refreshIdentity = null;
+}
 
 export function getLatestComputerVersion(): Promise<string | null> {
   const result = readComputerDeploymentConfig();
   if (result.status !== "ready") {
     // Unconfigured or invalid deployment → unknown. A background refresh under
-    // the old identity would be equally wrong, so drop it entirely.
+    // the old source would be equally wrong; retire it.
+    bumpGeneration();
     cache = null;
     return Promise.resolve(null);
   }
 
   const { config } = result;
   if (config.pinnedVersion) {
-    // The deployment pin is the authoritative target version.
+    // The deployment pin is the authoritative target version. It also retires
+    // any in-flight channel resolution: the pin answer never depends on it.
+    bumpGeneration();
     cache = null;
     return Promise.resolve(config.pinnedVersion);
   }
 
   const identity = computerReleaseIdentity(config);
   const now = Date.now();
-  if (cache && cache.identity === identity && cache.version && now - cache.lastFetchTime < REFRESH_INTERVAL_MS) {
+  if (cache && cache.identity === identity && cache.version && now - cache.lastFetchTime < refreshIntervalMs) {
     return Promise.resolve(cache.version);
   }
 
@@ -79,19 +111,30 @@ async function refreshLatestComputerVersion(
   // Coalesce only refreshes for the SAME identity: a config change mid-flight
   // must start its own resolution, not piggyback on the previous source's.
   if (refreshPromise && refreshIdentity === identity) return refreshPromise;
+  // Starting a refresh for a DIFFERENT identity opens a new generation. Any
+  // still-in-flight request from the previous identity is retired: when it
+  // settles later it can neither commit its (stale-source) result nor clear
+  // this refresh's coalescing bookkeeping.
+  refreshGeneration += 1;
+  const generation = refreshGeneration;
   refreshIdentity = identity;
   refreshPromise = fetchLatestComputerVersion(config)
     .then((version) => {
-      // Only a successful parse updates the cache. A failure keeps the last
-      // value under the same identity (best-effort refresh, retried on the
-      // next call because lastFetchTime is untouched).
-      if (version !== null) {
+      // Only a successful parse updates the cache, and only while this
+      // generation still owns the resolve context: a stale request from a
+      // PREVIOUS source resolving late must never overwrite or evict the
+      // current source's cached value.
+      if (version !== null && refreshGeneration === generation) {
         cache = { identity, version, lastFetchTime: Date.now() };
       }
     })
     .finally(() => {
-      refreshPromise = null;
-      refreshIdentity = null;
+      // Only the owning generation may clear the coalescing slots; an older
+      // request finishing late must not clobber a newer refresh's state.
+      if (refreshGeneration === generation) {
+        refreshPromise = null;
+        refreshIdentity = null;
+      }
     });
   return refreshPromise;
 }
@@ -99,11 +142,16 @@ async function refreshLatestComputerVersion(
 async function fetchLatestComputerVersion(
   config: ComputerDeploymentSetupConfig,
 ): Promise<string | null> {
+  // The deadline covers fetch AND body parsing: a hanging response head or a
+  // body that never ends must release the refresh slot, keep the same-identity
+  // cached value, and let the next call retry.
+  const controller = new AbortController();
+  const timeoutId = setClockTimeout(() => controller.abort(), fetchDeadlineMs);
   try {
     if (config.backend === "hands") {
       const channel = config.installChannel === "alpha" ? "alpha" : "main";
       const url = `${config.handsOrigin}/public/v2/apps/${HANDS_COMPUTER_APP_SLUG}/latest?channel=${encodeURIComponent(channel)}`;
-      const res = await fetch(url);
+      const res = await fetch(url, { signal: controller.signal });
       if (!res.ok) return null;
       // Anchor the version inside the "build" object so strings elsewhere in
       // the response (release notes, fallback release) can never be mistaken
@@ -113,20 +161,33 @@ async function fetchLatestComputerVersion(
       return typeof version === "string" && version.length > 0 ? version : null;
     }
 
-    const res = await fetch(`${config.releaseBase}/manifest.json`);
+    const res = await fetch(`${config.releaseBase}/manifest.json`, { signal: controller.signal });
     if (!res.ok) return null;
     const data = (await res.json()) as { version?: unknown };
     return typeof data.version === "string" && data.version.length > 0 ? data.version : null;
   } catch {
     // Network lookup is best-effort; fall back to the last cached value.
     return null;
+  } finally {
+    clearClockTimeout(timeoutId);
   }
 }
 
 export function __resetLatestComputerVersionForTest(): void {
+  bumpGeneration();
   cache = null;
-  refreshPromise = null;
-  refreshIdentity = null;
+  refreshIntervalMs = DEFAULT_REFRESH_INTERVAL_MS;
+  fetchDeadlineMs = DEFAULT_FETCH_DEADLINE_MS;
+}
+
+/** Test hook: make an already-cached value expire (or never expire with Infinity). */
+export function __setLatestComputerRefreshIntervalForTest(ms: number): void {
+  refreshIntervalMs = ms;
+}
+
+/** Test hook: shrink the per-request fetch deadline for timeout regressions. */
+export function __setLatestComputerFetchDeadlineForTest(ms: number): void {
+  fetchDeadlineMs = ms;
 }
 
 export function resolveComputerUpgradeAvailable(

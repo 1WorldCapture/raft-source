@@ -9,14 +9,17 @@ import { readComputerDeploymentConfig } from "../config/computerDeploymentConfig
  * not a Raft session, and the web page rendering the commands needs this data
  * before any sign-in flow on that machine exists. Only public values travel:
  * origins, backend selection, and channel — never tokens, filesystem paths,
- * process environment, or secrets. Configuration is re-read per request so a
- * config fix applies on the next request without a restart, and the response is
- * `no-store` so no browser/CDN cache outlives that re-read.
+ * process environment, or secrets. The response is `no-store` so no
+ * browser/CDN cache outlives a config change.
  *
  * Not-ready deployments answer HTTP 200 with `status: "missing" | "invalid"`
  * and field NAMES only — the web surface must render a visible error and
  * disable command copying. Half-built payloads or echoed raw values would let
  * a broken deployment look like a working official one.
+ *
+ * Configuration is re-read from process.env per request; editing the .env FILE
+ * still requires a process restart through the deployment flow before the
+ * change reaches this endpoint.
  */
 export const deploymentComputerSetupRouter: ExpressRouter = Router();
 

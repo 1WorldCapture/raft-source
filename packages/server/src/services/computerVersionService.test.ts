@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import { getLatestComputerVersion, resolveComputerUpgradeAvailable, __resetLatestComputerVersionForTest } from "./computerVersionService.js";
+import {
+  getLatestComputerVersion,
+  resolveComputerUpgradeAvailable,
+  __resetLatestComputerVersionForTest,
+  __setLatestComputerFetchDeadlineForTest,
+  __setLatestComputerRefreshIntervalForTest,
+} from "./computerVersionService.js";
 import {
   RAFT_COMPUTER_HANDS_ORIGIN_ENV,
   RAFT_COMPUTER_PINNED_VERSION_ENV,
@@ -188,34 +194,186 @@ test("a config identity change drops the previous source's cached version", asyn
   }
 });
 
-test("network failures keep the last value under the SAME identity only", async () => {
+test("a late response from a previous source never overwrites the new source's cache", async () => {
   __resetLatestComputerVersionForTest();
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = (async () => jsonResponse(200, { version: "1.0.30" })) as typeof fetch;
+  const fetchCalls: string[] = [];
+  // Identity A's fetch hangs until released; identity B resolves immediately.
+  const hungA = deferred<Response>();
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    fetchCalls.push(url);
+    return url.includes("other.example.com")
+      ? jsonResponse(200, { version: "2.0.0" })
+      : hungA.promise;
+  }) as typeof fetch;
+
+  const B_ENV = {
+    ...MANIFEST_ENV,
+    [RAFT_COMPUTER_RELEASE_BASE_ENV]: "https://other.example.com/computer",
+  };
+
+  try {
+    // Start a refresh under identity A (its fetch never settles yet).
+    await withDeploymentEnv(MANIFEST_ENV, async () => {
+      await getLatestComputerVersion();
+    });
+    // Switch identity: B resolves and caches 2.0.0.
+    await withDeploymentEnv(B_ENV, async () => {
+      await getLatestComputerVersion();
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(await getLatestComputerVersion(), "2.0.0");
+    });
+    const callsAfterBCached = fetchCalls.length;
+
+    // A's response finally arrives — with a stale version. It must NOT
+    // overwrite B's cached value, and the next B read must neither degrade
+    // to unknown nor fire another fetch.
+    hungA.resolve(jsonResponse(200, { version: "1.0.0" }));
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    await withDeploymentEnv(B_ENV, async () => {
+      assert.equal(await getLatestComputerVersion(), "2.0.0");
+    });
+    assert.equal(fetchCalls.length, callsAfterBCached, "late stale response must not cause re-fetch churn");
+  } finally {
+    globalThis.fetch = originalFetch;
+    __resetLatestComputerVersionForTest();
+  }
+});
+
+test("an older request finishing before the newer one must not break coalescing", async () => {
+  __resetLatestComputerVersionForTest();
+  const originalFetch = globalThis.fetch;
+  const fetchCalls: string[] = [];
+  const hungA = deferred<Response>();
+  const hungB = deferred<Response>();
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    fetchCalls.push(url);
+    return url.includes("other.example.com") ? hungB.promise : hungA.promise;
+  }) as typeof fetch;
+
+  const B_ENV = {
+    ...MANIFEST_ENV,
+    [RAFT_COMPUTER_RELEASE_BASE_ENV]: "https://other.example.com/computer",
+  };
 
   try {
     await withDeploymentEnv(MANIFEST_ENV, async () => {
       await getLatestComputerVersion();
-      await new Promise((resolve) => setImmediate(resolve));
-      assert.equal(await getLatestComputerVersion(), "1.0.30");
     });
+    // B starts while A is still in flight.
+    await withDeploymentEnv(B_ENV, async () => {
+      await getLatestComputerVersion();
+    });
+    assert.equal(fetchCalls.length, 2);
 
-    // Same identity, failing network: the cached value survives (best-effort
-    // refresh, never an "already latest" claim from a failure).
+    // A finishes FIRST. Its finally must not clear B's in-flight marker: a
+    // second B read while B is still in flight must coalesce onto B's own
+    // promise instead of starting a duplicate fetch.
+    hungA.resolve(jsonResponse(200, { version: "1.0.0" }));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    await withDeploymentEnv(B_ENV, async () => {
+      await getLatestComputerVersion();
+    });
+    assert.equal(fetchCalls.length, 2, "B's in-flight refresh must survive A finishing");
+
+    hungB.resolve(jsonResponse(200, { version: "2.0.0" }));
+    await new Promise((resolve) => setImmediate(resolve));
+    await withDeploymentEnv(B_ENV, async () => {
+      assert.equal(await getLatestComputerVersion(), "2.0.0");
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
     __resetLatestComputerVersionForTest();
-    globalThis.fetch = (async () => jsonResponse(200, { version: "1.0.31" })) as typeof fetch;
+  }
+});
+
+test("a hanging upstream times out, releases the refresh slot, and keeps the same-identity cache", async () => {
+  __resetLatestComputerVersionForTest();
+  __setLatestComputerFetchDeadlineForTest(30);
+  const originalFetch = globalThis.fetch;
+  const fetchCalls: string[] = [];
+  // Seed a cached value first.
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    fetchCalls.push(url);
+    return jsonResponse(200, { version: "1.0.30" });
+  }) as typeof fetch;
+  await withDeploymentEnv(MANIFEST_ENV, async () => {
+    await getLatestComputerVersion();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(await getLatestComputerVersion(), "1.0.30");
+  });
+
+  // Expire immediately and hang every fetch: the deadline must fire, the
+  // cached same-identity value must survive, and the refresh slot must free
+  // up so the next call retries rather than coalescing onto the hung request.
+  __setLatestComputerRefreshIntervalForTest(0);
+  let hang = true;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    fetchCalls.push(url);
+    if (!hang) return jsonResponse(200, { version: "1.0.31" });
+    // A stuck upstream that only settles when aborted, like a real fetch
+    // whose AbortSignal fires — not a promise that ignores the deadline.
+    return new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(new Error("aborted")));
+    });
+  }) as typeof fetch;
+
+  try {
+    await withDeploymentEnv(MANIFEST_ENV, async () => {
+      assert.equal(await getLatestComputerVersion(), "1.0.30"); // cached value still served
+      await new Promise((resolve) => setTimeout(resolve, 80)); // let the deadline fire
+      assert.equal(await getLatestComputerVersion(), "1.0.30"); // still cached, slot released
+    });
+    assert.ok(fetchCalls.length >= 2, "a retry must have been possible after the deadline");
+
+    // Recovery: wait out any in-flight hung refresh, then let the upstream
+    // answer again — the next refresh must succeed.
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    hang = false;
     await withDeploymentEnv(MANIFEST_ENV, async () => {
       await getLatestComputerVersion();
       await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(await getLatestComputerVersion(), "1.0.31");
     });
+  } finally {
+    globalThis.fetch = originalFetch;
+    __resetLatestComputerVersionForTest();
+  }
+});
 
+test("a genuinely expired cache keeps its value when the failing refresh throws", async () => {
+  __resetLatestComputerVersionForTest();
+  const originalFetch = globalThis.fetch;
+  const fetchCalls: string[] = [];
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    fetchCalls.push(url);
+    return jsonResponse(200, { version: "1.0.31" });
+  }) as typeof fetch;
+  await withDeploymentEnv(MANIFEST_ENV, async () => {
+    await getLatestComputerVersion();
+    await new Promise((resolve) => setImmediate(resolve));
+  });
+
+  try {
+    // Expire the cache window immediately and make fetch itself throw: the
+    // failing refresh MUST be invoked (post-expiry path) and the same-identity
+    // cached value must survive the failure.
+    __setLatestComputerRefreshIntervalForTest(0);
     globalThis.fetch = (async () => {
       throw new Error("network down");
     }) as typeof fetch;
-    // Force expiry of the refresh window without breaking the cached value.
     await withDeploymentEnv(MANIFEST_ENV, async () => {
       assert.equal(await getLatestComputerVersion(), "1.0.31");
     });
+    assert.equal(fetchCalls.length, 1, "only the seeding fetch happened before the failure");
   } finally {
     globalThis.fetch = originalFetch;
     __resetLatestComputerVersionForTest();
