@@ -1394,6 +1394,9 @@ export const zhCn: Record<MessageId, string> = {
   "machine.commandGuide.showLegacyDaemonCommand": "显示旧守护进程命令",
   "machine.commandGuide.generateFreshDaemonConnect": "生成新的守护进程连接命令，以使用此旧版选项。",
   "machine.commandGuide.generateLegacyDaemonCommand": "生成旧守护进程命令",
+  "machine.commandGuide.deploymentLoading": "正在准备本部署的连接命令…",
+  "machine.commandGuide.deploymentUnavailable":
+    "无法获取本部署的连接配置，命令已禁用。请刷新页面或联系该服务器的管理员；命令不会指向任何回退来源。",
   "machine.mobile.title": "计算机",
   "machine.mobile.retry": "重试",
   "machine.mobile.refreshErrorSaved": "无法刷新 Computer。正在显示已保存结果。",

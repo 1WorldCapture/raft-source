@@ -9,9 +9,31 @@ import { useMachineStore } from "../src/store/machineStore";
 import type { Machine } from "../src/store/machineStore";
 import { useServerStore } from "../src/store/serverStore";
 import type { Server } from "../src/store/serverStore";
-import { getComputerCommands } from "../src/utils/computerSetupCommand";
-import { getServerUrl } from "../src/utils/server";
+import { getComputerCommandsFromDeployment } from "../src/utils/computerSetupCommand";
+import { DEFAULT_READY } from "./helpers/deploymentComputerSetup";
 import { renderWithIntl, TestIntlProvider } from "./helpers/intl";
+
+// Contract v1: expected commands come from the deployment-config builder fed
+// the same ready payload the shared domSetup stub serves. staging/slockdev
+// tests pass isolatedHomeSlug to match the panel's QA isolation.
+function expectedCommands(options: {
+  platform?: "mac-linux" | "windows";
+  machineId?: string | null;
+  version?: string | null;
+  deploymentEnv?: "staging" | "slockdev";
+}) {
+  const { platform, machineId, version, deploymentEnv } = options;
+  const commands = getComputerCommandsFromDeployment({
+    deployment: DEFAULT_READY,
+    serverSlug: server.slug,
+    platform,
+    machineId,
+    version,
+    isolatedHomeSlug: deploymentEnv ? server.slug : null,
+  });
+  assert.ok(commands);
+  return commands;
+}
 
 const initialAgentState = useAgentStore.getState();
 const initialMachineState = useMachineStore.getState();
@@ -96,8 +118,7 @@ test("offline managed Computer admin can expand and copy environment-correct Ins
   useAgentStore.setState({ agents: [] });
   useMachineStore.setState({ computerOperationProgress: {} });
 
-  const commands = getComputerCommands(server.slug, undefined, getServerUrl());
-  assert.ok(commands);
+  const commands = expectedCommands({});
   const clipboardWrites: string[] = [];
   const originalClipboard = navigator.clipboard;
   Object.defineProperty(navigator, "clipboard", {
@@ -116,9 +137,10 @@ test("offline managed Computer admin can expand and copy environment-correct Ins
       </MemoryRouter>,
     );
 
-    const disclosure = screen.getByRole("button", {
+    // The deployment config arrives asynchronously (contract v1 runtime fetch).
+    const disclosure = await waitFor(() => screen.getByRole("button", {
       name: "raft-computer: command not found? Install or re-run setup",
-    });
+    }));
     assert.equal(disclosure.getAttribute("aria-expanded"), "false");
     assert.equal(screen.queryByTestId("computer-recovery-install"), null);
     assert.equal(screen.queryByTestId("computer-recovery-setup"), null);
@@ -126,7 +148,7 @@ test("offline managed Computer admin can expand and copy environment-correct Ins
     fireEvent.click(disclosure);
 
     assert.equal(disclosure.getAttribute("aria-expanded"), "true");
-    assert.equal(screen.getByTestId("computer-recovery-install").textContent, commands.install);
+    await waitFor(() => assert.equal(screen.getByTestId("computer-recovery-install").textContent, commands.install));
     assert.equal(screen.getByTestId("computer-recovery-setup").textContent, commands.setup);
 
     fireEvent.click(screen.getByRole("button", { name: "Copy install command" }));
@@ -142,20 +164,19 @@ test("offline managed Computer admin can expand and copy environment-correct Ins
   }
 });
 
-test("offline Windows Computer recovery uses PowerShell and the Windows executable bundle", () => {
+test("offline Windows Computer recovery uses PowerShell and the Windows executable bundle", async () => {
   useServerStore.setState({ current: server, members: [] });
   useAgentStore.setState({ agents: [] });
   useMachineStore.setState({ computerOperationProgress: {} });
 
-  const commands = getComputerCommands(server.slug, "staging", getServerUrl(), { platform: "windows" });
-  assert.ok(commands);
+  const commands = expectedCommands({ platform: "windows", deploymentEnv: "staging" });
   renderWithIntl(
     <MemoryRouter initialEntries={["/s/acme/settings/computers/computer-1"]}>
       <MachineDetailPanel machine={windowsMachine} workspaceEmbedded deploymentEnv="staging" />
     </MemoryRouter>,
   );
 
-  assert.equal(screen.getByTestId("computer-recovery-restart").textContent, commands.restart);
+  await waitFor(() => assert.equal(screen.getByTestId("computer-recovery-restart").textContent, commands.restart));
   assert.equal(screen.getByTestId("computer-recovery-guide-install").textContent, commands.install);
   assert.ok(screen.getByText("2. Fresh install · Windows x64"));
   fireEvent.click(screen.getByRole("button", {
@@ -164,11 +185,11 @@ test("offline Windows Computer recovery uses PowerShell and the Windows executab
   assert.equal(screen.getByTestId("computer-recovery-install").textContent, commands.install);
   assert.equal(screen.getByTestId("computer-recovery-setup").textContent, commands.setup);
   assert.match(commands.install, /install\.ps1/);
-  assert.match(commands.setup, /raft-computer\.exe" setup \/acme/);
+  assert.match(commands.setup, /raft-computer\.exe" setup '\/acme'/);
   assert.doesNotMatch(`${commands.install}\n${commands.setup}`, /install\.sh|RAFT_HOME="\$HOME/);
 });
 
-test("legacy Windows machine page offers Experimental Computer migration and keeps the daemon block", () => {
+test("legacy Windows machine page offers Experimental Computer migration and keeps the daemon block", async () => {
   useServerStore.setState({ current: server, members: [] });
   useAgentStore.setState({ agents: [] });
   useMachineStore.setState({ computerOperationProgress: {} });
@@ -181,11 +202,7 @@ test("legacy Windows machine page offers Experimental Computer migration and kee
     computerVersion: null,
     computerUpgradeAvailable: false,
   };
-  const commands = getComputerCommands(server.slug, undefined, getServerUrl(), {
-    machineId: legacyWindowsMachine.id,
-    platform: "windows",
-  });
-  assert.ok(commands);
+  const commands = expectedCommands({ machineId: legacyWindowsMachine.id, platform: "windows" });
 
   renderWithIntl(
     <MemoryRouter initialEntries={["/s/acme/settings/computers/legacy-windows"]}>
@@ -193,7 +210,7 @@ test("legacy Windows machine page offers Experimental Computer migration and kee
     </MemoryRouter>,
   );
 
-  const migrate = screen.getByTestId("computer-migrate-block");
+  const migrate = await waitFor(() => screen.getByTestId("computer-migrate-block"));
   assert.ok(within(migrate).getByText("Experimental"));
   assert.ok(within(migrate).getByText("Migrate to Computer · Windows x64"));
   assert.ok(within(migrate).getByText(commands.install, { exact: true, selector: "code" }));
@@ -210,13 +227,7 @@ test("online Computer without remote Upgrade shows a version-pinned fresh-instal
     latestComputerVersion: "1.0.14",
   });
 
-  const commands = getComputerCommands(
-    server.slug,
-    "staging",
-    getServerUrl(),
-    { version: "1.0.14" },
-  );
-  assert.ok(commands);
+  const commands = expectedCommands({ version: "1.0.14", deploymentEnv: "staging" });
   const clipboardWrites: string[] = [];
   const originalClipboard = navigator.clipboard;
   Object.defineProperty(navigator, "clipboard", {
@@ -239,20 +250,20 @@ test("online Computer without remote Upgrade shows a version-pinned fresh-instal
       </MemoryRouter>,
     );
 
-    const actions = screen.getByTestId("computer-service-actions");
+    const actions = await waitFor(() => screen.getByTestId("computer-service-actions"));
     assert.match(
       actions.textContent ?? "",
       /Restart remains available; this source is not currently eligible for an upgrade\./,
     );
-    assert.equal(
+    await waitFor(() => assert.equal(
       screen.getByTestId("computer-upgrade-fresh-install").textContent,
       commands.install,
-    );
+    ));
     assert.equal(
       screen.getByTestId("computer-upgrade-fresh-restart").textContent,
       commands.restartService,
     );
-    assert.match(commands.install, /RAFT_COMPUTER_VERSION=1\.0\.14/);
+    assert.match(commands.install, /RAFT_COMPUTER_VERSION='1\.0\.14'/);
     assert.match(commands.restartService, /raft-computer"? restart$/);
     assert.doesNotMatch(commands.restartService, /\/acme/);
 
@@ -284,8 +295,7 @@ for (const deploymentEnv of ["staging", "slockdev"] as const) {
     useAgentStore.setState({ agents: [] });
     useMachineStore.setState({ computerOperationProgress: {} });
 
-    const commands = getComputerCommands(server.slug, deploymentEnv, getServerUrl());
-    assert.ok(commands);
+    const commands = expectedCommands({ deploymentEnv });
     const clipboardWrites: string[] = [];
     const originalClipboard = navigator.clipboard;
     Object.defineProperty(navigator, "clipboard", {
@@ -304,7 +314,7 @@ for (const deploymentEnv of ["staging", "slockdev"] as const) {
         </MemoryRouter>,
       );
 
-      const guide = screen.getByTestId("computer-recovery-guide");
+      const guide = await waitFor(() => screen.getByTestId("computer-recovery-guide"));
       const disclosure = within(guide).getByRole("button", { name: "Show Recovery guide" });
       assert.equal(disclosure.tagName, "BUTTON");
       assert.equal(disclosure.getAttribute("aria-expanded"), "false");
@@ -372,7 +382,7 @@ for (const deploymentEnv of ["staging", "slockdev"] as const) {
   });
 }
 
-test("offline managed Computer auto-expands on each abnormal transition but still allows an explicit collapse", () => {
+test("offline managed Computer auto-expands on each abnormal transition but still allows an explicit collapse", async () => {
   useServerStore.setState({ current: server, members: [] });
   useAgentStore.setState({ agents: [] });
   useMachineStore.setState({ computerOperationProgress: {} });
@@ -383,7 +393,7 @@ test("offline managed Computer auto-expands on each abnormal transition but stil
     </MemoryRouter>,
   );
 
-  const guide = screen.getByTestId("computer-recovery-guide");
+  const guide = await waitFor(() => screen.getByTestId("computer-recovery-guide"));
   const disclosure = within(guide).getByRole("button", { name: "Hide Recovery guide" });
   assert.equal(disclosure.getAttribute("aria-expanded"), "true");
   assert.ok(guide.querySelector("svg.lucide-chevron-right"));
@@ -418,7 +428,7 @@ test("offline managed Computer auto-expands on each abnormal transition but stil
   assert.ok(screen.getByTestId("computer-recovery-guide-content"));
 });
 
-test("an online-to-offline status transition overrides the stale healthy disclosure choice and exposes recovery", () => {
+test("an online-to-offline status transition overrides the stale healthy disclosure choice and exposes recovery", async () => {
   useServerStore.setState({ current: server, members: [] });
   useAgentStore.setState({ agents: [] });
   useMachineStore.setState({ computerOperationProgress: {} });
@@ -429,7 +439,7 @@ test("an online-to-offline status transition overrides the stale healthy disclos
     </MemoryRouter>,
   );
 
-  const healthyGuide = screen.getByTestId("computer-recovery-guide");
+  const healthyGuide = await waitFor(() => screen.getByTestId("computer-recovery-guide"));
   const show = within(healthyGuide).getByRole("button", { name: "Show Recovery guide" });
   fireEvent.click(show);
   fireEvent.click(within(healthyGuide).getByRole("button", { name: "Hide Recovery guide" }));
@@ -449,7 +459,7 @@ test("an online-to-offline status transition overrides the stale healthy disclos
   assert.ok(screen.getByTestId("computer-recovery-guide-content"));
 });
 
-test("multiple Computer panels keep each recovery disclosure control target unique", () => {
+test("multiple Computer panels keep each recovery disclosure control target unique", async () => {
   useServerStore.setState({ current: server, members: [] });
   useAgentStore.setState({ agents: [] });
   useMachineStore.setState({ computerOperationProgress: {} });
@@ -470,8 +480,11 @@ test("multiple Computer panels keep each recovery disclosure control target uniq
     </MemoryRouter>,
   );
 
-  const guides = screen.getAllByTestId("computer-recovery-guide");
-  assert.equal(guides.length, 2);
+  const guides = await waitFor(() => {
+    const found = screen.getAllByTestId("computer-recovery-guide");
+    assert.equal(found.length, 2);
+    return found;
+  });
   const disclosures = guides.map((guide) => within(guide).getByRole("button", { name: "Show Recovery guide" }));
   const controlIds = disclosures.map((disclosure) => disclosure.getAttribute("aria-controls"));
   assert.equal(controlIds.every(Boolean), true);

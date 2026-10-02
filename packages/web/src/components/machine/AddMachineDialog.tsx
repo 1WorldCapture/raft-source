@@ -5,10 +5,10 @@ import { useMachineStore } from "../../store/machineStore";
 import { useComputerConnectionWatch } from "../../hooks/useComputerConnectionWatch";
 import { useServerStore } from "../../store/serverStore";
 import { useAppNavigate } from "../../hooks/useAppNavigate";
-import { getServerUrl } from "../../utils/server";
+import { useDeploymentComputerSetup } from "../../hooks/useDeploymentComputerSetup";
 // The baseline/resolver import staging still carries is gone here: this dialog's
 // connect state machine lives in useComputerConnectionWatch now, shared with onboarding.
-import { getComputerCommands, getDaemonConnectCommand } from "../../utils/computerSetupCommand";
+import { getComputerCommandsFromDeployment, getDaemonConnectCommand, isIsolatedDeploymentEnv } from "../../utils/computerSetupCommand";
 import { PLAN_CONFIG, getEffectiveLimits } from "@botiverse/raft-shared";
 import type { ServerPlan } from "@botiverse/raft-shared";
 import Modal from "../Modal";
@@ -49,9 +49,6 @@ export default function AddMachineDialog({ onClose }: { onClose: () => void }) {
   const plan = (useServerStore((s) => s.current?.plan) || "free") as ServerPlan;
   const maxMachines = getEffectiveLimits(plan).maxMachines;
   const atLimit = maxMachines !== -1 && machines.length >= maxMachines;
-
-  const serverUrl = getServerUrl();
-
 
   // Watch for the machine coming online. The detection, the baseline, and the
   // dropped-event polling fallback all live in the shared watch — the onboarding
@@ -171,29 +168,49 @@ export default function AddMachineDialog({ onClose }: { onClose: () => void }) {
     nav.toMachine(machineId);
   };
 
+  // Contract v1: command URLs come from the runtime deployment config. While
+  // it loads nothing copyable renders; when it is not ready the guide locks
+  // with a visible error instead of degrading to official sources.
+  const { setup: deploymentSetup, loading: deploymentLoading } = useDeploymentComputerSetup();
+  const deploymentConfig = deploymentSetup?.kind === "ready" ? deploymentSetup.config : null;
+  const deploymentLockReason = deploymentSetup?.kind === "unavailable"
+    ? formatMessage({ id: "machine.commandGuide.deploymentUnavailable" })
+    : null;
   const deploymentEnv = import.meta.env?.VITE_DEPLOYMENT_ENV;
   const daemonDistTag = deploymentEnv === "staging" ? "staging" : "latest";
-  const macLinuxDaemonCommand = getDaemonConnectCommand({
-    apiKey,
-    distTag: daemonDistTag,
-    platform: "mac-linux",
-    serverName,
-    serverUrl,
-  });
-  const windowsDaemonCommand = getDaemonConnectCommand({
-    apiKey,
-    distTag: daemonDistTag,
-    platform: "windows",
-    serverName,
-    serverUrl,
-  });
-  const computerCommands = getComputerCommands(serverSlug, deploymentEnv, serverUrl, {
-    legacyApiKey: apiKey,
-  });
-  const windowsComputerCommands = getComputerCommands(serverSlug, deploymentEnv, serverUrl, {
-    legacyApiKey: apiKey,
-    platform: "windows",
-  });
+  const macLinuxDaemonCommand = deploymentConfig
+    ? getDaemonConnectCommand({
+      apiKey,
+      distTag: daemonDistTag,
+      platform: "mac-linux",
+      serverName,
+      serverUrl: deploymentConfig.serverUrl,
+    })
+    : "";
+  const windowsDaemonCommand = deploymentConfig
+    ? getDaemonConnectCommand({
+      apiKey,
+      distTag: daemonDistTag,
+      platform: "windows",
+      serverName,
+      serverUrl: deploymentConfig.serverUrl,
+    })
+    : "";
+  const computerCommands = deploymentConfig
+    ? getComputerCommandsFromDeployment({
+      deployment: deploymentConfig,
+      serverSlug,
+      isolatedHomeSlug: isIsolatedDeploymentEnv(deploymentEnv) ? serverSlug : null,
+    })
+    : null;
+  const windowsComputerCommands = deploymentConfig
+    ? getComputerCommandsFromDeployment({
+      deployment: deploymentConfig,
+      serverSlug,
+      platform: "windows",
+      isolatedHomeSlug: isIsolatedDeploymentEnv(deploymentEnv) ? serverSlug : null,
+    })
+    : null;
   const computerSetupCommand = computerCommands?.setup ?? null;
   const computerInstall = computerCommands?.install ?? null;
   const windowsComputerSetupCommand = windowsComputerCommands?.setup ?? null;
@@ -323,6 +340,8 @@ export default function AddMachineDialog({ onClose }: { onClose: () => void }) {
               windowsComputerInstallCommand={windowsComputerInstall}
               macLinuxDaemonCommand={macLinuxDaemonCommand}
               windowsDaemonCommand={windowsDaemonCommand}
+              deploymentLoading={deploymentLoading}
+              deploymentLockReason={deploymentLockReason}
             />
 
             {/* Waiting indicator */}

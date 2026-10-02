@@ -1410,6 +1410,9 @@ export const en = {
   "machine.commandGuide.showLegacyDaemonCommand": "Show legacy daemon command",
   "machine.commandGuide.generateFreshDaemonConnect": "Generate a fresh daemon connect command to use this legacy option.",
   "machine.commandGuide.generateLegacyDaemonCommand": "Generate legacy daemon command",
+  "machine.commandGuide.deploymentLoading": "Preparing this deployment's connect commands…",
+  "machine.commandGuide.deploymentUnavailable":
+    "This deployment's connect configuration is unavailable, so commands are disabled. Refresh the page or contact this server's administrator. Commands are never pointed at fallback sources.",
   "machine.mobile.title": "Computers",
   "machine.mobile.retry": "Retry",
   "machine.mobile.refreshErrorSaved": "Couldn't refresh computers. Showing saved results.",

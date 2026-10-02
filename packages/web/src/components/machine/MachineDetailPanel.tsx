@@ -16,9 +16,10 @@ import { useAuthStore } from "../../store/authStore";
 import api from "../../api/client";
 import { useAppNavigate, useMobileBack } from "../../hooks/useAppNavigate";
 import { useServerPermissions } from "../../hooks/useServerPermissions";
-import { getServerUrl } from "../../utils/server";
 import { formatRelativeTime } from "../../utils/relativeTime";
-import { getComputerCommands, getDaemonConnectCommand } from "../../utils/computerSetupCommand";
+import { getComputerCommandsFromDeployment, getDaemonConnectCommand, isIsolatedDeploymentEnv } from "../../utils/computerSetupCommand";
+import { useDeploymentComputerSetup } from "../../hooks/useDeploymentComputerSetup";
+// getServerUrl import removed: command URLs come from the runtime deployment config (contract v1).
 import { canViewMachineRuntimeAccountUsage } from "../../utils/machineRuntimeUsageVisibility";
 import { isAppManagedComputer } from "../../utils/computerUpgradeIndicator";
 import ConfirmDialog from "../ConfirmDialog";
@@ -713,40 +714,61 @@ export default function MachineDetailPanel({
   const [descriptionError, setDescriptionError] = useState("");
   const descriptionInputRef = useRef<HTMLTextAreaElement>(null);
 
-  const serverUrl = getServerUrl();
   const savedKey = localStorage.getItem(`slock_machine_apikey_${machine.id}`);
   // Validate cached key against server's apiKeyPrefix to detect stale keys
   const isKeyValid = savedKey && machine.apiKeyPrefix && savedKey.startsWith(machine.apiKeyPrefix);
   if (savedKey && !isKeyValid) {
     localStorage.removeItem(`slock_machine_apikey_${machine.id}`);
   }
-  const macLinuxConnectCommand = isKeyValid
-    ? getDaemonConnectCommand({ apiKey: savedKey, platform: "mac-linux", serverName, serverUrl })
+  // Contract v1: all command sources come from the runtime deployment config.
+  // While it loads nothing copyable renders; a non-ready config locks the
+  // Computer sections with a visible error instead of degrading to official
+  // sources. staging/slockdev QA builds keep their isolated-home scoping.
+  const { setup: deploymentSetup, loading: deploymentLoading } = useDeploymentComputerSetup();
+  const deploymentConfig = deploymentSetup?.kind === "ready" ? deploymentSetup.config : null;
+  const deploymentLockReason = deploymentSetup?.kind === "unavailable"
+    ? formatMessage({ id: "machine.commandGuide.deploymentUnavailable" })
     : null;
-  const windowsConnectCommand = isKeyValid
-    ? getDaemonConnectCommand({ apiKey: savedKey, platform: "windows", serverName, serverUrl })
+  const isolatedHomeSlug = isIsolatedDeploymentEnv(deploymentEnv) ? serverSlug : null;
+  const macLinuxConnectCommand = isKeyValid && deploymentConfig
+    ? getDaemonConnectCommand({ apiKey: savedKey, platform: "mac-linux", serverName, serverUrl: deploymentConfig.serverUrl })
+    : null;
+  const windowsConnectCommand = isKeyValid && deploymentConfig
+    ? getDaemonConnectCommand({ apiKey: savedKey, platform: "windows", serverName, serverUrl: deploymentConfig.serverUrl })
     : null;
   const setupMachineId = machine.isComputer ? null : machine.id;
-  const computerCommands = getComputerCommands(serverSlug, deploymentEnv, serverUrl, {
-    legacyApiKey: isKeyValid ? savedKey : null,
-    // Identity-carried migration (task #239): this page knows WHICH row the
-    // computer is, so the setup command adopts it directly (--machine <id>) —
-    // no fingerprint matching, works after key rotation. Legacy rows only;
-    // Computer rows keep the plain setup command.
-    machineId: setupMachineId,
-  });
+  const computerCommands = deploymentConfig
+    ? getComputerCommandsFromDeployment({
+      deployment: deploymentConfig,
+      serverSlug,
+      isolatedHomeSlug,
+      // Identity-carried migration (task #239): this page knows WHICH row the
+      // computer is, so the setup command adopts it directly (--machine <id>) —
+      // no fingerprint matching, works after key rotation. Legacy rows only;
+      // Computer rows keep the plain setup command.
+      machineId: setupMachineId,
+    })
+    : null;
   const windowsMachine = machine.os?.toLowerCase().startsWith("win") ?? false;
-  const windowsComputerCommands = getComputerCommands(serverSlug, deploymentEnv, serverUrl, {
-    legacyApiKey: isKeyValid ? savedKey : null,
-    machineId: setupMachineId,
-    platform: "windows",
-  });
-  const computerFreshInstallCommands = getComputerCommands(serverSlug, deploymentEnv, serverUrl, {
-    legacyApiKey: isKeyValid ? savedKey : null,
-    machineId: setupMachineId,
-    platform: windowsMachine ? "windows" : "mac-linux",
-    version: latestComputerVersion,
-  });
+  const windowsComputerCommands = deploymentConfig
+    ? getComputerCommandsFromDeployment({
+      deployment: deploymentConfig,
+      serverSlug,
+      isolatedHomeSlug,
+      machineId: setupMachineId,
+      platform: "windows",
+    })
+    : null;
+  const computerFreshInstallCommands = deploymentConfig
+    ? getComputerCommandsFromDeployment({
+      deployment: deploymentConfig,
+      serverSlug,
+      isolatedHomeSlug,
+      machineId: setupMachineId,
+      platform: windowsMachine ? "windows" : "mac-linux",
+      version: latestComputerVersion,
+    })
+    : null;
   const machineComputerCommands = windowsMachine ? windowsComputerCommands : computerCommands;
   const computerSetupCommand = machineComputerCommands?.setup ?? null;
   const computerInstall = machineComputerCommands?.install ?? null;
@@ -1293,6 +1315,14 @@ export default function MachineDetailPanel({
         </div>
 
         <div className="px-5 py-4 space-y-6">
+          {/* Contract v1: when the deployment config is not ready, every
+              Computer/daemon command on this page stays hidden and the reason
+              is the only thing rendered — no official-source fallback. */}
+          {deploymentLockReason && (
+            <Banner intent="warning" className="font-bold" data-testid="machine-deployment-error">
+              {deploymentLockReason}
+            </Banner>
+          )}
           {/* Legacy daemon: intent-stable command sections (task #239 v2.3
               §19.web). Structure is decided by user INTENT — Migrate primary
               (always, any status), stay-legacy secondary (offline only) —
@@ -1358,6 +1388,8 @@ export default function MachineDetailPanel({
                       computerInstallCommand={null}
                       macLinuxDaemonCommand={macLinuxConnectCommand}
                       windowsDaemonCommand={windowsConnectCommand}
+                      deploymentLoading={deploymentLoading}
+                      deploymentLockReason={deploymentLockReason}
                     />
                   ) : (
                     <div>
