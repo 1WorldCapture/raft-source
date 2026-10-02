@@ -6519,8 +6519,7 @@ export const productFeedbackLocators = pgTable("product_feedback_locators", {
 // --- External Agent Proxy Delegation (design v1.1 §3, grokbot-integration
 // task #4 / Phase A1). Six domain records: configuration, input consumption,
 // wake intent, transport attempts, run ownership, batch claims. bigint
-// columns use BigInt mode for exactness above MAX_SAFE_INTEGER; the JSON
-// decimal-string contract is enforced by the shared DTO schemas (A32).
+// columns use mode:"string" so JSON surfaces stay exact decimal strings.
 
 export const externalAgentConnections = pgTable("external_agent_connections", {
   id: uuid("id").primaryKey().$defaultFn(() => randomUUID()),
