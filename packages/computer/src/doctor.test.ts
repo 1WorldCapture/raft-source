@@ -589,106 +589,112 @@ test("doctor: terminal unlink marker gives stale-state recovery even without log
 
 test("doctor: regret state detects empty fresh Computer without destructive delete advice", async () => {
   await withHome(async (home) => {
-    await writeUserSessionForServer(home, "tok", "https://api.example.test");
-    await writeAttach(home, SERVER_A, SECRET_KEY, {
-      serverSlug: "botiverse",
-      serverUrl: "https://api.example.test",
-      machineId: MACHINE_B,
-    });
-    const migration: MigrationDetection = {
-      kind: "matched",
-      candidates: [{
-        apiKeyFingerprint: FP_A,
-        daemonId: MACHINE_A,
-        localPath: `${home}/machines/machine-${FP_A}/daemon.lock/owner.json`,
-        machineName: "wenyideMacBook-Air",
-      }],
-      excluded: [],
-    };
+    const ctx = await startPreflightServer(200, { ok: true });
+    try {
+      await writeUserSessionForServer(home, "tok", ctx.baseUrl);
+      await writeAttach(home, SERVER_A, SECRET_KEY, {
+        serverSlug: "botiverse",
+        serverUrl: ctx.baseUrl,
+        machineId: MACHINE_B,
+      });
+      const migration: MigrationDetection = {
+        kind: "matched",
+        candidates: [{
+          apiKeyFingerprint: FP_A,
+          daemonId: MACHINE_A,
+          localPath: `${home}/machines/machine-${FP_A}/daemon.lock/owner.json`,
+          machineName: "wenyideMacBook-Air",
+        }],
+        excluded: [],
+      };
 
-    const checks = await runDoctorChecks(home, {
-      detectMigration: async () => migration,
-      listServerMachines: async () => ({
-        status: "success",
-        machines: [
-          {
-            id: MACHINE_B,
-            name: "new-computer",
-            createdAt: "2026-07-08T00:00:00.000Z",
-            isComputer: true,
-            computerAttachedByCurrentUser: true,
-            agentCount: 0,
-          },
-          {
-            id: MACHINE_A,
-            name: "wenyideMacBook-Air",
-            createdAt: "2026-07-07T00:00:00.000Z",
-            isComputer: false,
-            computerAttachedByCurrentUser: false,
-            agentCount: 2,
-          },
-        ],
-      }),
-    });
+      const checks = await runDoctorChecks(home, {
+        detectMigration: async () => migration,
+        listServerMachines: async () => ({
+          status: "success",
+          machines: [
+            {
+              id: MACHINE_B,
+              name: "new-computer",
+              createdAt: "2026-07-08T00:00:00.000Z",
+              isComputer: true,
+              computerAttachedByCurrentUser: true,
+              agentCount: 0,
+            },
+            {
+              id: MACHINE_A,
+              name: "wenyideMacBook-Air",
+              createdAt: "2026-07-07T00:00:00.000Z",
+              isComputer: false,
+              computerAttachedByCurrentUser: false,
+              agentCount: 2,
+            },
+          ],
+        }),
+      });
 
-    const identity = checks.find((check) => check.name === "identity /botiverse");
-    assert.ok(identity);
-    assert.equal(identity.ok, false);
-    assert.match(identity.detail, /connected as "new-computer" \(0 agents\)/);
-    assert.match(identity.detail, /agents currently appear on "wenyideMacBook-Air"/);
-    assert.match(identity.detail, /Do not delete any Computer from this diagnosis alone/);
-    assert.match(identity.detail, /raft-computer doctor \/botiverse --migration-details/);
-    assert.doesNotMatch(identity.detail, /delete the empty new Computer on the web/);
-    assert.doesNotMatch(identity.detail, /raft-computer switch/);
+      const identity = checks.find((check) => check.name === "identity /botiverse");
+      assert.ok(identity);
+      assert.equal(identity.ok, false);
+      assert.match(identity.detail, /connected as "new-computer" \(0 agents\)/);
+      assert.match(identity.detail, /agents currently appear on "wenyideMacBook-Air"/);
+      assert.match(identity.detail, /Do not delete any Computer from this diagnosis alone/);
+      assert.match(identity.detail, /raft-computer doctor \/botiverse --migration-details/);
+      assert.doesNotMatch(identity.detail, /delete the empty new Computer on the web/);
+      assert.doesNotMatch(identity.detail, /raft-computer switch/);
+    } finally { await stop(ctx.server); }
   });
 });
 
 test("doctor: missing attached Computer row is treated as reconcile window, not empty delete target", async () => {
   await withHome(async (home) => {
-    await writeUserSessionForServer(home, "tok", "https://api.example.test");
-    await writeAttach(home, SERVER_A, SECRET_KEY, {
-      serverSlug: "botiverse",
-      serverUrl: "https://api.example.test",
-      machineId: MACHINE_B,
-    });
-    const migration: MigrationDetection = {
-      kind: "matched",
-      candidates: [{
-        apiKeyFingerprint: FP_A,
-        daemonId: MACHINE_A,
-        localPath: `${home}/machines/machine-${FP_A}/daemon.lock/owner.json`,
-        machineName: "CASE-Jr.local",
-      }],
-      excluded: [],
-    };
+    const ctx = await startPreflightServer(200, { ok: true });
+    try {
+      await writeUserSessionForServer(home, "tok", ctx.baseUrl);
+      await writeAttach(home, SERVER_A, SECRET_KEY, {
+        serverSlug: "botiverse",
+        serverUrl: ctx.baseUrl,
+        machineId: MACHINE_B,
+      });
+      const migration: MigrationDetection = {
+        kind: "matched",
+        candidates: [{
+          apiKeyFingerprint: FP_A,
+          daemonId: MACHINE_A,
+          localPath: `${home}/machines/machine-${FP_A}/daemon.lock/owner.json`,
+          machineName: "CASE-Jr.local",
+        }],
+        excluded: [],
+      };
 
-    const checks = await runDoctorChecks(home, {
-      detectMigration: async () => migration,
-      listServerMachines: async () => ({
-        status: "success",
-        machines: [
-          {
-            id: MACHINE_A,
-            name: "CASE-Jr.local",
-            createdAt: "2026-07-07T00:00:00.000Z",
-            isComputer: false,
-            computerAttachedByCurrentUser: false,
-            agentCount: 7,
-          },
-        ],
-      }),
-    });
+      const checks = await runDoctorChecks(home, {
+        detectMigration: async () => migration,
+        listServerMachines: async () => ({
+          status: "success",
+          machines: [
+            {
+              id: MACHINE_A,
+              name: "CASE-Jr.local",
+              createdAt: "2026-07-07T00:00:00.000Z",
+              isComputer: false,
+              computerAttachedByCurrentUser: false,
+              agentCount: 7,
+            },
+          ],
+        }),
+      });
 
-    const identity = checks.find((check) => check.name === "identity /botiverse");
-    assert.ok(identity);
-    assert.equal(identity.ok, false);
-    assert.match(identity.detail, new RegExp(`saved Computer identity ${MACHINE_B} is not visible`));
-    assert.match(identity.detail, /agents currently appear on "CASE-Jr.local" \(7 agents\)/);
-    assert.match(identity.detail, /setup or migration reconciliation window/);
-    assert.match(identity.detail, /Do not delete any Computer from this diagnosis alone/);
-    assert.match(identity.detail, /raft-computer doctor \/botiverse --migration-details/);
-    assert.doesNotMatch(identity.detail, /connected as "this Computer"/);
-    assert.doesNotMatch(identity.detail, /delete the empty new Computer on the web/);
+      const identity = checks.find((check) => check.name === "identity /botiverse");
+      assert.ok(identity);
+      assert.equal(identity.ok, false);
+      assert.match(identity.detail, new RegExp(`saved Computer identity ${MACHINE_B} is not visible`));
+      assert.match(identity.detail, /agents currently appear on "CASE-Jr.local" \(7 agents\)/);
+      assert.match(identity.detail, /setup or migration reconciliation window/);
+      assert.match(identity.detail, /Do not delete any Computer from this diagnosis alone/);
+      assert.match(identity.detail, /raft-computer doctor \/botiverse --migration-details/);
+      assert.doesNotMatch(identity.detail, /connected as "this Computer"/);
+      assert.doesNotMatch(identity.detail, /delete the empty new Computer on the web/);
+    } finally { await stop(ctx.server); }
   });
 });
 

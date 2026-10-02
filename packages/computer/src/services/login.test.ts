@@ -216,25 +216,34 @@ test("login service: device-authorize transport failure throws DEVICE_AUTHORIZE_
 });
 
 test("login service: device-authorize honors HTTP_PROXY instead of going direct", async () => {
-  await withProxyEnv({ HTTP_PROXY: "http://127.0.0.1:1" }, async () => {
-    await withHome(async (home) => {
-      const ctx = await startDeviceServer({});
-      try {
-        await assert.rejects(
-          () => login({ serverUrl: ctx.baseUrl, slockHome: home }),
-          (err: unknown) => {
-            assert.ok(err instanceof ComputerServiceError);
-            assert.equal((err as ComputerServiceError).code, "DEVICE_AUTHORIZE_FAILED");
-            assert.match((err as ComputerServiceError).message, /Could not start device login at/);
-            assert.equal(ctx.tokenCalls(), 0, "authorize never reached the direct origin");
-            return true;
-          },
-        );
-      } finally {
-        await stop(ctx.server);
-      }
+  // Own a proxy fixture that rejects tunnels instead of contacting an
+  // arbitrary unallocated localhost port.
+  const proxy = createServer((_req, response) => { response.writeHead(502); response.end(); });
+  proxy.on("connect", (_req, socket) => socket.destroy());
+  await new Promise<void>((resolve) => proxy.listen(0, "127.0.0.1", resolve));
+  const proxyAddress = proxy.address();
+  assert.ok(proxyAddress && typeof proxyAddress === "object");
+  try {
+    await withProxyEnv({ HTTP_PROXY: `http://127.0.0.1:${proxyAddress.port}` }, async () => {
+      await withHome(async (home) => {
+        const ctx = await startDeviceServer({});
+        try {
+          await assert.rejects(
+            () => login({ serverUrl: ctx.baseUrl, slockHome: home }, { requestTimeoutMs: 200 }),
+            (err: unknown) => {
+              assert.ok(err instanceof ComputerServiceError);
+              assert.equal((err as ComputerServiceError).code, "DEVICE_AUTHORIZE_FAILED");
+              assert.match((err as ComputerServiceError).message, /Could not start device login at/);
+              assert.equal(ctx.tokenCalls(), 0, "authorize never reached the direct origin");
+              return true;
+            },
+          );
+        } finally {
+          await stop(ctx.server);
+        }
+      });
     });
-  });
+  } finally { proxy.closeAllConnections(); await stop(proxy); }
 });
 
 test("login service: device-authorize honors NO_PROXY bypass for local server", async () => {
