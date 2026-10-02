@@ -1128,7 +1128,8 @@ test("bootout late error whose in-call recovery also fails degrades to the durab
         },
       }),
       (error: unknown) => {
-        assert.equal((error as { code?: string }).code, "HOST_LIFECYCLE_BOOTOUT_FAILED");
+        // Terminal degraded code, never rewritten into a "restored" claim.
+        assert.equal((error as { code?: string }).code, "HOST_LIFECYCLE_BOOTOUT_RECOVERY_FAILED");
         return true;
       },
     );
@@ -1256,6 +1257,60 @@ test("caller-level cancellation during bootout still recovers — the recovery b
     assert.ok([...harness.jobs.values()][0]!.includes(originalDispatcher));
     assert.equal((await readHostLifecycleMarker(slockHome))?.dispatcherPath, originalDispatcher);
     assert.equal(await readHostLifecycleRecoveryStatus(slockHome), null);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("forward timeout + failed in-call recovery reports the degraded truth, never a rewritten 'restored' claim", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "raft-macos-login-timeout-degraded-"));
+  const home = path.join(root, "user");
+  const slockHome = path.join(home, ".slock");
+  const harness = launchctlHarness();
+  const originalDispatcher = path.join(home, ".local", "bin", "raft-computer");
+  const baseDeps = {
+    platform: "darwin" as const,
+    userHome: home,
+    uid: 501,
+    dispatcherPath: originalDispatcher,
+    legacyDesktopBundlePath: path.join(root, "Applications", "Raft Computer.app"),
+    runCommand: harness.run,
+  };
+  try {
+    await convergeCliHostLifecycle(slockHome, "enabled", baseDeps);
+    const deadline = new AbortController();
+    await assert.rejects(
+      refreshCliLoginCarrierIfOwned(slockHome, {
+        ...baseDeps,
+        dispatcherPath: path.join(home, ".local", "bin", "raft-computer-next"),
+        signal: deadline.signal,
+        deadlineAtMs: Date.now() + 60_000,
+        runCommand: async (command, args, signal) => {
+          if (args[0] === "bootout") {
+            await harness.run(command, args, signal);
+            deadline.abort();
+            const abortError = new Error("operation aborted");
+            abortError.name = "AbortError";
+            throw abortError;
+          }
+          // The forward deadline fired AND the recovery bootstrap fails: the
+          // report must keep the degraded terminal code and state.
+          if (args[0] === "bootstrap") throw new Error("bootstrap denied");
+          return harness.run(command, args, signal);
+        },
+      }),
+      (error: unknown) => {
+        assert.equal(
+          (error as { code?: string }).code,
+          "HOST_LIFECYCLE_BOOTOUT_RECOVERY_FAILED",
+          "the outer timeout rewrite must not mask the degraded outcome",
+        );
+        return true;
+      },
+    );
+    assert.equal(harness.jobs.size, 0, "job is genuinely gone");
+    assert.equal((await readHostLifecycleRecoveryStatus(slockHome))?.status, "pending-replace");
+    assert.equal((await readHostLifecycleMarker(slockHome))?.dispatcherPath, originalDispatcher);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

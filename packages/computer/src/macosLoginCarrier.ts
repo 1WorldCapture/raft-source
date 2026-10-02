@@ -986,9 +986,15 @@ async function enableCliCarrier(
             error,
           );
         } catch (recoveryError) {
-          if (recoveryError instanceof ComputerServiceError) throw recoveryError;
+          if (recoveryError instanceof ComputerServiceError
+            && recoveryError.code === "HOST_LIFECYCLE_BOOTOUT_FAILED") {
+            throw recoveryError;
+          }
+          // Terminal degraded code: the machine is NOT restored here (job=0,
+          // pending kept), so no outer handler may rewrite this into a
+          // "restored" claim.
           throw new ComputerServiceError(
-            "HOST_LIFECYCLE_BOOTOUT_FAILED",
+            "HOST_LIFECYCLE_BOOTOUT_RECOVERY_FAILED",
             "Raft Computer failed to unload the macOS post-login job, the job was in fact unloaded, AND re-registering the previous carrier failed. The login definition and owner marker are intact and the recovery record is kept; the next lifecycle command recovers from it.",
             recoveryError,
           );
@@ -1047,7 +1053,19 @@ async function enableCliCarrier(
         );
       }
     }
-    if (forwardDeadline?.signal.aborted) {
+    const DEGRADED_TERMINAL_CODES = new Set([
+      "HOST_LIFECYCLE_BOOTOUT_RECOVERY_FAILED",
+      "HOST_LIFECYCLE_ROLLBACK_FAILED",
+      "HOST_LIFECYCLE_RECOVERY_FAILED",
+    ]);
+    if (
+      forwardDeadline?.signal.aborted
+      && !(error instanceof ComputerServiceError && DEGRADED_TERMINAL_CODES.has(error.code))
+    ) {
+      // Only claim "restored" when the degraded-terminal paths were NOT the
+      // outcome: their codes mean the carrier is gone and a pending record
+      // is the durable state — rewriting them into a restoration claim
+      // would misreport the machine.
       throw new ComputerServiceError(
         "HOST_LIFECYCLE_REFRESH_TIMEOUT",
         "Raft Computer stopped macOS login-carrier replacement before the shared K resume deadline and restored the last verified carrier.",
