@@ -1143,6 +1143,8 @@ export class AgentProcessManager {
    * daemon restart and reconstructs this cache.
    */
   private readonly trackedMentionDeliveries = new Map<string, TrackedMentionDelivery>();
+  /** occurrenceId -> last reject log time; collapses re-send storms (task #8). */
+  private mentionRejectMemory = new Map<string, number>();
   /** Monotonic ordering counter for launch phase-5/6 exported rows (audit only, not a pairing key). */
   private launchTransitionSeq = 0;
   private noProcessResidencyTransitions = new AgentNoProcessResidencyTransitions();
@@ -4203,15 +4205,25 @@ export class AgentProcessManager {
     const tracked = context.mentionDelivery;
     if (!tracked) return "untracked";
     const reject = (code: MentionDeliveryTerminalErrorCode) => {
-      // A rejected mention is a missed wake; it must leave a log line and a routed
-      // trace, not just the bare "Delivery received".
-      logger.warn(`[Agent ${agentId}] Mention delivery rejected (${code}, process_present=${Boolean(ap)}, seq=${message.seq ?? 0})`);
-      this.recordDaemonTrace("daemon.agent.delivery.routed", this.deliveryTraceAttrs(agentId, message, {
-        outcome: "mention_rejected",
-        accepted: false,
-        process_present: Boolean(ap),
-        mention_reject_code: code,
-      }), "error");
+      // Re-send storms hit the same occurrence every few seconds (task #8):
+      // the terminal_error is still forwarded every time (the server decides
+      // idempotently by generation), but the log line and error trace fire
+      // only ONCE per occurrence per silence window instead of per attempt.
+      const now = Date.now();
+      const lastRejectedAt = this.mentionRejectMemory.get(tracked.occurrenceId) ?? 0;
+      const fresh = now - lastRejectedAt > 5 * 60_000;
+      if (fresh) {
+        this.mentionRejectMemory.set(tracked.occurrenceId, now);
+        // A rejected mention is a missed wake; it must leave a log line and a routed
+        // trace, not just the bare "Delivery received".
+        logger.warn(`[Agent ${agentId}] Mention delivery rejected (${code}, process_present=${Boolean(ap)}, seq=${message.seq ?? 0})`);
+        this.recordDaemonTrace("daemon.agent.delivery.routed", this.deliveryTraceAttrs(agentId, message, {
+          outcome: "mention_rejected",
+          accepted: false,
+          process_present: Boolean(ap),
+          mention_reject_code: code,
+        }), "error");
+      }
       context.onMentionTerminalError?.(code);
       return "rejected" as const;
     };

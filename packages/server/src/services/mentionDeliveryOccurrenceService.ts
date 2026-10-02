@@ -10,6 +10,11 @@ export const MENTION_DELIVERY_TERMINAL_ERROR_CODES = [
   "DELIVERY_REJECTED",
   "UNSUPPORTED_DELIVERY_PATH",
   "INSTRUMENT_FAILED",
+  // Server-side verdict only — the ack-retry budget ran out. Never reported
+  // by a daemon; written when the orchestrator exhausts re-sends so the
+  // durable occurrence holds a queryable terminal state instead of a fresh
+  // invisible budget on the next track/redrive (task #8).
+  "RETRY_EXHAUSTED",
 ] as const;
 
 export type MentionDeliveryTerminalErrorCode = typeof MENTION_DELIVERY_TERMINAL_ERROR_CODES[number];
