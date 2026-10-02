@@ -957,7 +957,7 @@ taskRouter.delete("/:taskId", async (req, res) => {
     // canonical row also drops the anti-join that suppresses its message-side
     // shadow, so the "deleted" task reappears on the board from the other
     // table. `deleteTaskByOwner` removes both sides.
-    await taskService.deleteTaskByOwner(task.owner);
+    await taskService.deleteTaskByOwner(task.owner, "user", req.userId!);
 
     const io: SocketServer = req.app.get("io");
     const surface = {

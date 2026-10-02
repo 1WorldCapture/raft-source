@@ -1,0 +1,1476 @@
+{
+  "源码提交": "3fdef79664e40d865d3caf624b5a9db58343528b",
+  "说明": "逐项列出旧入口当前拒绝策略和静态调用线索；实际服务提交及路由外调用者见配套报告。",
+  "文件": [
+    "packages/server/src/routes/internalAgentApi.ts",
+    "packages/shared/src/agentApiContract.ts"
+  ],
+  "合约条数": 80,
+  "字面量登记条数": 77,
+  "直接旧路由条数": 17,
+  "记录": [
+    {
+      "合约键": "actionPrepare",
+      "方法": "POST",
+      "路径": "/prepare-action",
+      "登记行": [
+        7569
+      ],
+      "当前登记行": 7572,
+      "静态服务调用": [
+        "actionCardsService.prepareActionCard"
+      ],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "appConfigGet",
+      "方法": "GET",
+      "路径": "/apps/:appId/config",
+      "登记行": [
+        7505
+      ],
+      "当前登记行": 7508,
+      "静态服务调用": [],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "appConfigPatch",
+      "方法": "PATCH",
+      "路径": "/apps/:appId/config",
+      "登记行": [
+        7524
+      ],
+      "当前登记行": 7527,
+      "静态服务调用": [],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "appSourceAck",
+      "方法": "POST",
+      "路径": "/app-sources/ack",
+      "登记行": [
+        7441
+      ],
+      "当前登记行": 7444,
+      "静态服务调用": [],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "attachmentCommentsList",
+      "方法": "GET",
+      "路径": "/attachments/:attachmentId/comments",
+      "登记行": [
+        3544
+      ],
+      "当前登记行": 3547,
+      "静态服务调用": [
+        "attachmentCommentService.attachmentCommentsEnabledForServer",
+        "attachmentCommentService.enrichCommentsWithResolveStatus",
+        "attachmentCommentService.listAttachmentComments"
+      ],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "attachmentDownload",
+      "方法": "GET",
+      "路径": "/attachments/:attachmentId",
+      "登记行": [
+        3466
+      ],
+      "当前登记行": 3469,
+      "静态服务调用": [],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "attachmentUpload",
+      "方法": "POST",
+      "路径": "/upload",
+      "登记行": [
+        4400
+      ],
+      "当前登记行": 4403,
+      "静态服务调用": [
+        "channelService.canAgentPostToChannel",
+        "channelService.isChannelArchived"
+      ],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "attachmentUploadCapabilities",
+      "方法": "GET",
+      "路径": "/attachment-upload-capabilities",
+      "登记行": [
+        4305
+      ],
+      "当前登记行": 4308,
+      "静态服务调用": [],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "attachmentUploadSessionCancel",
+      "方法": "DELETE",
+      "路径": "/attachment-upload-sessions/:uploadId",
+      "登记行": [
+        4364
+      ],
+      "当前登记行": 4367,
+      "静态服务调用": [],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "attachmentUploadSessionComplete",
+      "方法": "POST",
+      "路径": "/attachment-upload-sessions/:uploadId/complete",
+      "登记行": [
+        4346
+      ],
+      "当前登记行": 4349,
+      "静态服务调用": [],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "attachmentUploadSessionCreate",
+      "方法": "POST",
+      "路径": "/attachment-upload-sessions",
+      "登记行": [
+        4325
+      ],
+      "当前登记行": 4328,
+      "静态服务调用": [],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "attachmentUploadSessionStatus",
+      "方法": "GET",
+      "路径": "/attachment-upload-sessions/:uploadId",
+      "登记行": [
+        4382
+      ],
+      "当前登记行": 4385,
+      "静态服务调用": [],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "channelArchive",
+      "方法": "POST",
+      "路径": "/channels/archive",
+      "登记行": [
+        2735
+      ],
+      "当前登记行": 2738,
+      "静态服务调用": [],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "channelJoin",
+      "方法": "POST",
+      "路径": "/channels/:channelId/join",
+      "登记行": [
+        2519
+      ],
+      "当前登记行": 2522,
+      "静态服务调用": [
+        "agentService.getAgent",
+        "channelService.addAgent",
+        "channelService.getChannel",
+        "channelService.isChannelAgent",
+        "messageService.broadcastSystemMessage"
+      ],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "channelLeave",
+      "方法": "POST",
+      "路径": "/channels/:channelId/leave",
+      "登记行": [
+        2599
+      ],
+      "当前登记行": 2602,
+      "静态服务调用": [
+        "agentOrchestrator.purgeAgentInboxForChannelTree",
+        "agentService.getAgent",
+        "channelService.canAgentAccessChannel",
+        "channelService.getChannel",
+        "channelService.removeAgent"
+      ],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "channelMembers",
+      "方法": "GET",
+      "路径": "/channel-members",
+      "登记行": [
+        4677
+      ],
+      "当前登记行": 4680,
+      "静态服务调用": [
+        "channelService.getChannelMembers",
+        "channelService.resolveChannelByName"
+      ],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "channelMute",
+      "方法": "POST",
+      "路径": "/channels/:channelId/mute",
+      "登记行": [
+        2798
+      ],
+      "当前登记行": 2801,
+      "静态服务调用": [
+        "channelService.setInboxTargetActivityMuteState"
+      ],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "channelUnarchive",
+      "方法": "POST",
+      "路径": "/channels/unarchive",
+      "登记行": [
+        2741
+      ],
+      "当前登记行": 2744,
+      "静态服务调用": [],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "channelUnmute",
+      "方法": "POST",
+      "路径": "/channels/:channelId/unmute",
+      "登记行": [
+        2845
+      ],
+      "当前登记行": 2848,
+      "静态服务调用": [
+        "agentOrchestrator.discardUndeliverableMessages",
+        "agentOrchestrator.peekPendingMessages",
+        "channelService.setInboxTargetActivityMuteState"
+      ],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "events",
+      "方法": "GET",
+      "路径": "/events",
+      "登记行": [
+        3205
+      ],
+      "当前登记行": 3208,
+      "静态服务调用": [],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "eventsAck",
+      "方法": "POST",
+      "路径": "/events/ack",
+      "登记行": [
+        3245
+      ],
+      "当前登记行": 3248,
+      "静态服务调用": [
+        "agentOrchestrator.discardUndeliverableMessages",
+        "agentOrchestrator.receiveMessages",
+        "agentPermalinkRenderService.renderAgentReadablePermalinksInTexts",
+        "agentService.getAgent",
+        "messageService.rebuildExternalAgentPendingFromAckCursors"
+      ],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "eventsClaim",
+      "方法": "GET",
+      "路径": "/events/claim",
+      "登记行": [
+        3208
+      ],
+      "当前登记行": 3211,
+      "静态服务调用": [
+        "agentOrchestrator.acknowledgeDeliveredMessages",
+        "agentOrchestrator.hasMachineCapability",
+        "channelService.markAgentLegacyAckCheckpoint",
+        "oauthService.markThirdPartyAgentEventsDelivered"
+      ],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "feedbackLocatorIngest",
+      "方法": "POST",
+      "路径": "/feedback-locators",
+      "登记行": [
+        833
+      ],
+      "当前登记行": 836,
+      "静态服务调用": [],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "feedbackLocatorList",
+      "方法": "GET",
+      "路径": "/feedback-locators",
+      "登记行": [
+        863
+      ],
+      "当前登记行": 866,
+      "静态服务调用": [
+        "agentOrchestrator.recordAgentRaftAction",
+        "agentScopesService.agentHasScope",
+        "agentService.getAgent",
+        "attestedSendService.listRecentAgentAttentionMessagesAfterSeq",
+        "attestedSendService.listRecentMessagesAfterSeq",
+        "channelService.canAgentPostToChannel",
+        "channelService.canAgentReceiveChannelDelivery",
+        "channelService.getChannel",
+        "channelService.hasImplicitServerMembership",
+        "channelService.isChannelAgent",
+        "channelService.isChannelArchived",
+        "channelService.resolveChannelByName",
+        "messageService.listMessagesByIds",
+        "messageService.projectAgentVisibleHttpMessageResponse",
+        "oauthService.defaultAgentLoginScopes",
+        "oauthService.resolveAgentManifest",
+        "rawService.trim"
+      ],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "historyRead",
+      "方法": "GET",
+      "路径": "/history",
+      "登记行": [
+        1938
+      ],
+      "当前登记行": 1941,
+      "静态服务调用": [
+        "agentPermalinkRenderService.renderAgentReadablePermalinksInTexts",
+        "channelService.canAgentAccessChannel",
+        "channelService.getAgentLegacyReadCursor",
+        "channelService.getChannel",
+        "channelService.getJointThreadProjectionByLocalThread",
+        "channelService.markRead",
+        "channelService.parseChannelRef",
+        "channelService.resolveChannelAccess",
+        "channelService.resolveChannelByName",
+        "messageService.appendAgentFacingForwardedSnapshot",
+        "messageService.getMessageContextBySeq",
+        "messageService.listMessages",
+        "messageService.messageShortIdExistsInChannel",
+        "messageService.projectJointMessagesToLocalChannel",
+        "messageService.resolveMessageSeqAnchor",
+        "oauthService.readThirdPartyAgentEventForAgent"
+      ],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "integrationAppList",
+      "方法": "GET",
+      "路径": "/integrations/app",
+      "登记行": [
+        5819
+      ],
+      "当前登记行": 5822,
+      "静态服务调用": [
+        "integrationAppQueryService.listAgentIntegrationApps"
+      ],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "integrationAppLogoUpdate",
+      "方法": "POST",
+      "路径": "/integrations/app/logo",
+      "登记行": [
+        5748
+      ],
+      "当前登记行": 5751,
+      "静态服务调用": [
+        "oauthService.resolveOAuthClientForAgentMutation",
+        "oauthService.updateOAuthClientLogo"
+      ],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "integrationAppManage",
+      "方法": "POST",
+      "路径": "/integrations/app/manage",
+      "登记行": [
+        5592
+      ],
+      "当前登记行": 5595,
+      "静态服务调用": [
+        "oauthService.clearOAuthClientLogo",
+        "oauthService.createOAuthClientShareLink",
+        "oauthService.deleteOAuthClient",
+        "oauthService.getOAuthClientShareLink",
+        "oauthService.requestOAuthClientPublish",
+        "oauthService.requestOAuthClientUnpublish",
+        "oauthService.resolveOAuthClientForAgentMutation",
+        "oauthService.revokeOAuthClientShareLink"
+      ],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "integrationAppPrepare",
+      "方法": "POST",
+      "路径": "/integrations/app/prepare",
+      "登记行": [
+        5290
+      ],
+      "当前登记行": 5293,
+      "静态服务调用": [
+        "actionCardsService.prepareActionCard",
+        "channelService.resolveChannelByName"
+      ],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "integrationAppRotateSecret",
+      "方法": "POST",
+      "路径": "/integrations/app/rotate-secret",
+      "登记行": [
+        5389
+      ],
+      "当前登记行": 5392,
+      "静态服务调用": [
+        "oauthService.rotateClientSecretForAgent"
+      ],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "integrationAppStatus",
+      "方法": "GET",
+      "路径": "/integrations/app/status",
+      "登记行": [
+        5831
+      ],
+      "当前登记行": 5834,
+      "静态服务调用": [
+        "integrationAppQueryService.getAgentIntegrationAppByCard",
+        "integrationAppQueryService.getAgentIntegrationAppByClient"
+      ],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "integrationAppTransferOwner",
+      "方法": "POST",
+      "路径": "/integrations/app/transfer-owner",
+      "登记行": [
+        5438
+      ],
+      "当前登记行": 5441,
+      "静态服务调用": [
+        "channelService.resolveAgentByName",
+        "oauthService.transferClientOwnershipForAgent"
+      ],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "integrationAppUpdate",
+      "方法": "POST",
+      "路径": "/integrations/app/update",
+      "登记行": [
+        5493
+      ],
+      "当前登记行": 5496,
+      "静态服务调用": [
+        "actionCardsService.validateIntegrationUrl",
+        "oauthService.updateOAuthClientForAgent"
+      ],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "integrationList",
+      "方法": "GET",
+      "路径": "/integrations",
+      "登记行": [
+        4968
+      ],
+      "当前登记行": 4971,
+      "静态服务调用": [
+        "oauthService.getAgentIntegrationsOverview",
+        "oauthService.listAgentAvailableOAuthClients",
+        "oauthService.resolveAgentManifest"
+      ],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "integrationLogin",
+      "方法": "POST",
+      "路径": "/integrations/login",
+      "登记行": [
+        5045
+      ],
+      "当前登记行": 5048,
+      "静态服务调用": [
+        "actionCardsService.bindMarketplaceAppName",
+        "actionCardsService.prepareActionCard",
+        "agentService.getAgent",
+        "channelService.resolveChannelByName",
+        "oauthService.listAgentAvailableOAuthClients",
+        "oauthService.listPublicMarketplaceOAuthClients",
+        "oauthService.normalizeAgentRequestedScopes",
+        "oauthService.requestAgentAccess",
+        "serverService.getServer"
+      ],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "integrationMarketplaceSearch",
+      "方法": "GET",
+      "路径": "/integrations/marketplace",
+      "登记行": [
+        5008
+      ],
+      "当前登记行": 5011,
+      "静态服务调用": [
+        "oauthService.searchPublicMarketplaceOAuthClients"
+      ],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "knowledgeGet",
+      "方法": "GET",
+      "路径": "/knowledge",
+      "登记行": [],
+      "直接登记行": [
+        1842
+      ],
+      "当前登记行": 1845,
+      "静态服务调用": [],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "knowledgeSearch",
+      "方法": "GET",
+      "路径": "/knowledge/search",
+      "登记行": [],
+      "直接登记行": [
+        1852
+      ],
+      "当前登记行": 1855,
+      "静态服务调用": [],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "managedMcpCall",
+      "方法": "POST",
+      "路径": "/mcp/call",
+      "登记行": [
+        1618
+      ],
+      "当前登记行": 1621,
+      "静态服务调用": [],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "managedMcpTools",
+      "方法": "GET",
+      "路径": "/mcp/tools",
+      "登记行": [
+        1610
+      ],
+      "当前登记行": 1613,
+      "静态服务调用": [],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "mentionActionsExecute",
+      "方法": "POST",
+      "路径": "/mention-actions/execute",
+      "登记行": [
+        2326
+      ],
+      "当前登记行": 2329,
+      "静态服务调用": [
+        "channelService.assertChannelNotArchived",
+        "channelService.canAgentAccessChannel",
+        "channelService.canAgentPostToChannel",
+        "channelService.getChannel",
+        "messageService.deliverMessageToAgent",
+        "messageService.getMessage",
+        "messageService.getMessageContext",
+        "messageService.resolveMessageIdVisibleToAgent",
+        "messageService.stripViewerScopedAttachmentCommentMetadata"
+      ],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "mentionActionsPending",
+      "方法": "GET",
+      "路径": "/mention-actions/pending",
+      "登记行": [
+        2301
+      ],
+      "当前登记行": 2304,
+      "静态服务调用": [],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "messageReactionAdd",
+      "方法": "POST",
+      "路径": "/messages/:msgId/reactions",
+      "登记行": [
+        2501
+      ],
+      "当前登记行": 2504,
+      "静态服务调用": [],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "messageReactionRemove",
+      "方法": "DELETE",
+      "路径": "/messages/:msgId/reactions",
+      "登记行": [
+        2510
+      ],
+      "当前登记行": 2513,
+      "静态服务调用": [],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "messageResolve",
+      "方法": "GET",
+      "路径": "/messages/:msgId/resolve",
+      "登记行": [
+        4643
+      ],
+      "当前登记行": 4646,
+      "静态服务调用": [
+        "messageService.resolveMessageIdVisibleToAgent"
+      ],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "messageSearch",
+      "方法": "GET",
+      "路径": "/search",
+      "登记行": [
+        4529
+      ],
+      "当前登记行": 4532,
+      "静态服务调用": [
+        "agentPermalinkRenderService.renderAgentReadablePermalinksInTexts",
+        "channelService.resolveChannelByName",
+        "searchService.isMessageSearchPublicError",
+        "searchService.isSearchQueryAbortedError",
+        "searchService.searchMessagesForAgent"
+      ],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "messageSend",
+      "方法": "POST",
+      "路径": "/send",
+      "登记行": [
+        4239
+      ],
+      "当前登记行": 4242,
+      "静态服务调用": [],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "messageSendReceipt",
+      "方法": "GET",
+      "路径": "/send-receipts/:key",
+      "登记行": [
+        4241
+      ],
+      "当前登记行": 4244,
+      "静态服务调用": [
+        "channelService.canAgentPostToChannel",
+        "channelService.isChannelArchived"
+      ],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "messageSendV2",
+      "方法": "POST",
+      "路径": "/v2/send",
+      "登记行": [
+        4240
+      ],
+      "当前登记行": 4243,
+      "静态服务调用": [],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "migrationArrived",
+      "方法": "POST",
+      "路径": "/migrations/arrived",
+      "登记行": [
+        7140
+      ],
+      "当前登记行": 7143,
+      "静态服务调用": [],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "migrationBegin",
+      "方法": "POST",
+      "路径": "/migrations",
+      "登记行": [
+        7075
+      ],
+      "当前登记行": 7078,
+      "静态服务调用": [],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "migrationReady",
+      "方法": "POST",
+      "路径": "/migrations/ready",
+      "登记行": [
+        7102
+      ],
+      "当前登记行": 7105,
+      "静态服务调用": [
+        "agentMigrationService.getActiveAgentMigration",
+        "agentMigrationService.markAgentMigrationReady"
+      ],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "migrationStatus",
+      "方法": "GET",
+      "路径": "/migrations/current",
+      "登记行": [
+        7083
+      ],
+      "当前登记行": 7086,
+      "静态服务调用": [
+        "agentMigrationService.getActiveAgentMigration"
+      ],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "profileAvatarUpdate",
+      "方法": "POST",
+      "路径": "/profile/avatar",
+      "登记行": [
+        4916
+      ],
+      "当前登记行": 4919,
+      "静态服务调用": [
+        "agentService.getAgent",
+        "agentService.updateAgent"
+      ],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "profileShow",
+      "方法": "GET",
+      "路径": "/profile",
+      "登记行": [
+        4791
+      ],
+      "当前登记行": 4794,
+      "静态服务调用": [],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "profileUpdate",
+      "方法": "POST",
+      "路径": "/profile",
+      "登记行": [
+        4819
+      ],
+      "当前登记行": 4822,
+      "静态服务调用": [
+        "agentService.updateAgent"
+      ],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "reminderCancel",
+      "方法": "DELETE",
+      "路径": "/reminders/:reminderId",
+      "登记行": [
+        7258
+      ],
+      "当前登记行": 7261,
+      "静态服务调用": [
+        "reminderCrud.cancelAppReminder",
+        "reminderService.toReminderSummaries"
+      ],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "reminderCreate",
+      "方法": "POST",
+      "路径": "/reminders",
+      "登记行": [
+        7167
+      ],
+      "当前登记行": 7170,
+      "静态服务调用": [
+        "channelService.resolveChannelByName",
+        "reminderCrud.createAppReminder",
+        "reminderService.toReminderSummaries"
+      ],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "reminderList",
+      "方法": "GET",
+      "路径": "/reminders",
+      "登记行": [
+        7147
+      ],
+      "当前登记行": 7150,
+      "静态服务调用": [
+        "reminderCrud.listAppReminders",
+        "reminderService.toReminderSummaries"
+      ],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "reminderLog",
+      "方法": "GET",
+      "路径": "/reminders/:reminderId/log",
+      "登记行": [
+        7463
+      ],
+      "当前登记行": 7466,
+      "静态服务调用": [
+        "reminderCrud.listAppReminderEventsForOwner",
+        "reminderCrud.resolveAppHistoricalReminderIdForOwner",
+        "reminderService.toReminderEventSummaries"
+      ],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "reminderSnooze",
+      "方法": "POST",
+      "路径": "/reminders/:reminderId/snooze",
+      "登记行": [
+        7303
+      ],
+      "当前登记行": 7306,
+      "静态服务调用": [
+        "reminderCrud.snoozeAppReminder",
+        "reminderService.toReminderSummaries"
+      ],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "reminderUpdate",
+      "方法": "PATCH",
+      "路径": "/reminders/:reminderId",
+      "登记行": [
+        7352
+      ],
+      "当前登记行": 7355,
+      "静态服务调用": [
+        "reminderCrud.updateAppReminder",
+        "reminderService.toReminderSummaries"
+      ],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "resolveChannel",
+      "方法": "POST",
+      "路径": "/resolve-channel",
+      "登记行": [
+        4499
+      ],
+      "当前登记行": 4502,
+      "静态服务调用": [],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "serverInfo",
+      "方法": "GET",
+      "路径": "/server",
+      "登记行": [
+        1707
+      ],
+      "当前登记行": 1710,
+      "静态服务调用": [
+        "agentService.getAgent",
+        "channelService.listChannelsForAgent",
+        "machineService.getMachine",
+        "serverService.getServerMembers"
+      ],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "serverUpdate",
+      "方法": "PATCH",
+      "路径": "/server",
+      "登记行": [],
+      "直接登记行": [
+        1755
+      ],
+      "当前登记行": 1758,
+      "静态服务调用": [
+        "agentService.getAgent"
+      ],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "taskAmend",
+      "方法": "POST",
+      "路径": "/tasks/amend",
+      "登记行": [
+        6946
+      ],
+      "当前登记行": 6949,
+      "静态服务调用": [
+        "agentService.getAgent",
+        "channelService.canAgentPostToChannel",
+        "channelService.isChannelArchived",
+        "taskService.amendTask",
+        "taskService.getTaskByNumber"
+      ],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "taskAssign",
+      "方法": "POST",
+      "路径": "/tasks/assign",
+      "登记行": [
+        6557
+      ],
+      "当前登记行": 6560,
+      "静态服务调用": [
+        "channelService.canAgentPostToChannel",
+        "channelService.isChannelArchived",
+        "taskService.assignTask",
+        "taskService.getTaskByNumber"
+      ],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "taskClaim",
+      "方法": "POST",
+      "路径": "/tasks/claim",
+      "登记行": [
+        6242
+      ],
+      "当前登记行": 6245,
+      "静态服务调用": [
+        "taskService.batchClaimTasks",
+        "taskService.claimTaskDetailed",
+        "taskService.convertMessageToTask",
+        "taskService.getClaimRejectionForOwner",
+        "taskService.projectTaskToChannel",
+        "taskService.resolveMessageInChannel",
+        "taskService.resolveTaskByMessageId"
+      ],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "taskConvert",
+      "方法": "POST",
+      "路径": "/tasks/convert",
+      "登记行": [
+        6863
+      ],
+      "当前登记行": 6866,
+      "静态服务调用": [
+        "agentService.getAgent",
+        "channelService.canAgentPostToChannel",
+        "channelService.isChannelArchived",
+        "messageService.broadcastSystemMessageToLocalSurfaces",
+        "messageService.summarizeForSystemMessage",
+        "taskService.convertMessageToTask",
+        "taskService.enrichSingleLegacyTask",
+        "taskService.projectTaskToChannel",
+        "taskService.resolveMessageInChannel"
+      ],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "taskCreate",
+      "方法": "POST",
+      "路径": "/tasks",
+      "登记行": [
+        6029
+      ],
+      "当前登记行": 6032,
+      "静态服务调用": [
+        "messageService.broadcastSystemMessageToLocalSurfaces",
+        "messageService.deliverMessagesToAgents",
+        "messageService.summarizeForSystemMessage",
+        "messageService.updateMaxSeq",
+        "taskService.createTasks",
+        "taskService.createTasksWithAssignmentReceipt",
+        "taskService.projectTasksToChannel"
+      ],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "taskDelete",
+      "方法": "POST",
+      "路径": "/tasks/delete",
+      "登记行": [
+        6786
+      ],
+      "当前登记行": 6789,
+      "静态服务调用": [
+        "agentService.getAgent",
+        "channelService.canAgentPostToChannel",
+        "channelService.isChannelArchived",
+        "messageService.broadcastSystemMessageToLocalSurfaces",
+        "messageService.summarizeForSystemMessage",
+        "taskService.deleteTaskByOwner",
+        "taskService.resolveTaskByNumber"
+      ],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "taskHistory",
+      "方法": "GET",
+      "路径": "/tasks/history",
+      "登记行": [
+        7028
+      ],
+      "当前登记行": 7031,
+      "静态服务调用": [
+        "taskService.getTaskByNumber",
+        "taskService.listTaskHistory",
+        "taskService.resolveTaskById"
+      ],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "taskList",
+      "方法": "GET",
+      "路径": "/tasks",
+      "登记行": [
+        5861
+      ],
+      "当前登记行": 5864,
+      "静态服务调用": [
+        "channelService.canAgentPostToChannel",
+        "channelService.canUserPostToChannel",
+        "channelService.listAgentFacingTaskChannelRefs",
+        "channelService.resolveAgentByName",
+        "channelService.resolveUserByName",
+        "taskService.listTasks",
+        "taskService.listTasksAssignedToAgent",
+        "taskService.projectTaskToChannel",
+        "taskService.projectTasksToChannel"
+      ],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "taskResourceReceipt",
+      "方法": "POST",
+      "路径": "/tasks/resource-receipt",
+      "登记行": [
+        6684
+      ],
+      "当前登记行": 6687,
+      "静态服务调用": [
+        "channelService.canAgentPostToChannel",
+        "channelService.isChannelArchived",
+        "taskService.getTaskByNumber",
+        "taskService.recordTaskResourceReceipt"
+      ],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "taskUnclaim",
+      "方法": "POST",
+      "路径": "/tasks/unclaim",
+      "登记行": [
+        6445
+      ],
+      "当前登记行": 6448,
+      "静态服务调用": [
+        "channelService.canAgentPostToChannel",
+        "channelService.getChannelMembers",
+        "channelService.isChannelArchived",
+        "taskService.getTaskByNumber",
+        "taskService.unclaimTask"
+      ],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "taskUpdateStatus",
+      "方法": "POST",
+      "路径": "/tasks/update-status",
+      "登记行": [
+        6626
+      ],
+      "当前登记行": 6629,
+      "静态服务调用": [
+        "channelService.canAgentPostToChannel",
+        "channelService.isChannelArchived",
+        "taskService.forceUpdateTaskStatus",
+        "taskService.getTaskByNumber",
+        "taskService.updateTaskStatus"
+      ],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "threadUnfollow",
+      "方法": "POST",
+      "路径": "/threads/unfollow",
+      "登记行": [
+        4711
+      ],
+      "当前登记行": 4714,
+      "静态服务调用": [
+        "agentService.getAgent",
+        "channelService.canAgentAccessChannel",
+        "channelService.getChannel",
+        "channelService.resolveChannelByName",
+        "channelService.unfollowThreadForFollower",
+        "messageService.broadcastSystemMessage",
+        "messageService.summarizeForSystemMessage"
+      ],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "wikiArtifactRead",
+      "方法": "GET",
+      "路径": "/wiki/artifacts/:artifactId",
+      "登记行": [
+        1892
+      ],
+      "当前登记行": 1895,
+      "静态服务调用": [
+        "wikiService.getWikiAgentArtifact"
+      ],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "wikiManifestGet",
+      "方法": "GET",
+      "路径": "/wiki/manifest",
+      "登记行": [
+        1880
+      ],
+      "当前登记行": 1883,
+      "静态服务调用": [
+        "wikiService.getWikiAgentManifest"
+      ],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": "wikiManifestPublish",
+      "方法": "POST",
+      "路径": "/wiki/publish",
+      "登记行": [
+        1910
+      ],
+      "当前登记行": 1913,
+      "静态服务调用": [
+        "wikiService.publishWikiAgentManifest"
+      ],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": null,
+      "方法": "GET",
+      "路径": "/",
+      "登记行": [],
+      "直接登记行": [
+        1666
+      ],
+      "当前登记行": 1669,
+      "静态服务调用": [
+        "agentService.getAgent"
+      ],
+      "delegated入口策略": "仅身份 bootstrap",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": null,
+      "方法": "GET",
+      "路径": "/labs",
+      "登记行": [],
+      "直接登记行": [
+        1780
+      ],
+      "当前登记行": 1783,
+      "静态服务调用": [],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": null,
+      "方法": "PATCH",
+      "路径": "/labs/access",
+      "登记行": [],
+      "直接登记行": [
+        1781
+      ],
+      "当前登记行": 1784,
+      "静态服务调用": [],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": null,
+      "方法": "POST",
+      "路径": "/server/avatar",
+      "登记行": [],
+      "直接登记行": [
+        1784
+      ],
+      "当前登记行": 1787,
+      "静态服务调用": [
+        "agentService.getAgent",
+        "serverService.getServer",
+        "serverService.updateServerProfile"
+      ],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": null,
+      "方法": "GET",
+      "路径": "/mentions",
+      "登记行": [],
+      "直接登记行": [
+        2204
+      ],
+      "当前登记行": 2207,
+      "静态服务调用": [],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": null,
+      "方法": "GET",
+      "路径": "/mentions/:messageId/delivery",
+      "登记行": [],
+      "直接登记行": [
+        2267
+      ],
+      "当前登记行": 2270,
+      "静态服务调用": [
+        "mentionDeliveryOccurrenceService.lookupMentionDeliveryOccurrence"
+      ],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": null,
+      "方法": "POST",
+      "路径": "/channels",
+      "登记行": [],
+      "直接登记行": [
+        2653
+      ],
+      "当前登记行": 2656,
+      "静态服务调用": [
+        "agentService.getAgent"
+      ],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": null,
+      "方法": "PATCH",
+      "路径": "/channels/:channelId",
+      "登记行": [],
+      "直接登记行": [
+        2676
+      ],
+      "当前登记行": 2679,
+      "静态服务调用": [
+        "agentService.getAgent",
+        "channelService.resolveChannelByName"
+      ],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": null,
+      "方法": "POST",
+      "路径": "/channels/:channelId/members",
+      "登记行": [],
+      "直接登记行": [
+        2748
+      ],
+      "当前登记行": 2751,
+      "静态服务调用": [
+        "agentService.getAgent"
+      ],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": null,
+      "方法": "DELETE",
+      "路径": "/channels/:channelId/members",
+      "登记行": [],
+      "直接登记行": [
+        2773
+      ],
+      "当前登记行": 2776,
+      "静态服务调用": [
+        "agentService.getAgent"
+      ],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": null,
+      "方法": "GET",
+      "路径": "/wake-hints",
+      "登记行": [],
+      "直接登记行": [
+        2927
+      ],
+      "当前登记行": 2930,
+      "静态服务调用": [
+        "agentService.getAgent",
+        "messageService.rebuildExternalAgentPendingFromAckCursors"
+      ],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": null,
+      "方法": "POST",
+      "路径": "/activity",
+      "登记行": [],
+      "直接登记行": [
+        2987
+      ],
+      "当前登记行": 2990,
+      "静态服务调用": [
+        "agentOrchestrator.recordExternalAgentActivity",
+        "agentService.getAgent"
+      ],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": null,
+      "方法": "GET",
+      "路径": "/wake-hints/stream",
+      "登记行": [],
+      "直接登记行": [
+        3028
+      ],
+      "当前登记行": 3031,
+      "静态服务调用": [
+        "agentOrchestrator.off",
+        "agentOrchestrator.on",
+        "agentService.getAgent",
+        "messageService.rebuildExternalAgentPendingFromAckCursors"
+      ],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    },
+    {
+      "合约键": null,
+      "方法": "POST",
+      "路径": "/attachments/:attachmentId/comments",
+      "登记行": [],
+      "直接登记行": [
+        3612
+      ],
+      "当前登记行": 3615,
+      "静态服务调用": [
+        "agentOrchestrator.acknowledgeDeliveredMessagesForChannel",
+        "agentService.getAgent",
+        "attachmentCommentService.AttachmentCommentError",
+        "attachmentCommentService.createAttachmentComment",
+        "attestedSendService.countAgentAttentionMessagesAfterSeq",
+        "attestedSendService.countMessagesAfterSeq",
+        "attestedSendService.getFormalMentionFacts",
+        "attestedSendService.getLatestAgentAttentionAnchor",
+        "attestedSendService.getLatestMessageAnchor",
+        "attestedSendService.getMessageIdForSeq",
+        "attestedSendService.getThreadParentAnchor",
+        "attestedSendService.getThreadParentMessage",
+        "attestedSendService.recordContinueEvent",
+        "attestedSendService.recordGateTriggered",
+        "channelService.assertChannelNotArchived",
+        "channelService.canAgentPostToChannel",
+        "channelService.markRead",
+        "messageService.broadcastAndDeliver",
+        "messageService.getSenderPendingMentionActions",
+        "messageService.getSenderUnresolvedMentionHandles"
+      ],
+      "delegated入口策略": "入口拒绝 delegated_legacy_route_unsupported",
+      "注意": "静态调用线索不证明每个内部函数支持 delegated 执行上下文。"
+    }
+  ],
+  "源码基线": "f7eea01 + A2 当前工作树"
+}

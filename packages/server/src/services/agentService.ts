@@ -1,4 +1,4 @@
-import { createHash } from "crypto";
+import { createHash, randomUUID } from "crypto";
 import { isDeepStrictEqual } from "node:util";
 import { eq, and, inArray, isNull, sql, asc, ne } from "drizzle-orm";
 import { getDb, withDbTraceAttributes, type DatabaseExecutor, type DatabaseTransaction } from "../db/index.js";
@@ -12,6 +12,8 @@ import { evaluateFeatureFlag } from "./featureFlagService.js";
 import { recordSecondAgentCreatedEvent } from "./productEventsService.js";
 import { emitAppFacingNotificationEvent } from "./appNotificationDeliveryService.js";
 import { requestExternalAuthorAvatarSync } from "./externalAuthorAvatarSyncRuntime.js";
+
+import { DelegationError, readConnection, assertAgentTransaction, withExpandingAgentTransaction, requireLegacyAgentActor, type AgentTransaction } from "./agentTransactionAuthority.js";
 
 export type CreatorType = "user" | "agent";
 
@@ -52,10 +54,7 @@ export class ServerSetupChangedRetryError extends Error {
   }
 }
 
-export async function createAgent(
-  serverId: string,
-  name: string,
-  opts: {
+export type AgentCreationOptions = {
     description?: string;
     model?: string;
     runtime?: string;
@@ -73,14 +72,40 @@ export async function createAgent(
       credentialVersion: number;
       updatedByUserId: string;
     };
-  } = {}
+  };
+
+const newAgentsByTransaction = new WeakMap<object, Set<string>>();
+
+export function wasAgentCreatedInTransaction(context: AgentTransaction, agentId: string): boolean {
+  assertAgentTransaction(context, agentId);
+  return newAgentsByTransaction.get(context.tx)?.has(agentId) === true;
+}
+
+export async function createAgent(
+  serverId: string,
+  name: string,
+  opts: AgentCreationOptions = {},
 ) {
+  await refreshSubscriptionForServerIfStale(serverId);
+  const agentId = randomUUID();
+  const actorIds = opts.creatorType === "agent" && opts.creatorId ? [opts.creatorId] : [];
+  return withExpandingAgentTransaction([agentId, ...actorIds], async (context) => {
+    if (actorIds.length) await requireLegacyAgentActor(context, actorIds[0]);
+    return createAgentInTransaction(context, agentId, serverId, name, opts);
+  });
+}
+
+// Only this factory can certify an Agent that was inserted, never updated,
+// in the active transaction. The proof expires with the transaction capability.
+export async function createAgentInTransaction(
+  context: AgentTransaction, agentId: string, serverId: string, name: string,
+  opts: AgentCreationOptions = {},
+) {
+  assertAgentTransaction(context, agentId);
   const nameError = validateAgentName(name, "Agent name");
   if (nameError) {
     throw new Error(nameError);
   }
-
-  await refreshSubscriptionForServerIfStale(serverId);
 
   // Atomic quota check + insert under advisory lock (namespace 1 = agents)
   const agent = await withAgentCreateLock(serverId, async (tx) => {
@@ -135,6 +160,7 @@ export async function createAgent(
     const [newAgent] = await tx
       .insert(agents)
       .values({
+        id: agentId,
         serverId,
         name,
         displayName: name,
@@ -250,8 +276,11 @@ export async function createAgent(
     // may not be Cindy. Someone running a non-Cindy agent has still set their server up.
     await markServerSetupCompleteOnFirstAgent(tx, serverId);
 
+    const born = newAgentsByTransaction.get(context.tx) ?? new Set<string>();
+    born.add(newAgent.id);
+    newAgentsByTransaction.set(context.tx, born);
     return newAgent;
-  });
+  }, context.tx);
 
   return agent;
 }
@@ -832,16 +861,23 @@ export async function updateAgent(
       credentialVersion: number;
       updatedByUserId: string;
     } | null;
-  }
+  },
+  actor?: { type: "user" | "agent"; id: string },
 ) {
   const db = getDb();
-  const result = await db.transaction(async (tx) => {
+  const result = await withExpandingAgentTransaction([agentId, ...(actor?.type === "agent" ? [actor.id] : [])], async (context) => {
+    if (actor?.type === "agent") await requireLegacyAgentActor(context, actor.id);
+    const tx = context.tx;
     const [existing] = await tx.select().from(agents)
       .where(and(eq(agents.id, agentId), isNull(agents.deletedAt)))
       .limit(1)
       .for("update");
     if (!existing) return null;
 
+    if (fields.runtime !== undefined && !isExternalAgentRuntime(fields.runtime)
+      && (await readConnection(context, agentId))?.consumptionMode === "delegated") {
+      throw new DelegationError("delegation_rollback_required", 409);
+    }
     const { reasoningEffort, envVars, runtimeConfig, sessionId, providerConnection, ...rest } = fields;
     const now = currentDate();
     const [updated] = await tx.update(agents)
@@ -1180,10 +1216,13 @@ export async function resetAgentSession(agentId: string, status: AgentStatus = "
 }
 
 export async function assignMachine(agentId: string, machineId: string | null) {
-  const db = getDb();
-  await db.update(agents)
-    .set({ machineId, updatedAt: new Date() })
-    .where(and(eq(agents.id, agentId), isNull(agents.deletedAt)));
+  return withExpandingAgentTransaction([agentId], async (context) => {
+    if (machineId && (await readConnection(context, agentId))?.consumptionMode === "delegated") {
+      throw new DelegationError("delegation_rollback_required", 409);
+    }
+    await context.tx.update(agents).set({ machineId, updatedAt: new Date() })
+      .where(and(eq(agents.id, agentId), isNull(agents.deletedAt)));
+  });
 }
 
 export async function getAgentsForMachine(machineId: string) {

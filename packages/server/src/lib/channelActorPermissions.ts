@@ -1,3 +1,4 @@
+import { requireLegacyAgentActor, withExpandingAgentTransaction } from "../services/agentTransactionAuthority.js";
 import {
   canAddChannelMembers,
   getChannelAdminBasis,
@@ -164,7 +165,9 @@ export async function withLockedChannelActorCapabilities<T>(
   },
   callback: (executor: DatabaseExecutor, context: ChannelActorContext) => Promise<T>,
 ): Promise<T> {
-  return getDb().transaction(async (tx) => {
+  return withExpandingAgentTransaction(input.actorType === "agent" ? [input.actorId] : [], async (authority) => {
+    if (input.actorType === "agent") await requireLegacyAgentActor(authority, input.actorId);
+    const tx = authority.tx;
     const [lockedChannel] = await tx.select({ id: channels.id })
       .from(channels)
       .where(and(eq(channels.id, input.channelId), eq(channels.serverId, input.serverId)))

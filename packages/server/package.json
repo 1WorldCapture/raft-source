@@ -47,7 +47,8 @@
     "reconcile:slack-bridge-oauth-identity": "tsx scripts/reconcile-slack-bridge-oauth-identity.ts",
     "migration:repair-john-completion": "tsx scripts/ops/incidents/task-39/repair-john-agent-migration-completion.ts",
     "dm:repair-duplicates": "tsx scripts/repair-dm-duplicate-channels.ts",
-    "threads:cleanup-empty": "tsx scripts/cleanup-empty-thread-channels.ts"
+    "threads:cleanup-empty": "tsx scripts/cleanup-empty-thread-channels.ts",
+    "test:external-agent-delegation-real-pg": "python3 ../../scripts/test/external-agent-delegation-postgres.py"
   },
   "dependencies": {
     "@aws-sdk/client-kms": "^3.1107.0",
