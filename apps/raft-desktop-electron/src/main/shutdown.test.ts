@@ -147,3 +147,90 @@ test("unreadable descendant remains unresolved after parent exit and is never cl
   assert.deepEqual(scope.observe(detached), []);
   assert.deepEqual(scope.unverified(detached), [101]);
 });
+
+
+async function stopFixture(t: import("node:test").TestContext) {
+  const dir = await mkdtemp(path.join(tmpdir(), "raft-stop-finalize-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  let now = 0;
+  return {
+    scope: new ComputerProcessScope(home, 7),
+    snapshot: async () => ({ rootPids: [], rows: [] }),
+    signal: () => { assert.fail("an empty tree never needs a signal"); },
+    now: () => now,
+    sleep: async (ms: number) => { await new Promise<void>((resolve) => setImmediate(resolve)); now += ms; },
+    logFile: path.join(dir, "shutdown.log"), systemShutdown: false,
+    stopFinishTimeoutMs: 500,
+  };
+}
+
+test("all-clear waits for stop's lifecycle tail before reporting success", async (t) => {
+  const base = await stopFixture(t);
+  let finish!: () => void;
+  let stopStarted!: () => void;
+  const tail = new Promise<void>((resolve) => { finish = resolve; });
+  const started = new Promise<void>((resolve) => { stopStarted = resolve; });
+  let returned = false;
+  let finalized = false;
+  const pending = runShutdownTree({ ...base,
+    requestStop: async () => { stopStarted(); await tail; finalized = true; },
+    sleep: async () => { await tail; },
+  }).then((result) => { returned = true; return result; });
+  await started;
+  await Promise.resolve();
+  assert.equal(returned, false);
+  finish();
+  assert.equal(await pending, true);
+  assert.equal(finalized, true);
+});
+
+test("all-clear with a hung stop tail reports incomplete within its budget", async (t) => {
+  const base = await stopFixture(t);
+  assert.equal(await runShutdownTree({ ...base, requestStop: () => new Promise(() => {}) }), false);
+  assert.match(await readFile(base.logFile, "utf8"), /finalization timed out/);
+});
+
+test("all-clear never hides a failed or cancelled stop tail", async (t) => {
+  for (const error of [new Error("lifecycle failed"), new DOMException("cancelled", "AbortError")]) {
+    const base = await stopFixture(t);
+    assert.equal(await runShutdownTree({ ...base, requestStop: async () => { throw error; } }), false);
+    assert.match(await readFile(base.logFile, "utf8"), /INCOMPLETE: stop failed/);
+  }
+});
+
+test("a timed-out polite stop after force-kill is finalized with one bounded idempotent retry", async (t) => {
+  const base = await stopFixture(t);
+  let alive = true;
+  let calls = 0;
+  let finalized = false;
+  const result = await runShutdownTree({ ...base,
+    snapshot: async () => ({ rootPids: alive ? [100] : [], rows: alive ? [row(100)] : [] }),
+    requestStop: async () => {
+      calls++;
+      if (calls === 1) throw Object.assign(new Error("polite stop timed out"), { code: "STOP_TIMEOUT" });
+      assert.equal(alive, false);
+      finalized = true;
+    },
+    tuning: { gracefulTimeoutMs: 500, termTimeoutMs: 500 },
+    signal: (pid, signal) => { assert.equal(pid, 100); if (signal === "SIGKILL") alive = false; },
+  });
+  assert.equal(result, true);
+  assert.equal(calls, 2);
+  assert.equal(finalized, true);
+});
+
+test("timeout retry failure and late processes both prevent a successful quit", async (t) => {
+  const base = await stopFixture(t);
+  let calls = 0;
+  assert.equal(await runShutdownTree({ ...base, requestStop: async () => {
+    calls++;
+    throw Object.assign(new Error("still not finalized"), { code: "STOP_TIMEOUT" });
+  } }), false);
+  assert.equal(calls, 2);
+  const late = await stopFixture(t);
+  let finished = false;
+  assert.equal(await runShutdownTree({ ...late,
+    requestStop: async () => { finished = true; },
+    snapshot: async () => ({ rootPids: [], rows: finished ? [row(102, { agent: true, root: false })] : [] }),
+  }), false);
+});

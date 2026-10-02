@@ -110,6 +110,8 @@ export interface ShutdownDeps {
   logFile: string;
   systemShutdown: boolean;
   tuning?: ShutdownTuning;
+  /** Additional bounded window for pidfile and host-lifecycle finalization. */
+  stopFinishTimeoutMs?: number;
 }
 
 /** Retain descendants even after the service clears pidfiles. Stop runs in
@@ -123,9 +125,45 @@ export async function runShutdownTree(deps: ShutdownDeps): Promise<boolean> {
   const first = await deps.snapshot();
   deps.scope.assertRoots(first);
   deps.scope.observe(first);
-  void Promise.resolve().then(() => deps.requestStop()).catch((error: unknown) => {
-    void log(`stop request failed: ${error instanceof Error ? error.message : "unknown error"}`);
-  });
+  const startStop = () => {
+    const outcome: { status: "pending" | "success" | "failed"; error?: unknown } = { status: "pending" };
+    const task = Promise.resolve().then(() => deps.requestStop()).then(
+      () => { outcome.status = "success"; },
+      (error: unknown) => { outcome.status = "failed"; outcome.error = error; },
+    );
+    return { outcome, task };
+  };
+  const stop = startStop();
+  const finishStop = async (): Promise<boolean> => {
+    const wait = async (attempt: ReturnType<typeof startStop>): Promise<boolean> => {
+      const deadline = deps.now() + (deps.stopFinishTimeoutMs ?? (deps.systemShutdown ? 3_000 : 5_000));
+      while (attempt.outcome.status === "pending") {
+        const remaining = deadline - deps.now();
+        if (remaining <= 0) {
+          await log("shutdown INCOMPLETE: stop finalization timed out");
+          return false;
+        }
+        await deps.sleep(Math.min(POLL_MS, remaining));
+      }
+      await attempt.task;
+      return true;
+    };
+    if (!(await wait(stop))) return false;
+    let finished = stop;
+    if (stop.outcome.status === "failed" && (stop.outcome.error as { code?: string } | null)?.code === "STOP_TIMEOUT") {
+      // A timed-out polite stop may have been followed by verified force-kill.
+      // With an empty tree, retry the idempotent stop to finish pidfiles and
+      // login ownership. Never skip those mutations just because PIDs vanished.
+      await log("stop timed out before all-clear; retrying lifecycle finalization");
+      finished = startStop();
+      if (!(await wait(finished))) return false;
+    }
+    if (finished.outcome.status !== "success") {
+      await log(`shutdown INCOMPLETE: stop failed: ${finished.outcome.error instanceof Error ? finished.outcome.error.message : "unknown error"}`);
+      return false;
+    }
+    return true;
+  };
   let state: ShutdownState = { phase: "stopping", phaseElapsedMs: 0 };
   let phaseStarted = deps.now();
   for (let guard = 0; guard < 200; guard++) {
@@ -150,7 +188,15 @@ export async function runShutdownTree(deps: ShutdownDeps): Promise<boolean> {
         }
       }
     } else if (step.action === "complete") {
-      await log("shutdown complete: no verified Computer processes remain");
+      if (!(await finishStop())) return false;
+      // Finalization can await external lifecycle work: re-check for processes
+      // born in that window before releasing the app's quit gate.
+      const last = await deps.snapshot();
+      if (deps.scope.observe(last).length + deps.scope.unverified(last).length > 0) {
+        await log("shutdown INCOMPLETE: processes appeared during stop finalization");
+        return false;
+      }
+      await log("shutdown complete: processes cleared and stop finalized");
       return true;
     } else if (step.action === "incomplete") {
       await log(`shutdown INCOMPLETE: remaining=[${[...survivors.map((row) => row.pid), ...unresolved]}]`);

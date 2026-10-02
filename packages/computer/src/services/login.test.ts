@@ -65,6 +65,7 @@ interface DeviceServerOptions {
   /** GET /api/auth/me response for the login-time identity enrichment (#112). */
   meStatus?: number;
   meBody?: unknown;
+  hang?: { phase: "authorize" | "token" | "me"; body: boolean; reached(): void };
 }
 
 async function startDeviceServer(opts: DeviceServerOptions): Promise<{ server: Server; baseUrl: string; tokenCalls: () => number }> {
@@ -72,6 +73,15 @@ async function startDeviceServer(opts: DeviceServerOptions): Promise<{ server: S
   const server = await new Promise<Server>((resolve) => {
     const s = createServer((req, res) => {
       res.setHeader("content-type", "application/json");
+      const phasePath = opts.hang?.phase === "me" ? "/api/auth/me" : `/api/auth/device/${opts.hang?.phase}`;
+      if (opts.hang && req.url === phasePath) {
+        if (opts.hang.body) {
+          res.statusCode = opts.hang.phase === "authorize" ? 201 : 200;
+          res.write("{"); // headers received, JSON body deliberately unfinished
+        }
+        opts.hang.reached();
+        return;
+      }
       if (req.url === "/api/auth/device/authorize") {
         const a = opts.authorize ?? {
           status: 201,
@@ -341,3 +351,70 @@ test("device authorization cancelled during token response never writes a sessio
     } finally { await stop(ctx.server); }
   });
 });
+
+
+async function bounded<T>(promise: Promise<T>, timeoutMs = 2_000): Promise<T> {
+  let timer!: ReturnType<typeof setTimeout>;
+  try {
+    return await Promise.race([promise, new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error("request did not settle within watchdog")), timeoutMs);
+    })]);
+  } finally { clearTimeout(timer); }
+}
+
+for (const phase of ["authorize", "token", "me"] as const) {
+  for (const body of [false, true]) {
+    test(`login cancellation interrupts ${phase} ${body ? "response body" : "request"} without any session write`, async () => {
+      await withHome(async (home) => {
+        let reached!: () => void;
+        const seen = new Promise<void>((resolve) => { reached = resolve; });
+        const ctx = await startDeviceServer({ hang: { phase, body, reached } });
+        const abort = new AbortController();
+        const pending = login({ serverUrl: ctx.baseUrl, slockHome: home }, { signal: abort.signal })
+          .then(() => null, (error: unknown) => error);
+        try {
+          await bounded(seen);
+          abort.abort();
+          const error = await bounded(pending);
+          assert.ok(error instanceof Error);
+          assert.equal(error.name, "AbortError");
+          await assert.rejects(readFile(userSessionPath(home)), (error: NodeJS.ErrnoException) => error.code === "ENOENT");
+        } finally {
+          abort.abort();
+          ctx.server.closeAllConnections();
+          await stop(ctx.server);
+          await pending;
+        }
+      });
+    });
+
+    test(`login deadline bounds ${phase} ${body ? "response body" : "request"}`, async () => {
+      await withHome(async (home) => {
+        const ctx = await startDeviceServer({ hang: { phase, body, reached: () => {} } });
+        const abort = new AbortController();
+        try {
+          const pending = login({ serverUrl: ctx.baseUrl, slockHome: home }, {
+            signal: abort.signal, requestTimeoutMs: 100,
+          });
+          if (phase === "me") {
+            const result = await bounded(pending);
+            // Identity enrichment stays best-effort after successful approval.
+            const session = JSON.parse(await readFile(result.sessionPath, "utf8"));
+            assert.equal(session.displayName, undefined);
+          } else {
+            await assert.rejects(bounded(pending), (error: unknown) => {
+              assert.ok(error instanceof Error);
+              assert.ok(phase === "authorize" ? error instanceof ComputerServiceError : error.name === "TimeoutError");
+              return true;
+            });
+            await assert.rejects(readFile(userSessionPath(home)), (error: NodeJS.ErrnoException) => error.code === "ENOENT");
+          }
+        } finally {
+          abort.abort();
+          ctx.server.closeAllConnections();
+          await stop(ctx.server);
+        }
+      });
+    });
+  }
+}

@@ -530,7 +530,7 @@ async function orchestrateQuitShutdown(systemShutdown: boolean): Promise<void> {
       logFile: path.join(host.slockHome, "computer", "run", "shutdown.log"),
       systemShutdown,
     });
-    if (!complete) throw new Error("这台计算机仍有进程未完成退出，请重试。无法确认归属的进程未被终止。");
+    if (!complete) throw new Error("这台计算机的退出清理未完成，进程或停止收尾仍需处理，请重试。无法确认归属的进程未被终止。");
   } finally {
     abort.abort();
   }
