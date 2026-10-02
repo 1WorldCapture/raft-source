@@ -15,7 +15,15 @@ mkdir -p "$OUT"/{run,logs,temp}
 RAFT_COMPUTER_WEB_ROOT=${RAFT_COMPUTER_WEB_ROOT:-/srv/raft-computer}
 LISTEN=""; for p in $RAFT_PUBLIC_PORTS; do LISTEN+="    listen $p;      listen [::]:$p;"$'\n'; done
 SERVER_NAME="_"; HTTP_SERVER=""; TLS_SETUP=""
-if [ -n "${RAFT_TLS_SERVER_NAME:-}" ] && [ -n "${RAFT_TLS_CERT:-}" ] && [ -n "${RAFT_TLS_KEY:-}" ]; then
+TLS_SET=0
+[ -n "${RAFT_TLS_SERVER_NAME:-}" ] && TLS_SET=$((TLS_SET+1))
+[ -n "${RAFT_TLS_CERT:-}" ] && TLS_SET=$((TLS_SET+1))
+[ -n "${RAFT_TLS_KEY:-}" ] && TLS_SET=$((TLS_SET+1))
+# Partial TLS configuration must never silently fall back to plain HTTP —
+# that would drop HTTPS on the next reload. All three or none.
+[ $TLS_SET -eq 0 ] || [ $TLS_SET -eq 3 ] \
+  || { echo "RAFT_TLS_SERVER_NAME / RAFT_TLS_CERT / RAFT_TLS_KEY must be set together (got $TLS_SET of 3)" >&2; exit 1; }
+if [ $TLS_SET -eq 3 ]; then
   [ -f "$RAFT_TLS_CERT" ] || { echo "RAFT_TLS_CERT not found: $RAFT_TLS_CERT" >&2; exit 1; }
   [ -f "$RAFT_TLS_KEY" ] || { echo "RAFT_TLS_KEY not found: $RAFT_TLS_KEY" >&2; exit 1; }
   SERVER_NAME=$RAFT_TLS_SERVER_NAME

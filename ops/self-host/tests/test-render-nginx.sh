@@ -73,6 +73,33 @@ echo "R4 TLS render with missing cert file: refused"
 printf 'RAFT_TLS_CERT=%s/certs/missing.pem\n' "$WORK" >> "$WORK/env.tls"
 RAFT_OPS_ENV=$WORK/env.tls "$OPS/render-nginx.sh" >/dev/null 2>&1 && bad "must refuse missing cert" || ok "refused missing cert"
 
+echo "R5 partial TLS variables: refused, never silent HTTP fallback"
+# a good conf exists from R3; every partial combo must refuse AND leave it as-is
+cp "$C" "$C.baseline"
+partial=0; refused=0
+for extra in "RAFT_TLS_SERVER_NAME=raft.example.internal" \
+             "RAFT_TLS_CERT=$WORK/certs/c.pem" \
+             "RAFT_TLS_KEY=$WORK/certs/k.pem" \
+             "RAFT_TLS_SERVER_NAME=raft.example.internal
+RAFT_TLS_CERT=$WORK/certs/c.pem" \
+             "RAFT_TLS_SERVER_NAME=raft.example.internal
+RAFT_TLS_KEY=$WORK/certs/k.pem" \
+             "RAFT_TLS_CERT=$WORK/certs/c.pem
+RAFT_TLS_KEY=$WORK/certs/k.pem"; do
+  partial=$((partial+1))
+  base_env "$WORK/env.p" /srv/raft-computer
+  printf '%s\n' "$extra" >> "$WORK/env.p"
+  if RAFT_OPS_ENV=$WORK/env.p "$OPS/render-nginx.sh" >/dev/null 2>&1; then
+    bad "partial combo accepted: $(echo "$extra" | tr '\n' ',')"
+  else
+    refused=$((refused+1))
+  fi
+done
+cmp -s "$C" "$C.baseline" && conf_unchanged=1 || conf_unchanged=0
+[ $refused -eq $partial ] && [ $conf_unchanged -eq 1 ] \
+  && ok "all $partial partial combos refused, rendered conf untouched" \
+  || bad "refused=$refused/$partial, conf_unchanged=$conf_unchanged"
+
 echo
 echo "passed=$PASS failed=$FAIL"
 [ $FAIL -eq 0 ]

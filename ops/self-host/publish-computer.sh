@@ -122,7 +122,12 @@ PY
 # --- collect the single version dir ---------------------------------------------------
 versions=()
 for f in "$STAGING"/*/; do
-  f=${f%/}; [ -d "$f" ] || continue
+  f=${f%/}
+  [ -e "$f" ] || continue
+  # The version dir itself must be a real directory, not a link: -d follows
+  # symlinks, so check -L first.
+  [ -L "$f" ] && die "staging entry $(basename "$f") is a symbolic link (refused)"
+  [ -d "$f" ] || continue
   case "$(basename "$f")" in
     [0-9]*) versions+=("$(basename "$f")") ;;
   esac
@@ -157,44 +162,56 @@ for name in ("install.sh", "install.ps1"):
         print(f"{name}: empty (refused)"); sys.exit(1)
 PY
 
-trap 'rm -f "$ROOT/.manifest.json.flip.$$" "$ROOT/.install.sh.$$" "$ROOT/.install.ps1.$$"; rm -rf "$ROOT/.publish-$VERSION.$$"' EXIT
+trap 'rm -f "$ROOT/.manifest.json.flip.$$"; rm -rf "$ROOT/.publish-$VERSION.$$"' EXIT
+
+# --- build controlled snapshots of EVERYTHING that will be promoted --------------------
+# All validation (including entry-script shellcheck) must finish before any
+# live change, and it must validate the exact bytes that get promoted — so
+# promote snapshots, never the still-mutable staging sources.
+SNAP=$ROOT/.publish-$VERSION.$$
+rm -rf "$SNAP"; mkdir -p "$SNAP"
+cp -R "$VDIR" "$SNAP/version"
+[ ! -L "$SNAP/version" ] && [ -d "$SNAP/version" ] || die "version snapshot is not a real directory (symlinks refused)"
+# Hash-verify the isolated snapshot, not the still-mutable source (TOCTOU).
+verify_release "$SNAP/version" "$VERSION" "snapshot" || die "snapshot verification failed for $VERSION (nothing published)"
+for script in install.sh install.ps1; do
+  [ -f "$STAGING/$script" ] || continue
+  cp "$STAGING/$script" "$SNAP/$script"
+  chmod a-w "$SNAP/$script"
+done
+# shellcheck the exact snapshot copy that would go live (best effort: only
+# when shellcheck is installed on this host).
+if [ -f "$SNAP/install.sh" ] && command -v shellcheck >/dev/null 2>&1; then
+  shellcheck "$SNAP/install.sh" || die "install.sh failed shellcheck (nothing published: version dir, entries and latest all untouched)"
+fi
 
 # --- publish the version dir: identical -> no-op, divergent -> refuse ------------------
 dest=$ROOT/$VERSION
-if [ -d "$dest" ]; then
+if [ -L "$dest" ] || { [ -e "$dest" ] && [ ! -d "$dest" ]; }; then
+  die "$dest exists but is not a real directory (symlinks/special files refused)"
+elif [ -d "$dest" ]; then
   if [ "$VERSION" = "$(python3 -c "import json;print(json.load(open('$dest/manifest.json'))['version'])" 2>/dev/null)" ] \
-     && diff -r --no-dereference "$VDIR" "$dest" >/dev/null 2>&1; then
+     && diff -r --no-dereference "$SNAP/version" "$dest" >/dev/null 2>&1; then
     log "version $VERSION already published with identical content (idempotent)"
   else
     die "version $VERSION already published with DIFFERENT content; version dirs are immutable — bump the version instead"
   fi
 else
-  tmp=$ROOT/.publish-$VERSION.$$
-  cp -R "$VDIR" "$tmp"
-  # Hash-verify the isolated copy, not the still-mutable source (TOCTOU).
-  verify_release "$tmp" "$VERSION" "copy" || die "copy verification failed for $VERSION (nothing published)"
-  chmod -R a-w "$tmp"
-  # -T: never nest the staged dir inside a concurrently-created dest (same
+  chmod -R a-w "$SNAP/version"
+  # -T: never nest the snapshot inside a concurrently-created dest (same
   # convention as switch_web in lib.sh).
-  mv -T "$tmp" "$dest"
+  mv -T "$SNAP/version" "$dest"
   log "published immutable version dir $dest"
 fi
 
-# --- entry scripts: atomic replace when content differs -------------------------------
+# --- entry scripts: promote the validated snapshot copies ------------------------------
 for script in install.sh install.ps1; do
-  src=$STAGING/$script
-  [ -f "$src" ] || continue
+  [ -f "$SNAP/$script" ] || continue
   dst=$ROOT/$script
-  if [ -f "$dst" ] && cmp -s "$src" "$dst"; then
+  if [ -f "$dst" ] && cmp -s "$SNAP/$script" "$dst"; then
     log "$script unchanged"
   else
-    tmp=$ROOT/.$script.$$
-    cp "$src" "$tmp"
-    if command -v shellcheck >/dev/null 2>&1 && [ "$script" = install.sh ]; then
-      shellcheck "$tmp" || { rm -f "$tmp"; die "install.sh failed shellcheck (version dir stays published; latest unchanged)"; }
-    fi
-    chmod a-w "$tmp"
-    mv -f "$tmp" "$dst"
+    mv -f "$SNAP/$script" "$dst"
     log "$script updated (sha256 $(sha256sum "$dst" 2>/dev/null | cut -c1-12 || shasum -a 256 "$dst" | cut -c1-12))"
   fi
 done

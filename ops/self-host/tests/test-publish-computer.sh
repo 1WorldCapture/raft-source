@@ -129,6 +129,34 @@ stage_version "$WORK/stage10" 4.0.0; entry_scripts "$WORK/stage10"
 printf 'corrupt' > "$WORK/stage10/4.0.0/raft-computer-darwin-arm64"
 ! run "$OPS/publish-computer.sh" "$WORK/stage10" && [ "$(latest)" = "$final" ] && ok "refused" || bad "corrupted binary must refuse"
 
+echo "T11 version dir itself a symlink -> refused"
+mkdir -p "$WORK/stage11"
+ln -s "$WORK/stage1/1.2.3" "$WORK/stage11/5.0.0"
+entry_scripts "$WORK/stage11"
+! run "$OPS/publish-computer.sh" "$WORK/stage11" && [ "$(latest)" = "$final" ] && ok "refused" || bad "symlinked version dir must refuse"
+
+if command -v shellcheck >/dev/null 2>&1; then
+echo "T12 shellcheck-failing install.sh -> NOTHING published"
+stage_version "$WORK/stage12" 6.0.0
+printf '#!/bin/sh\nif [ $1 ]; then echo "$((1+))"\nfi\n' > "$WORK/stage12/install.sh"
+printf 'x\n' > "$WORK/stage12/install.ps1"
+before_root=$(ls -A "$WORK/root")
+! run "$OPS/publish-computer.sh" "$WORK/stage12" \
+  && [ "$(latest)" = "$final" ] \
+  && [ "$before_root" = "$(ls -A "$WORK/root")" ] \
+  && ok "version dir, entries and latest all untouched" || bad "shellcheck failure must publish nothing"
+else
+echo "T12 skipped (no shellcheck on this host)"
+fi
+
+echo "T13 already-published dest is a symlink -> refused"
+mkdir -p "$WORK/root2/real" && stage_version "$WORK/stage13" 7.0.0 >/dev/null 2>&1
+sed "s|RAFT_COMPUTER_WEB_ROOT=.*|RAFT_COMPUTER_WEB_ROOT=$WORK/root2|" "$WORK/env.local" > "$WORK/env.root2"
+ln -s "$WORK/root2/real" "$WORK/root2/7.0.0"
+entry_scripts "$WORK/stage13"
+out=$(RAFT_OPS_ENV=$WORK/env.root2 "$OPS/publish-computer.sh" "$WORK/stage13" 2>&1) && bad "symlinked dest must refuse" || true
+case "$out" in *"not a real directory"*) ok "refused" ;; *) bad "unexpected: $out" ;; esac
+
 echo
 echo "passed=$PASS failed=$FAIL"
 [ $FAIL -eq 0 ]
