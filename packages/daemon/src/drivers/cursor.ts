@@ -1,6 +1,16 @@
-import { spawn, spawnSync } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import path from "node:path";
-import { hydrateRuntimeConfig, runtimeConfigToLaunchFields, runtimeModelSourceOutcomeFromSet, type AgentConfig, type RuntimeModelInfo, type RuntimeModelSet, type RuntimeModelSourceOutcome , type AxSurfaceText } from "@botiverse/raft-shared";
+import {
+  CURSOR_MODEL_PROBE_TIMEOUT_MS,
+  hydrateRuntimeConfig,
+  runtimeConfigToLaunchFields,
+  runtimeModelSourceOutcomeFromSet,
+  type AgentConfig,
+  type AxSurfaceText,
+  type RuntimeModelInfo,
+  type RuntimeModelSet,
+  type RuntimeModelSourceOutcome,
+} from "@botiverse/raft-shared";
 import type { RuntimeDriver, SpawnContext, SpawnResult, ParsedEvent } from "./types.js";
 import { buildCliTransportSystemPrompt, prepareCliTransport } from "./cliTransport.js";
 import { withWindowsUserEnvironment, type ProbeDeps } from "./probe.js";
@@ -15,7 +25,7 @@ interface CursorModelsCommandResult {
   error?: Error;
 }
 
-type CursorModelsCommand = () => CursorModelsCommandResult;
+type CursorModelsCommand = () => CursorModelsCommandResult | Promise<CursorModelsCommandResult>;
 
 export async function buildCursorSpawnEnv(ctx: SpawnContext, deps: ProbeDeps = {}): Promise<NodeJS.ProcessEnv> {
   const { spawnEnv } = await prepareCliTransport(ctx, { NO_COLOR: "1" });
@@ -231,17 +241,17 @@ export function parseCursorModelsOutput(output: string): RuntimeModelSet | null 
   return { models, default: defaultModel };
 }
 
-export function detectCursorModels(runCommand: CursorModelsCommand = runCursorModelsCommand): RuntimeModelSet | null {
-  const result = runCommand();
+export async function detectCursorModels(runCommand: CursorModelsCommand = runCursorModelsCommand): Promise<RuntimeModelSet | null> {
+  const result = await runCommand();
 
   if (result.error || result.status !== 0) return null;
   return parseCursorModelsOutput(String(result.stdout || ""));
 }
 
-export function detectCursorModelSource(
+export async function detectCursorModelSource(
   runCommand: CursorModelsCommand = runCursorModelsCommand,
-): RuntimeModelSourceOutcome {
-  const result = runCommand();
+): Promise<RuntimeModelSourceOutcome> {
+  const result = await runCommand();
   if (result.error || result.status !== 0) {
     return { kind: "error", retryable: true };
   }
@@ -256,10 +266,16 @@ export function buildCursorModelProbeEnv(deps: ProbeDeps = {}): NodeJS.ProcessEn
   }, deps);
 }
 
-function runCursorModelsCommand(): CursorModelsCommandResult {
-  return spawnSync("cursor-agent", ["models"], {
-    env: buildCursorModelProbeEnv(),
-    encoding: "utf8",
-    timeout: 5000,
+function runCursorModelsCommand(): Promise<CursorModelsCommandResult> {
+  return new Promise((resolve) => {
+    execFile("cursor-agent", ["models"], {
+      env: buildCursorModelProbeEnv(),
+      encoding: "utf8",
+      timeout: CURSOR_MODEL_PROBE_TIMEOUT_MS,
+      // A model-only probe must terminate even if the CLI ignores SIGTERM.
+      killSignal: "SIGKILL",
+    }, (error, stdout) => {
+      resolve({ status: error ? null : 0, stdout, error: error ?? undefined });
+    });
   });
 }
