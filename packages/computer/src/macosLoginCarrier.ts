@@ -942,11 +942,44 @@ async function enableCliCarrier(
       // the pending record must STAY as the durable recovery anchor.
       const jobStillLoaded = await printJob(spec, forwardRunCommand).catch(() => null);
       if (jobStillLoaded === null) {
-        throw new ComputerServiceError(
-          "HOST_LIFECYCLE_BOOTOUT_FAILED",
-          "Raft Computer failed to unload the macOS post-login job, but the job is no longer loaded. The login definition and owner marker are intact and the recovery record is kept; the next lifecycle command recovers from it.",
-          error,
-        );
+        // The unload DID happen despite the error. At this point the on-disk
+        // definition is still the PREVIOUS one (the destructive definition
+        // swap happens after bootout), so bounded recovery within THIS call
+        // is just: re-bootstrap the existing definition and verify the old
+        // job is live again. Only a failed recovery may fall back to leaving
+        // the pending record as the durable degraded anchor.
+        try {
+          await forwardRunCommand("/bin/launchctl", [
+            "bootstrap",
+            spec.domain,
+            spec.definitionPath,
+          ]);
+          const recovered = await printJob(spec, forwardRunCommand);
+          const previousDispatcher = previousMarker?.dispatcherPath
+            ?? dispatcherFromDefinition(
+              (await readFile(spec.definitionPath, "utf8").catch(() => "")) ?? "",
+              );
+          if (
+            recovered === null
+            || !recovered.includes(spec.label)
+            || (previousDispatcher !== null && !recovered.includes(previousDispatcher))
+          ) {
+            throw new Error("recovered job readback mismatch");
+          }
+          await rm(pendingReplacePath(spec.slockHome), { force: true });
+          throw new ComputerServiceError(
+            "HOST_LIFECYCLE_BOOTOUT_FAILED",
+            "Raft Computer failed to unload the macOS post-login job, but the job was in fact unloaded. The previous login carrier was re-registered and verified live within this operation; nothing else was changed.",
+            error,
+          );
+        } catch (recoveryError) {
+          if (recoveryError instanceof ComputerServiceError) throw recoveryError;
+          throw new ComputerServiceError(
+            "HOST_LIFECYCLE_BOOTOUT_FAILED",
+            "Raft Computer failed to unload the macOS post-login job, the job was in fact unloaded, AND re-registering the previous carrier failed. The login definition and owner marker are intact and the recovery record is kept; the next lifecycle command recovers from it.",
+            recoveryError,
+          );
+        }
       }
       await rm(pendingReplacePath(spec.slockHome), { force: true });
       throw new ComputerServiceError(

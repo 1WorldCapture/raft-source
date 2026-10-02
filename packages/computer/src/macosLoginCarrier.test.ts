@@ -1009,7 +1009,7 @@ test("pending recovery with the old carrier actually intact repairs bookkeeping 
   }
 });
 
-test("bootout late error (job actually unloaded) keeps the pending record as the recovery anchor", async () => {
+test("bootout late error (job actually unloaded) restores the previous carrier within the failed call", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "raft-macos-login-late-red-"));
   const home = path.join(root, "user");
   const slockHome = path.join(home, ".slock");
@@ -1047,16 +1047,13 @@ test("bootout late error (job actually unloaded) keeps the pending record as the
         return true;
       },
     );
-    // Job is gone, but definition + marker are intact and the pending record
-    // is KEPT — the next lifecycle command recovers from it.
-    assert.equal(harness.jobs.size, 0);
-    assert.equal(await readFile(markerBefore!.definitionPath!, "utf8"), definitionBefore);
-    assert.equal((await readHostLifecycleMarker(slockHome))?.dispatcherPath, originalDispatcher);
-    assert.equal((await readHostLifecycleRecoveryStatus(slockHome))?.status, "pending-replace");
-    // And recovery does land: the intact-carrier fast path sees the job is
-    // NOT live, so it re-bootstraps the saved definition.
-    await convergeCliHostLifecycle(slockHome, "enabled", baseDeps);
+    // Bounded recovery WITHIN the failed call: the previous definition was
+    // never swapped (the destructive phase follows bootout), so the same call
+    // re-bootstraps it, verifies the old job is live again, and clears the
+    // pending record. The caller sees BOOTOUT_FAILED with "carrier restored".
+    assert.equal(harness.jobs.size, 1);
     assert.ok([...harness.jobs.values()][0]!.includes(originalDispatcher));
+    assert.equal(await readFile(markerBefore!.definitionPath!, "utf8"), definitionBefore);
     assert.equal((await readHostLifecycleMarker(slockHome))?.dispatcherPath, originalDispatcher);
     assert.equal(await readHostLifecycleRecoveryStatus(slockHome), null);
   } finally {
@@ -1091,6 +1088,59 @@ test("explicit carrier refresh (mode=refresh) must land the new dispatcher despi
     });
     assert.equal((await readHostLifecycleMarker(slockHome))?.dispatcherPath, nextDispatcher);
     assert.ok([...harness.jobs.values()][0]!.includes(nextDispatcher));
+    assert.equal(await readHostLifecycleRecoveryStatus(slockHome), null);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("bootout late error whose in-call recovery also fails degrades to the durable pending record", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "raft-macos-login-late-recover-red-"));
+  const home = path.join(root, "user");
+  const slockHome = path.join(home, ".slock");
+  const harness = launchctlHarness();
+  const originalDispatcher = path.join(home, ".local", "bin", "raft-computer");
+  const baseDeps = {
+    platform: "darwin" as const,
+    userHome: home,
+    uid: 501,
+    dispatcherPath: originalDispatcher,
+    legacyDesktopBundlePath: path.join(root, "Applications", "Raft Computer.app"),
+    runCommand: harness.run,
+  };
+  try {
+    await convergeCliHostLifecycle(slockHome, "enabled", baseDeps);
+    const markerBefore = await readHostLifecycleMarker(slockHome);
+    const definitionBefore = await readFile(markerBefore!.definitionPath!, "utf8");
+    await assert.rejects(
+      refreshCliLoginCarrierIfOwned(slockHome, {
+        ...baseDeps,
+        dispatcherPath: path.join(home, ".local", "bin", "raft-computer-next"),
+        runCommand: async (command, args, signal) => {
+          // bootout REALLY unloads then errors; every subsequent bootstrap
+          // (the in-call recovery AND any later retry) is denied.
+          if (args[0] === "bootout") {
+            await harness.run(command, args, signal);
+            throw new Error("bootout failed late");
+          }
+          if (args[0] === "bootstrap") throw new Error("bootstrap denied");
+          return harness.run(command, args, signal);
+        },
+      }),
+      (error: unknown) => {
+        assert.equal((error as { code?: string }).code, "HOST_LIFECYCLE_BOOTOUT_FAILED");
+        return true;
+      },
+    );
+    // Degraded, truthfully so: job gone, definition + marker intact, pending
+    // record kept as the durable recovery anchor.
+    assert.equal(harness.jobs.size, 0);
+    assert.equal(await readFile(markerBefore!.definitionPath!, "utf8"), definitionBefore);
+    assert.equal((await readHostLifecycleMarker(slockHome))?.dispatcherPath, originalDispatcher);
+    assert.equal((await readHostLifecycleRecoveryStatus(slockHome))?.status, "pending-replace");
+    // Once bootstrap is allowed again, a plain converge lands the recovery.
+    await convergeCliHostLifecycle(slockHome, "enabled", baseDeps);
+    assert.ok([...harness.jobs.values()][0]!.includes(originalDispatcher));
     assert.equal(await readHostLifecycleRecoveryStatus(slockHome), null);
   } finally {
     await rm(root, { recursive: true, force: true });
