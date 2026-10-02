@@ -1,6 +1,0 @@
-{
-  "note": "brace } and { inside",
-  "path": "escaped\"quote",
-  "evidence": { "inner": "}looks-like-end{" },
-  "version": "1.2.3"
-}

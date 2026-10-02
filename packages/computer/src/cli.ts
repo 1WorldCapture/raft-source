@@ -67,8 +67,9 @@ import { currentDate, currentTimeMs, type Tracer } from "@botiverse/raft-shared"
 import { withMutationLock } from "./concurrency.js";
 import { runChannelShow, runChannelSet, runChannelVersions } from "./channel.js";
 import { parseChannel, readChannel, SEMVER_RE } from "./lib/channelState.js";
-import { resolveRuntimeReleaseSource } from "./lib/releaseSource.js";
-import { runReleaseSourceInit, runReleaseSourceSet, runReleaseSourceShow } from "./releaseSourceCli.js";
+import {
+  resolveUpgradeBaseUrl,
+} from "./computerRelease.js";
 import { resolveComputerUpgradeTargetVersion } from "./kReleaseSource.js";
 import { ComputerServiceError } from "./services/errors.js";
 import { resolveRaftHome } from "./paths.js";
@@ -554,57 +555,9 @@ channel
     }),
   );
 
-const releaseSourceCmd = program
-  .command("release-source")
-  .description("Show or manage where this Computer's binary and updates come from (contract v1).");
-releaseSourceCmd
-  .command("show")
-  .description("Show the effective release source and whether it comes from the environment, the persisted file, or the official default.")
-  .action(
-    withCliExit(async () => {
-      await runReleaseSourceShow(resolveRaftHome());
-    }),
-  );
-releaseSourceCmd
-  .command("init")
-  .description("Initialize the release source after a verified install. First-writer-wins: refuses to switch an existing different source.")
-  .requiredOption("--backend <backend>", "hands | manifest")
-  .requiredOption("--release-base <url>", "release file root (install scripts, manifest.json, per-version artifacts)")
-  .option("--hands-origin <url>", "Hands version-authority origin (required for --backend hands)")
-  .action(
-    withCliExit(async (opts: { backend: string; releaseBase: string; handsOrigin?: string }) => {
-      await withMutationLock(() => runReleaseSourceInit(resolveRaftHome(), {
-        backend: toReleaseBackend(opts.backend),
-        releaseBase: opts.releaseBase,
-        ...(opts.handsOrigin ? { handsOrigin: opts.handsOrigin } : {}),
-      }));
-    }),
-  );
-releaseSourceCmd
-  .command("set")
-  .description("Deliberately switch (or repair) this Computer's release source. The only migration path for an existing install.")
-  .requiredOption("--backend <backend>", "hands | manifest")
-  .requiredOption("--release-base <url>", "release file root (install scripts, manifest.json, per-version artifacts)")
-  .option("--hands-origin <url>", "Hands version-authority origin (required for --backend hands)")
-  .action(
-    withCliExit(async (opts: { backend: string; releaseBase: string; handsOrigin?: string }) => {
-      await withMutationLock(() => runReleaseSourceSet(resolveRaftHome(), {
-        backend: toReleaseBackend(opts.backend),
-        releaseBase: opts.releaseBase,
-        ...(opts.handsOrigin ? { handsOrigin: opts.handsOrigin } : {}),
-      }));
-    }),
-  );
-
-function toReleaseBackend(raw: string): "hands" | "manifest" {
-  if (raw === "hands" || raw === "manifest") return raw;
-  fail("RELEASE_SOURCE_BACKEND_INVALID", `--backend must be "hands" or "manifest" (got "${raw}")`);
-}
-
 const operation = program
   .command("operation")
   .description("Inspect or acknowledge durable Computer upgrade receipts.");
-
 operation
   .command("acknowledge")
   .argument("<operationId>", "exact K operation id shown by `raft-computer status`")
@@ -687,20 +640,12 @@ program
               `Invalid --channel "${opts.channel}". Accepted: latest | alpha | pinned:<semver>.`,
             );
           }
-          // Contract v1: resolve through the unified release-source chain
-          // (env override > persisted file > official default) so a privately
-          // deployed Computer upgrades from its private source.
-          const releaseSource = await resolveRuntimeReleaseSource(process.env, slockHome);
+          const baseUrl = resolveUpgradeBaseUrl();
           try {
             kTargetVersion = await resolveComputerUpgradeTargetVersion(channel!, {
               currentVersion: COMPUTER_VERSION,
               platformKey: `${process.platform}-${process.arch}`,
-            }, releaseSource.source.releaseBase, {
-              backend: releaseSource.source.backend,
-              ...(releaseSource.source.handsOrigin !== undefined
-                ? { handsApiOrigin: releaseSource.source.handsOrigin }
-                : {}),
-            });
+            }, baseUrl);
           } catch (error) {
             if (error instanceof ComputerServiceError) presentUpgradeTargetResolutionFailure(error);
             throw error;

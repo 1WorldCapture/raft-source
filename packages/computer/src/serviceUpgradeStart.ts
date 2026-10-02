@@ -1,7 +1,7 @@
 import { type ChildProcess } from "node:child_process";
 
+import { resolveUpgradeBaseUrl } from "./computerRelease.js";
 import { resolveComputerUpgradeTargetVersion } from "./kReleaseSource.js";
-import { resolveRuntimeReleaseSource } from "./lib/releaseSource.js";
 import {
   inspectKUpgradeStart,
   spawnKUpgradeCoordinator,
@@ -21,7 +21,6 @@ export interface ServiceUpgradeStartSeams {
   isSeaBinaryFn?: () => boolean;
   readChannelFn?: typeof readChannel;
   resolveUpgradeTargetVersionFn?: typeof resolveComputerUpgradeTargetVersion;
-  resolveReleaseSourceFn?: typeof resolveRuntimeReleaseSource;
   spawnKUpgradeCoordinatorFn?: typeof spawnKUpgradeCoordinator;
   inspectKUpgradeStartFn?: typeof inspectKUpgradeStart;
   waitForKUpgradeStartFn?: typeof waitForKUpgradeStart;
@@ -138,15 +137,7 @@ async function startUpgrade(
   const { scope, requestId: upgradeId, originServerId, trigger, owner } = context;
   try {
     const channel = await (options.readChannelFn ?? readChannel)(options.slockHome);
-    // Contract v1: the upgrade path resolves its release source through the
-    // SAME chain as everything else (env override > persisted release-source
-    // file > official default), so a privately deployed Computer keeps using
-    // its private source across service restarts — never silently back to
-    // the official CDN.
-    const releaseSource = await (options.resolveReleaseSourceFn ?? resolveRuntimeReleaseSource)(
-      process.env,
-      options.slockHome,
-    );
+    const baseUrl = resolveUpgradeBaseUrl();
     let resolved = context.explicit;
     if (!resolved) {
       const resolveTarget = options.resolveUpgradeTargetVersionFn
@@ -154,12 +145,7 @@ async function startUpgrade(
       resolved = await resolveTarget(channel, {
         currentVersion: COMPUTER_VERSION,
         platformKey: `${process.platform}-${process.arch}`,
-      }, releaseSource.source.releaseBase, {
-        backend: releaseSource.source.backend,
-        ...(releaseSource.source.handsOrigin !== undefined
-          ? { handsApiOrigin: releaseSource.source.handsOrigin }
-          : {}),
-      });
+      }, baseUrl);
     }
     context.setInFlightUpgrade({ upgradeId, targetVersion: resolved });
     const commonRequest = {
