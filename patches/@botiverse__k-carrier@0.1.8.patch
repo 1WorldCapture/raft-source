@@ -92,3 +92,166 @@ index 89b9dfae9b281b42ad2af21ce59112ded1de120a..6fec07dd6fe7699d70347bcb6fc669a6
  }
  
  export interface ReleaseSource {
+diff --git a/core/src/index.ts b/core/src/index.ts
+index 9b5d2b842f18f803fb02b5df0f492581e51c4fbe..f72b455683f18966523cc936dfe7d7ac81b7bb0f 100644
+--- a/core/src/index.ts
++++ b/core/src/index.ts
+@@ -27,3 +27,4 @@ export * from "./lifecycle/hostAdapter.ts";
+ 
+ // The built-in invariants and their types (WorldSnapshot, Invariant, ...).
+ export * from "./invariants.ts";
++export * from "./txn/lock.ts";
+diff --git a/core/src/platform/posix.ts b/core/src/platform/posix.ts
+index 1041212ff31843bd72a7803a8a40fc5e3f4ab87f..e2e8a55bd03796f4cfad7d9f0c03c9a86c9b5e45 100644
+--- a/core/src/platform/posix.ts
++++ b/core/src/platform/posix.ts
+@@ -4,6 +4,8 @@
+  */
+ import { execFileSync } from "node:child_process";
+ import { promises as fs } from "node:fs";
++import { readFileSync } from "node:fs";
++import { spawnSync } from "node:child_process";
+ import type { PlatformOps } from "./ops.ts";
+ 
+ async function atomicReplace(filePath: string, data: Uint8Array): Promise<void> {
+@@ -74,15 +76,88 @@ export function platformKeyFor(
+   return `${platform}-${arch}`;
+ }
+ 
++
++/**
++ * Parse the scheduler state field out of one /proc/<pid>/stat line, or null
++ * when the line is not a stat line. The state follows the closing paren of
++ * comm — comm may contain spaces and parens, so the LAST ")" closes it.
++ * (Downstream patch, task #12: aligned with raft-computer's unified liveness
++ * predicate from PR #141 — same semantics, independently vendored here.)
++ */
++function parseLinuxStatState(stat: string): string | null {
++  const close = stat.lastIndexOf(")");
++  if (close === -1) return null;
++  return stat.slice(close + 2, close + 3);
++}
++
++/**
++ * Kernel state of a Linux process, or null when unreadable. Null keeps the
++ * signal-0 verdict — never invents "exited".
++ */
++function readLinuxProcessState(pid: number): string | null {
++  let stat: string;
++  try {
++    stat = readFileSync(`/proc/${pid}/stat`, "utf8");
++  } catch {
++    return null;
++  }
++  return parseLinuxStatState(stat);
++}
++
++/**
++ * State of a Darwin process via `ps -o state=`, or null when ps cannot
++ * answer. Null keeps the signal-0 verdict — never invents "exited".
++ */
++function readDarwinProcessState(pid: number): string | null {
++  let run: ReturnType<typeof spawnSync>;
++  try {
++    run = spawnSync("ps", ["-o", "state=", "-p", String(pid)], { encoding: "utf8", timeout: 2_000 });
++  } catch {
++    return null;
++  }
++  if (run.error || run.status !== 0) return null;
++  return run.stdout.trim().slice(0, 1) || null;
++}
++
++/**
++ * Scheduler states that mean "already exited": Z is an unreaped zombie on
++ * both Linux and Darwin; X/x is a Linux process being torn down.
++ */
++function isExitedProcessState(state: string | null): boolean {
++  return state === "Z" || state === "X" || state === "x";
++}
++
++/**
++ * Liveness via signal 0, refined by kernel process state on Linux/Darwin.
++ * Signal 0 alone cannot tell an EXITED-but-unreaped process (a zombie whose
++ * parent never waits — e.g. an orphan under a non-reaping PID 1) from a
++ * running one, which wedged lock-holder checks on corpses (task #12: a
++ * zombie holder kept answering "alive" and the upgrade lock refused to be
++ * taken over). Failure to refine — unreadable state, ps missing/error —
++ * stays CONSERVATIVELY ALIVE: "dead" requires positive exited-state
++ * evidence. PID reuse keeps the conservative direction: a live successor on
++ * the same pid reads alive, so a reused pid is never mistaken for the
++ * waited-on holder.
++ */
++function refinedIsProcessAlive(pid: number): boolean {
++  if (!Number.isInteger(pid) || pid <= 0) return false;
++  try {
++    process.kill(pid, 0);
++  } catch (err) {
++    return (err as NodeJS.ErrnoException).code === "EPERM";
++  }
++  const state =
++    process.platform === "linux" ? readLinuxProcessState(pid)
++    : process.platform === "darwin" ? readDarwinProcessState(pid)
++    : null;
++  if (isExitedProcessState(state)) return false;
++  return true;
++}
++
+ export const posixOps: PlatformOps = {
+   swapExecutable: atomicReplace,
+   isProcessAlive(pid) {
+-    try {
+-      process.kill(pid, 0);
+-      return true;
+-    } catch {
+-      return false;
+-    }
++    return refinedIsProcessAlive(pid);
+   },
+   killProcess(pid) {
+     process.kill(pid, "SIGKILL");
+diff --git a/core/src/txn/lock.ts b/core/src/txn/lock.ts
+index 5c388abe7cbe97902f7515f6e050ab7cf467d83e..a8b4d6c07d5cecc0124b2177597b76684c1a64a6 100644
+--- a/core/src/txn/lock.ts
++++ b/core/src/txn/lock.ts
+@@ -43,15 +43,30 @@ export interface UpgradeLock {
+   release(): Promise<void>;
+ }
+ 
++/**
++ * Seam over the holder-liveness check (task #12). The default is the
++ * platform ops' refined predicate (zombie-aware, conservative on failure);
++ * tests of the REAL acquire/release path inject a deterministic stand-in so
++ * holder states (running, zombie, state-query failure, pid reuse) can be
++ * forced without depending on kernel luck.
++ */
++export interface UpgradeLockDeps {
++  isProcessAlive?: (pid: number) => boolean;
++}
++
+ /**
+  * Acquire the single-transaction lock, or throw UpgradeLockError.
+  * `nowMs` is injected rather than read from Date so simulation stays
+  * deterministic (clock seam discipline).
+  */
+-export async function acquireUpgradeLock(stateDir: string, nowMs: number): Promise<UpgradeLock> {
++export async function acquireUpgradeLock(
++  stateDir: string,
++  nowMs: number,
++  deps: UpgradeLockDeps = {},
++): Promise<UpgradeLock> {
+   const lockPath = path.join(stateDir, "upgrade.lock");
+   await fs.mkdir(stateDir, { recursive: true });
+-  const ops = platformOpsFor();
++  const isProcessAlive = deps.isProcessAlive ?? platformOpsFor().isProcessAlive;
+ 
+   const record: LockRecord = { pid: process.pid, acquiredAtMs: nowMs };
+   let attempts = 0;
+@@ -84,7 +99,7 @@ export async function acquireUpgradeLock(stateDir: string, nowMs: number): Promi
+       if (holder === "vanished") continue; // gone between open and read: retry
+       // A non-positive pid is never a real holder — and must NEVER reach
+       // process.kill, where pid<=0 addresses process GROUPS or every process.
+-      if (holder !== "unreadable" && holder.pid > 0 && ops.isProcessAlive(holder.pid)) {
++      if (holder !== "unreadable" && holder.pid > 0 && isProcessAlive(holder.pid)) {
+         throw new UpgradeLockError(holder.pid);
+       }
+       // Holder is gone: its transaction died mid-flight. Recovery (journal

@@ -9,7 +9,7 @@ patchedDependencies:
     hash: b4e8258c691e98669cbe78c60015c2a94019f8c08fe70d5693946c4794a0cc98
     path: patches/@botiverse__hands-node@0.5.1.patch
   '@botiverse/k-carrier@0.1.8':
-    hash: 13117bc98923d3c5a7b99d69c5ec688f6006e9f5e139f9d7d8c24702a74dc132
+    hash: c32d48e002de0bb291bf416ae2d910c8679d10a8200e7ee634d3b5d7e8a81a40
     path: patches/@botiverse__k-carrier@0.1.8.patch
   react-native-screens@4.26.2:
     hash: 05af4cdc9cc9799b2649a099232e371e9fa39c4a8ec5504b6eca4034827df14c
@@ -386,7 +386,7 @@ importers:
         version: 0.5.1(patch_hash=b4e8258c691e98669cbe78c60015c2a94019f8c08fe70d5693946c4794a0cc98)
       '@botiverse/k-carrier':
         specifier: 0.1.8
-        version: 0.1.8(patch_hash=13117bc98923d3c5a7b99d69c5ec688f6006e9f5e139f9d7d8c24702a74dc132)
+        version: 0.1.8(patch_hash=c32d48e002de0bb291bf416ae2d910c8679d10a8200e7ee634d3b5d7e8a81a40)
       '@botiverse/raft-daemon':
         specifier: workspace:*
         version: link:../daemon
@@ -12965,7 +12965,7 @@ snapshots:
 
   '@botiverse/hands-node@0.5.1(patch_hash=b4e8258c691e98669cbe78c60015c2a94019f8c08fe70d5693946c4794a0cc98)': {}
 
-  '@botiverse/k-carrier@0.1.8(patch_hash=13117bc98923d3c5a7b99d69c5ec688f6006e9f5e139f9d7d8c24702a74dc132)': {}
+  '@botiverse/k-carrier@0.1.8(patch_hash=c32d48e002de0bb291bf416ae2d910c8679d10a8200e7ee634d3b5d7e8a81a40)': {}
 
   '@botiverse/kimi-code-sdk@0.34.0-botiverse.0':
     dependencies:
