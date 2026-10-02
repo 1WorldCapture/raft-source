@@ -99,3 +99,11 @@ if (typeof globalThis.localStorage?.getItem !== "function") {
     value: storage,
   });
 }
+
+// Contract v1: command surfaces fetch the deployment config at runtime. The
+// shared DOM harness answers that endpoint with a ready payload so behavioral
+// tests render the normal path; individual tests override api.get (see
+// helpers/deploymentComputerSetup.ts) to exercise missing/invalid/network
+// lock states.
+import { installDefaultDeploymentStub } from "./deploymentComputerSetup";
+installDefaultDeploymentStub();

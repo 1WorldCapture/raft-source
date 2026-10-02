@@ -2,6 +2,9 @@ export const STAGING_COMPUTER_SERVER_URL = "https://api-aws-staging.botiverse.de
 export const DEFAULT_COMPUTER_SERVER_URL = "https://api.raft.build";
 export const LEGACY_DEFAULT_COMPUTER_SERVER_URL = "https://api.slock.ai";
 
+import { powerShellQuote, shellQuote } from "./commandEscaping";
+import type { DeploymentComputerSetupReady } from "./deploymentComputerSetup";
+
 // The Computer ships as a self-contained SEA binary installed by the native
 // shell script (`install.sh` on macOS/Linux, `install.ps1` on Windows), not
 // npm — no Node/npm required. The installer resolves the latest version from
@@ -127,6 +130,15 @@ export function getDaemonConnectCommand({
 // users legitimately want a single Computer at the default location.
 const ISOLATED_DEPLOYMENT_ENVS = new Set(["staging", "slockdev"]);
 
+/**
+ * Internal test surfaces (staging/slockdev QA builds) scope the Computer's
+ * state and binary to a per-slug home. This decides ISOLATION ONLY — never
+ * command sources, which contract v1 keeps in the runtime deployment config.
+ */
+export function isIsolatedDeploymentEnv(deploymentEnv?: string | null): boolean {
+  return Boolean(deploymentEnv && ISOLATED_DEPLOYMENT_ENVS.has(deploymentEnv));
+}
+
 export function getComputerCommands(
   serverSlug: string | undefined | null,
   deploymentEnv = import.meta.env?.VITE_DEPLOYMENT_ENV,
@@ -207,6 +219,151 @@ export function getComputerSetupCommand(
   options: ComputerSetupCommandOptions = {},
 ): string | null {
   return getComputerCommands(serverSlug, deploymentEnv, serverUrl, options)?.setup ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// Contract-v1 deployment-driven command generation (私有部署配置契约 v1).
+//
+// Every URL, version and identifier below comes from the runtime deployment
+// config (`GET /api/deployment/computer-setup`); the official constants above
+// are legacy debug/build-scoped paths only and are never used to fill a
+// missing runtime value. `setup` ALWAYS carries an explicit `--server-url`;
+// install env vars are placed on the `sh` side of the POSIX pipe (not on the
+// curl side) so they reach the installer process; and every dynamic value is
+// escaped for the target interpreter — plain concatenation is not escaping.
+// ---------------------------------------------------------------------------
+
+/** Extract the version from a `pinned:<semver>` channel, else null. */
+export function pinnedChannelVersion(installChannel: DeploymentComputerSetupReady["installChannel"]): string | null {
+  if (!installChannel.startsWith("pinned:")) return null;
+  return normalizeComputerVersionPin(installChannel.slice("pinned:".length));
+}
+
+export interface DeploymentComputerCommandInput {
+  /** Ready payload of GET /api/deployment/computer-setup. */
+  deployment: DeploymentComputerSetupReady;
+  serverSlug: string | undefined | null;
+  platform?: ComputerCommandPlatform;
+  /** Adopt a known machine row directly (`--machine <id>`); id, not secret. */
+  machineId?: string | null;
+  /**
+   * Manual fresh-install pin from the server's own release strategy
+   * (latestComputerVersion). Overrides the deployment channel to
+   * `pinned:<version>` so restarts keep the same target.
+   */
+  version?: string | null;
+  /**
+   * Internal test-surface isolation (staging/slockdev QA builds, keyed by
+   * VITE_DEPLOYMENT_ENV — this decides tester isolation ONLY, never the
+   * command sources, which always come from `deployment`). Scopes RAFT_HOME,
+   * the install dir and the binary path to a per-slug home so a test Computer
+   * cannot clobber the tester's production one.
+   */
+  isolatedHomeSlug?: string | null;
+}
+
+export function getComputerCommandsFromDeployment({
+  deployment,
+  serverSlug,
+  platform = "mac-linux",
+  machineId,
+  version,
+  isolatedHomeSlug,
+}: DeploymentComputerCommandInput): ComputerCommands | null {
+  const slug = serverSlug?.trim().replace(/^\/+/, "");
+  if (!slug) return null;
+
+  const { serverUrl, releaseSource, installChannel } = deployment;
+  const { backend, releaseBase } = releaseSource;
+
+  // A manual pin wins over the deployment channel; both collapse to
+  // `pinned:<version>` + an explicit RAFT_COMPUTER_VERSION.
+  const pinnedVersion = normalizeComputerVersionPin(version) ?? pinnedChannelVersion(installChannel);
+  const effectiveChannel: string = pinnedVersion ? `pinned:${pinnedVersion}` : installChannel;
+
+  const machineIdValue = machineId?.trim() ?? "";
+  const machineArg = machineIdValue
+    ? platform === "windows"
+      ? ` --machine ${powerShellQuote(machineIdValue)}`
+      : ` --machine ${shellQuote(machineIdValue)}`
+    : "";
+
+  // Isolated-home plumbing (test surfaces only). `slug` is the canonical setup
+  // slug, so the isolated home matches across web-generated commands and
+  // manual QA. paths.ts reads RAFT_HOME || SLOCK_HOME.
+  const isolationSlug = isolatedHomeSlug?.trim().replace(/^\/+/, "") || null;
+  const home = platform === "windows"
+    ? `$env:USERPROFILE\\.raft-computer-${isolationSlug}`
+    : `$HOME/.raft-computer-${isolationSlug}`;
+
+  if (platform === "windows") {
+    const envLines = [
+      `$env:RAFT_COMPUTER_RELEASE_BACKEND = ${powerShellQuote(backend)}`,
+      `$env:RAFT_COMPUTER_RELEASE_BASE = ${powerShellQuote(releaseBase)}`,
+      ...(releaseSource.handsOrigin
+        ? [`$env:RAFT_COMPUTER_HANDS_ORIGIN = ${powerShellQuote(releaseSource.handsOrigin)}`]
+        : []),
+      `$env:RAFT_COMPUTER_INSTALL_CHANNEL = ${powerShellQuote(effectiveChannel)}`,
+      ...(pinnedVersion ? [`$env:RAFT_COMPUTER_VERSION = ${powerShellQuote(pinnedVersion)}`] : []),
+    ];
+    const installUrl = `${releaseBase}/install.ps1`;
+    const installBase = `${envLines.join("; ")}; irm ${powerShellQuote(installUrl)} | iex`;
+    const isolated = Boolean(isolationSlug);
+    const isolationEnvLines = isolated
+      ? [
+        `$env:RAFT_HOME = ${powerShellQuote(home)}`,
+        `$env:RAFT_COMPUTER_INSTALL_DIR = ${powerShellQuote(`${home}\\bin`)}`,
+      ]
+      : [];
+    const binary = isolated
+      ? `& "$env:RAFT_COMPUTER_INSTALL_DIR\\raft-computer.exe"`
+      : "raft-computer";
+    return {
+      install: isolated ? `${isolationEnvLines.join("; ")}; ${installBase}` : installBase,
+      setup: `${binary} setup ${powerShellQuote(`/${slug}`)} --server-url ${powerShellQuote(serverUrl)}${machineArg}`,
+      status: `${binary} status`,
+      doctor: `${binary} doctor`,
+      restartService: `${binary} restart`,
+      restart: `${binary} restart ${powerShellQuote(`/${slug}`)}`,
+      stop: `${binary} stop`,
+      start: `${binary} start`,
+    };
+  }
+
+  // POSIX: env assignments must sit on the `sh` side of the pipe so the
+  // installer process itself sees them (contract: not on the curl side).
+  // Isolation pairs ride the same side — `VAR=1 a | b` would scope VAR to `a`
+  // only, so RAFT_HOME has to share the installer's prefix.
+  const isolated = Boolean(isolationSlug);
+  const envPairs = [
+    ...(isolated
+      ? [
+          `RAFT_HOME=${shellQuote(home)}`,
+          `RAFT_COMPUTER_INSTALL_DIR=${shellQuote(`${home}/bin`)}`,
+        ]
+      : []),
+    `RAFT_COMPUTER_RELEASE_BACKEND=${shellQuote(backend)}`,
+    `RAFT_COMPUTER_RELEASE_BASE=${shellQuote(releaseBase)}`,
+    ...(releaseSource.handsOrigin ? [`RAFT_COMPUTER_HANDS_ORIGIN=${shellQuote(releaseSource.handsOrigin)}`] : []),
+    `RAFT_COMPUTER_INSTALL_CHANNEL=${shellQuote(effectiveChannel)}`,
+    ...(pinnedVersion ? [`RAFT_COMPUTER_VERSION=${shellQuote(pinnedVersion)}`] : []),
+  ];
+  const installUrl = `${releaseBase}/install.sh`;
+  // Every command that runs the installed binary needs the same state root.
+  const binaryEnvPrefix = isolated
+    ? `RAFT_HOME=${shellQuote(home)} RAFT_COMPUTER_INSTALL_DIR=${shellQuote(`${home}/bin`)} `
+    : "";
+  const binary = isolated ? shellQuote(`${home}/bin/raft-computer`) : "raft-computer";
+  return {
+    install: `curl -fsSL ${shellQuote(installUrl)} | ${envPairs.join(" ")} sh`,
+    setup: `${binaryEnvPrefix}${binary} setup ${shellQuote(`/${slug}`)} --server-url ${shellQuote(serverUrl)}${machineArg}`,
+    status: `${binaryEnvPrefix}${binary} status`,
+    doctor: `${binaryEnvPrefix}${binary} doctor`,
+    restartService: `${binaryEnvPrefix}${binary} restart`,
+    restart: `${binaryEnvPrefix}${binary} restart ${shellQuote(`/${slug}`)}`,
+    stop: `${binaryEnvPrefix}${binary} stop`,
+    start: `${binaryEnvPrefix}${binary} start`,
+  };
 }
 
 function isDefaultComputerServerUrl(serverUrl: string | undefined): boolean {

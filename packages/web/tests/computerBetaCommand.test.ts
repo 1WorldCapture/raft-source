@@ -43,15 +43,17 @@ test("add computer dialog uses the shared explicit platform command selector", (
 
   assert.match(source, /const serverSlug = useServerStore\(\(s\) => s\.current\?\.slug\)/);
   assert.match(source, /const deploymentEnv = import\.meta\.env\?\.VITE_DEPLOYMENT_ENV/);
-  assert.match(source, /const computerCommands = getComputerCommands\(serverSlug, deploymentEnv, serverUrl, \{/);
-  assert.match(source, /const windowsComputerCommands = getComputerCommands\(serverSlug, deploymentEnv, serverUrl, \{/);
+  // Contract v1: both platforms come from the shared deployment-config builder.
+  assert.match(source, /const computerCommands = deploymentConfig\s*\? getComputerCommandsFromDeployment\(\{/);
+  assert.match(source, /const windowsComputerCommands = deploymentConfig\s*\? getComputerCommandsFromDeployment\(\{/);
+  assert.match(source, /deployment: deploymentConfig,/);
   assert.match(source, /platform: "windows"/);
-  assert.match(source, /legacyApiKey: apiKey/);
+  assert.match(source, /isolatedHomeSlug: isIsolatedDeploymentEnv\(deploymentEnv\) \? serverSlug : null/);
   assert.match(source, /computerCommands\?\.install/);
   assert.match(source, /computerCommands\?\.setup/);
-  assert.match(source, /const macLinuxDaemonCommand = getDaemonConnectCommand\(\{/);
+  assert.match(source, /const macLinuxDaemonCommand = deploymentConfig\s*\? getDaemonConnectCommand\(\{/);
   assert.match(source, /platform: "mac-linux"/);
-  assert.match(source, /const windowsDaemonCommand = getDaemonConnectCommand\(\{/);
+  assert.match(source, /const windowsDaemonCommand = deploymentConfig\s*\? getDaemonConnectCommand\(\{/);
   assert.match(source, /platform: "windows"/);
   assert.match(source, /<ComputerCommandGuide/);
   assert.match(source, /macLinuxDaemonCommand=\{macLinuxDaemonCommand\}/);
@@ -84,14 +86,14 @@ test("add computer dialog uses the shared explicit platform command selector", (
 test("machine detail connect command uses the same platform selector and keeps online recovery guide", () => {
   const source = readSource("src/components/machine/MachineDetailPanel.tsx");
 
-  assert.match(source, /const macLinuxConnectCommand = isKeyValid/);
+  assert.match(source, /const macLinuxConnectCommand = isKeyValid && deploymentConfig/);
   assert.match(source, /platform: "mac-linux"/);
-  assert.match(source, /const windowsConnectCommand = isKeyValid/);
+  assert.match(source, /const windowsConnectCommand = isKeyValid && deploymentConfig/);
   assert.match(source, /platform: "windows"/);
   assert.match(source, /deploymentEnv = import\.meta\.env\?\.VITE_DEPLOYMENT_ENV/);
-  assert.match(source, /const computerCommands = getComputerCommands\(serverSlug, deploymentEnv, serverUrl, \{/);
-  assert.match(source, /const windowsComputerCommands = getComputerCommands\(serverSlug, deploymentEnv, serverUrl, \{/);
-  assert.match(source, /legacyApiKey: isKeyValid \? savedKey : null/);
+  assert.match(source, /const computerCommands = deploymentConfig\s*\? getComputerCommandsFromDeployment\(\{/);
+  assert.match(source, /const windowsComputerCommands = deploymentConfig\s*\? getComputerCommandsFromDeployment\(\{/);
+  assert.match(source, /machineId: setupMachineId,/);
   assert.match(source, /const machineComputerCommands = windowsMachine \? windowsComputerCommands : computerCommands/);
   assert.match(source, /machineComputerCommands\?\.install/);
   assert.match(source, /machineComputerCommands\?\.setup/);
