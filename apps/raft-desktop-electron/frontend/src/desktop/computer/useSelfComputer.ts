@@ -36,6 +36,7 @@ export interface ComputerBridge {
   recycle?: () => Promise<void>;
   /** Re-run the startup host converge (generic failure retry path). */
   retryConverge?: () => Promise<void>;
+  connectCurrentDeployment?: (userId?: string) => Promise<void>;
   getUpgradeInfo?: () => Promise<{ latestVersion: string | null }>;
   upgrade?: () => Promise<void>;
   upgradeViaFreshInstall?: (version: string) => Promise<void>;

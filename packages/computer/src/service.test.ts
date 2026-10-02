@@ -1,3 +1,4 @@
+import { assertStateRootHermetic } from "./test/hermeticAssertions.js";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
@@ -82,13 +83,18 @@ const SERVER_B = "22222222-2222-4222-8222-222222222222";
 
 async function withHome<T>(fn: (home: string) => Promise<T>): Promise<T> {
   const home = await mkdtemp(join(tmpdir(), "raft-computer-sup-"));
-  const old = process.env.SLOCK_HOME;
+  const oldSlock = process.env.SLOCK_HOME;
+  const oldRaft = process.env.RAFT_HOME;
   process.env.SLOCK_HOME = home;
+  process.env.RAFT_HOME = home;
   try {
+    assertStateRootHermetic(home, "withHome");
     return await fn(home);
   } finally {
-    if (old === undefined) delete process.env.SLOCK_HOME;
-    else process.env.SLOCK_HOME = old;
+    if (oldSlock === undefined) delete process.env.SLOCK_HOME;
+    else process.env.SLOCK_HOME = oldSlock;
+    if (oldRaft === undefined) delete process.env.RAFT_HOME;
+    else process.env.RAFT_HOME = oldRaft;
     await rm(home, { recursive: true, force: true });
   }
 }
@@ -2964,4 +2970,16 @@ test("resolveResidentSlockCliPath: non-SEA + no env → undefined (normal node i
   assert.equal(resolveResidentSlockCliPath(false, {}), undefined);
   // empty string is treated as unset (falsy), not a bogus path
   assert.equal(resolveResidentSlockCliPath(false, { [RESIDENT_CLI_PATH_ENV_VAR]: "" }), undefined);
+});
+
+test("buildResidentSpawn: packaged Electron dispatches mode directly without treating __service as a script", () => {
+  assert.deepEqual(buildResidentSpawn("__service", null, "__service", [], false, process.execPath, "packaged"), {
+    command: process.execPath, args: ["__service"],
+  });
+  assert.deepEqual(buildResidentSpawn("__run", SERVER_A, "--hidden", [], false, process.execPath, "packaged"), {
+    command: process.execPath, args: ["__run", SERVER_A],
+  });
+  assert.deepEqual(buildResidentSpawn("__service", null, "/dev/app", [], false, process.execPath, "development"), {
+    command: process.execPath, args: ["/dev/app", "__service"],
+  });
 });

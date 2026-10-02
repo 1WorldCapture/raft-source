@@ -3,6 +3,7 @@
 //
 // Companion: ../service.test.ts asserts the CLI adapter (`runStop`)
 // still emits the pre-extraction info()/fail() lines byte-identically.
+import { assertStateRootHermetic } from "../test/hermeticAssertions.js";
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -16,13 +17,18 @@ import { servicePidPath } from "../paths.js";
 
 async function withHome<T>(fn: (home: string) => Promise<T>): Promise<T> {
   const home = await mkdtemp(join(tmpdir(), "raft-computer-stop-svc-"));
-  const old = process.env.SLOCK_HOME;
+  const oldSlock = process.env.SLOCK_HOME;
+  const oldRaft = process.env.RAFT_HOME;
   process.env.SLOCK_HOME = home;
+  process.env.RAFT_HOME = home;
   try {
+    assertStateRootHermetic(home, "withHome");
     return await fn(home);
   } finally {
-    if (old === undefined) delete process.env.SLOCK_HOME;
-    else process.env.SLOCK_HOME = old;
+    if (oldSlock === undefined) delete process.env.SLOCK_HOME;
+    else process.env.SLOCK_HOME = oldSlock;
+    if (oldRaft === undefined) delete process.env.RAFT_HOME;
+    else process.env.RAFT_HOME = oldRaft;
     await rm(home, { recursive: true, force: true });
   }
 }
@@ -362,4 +368,28 @@ test("stop service: source has exactly one graceful process.kill(SIGTERM) author
   assert.equal(src.match(/process\.kill\s*\(/g)?.length, 1);
   assert.match(src, /process\.kill\s*\([^)]*,\s*["']SIGTERM["']\s*\)/);
   assert.equal(src.match(/\b(?:process\.)?kill\s*\([^)]*,\s*(?:9|["']SIGKILL["'])/g), null);
+});
+
+test("stop awaits asynchronous identity verification before committing the signal", async () => {
+  await withHome(async (home) => {
+    let killed = false;
+    const result = await stop({ slockHome: home }, {
+      readPidfile: async () => 12345,
+      isProcessAlive: () => !killed,
+      killService: async () => { await new Promise<void>((resolve) => setImmediate(resolve)); killed = true; },
+    });
+    assert.equal(killed, true);
+    assert.equal(result.status, "stopped");
+  });
+});
+
+test("failed asynchronous identity verification preserves pidfile and sends no signal", async () => {
+  await withHome(async (home) => {
+    await writePidfile(home, 12345);
+    await assert.rejects(stop({ slockHome: home }, {
+      readPidfile: async () => 12345, isProcessAlive: () => true,
+      killService: async () => { throw new Error("identity changed"); },
+    }), /identity changed/);
+    assert.equal(await readFile(servicePidPath(home), "utf8"), "12345");
+  });
 });

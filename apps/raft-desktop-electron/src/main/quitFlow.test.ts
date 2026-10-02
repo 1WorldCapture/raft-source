@@ -25,7 +25,7 @@ test("quit flow: when to ask, copy truthfulness, cancel vs proceed", async (t) =
       },
     },
   } });
-  const { shouldAskQuitConfirm, quitDialogCopy, runQuitFlow } = await import("./quitFlow.ts");
+  const { shouldAskQuitConfirm, quitDialogCopy, runQuitFlow, createQuitController } = await import("./quitFlow.ts");
 
   await t.test("shouldAskQuitConfirm: skip for pref, OS shutdown, nothing running", () => {
     const base = { prefs: { quitNoConfirm: false }, osShuttingDown: false, anythingRunning: true };
@@ -82,13 +82,52 @@ test("quit flow: when to ask, copy truthfulness, cancel vs proceed", async (t) =
     assert.deepEqual(saved, [{ quitNoConfirm: true }]);
   });
 
-  await t.test("nothing running: no dialog, no orchestration, straight proceed", async () => {
+  await t.test("nothing running: no dialog, still scans for orphaned processes", async () => {
     dialogCalls.length = 0;
     const { deps, orchestrated } = makeDeps({ anythingRunning: async () => false });
     const proceed = await runQuitFlow(deps);
     assert.equal(proceed, true);
     assert.equal(dialogCalls.length, 0);
-    assert.equal(orchestrated.length, 0);
+    assert.equal(orchestrated.length, 1);
+  });
+
+  await t.test("repeated quit stays intercepted until cleanup completes", async () => {
+    let release!: (proceed: boolean) => void;
+    let attempts = 0;
+    let completes = 0;
+    let intercepted = 0;
+    const controller = createQuitController({
+      attempt: () => { attempts++; return new Promise<boolean>((resolve) => { release = resolve; }); },
+      complete: () => { completes++; }, failed: () => assert.fail("unexpected error"),
+    });
+    const event = { preventDefault: () => { intercepted++; } };
+    controller.beforeQuit(event);
+    controller.beforeQuit(event);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(attempts, 1);
+    assert.equal(intercepted, 2);
+    assert.equal(completes, 0);
+    release(true);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    controller.beforeQuit(event);
+    assert.equal(completes, 1);
+    assert.equal(intercepted, 2);
+  });
+
+  await t.test("cancel and error allow a later quit retry", async () => {
+    let attempts = 0;
+    let errors = 0;
+    let completes = 0;
+    const controller = createQuitController({
+      attempt: async () => { attempts++; if (attempts === 1) return false; if (attempts === 2) throw new Error("scan failed"); return true; },
+      complete: () => { completes++; }, failed: () => { errors++; },
+    });
+    for (let i = 0; i < 3; i++) {
+      controller.beforeQuit({ preventDefault() {} });
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+    assert.equal(errors, 1);
+    assert.equal(completes, 1);
   });
 
   await t.test("OS shutdown skips the dialog but still runs the ladder", async () => {

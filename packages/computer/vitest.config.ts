@@ -5,6 +5,11 @@ export default defineConfig({
     environment: "node",
     include: ["src/**/*.test.ts", "scripts/native/*.test.mjs"],
     pool: "forks",
+    // Hermetic state roots (#bugfix task #5): before any test file loads a
+    // business module, BOTH home variables point at a throwaway temp root,
+    // so an inherited RAFT_HOME (e.g. a managed agent terminal pointing at a
+    // live ~/.slock-raft) can never leak state writes into a real home.
+    setupFiles: ["src/test/hermeticStateRootSetup.ts"],
     // The previous Node runner imposed no per-test or per-hook timeout. Keep
     // that contract and let the existing job watchdogs bound hangs.
     testTimeout: 0,

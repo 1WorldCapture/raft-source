@@ -2,21 +2,30 @@ import assert from "node:assert/strict";
 import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { test } from "vitest";
 
 import { runLogin, runLogout } from "./login.js";
-import { serverAttachmentPath, userSessionPath } from "./paths.js";
+import { resolveRaftHome, serverAttachmentPath, userSessionPath } from "./paths.js";
 
 async function withHome<T>(fn: (home: string) => Promise<T>): Promise<T> {
   const home = await mkdtemp(join(tmpdir(), "raft-computer-login-"));
-  const old = process.env.SLOCK_HOME;
+  const oldSlock = process.env.SLOCK_HOME;
+  const oldRaft = process.env.RAFT_HOME;
   process.env.SLOCK_HOME = home;
+  process.env.RAFT_HOME = home;
   try {
+    // These tests write login state and stop runners — the exact operations
+    // that leaked into a live root on 2026-10-02 when RAFT_HOME overrode a
+    // SLOCK_HOME-only fixture. Assert the EFFECTIVE resolution, not the env
+    // write (contract: #bugfix task #5).
+    assert.equal(resolveRaftHome(), resolve(home), "login tests must resolve inside their temp home");
     return await fn(home);
   } finally {
-    if (old === undefined) delete process.env.SLOCK_HOME;
-    else process.env.SLOCK_HOME = old;
+    if (oldSlock === undefined) delete process.env.SLOCK_HOME;
+    else process.env.SLOCK_HOME = oldSlock;
+    if (oldRaft === undefined) delete process.env.RAFT_HOME;
+    else process.env.RAFT_HOME = oldRaft;
     await rm(home, { recursive: true, force: true });
   }
 }

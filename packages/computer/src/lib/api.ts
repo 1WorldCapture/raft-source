@@ -180,7 +180,7 @@ export interface ComputerApi {
    * the device-code flow; the presenter-supplied `onEvent` sink prints the
    * verification URL/code + waiting lines. The api itself never prints.
    */
-  login(opts: { serverUrl?: string }, onEvent?: (event: ComputerApiEvent) => void): Promise<LoginResult>;
+  login(opts: { serverUrl?: string }, onEvent?: (event: ComputerApiEvent) => void, options?: { signal?: AbortSignal }): Promise<LoginResult>;
   /** Clear the saved user session (idempotent). Pure: returns a result. */
   logout(onEvent?: (event: ComputerApiEvent) => void, deps?: StopDeps): Promise<LogoutResult>;
   /**
@@ -374,9 +374,9 @@ export function createComputerApi(slockHome: string, opts?: CreateComputerApiOpt
       );
     },
 
-    login(opts, onEvent): Promise<LoginResult> {
+    login(opts, onEvent, options): Promise<LoginResult> {
       return viaService(() =>
-        loginService({ serverUrl: opts.serverUrl, slockHome }, onEvent ? { onEvent } : {}),
+        loginService({ serverUrl: opts.serverUrl, slockHome }, { ...options, ...(onEvent ? { onEvent } : {}) }),
       );
     },
 

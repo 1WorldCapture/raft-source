@@ -167,6 +167,8 @@ export function buildResidentSpawn(
   execArgv: string[] = process.execArgv,
   isSea = isSeaBinary(),
   seaExecutable = process.execPath,
+  electronLayout: "packaged" | "development" | null = process.versions.electron
+    ? ((process as NodeJS.Process & { defaultApp?: boolean }).defaultApp ? "development" : "packaged") : null,
 ): { command: string; args: string[] } {
   // Carry parent execArgv so the dev-mode tsx loader survives re-exec.
   const tail = serverId ? [mode, serverId] : [mode];
@@ -175,6 +177,11 @@ export function buildResidentSpawn(
   // path). Re-exec the binary directly with the mode flag, which the commander
   // `__service`/`__run` commands dispatch. Passing the SEA argv[1] would corrupt
   // the child argv.
+  if (electronLayout === "packaged") {
+    // Electron loads the app bundle itself. argv[1] may already be __service;
+    // treating it as a Node script causes the historical /__service failure.
+    return { command: process.execPath, args: tail };
+  }
   if (isSea) {
     return { command: seaExecutable, args: [...execArgv, ...tail] };
   }
@@ -224,6 +231,7 @@ export function buildDetachedServiceEnv(
   // A detached Computer replacement is never owned by a legacy OS manager,
   // even when the incumbent was originally launched by one.
   delete env[OS_SUPERVISOR_KIND_ENV_VAR];
+  if (process.versions.electron) delete env.ELECTRON_RUN_AS_NODE;
   return env;
 }
 
@@ -282,7 +290,7 @@ export async function spawnDetachedService(
     detached: true,
     stdio: ["ignore", supLogFd.fd, supLogFd.fd],
     windowsHide: true,
-    env: buildDetachedServiceEnv(process.env, opts),
+    env: { ...buildDetachedServiceEnv(process.env, opts), RAFT_HOME: slockHome, SLOCK_HOME: slockHome },
   });
   child.on("error", (err) => {
     process.stderr.write(formatHumanError("SUPERVISOR_SPAWN_FAILED", err.message));
@@ -903,6 +911,7 @@ export async function runService(deps: RunServiceDeps = {}): Promise<void> {
   // shouldn't observe it. Defensive even though `runResident` doesn't
   // currently read this var. See Dayu nit (msg=29336624).
   const childEnv = buildRunnerChildEnv(process.env);
+  if (process.versions.electron) delete childEnv.ELECTRON_RUN_AS_NODE;
 
   const emitTransition = (
     serverId: string,
@@ -965,7 +974,12 @@ export async function runService(deps: RunServiceDeps = {}): Promise<void> {
     const child = spawn(command, args, {
       stdio: ["ignore", logFd.fd, logFd.fd],
       windowsHide: true,
-      env: childEnv,
+      // Pin the state root explicitly: supervisor-managed processes must be
+      // attributable to THIS root from the outside (ps eww) — the desktop
+      // quit-ladder and any future root-isolation check key off
+      // RAFT_HOME/SLOCK_HOME, and an inherited-but-unset env (GUI-launched
+      // app) would leave a runner indistinguishable from another root's.
+      env: { ...childEnv, RAFT_HOME: slockHome, SLOCK_HOME: slockHome },
     });
     await logFd.close();
     if (!child.pid) {
