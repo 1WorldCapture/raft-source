@@ -142,10 +142,12 @@ manifest_latest_version() {
             n = hextonum(hex)
             if (length(hex) != 4 || n < 0) fail()
             pos += 6
-            # Surrogate handling mirrors JSON.parse exactly: a PAIRED
-            # high+low combination becomes its astral code point; a LONE
-            # surrogate (high without a low, or a bare low) is replaced
-            # with U+FFFD — JSON.parse does NOT reject the document.
+            # Surrogate handling: a PAIRED high+low combination becomes
+            # its astral code point. A LONE surrogate (high without a low,
+            # or a bare low) is emitted as the U+FFFD replacement character
+            # — JSON.parse likewise does NOT reject the document (it keeps
+            # the lone surrogate in memory; only the OUTPUT encoding
+            # differs, which cannot affect the version resolution).
             if (n >= 55296 && n <= 56319) {
               if (substr(s, pos, 2) == "\\u") {
                 lo = hextonum(substr(s, pos + 2, 4))
