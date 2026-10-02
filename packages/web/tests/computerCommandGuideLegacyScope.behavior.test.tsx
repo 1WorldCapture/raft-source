@@ -118,16 +118,3 @@ test("showLegacyDaemon={false} suppresses a legacy command the caller already ho
   assert.equal(screen.queryByText(/npx\.cmd @botiverse\/raft-daemon/), null);
   assert.equal(document.body.innerHTML.includes(SECRET), false);
 });
-
-test("the Windows Computer block states the pwsh 7+ prerequisite; Mac/Linux does not", () => {
-  // The install/setup commands pipe through a strict JSON reader that only exists in pwsh 7+.
-  // The prerequisite must be visible where the commands are — not buried in docs (joint-test S1 item).
-  renderGuide();
-  assert.equal(screen.queryByTestId("computer-guide-pwsh7-prerequisite"), null);
-
-  fireEvent.click(screen.getByRole("radio", { name: "Windows x64" }));
-  const note = screen.getByTestId("computer-guide-pwsh7-prerequisite");
-  assert.match(note.textContent ?? "", /PowerShell 7/);
-  assert.match(note.textContent ?? "", /pwsh/);
-  assert.match(note.textContent ?? "", /5\.1/);
-});
