@@ -8,7 +8,7 @@
 import api from "../../src/api/client";
 import type { DeploymentComputerSetupReady } from "../../src/utils/deploymentComputerSetup";
 
-export const DEPLOYMENT_SETUP_PATH = "/deployment/computer-setup";
+export const DEPLOYMENT_SETUP_PATH = "/api/deployment/computer-setup";
 
 export const DEFAULT_READY: DeploymentComputerSetupReady = {
   schemaVersion: 1,

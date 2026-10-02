@@ -11,9 +11,7 @@
 
 import api from "../api/client";
 
-// api client (axios) already carries the /api base (RUNTIME_API_BASE); call-site
-// paths must be api-relative — "/api/..." here would double the prefix and 404.
-export const DEPLOYMENT_COMPUTER_SETUP_PATH = "/deployment/computer-setup";
+export const DEPLOYMENT_COMPUTER_SETUP_PATH = "/api/deployment/computer-setup";
 
 /** The only schema this client understands; anything else is an explicit error. */
 export const DEPLOYMENT_COMPUTER_SETUP_SCHEMA_VERSION = 1;
