@@ -61,180 +61,36 @@ DISPATCHER_PUBLISHED="0"
 # exact block from install.sh — keep it self-contained POSIX sh) ---
 manifest_latest_version() {
   _mlv_input="${1:-}"
-  # The awk program below accumulates EVERY input record and parses the
-  # ORIGINAL bytes: no shell variable ever holds the body (command
-  # substitution would strip NUL), and there is no newline folding that
-  # could launder a raw control character. JSON-legal whitespace
-  # (space/tab/CR/LF) is skipped structurally; a control byte anywhere
-  # JSON forbids it fails exactly like JSON.parse on the same bytes.
+  _mlv_tmp=""
   if [ "$_mlv_input" = "-" ]; then
-    _mlv_version="$(awk '
-    # A complete, strict JSON parser (recursive descent) over the ORIGINAL
-    # bytes — the shell surface
-    # must accept and reject EXACTLY what JSON.parse / ConvertFrom-Json do:
-    # full structure validation (commas, colons, single root, no trailing
-    # content, legal numbers and literals, no raw control characters inside
-    # strings) plus escape decoding including \uXXXX surrogate pairs. The
-    # root-object LAST "version" string wins (JSON.parse duplicate-key
-    # semantics); a non-string or nested "version" never satisfies the
-    # lookup, and an invalid document yields NOTHING — a failed look is
-    # never a version.
-    function fail() { bad = 1; exit }
-    function skipws() {
-      while (pos <= len && substr(s, pos, 1) ~ /[ \t\n\r]/) pos++
-    }
-    function hextonum(h,    i, d, v) {
-      v = 0
-      for (i = 1; i <= length(h); i++) {
-        d = index("0123456789abcdef", tolower(substr(h, i, 1))) - 1
-        if (d < 0) return -1
-        v = v * 16 + d
-      }
-      return v
-    }
-    function utf8encode(n,    out) {
-      if (n < 128) return sprintf("%c", n)
-      if (n < 2048) { out = sprintf("%c", 192 + int(n / 64)); return out sprintf("%c", 128 + n % 64) }
-      if (n < 65536) {
-        out = sprintf("%c", 224 + int(n / 4096))
-        out = out sprintf("%c", 128 + int(n / 64) % 64)
-        return out sprintf("%c", 128 + n % 64)
-      }
-      out = sprintf("%c", 240 + int(n / 262144))
-      out = out sprintf("%c", 128 + int(n / 4096) % 64)
-      out = out sprintf("%c", 128 + int(n / 64) % 64)
-      return out sprintf("%c", 128 + n % 64)
-    }
-    function parse_string(    c, esc, hex, n, lo) {
-      pos++
-      out = ""
-      while (pos <= len) {
-        c = substr(s, pos, 1)
-        if (c == "\"") { pos++; return out }
-        if (c < " ") fail()
-        if (c == "\\") {
-          esc = substr(s, pos + 1, 1)
-          if (esc == "u") {
-            hex = substr(s, pos + 2, 4)
-            n = hextonum(hex)
-            if (length(hex) != 4 || n < 0) fail()
-            pos += 6
-            if (n >= 55296 && n <= 56319) {
-              # high surrogate: must be followed by \uDC00-\uDFFF
-              if (substr(s, pos, 2) != "\\u") fail()
-              lo = hextonum(substr(s, pos + 2, 4))
-              if (lo < 56320 || lo > 57343) fail()
-              pos += 6
-              n = 65536 + (n - 55296) * 1024 + (lo - 56320)
-            } else if (n >= 56320 && n <= 57343) fail()
-            out = out utf8encode(n)
-          } else if (esc == "\"") { out = out "\""; pos += 2 }
-          else if (esc == "\\") { out = out "\\"; pos += 2 }
-          else if (esc == "/") { out = out "/"; pos += 2 }
-          else if (esc == "b") { out = out sprintf("%c", 8); pos += 2 }
-          else if (esc == "f") { out = out sprintf("%c", 12); pos += 2 }
-          else if (esc == "n") { out = out sprintf("%c", 10); pos += 2 }
-          else if (esc == "r") { out = out sprintf("%c", 13); pos += 2 }
-          else if (esc == "t") { out = out sprintf("%c", 9); pos += 2 }
-          else fail()
-        } else { out = out c; pos++ }
-      }
-      fail()
-    }
-    function parse_number(    c) {
-      if (substr(s, pos, 1) == "-") pos++
-      if (substr(s, pos, 1) == "0") pos++
-      else if (substr(s, pos, 1) ~ /[1-9]/) { while (substr(s, pos, 1) ~ /[0-9]/) pos++ }
-      else fail()
-      if (substr(s, pos, 1) == ".") {
-        pos++
-        if (substr(s, pos, 1) !~ /[0-9]/) fail()
-        while (substr(s, pos, 1) ~ /[0-9]/) pos++
-      }
-      if (substr(s, pos, 1) ~ /[eE]/) {
-        pos++
-        if (substr(s, pos, 1) ~ /[+-]/) pos++
-        if (substr(s, pos, 1) !~ /[0-9]/) fail()
-        while (substr(s, pos, 1) ~ /[0-9]/) pos++
-      }
-      return "num"
-    }
-    function parse_object(isroot,    key, first, c, vtype) {
-      pos++
-      first = 1
-      while (1) {
-        skipws()
-        c = substr(s, pos, 1)
-        if (c == "}") { pos++; return }
-        if (!first) {
-          if (c != ",") fail()
-          pos++
-          skipws()
-        }
-        first = 0
-        if (substr(s, pos, 1) != "\"") fail()
-        key = parse_string()
-        skipws()
-        if (substr(s, pos, 1) != ":") fail()
-        pos++
-        vtype = parse_value()
-        if (isroot && key == "version") rootVersion = (vtype == "str") ? g_str : ""
-      }
-    }
-    function parse_array(    first, c) {
-      pos++
-      first = 1
-      while (1) {
-        skipws()
-        c = substr(s, pos, 1)
-        if (c == "]") { pos++; return }
-        if (!first) {
-          if (c != ",") fail()
-          pos++
-        }
-        first = 0
-        parse_value()
-      }
-    }
-    function parse_value(    c, wasroot) {
-      skipws()
-      c = substr(s, pos, 1)
-      if (c == "{") {
-        wasroot = isroot
-        isroot = 0
-        parse_object(wasroot)
-        return "obj"
-      }
-      if (c == "[") { isroot = 0; parse_array(); return "arr" }
-      if (c == "\"") { g_str = parse_string(); return "str" }
-      if (c == "-" || c ~ /[0-9]/) { parse_number(); return "num" }
-      if (substr(s, pos, 4) == "true") { pos += 4; return "lit" }
-      if (substr(s, pos, 5) == "false") { pos += 5; return "lit" }
-      if (substr(s, pos, 4) == "null") { pos += 4; return "lit" }
-      fail()
-    }
-    {
-      buf = buf $0 "\n"
-    }
-    END {
-      s = buf
-      len = length(s)
-      pos = 1
-      bad = 0
-      rootVersion = ""
-      g_str = ""
-      isroot = 1
-      skipws()
-      parse_value()
-      skipws()
-      if (pos <= len) fail()
-      if (rootVersion != "") print rootVersion
-    }
-  ')"
+    # Stage stdin to a temp file FIRST: the byte-level control check below
+    # and the awk parse must both see the ORIGINAL bytes, and a stream can
+    # only be consumed once (command substitution would also strip NUL).
+    _mlv_tmp="$(mktemp 2>/dev/null)" \
+      || { echo '[manifest] error: could not create a temp staging file' >&2; return 2; }
+    cat > "$_mlv_tmp" \
+      || { rm -f "$_mlv_tmp"; echo '[manifest] error: could not read manifest' >&2; return 2; }
+    _mlv_input="$_mlv_tmp"
   else
     [ -n "$_mlv_input" ] || { echo '[manifest] error: no manifest path given' >&2; return 2; }
     [ -r "$_mlv_input" ] || { echo '[manifest] error: could not read manifest' >&2; return 2; }
-    _mlv_version="$(awk '
+  fi
+  # Refuse forbidden control bytes BEFORE awk sees the document: macOS
+  # awk drops NUL inside records, so the parser alone cannot be trusted
+  # with them. Delete printable ASCII, the three JSON-legal whitespace
+  # bytes and non-ASCII UTF-8; any surviving byte is a control byte JSON
+  # forbids anywhere (NUL, U+0001-U+0008, U+000B/U+000C, U+000E-U+001F).
+  _mlv_forbidden="$(LC_ALL=C tr -d '\011\012\015\040-\176\200-\377' < "$_mlv_input" | wc -c | tr -d '[:space:]')" \
+    || { [ -z "$_mlv_tmp" ] || rm -f "$_mlv_tmp"; echo '[manifest] error: could not read manifest' >&2; return 2; }
+  if [ "$_mlv_forbidden" != "0" ]; then
+    [ -z "$_mlv_tmp" ] || rm -f "$_mlv_tmp"
+    echo '[manifest] error: raw control byte in manifest (invalid JSON); refusing' >&2
+    return 1
+  fi
+  # The awk program accumulates every record and parses the original
+  # bytes; the input file is passed as a direct awk argument because a
+  # redirect on the assignment is not portable across shells.
+  _mlv_version="$(awk '
     # A complete, strict JSON parser (recursive descent) over the ORIGINAL
     # bytes — the shell surface
     # must accept and reject EXACTLY what JSON.parse / ConvertFrom-Json do:
@@ -396,8 +252,10 @@ manifest_latest_version() {
       if (pos <= len) fail()
       if (rootVersion != "") print rootVersion
     }
-  ')" < "$_mlv_input" || { echo '[manifest] error: could not read manifest' >&2; return 2; }
-  fi
+  ' "$_mlv_input"
+)" \
+    || { [ -z "$_mlv_tmp" ] || rm -f "$_mlv_tmp"; echo '[manifest] error: could not read manifest' >&2; return 2; }
+  [ -z "$_mlv_tmp" ] || rm -f "$_mlv_tmp"
   [ -n "$_mlv_version" ] || return 1
   printf '%s' "$_mlv_version"
 }

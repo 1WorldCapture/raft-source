@@ -125,6 +125,37 @@ test("shell: the install.sh manifest_latest_version block resolves the shared fi
         `fixture ${testCase.file} must refuse to resolve a version in shell but resolved: ${JSON.stringify(stdout)}`,
       );
     }
+
+    // The installer's manifest-latest line calls the function with the file
+    // PATH as its argument — both invocation shapes must agree on every
+    // fixture (the file branch once broke while stdin kept passing).
+    const fixturePath = path.join(fixturesDir, testCase.file);
+    let fileOut = "";
+    let fileError: unknown = null;
+    try {
+      const fileRun = await execFileAsync("sh", [
+        "-c",
+        `eval "$(printf '%s' "$2")"\nmanifest_latest_version "$1"\n`,
+        "sh",
+        fixturePath,
+        match[0],
+      ]) as unknown as { stdout: string | Buffer };
+      fileOut = typeof fileRun.stdout === "string" ? fileRun.stdout : fileRun.stdout.toString();
+    } catch (error) {
+      fileError = error;
+      const partial = (error as { stdout?: string | Buffer }).stdout;
+      if (typeof partial === "string") fileOut = partial;
+      else if (Buffer.isBuffer(partial)) fileOut = partial.toString();
+    }
+    if (testCase.expect.ok) {
+      assert.equal(fileError, null, `fixture ${testCase.file} (file argument) must resolve in shell but failed: ${fileError}`);
+      assert.equal(fileOut, testCase.expect.version, `fixture ${testCase.file} (file argument)`);
+    } else {
+      assert.ok(
+        fileError !== null || fileOut.trim().length === 0,
+        `fixture ${testCase.file} (file argument) must refuse to resolve a version in shell but resolved: ${JSON.stringify(fileOut)}`,
+      );
+    }
   }
 }, { timeout: 30_000 });
 

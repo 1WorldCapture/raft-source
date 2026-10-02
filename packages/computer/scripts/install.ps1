@@ -154,9 +154,11 @@ function Read-Json([string]$Uri) {
     if ($_.Exception -is [System.Management.Automation.MethodInvocationException]) {
       Fail "invalid JSON from ${Uri}: $($_.Exception.InnerException.Message)"
     }
-    if ([regex]::Match($content, '"(?:[^"\\]|\\.)*[\x00-\x1F]').Success) {
-      Fail "invalid JSON from ${Uri}: raw control character inside a string"
-    }
+    # Strict reader unavailable on this host: refuse rather than guess. A
+    # regex pre-check cannot validate the full grammar, and shipping a
+    # weaker line than the other installer surfaces would silently change
+    # what counts as a manifest (task: installer JSON parity).
+    Fail "a strict JSON reader (System.Text.Json) is not available in this PowerShell; run the installer under a PowerShell that provides it (pwsh 7+)"
   }
   return $content | ConvertFrom-Json
 }
