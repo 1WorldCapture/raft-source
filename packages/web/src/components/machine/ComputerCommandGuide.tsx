@@ -271,6 +271,14 @@ export default function ComputerCommandGuide({
               <Badge.Experimental />
             </div>
             {displayedComputerSteps.length > 0 ? (
+              <p
+                className="text-xs leading-5 text-black/60"
+                data-testid="computer-guide-pwsh7-prerequisite"
+              >
+                {formatMessage({ id: "machine.commandGuide.windowsPwsh7Prerequisite" })}
+              </p>
+            ) : null}
+            {displayedComputerSteps.length > 0 ? (
               <CommandRows
                 steps={displayedComputerSteps}
                 copiedCommand={copiedCommand}
