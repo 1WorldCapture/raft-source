@@ -23,8 +23,13 @@
 #                                which version to install; default =
 #                                https://hands.build. Pins also require this
 #                                authority; unreachable/mismatched identity fails.
-#   RAFT_COMPUTER_RELEASE_BACKEND  explicit legacy-cdn permits unattested pinned
-#                                custom/offline releases; default = hands.
+#   RAFT_COMPUTER_RELEASE_BACKEND  release authority: "hands" (default) or
+#                                "manifest" (the release root's own
+#                                manifest.json resolves latest; pinned versions
+#                                skip authority attestation and keep the
+#                                per-version sha256+size verification).
+#                                "legacy-cdn" is the pre-contract alias for
+#                                manifest. No fallback between backends.
 #   RAFT_COMPUTER_HANDS_APP     Hands app slug; default = raft-computer-cli.
 #   RAFT_COMPUTER_INSTALL_CHANNEL  persist a release channel after successful
 #                                install (`alpha` for staging, `latest`, or
@@ -51,6 +56,54 @@ K_STATE_DIR="${STATE_HOME}/computer/k"
 K_RESET_BACKUP=""
 K_RESET_RESIDENT="0"
 DISPATCHER_PUBLISHED="0"
+
+# --- manifest-latest shared block start (fixture tests extract and eval this
+# exact block from install.sh — keep it self-contained POSIX sh) ---
+manifest_latest_version() {
+  _mlv_input="${1:-}"
+  if [ "$_mlv_input" = "-" ]; then
+    _mlv_body="$(cat)"
+  else
+    [ -n "$_mlv_input" ] || { echo '[manifest] error: no manifest path given' >&2; return 2; }
+    _mlv_body="$(tr -d '\n' < "$_mlv_input")" || { echo '[manifest] error: could not read manifest' >&2; return 2; }
+  fi
+  # Depth-aware extraction of the ROOT-LEVEL "version" string: a `"version"`
+  # key at brace depth 1 only. Nested "version" keys (per-version target
+  # blocks, evidence objects) can never satisfy the depth gate — the same
+  # anchoring discipline the target-body extraction below applies.
+  _mlv_version="$(printf '%s' "$_mlv_body" | awk '
+    {
+      s = $0
+      len = length(s)
+      depth = 0
+      for (i = 1; i <= len; i++) {
+        c = substr(s, i, 1)
+        if (c == "{") depth++
+        else if (c == "}") { depth--; continue }
+        if (depth != 1) continue
+        if (substr(s, i, 9) != "\"version\"") continue
+        j = i + 9
+        while (j <= len && substr(s, j, 1) ~ /[[:space:]]/) j++
+        if (substr(s, j, 1) != ":") continue
+        j++
+        while (j <= len && substr(s, j, 1) ~ /[[:space:]]/) j++
+        if (substr(s, j, 1) != "\"") continue
+        j++
+        out = ""
+        for (; j <= len; j++) {
+          d = substr(s, j, 1)
+          if (d == "\"") { print out; exit }
+          out = out d
+        }
+        exit
+      }
+      exit
+    }
+  ')"
+  [ -n "$_mlv_version" ] || return 1
+  printf '%s' "$_mlv_version"
+}
+# --- manifest-latest shared block end ---
 
 err() {
   printf '[install] error: %s\n' "$1" >&2
@@ -250,13 +303,29 @@ semver_compare() {
 }
 
 # --- resolve base + version ---
-# Bytes come from the CDN distribution (cdn.raft.build by default; override via
-# RAFT_COMPUTER_RELEASE_BASE, e.g. the staging bucket): the per-version subdir
-# holds that version's manifest + binaries. WHICH version to install is decided
-# by the Hands release authority (channel latest/alpha), so activating a release
-# in Hands is what makes installers pick it up. A pinned RAFT_COMPUTER_VERSION
-# or pinned:<semver> channel selects exact bytes attested by Hands.
+# Bytes come from the release-file root (cdn.raft.build by default; override
+# via RAFT_COMPUTER_RELEASE_BASE, e.g. a private /computer/ mirror): the
+# per-version subdir holds that version's manifest + binaries. WHICH version
+# to install is decided by the release authority for the configured backend
+# (contract v1):
+#   hands (default)   — the Hands release authority resolves the channel
+#                       (latest/alpha) and attests pinned versions;
+#   manifest          — the release root's own manifest.json top-level
+#                       `version` IS the latest pointer; pinned versions skip
+#                       authority attestation and keep the per-version
+#                       sha256+size verification (the operator owns the trust
+#                       of the release directory).
+#   legacy-cdn        — pre-contract alias for manifest (same behavior).
 RELEASE_BASE="${RAFT_COMPUTER_RELEASE_BASE:-https://cdn.raft.build/computer}"
+RELEASE_BACKEND="${RAFT_COMPUTER_RELEASE_BACKEND:-hands}"
+case "$RELEASE_BACKEND" in
+  hands) ;;
+  manifest|legacy-cdn) RELEASE_BACKEND="manifest" ;;
+  *) err "invalid RAFT_COMPUTER_RELEASE_BACKEND: ${RAFT_COMPUTER_RELEASE_BACKEND} (expected hands or manifest)" ;;
+esac
+if [ "$RELEASE_BACKEND" = "manifest" ] && [ -z "${RAFT_COMPUTER_RELEASE_BASE:-}" ]; then
+  err "RAFT_COMPUTER_RELEASE_BACKEND=manifest requires RAFT_COMPUTER_RELEASE_BASE (self-managed manifests cannot resolve from the official CDN root)"
+fi
 HANDS_ORIGIN="${RAFT_COMPUTER_HANDS_ORIGIN:-https://hands.build}"
 HANDS_APP="${RAFT_COMPUTER_HANDS_APP:-raft-computer-cli}"
 VERSION="${CLI_VERSION:-${RAFT_COMPUTER_VERSION:-}}"
@@ -409,6 +478,20 @@ if [ -z "$VERSION" ]; then
     pinned:*) VERSION="${SELECT_CHANNEL#pinned:}" ;;
   esac
 fi
+if [ -z "$VERSION" ] && [ "$RELEASE_BACKEND" = "manifest" ]; then
+  # Contract v1 manifest backend: the release root's own manifest.json IS the
+  # latest pointer. alpha is a Hands-only debug channel — refuse rather than
+  # passing latest off as alpha.
+  [ "$SELECT_CHANNEL" = "alpha" ] \
+    && err "the manifest backend has no alpha channel; RAFT_COMPUTER_INSTALL_CHANNEL=alpha requires hands"
+  _mlv="$(mktemp)"
+  $DLO "$_mlv" "${RELEASE_BASE%/}/manifest.json" \
+    || err "could not download the release manifest (${RELEASE_BASE%/}/manifest.json); refusing to continue"
+  VERSION="$(manifest_latest_version "$_mlv")" \
+    || err "the release manifest at ${RELEASE_BASE%/}/manifest.json carries no usable top-level version; refusing to continue"
+  rm -f "$_mlv"
+  info "resolved latest release from the self-managed manifest: ${VERSION}"
+fi
 if [ -z "$VERSION" ]; then
   case "$SELECT_CHANNEL" in
     alpha) HANDS_CHANNEL="alpha" ;;
@@ -485,7 +568,7 @@ trap cleanup EXIT
 # Exact versions need an independent identity too. The explicit legacy-CDN
 # backend remains an operator-owned escape hatch for offline/custom releases,
 # matching the runtime updater; pinning a version alone never selects it.
-if [ -z "$HANDS_LATEST_BODY" ] && [ "${RAFT_COMPUTER_RELEASE_BACKEND:-hands}" != "legacy-cdn" ]; then
+if [ -z "$HANDS_LATEST_BODY" ] && [ "$RELEASE_BACKEND" != "manifest" ]; then
   HANDS_CHANNEL="pinned:${VERSION}"
   hands_query_version="$(printf '%s' "$VERSION" | sed 's/+/%2B/g')"
   hands_url="${HANDS_ORIGIN%/}/public/v2/apps/${HANDS_APP}/updates/check?product_type=cli-binary&current_version=0.0.0&channel=main&platform=${PLAT}&arch=${ARCH}&sdk_version=0.5.1&version=${hands_query_version}"
@@ -809,6 +892,28 @@ reset_k_state() {
   info "K state reset; complete previous state saved to $K_RESET_BACKUP/k"
 }
 
+# --- release-source pre-flight (contract v1) ---
+# When the onboarding command carries a release-source configuration, an
+# existing contract-aware binary must accept it BEFORE this installer touches
+# any binary or state: a different persisted source is a conflict that needs
+# a deliberate `raft-computer release-source set`, and a corrupt persisted
+# source must surface now, not after a half-replaced install. A pre-contract
+# binary has no `release-source` subcommand; the file cannot exist without
+# one, so the pre-flight is skipped and the post-install init writes it.
+release_source_args() {
+  if [ "$RELEASE_BACKEND" = "hands" ]; then
+    printf '%s' "--backend hands --release-base $RELEASE_BASE --hands-origin $HANDS_ORIGIN"
+  else
+    printf '%s' "--backend manifest --release-base $RELEASE_BASE"
+  fi
+}
+if [ -n "${RAFT_COMPUTER_RELEASE_BASE:-}" ] && [ -x "$existing" ] \
+  && SLOCK_HOME="$STATE_HOME" RAFT_HOME="$STATE_HOME" "$existing" release-source show >/dev/null 2>&1; then
+  # shellcheck disable=SC2086
+  SLOCK_HOME="$STATE_HOME" RAFT_HOME="$STATE_HOME" "$existing" release-source init $(release_source_args) \
+    || err "release-source conflict: this Computer already tracks a different release source. Resolve it explicitly with 'raft-computer release-source set' before re-running this installer."
+fi
+
 # --- stage and verify all install files before stopping the service ---
 mkdir -p "$INSTALL_DIR" || err "failed to create install directory ${INSTALL_DIR}"
 install_stage="$INSTALL_DIR/.${BIN_NAME}.install.$$"
@@ -831,6 +936,14 @@ INSTALLED_SHA="$($SHA_CMD "$INSTALL_DIR/$BIN_NAME" | awk '{print $1}')"
 INSTALLED_VERSION="$(binary_self_version "$INSTALL_DIR/$BIN_NAME" || true)"
 [ "$INSTALLED_VERSION" = "$VERSION" ] || err "installed dispatcher reported version '${INSTALLED_VERSION}', expected '${VERSION}'"
 info "installed to ${INSTALL_DIR}/${BIN_NAME}"
+# Persist the release source BEFORE any service start (contract v1): the
+# freshly installed binary initializes it first-writer-wins. The shell never
+# hand-writes the JSON — the binary's validated, atomic writer does.
+if [ -n "${RAFT_COMPUTER_RELEASE_BASE:-}" ]; then
+  # shellcheck disable=SC2086
+  SLOCK_HOME="$STATE_HOME" RAFT_HOME="$STATE_HOME" "$INSTALL_DIR/$BIN_NAME" release-source init $(release_source_args) \
+    || err "installed $VERSION but could not persist the release source; run 'raft-computer release-source init' manually and re-run setup"
+fi
 persist_install_channel
 persist_shell_path
 retire_legacy_supervisor

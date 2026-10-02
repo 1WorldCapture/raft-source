@@ -50,8 +50,13 @@ export interface KReleaseSourceDeps {
   fetchFn?: typeof fetch;
   /** Per-request deadline; the release authority answers in ms or is broken. */
   timeoutMs?: number;
-  /** Legacy CDN is opt-in; Hands is the production default. */
-  backend?: "hands" | "legacy-cdn";
+  /**
+   * Legacy CDN is opt-in; Hands is the production default. "manifest" is the
+   * contract-v1 name for the self-managed manifest backend — same resolution
+   * path as the legacy CDN source ("legacy-cdn" remains as a pre-contract
+   * alias so old env values keep working).
+   */
+  backend?: "hands" | "legacy-cdn" | "manifest";
   handsApiOrigin?: string;
   handsAppSlug?: string;
   channelProvider?: () => Channel | Promise<Channel>;
@@ -63,10 +68,14 @@ export const RELEASE_BACKEND_ENV = "RAFT_COMPUTER_RELEASE_BACKEND";
 
 function resolveBackend(deps: KReleaseSourceDeps): "hands" | "legacy-cdn" {
   const configured = deps.backend ?? process.env[RELEASE_BACKEND_ENV] ?? "hands";
-  if (configured === "hands" || configured === "legacy-cdn") return configured;
+  if (configured === "hands") return "hands";
+  // "manifest" (contract v1) and "legacy-cdn" (pre-contract) both select the
+  // self-managed manifest source; the persisted release-source file already
+  // normalized legacy values, this accepts both spellings at the env seam.
+  if (configured === "legacy-cdn" || configured === "manifest") return "legacy-cdn";
   throw new ComputerServiceError(
     "K_SOURCE_BACKEND_INVALID",
-    `K_SOURCE_BACKEND_INVALID: ${RELEASE_BACKEND_ENV} must be "hands" or "legacy-cdn"`,
+    `K_SOURCE_BACKEND_INVALID: ${RELEASE_BACKEND_ENV} must be "hands" or "manifest"`,
   );
 }
 

@@ -67,6 +67,10 @@ $HandsOrigin = if ($env:RAFT_COMPUTER_HANDS_ORIGIN) {
   'https://hands.build'
 }
 $HandsApp = if ($env:RAFT_COMPUTER_HANDS_APP) { $env:RAFT_COMPUTER_HANDS_APP } else { 'raft-computer-cli' }
+# Contract v1: hands (default) resolves through the Hands authority; manifest
+# resolves latest from the release root's own manifest.json. Validated and
+# normalized in the main block (Fail is not yet defined here).
+$ReleaseBackend = if ($env:RAFT_COMPUTER_RELEASE_BACKEND) { $env:RAFT_COMPUTER_RELEASE_BACKEND } else { 'hands' }
 $VersionArgumentProvided = $PSBoundParameters.ContainsKey('Version')
 if (-not $VersionArgumentProvided) {
   $Version = $env:RAFT_COMPUTER_VERSION
@@ -563,6 +567,17 @@ try {
   $target = Get-Target
   Write-Step "detected target: $target"
   Assert-GitBashRequirement
+
+  # Normalize and validate the release backend (contract v1). "legacy-cdn" is
+  # the pre-contract alias for the self-managed manifest backend.
+  if ($ReleaseBackend -in @('manifest', 'legacy-cdn')) { $ReleaseBackend = 'manifest' }
+  elseif ($ReleaseBackend -ne 'hands') {
+    Fail "invalid RAFT_COMPUTER_RELEASE_BACKEND: $ReleaseBackend (expected hands or manifest)"
+  }
+  if ($ReleaseBackend -eq 'manifest' -and -not $env:RAFT_COMPUTER_RELEASE_BASE) {
+    Fail 'RAFT_COMPUTER_RELEASE_BACKEND=manifest requires RAFT_COMPUTER_RELEASE_BASE (self-managed manifests cannot resolve from the official CDN root)'
+  }
+
   $handsLatest = $null
   $handsChannel = $null
 
@@ -583,8 +598,17 @@ try {
       }
     }
     if ($selectChannel -and $selectChannel.StartsWith('pinned:')) {
-      # A pin selects an exact version; Hands still attests its identity.
+      # A pin selects an exact version; Hands still attests its identity on
+      # the hands backend (the manifest backend keeps per-version hashes).
       $Version = $selectChannel.Substring(7)
+    } elseif ($ReleaseBackend -eq 'manifest') {
+      # Contract v1 manifest backend: the release root's own manifest.json IS
+      # the latest pointer. alpha is a Hands-only debug channel.
+      if ($selectChannel -eq 'alpha') { Fail 'the manifest backend has no alpha channel; RAFT_COMPUTER_INSTALL_CHANNEL=alpha requires hands' }
+      Write-Step "resolving latest release from the self-managed manifest ($ReleaseBase/manifest.json)"
+      $rootManifest = Read-Json "$ReleaseBase/manifest.json"
+      $Version = $rootManifest.version
+      if (-not $Version) { Fail "the release manifest at $ReleaseBase/manifest.json carries no usable top-level version; refusing to continue" }
     } else {
       $handsChannel = if ($selectChannel -eq 'alpha') { 'alpha' } else { 'main' }
       $handsUrl = "$HandsOrigin/public/v2/apps/$HandsApp/latest?channel=$handsChannel&product_type=cli-binary"
@@ -617,7 +641,37 @@ try {
     }
   }
 
-  if (-not $handsLatest -and $env:RAFT_COMPUTER_RELEASE_BACKEND -ne 'legacy-cdn') {
+  # Release-source pre-flight (contract v1): a contract-aware existing binary
+  # must accept the onboarding's release source BEFORE this installer replaces
+  # any binary or state. A pre-contract binary has no `release-source`
+  # subcommand — and no file to conflict with — so the probe is skipped and
+  # the post-install init writes it.
+  $destination = Join-Path $InstallDir $BinaryName
+  if ($env:RAFT_COMPUTER_RELEASE_BASE -and (Test-Path -LiteralPath $destination)) {
+    $releaseSourceProbe = @('release-source', 'show')
+    $probeOk = $false
+    try {
+      $priorSlockHome = $env:SLOCK_HOME
+      $priorRaftHome = $env:RAFT_HOME
+      $env:SLOCK_HOME = $StateHome
+      $env:RAFT_HOME = $StateHome
+      & $destination @releaseSourceProbe *> $null
+      $probeOk = ($LASTEXITCODE -eq 0)
+    } catch { $probeOk = $false } finally {
+      if ($null -ne $priorSlockHome) { $env:SLOCK_HOME = $priorSlockHome } else { Remove-Item Env:SLOCK_HOME -ErrorAction SilentlyContinue }
+      if ($null -ne $priorRaftHome) { $env:RAFT_HOME = $priorRaftHome } else { Remove-Item Env:RAFT_HOME -ErrorAction SilentlyContinue }
+    }
+    if ($probeOk) {
+      $releaseSourceArgs = @('release-source', 'init', '--backend', $ReleaseBackend, '--release-base', $ReleaseBase)
+      if ($ReleaseBackend -eq 'hands') { $releaseSourceArgs += @('--hands-origin', $HandsOrigin) }
+      & $destination @releaseSourceArgs
+      if ($LASTEXITCODE -ne 0) {
+        Fail "release-source conflict: this Computer already tracks a different release source. Resolve it explicitly with 'raft-computer release-source set' before re-running this installer."
+      }
+    }
+  }
+
+  if (-not $handsLatest -and $ReleaseBackend -ne 'manifest') {
     $handsChannel = "pinned:$Version"
     $encodedVersion = [Uri]::EscapeDataString($Version)
     $targetParts = @($target -split '-', 2)
@@ -702,6 +756,24 @@ try {
     $script:KEffectiveTarget = $null
     Persist-InstallChannel
     Add-ToUserPath $InstallDir
+    # Persist the release source BEFORE any service start (contract v1): the
+    # freshly installed binary initializes it first-writer-wins; PowerShell
+    # never hand-writes the JSON — the binary's validated writer does.
+    if ($env:RAFT_COMPUTER_RELEASE_BASE) {
+      $releaseSourceArgs = @('release-source', 'init', '--backend', $ReleaseBackend, '--release-base', $ReleaseBase)
+      if ($ReleaseBackend -eq 'hands') { $releaseSourceArgs += @('--hands-origin', $HandsOrigin) }
+      $priorSlockHome = $env:SLOCK_HOME
+      $priorRaftHome = $env:RAFT_HOME
+      $env:SLOCK_HOME = $StateHome
+      $env:RAFT_HOME = $StateHome
+      try {
+        & $destination @releaseSourceArgs
+        if ($LASTEXITCODE -ne 0) { Fail "installed $Version but could not persist the release source; run 'raft-computer release-source init' manually and re-run setup" }
+      } finally {
+        if ($null -ne $priorSlockHome) { $env:SLOCK_HOME = $priorSlockHome } else { Remove-Item Env:SLOCK_HOME -ErrorAction SilentlyContinue }
+        if ($null -ne $priorRaftHome) { $env:RAFT_HOME = $priorRaftHome } else { Remove-Item Env:RAFT_HOME -ErrorAction SilentlyContinue }
+      }
+    }
     if ($needsLegacyMigration) {
       Retire-LegacySupervisor $destination
     }
