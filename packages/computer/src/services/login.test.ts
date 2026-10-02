@@ -3,6 +3,7 @@
 //
 // Companion: ../login.test.ts asserts the CLI adapter still emits the
 // pre-extraction info()/fail() lines byte-identically.
+import { assertStateRootHermetic } from "../test/hermeticAssertions.js";
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
@@ -21,6 +22,7 @@ async function withHome<T>(fn: (home: string) => Promise<T>): Promise<T> {
   process.env.SLOCK_HOME = home;
   process.env.RAFT_HOME = home;
   try {
+    assertStateRootHermetic(home, "withHome");
     return await fn(home);
   } finally {
     if (oldSlock === undefined) delete process.env.SLOCK_HOME;

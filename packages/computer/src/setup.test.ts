@@ -1,3 +1,4 @@
+import { assertStateRootHermetic } from "./test/hermeticAssertions.js";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -48,6 +49,7 @@ async function withHome<T>(fn: (home: string) => Promise<T>): Promise<T> {
   process.env.SLOCK_HOME = home;
   process.env.RAFT_HOME = home;
   try {
+    assertStateRootHermetic(home, "withHome");
     return await fn(home);
   } finally {
     if (oldSlock === undefined) delete process.env.SLOCK_HOME;

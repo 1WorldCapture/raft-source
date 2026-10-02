@@ -5,6 +5,7 @@
 //
 // Companion: ../service.test.ts asserts the CLI adapter (`runStart`)
 // still emits the pre-extraction info()/fail() lines byte-identically.
+import { assertStateRootHermetic } from "../test/hermeticAssertions.js";
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -44,6 +45,7 @@ async function withHome<T>(fn: (home: string) => Promise<T>): Promise<T> {
   process.env.SLOCK_HOME = home;
   process.env.RAFT_HOME = home;
   try {
+    assertStateRootHermetic(home, "withHome");
     return await fn(home);
   } finally {
     if (oldSlock === undefined) delete process.env.SLOCK_HOME;

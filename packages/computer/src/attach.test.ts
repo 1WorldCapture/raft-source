@@ -1,3 +1,4 @@
+import { assertStateRootHermetic } from "./test/hermeticAssertions.js";
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -24,6 +25,7 @@ async function withHome<T>(fn: (home: string) => Promise<T>): Promise<T> {
   process.env.SLOCK_HOME = home;
   process.env.RAFT_HOME = home;
   try {
+    assertStateRootHermetic(home, "withHome");
     await mkdir(join(home, "computer"), { recursive: true });
     await writeFile(
       join(home, "computer", "user-session.json"),

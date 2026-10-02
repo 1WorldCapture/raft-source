@@ -1,3 +1,4 @@
+import { assertStateRootHermetic } from "./test/hermeticAssertions.js";
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -31,6 +32,7 @@ async function withHome<T>(fn: (home: string) => Promise<T>): Promise<T> {
   process.env.SLOCK_HOME = home;
   process.env.RAFT_HOME = home;
   try {
+    assertStateRootHermetic(home, "withHome");
     // Need a per-server dir to anchor health.json into
     await mkdir(join(home, "computer", "servers", SERVER_A), { recursive: true });
     return await fn(home);

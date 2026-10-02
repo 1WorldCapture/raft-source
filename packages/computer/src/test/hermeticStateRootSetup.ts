@@ -10,9 +10,9 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll } from "vitest";
-import { assertStateRootHermetic } from "./hermeticAssertions.js";
+import { assertStateRootHermetic, registerHermeticRoot } from "./hermeticAssertions.js";
 
-const globalRoot = await mkdtemp(path.join(tmpdir(), "raft-computer-hermetic-"));
+const globalRoot = registerHermeticRoot(await mkdtemp(path.join(tmpdir(), "raft-computer-hermetic-")));
 // DELETE the inherited RAFT_HOME rather than pointing it at the temp root:
 // many contract tests build their env by spreading `...process.env` and then
 // overriding only SLOCK_HOME — a setup-injected RAFT_HOME would silently win
@@ -29,4 +29,4 @@ afterAll(async () => {
 
 // Fail at load time if the guard itself is broken — not after the first
 // state write.
-assertStateRootHermetic("global setup");
+assertStateRootHermetic(globalRoot, "global setup");

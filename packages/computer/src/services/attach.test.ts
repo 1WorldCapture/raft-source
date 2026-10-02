@@ -4,6 +4,7 @@
 //
 // Companion: ../attach.test.ts asserts the CLI adapter still emits the
 // pre-extraction info()/fail() lines byte-identically.
+import { assertStateRootHermetic } from "../test/hermeticAssertions.js";
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
@@ -36,6 +37,7 @@ async function withHome<T>(fn: (home: string) => Promise<T>, opts: { writeSessio
   process.env.SLOCK_HOME = home;
   process.env.RAFT_HOME = home;
   try {
+    assertStateRootHermetic(home, "withHome");
     if (opts.writeSession !== false) {
       await mkdir(join(home, "computer"), { recursive: true });
       await writeFile(

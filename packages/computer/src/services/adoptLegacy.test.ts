@@ -4,6 +4,7 @@
 //
 // Companion: ../adopt.test.ts asserts the CLI adapter's resolveLegacyKey
 // (4-channel exactly-one-source) + info()/fail() lines stay byte-identical.
+import { assertStateRootHermetic } from "../test/hermeticAssertions.js";
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdtemp, mkdir, readFile, rm, writeFile, stat } from "node:fs/promises";
@@ -43,6 +44,7 @@ async function withHome<T>(
   process.env.SLOCK_HOME = home;
   process.env.RAFT_HOME = home;
   try {
+    assertStateRootHermetic(home, "withHome");
     if (opts.writeSession !== false) {
       await mkdir(join(home, "computer"), { recursive: true });
       await writeFile(
