@@ -32,8 +32,8 @@ test("shell and PowerShell quoting neutralize interpreter metacharacters", () =>
   assert.equal(shellQuote("/acme"), `'/acme'`);
   assert.equal(shellQuote("it's"), `'it'\\''s'`);
   assert.equal(
-    shellQuote("$(rm -rf /) `id` ; a"),
-    `'$(rm -rf /) ` + "`id`" + ` ; a'`,
+    shellQuote("$(printf INJECTED) `id` ; a"),
+    `'$(printf INJECTED) ` + "`id`" + ` ; a'`,
   );
   assert.equal(powerShellQuote("it's"), `'it''s'`);
   assert.equal(powerShellQuote("$(calc)"), `'$(calc)'`);
@@ -200,11 +200,11 @@ test("isolated home expands the real home directory while the slug stays inert",
   const sneaky = getComputerCommandsFromDeployment({
     deployment: DEPLOYMENT,
     serverSlug: "acme",
-    isolatedHomeSlug: "x$(rm -rf /)y",
+    isolatedHomeSlug: "x$(printf INJECTED)y",
   });
   assert.ok(sneaky);
   // The injected $ is escaped inside the double quotes; the $HOME prefix still expands.
-  assert.match(sneaky.setup, /RAFT_HOME="\$HOME\/\.raft-computer-x\\\$\(?rm -rf \/\)?y"/);
+  assert.match(sneaky.setup, /RAFT_HOME="\$HOME\/\.raft-computer-x\\\$\(?printf INJECTED\)?y"/);
 
   const win = getComputerCommandsFromDeployment({
     deployment: DEPLOYMENT,
@@ -266,7 +266,7 @@ test("sh expands the isolated home to the real absolute directory and keeps the 
   const sneaky = getComputerCommandsFromDeployment({
     deployment: DEPLOYMENT,
     serverSlug: "acme",
-    isolatedHomeSlug: "x$(rm -rf /)y",
+    isolatedHomeSlug: "x$(printf INJECTED)y",
   });
   assert.ok(sneaky);
   const sneakyAssignment = extractShAssignment(sneaky.setup);
@@ -274,7 +274,7 @@ test("sh expands the isolated home to the real absolute directory and keeps the 
     encoding: "utf8",
   });
   // $HOME expands; the command-substitution suffix stays literal text.
-  assert.equal(sneakyExpanded, `${process.env.HOME}/.raft-computer-x$(rm -rf /)y`);
+  assert.equal(sneakyExpanded, `${process.env.HOME}/.raft-computer-x$(printf INJECTED)y`);
 });
 
 const pwshProbe = spawnSync("pwsh", ["-NoProfile", "-Command", "Write-Output ok"], { encoding: "utf8" });
