@@ -209,6 +209,36 @@ index 1041212ff31843bd72a7803a8a40fc5e3f4ab87f..e2e8a55bd03796f4cfad7d9f0c03c9a8
    },
    killProcess(pid) {
      process.kill(pid, "SIGKILL");
+diff --git a/core/src/txn/fileEffects.ts b/core/src/txn/fileEffects.ts
+index b7cb90a050f0adf462ccde9b38a892410384ba03..ec9dd2ebc745a6aa23e45f062560e96fb429a86e 100644
+--- a/core/src/txn/fileEffects.ts
++++ b/core/src/txn/fileEffects.ts
+@@ -95,7 +95,24 @@ export function fileSlotStore(stateDir: string): SlotStore {
+       const stable = slotDir(stateDir, "stable");
+       if ((await readVersion("experiment")) === null) return; // idempotent redo
+       await fs.rm(`${stable}.old`, { recursive: true, force: true });
+-      await platformOpsFor().renamePath(stable, `${stable}.old`).catch(() => {});
++      // Diagnosable aside-move (task #11): the bare catch(() => {}) swallowed
++      // the errno, so ANY first-step failure (permissions, IO, cross-device)
++      // resurfaced later as a misleading ENOTEMPTY on the NEXT rename — the
++      // original evidence destroyed exactly when it was needed. Crash-redo
++      // idempotence is preserved: ENOENT means "stable already moved aside"
++      // and the redo proceeds; every other failure is rethrown with the
++      // original errno as the cause.
++      try {
++        await platformOpsFor().renamePath(stable, `${stable}.old`);
++      } catch (err) {
++        if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
++          throw new Error(
++            `[K_PROMOTE_FAILED] could not move the current stable slot aside ` +
++              `(${(err as Error).message}); the original errno is preserved as this error's cause`,
++            { cause: err },
++          );
++        }
++      }
+       await platformOpsFor().renamePath(experiment, stable);
+       await fs.rm(`${stable}.old`, { recursive: true, force: true });
+     },
 diff --git a/core/src/txn/lock.ts b/core/src/txn/lock.ts
 index 5c388abe7cbe97902f7515f6e050ab7cf467d83e..a8b4d6c07d5cecc0124b2177597b76684c1a64a6 100644
 --- a/core/src/txn/lock.ts
