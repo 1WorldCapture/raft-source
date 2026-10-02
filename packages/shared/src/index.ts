@@ -233,6 +233,7 @@ export * from "./attentionDependencyOracle.js";
 export * from "./runtimeProviderDisplay.js";
 export * from "./runtimeAccountUsage.js";
 export * from "./externalAgentIntegration.js";
+export * from "./externalAgentActivation.js";
 export * from "./translationLanguages.js";
 export * from "./displayLocales.js";
 export * from "./timeFormatPreference.js";

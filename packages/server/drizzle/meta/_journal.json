@@ -1891,6 +1891,13 @@
       "when": 1790823792594,
       "tag": "0269_announcement_tracked_since",
       "breakpoints": true
+    },
+    {
+      "idx": 270,
+      "version": "7",
+      "when": 1790944017257,
+      "tag": "0270_external_agent_delegation",
+      "breakpoints": true
     }
   ]
 }
