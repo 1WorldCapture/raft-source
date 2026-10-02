@@ -28,11 +28,20 @@ const CASES: FixtureCase[] = [
   // Braces/escaped quotes inside strings and real document line breaks must
   // not confuse any of the three parsers (shell keeps a string-aware scanner).
   { file: "release-root-manifest.string-braces.fixture.json", expect: { ok: true, version: "1.2.3" } },
+  // \uXXXX escapes must decode to the SAME key/value JSON.parse produces:
+  // "version":"8.8.8-wrong" and "version":"3.2.1" are duplicate keys (the
+  // escaped spelling IS the plain key after decoding) so the last one wins;
+  // "version" spelled with a LITERAL backslash never matches.
+  { file: "release-root-manifest.unicode-escapes.fixture.json", expect: { ok: true, version: "3.2.1" } },
   { file: "release-root-manifest.no-version.fixture.json", expect: { ok: false, reason: "publishing" } },
-  // Structurally invalid JSON (unterminated object) resolves NOWHERE — a
-  // failed look is never a version. The TS surface maps a body that will not
-  // parse to its catch-all network failure.
+  // Structurally invalid JSON resolves NOWHERE — a failed look is never a
+  // version. The TS surface maps a body that will not parse to its catch-all
+  // network failure.
   { file: "release-root-manifest.invalid.fixture.json", expect: { ok: false, reason: "network" } },
+  // Two concatenated objects and an illegal literal are likewise invalid
+  // documents everywhere (review reproductions).
+  { file: "release-root-manifest.concat-invalid.fixture.json", expect: { ok: false, reason: "network" } },
+  { file: "release-root-manifest.bad-literal.fixture.json", expect: { ok: false, reason: "network" } },
 ];
 
 async function fixtureBody(file: string): Promise<string> {

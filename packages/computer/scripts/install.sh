@@ -82,70 +82,158 @@ manifest_latest_version() {
   # unterminated string) — the same accept/reject line as TS JSON.parse and
   # PowerShell ConvertFrom-Json, so all three resolution surfaces agree.
   _mlv_version="$(printf '%s' "$_mlv_body" | awk '
+    # A complete, strict JSON parser (recursive descent) — the shell surface
+    # must accept and reject EXACTLY what JSON.parse / ConvertFrom-Json do:
+    # full structure validation (commas, colons, single root, no trailing
+    # content, legal numbers and literals, no raw control characters inside
+    # strings) plus escape decoding including \uXXXX surrogate pairs. The
+    # root-object LAST "version" string wins (JSON.parse duplicate-key
+    # semantics); a non-string or nested "version" never satisfies the
+    # lookup, and an invalid document yields NOTHING — a failed look is
+    # never a version.
+    function fail() { bad = 1; exit }
+    function skipws() {
+      while (pos <= len && substr(s, pos, 1) ~ /[ \t\r\n]/) pos++
+    }
+    function hextonum(h,    i, d, v) {
+      v = 0
+      for (i = 1; i <= length(h); i++) {
+        d = index("0123456789abcdef", tolower(substr(h, i, 1))) - 1
+        if (d < 0) return -1
+        v = v * 16 + d
+      }
+      return v
+    }
+    function utf8encode(n,    out) {
+      if (n < 128) return sprintf("%c", n)
+      if (n < 2048) { out = sprintf("%c", 192 + int(n / 64)); return out sprintf("%c", 128 + n % 64) }
+      if (n < 65536) {
+        out = sprintf("%c", 224 + int(n / 4096))
+        out = out sprintf("%c", 128 + int(n / 64) % 64)
+        return out sprintf("%c", 128 + n % 64)
+      }
+      out = sprintf("%c", 240 + int(n / 262144))
+      out = out sprintf("%c", 128 + int(n / 4096) % 64)
+      out = out sprintf("%c", 128 + int(n / 64) % 64)
+      return out sprintf("%c", 128 + n % 64)
+    }
+    function parse_string(    c, esc, hex, n, lo) {
+      pos++
+      out = ""
+      while (pos <= len) {
+        c = substr(s, pos, 1)
+        if (c == "\"") { pos++; return out }
+        if (c < " ") fail()
+        if (c == "\\") {
+          esc = substr(s, pos + 1, 1)
+          if (esc == "u") {
+            hex = substr(s, pos + 2, 4)
+            n = hextonum(hex)
+            if (length(hex) != 4 || n < 0) fail()
+            pos += 6
+            if (n >= 55296 && n <= 56319) {
+              # high surrogate: must be followed by \uDC00-\uDFFF
+              if (substr(s, pos, 2) != "\\u") fail()
+              lo = hextonum(substr(s, pos + 2, 4))
+              if (lo < 56320 || lo > 57343) fail()
+              pos += 6
+              n = 65536 + (n - 55296) * 1024 + (lo - 56320)
+            } else if (n >= 56320 && n <= 57343) fail()
+            out = out utf8encode(n)
+          } else if (esc == "\"") { out = out "\""; pos += 2 }
+          else if (esc == "\\") { out = out "\\"; pos += 2 }
+          else if (esc == "/") { out = out "/"; pos += 2 }
+          else if (esc == "b") { out = out sprintf("%c", 8); pos += 2 }
+          else if (esc == "f") { out = out sprintf("%c", 12); pos += 2 }
+          else if (esc == "n") { out = out sprintf("%c", 10); pos += 2 }
+          else if (esc == "r") { out = out sprintf("%c", 13); pos += 2 }
+          else if (esc == "t") { out = out sprintf("%c", 9); pos += 2 }
+          else fail()
+        } else { out = out c; pos++ }
+      }
+      fail()
+    }
+    function parse_number(    c) {
+      if (substr(s, pos, 1) == "-") pos++
+      if (substr(s, pos, 1) == "0") pos++
+      else if (substr(s, pos, 1) ~ /[1-9]/) { while (substr(s, pos, 1) ~ /[0-9]/) pos++ }
+      else fail()
+      if (substr(s, pos, 1) == ".") {
+        pos++
+        if (substr(s, pos, 1) !~ /[0-9]/) fail()
+        while (substr(s, pos, 1) ~ /[0-9]/) pos++
+      }
+      if (substr(s, pos, 1) ~ /[eE]/) {
+        pos++
+        if (substr(s, pos, 1) ~ /[+-]/) pos++
+        if (substr(s, pos, 1) !~ /[0-9]/) fail()
+        while (substr(s, pos, 1) ~ /[0-9]/) pos++
+      }
+      return "num"
+    }
+    function parse_object(isroot,    key, first, c) {
+      pos++
+      first = 1
+      while (1) {
+        skipws()
+        c = substr(s, pos, 1)
+        if (c == "}") { pos++; return }
+        if (!first) {
+          if (c != ",") fail()
+          pos++
+          skipws()
+        }
+        first = 0
+        if (substr(s, pos, 1) != "\"") fail()
+        key = parse_string()
+        skipws()
+        if (substr(s, pos, 1) != ":") fail()
+        pos++
+        parse_value()
+        if (isroot && key == "version") rootVersion = (g_type == "str") ? g_str : ""
+      }
+    }
+    function parse_array(    first, c) {
+      pos++
+      first = 1
+      while (1) {
+        skipws()
+        c = substr(s, pos, 1)
+        if (c == "]") { pos++; return }
+        if (!first) {
+          if (c != ",") fail()
+          pos++
+        }
+        first = 0
+        parse_value()
+      }
+    }
+    function parse_value(    c) {
+      skipws()
+      c = substr(s, pos, 1)
+      if (c == "{") { parse_object(isroot); isroot = 0; return }
+      if (c == "[") { isroot = 0; parse_array(); return }
+      if (c == "\"") { g_type = "str"; g_str = parse_string(); return }
+      if (c == "-" || c ~ /[0-9]/) { g_type = "num"; parse_number(); return }
+      if (substr(s, pos, 4) == "true") { pos += 4; g_type = "lit"; return }
+      if (substr(s, pos, 5) == "false") { pos += 5; g_type = "lit"; return }
+      if (substr(s, pos, 4) == "null") { pos += 4; g_type = "lit"; return }
+      fail()
+    }
     {
       s = $0
       len = length(s)
-      depth = 0
-      in_str = 0
-      esc = 0
-      garbage = 0
-      found = ""
-      i = 1
-      while (i <= len) {
-        c = substr(s, i, 1)
-        if (in_str) {
-          if (esc) esc = 0
-          else if (c == "\\") esc = 1
-          else if (c == "\"") in_str = 0
-          i++
-          continue
-        }
-        if (c == "{") { depth++; i++; continue }
-        if (c == "}") { depth--; i++; continue }
-        if (depth == 0 && c !~ /[[:space:]]/) { garbage = 1; exit }
-        if (c == "\"") {
-          # Read the complete JSON string starting at i (escape-aware).
-          j = i + 1
-          tok = ""
-          tok_esc = 0
-          while (j <= len) {
-            d = substr(s, j, 1)
-            if (tok_esc) { tok = tok d; tok_esc = 0; j++; continue }
-            if (d == "\\") { tok = tok d; tok_esc = 1; j++; continue }
-            if (d == "\"") break
-            tok = tok d
-            j++
-          }
-          if (j > len) exit # unterminated string: not valid JSON
-          if (tok == "version" && depth == 1) {
-            k = j + 1
-            while (k <= len && substr(s, k, 1) ~ /[[:space:]]/) k++
-            if (substr(s, k, 1) != ":") exit
-            k++
-            while (k <= len && substr(s, k, 1) ~ /[[:space:]]/) k++
-            if (substr(s, k, 1) != "\"") exit
-            k++
-            out = ""
-            val_esc = 0
-            while (k <= len) {
-              d = substr(s, k, 1)
-              if (val_esc) { out = out d; val_esc = 0; k++; continue }
-              if (d == "\\") { out = out d; val_esc = 1; k++; continue }
-              if (d == "\"") break
-              out = out d
-              k++
-            }
-            if (k > len) exit # unterminated value string
-            # JSON.parse keeps the LAST duplicate key; match that.
-            found = out
-          }
-          i = j + 1
-          continue
-        }
-        i++
-      }
-      # Emit only from a structurally balanced document.
-      if (depth == 0 && !garbage) print found
+      pos = 1
+      bad = 0
+      rootVersion = ""
+      g_type = ""
+      g_str = ""
+      isroot = 1
+      skipws()
+      parse_value()
+      skipws()
+      if (pos <= len) fail()
+      if (rootVersion != "") print rootVersion
       exit
     }
   ')"
