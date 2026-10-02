@@ -348,6 +348,61 @@ test("a hanging upstream times out, releases the refresh slot, and keeps the sam
   }
 });
 
+test("switching back to a cached identity retires another identity's in-flight request", async () => {
+  __resetLatestComputerVersionForTest();
+  const originalFetch = globalThis.fetch;
+  const fetchCalls: string[] = [];
+  // A resolves immediately (caches 1.0.30); B hangs until released.
+  const hungB = deferred<Response>();
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    fetchCalls.push(url);
+    return url.includes("other.example.com")
+      ? hungB.promise
+      : jsonResponse(200, { version: "1.0.30" });
+  }) as typeof fetch;
+
+  const B_ENV = {
+    ...MANIFEST_ENV,
+    [RAFT_COMPUTER_RELEASE_BASE_ENV]: "https://other.example.com/computer",
+  };
+
+  try {
+    // A caches 1.0.30.
+    await withDeploymentEnv(MANIFEST_ENV, async () => {
+      await getLatestComputerVersion();
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(await getLatestComputerVersion(), "1.0.30");
+    });
+    // B's refresh starts and hangs.
+    await withDeploymentEnv(B_ENV, async () => {
+      await getLatestComputerVersion();
+    });
+    assert.equal(fetchCalls.length, 2);
+
+    // Switch BACK to A: this read only hits A's cache, but it must still
+    // retire B's in-flight request — otherwise B's late response would
+    // overwrite the cache A's reader just relied on.
+    await withDeploymentEnv(MANIFEST_ENV, async () => {
+      assert.equal(await getLatestComputerVersion(), "1.0.30");
+    });
+    const callsAfterACacheHit = fetchCalls.length;
+    assert.equal(callsAfterACacheHit, 2, "a cache hit must not start a fetch");
+
+    hungB.resolve(jsonResponse(200, { version: "2.0.0" }));
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    await withDeploymentEnv(MANIFEST_ENV, async () => {
+      assert.equal(await getLatestComputerVersion(), "1.0.30");
+    });
+    assert.equal(fetchCalls.length, callsAfterACacheHit, "late B response must not evict A's cache or re-fetch");
+  } finally {
+    globalThis.fetch = originalFetch;
+    __resetLatestComputerVersionForTest();
+  }
+});
+
 test("a genuinely expired cache keeps its value when the failing refresh throws", async () => {
   __resetLatestComputerVersionForTest();
   const originalFetch = globalThis.fetch;
@@ -364,16 +419,23 @@ test("a genuinely expired cache keeps its value when the failing refresh throws"
 
   try {
     // Expire the cache window immediately and make fetch itself throw: the
-    // failing refresh MUST be invoked (post-expiry path) and the same-identity
-    // cached value must survive the failure.
+    // failing refresh MUST actually run (count its stub calls), and once it
+    // completes the same-identity cached value must survive the failure.
     __setLatestComputerRefreshIntervalForTest(0);
+    let failingFetchCalls = 0;
     globalThis.fetch = (async () => {
+      failingFetchCalls += 1;
       throw new Error("network down");
     }) as typeof fetch;
     await withDeploymentEnv(MANIFEST_ENV, async () => {
       assert.equal(await getLatestComputerVersion(), "1.0.31");
+      // Let the failing refresh actually run to completion before judging
+      // the cached value's survival.
+      await new Promise((resolve) => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(await getLatestComputerVersion(), "1.0.31");
     });
-    assert.equal(fetchCalls.length, 1, "only the seeding fetch happened before the failure");
+    assert.ok(failingFetchCalls >= 1, "the failing refresh path must have been exercised");
   } finally {
     globalThis.fetch = originalFetch;
     __resetLatestComputerVersionForTest();

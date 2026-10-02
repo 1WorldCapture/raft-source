@@ -67,12 +67,21 @@ let refreshIdentity: string | null = null;
  * in-flight requests can detect they no longer own the cache.
  */
 let refreshGeneration = 0;
+/**
+ * Identity of the current resolve context. Every getLatest call — including
+ * one that only HITS the cache — re-establishes this: switching identity
+ * without starting a refresh must still retire the previous identity's
+ * in-flight request, or its late response would overwrite the cache the
+ * caller just relied on.
+ */
+let currentIdentity: string | null = null;
 let refreshIntervalMs = DEFAULT_REFRESH_INTERVAL_MS;
 
 function bumpGeneration(): void {
   refreshGeneration += 1;
   refreshPromise = null;
   refreshIdentity = null;
+  currentIdentity = null;
 }
 
 export function getLatestComputerVersion(): Promise<string | null> {
@@ -95,6 +104,14 @@ export function getLatestComputerVersion(): Promise<string | null> {
   }
 
   const identity = computerReleaseIdentity(config);
+  if (currentIdentity !== identity) {
+    // A different source is now effective. Retire any in-flight refresh from
+    // the previous identity — including when this call goes on to HIT the
+    // cache and starts no refresh of its own: a late response from the old
+    // identity must not overwrite what the caller just read.
+    bumpGeneration();
+    currentIdentity = identity;
+  }
   const now = Date.now();
   if (cache && cache.identity === identity && cache.version && now - cache.lastFetchTime < refreshIntervalMs) {
     return Promise.resolve(cache.version);
@@ -110,12 +127,10 @@ async function refreshLatestComputerVersion(
 ): Promise<void> {
   // Coalesce only refreshes for the SAME identity: a config change mid-flight
   // must start its own resolution, not piggyback on the previous source's.
+  // The generation was already advanced by the getLatest caller when the
+  // effective identity changed, retiring any in-flight previous-source
+  // request before this one starts.
   if (refreshPromise && refreshIdentity === identity) return refreshPromise;
-  // Starting a refresh for a DIFFERENT identity opens a new generation. Any
-  // still-in-flight request from the previous identity is retired: when it
-  // settles later it can neither commit its (stale-source) result nor clear
-  // this refresh's coalescing bookkeeping.
-  refreshGeneration += 1;
   const generation = refreshGeneration;
   refreshIdentity = identity;
   refreshPromise = fetchLatestComputerVersion(config)
