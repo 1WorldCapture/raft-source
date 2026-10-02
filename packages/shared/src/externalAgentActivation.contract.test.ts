@@ -45,6 +45,7 @@ function connectionDto(overrides: Record<string, unknown> = {}): Record<string, 
       },
     },
     enabled: false,
+    consumptionMode: "legacy",
     pauseReason: null,
     revision: 0,
     epoch: "3",
@@ -83,7 +84,7 @@ test("closed schemas: inbox receipt DTO rejects unknown fields", () => {
 test("closed schemas: wake DTO rejects unknown fields", () => {
   const wake = {
     id: UUID, connectionId: UUID, connectionEpoch: "1", generationAtCreation: "1",
-    state: "queued", nextAttemptAt: TS, attemptCount: 0, dispatchOwner: null,
+    cycle: "0", state: "queued", nextAttemptAt: TS, attemptCount: 0, dispatchOwner: null,
     dispatchFence: "0", dispatchLeaseUntil: null, startupDeadline: null,
     blockReason: null, exhaustedReason: null, recoveryAuditRef: null,
     createdAt: TS, nope: 1,
@@ -153,4 +154,15 @@ test(`claim batch cap: receiptIds rejects more than ${EXTERNAL_AGENT_CLAIM_MAX_R
     state: "open", expiresAt: TS, createdAt: TS,
   };
   assert.equal(claimDtoSchema.safeParse(claim).success, false);
+});
+
+test("v1.1 §12: consumptionMode is an explicit field — legacy default, delegated on cutover", () => {
+  const draft = externalAgentConnectionDtoSchema.parse(connectionDto());
+  assert.equal(draft.consumptionMode, "legacy");
+  const afterCutover = externalAgentConnectionDtoSchema.parse(connectionDto({ consumptionMode: "delegated", enabled: true }));
+  assert.equal(afterCutover.consumptionMode, "delegated");
+  // Not derivable: enabled=false with delegated mode is a VALID paused state.
+  const pausedDelegated = externalAgentConnectionDtoSchema.parse(connectionDto({ consumptionMode: "delegated", enabled: false }));
+  assert.equal(pausedDelegated.consumptionMode, "delegated");
+  assert.equal(externalAgentConnectionDtoSchema.safeParse(connectionDto({ consumptionMode: "rogue" })).success, false);
 });

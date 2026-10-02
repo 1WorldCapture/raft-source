@@ -1,5 +1,5 @@
 {
-  "id": "6a1c3fae-e093-4c78-92f9-1db067f211bb",
+  "id": "8bb13c38-bb87-4403-9dc3-a72596c3ad96",
   "prevId": "4a2c92ce-c7f1-4702-918b-3ecb4b445f0b",
   "version": "7",
   "dialect": "postgresql",
@@ -10300,6 +10300,13 @@
           "notNull": true,
           "default": false
         },
+        "consumption_mode": {
+          "name": "consumption_mode",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'legacy'"
+        },
         "pause_reason": {
           "name": "pause_reason",
           "type": "text",
@@ -10974,6 +10981,13 @@
           "primaryKey": false,
           "notNull": true
         },
+        "cycle": {
+          "name": "cycle",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "0"
+        },
         "state": {
           "name": "state",
           "type": "text",
@@ -11047,6 +11061,33 @@
         }
       },
       "indexes": {
+        "idx_external_agent_wakes_connection_epoch_cycle": {
+          "name": "idx_external_agent_wakes_connection_epoch_cycle",
+          "columns": [
+            {
+              "expression": "connection_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "connection_epoch",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "cycle",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
         "idx_external_agent_wakes_connection_live": {
           "name": "idx_external_agent_wakes_connection_live",
           "columns": [

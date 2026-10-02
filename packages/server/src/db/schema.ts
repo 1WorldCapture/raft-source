@@ -6528,6 +6528,10 @@ export const externalAgentConnections = pgTable("external_agent_connections", {
   schemaVersion: integer("schema_version").notNull().default(1),
   activation: jsonb("activation").$type<import("@botiverse/raft-shared").ExternalActivationConfig>().notNull(),
   enabled: boolean("enabled").notNull().default(false),
+  // v1.1 §12: consumer mode is a stored fact, NEVER derived from `enabled` —
+  // pause/unbind keep the delegated consumption constraints (no legacy
+  // drain/裸ack fallback); only the explicit rollback action restores legacy.
+  consumptionMode: text("consumption_mode", { enum: ["legacy", "delegated"] }).notNull().default("legacy"),
   // v1.1: explicit pause/waiting reason; never implied by `enabled` and never
   // a claim that the external process is alive.
   pauseReason: text("pause_reason"),
@@ -6575,6 +6579,10 @@ export const externalAgentWakes = pgTable("external_agent_wakes", {
   connectionId: uuid("connection_id").notNull().references(() => externalAgentConnections.id, { onDelete: "cascade" }),
   connectionEpoch: bigint("connection_epoch", { mode: "bigint" }).notNull(),
   generationAtCreation: bigint("generation_at_creation", { mode: "bigint" }).notNull(),
+  // v1.1 §12: authoritative retry-cycle locator — exactly one wake per
+  // (connection, epoch, cycle). exhausted is terminal yet locatable via
+  // max(cycle); redrive opens cycle+1 and never reuses historical cycles.
+  cycle: bigint("cycle", { mode: "bigint" }).notNull().default(sql`0`),
   state: text("state", {
     enum: ["queued", "dispatching", "awaiting_agent", "active", "blocked", "settled", "superseded", "exhausted"],
   }).notNull().default("queued"),
@@ -6591,6 +6599,7 @@ export const externalAgentWakes = pgTable("external_agent_wakes", {
 }, (t) => [
   // At most one non-terminal wake per connection. The live set is an explicit
   // state list — no now() or dynamic expiry inside the unique index (§3.3).
+  uniqueIndex("idx_external_agent_wakes_connection_epoch_cycle").on(t.connectionId, t.connectionEpoch, t.cycle),
   uniqueIndex("idx_external_agent_wakes_connection_live").on(t.connectionId)
     .where(sql`state in ('queued','dispatching','awaiting_agent','active','blocked')`),
   // Worker ready scan: due live wakes oldest-first.

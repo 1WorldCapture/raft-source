@@ -113,6 +113,9 @@ export type RunState = typeof runStateValues[number];
 export const runFinishOutcomeValues = ["drained", "waiting_user", "yielded", "failed"] as const;
 export type RunFinishOutcome = typeof runFinishOutcomeValues[number];
 
+export const externalAgentConsumptionModeValues = ["legacy", "delegated"] as const;
+export type ExternalAgentConsumptionMode = typeof externalAgentConsumptionModeValues[number];
+
 export const claimStateValues = ["open", "acked", "released"] as const;
 export type ClaimState = typeof claimStateValues[number];
 
@@ -137,6 +140,10 @@ export const externalAgentConnectionDtoSchema = z.strictObject({
   schemaVersion: z.literal(EXTERNAL_AGENT_ACTIVATION_SCHEMA_VERSION),
   activation: externalActivationConfigSchema,
   enabled: z.boolean(),
+  /** v1.1 §12: stored consumer mode — never derived from `enabled`. Pause/
+   * unbind keep `delegated` constraints; only explicit rollback restores
+   * `legacy`. Draft connections are `legacy` until cutover. */
+  consumptionMode: z.enum(externalAgentConsumptionModeValues),
   /** v1.1: explicit pause/waiting reason — never implied by `enabled`, and
    * never presented as "the external process is alive". */
   pauseReason: z.string().nullable(),
@@ -184,6 +191,9 @@ export const wakeDtoSchema = z.strictObject({
   connectionId: uuidSchema,
   connectionEpoch: int64StringSchema,
   generationAtCreation: int64StringSchema,
+  /** v1.1 §12: authoritative retry-cycle locator, unique per
+   * (connection, epoch, cycle). */
+  cycle: int64StringSchema,
   state: z.enum(wakeStateValues),
   nextAttemptAt: isoTimestampSchema,
   attemptCount: z.number().int().nonnegative(),

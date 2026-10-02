@@ -90,7 +90,7 @@ dbTest("inbox receipt dedup: same (agent, sourceEventKey) collapses (§3.2)", as
 
 dbTest("at most one non-terminal wake per connection (§3.3 partial unique)", async ({ db }) => {
   const ids = await seedConnection(db);
-  const base = { connectionId: ids.connectionId, connectionEpoch: 1n, generationAtCreation: 1n, state: "queued" as const };
+  const base = { connectionId: ids.connectionId, connectionEpoch: 1n, generationAtCreation: 1n, cycle: 0n, state: "queued" as const };
   await db.insert(externalAgentWakes).values(base);
   for (const state of ["queued", "active", "blocked"] as const) {
     await assert.rejects(
@@ -99,14 +99,14 @@ dbTest("at most one non-terminal wake per connection (§3.3 partial unique)", as
     );
   }
   // Terminal wakes coexist freely with a live one.
-  await db.insert(externalAgentWakes).values({ ...base, state: "settled" });
-  await db.insert(externalAgentWakes).values({ ...base, state: "exhausted" });
+  await db.insert(externalAgentWakes).values({ ...base, state: "settled", cycle: 1n });
+  await db.insert(externalAgentWakes).values({ ...base, state: "exhausted", cycle: 2n });
 });
 
 dbTest("attempts are unique per (wake, attemptNumber) (§3.3)", async ({ db }) => {
   const ids = await seedConnection(db);
   const [wake] = await db.insert(externalAgentWakes).values({
-    connectionId: ids.connectionId, connectionEpoch: 1n, generationAtCreation: 1n,
+    connectionId: ids.connectionId, connectionEpoch: 1n, generationAtCreation: 1n, cycle: 0n,
   }).returning();
   const attempt = { wakeId: wake.id, attemptNumber: 1, connectionRevision: 0, connectionEpoch: 1n, dispatchFence: 1n, requestDigest: "d1" };
   await db.insert(externalAgentWakeAttempts).values(attempt);
@@ -119,7 +119,7 @@ dbTest("attempts are unique per (wake, attemptNumber) (§3.3)", async ({ db }) =
 dbTest("run begin idempotency key is unique per (connection, epoch, key) (v1.1 §3)", async ({ db }) => {
   const ids = await seedConnection(db);
   const [wake] = await db.insert(externalAgentWakes).values({
-    connectionId: ids.connectionId, connectionEpoch: 1n, generationAtCreation: 1n,
+    connectionId: ids.connectionId, connectionEpoch: 1n, generationAtCreation: 1n, cycle: 0n,
   }).returning();
   const run = {
     connectionId: ids.connectionId, connectionEpoch: 1n, agentId: ids.agentId,
@@ -140,7 +140,7 @@ dbTest("run begin idempotency key is unique per (connection, epoch, key) (v1.1 �
 dbTest("claim replay and single-open-claim constraints (§3.5, D3)", async ({ db }) => {
   const ids = await seedConnection(db);
   const [wake] = await db.insert(externalAgentWakes).values({
-    connectionId: ids.connectionId, connectionEpoch: 1n, generationAtCreation: 1n,
+    connectionId: ids.connectionId, connectionEpoch: 1n, generationAtCreation: 1n, cycle: 0n,
   }).returning();
   const [run] = await db.insert(externalAgentRuns).values({
     connectionId: ids.connectionId, connectionEpoch: 1n, agentId: ids.agentId,
@@ -168,4 +168,35 @@ dbTest("claim replay and single-open-claim constraints (§3.5, D3)", async ({ db
   // Once the open claim is acked, a new request key may open the next batch.
   await db.execute(sql`UPDATE external_agent_claims SET state = 'acked' WHERE request_key = 'rk-1'`);
   await db.insert(externalAgentClaims).values({ ...claim, requestKey: "rk-2" });
+});
+
+dbTest("v1.1 §12: consumptionMode defaults to legacy and is a stored fact", async ({ db }) => {
+  const ids = await seedConnection(db);
+  const [row] = await db.select().from(externalAgentConnections).where(sql`id = ${ids.connectionId}`);
+  assert.equal(row.consumptionMode, "legacy");
+  // Pausing (enabled=false) never flips a cutover connection back to legacy.
+  await db.execute(sql`UPDATE external_agent_connections SET consumption_mode = 'delegated', enabled = false WHERE id = ${ids.connectionId}`);
+  const [paused] = await db.select().from(externalAgentConnections).where(sql`id = ${ids.connectionId}`);
+  assert.equal(paused.consumptionMode, "delegated");
+  assert.equal(paused.enabled, false);
+});
+
+dbTest("v1.1 §12: retry-cycle locator — one wake per (connection, epoch, cycle)", async ({ db }) => {
+  const ids = await seedConnection(db);
+  const base = { connectionId: ids.connectionId, connectionEpoch: 1n, generationAtCreation: 1n };
+  await db.insert(externalAgentWakes).values({ ...base, cycle: 0n });
+  // Same cycle collides even across states (exhausted stays locatable).
+  await assert.rejects(
+    db.insert(externalAgentWakes).values({ ...base, cycle: 0n, state: "exhausted" }),
+    /Failed query|unique|duplicate/i,
+  );
+  // Same cycle in a NEW epoch is free space only after the old epoch's wake
+  // is converged: the live-wake partial unique is per connection, not per
+  // epoch — revocation must first supersede the old epoch's live wake.
+  await assert.rejects(
+    db.insert(externalAgentWakes).values({ ...base, connectionEpoch: 2n, cycle: 0n }),
+    /Failed query|unique|duplicate/i,
+  );
+  await db.execute(sql`UPDATE external_agent_wakes SET state = 'superseded' WHERE connection_id = ${base.connectionId}`);
+  await db.insert(externalAgentWakes).values({ ...base, connectionEpoch: 2n, cycle: 0n });
 });

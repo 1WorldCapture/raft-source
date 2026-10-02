@@ -19,6 +19,7 @@ CREATE TABLE "external_agent_connections" (
 	"schema_version" integer DEFAULT 1 NOT NULL,
 	"activation" jsonb NOT NULL,
 	"enabled" boolean DEFAULT false NOT NULL,
+	"consumption_mode" text DEFAULT 'legacy' NOT NULL,
 	"pause_reason" text,
 	"revision" integer DEFAULT 0 NOT NULL,
 	"epoch" bigint DEFAULT 0 NOT NULL,
@@ -87,6 +88,7 @@ CREATE TABLE "external_agent_wakes" (
 	"connection_id" uuid NOT NULL,
 	"connection_epoch" bigint NOT NULL,
 	"generation_at_creation" bigint NOT NULL,
+	"cycle" bigint DEFAULT 0 NOT NULL,
 	"state" text DEFAULT 'queued' NOT NULL,
 	"next_attempt_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"attempt_count" integer DEFAULT 0 NOT NULL,
@@ -123,5 +125,6 @@ CREATE UNIQUE INDEX "idx_external_agent_runs_begin_key" ON "external_agent_runs"
 CREATE INDEX "idx_external_agent_runs_connection" ON "external_agent_runs" USING btree ("connection_id","state");--> statement-breakpoint
 CREATE UNIQUE INDEX "idx_external_agent_wake_attempts_number" ON "external_agent_wake_attempts" USING btree ("wake_id","attempt_number");--> statement-breakpoint
 CREATE INDEX "idx_external_agent_wake_attempts_wake" ON "external_agent_wake_attempts" USING btree ("wake_id");--> statement-breakpoint
+CREATE UNIQUE INDEX "idx_external_agent_wakes_connection_epoch_cycle" ON "external_agent_wakes" USING btree ("connection_id","connection_epoch","cycle");--> statement-breakpoint
 CREATE UNIQUE INDEX "idx_external_agent_wakes_connection_live" ON "external_agent_wakes" USING btree ("connection_id") WHERE state in ('queued','dispatching','awaiting_agent','active','blocked');--> statement-breakpoint
 CREATE INDEX "idx_external_agent_wakes_ready" ON "external_agent_wakes" USING btree ("state","next_attempt_at");
