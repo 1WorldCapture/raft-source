@@ -42,6 +42,10 @@ const CASES: FixtureCase[] = [
   // documents everywhere (review reproductions).
   { file: "release-root-manifest.concat-invalid.fixture.json", expect: { ok: false, reason: "network" } },
   { file: "release-root-manifest.bad-literal.fixture.json", expect: { ok: false, reason: "network" } },
+  // Duplicate "version" keys where the LAST one is not a string: the value
+  // is a number everywhere, so no surface may resolve a version from it
+  // (TS maps it to its publishing failure, shell/PS refuse).
+  { file: "release-root-manifest.nonstring-version.fixture.json", expect: { ok: false, reason: "publishing" } },
 ];
 
 async function fixtureBody(file: string): Promise<string> {
