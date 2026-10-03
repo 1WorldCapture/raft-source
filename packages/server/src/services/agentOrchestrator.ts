@@ -93,6 +93,14 @@ import * as machineService from "./machineService.js";
 import * as channelService from "./channelService.js";
 import * as messageService from "./messageService.js";
 import * as mentionDeliveryOccurrenceService from "./mentionDeliveryOccurrenceService.js";
+import {
+  AGENT_DELIVERY_ACK_BACKOFF_CAP_MS,
+  AGENT_DELIVERY_ACK_MAX_ATTEMPTS,
+  agentDeliveryAckBackoffMs,
+  terminalErrorMatchesTrackedGeneration,
+  type DeliveryGeneration,
+  AGENT_DELIVERY_ACK_TIMEOUT_BASE_MS,
+} from "./agentDeliveryRetryPolicy.js";
 import * as agentActivityLogService from "./agentActivityLogService.js";
 import * as computerLifecycleOperationService from "./computerLifecycleOperationService.js";
 import {
@@ -7642,10 +7650,46 @@ export class AgentOrchestrator extends EventEmitter {
 
       case "agent:delivery:terminal_error": {
         const agent = await this.validateMachineAgentMessage(machineId, conn?.serverId ?? null, msg.agentId, msg.type);
-        if (
-          !agent
-          || msg.mentionDelivery.machineId !== machineId
-        ) {
+        // Authenticated-identity closure (task #8 review r1 finding 3): the
+        // ATTEMPT a terminal_error may stop is located by TRUSTED context
+        // only — the authenticated connection's machineId plus the server's
+        // own tracked snapshot. Payload machineId/launchId/sessionId
+        // participate ONLY as consistency evidence and NEVER as the clearing
+        // credential: a machine B reporting machine A's exact payload must
+        // change nothing. An old process's late error still cannot cancel a
+        // delivery a new process took over (launch/session vs the tracked
+        // snapshot inside clearPendingAgentDeliveryAck).
+        const stopThisAttempt = () => this.clearPendingAgentDeliveryAck({
+          agentId: msg.agentId,
+          seq: 0,
+          deliveryId: msg.mentionDelivery.occurrenceId,
+        }, {
+          // The AUTHENTICATED machine — never msg.mentionDelivery.machineId.
+          machineId,
+          launchId: msg.mentionDelivery.launchId,
+          sessionId: msg.mentionDelivery.sessionId,
+        });
+        if (!agent) {
+          // No such agent under this server: rejected with ZERO state
+          // change — a report about a nonexistent agent cannot cancel
+          // anyone's attempt (the pre-fix code stopped the tracked attempt
+          // here on an unconfirmable identity).
+          console.warn(
+            `[Agent ${msg.agentId}] terminal_error ${msg.code} reported by machine ${machineId} ` +
+            `for a nonexistent/unverifiable agent (occurrence ${msg.mentionDelivery.occurrenceId}); rejected with zero state change`,
+          );
+          break;
+        }
+        if (msg.mentionDelivery.machineId !== machineId) {
+          // Payload machine differs from the AUTHENTICATED sender: rejected
+          // with ZERO state change. The trusted-context stop above requires
+          // the authenticated machineId to ALSO match the server's tracked
+          // snapshot, so a machine B forging A's payload now fails both the
+          // payload consistency check here and the tracked-snapshot match.
+          console.warn(
+            `[Agent ${msg.agentId}] terminal_error ${msg.code} from machine ${machineId} claims machine ` +
+            `${msg.mentionDelivery.machineId} (occurrence ${msg.mentionDelivery.occurrenceId}); rejected with zero state change`,
+          );
           break;
         }
         if (
@@ -7658,25 +7702,47 @@ export class AgentOrchestrator extends EventEmitter {
             messageId: msg.mentionDelivery.messageId,
             identity: msg.mentionDelivery,
           });
-          if (terminal) this.clearPendingAgentDeliveryAck({
-            agentId: msg.agentId,
-            seq: terminal.deliveryPayload?.seq ?? 0,
-            deliveryId: msg.mentionDelivery.occurrenceId,
-          });
+          // An old-generation error leaves the newer attempt's tracker
+          // alone (the generation guard inside decides); a confirmed drift
+          // terminal-marks the occurrence and stops its own attempt.
+          stopThisAttempt();
+          if (!terminal) {
+            console.warn(
+              `[Agent ${msg.agentId}] late identity-drift terminal_error for occurrence ` +
+              `${msg.mentionDelivery.occurrenceId} did not match a live occurrence row; attempt-level stop only`,
+            );
+          }
           break;
         }
+        if (msg.code === "IDENTITY_UNKNOWN") {
+          // IDENTITY_UNKNOWN failed THIS ATTEMPT's identity confirmation — it
+          // never ends the message obligation (task #8 review): stop the
+          // attempt, keep the durable occurrence recoverable; machine-ready
+          // recovery re-delivers once the agent can confirm its identity.
+          stopThisAttempt();
+          console.warn(
+            `[Agent ${msg.agentId}] terminal_error IDENTITY_UNKNOWN for occurrence ` +
+            `${msg.mentionDelivery.occurrenceId}: stopped this attempt, occurrence stays recoverable`,
+          );
+          break;
+        }
+        // IDENTITY_UNKNOWN was narrowed away above; the wire type still
+        // carries it (daemons may report it), so exclude it at the seam.
+        const terminalCode = msg.code as Exclude<typeof msg.code, "IDENTITY_UNKNOWN">;
         const terminal = await mentionDeliveryOccurrenceService.recordMentionDeliveryTerminalError({
           occurrenceId: msg.mentionDelivery.occurrenceId,
           agentId: msg.agentId,
           messageId: msg.mentionDelivery.messageId,
           identity: msg.mentionDelivery,
-          code: msg.code,
+          code: terminalCode,
         });
-        if (terminal) this.clearPendingAgentDeliveryAck({
-          agentId: msg.agentId,
-          seq: terminal.deliveryPayload?.seq ?? 0,
-          deliveryId: msg.mentionDelivery.occurrenceId,
-        });
+        stopThisAttempt();
+        if (!terminal) {
+          console.warn(
+            `[Agent ${msg.agentId}] terminal_error ${msg.code} for occurrence ` +
+            `${msg.mentionDelivery.occurrenceId} arrived after the row was terminal/acked; attempt-level stop only`,
+          );
+        }
         break;
       }
 
@@ -9074,22 +9140,40 @@ export class AgentOrchestrator extends EventEmitter {
     }
   }
 
-  private scheduleAgentDeliveryAckTimeout(key: string, pending: PendingAgentDeliveryAck): void {
+  private scheduleAgentDeliveryAckTimeout(key: string, pending: PendingAgentDeliveryAck, delayMs?: number): void {
     if (pending.timer) {
       this.clock.clearTimeout(pending.timer);
     }
+    // Exponential backoff (5s doubling, capped): a fixed 5-second cadence
+    // turned one unacknowledged mention into a quarter-hour storm (task #8).
+    // The PERSISTENT budget's nextAllowedAt (when supplied) wins over the
+    // in-memory attempt count — it is the authoritative schedule.
+    const wait = delayMs ?? agentDeliveryAckBackoffMs(pending.attempts);
     pending.timer = this.scheduleOnClock(() => {
       void this.retryPendingAgentDelivery(key, "ack_timeout");
-    }, AgentOrchestrator.AGENT_DELIVERY_ACK_TIMEOUT_MS);
+    }, wait);
     const timerWithUnref = pending.timer as { unref?: () => void } | null;
     timerWithUnref?.unref?.();
   }
 
-  private clearPendingAgentDeliveryAck(msg: Pick<Extract<MachineToServerMessage, { type: "agent:deliver:ack" }>, "agentId" | "seq" | "deliveryId">): boolean {
-    const key = this.findAgentDeliveryAckKey(msg.agentId, msg.seq, msg.deliveryId);
+  private clearPendingAgentDeliveryAck(msg: Pick<Extract<MachineToServerMessage, { type: "agent:deliver:ack" }>, "agentId" | "seq" | "deliveryId">, generation?: DeliveryGeneration): boolean {
+    const key = this.findAgentDeliveryAckKey(msg.agentId, msg.seq, msg.deliveryId ?? undefined);
     if (!key) return false;
     const pending = this.pendingAgentDeliveryAcks.get(key);
-    if (pending?.timer) this.clock.clearTimeout(pending.timer);
+    if (!pending) return false;
+    // A late terminal_error may only stop the tracked attempt it belongs to:
+    // when a generation is supplied, machine/launch/session must all agree
+    // with the tracked message's own mentionDelivery snapshot — an old
+    // process's error must never cancel a delivery a new process took over
+    // (task #8).
+    if (generation
+      && !terminalErrorMatchesTrackedGeneration(
+        { machineId: pending.machineId, mentionDelivery: pending.msg.mentionDelivery },
+        generation,
+      )) {
+      return false;
+    }
+    if (pending.timer) this.clock.clearTimeout(pending.timer);
     return this.pendingAgentDeliveryAcks.delete(key);
   }
 
@@ -9258,8 +9342,26 @@ export class AgentOrchestrator extends EventEmitter {
     if (pending.parked && reason === "ack_timeout") {
       return;
     }
-    if (pending.attempts >= AgentOrchestrator.AGENT_DELIVERY_ACK_MAX_ATTEMPTS) {
+    // The PERSISTENT budget decides before any re-send (task #8 review):
+    // attempts live on the durable occurrence, not on this tracker — a
+    // deleted tracker, a redrive or a process restart all meet the SAME
+    // budget here. A terminal write that fails KEEPS the tracker and
+    // reschedules (never silently restarts a fresh budget).
+    let budget: Awaited<ReturnType<typeof this.claimDeliverySendBudget>>;
+    try {
+      budget = await this.claimDeliverySendBudget(pending.msg);
+    } catch (err) {
+      console.warn(`[Machine ${pending.machineId}] delivery retry budget claim failed; attempt deferred:`, err);
+      this.scheduleAgentDeliveryAckTimeout(key, pending, AGENT_DELIVERY_ACK_TIMEOUT_BASE_MS);
+      return;
+    }
+    if (budget.decision === "exhausted") {
       if (pending.timer) this.clock.clearTimeout(pending.timer);
+      const durable = await this.markDeliveryRetryExhausted(pending);
+      if (!durable) {
+        this.scheduleAgentDeliveryAckTimeout(key, pending, AGENT_DELIVERY_ACK_TIMEOUT_BASE_MS);
+        return;
+      }
       this.pendingAgentDeliveryAcks.delete(key);
       const ownerTraceAttrs = await this.getMachineOwnerTraceAttrs(pending.machineId);
       this.tracer.startSpan("server.agent.delivery.retry", {
@@ -9274,7 +9376,7 @@ export class AgentOrchestrator extends EventEmitter {
           deliveryId: pending.msg.deliveryId,
           delivery_correlation_id: pending.msg.deliveryId,
           seq: pending.msg.seq,
-          attempts: pending.attempts,
+          attempts: budget.decision === "exhausted" ? budget.attempts : pending.attempts,
           first_attempt_age_ms: this.clock.now() - pending.firstAttemptAt,
           outcome: "gave_up",
           reason: "ack_retry_exhausted",
@@ -9348,6 +9450,13 @@ export class AgentOrchestrator extends EventEmitter {
         return;
       }
 
+      if (budget.decision === "wait") {
+        // Not yet allowed by the persistent budget: no send; reschedule to
+        // the authoritative nextAllowedAt.
+        this.scheduleAgentDeliveryAckTimeout(key, pending, Math.max(1, budget.nextAllowedAtMs - this.clock.now()));
+        span.end("ok", { attrs: { outcome: "scheduled", reason: "budget_wait" } });
+        return;
+      }
       pending.parked = false;
       pending.parkedReason = undefined;
       pending.attempts += 1;
@@ -9381,23 +9490,120 @@ export class AgentOrchestrator extends EventEmitter {
     }
   }
 
+  /**
+   * Claim one send from the occurrence's PERSISTENT budget (task #8 review).
+   * Every REAL send of a mention delivery routes through this — sends that
+   * do not claim are budget bypasses. Messages without a mentionDelivery
+   * snapshot (non-mention agent:deliver) are not budgeted and pass through.
+   */
+  private async claimDeliverySendBudget(
+    msg: Extract<ServerToMachineMessage, { type: "agent:deliver" }>,
+  ): Promise<{ decision: "send" } | { decision: "wait"; nextAllowedAtMs: number } | { decision: "exhausted"; attempts: number }> {
+    if (!msg.mentionDelivery) return { decision: "send" };
+    const claim = await mentionDeliveryOccurrenceService.claimMentionDeliverySendBudget({
+      occurrenceId: msg.mentionDelivery.occurrenceId,
+      nowMs: this.clock.now(),
+      maxAttempts: AGENT_DELIVERY_ACK_MAX_ATTEMPTS,
+      backoffMsForAttempts: agentDeliveryAckBackoffMs,
+    });
+    if (claim.decision === "send") return { decision: "send" };
+    if (claim.decision === "wait") return { decision: "wait", nextAllowedAtMs: claim.nextAllowedAt.getTime() };
+    if (claim.decision === "exhausted") return { decision: "exhausted", attempts: claim.attempts };
+    // "missing" = the row is terminal/acked (or gone): NEVER fall through to
+    // an unbudgeted send. Route it through the exhausted handler — its
+    // terminal write is idempotent for already-terminal rows and drops the
+    // tracker (found live in review: the pass-through sent past a terminal
+    // verdict 4 more times).
+    return { decision: "exhausted", attempts: 0 };
+  }
+
+  /**
+   * Terminal-mark an exhausted occurrence. Returns true when the tracker may
+   * be dropped (terminal state durable, or provably already terminal/acked).
+   * A WRITE FAILURE returns false and the caller MUST keep the tracker and
+   * reschedule — never silently fall back to a fresh budget (task #8 review).
+   */
+  private async markDeliveryRetryExhausted(pending: PendingAgentDeliveryAck): Promise<boolean> {
+    if (!pending.msg.mentionDelivery) return true;
+    try {
+      const exhausted = await mentionDeliveryOccurrenceService.recordMentionDeliveryTerminalError({
+        occurrenceId: pending.msg.mentionDelivery.occurrenceId,
+        agentId: pending.msg.agentId,
+        messageId: pending.msg.mentionDelivery.messageId,
+        identity: {
+          machineId: pending.msg.mentionDelivery.machineId,
+          launchId: pending.msg.mentionDelivery.launchId,
+          sessionId: pending.msg.mentionDelivery.sessionId,
+        },
+        code: "RETRY_EXHAUSTED",
+      });
+      if (!exhausted) {
+        console.warn(
+          `[Agent ${pending.msg.agentId}] delivery retry budget exhausted but the occurrence was already terminal/acked (occurrence ${pending.msg.mentionDelivery.occurrenceId}); dropping the tracker`,
+        );
+      }
+      return true;
+    } catch (err) {
+      console.warn(`[Agent ${pending.msg.agentId}] failed to terminal-mark an exhausted mention delivery (tracker kept, will retry the terminal write):`, err);
+      return false;
+    }
+  }
+
   protected async sendAgentDeliveryWithAckRetry(
     machineId: string,
     msg: Extract<ServerToMachineMessage, { type: "agent:deliver" }>,
     errorContext: string,
   ): Promise<boolean> {
+    // The persistent budget is authoritative across every entry point:
+    // claim BEFORE sending (task #8 review). Exhausted → queryable terminal
+    // state (write failure keeps the tracker); wait → no send, tracker
+    // scheduled for the authoritative nextAllowedAt.
+    let budget: Awaited<ReturnType<typeof this.claimDeliverySendBudget>>;
+    try {
+      budget = await this.claimDeliverySendBudget(msg);
+    } catch (err) {
+      // Budget unavailable (db error): do NOT send un-budgeted — track and
+      // let the next timeout re-claim.
+      console.warn(`[Machine ${machineId}] ${errorContext}: send-budget claim failed; not sending this attempt:`, err);
+      this.trackPendingAgentDeliveryAck(machineId, msg);
+      return false;
+    }
+    if (budget.decision === "exhausted") {
+      this.trackPendingAgentDeliveryAck(machineId, msg, { scheduleTimeout: false });
+      const tracked = this.findAgentDeliveryAckKey(msg.agentId, msg.seq, msg.deliveryId ?? undefined);
+      const pending = tracked ? this.pendingAgentDeliveryAcks.get(tracked) : undefined;
+      if (pending && tracked) {
+        const durable = await this.markDeliveryRetryExhausted(pending);
+        if (durable) {
+          if (pending.timer) this.clock.clearTimeout(pending.timer);
+          this.pendingAgentDeliveryAcks.delete(tracked);
+        } else {
+          this.scheduleAgentDeliveryAckTimeout(tracked, pending, AGENT_DELIVERY_ACK_TIMEOUT_BASE_MS);
+        }
+      }
+      return false;
+    }
+    if (budget.decision === "wait") {
+      this.trackPendingAgentDeliveryAck(machineId, msg);
+      const tracked = this.findAgentDeliveryAckKey(msg.agentId, msg.seq, msg.deliveryId ?? undefined);
+      const pending = tracked ? this.pendingAgentDeliveryAcks.get(tracked) : undefined;
+      if (pending && tracked) {
+        this.scheduleAgentDeliveryAckTimeout(tracked, pending, Math.max(1, budget.nextAllowedAtMs - this.clock.now()));
+      }
+      return false;
+    }
     const localAtSend = this.hasMachineLocally(machineId);
     if (localAtSend) {
       this.trackPendingAgentDeliveryAck(machineId, msg);
     }
     try {
       const sent = await this.sendToMachine(machineId, msg);
-      if (!sent && !this.findAgentDeliveryAckKey(msg.agentId, msg.seq, msg.deliveryId)) {
+      if (!sent && !this.findAgentDeliveryAckKey(msg.agentId, msg.seq, msg.deliveryId ?? undefined)) {
         this.trackPendingAgentDeliveryAck(machineId, msg);
       }
       return sent;
     } catch (err) {
-      if (!this.findAgentDeliveryAckKey(msg.agentId, msg.seq, msg.deliveryId)) {
+      if (!this.findAgentDeliveryAckKey(msg.agentId, msg.seq, msg.deliveryId ?? undefined)) {
         this.trackPendingAgentDeliveryAck(machineId, msg);
       }
       console.warn(`[Machine ${machineId}] ${errorContext}:`, err);

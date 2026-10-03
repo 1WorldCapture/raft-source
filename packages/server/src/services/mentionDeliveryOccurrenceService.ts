@@ -1,16 +1,30 @@
-import { and, eq, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
 import { currentDate, type AgentMessage } from "@botiverse/raft-shared";
 import { getDb } from "../db/index.js";
 import { mentionDeliveryOccurrences } from "../db/schema.js";
 
 export const MENTION_DELIVERY_TERMINAL_ERROR_CODES = [
-  "IDENTITY_UNKNOWN",
   "IDENTITY_DRIFT",
   "QUOTA_LIMITED",
   "DELIVERY_REJECTED",
   "UNSUPPORTED_DELIVERY_PATH",
   "INSTRUMENT_FAILED",
+  // Server-side verdict only — the ack-retry budget ran out. Never reported
+  // by a daemon; written when the orchestrator exhausts re-sends so the
+  // durable occurrence holds a queryable terminal state instead of a fresh
+  // invisible budget on the next track/redrive (task #8).
+  "RETRY_EXHAUSTED",
 ] as const;
+
+/**
+ * Legacy terminal code that no longer ends the delivery obligation (task #8
+ * review): IDENTITY_UNKNOWN meant "this ATTEMPT could not confirm who it was
+ * for", which stops an attempt — never the message's obligation. Rows
+ * terminal-marked with it by pre-fix builds are read back as recoverable
+ * (evaluate + the recoverable lists) without a data migration; the
+ * terminal-mark write itself is gone from the orchestrator.
+ */
+export const LEGACY_RECOVERABLE_TERMINAL_CODES = ["IDENTITY_UNKNOWN"] as const;
 
 export type MentionDeliveryTerminalErrorCode = typeof MENTION_DELIVERY_TERMINAL_ERROR_CODES[number];
 export type MentionDeliveryTransitionStage = "daemon_received" | "daemon_pending" | "daemon_drained";
@@ -123,17 +137,17 @@ export function evaluateMentionDeliveryOccurrence(row: MentionDeliveryOccurrence
       : { status: "BROKEN_HOP", occurrenceId: row.occurrenceId, hop: "SERVER_DECISION", version: row.version };
   }
   if (row.state === "terminal_error") {
-    if (!row.terminalErrorAt || !MENTION_DELIVERY_TERMINAL_ERROR_CODES.includes(row.terminalErrorCode as MentionDeliveryTerminalErrorCode)) {
+    // Legacy IDENTITY_UNKNOWN rows (pre-fix builds) attempted-failed an
+    // ATTEMPT, not the obligation: read them back on the ordinary hop chain
+    // so they stay diagnosable and recoverable — no data migration.
+    if ((LEGACY_RECOVERABLE_TERMINAL_CODES as readonly string[]).includes(row.terminalErrorCode ?? "")) {
+      // fall through to the hop-chain projection below, as if not terminal.
+    } else if (!row.terminalErrorAt || !MENTION_DELIVERY_TERMINAL_ERROR_CODES.includes(row.terminalErrorCode as MentionDeliveryTerminalErrorCode)) {
       return { status: "INSTRUMENT_FAILED", occurrenceId: row.occurrenceId, missingReceipt: "TERMINAL_ERROR", version: row.version };
+    } else {
+      const code = row.terminalErrorCode as MentionDeliveryTerminalErrorCode;
+      return { status: "TERMINAL_ERROR", occurrenceId: row.occurrenceId, code, version: row.version };
     }
-    // The guard above already returned for any code outside the closed set, so this cast is
-    // total. There used to be a ternary here falling back to "INSTRUMENT_FAILED" — dead code
-    // (@Hipp, review of #6700), and dangerous in the way dead guards are: it READS like a safety
-    // net, so a later editor could delete the real guard above believing this one covers it.
-    // Its fallback also reused "INSTRUMENT_FAILED", which is simultaneously a `status` value and
-    // a terminal error CODE — one word answering two questions.
-    const code = row.terminalErrorCode as MentionDeliveryTerminalErrorCode;
-    return { status: "TERMINAL_ERROR", occurrenceId: row.occurrenceId, code, version: row.version };
   }
   if (!row.daemonReceivedAt) {
     return missingReceiptIsInstrumentationFailure(row, "DAEMON_RECEIVE", 2)
@@ -360,8 +374,19 @@ export async function listRecoverableMentionDeliveries(machineId: string): Promi
     isNotNull(mentionDeliveryOccurrences.serverDecidedAt),
     isNotNull(mentionDeliveryOccurrences.deliveryPayload),
     isNull(mentionDeliveryOccurrences.ackedAt),
-    isNull(mentionDeliveryOccurrences.terminalErrorAt),
-    inArray(mentionDeliveryOccurrences.state, ["server_decided", "daemon_received", "daemon_pending"]),
+    // Legacy IDENTITY_UNKNOWN rows are attempt-failures, not obligation
+    // endings (task #8 review): they stay recoverable alongside non-terminal.
+    or(
+      isNull(mentionDeliveryOccurrences.terminalErrorAt),
+      inArray(mentionDeliveryOccurrences.terminalErrorCode, [...LEGACY_RECOVERABLE_TERMINAL_CODES]),
+    ),
+    or(
+      inArray(mentionDeliveryOccurrences.state, ["server_decided", "daemon_received", "daemon_pending"]),
+      and(
+        eq(mentionDeliveryOccurrences.state, "terminal_error"),
+        inArray(mentionDeliveryOccurrences.terminalErrorCode, [...LEGACY_RECOVERABLE_TERMINAL_CODES]),
+      ),
+    ),
   ));
 }
 
@@ -373,8 +398,18 @@ export async function listRecoverableMentionDeliveriesForAgent(
     eq(mentionDeliveryOccurrences.agentId, agentId),
     isNotNull(mentionDeliveryOccurrences.deliveryPayload),
     isNull(mentionDeliveryOccurrences.ackedAt),
-    isNull(mentionDeliveryOccurrences.terminalErrorAt),
-    inArray(mentionDeliveryOccurrences.state, ["recorded", "server_decided", "daemon_received", "daemon_pending"]),
+    // Legacy IDENTITY_UNKNOWN rows stay recoverable (see machineId variant).
+    or(
+      isNull(mentionDeliveryOccurrences.terminalErrorAt),
+      inArray(mentionDeliveryOccurrences.terminalErrorCode, [...LEGACY_RECOVERABLE_TERMINAL_CODES]),
+    ),
+    or(
+      inArray(mentionDeliveryOccurrences.state, ["recorded", "server_decided", "daemon_received", "daemon_pending"]),
+      and(
+        eq(mentionDeliveryOccurrences.state, "terminal_error"),
+        inArray(mentionDeliveryOccurrences.terminalErrorCode, [...LEGACY_RECOVERABLE_TERMINAL_CODES]),
+      ),
+    ),
     sql`(${mentionDeliveryOccurrences.machineIdSnapshot} is null or ${mentionDeliveryOccurrences.machineIdSnapshot} = ${machineId})`,
   ));
 }
@@ -457,6 +492,95 @@ export async function claimMentionDeliveryRedrive(input: {
     ne(mentionDeliveryOccurrences.state, "terminal_error"),
   )).returning();
   return claimed ?? null;
+}
+
+export type MentionDeliverySendBudgetClaim =
+  | { decision: "send"; attempts: number; nextAllowedAt: Date }
+  | { decision: "wait"; attempts: number; nextAllowedAt: Date }
+  | { decision: "exhausted"; attempts: number }
+  | { decision: "missing" };
+
+/**
+ * Atomically claim one send from the occurrence's PERSISTENT budget (task #8
+ * review): attempts counts real sends across tracker lifetimes, redrives and
+ * process restarts. Every real send entry point must route through this — a
+ * send that does not claim is a budget bypass. The claim increments BEFORE
+ * the send (a claimed-but-unsent attempt is spent: under dark conditions we
+ * err on the side of NOT resending). `backoffMsForAttempts` maps the
+ * post-increment attempt count to the wait before the NEXT send.
+ */
+export async function claimMentionDeliverySendBudget(input: {
+  occurrenceId: string;
+  nowMs: number;
+  maxAttempts: number;
+  backoffMsForAttempts: (attemptsAfterThisSend: number) => number;
+}): Promise<MentionDeliverySendBudgetClaim> {
+  const now = new Date(input.nowMs);
+  const [row] = await getDb().select().from(mentionDeliveryOccurrences)
+    .where(eq(mentionDeliveryOccurrences.occurrenceId, input.occurrenceId)).limit(1);
+  if (!row) return { decision: "missing" };
+  // Terminal (other than legacy-recoverable) and acked rows never send.
+  if (row.ackedAt) return { decision: "missing" };
+  const legacyRecoverable = row.state === "terminal_error"
+    && (LEGACY_RECOVERABLE_TERMINAL_CODES as readonly string[]).includes(row.terminalErrorCode ?? "");
+  if (row.state === "terminal_error" && !legacyRecoverable) return { decision: "missing" };
+
+  if (row.deliveryRetryAttempts >= input.maxAttempts) {
+    return { decision: "exhausted", attempts: row.deliveryRetryAttempts };
+  }
+  if (row.deliveryRetryNextAllowedAt && row.deliveryRetryNextAllowedAt.getTime() > input.nowMs) {
+    return { decision: "wait", attempts: row.deliveryRetryAttempts, nextAllowedAt: row.deliveryRetryNextAllowedAt };
+  }
+  const attemptsAfter = row.deliveryRetryAttempts + 1;
+  const nextAllowedAt = new Date(input.nowMs + input.backoffMsForAttempts(attemptsAfter));
+  // CAS on version so a concurrent claim/redrive cannot double-spend.
+  const [updated] = await getDb().update(mentionDeliveryOccurrences).set({
+    deliveryRetryAttempts: attemptsAfter,
+    deliveryRetryNextAllowedAt: nextAllowedAt,
+    version: sql`${mentionDeliveryOccurrences.version} + 1`,
+    updatedAt: now,
+  }).where(and(
+    eq(mentionDeliveryOccurrences.occurrenceId, input.occurrenceId),
+    eq(mentionDeliveryOccurrences.version, row.version),
+  )).returning();
+  if (!updated) {
+    // Lost the CAS race: another claim won this slot. Treat as wait with a
+    // short retry horizon — the winner's nextAllowedAt is now authoritative.
+    const [fresh] = await getDb().select().from(mentionDeliveryOccurrences)
+      .where(eq(mentionDeliveryOccurrences.occurrenceId, input.occurrenceId)).limit(1);
+    if (!fresh) return { decision: "missing" };
+    if (fresh.deliveryRetryAttempts >= input.maxAttempts) {
+      return { decision: "exhausted", attempts: fresh.deliveryRetryAttempts };
+    }
+    return { decision: "wait", attempts: fresh.deliveryRetryAttempts, nextAllowedAt: fresh.deliveryRetryNextAllowedAt ?? new Date(input.nowMs) };
+  }
+  return { decision: "send", attempts: attemptsAfter, nextAllowedAt };
+}
+
+/**
+ * Controlled recovery for a RETRY_EXHAUSTED occurrence (task #8 review): an
+ * explicit operation — never implicit — that clears the terminal verdict AND
+ * the send budget so the message obligation becomes deliverable again.
+ * Returns the recovered row, or null when the occurrence does not exist or
+ * is not in the exhausted terminal state (no blanket un-terminal here).
+ */
+export async function recoverMentionDeliveryFromRetryExhaustion(occurrenceId: string): Promise<MentionDeliveryOccurrenceRow | null> {
+  const now = currentDate();
+  const [recovered] = await getDb().update(mentionDeliveryOccurrences).set({
+    state: "server_decided",
+    terminalErrorAt: null,
+    terminalErrorCode: null,
+    deliveryRetryAttempts: 0,
+    deliveryRetryNextAllowedAt: null,
+    version: sql`${mentionDeliveryOccurrences.version} + 1`,
+    updatedAt: now,
+  }).where(and(
+    eq(mentionDeliveryOccurrences.occurrenceId, occurrenceId),
+    eq(mentionDeliveryOccurrences.state, "terminal_error"),
+    eq(mentionDeliveryOccurrences.terminalErrorCode, "RETRY_EXHAUSTED"),
+    isNull(mentionDeliveryOccurrences.ackedAt),
+  )).returning();
+  return recovered ?? null;
 }
 
 export async function getMentionDeliveryOccurrenceById(occurrenceId: string): Promise<MentionDeliveryOccurrenceRow | null> {

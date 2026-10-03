@@ -1891,6 +1891,13 @@
       "when": 1790823792594,
       "tag": "0269_announcement_tracked_since",
       "breakpoints": true
+    },
+    {
+      "idx": 271,
+      "version": "7",
+      "when": 1790948800000,
+      "tag": "0271_mention_delivery_retry_budget",
+      "breakpoints": true
     }
   ]
 }
