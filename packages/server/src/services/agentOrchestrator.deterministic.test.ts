@@ -1214,6 +1214,22 @@ async function waitForCondition(predicate: () => boolean, attempts = 20): Promis
   }
 }
 
+/**
+ * Flush that also pumps MACROTASKS, not just microtasks: the #142 retry
+ * path reads durable state (budget/owner trace) through real async I/O, so
+ * its continuations only settle when the event loop turns — plain
+ * microtask flushing leaves those sends unobserved and the legacy
+ * assertions race them (0 !== 1). Wait-for-timer is safe under FakeClock:
+ * the fake timer wheel is driven by advance(), real setTimeout here only
+ * yields the loop.
+ */
+async function flushMicrotasksAndIo(times = 8): Promise<void> {
+  for (let i = 0; i < times; i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await flushMicrotasks(3);
+  }
+}
+
 async function advanceClockAndWaitForCondition(clock: FakeClock, ms: number, predicate: () => boolean): Promise<void> {
   clock.advance(ms);
   await waitForCondition(predicate);
@@ -13204,7 +13220,7 @@ test("machine ready reconcile retries pending direct delivery lost before socket
     daemonVersion: "1.0.0",
     runningAgents: ["agent-1"],
   } as MachineToServerMessage);
-  await flushMicrotasks(10);
+  await flushMicrotasksAndIo();
 
   assert.equal(freshWs.sent.length, 1);
   const retried = JSON.parse(freshWs.sent[0] ?? "{}") as Extract<ServerToMachineMessage, { type: "agent:deliver" }>;
@@ -13219,7 +13235,7 @@ test("machine ready reconcile retries pending direct delivery lost before socket
     deliveryId: retried.deliveryId,
   });
   clock.advance(5_000);
-  await flushMicrotasks(10);
+  await flushMicrotasksAndIo();
 
   assert.equal(freshWs.sent.length, 1);
   assert.deepEqual(await orchestrator.receiveMessages("agent-1", false, 0), []);
@@ -13233,12 +13249,12 @@ test("ack timeout retries pending delivery when the machine socket appears after
   const message = makeAgentMessage("retry when stale registry resolves before ready", 48);
 
   await orchestrator.deliverMessage("agent-1", message);
-  await flushMicrotasks();
+  await flushMicrotasksAndIo();
 
   const freshWs = makeFakeWs(1);
   seedMachineConnection(orchestrator, "machine-1", freshWs);
   clock.advance(5_000);
-  await flushMicrotasks(10);
+  await flushMicrotasksAndIo();
 
   assert.equal(freshWs.sent.length, 1);
   const retried = JSON.parse(freshWs.sent[0] ?? "{}") as Extract<ServerToMachineMessage, { type: "agent:deliver" }>;
@@ -13253,7 +13269,7 @@ test("ack timeout retries pending delivery when the machine socket appears after
     deliveryId: retried.deliveryId,
   });
   clock.advance(5_000);
-  await flushMicrotasks(10);
+  await flushMicrotasksAndIo();
 
   assert.equal(freshWs.sent.length, 1);
   assert.deepEqual(await orchestrator.receiveMessages("agent-1", false, 0), []);
@@ -13267,7 +13283,7 @@ test("ack timeout parks pending delivery while machine is offline and ready reco
   const message = makeAgentMessage("park offline delivery until ready reconcile", 49);
 
   await orchestrator.deliverMessage("agent-1", message);
-  await flushMicrotasks();
+  await flushMicrotasksAndIo();
 
   const pendingAcks = (orchestrator as any).pendingAgentDeliveryAcks as Map<string, { attempts: number; parked: boolean; timer: unknown | null }>;
   assert.equal(pendingAcks.size, 1);
@@ -13275,7 +13291,7 @@ test("ack timeout parks pending delivery while machine is offline and ready reco
   assert.equal(pendingBeforeTimeout?.attempts, 1);
 
   clock.advance(5_000);
-  await flushMicrotasks(10);
+  await flushMicrotasksAndIo();
 
   const [parkedPending] = pendingAcks.values();
   assert.equal(pendingAcks.size, 1);
@@ -13284,7 +13300,7 @@ test("ack timeout parks pending delivery while machine is offline and ready reco
   assert.equal(parkedPending?.timer, null);
 
   clock.advance(60_000);
-  await flushMicrotasks(10);
+  await flushMicrotasksAndIo();
 
   const [stillParked] = pendingAcks.values();
   assert.equal(pendingAcks.size, 1);
@@ -13300,7 +13316,7 @@ test("ack timeout parks pending delivery while machine is offline and ready reco
     daemonVersion: "1.0.0",
     runningAgents: ["agent-1"],
   } as MachineToServerMessage);
-  await flushMicrotasks(10);
+  await flushMicrotasksAndIo();
 
   assert.equal(freshWs.sent.length, 1);
   const retried = JSON.parse(freshWs.sent[0] ?? "{}") as Extract<ServerToMachineMessage, { type: "agent:deliver" }>;
@@ -13325,11 +13341,11 @@ test("parked pending delivery still drops on stop before ready reconcile", async
   const message = makeAgentMessage("parked delivery must not cross stop boundary", 50);
 
   await orchestrator.deliverMessage("agent-1", message);
-  await flushMicrotasks();
+  await flushMicrotasksAndIo();
 
   const pendingAcks = (orchestrator as any).pendingAgentDeliveryAcks as Map<string, { attempts: number; parked: boolean }>;
   clock.advance(5_000);
-  await flushMicrotasks(10);
+  await flushMicrotasksAndIo();
   assert.equal(pendingAcks.size, 1);
   assert.equal([...pendingAcks.values()][0]?.parked, true);
 
@@ -13344,7 +13360,7 @@ test("parked pending delivery still drops on stop before ready reconcile", async
     daemonVersion: "1.0.0",
     runningAgents: [],
   } as MachineToServerMessage);
-  await flushMicrotasks(10);
+  await flushMicrotasksAndIo();
 
   assert.equal(freshWs.sent.length, 0);
   assert.equal(pendingAcks.size, 0);
