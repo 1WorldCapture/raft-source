@@ -93,16 +93,17 @@ index 89b9dfae9b281b42ad2af21ce59112ded1de120a..6fec07dd6fe7699d70347bcb6fc669a6
  
  export interface ReleaseSource {
 diff --git a/core/src/index.ts b/core/src/index.ts
-index 9b5d2b842f18f803fb02b5df0f492581e51c4fbe..f72b455683f18966523cc936dfe7d7ac81b7bb0f 100644
+index 9b5d2b842f18f803fb02b5df0f492581e51c4fbe..b37830d9dd888f343365972bfe7c3b87203a4e46 100644
 --- a/core/src/index.ts
 +++ b/core/src/index.ts
-@@ -27,3 +27,4 @@ export * from "./lifecycle/hostAdapter.ts";
+@@ -27,3 +27,5 @@ export * from "./lifecycle/hostAdapter.ts";
  
  // The built-in invariants and their types (WorldSnapshot, Invariant, ...).
  export * from "./invariants.ts";
 +export * from "./txn/lock.ts";
++export * from "./txn/fileEffects.ts";
 diff --git a/core/src/platform/posix.ts b/core/src/platform/posix.ts
-index 1041212ff31843bd72a7803a8a40fc5e3f4ab87f..e2e8a55bd03796f4cfad7d9f0c03c9a86c9b5e45 100644
+index 1041212ff31843bd72a7803a8a40fc5e3f4ab87f..c8b263c2c7adc3efe366637b6d1b745d74f8d2d4 100644
 --- a/core/src/platform/posix.ts
 +++ b/core/src/platform/posix.ts
 @@ -4,6 +4,8 @@
@@ -158,7 +159,7 @@ index 1041212ff31843bd72a7803a8a40fc5e3f4ab87f..e2e8a55bd03796f4cfad7d9f0c03c9a8
 +    return null;
 +  }
 +  if (run.error || run.status !== 0) return null;
-+  return run.stdout.trim().slice(0, 1) || null;
++  return String(run.stdout ?? "").trim().slice(0, 1) || null;
 +}
 +
 +/**
@@ -209,6 +210,36 @@ index 1041212ff31843bd72a7803a8a40fc5e3f4ab87f..e2e8a55bd03796f4cfad7d9f0c03c9a8
    },
    killProcess(pid) {
      process.kill(pid, "SIGKILL");
+diff --git a/core/src/txn/fileEffects.ts b/core/src/txn/fileEffects.ts
+index b7cb90a050f0adf462ccde9b38a892410384ba03..ec9dd2ebc745a6aa23e45f062560e96fb429a86e 100644
+--- a/core/src/txn/fileEffects.ts
++++ b/core/src/txn/fileEffects.ts
+@@ -95,7 +95,24 @@ export function fileSlotStore(stateDir: string): SlotStore {
+       const stable = slotDir(stateDir, "stable");
+       if ((await readVersion("experiment")) === null) return; // idempotent redo
+       await fs.rm(`${stable}.old`, { recursive: true, force: true });
+-      await platformOpsFor().renamePath(stable, `${stable}.old`).catch(() => {});
++      // Diagnosable aside-move (task #11): the bare catch(() => {}) swallowed
++      // the errno, so ANY first-step failure (permissions, IO, cross-device)
++      // resurfaced later as a misleading ENOTEMPTY on the NEXT rename — the
++      // original evidence destroyed exactly when it was needed. Crash-redo
++      // idempotence is preserved: ENOENT means "stable already moved aside"
++      // and the redo proceeds; every other failure is rethrown with the
++      // original errno as the cause.
++      try {
++        await platformOpsFor().renamePath(stable, `${stable}.old`);
++      } catch (err) {
++        if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
++          throw new Error(
++            `[K_PROMOTE_FAILED] could not move the current stable slot aside ` +
++              `(${(err as Error).message}); the original errno is preserved as this error's cause`,
++            { cause: err },
++          );
++        }
++      }
+       await platformOpsFor().renamePath(experiment, stable);
+       await fs.rm(`${stable}.old`, { recursive: true, force: true });
+     },
 diff --git a/core/src/txn/lock.ts b/core/src/txn/lock.ts
 index 5c388abe7cbe97902f7515f6e050ab7cf467d83e..a8b4d6c07d5cecc0124b2177597b76684c1a64a6 100644
 --- a/core/src/txn/lock.ts

@@ -65,7 +65,7 @@ async function manufactureZombie(): Promise<ZombieFixture | "skip"> {
   }
   const parent = spawn(python, ["-c", PYTHON_PARENT], {
     stdio: ["pipe", "pipe", "inherit"],
-  }) as ChildProcessWithoutNullStreams;
+  }) as unknown as ChildProcessWithoutNullStreams;
   let out = "";
   parent.stdout.on("data", (chunk: Buffer) => { out += chunk.toString(); });
   const deadline = Date.now() + 3_000;
