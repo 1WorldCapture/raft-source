@@ -235,6 +235,10 @@ function classifyRuntimeError(message: string, httpStatus: number | null): strin
   ) {
     return "InputTooLargeError";
   }
+  // Known transient upstream stream teardown (e.g. cursor-agent "RetriableError:
+  // WritableIterable is closed"). Match before the generic error-name capture so
+  // the class name on stderr does not swallow it into a non-recoverable bucket.
+  if (/WritableIterable is closed/i.test(message)) return "ProviderStreamError";
   if (explicit) return explicit[1];
   if (httpStatus !== null) {
     if (httpStatus === 429) return "RateLimitError";
