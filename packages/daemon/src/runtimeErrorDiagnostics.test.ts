@@ -127,6 +127,29 @@ test("buildRuntimeErrorDiagnosticEnvelope classifies provider stream failures", 
   assert.equal(decodingFailure.spanAttrs.turn_reason, "provider_stream_error");
 });
 
+test("buildRuntimeErrorDiagnosticEnvelope classifies the cursor-agent WritableIterable stream teardown as a stream error", () => {
+  // Exact observed stderr form (#bugfix task #13/#14): the leading error name
+  // must not swallow the message into a non-recoverable class.
+  const observed = buildRuntimeErrorDiagnosticEnvelope("RetriableError: WritableIterable is closed");
+  assert.equal(observed.spanAttrs.runtime_error_class, "ProviderStreamError");
+  assert.equal(observed.spanAttrs.turn_reason, "provider_stream_error");
+
+  for (const variant of [
+    "WritableIterable is closed",
+    "retrieableerror: writableiterable is closed",
+    "Error: WritableIterable is closed while flushing the response stream",
+  ]) {
+    const envelope = buildRuntimeErrorDiagnosticEnvelope(variant);
+    assert.equal(envelope.spanAttrs.runtime_error_class, "ProviderStreamError", variant);
+    assert.equal(envelope.spanAttrs.turn_reason, "provider_stream_error", variant);
+  }
+
+  // Narrow match: other RetriableError variants keep their explicit-name class
+  // (semantics unknown, must not be generalized into recovery).
+  const otherRetriable = buildRuntimeErrorDiagnosticEnvelope("RetriableError: upstream queue full");
+  assert.equal(otherRetriable.spanAttrs.runtime_error_class, "RetriableError");
+});
+
 test("buildRuntimeErrorDiagnosticEnvelope treats Codex provider capacity as recoverable rate limiting", () => {
   const capacity = buildRuntimeErrorDiagnosticEnvelope("Selected model is at capacity. Please try a different model.");
   assert.equal(capacity.spanAttrs.runtime_error_class, "RateLimitError");
