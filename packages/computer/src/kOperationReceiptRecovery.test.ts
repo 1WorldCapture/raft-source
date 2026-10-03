@@ -46,9 +46,19 @@ function recoveryOperation(overrides: Partial<OperationRecord> = {}): OperationR
 }
 
 function okDeps(overrides: Partial<ReceiptRecoveryDeps> = {}): ReceiptRecoveryDeps {
+  // Stateful like the real store: after a successful acknowledge the reloaded
+  // record carries acknowledgedAtMs (the readback loads a second time).
+  const base = recoveryOperation();
+  let acknowledged = false;
   return {
-    load: async () => ({ kind: "observed", operation: recoveryOperation() }),
-    acknowledge: async () => "acknowledged",
+    load: async () => ({
+      kind: "observed",
+      operation: acknowledged ? { ...base, acknowledgedAtMs: 42_000 } : base,
+    }),
+    acknowledge: async () => {
+      acknowledged = true;
+      return "acknowledged";
+    },
     nowMs: () => 42_000,
     readServiceAttestationFn: async (): Promise<MachineServiceAttestation | null> => ({
       computerVersion: "9.9.91",
@@ -95,6 +105,55 @@ test("wrong operation id: refused, bound to the exact operation", { timeout: 10_
       recoverTerminalUpgradeReceiptMissingPredecessors(home, "another-operation", okDeps()),
       /bound to the exact operation/,
     );
+  });
+});
+
+test("installer-shaped record: refused — recovery is bounded to local receipts (scope gate)", { timeout: 10_000 }, async () => {
+  await withHome(async (home) => {
+    // Installer shape: installer provenance, no prior process identities,
+    // promotable outcome — exactly the record May's r2 review flagged as
+    // able to reach this path without the scope gate.
+    const op = recoveryOperation({
+      provenance: { who: "installer", carrier: "installer" },
+    });
+    op.metadata.trigger = "installer";
+    await assert.rejects(
+      recoverTerminalUpgradeReceiptMissingPredecessors(home, OPERATION_ID, okDeps({
+        load: async () => ({ kind: "observed", operation: op }),
+      })),
+      /not a local \(cli\/tray\) upgrade receipt/,
+    );
+  });
+});
+
+test("acknowledge changed: refused with NO audit line for a recovery that did not happen", { timeout: 10_000 }, async () => {
+  await withHome(async (home) => {
+    const audited: string[] = [];
+    await assert.rejects(
+      recoverTerminalUpgradeReceiptMissingPredecessors(home, OPERATION_ID, okDeps({
+        acknowledge: async () => "changed",
+        audit: (line) => audited.push(line),
+      })),
+      /changed during recovery/,
+    );
+    assert.equal(audited.length, 0, "a CHANGED acknowledge must not leave an audit line");
+  });
+});
+
+test("acknowledge not durable: readback refuses and nothing is audited", { timeout: 10_000 }, async () => {
+  await withHome(async (home) => {
+    const audited: string[] = [];
+    await assert.rejects(
+      recoverTerminalUpgradeReceiptMissingPredecessors(home, OPERATION_ID, okDeps({
+        // Acknowledge claims success but the reload never shows it — the
+        // readback must refuse, mirroring the normal path's durability check.
+        load: async () => ({ kind: "observed", operation: recoveryOperation() }),
+        acknowledge: async () => "acknowledged",
+        audit: (line) => audited.push(line),
+      })),
+      /did not durably confirm acknowledgement/,
+    );
+    assert.equal(audited.length, 0);
   });
 });
 
@@ -198,8 +257,17 @@ test("version mismatch: refused even when every other gate passes", { timeout: 1
 
 test("rolled-back outcome recovers against the restored version", { timeout: 10_000 }, async () => {
   await withHome(async (home) => {
+    const base = recoveryOperation({ phase: "rolled-back", outcome: "rolled-back" });
+    let acknowledged = false;
     const result = await recoverTerminalUpgradeReceiptMissingPredecessors(home, OPERATION_ID, okDeps({
-      load: async () => ({ kind: "observed", operation: recoveryOperation({ phase: "rolled-back", outcome: "rolled-back" }) }),
+      load: async () => ({
+        kind: "observed",
+        operation: acknowledged ? { ...base, acknowledgedAtMs: 42_000 } : base,
+      }),
+      acknowledge: async () => {
+        acknowledged = true;
+        return "acknowledged";
+      },
       readServiceAttestationFn: async () => ({
         computerVersion: "9.9.90", // the RESTORED version
         serviceGeneration: "successor-generation",

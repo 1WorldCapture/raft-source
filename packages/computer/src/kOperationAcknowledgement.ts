@@ -458,21 +458,24 @@ export interface ReceiptRecoveryDeps extends TerminalUpgradeReceiptAcknowledgeme
  *
  * This is NOT a relaxation of the normal path. Every gate must pass:
  *   1. exact same operation id (no cross-operation recovery);
- *   2. the identities really are absent (records that HAVE them must use
+ *   2. LOCAL scope only (cli/tray receipts): installer-shaped records have
+ *      their own acknowledgement with the stable-readback slot proof, and a
+ *      stale journal handing-over record must not stand in for it;
+ *   3. the identities really are absent (records that HAVE them must use
  *      the normal acknowledgement);
- *   3. bounded outcome whitelist: promoted or rolled-back only;
- *   4. TRUSTED history: the journal's handing-over record carries a
+ *   4. bounded outcome whitelist: promoted or rolled-back only;
+ *   5. TRUSTED history: the journal's handing-over record carries a
  *      priorStartId, and the CURRENT live service attests a DIFFERENT
  *      generation — the handover actually happened and the successor is a
  *      different incarnation. The priorStartId is generation evidence, NOT
  *      a process-exit proof, which is why it may only ENABLE this explicit
  *      path, never substitute for the checks below;
- *   5. stable live service readback (two agreeing attestations) at the
+ *   6. stable live service readback (two agreeing attestations) at the
  *      version the outcome demands;
- *   6. no live predecessor: the coordinator pid and any upgrade.lock
+ *   7. no live predecessor: the coordinator pid and any upgrade.lock
  *      holder must be gone (an alive predecessor refuses recovery).
  * Any failure throws typed and consumes nothing. A successful recovery is
- * audited before the receipt is delivered.
+ * durably read back and audited before the receipt is delivered.
  */
 export async function recoverTerminalUpgradeReceiptMissingPredecessors(
   slockHome: string,
@@ -514,6 +517,16 @@ export async function recoverTerminalUpgradeReceiptMissingPredecessors(
       outcome: operation.outcome,
       acknowledgedAt: new Date(operation.acknowledgedAtMs).toISOString(),
     };
+  }
+  // Scope gate (task #11 review r2, finding 1): the bounded recovery path is
+  // a LOCAL-receipt affordance. Installer-shaped receipts carry their own
+  // acknowledgement backed by the stable-readback byte-level slot proof; a
+  // stale journal handing-over record must not stand in for it.
+  if (!localReceipt(operation)) {
+    throw new ComputerError(
+      "UPGRADE_RECEIPT_SCOPE_MISMATCH",
+      `K operation ${operationId} is not a local (cli/tray) upgrade receipt; the missing-predecessors recovery path is bounded to local receipts.`,
+    );
   }
   if (predecessorPids(operation) !== null) {
     throw new ComputerError(
@@ -578,14 +591,6 @@ export async function recoverTerminalUpgradeReceiptMissingPredecessors(
     );
   }
 
-  // Auditable: the recovery is visible before the receipt is delivered.
-  const audit = deps.audit ?? ((line: string) => console.log(line));
-  audit(
-    `[k-operation ${operationId}] RECEIPT_RECOVERED_MISSING_PREDECESSORS outcome=${operation.outcome} ` +
-    `expectedVersion=${expectedVersion} priorStartId=${evidence.priorStartId} ` +
-    `liveGeneration=${first.serviceGeneration} servicePid=${first.servicePid}`,
-  );
-
   const acknowledge = deps.acknowledge ?? acknowledgeOperation;
   const result = await acknowledge(stateDir, operationId, (deps.nowMs ?? currentTimeMs)());
   if (result !== "acknowledged") {
@@ -594,10 +599,36 @@ export async function recoverTerminalUpgradeReceiptMissingPredecessors(
       `K operation ${operationId} changed during recovery (${result}); nothing was consumed. Re-run \`raft-computer status\`.`,
     );
   }
+
+  // Readback symmetric with the normal path (task #11 review r2, finding 3):
+  // verify the acknowledgement durably landed before auditing or delivering.
+  const after = await load(stateDir);
+  if (
+    after.kind !== "observed"
+    || after.operation.id !== operationId
+    || after.operation.outcome === null
+    || after.operation.acknowledgedAtMs === null
+    || !localReceipt(after.operation)
+  ) {
+    throw new ComputerError(
+      "UPGRADE_RECEIPT_READBACK_FAILED",
+      `K did not durably confirm acknowledgement of operation ${operationId}. Re-run \`raft-computer status\`.`,
+    );
+  }
+
+  // Auditable: the recovery line lands between the confirmed acknowledge and
+  // the delivery (task #11 review r2, finding 2) — a CHANGED acknowledge must
+  // not leave an audit line for a recovery that did not happen.
+  const audit = deps.audit ?? ((line: string) => console.log(line));
+  audit(
+    `[k-operation ${operationId}] RECEIPT_RECOVERED_MISSING_PREDECESSORS outcome=${after.operation.outcome} ` +
+    `expectedVersion=${expectedVersion} priorStartId=${evidence.priorStartId} ` +
+    `liveGeneration=${first.serviceGeneration} servicePid=${first.servicePid}`,
+  );
   return {
     status: "acknowledged",
     operationId,
-    outcome: operation.outcome,
-    acknowledgedAt: new Date((deps.nowMs ?? currentTimeMs)()).toISOString(),
+    outcome: after.operation.outcome,
+    acknowledgedAt: new Date(after.operation.acknowledgedAtMs).toISOString(),
   };
 }
