@@ -138,18 +138,20 @@ async function main(): Promise<void> {
   assert(startedProbe.version === "9.9.90", `stable service must attest 9.9.90, got ${startedProbe.version}`);
   step("start-service", { version: startedProbe.version, startId: startedProbe.startId });
 
-  // 3. Upgrade to 9.9.91; the coordinator kills itself the instant the
-  //    journal records running-experiment (the successor is live, the
-  //    transaction mid-flight). A redo from this phase verifies the live
-  //    successor evidence and completes the promote — the crash-redo
-  //    receipt shape: promoted, predecessor identities absent.
+  // 3. Upgrade to 9.9.91; the coordinator kills itself inside the host
+  //    adapter's first post-successor-start healthProbe (the write-path
+  //    seam, May r2 rework option A): the running-experiment intent is
+  //    durable and zero progress follows, so the redo deterministically
+  //    verifies the live successor and completes the promote — the
+  //    crash-redo receipt shape: promoted, predecessor identities absent.
+  //    Both settle shapes stay accepted below as belt-and-braces.
   const op91 = `chain-${randomUUID().slice(0, 8)}`;
   const killChild = spawn(
     process.execPath,
     [
       "--import", "tsx", runnerPath(),
       "upgrade", "--slock-home", slockHome, "--base-url", baseUrl("9.9.91"),
-      "--version", "9.9.91", "--operation-id", op91, "--kill-at-intent", "running-experiment",
+      "--version", "9.9.91", "--operation-id", op91, "--kill-at-successor-probe", "1",
     ],
     { cwd: resolve(import.meta.dirname ?? "..", ".."), env: process.env },
   );
@@ -167,7 +169,8 @@ async function main(): Promise<void> {
   assert(crashMeta.priorProcessIdentities === undefined, "crash-redo shape requires NO prior identities");
   const journal = await readFile(join(kStateDir(slockHome), "journal.jsonl"), "utf8");
   assert(journal.includes('"handing-over"'), "journal must carry the handing-over record");
-  assert(journal.includes('"running-experiment"'), "journal must have reached running-experiment");
+  assert(journal.includes('"probing"') === false, "the seam must kill before any phase past handing-over");
+  assert(journal.includes('"running-experiment"') === false, "the seam must kill before the engine journals running-experiment");
   step("crash-at-running-experiment", { operationId: op91, coordinatorPid: crashMeta.coordinatorPid, outcome: null });
 
   // 5. Fresh engine redo settles the transaction (coordinator's redo path).

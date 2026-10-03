@@ -16,11 +16,13 @@
 //       and print its probe evidence — the live service the handover hands
 //       over FROM (its startId becomes the journal's priorStartId).
 //   upgrade --slock-home H --base-url U --version V --operation-id ID
-//       [--kill-at-intent intent]
+//       [--kill-at-successor-probe]
 //       One real upgradeTo() transaction. With the kill flag the process
-//       SIGKILLs ITSELF as soon as the journal records the given intent —
-//       kill -9 at a defined phase, no cross-process race: only durable
-//       state survives, which is exactly the crash-redo shape.
+//       SIGKILLs ITSELF inside the host adapter's first post-successor-start
+//       healthProbe — the write-path seam: the kill lands in the same tick
+//       the running-experiment intent is durable and BEFORE any later
+//       durable write, so only "intent written, zero progress after" can
+//       survive (the crash-redo shape, deterministically).
 //   recover --slock-home H --base-url U --operation-id ID
 //       Fresh engine over the same durable state: settle the in-flight
 //       transaction (the coordinator's redo path).
@@ -63,16 +65,40 @@ function parseArgs(argv: string[]): Record<string, string> {
   return args;
 }
 
-async function buildUpgrader(slockHome: string, baseUrl: string): Promise<Upgrader> {
+async function buildUpgrader(
+  slockHome: string,
+  baseUrl: string,
+  killOnSuccessorProbe: boolean,
+): Promise<Upgrader> {
   const stateDir = kStateDir(slockHome);
   // The PRODUCTION host adapter with ONE harness-standard deviation: the
   // managed-set reads are static-matched to the acceptance app (the sandbox
   // has no daemon-configured managed servers). Every other path — slot
   // resolution, IPC, stop/spawn, pidfile, surfaces — is production.
-  const host: HostAdapter = createKHostAdapter(slockHome, {
+  const inner = createKHostAdapter(slockHome, {
     listManagedServerIdsFn: async () => ["srv-a"],
     readManagedMachineIdentitiesFn: async () => ({ "srv-a": "mid-a" }),
   });
+  // Deterministic crash-point seam (May r2 rework, option A): the engine
+  // journals handing-over (with the prior startId) BEFORE stopping stable
+  // and starting the experiment. Killing self the moment start("experiment")
+  // resolves puts the crash at "handing-over durable, successor live, zero
+  // progress after" — the exact state whose redo proves the handover
+  // evidence (live experiment incarnation ≠ priorStartId) and settles
+  // promoted. Any later journal write would move the last entry past the
+  // priorStartId carrier and redo settles fail-safe rollback by design.
+  const host: HostAdapter = {
+    quiesce: () => inner.quiesce(),
+    stop: (slot) => inner.stop(slot),
+    start: async (slot) => {
+      await inner.start(slot);
+      if (killOnSuccessorProbe && slot === "experiment") {
+        process.kill(process.pid, "SIGKILL");
+      }
+    },
+    healthProbe: () => inner.healthProbe(),
+    resume: () => inner.resume(),
+  };
   const source: ReleaseSource = await import(
     new URL("artifact/staticManifestSource.ts", K_CORE_URL).href
   ).then((m) => m.staticManifestSource({ baseUrl }));
@@ -91,15 +117,6 @@ async function buildUpgrader(slockHome: string, baseUrl: string): Promise<Upgrad
     // fixture-owned readbacks.
   };
   return createUpgrader(opts);
-}
-
-async function waitIntent(stateDir: string, intent: string): Promise<void> {
-  const journalPath = join(stateDir, "journal.jsonl");
-  for (;;) {
-    const text = await readFile(journalPath, "utf8").catch(() => "");
-    if (text.includes(`"${intent}"`)) return;
-    await new Promise((r) => setTimeout(r, 10));
-  }
 }
 
 async function main(): Promise<void> {
@@ -130,14 +147,9 @@ async function main(): Promise<void> {
     return;
   }
 
-  const u = await buildUpgrader(slockHome, baseUrl);
+  const u = await buildUpgrader(slockHome, baseUrl, args["kill-at-successor-probe"] === "1");
 
   if (mode === "upgrade") {
-    if (args["kill-at-intent"]) {
-      void waitIntent(stateDir, args["kill-at-intent"]).then(() => {
-        process.kill(process.pid, "SIGKILL");
-      });
-    }
     const outcome = await u.upgradeTo(args.version!, {
       consented: true,
       provenance: { who: "local", carrier: "cli" },
