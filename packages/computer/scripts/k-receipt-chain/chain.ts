@@ -171,6 +171,10 @@ async function main(): Promise<void> {
   step("crash-at-running-experiment", { operationId: op91, coordinatorPid: crashMeta.coordinatorPid, outcome: null });
 
   // 5. Fresh engine redo settles the transaction (coordinator's redo path).
+  //    The kill point sits inside running-experiment whose sub-position
+  //    varies, so redo legitimately settles EITHER way (May r2 review):
+  //    promoted (successor evidence verified) or rolled-back (fail-safe).
+  //    BOTH shapes are accepted and each runs the full acceptance below.
   const rec = await runRunner(
     ["recover", "--slock-home", slockHome, "--base-url", baseUrl("9.9.91"), "--operation-id", op91],
     {},
@@ -178,17 +182,33 @@ async function main(): Promise<void> {
   assert(rec.code === 0, `recover failed: ${rec.stderr}`);
   const recovered = parseResult(rec.stdout);
   const recOp = (recovered.operation as { operation: Record<string, unknown> }).operation;
-  assert(recOp.outcome === "promoted", `redo must settle promoted, got ${recOp.outcome}`);
+  const settle = recOp.outcome as "promoted" | "rolled-back" | string;
+  assert(settle === "promoted" || settle === "rolled-back", `redo must settle promoted or rolled-back, got ${settle}`);
   assert((recOp.metadata as Record<string, string>).priorProcessIdentities === undefined, "redo receipt must lack predecessor identities");
-  step("redo", { operationId: op91, outcome: recOp.outcome, identities: "absent" });
+  step("redo", { operationId: op91, outcome: settle, identities: "absent" });
 
   // 6. THE ACCEPTANCE: the computer recovery entry acknowledges the
   //    identity-less receipt through its six gates (real journal, real
-  //    live-service attestation, real pids).
+  //    live-service attestation, real pids). The outcome whitelist covers
+  //    both settle shapes: promoted checks the target version, rolled-back
+  //    checks the restored from-version.
+  const expectedVersion = settle === "promoted" ? "9.9.91" : "9.9.90";
+  const audited: string[] = [];
   const t0 = Date.now();
-  const receipt = await recoverTerminalUpgradeReceiptMissingPredecessors(slockHome, op91);
-  step("recovery-entry", { status: receipt.status, outcome: receipt.outcome, ms: Date.now() - t0 });
+  const receipt = await recoverTerminalUpgradeReceiptMissingPredecessors(slockHome, op91, {
+    audit: (line) => audited.push(line),
+  });
+  step("recovery-entry", {
+    status: receipt.status,
+    outcome: receipt.outcome,
+    expectedVersion,
+    ms: Date.now() - t0,
+  });
   assert(receipt.status === "acknowledged", `recovery entry refused: ${JSON.stringify(receipt)}`);
+  assert(receipt.outcome === settle, `recovered outcome must match the redo settle (${settle}), got ${receipt.outcome}`);
+  assert(audited.length === 1, `exactly one audit line expected, got ${audited.length}`);
+  assert(audited[0]!.includes("RECEIPT_RECOVERED_MISSING_PREDECESSORS"), "audit line must carry the recovery marker");
+  assert(audited[0]!.includes(`outcome=${settle}`), "audit line must carry the settled outcome");
 
   // 7. The NEXT upgrade passes end to end (what a missing recovery used to
   //    brick: the next upgrade blocked behind the unacknowledged receipt).
@@ -202,7 +222,7 @@ async function main(): Promise<void> {
   const nextOutcome = nextResult.outcome as { result?: string };
   assert(nextOutcome.result === "promoted", `next upgrade must promote, got ${JSON.stringify(nextOutcome)}`);
   const finalState = parseResult(
-    (await runRunner(["state", "--slock-home", slockHome, "--base-url", baseUrl("9.9.91")], {})).stdout,
+    (await runRunner(["state", "--slock-home", slockHome, "--base-url", baseUrl("9.9.92")], {})).stdout,
   );
   const finalTxn = finalState.state as { phase?: string; stableVersion?: string };
   assert(finalTxn.stableVersion === "9.9.92", `stable must be 9.9.92, got ${finalTxn.stableVersion} (phase ${finalTxn.phase})`);
