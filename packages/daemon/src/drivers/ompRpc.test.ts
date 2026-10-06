@@ -1068,10 +1068,12 @@ test("launch argv carries the standing prompt file and the isolation overlay, fr
   try {
     await fresh.waitUntil(() => fresh.driver.isProtocolSettled);
     argvDump = JSON.parse(readFileSync(fresh.argvLogPath, "utf8")) as typeof argvDump;
-    const promptFlag = argvDump.argv.indexOf("--system-prompt");
+    const promptFlag = argvDump.argv.indexOf("--append-system-prompt");
     const configFlag = argvDump.argv.indexOf("--config");
     assert.ok(promptFlag > 0 && configFlag > promptFlag, `argv must carry both flags: ${argvDump.argv.join(" ")}`);
-    assert.equal(readFileSync(argvDump.argv[promptFlag + 1], "utf8"), STANDING, "the prompt file must hold the standing prompt verbatim");
+    const promptFile = readFileSync(argvDump.argv[promptFlag + 1], "utf8");
+    assert.ok(promptFile.includes(STANDING), "the prompt file must carry the standing prompt");
+    assert.ok(promptFile.startsWith("以下 Raft 指引优先"), "appended content must open with the precedence declaration (task #7 ruling)");
     const overlay = readFileSync(argvDump.argv[configFlag + 1], "utf8");
     assert.match(overlay, /disabledExtensions:/);
     for (const name of ["AGENTS.md", "CLAUDE.md", "GEMINI.md", "copilot-instructions.md"]) {
@@ -1091,11 +1093,11 @@ test("launch argv carries the standing prompt file and the isolation overlay, fr
   try {
     await resumed.waitUntil(() => resumed.driver.isProtocolSettled);
     const dump = JSON.parse(readFileSync(resumed.argvLogPath, "utf8")) as { argv: string[] };
-    assert.ok(dump.argv.includes("--system-prompt"), "resumed launch must carry --system-prompt");
+    assert.ok(dump.argv.includes("--append-system-prompt"), "resumed launch must carry --append-system-prompt");
     assert.ok(dump.argv.includes("--config"), "resumed launch must carry the isolation overlay");
     const resumeFlag = dump.argv.indexOf("--resume");
     assert.ok(resumeFlag > 0 && dump.argv[resumeFlag + 1] === "recorded-handoff");
-    assert.equal(readFileSync(dump.argv[dump.argv.indexOf("--system-prompt") + 1], "utf8"), STANDING);
+    assert.ok(readFileSync(dump.argv[dump.argv.indexOf("--append-system-prompt") + 1], "utf8").includes(STANDING));
   } finally {
     resumed.cleanup();
     await resumed.mock.close();

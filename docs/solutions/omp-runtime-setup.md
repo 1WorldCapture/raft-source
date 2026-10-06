@@ -53,8 +53,8 @@ omp login <服务商>
 
 ## 系统提示词与隔离边界
 
-- Raft 的常驻系统提示词以 `--system-prompt <文件>` 传入（0600 权限，位于 per-agent 的 CLI transport 目录），**新建与恢复均生效**。
-- 隔离：每次启动附带 `--config` overlay，禁用**项目级**的上下文文件发现（`AGENTS.md`、`CLAUDE.md`、`GEMINI.md`、`copilot-instructions.md`），避免工作区指令文件叠加在 Raft 提示词之下；**用户级**的个人偏好（`~/.omp/agent/` 等）照常加载。会替换系统提示词的文件（`SYSTEM.md` 等）被显式 flag 压制。
+- Raft 的常驻系统提示词以 `--append-system-prompt <文件>` 传入（0600 权限，位于 per-agent 的 CLI transport 目录），**新建与恢复均生效**。采用追加而非整体替换：保留 omp 默认模板的工具使用协议（对工具调用有利），并在追加内容开头声明「Raft 指引优先」。整体替换式 `--system-prompt` 与 `--resume` 组合存在上游问题（恢复后模型视图工具不可用，omp 18.6.1 已复现），故不使用。
+- 隔离：每次启动附带 `--config` overlay，禁用**项目级**的上下文文件发现（`AGENTS.md`、`CLAUDE.md`、`GEMINI.md`、`copilot-instructions.md`），避免工作区指令文件叠加在 Raft 指引之下；**用户级**的个人偏好（`~/.omp/agent/` 等）照常加载。会替换系统提示词的发现文件（`SYSTEM.md` 等）被显式 flag 压制。
 - 用户自己的 skills、MCP servers、rules 等 discovery 贡献不受影响；认证与订阅在 provider 体系之外，不受影响。
 - daemon 不写入用户的 `~/.omp`（只读使用）。
 

@@ -771,10 +771,17 @@ export class OmpDriver implements RuntimeDriver {
 
     // Managed-agent launch files live in the per-agent CLI transport dir —
     // 0600, outside the workspace, rewritten every spawn (task #5). The
-    // prompt travels as a file because omp treats a multi-line
-    // --system-prompt VALUE as a literal, while a single-line path is read
-    // as a file (docs/system-prompt-customization.md).
-    this.systemPromptPath = this.writeLaunchFile(slockDir, OMP_SYSTEM_PROMPT_FILE, ctx.standingPrompt);
+    // prompt travels as a file because omp treats a multi-line flag VALUE as
+    // a literal, while a single-line path is read as a file
+    // (docs/system-prompt-customization.md). The appended content opens with
+    // an explicit precedence declaration (task #7 ruling): omp's default
+    // harness template stays in place, and where the two could conflict the
+    // Raft guidance wins.
+    this.systemPromptPath = this.writeLaunchFile(
+      slockDir,
+      OMP_SYSTEM_PROMPT_FILE,
+      `以下 Raft 指引优先于 omp 默认模板中的相关指引。\n\n${ctx.standingPrompt}`,
+    );
     this.configOverlayPath = this.writeLaunchFile(slockDir, OMP_CONFIG_OVERLAY_FILE, buildOmpConfigOverlay());
 
     // Managed MCP tools (task #5): membership is the server's decision, made
@@ -967,19 +974,27 @@ export class OmpDriver implements RuntimeDriver {
     } else {
       // extraArgs leads the list so a script seam (command: node, extraArgs:
       // [script, mode]) sees its own argv first; omp itself treats flags
-      // order-independently. --system-prompt and --config ride along on both
-      // fresh and resumed launches: resumed sessions re-apply the current
-      // standing prompt (task #5 — new / resumed / woken launches must all
-      // run with it). Model and thinking level come from the agent's runtime
-      // config (task #6); a bad --model id exits pre-ready with a
-      // "Model not found" stderr, which the exit handler surfaces verbatim.
+      // order-independently. The standing prompt rides --append-system-prompt
+      // on BOTH fresh and resumed launches (task #5, changed per the task #7
+      // ruling): --system-prompt (full replacement) combined with --resume
+      // breaks tool availability in the resumed session — the model sees no
+      // usable tools (reproduced standalone on omp 18.6.1; minimal repro in
+      // the task #7 PR). --append-system-prompt keeps omp's default harness
+      // template (its tool policy teaches correct tool use) and appends the
+      // Raft standing prompt with an explicit precedence declaration, so the
+      // effective instructions are identical across fresh and resumed
+      // launches. The --config overlay (below) still blocks project context
+      // files from stacking underneath. Model and thinking level come from
+      // the agent's runtime config (task #6); a bad --model id exits
+      // pre-ready with a "Model not found" stderr, which the exit handler
+      // surfaces verbatim.
       const launchFields = runtimeConfigToLaunchFields(hydrateRuntimeConfig(ctx.config));
       const thinkingLevel = launchFields.reasoningEffort ? mapOmpThinkingLevel(launchFields.reasoningEffort) : null;
       args = [
         ...(launchOverrides.extraArgs ?? []),
         "--mode", "rpc",
         "--session-dir", this.sessionDir!,
-        ...(this.systemPromptPath ? ["--system-prompt", this.systemPromptPath] : []),
+        ...(this.systemPromptPath ? ["--append-system-prompt", this.systemPromptPath] : []),
         ...(this.configOverlayPath ? ["--config", this.configOverlayPath] : []),
         ...(launchFields.model && launchFields.model !== "default" ? ["--model", launchFields.model] : []),
         ...(thinkingLevel ? ["--thinking", thinkingLevel] : []),
