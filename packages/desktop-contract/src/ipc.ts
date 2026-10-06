@@ -455,6 +455,22 @@ export const ELECTRON_IPC_CHANNELS = {
   storageResetRequest: "app:storage-reset-request",
   /** renderer → main (invoke): did this boot consume a pending storage wipe? */
   storageWipeStatus: "app:storage-wipe-status",
+  /** renderer → main (invoke): read the runtime server-origin state
+   * (phase 3-1): effective origin, the persisted override, the baked build
+   * default, whether the effective origin is official, and the generation
+   * counter (bumped on every override change; drives renderer session
+   * clearing through __RAFT_DESKTOP_ENVIRONMENT__). */
+  serverOriginGet: "server-origin:get",
+  /** renderer → main (invoke): validate and persist a server-origin override.
+   * The value is re-validated in main (never trusted from the renderer);
+   * a change bumps the generation and takes effect after relaunch. */
+  serverOriginSet: "server-origin:set",
+  /** renderer → main (invoke): remove the persisted override (back to the
+   * env/build default). Bumps the generation when an override existed. */
+  serverOriginReset: "server-origin:reset",
+  /** renderer → main: relaunch the app to apply a pending server-origin
+   * change (same relaunch semantics as the storage doctor). */
+  serverOriginRelaunch: "server-origin:relaunch",
 } as const;
 
 export type ElectronIpcChannel =

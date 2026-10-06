@@ -38,7 +38,8 @@ import { loadWindowState, trackWindowState } from "../main/windowState.js";
 import { MenubarResident, shouldHideOnClose } from "../main/menubarResident.js";
 import { isHiddenLaunch } from "../main/loginItem.js";
 import { armOAuthLoopback, cancelOAuthLoopback, isAllowedAuthorizationUrl } from "./oauthLoopback.js";
-import { buildApiOrigins, isOfficialApiBuild } from "./configuredApiOrigin.js";
+import { buildApiOrigins } from "./configuredApiOrigin.js";
+import { ServerOriginConfig } from "./serverOriginConfig.js";
 import { requestStorageWipeAndRelaunch, resolvePendingStorageWipe } from "./storageDoctor.js";
 import { createOAuthCoordinator } from "./oauthCoordinator.js";
 import { ComputerHost } from "./computerHost.js";
@@ -66,8 +67,28 @@ const ZOOM_MAX = 4;
 const TRAFFIC_LIGHT_INSET_X = 16;
 const TRAFFIC_LIGHT_INSET_Y = 16;
 
+// Dev-only: point this instance at its own userData directory. The
+// single-instance lock, login session and window state all key off userData,
+// so a second instance with its own dir runs fully isolated — local
+// verification of a dev build without disturbing the installed app (whose
+// window would otherwise pop to the foreground on single-instance activation).
+// Never active in packaged builds: the installed app must always share the
+// one canonical data dir.
+const userDataOverride = !app.isPackaged ? process.env.RAFT_DESKTOP_USER_DATA?.trim() : undefined;
+if (userDataOverride) app.setPath("userData", userDataOverride);
+
+// Runtime server origin (phase 3-1): userData/server-origin.json >
+// RAFT_DESKTOP_API_ORIGIN env > the baked CONFIGURED_API_ORIGIN. Resolved
+// ONCE per boot — a change is persisted and applied at relaunch. This is
+// the "current deployment" concept; isOfficialApiBuild() stays the
+// build-identity concept.
+const serverOriginConfig = new ServerOriginConfig({ userDataDir: app.getPath("userData"), env: process.env });
+
 const APP_VERSION = app.getVersion();
-const desktopUpdaterAllowed = isOfficialApiBuild() && !isCursorSdkE2eBuild(APP_VERSION);
+// Official-app updates only when THIS boot talks to an official backend —
+// a runtime-configured private origin must not pull official app builds
+// over the user's deployment (mirrors the baked self-hosted rule).
+const desktopUpdaterAllowed = serverOriginConfig.isOfficial() && !isCursorSdkE2eBuild(APP_VERSION);
 
 // ─── Computer host (raft-computer) argv dispatch ──────────────────────────────
 // The detached Computer service re-execs THIS binary with a hidden `__service` /
@@ -132,17 +153,6 @@ if (bundledCursorSdkAssets.root) {
 
 const headlessMode = findHeadlessMode(process.argv);
 
-// Dev-only: point this instance at its own userData directory. The
-// single-instance lock, login session and window state all key off userData,
-// so a second instance with its own dir runs fully isolated — local
-// verification of a dev build without disturbing the installed app (whose
-// window would otherwise pop to the foreground on single-instance activation).
-// Never active in packaged builds: the installed app must always share the
-// one canonical data dir.
-const userDataOverride = !app.isPackaged ? process.env.RAFT_DESKTOP_USER_DATA?.trim() : undefined;
-if (userDataOverride) app.setPath("userData", userDataOverride);
-
-
 // Storage doctor (task #12): set once this process holds the single-instance
 // lock and has consumed any pending wipe (see the lock-held branch below).
 let storageWipedThisBoot = false;
@@ -186,10 +196,12 @@ function flushDeepLinks(): void {
 // own backend, inject permissive CORS headers onto the API's responses so the
 // browser accepts them (this is the standard Electron approach for a bundled
 // first-party client; it does not weaken the API itself).
-// Self-hosted builds (VITE_API_URL configured to a non-official origin) bridge
-// exactly that one extra origin — never bare http:, and look-alike hosts stay
-// rejected by the parsed-origin matching below (see configuredApiOrigin.ts).
-const API_ORIGINS = buildApiOrigins();
+// Self-hosted builds (VITE_API_URL configured to a non-official origin) and
+// runtime-configured private origins (phase 3-1) bridge exactly that one
+// extra origin — never bare http:, and look-alike hosts stay rejected by the
+// parsed-origin matching below (see configuredApiOrigin.ts). The origin is
+// boot-stable (changes apply at relaunch), so a const set is still correct.
+const API_ORIGINS = buildApiOrigins(serverOriginConfig.current());
 
 function installApiCorsBridge(): void {
   session.defaultSession.webRequest.onHeadersReceived({ urls: [...API_ORIGINS].map((origin) => `${origin}/*`) }, (details, callback) => {
@@ -244,7 +256,9 @@ const oauthCoordinator = createOAuthCoordinator({
   arm: armOAuthLoopback,
   cancel: cancelOAuthLoopback,
   openExternal: (url) => shell.openExternal(url),
-  isAllowedUrl: isAllowedAuthorizationUrl,
+  // The authorization-URL allowlist follows the RUNTIME origin (a private
+  // deployment's authorize pages are served from it), not just the baked one.
+  isAllowedUrl: (url) => isAllowedAuthorizationUrl(url, serverOriginConfig.current()),
   randomToken: randomUUID,
 });
 
@@ -278,6 +292,17 @@ function registerIpcHandlers(): void {
     // IndexedDB cache clearly has data): schedule the wipe marker and
     // relaunch so the next boot starts from a clean Local Storage.
     requestStorageWipeAndRelaunch(app.getPath("userData"), () => app.relaunch(), (code) => app.exit(code));
+  });
+  // Server-origin configuration (phase 3-1). set/reset re-validate in THIS
+  // process — the renderer's value is never trusted. A persisted change is
+  // pending until relaunch (the renderer drives the confirm + relaunch UX).
+  ipcMain.handle(ELECTRON_IPC_CHANNELS.serverOriginGet, () => serverOriginConfig.status());
+  ipcMain.handle(ELECTRON_IPC_CHANNELS.serverOriginSet, (_e, raw: unknown) =>
+    typeof raw === "string" ? serverOriginConfig.set(raw) : Promise.resolve({ ok: false, error: "invalid_server_origin" }));
+  ipcMain.handle(ELECTRON_IPC_CHANNELS.serverOriginReset, () => serverOriginConfig.reset());
+  ipcMain.on(ELECTRON_IPC_CHANNELS.serverOriginRelaunch, () => {
+    app.relaunch();
+    app.exit(0);
   });
 }
 
@@ -446,6 +471,19 @@ function createMainWindow(): BrowserWindow {
       spellcheck: true,
       // Our own realtime UI relies on the socket firing while backgrounded.
       backgroundThrottling: false,
+      // Runtime server-origin environment (phase 3-1): hand the boot's
+      // resolved origin + generation to the sandboxed preload BEFORE page
+      // scripts run (it injects __RAFT_DESKTOP_ENVIRONMENT__ from these).
+      // Absent for stock official boots with no override — the renderer
+      // then follows the compiled origin exactly as before.
+      ...(serverOriginConfig.hasOverride()
+        ? {
+          additionalArguments: [
+            `--raft-server-origin=${serverOriginConfig.current()}`,
+            `--raft-environment-generation=${serverOriginConfig.injectionGeneration()}`,
+          ],
+        }
+        : {}),
     },
   });
   mainWindow = window;
@@ -645,7 +683,12 @@ if (headlessMode?.mode === "__service") {
   // ahead of app ready and any window/session, so nothing has opened storage.
   storageWipedThisBoot = resolvePendingStorageWipe(app.getPath("userData"));
 
-  if (app.isPackaged) app.setAsDefaultProtocolClient(DEEP_LINK_SCHEME);
+  // Isolated test builds (electron-builder.isolated.yml) skip raft://
+  // registration: LaunchServices would otherwise make the test build the
+  // deep-link handler and steal links meant for the installed app.
+  if (app.isPackaged && !app.getName().includes("Isolated")) {
+    app.setAsDefaultProtocolClient(DEEP_LINK_SCHEME);
+  }
 
   // macOS deep links arrive via open-url (may fire before ready).
   app.on("open-url", (event, url) => {
@@ -760,7 +803,7 @@ if (headlessMode?.mode === "__service") {
     // (no lifecycle mutation, no service spawn) — for dev/CI smoke boots on a
     // machine that already runs a Computer service. Default is enabled.
     if (process.env.RAFT_DESKTOP_DISABLE_COMPUTER_HOST !== "1") {
-      computerHost = new ComputerHost();
+      computerHost = new ComputerHost({ configuredOrigin: serverOriginConfig.current() });
       await computerHost.restoreSelection();
       registerComputerIpc(computerHost);
       // Read-only mode observes + surfaces an already-installed Computer (the

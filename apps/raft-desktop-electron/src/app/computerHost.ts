@@ -15,7 +15,7 @@
 
 import { execFile } from "node:child_process";
 import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { app } from "electron";
 import {
   connectService,
@@ -27,6 +27,9 @@ import {
   fetchCdnLatestVersion,
   resolveRaftHome,
   userSessionPath,
+  listServerAttachments,
+  serversDir,
+  canonicalizeServerUrl,
   type AttachResult,
   type ComputerApi,
   type ComputerStatusReport,
@@ -42,7 +45,7 @@ import {
 import { reduceConvergeFailure, type ConvergeState } from "./convergeState.js";
 import { ComputerProcessScope, readComputerProcesses, type ComputerProcessSnapshot } from "../main/computerProcesses.js";
 import { connectDeployment, readDeploymentSelection, type DeploymentConnectionPlan } from "./deploymentConnection.js";
-import { CONFIGURED_API_ORIGIN } from "./configuredApiOrigin.js";
+import { CONFIGURED_API_ORIGIN, OFFICIAL_API_ORIGINS } from "./configuredApiOrigin.js";
 import { runServiceRecycle } from "./serviceRecycle.js";
 
 // Mirrors `paths.ts` CURRENT_SCHEMA_VERSION (readers tolerate a missing value,
@@ -95,8 +98,23 @@ class ComputerHost {
     this.api = createComputerApi(this.slockHome, { hostLifecycleOwner: "app" });
   }
   private readonly readUpgradeInfo = createUpgradeInfoReader(
-    () => fetchCdnLatestVersion(DEFAULT_UPGRADE_BASE_URL),
+    // Resolved per call: the official CDN for official origins, the
+    // deployment's own downloads tree otherwise (phase 3-1 — a private
+    // desktop must make zero official egress for version checks).
+    () => fetchCdnLatestVersion(this.upgradeBase()),
   );
+
+  /**
+   * The manifest base this host's upgrade checks read. Official origins
+   * keep the historical CDN byte-for-byte; a runtime-configured private
+   * origin reads its own `/downloads/computer` tree (same shape the
+   * standalone installer and the service-side server backend consume).
+   */
+  private upgradeBase(): string {
+    return OFFICIAL_API_ORIGINS.has(this.configuredOrigin)
+      ? DEFAULT_UPGRADE_BASE_URL
+      : `${this.configuredOrigin}/downloads/computer`;
+  }
   private lastStatus: ComputerStatusReport | null = null;
   /**
    * Outcome of the app-ready host converge (and of later recycle attempts),
@@ -319,6 +337,14 @@ class ComputerHost {
         throw Object.assign(new Error(message), { code: SESSION_ORIGIN_MISMATCH_CODE });
       }
     }
+    // One home, one origin (phase 3-1, PM-approved): before attaching THIS
+    // deployment, archive any attachment from a different origin. This is
+    // the only point where the invariant can break (a fresh per-origin
+    // root cannot hold foreign attachments; the session-origin guard
+    // blocks the shared-root path unless no session exists). Fail the
+    // enable rather than create a home the upgrade source resolution
+    // would later refuse as AMBIGUOUS.
+    await this.archiveForeignAttachments();
     const attached = await this.api.attach({
       serverSlug: input.serverSlug,
       serverUrl: input.serverUrl,
@@ -438,7 +464,7 @@ class ComputerHost {
 
   private async upgradeInternal(): Promise<void> {
     await this.assertCanControl();
-    const latest = await fetchCdnLatestVersion(DEFAULT_UPGRADE_BASE_URL);
+    const latest = await fetchCdnLatestVersion(this.upgradeBase());
     if (!latest) throw new Error("no_update_available");
     const result = await this.api.tryUpgradeViaService(latest, undefined, { trigger: "tray" });
     if (!result.routed) {
@@ -499,7 +525,7 @@ class ComputerHost {
     // owner; "unknown" (service unreachable) is not a confirmation.
     const { model } = await this.getManagement();
     if (model !== "standalone") throw new Error("not_standalone_computer");
-    const command = `curl -fsSL ${DEFAULT_UPGRADE_BASE_URL}/install.sh | RAFT_COMPUTER_VERSION=${version} sh`;
+    const command = `curl -fsSL ${this.upgradeBase()}/install.sh | RAFT_COMPUTER_VERSION=${version} sh`;
     await new Promise<void>((resolve, reject) => {
       execFile("/bin/sh", ["-c", command], {
         timeout: FRESH_INSTALL_TIMEOUT_MS,
@@ -509,6 +535,29 @@ class ComputerHost {
         else resolve();
       });
     });
+  }
+
+  /**
+   * Archive (not delete — reversible by design) every attachment under the
+   * current home that belongs to a DIFFERENT origin: move
+   * `servers/<serverId>/` into a sibling `servers-retired-<id>/` directory.
+   * The computer only scans `servers/`, so the retired entries stop
+   * existing for it while their bytes (credentials, machine identity)
+   * remain restorable by moving them back.
+   */
+  private async archiveForeignAttachments(): Promise<void> {
+    const currentOrigin = canonicalizeServerUrl(this.configuredOrigin);
+    const foreign = (await listServerAttachments(this.slockHome))
+      .filter((attachment) => canonicalizeServerUrl(attachment.serverUrl) !== currentOrigin);
+    if (foreign.length === 0) return;
+    const retiredRoot = join(dirname(serversDir(this.slockHome)), `servers-retired-${Date.now()}`);
+    await mkdir(retiredRoot, { recursive: true, mode: 0o700 });
+    for (const attachment of foreign) {
+      await rename(join(serversDir(this.slockHome), attachment.serverId), join(retiredRoot, attachment.serverId));
+    }
+    console.warn(
+      `[raft-desktop] archived ${foreign.length} foreign-origin attachment(s) to ${retiredRoot} before attaching ${currentOrigin}`,
+    );
   }
 
   // Write the lib's shared `user-session.json` from the renderer's chat tokens,

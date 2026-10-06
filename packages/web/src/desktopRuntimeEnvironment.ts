@@ -1,5 +1,5 @@
 export type DesktopRuntimeEnvironment = Readonly<{
-  environmentId: "production" | "staging";
+  environmentId: "production" | "staging" | "server";
   generation: number;
   frontendOrigin: string;
   apiOrigin: string;
@@ -18,9 +18,13 @@ export class InvalidDesktopRuntimeEnvironmentError extends Error {
   }
 }
 
+/** environmentId values backed by a fixed preset (the runtime-configured
+ *  "server" environment has none — its origins are per-deployment). */
+export type PresetEnvironmentId = Exclude<DesktopRuntimeEnvironment["environmentId"], "server">;
+
 type DesktopRuntimeEnvironmentPreset = Readonly<Omit<DesktopRuntimeEnvironment, "environmentId" | "generation">>;
 
-export const DESKTOP_RUNTIME_ENVIRONMENT_PRESETS: Readonly<Record<DesktopRuntimeEnvironment["environmentId"], DesktopRuntimeEnvironmentPreset>> = Object.freeze({
+export const DESKTOP_RUNTIME_ENVIRONMENT_PRESETS: Readonly<Record<PresetEnvironmentId, DesktopRuntimeEnvironmentPreset>> = Object.freeze({
   production: Object.freeze({
     frontendOrigin: "https://app.raft.build",
     apiOrigin: "https://api.raft.build",
@@ -56,13 +60,53 @@ function origin(value: unknown): string | null {
   }
 }
 
+// ── Runtime-configured server environment (Electron desktop, phase 3-1) ──────
+//
+// The Electron shell injects the user-configured private server as a MINIMAL
+// three-key shape — exactly {apiOrigin, socketOrigin, generation}, nothing
+// else (PM review: preload exposes the least it can). The remaining fields
+// are derived, not injected: environmentId "server", frontendOrigin follows
+// apiOrigin (a self-hosted deployment serves its web frontend from the same
+// origin), and updateAuthority is "none" (no official Hands feed governs a
+// private deployment; private app updates are a separate later task).
+//
+// Unlike the preset environments, the origin is NOT compared against a fixed
+// allowlist: it must merely be a structurally valid https root origin. The
+// value crosses no trust boundary that the preset lock defends — the Tauri
+// handshake only negotiates privileges for preset environments, and in the
+// Electron app the injection comes from our own sandboxed preload over
+// additionalArguments (page scripts cannot forge it into the preload world;
+// a fully compromised renderer already holds its tokens in memory, so
+// steering fetch adds no new capability).
+
+const SERVER_ENVIRONMENT_KEYS = "apiOrigin,generation,socketOrigin";
+
+function readServerRuntimeEnvironment(
+  record: Record<string, unknown>,
+): DesktopRuntimeEnvironment | null {
+  if (!Number.isSafeInteger(record.generation) || (record.generation as number) < 1) return null;
+  const apiOrigin = origin(record.apiOrigin);
+  const socketOrigin = origin(record.socketOrigin);
+  if (!apiOrigin || !socketOrigin) return null;
+  return Object.freeze({
+    environmentId: "server",
+    generation: record.generation as number,
+    frontendOrigin: apiOrigin,
+    apiOrigin,
+    socketOrigin,
+    updateAuthority: "none",
+  });
+}
+
 export function readDesktopRuntimeEnvironment(
   host: EnvironmentHost = globalThis as EnvironmentHost,
 ): DesktopRuntimeEnvironment | null {
   const value = host.__RAFT_DESKTOP_ENVIRONMENT__;
   if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
-  if (Object.keys(record).sort().join(",") !== "apiOrigin,environmentId,frontendOrigin,generation,socketOrigin,updateAuthority") return null;
+  const keys = Object.keys(record).sort().join(",");
+  if (keys === SERVER_ENVIRONMENT_KEYS) return readServerRuntimeEnvironment(record);
+  if (keys !== "apiOrigin,environmentId,frontendOrigin,generation,socketOrigin,updateAuthority") return null;
   if (record.environmentId !== "production" && record.environmentId !== "staging") return null;
   if (!Number.isSafeInteger(record.generation) || (record.generation as number) < 1) return null;
   const frontendOrigin = origin(record.frontendOrigin);

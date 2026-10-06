@@ -50,6 +50,10 @@ test("start() success clears a failed converge notice; enable() does too", async
     readProcessStartTime: async () => null,
     rebindParentEvidence: async () => {},
     DEFAULT_UPGRADE_BASE_URL: "https://example.invalid/computer",
+    // phase 3-1: the host archives foreign-origin attachments before attach.
+    listServerAttachments: async () => [],
+    serversDir: (home: string) => `${home}/computer/servers`,
+    canonicalizeServerUrl: (url: string) => { try { return new URL(url).origin; } catch { return url; } },
     fetchCdnLatestVersion: async () => null,
     resolveRaftHome: () => testHome,
     userSessionPath: (home: string) => `${home}/user-session.json`,

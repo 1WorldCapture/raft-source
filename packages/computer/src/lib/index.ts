@@ -274,6 +274,15 @@ export { COMPUTER_VERSION } from "../version.js";
 // "no update info" silently.
 export { DEFAULT_UPGRADE_BASE_URL, fetchCdnLatestVersion } from "../computerRelease.js";
 
+// Server-attachment state readers (phase 3-1: the Electron host archives
+// foreign-origin attachments before attaching a new deployment, keeping the
+// "one home = one origin" invariant that the upgrade source resolution
+// fails closed on). Additive lib surface.
+export { listServerAttachments } from "../serverState.js";
+export type { ServerAttachment } from "../serverState.js";
+export { serversDir } from "../paths.js";
+export { canonicalizeServerUrl } from "../serverUrl.js";
+
 // Resident service entry points — the same `runService` / `runResident` the
 // CLI's `__service` / `__run` hidden commands dispatch to. Exposed so any
 // adapter that owns the process entry (Electron menu-bar, daemon harness,
