@@ -78,7 +78,7 @@ describe("private mode", () => {
       values.computerInstallCommand,
       `curl -fsSL ${base}/install.sh | RAFT_COMPUTER_RELEASE_BASE=${base} RAFT_COMPUTER_INSTALL_BACKEND=server sh`,
     );
-    assert.equal(values.cliInstallCommand, "npm i -g https://raft.internal.example:18443/downloads/cli/raft-0.0.24-zcode.1.tgz");
+    assert.equal(values.cliInstallCommand, "npm i -g https://raft.internal.example:18443/downloads/cli/0.0.24-zcode.1/raft-0.0.24-zcode.1.tgz");
     assert.ok(values.computerWindowsInstallCommand.includes(base));
   });
 

@@ -23,6 +23,7 @@
 //     --cli-version 0.0.24 --out deploy/docker/downloads \
 //     --computer-darwin-arm64 path/to/raft-computer-darwin-arm64 \
 //     --computer-darwin-x64  path/...      [--computer-linux-x64 ...] [--computer-linux-arm64 ...] \
+//     --computer-wasm path/to/photon_rs_bg.wasm \
 //     --cli path/to/raft-<cli-version>.tgz [--daemon path/to/raft-daemon-<v>.tgz] \
 //     [--commit <sha>] [--daemon-version <v>]
 // At least one --computer-* target and --cli are required; --daemon adds the
@@ -81,7 +82,7 @@ async function main() {
   }
 
   const computerEntries = Object.entries(args)
-    .filter(([key]) => key.startsWith("computer-") && key !== "computer-version")
+    .filter(([key]) => key.startsWith("computer-") && key !== "computer-version" && key !== "computer-wasm")
     .map(([key, file]) => {
       const platformKey = key.slice("computer-".length);
       if (!PLATFORM_RE.test(platformKey)) throw new Error(`Invalid platform key "${platformKey}" (expected <node-platform>-<arch>)`);
@@ -100,9 +101,23 @@ async function main() {
     const info = await stat(path.join(versionDir, destName));
     targets[platformKey] = { file: destName, sha256: await sha256(path.join(versionDir, destName)), size: info.size };
   }
+  // photonWasm sidecar (acceptance D1): install.sh hard-requires the
+  // versioned manifest to carry it — the SEA build emits the wasm beside
+  // the binaries, and the hands publish path always included it; the
+  // self-host pipeline originally did not, breaking every offline install.
+  const wasmFile = args["computer-wasm"];
+  if (!wasmFile) throw new Error("--computer-wasm <file> is required (photon_rs_bg.wasm from the SEA build; install.sh refuses manifests without it)");
+  const versionDir = path.join(outDir, "computer", computerVersion);
+  await copyFile(wasmFile, path.join(versionDir, "photon_rs_bg.wasm"));
+  const wasmInfo = await stat(path.join(versionDir, "photon_rs_bg.wasm"));
+  const photonWasm = {
+    file: "photon_rs_bg.wasm",
+    sha256: await sha256(path.join(versionDir, "photon_rs_bg.wasm")),
+    size: wasmInfo.size,
+  };
   await writeFile(
     path.join(outDir, "computer", computerVersion, "manifest.json"),
-    JSON.stringify({ version: computerVersion, ...(commit ? { commit } : {}), targets }, null, 2) + "\n",
+    JSON.stringify({ version: computerVersion, ...(commit ? { commit } : {}), photonWasm, targets }, null, 2) + "\n",
   );
   // The daemon ships INSIDE the Computer SEA; the latest pointer carries the
   // same-commit daemon version so daemonVersionService reads it in private

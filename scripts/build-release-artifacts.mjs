@@ -24,7 +24,7 @@
 // which writes the manifest tree.
 
 import { execFileSync } from "node:child_process";
-import { readFile, rename, rm } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 import path from "node:path";
 
 function parseArgs(argv) {
@@ -75,14 +75,18 @@ async function main() {
     seaFiles.push([platform, path.join(seaDir, `raft-computer-${platform}`)]);
   }
 
+  // CLI tarball (self-host variant, acceptance D3): the tsup bundle is
+  // self-contained, so the variant package.json drops dependency
+  // declarations — offline `npm i -g <tgz>` succeeds with zero registry.
   run("pnpm", ["--filter", "@botiverse/raft", "build"], { cwd: repoRoot });
-  const packDir = path.join(repoRoot, "packages/cli");
-  run("npm", ["pack", "--pack-destination", seaDir], { cwd: packDir, shell: process.platform === "win32" });
   const cliPackage = JSON.parse(await readFile(path.join(repoRoot, "packages/cli/package.json"), "utf8"));
   const cliVersion = cliPackage.version;
-  const packedName = `${cliPackage.name.replace(/^@/, "").replace("/", "-")}-${cliVersion}.tgz`;
+  run("node", [
+    path.join(repoRoot, "scripts/pack-selfhost-tarball.mjs"),
+    "--package-dir", "packages/cli", "--dist-dir", "dist",
+    "--out", "packages/computer/dist-native", "--name", "raft",
+  ], { cwd: repoRoot });
   const cliDest = path.join(seaDir, `raft-${cliVersion}.tgz`);
-  await rename(path.join(seaDir, packedName), cliDest);
 
   // Independent product versions: the SEA tree carries the Computer package
   // version, the CLI tree the CLI package version, the daemon tree/pointer
@@ -90,15 +94,25 @@ async function main() {
   const computerPackage = JSON.parse(await readFile(path.join(repoRoot, "packages/computer/package.json"), "utf8"));
   const daemonPackage = JSON.parse(await readFile(path.join(repoRoot, "packages/daemon/package.json"), "utf8"));
 
-  // Daemon tarball (task #6): private installs use
-  // npm i -g <origin>/downloads/daemon/raft-daemon-<v>.tgz offline.
-  run("npm", ["pack", "--pack-destination", seaDir], {
+  // Daemon tarball (acceptance D3): SELF-HOST build target only —
+  // noExternal bundle (every runtime dependency inlined) emitted to
+  // dist-selfhost, plus the CLI dist the runner transport injects, plus
+  // bin wrappers; packed as a dependency-free variant. The official daemon
+  // `build` and its npm publish path stay byte-identical.
+  const daemonSelfhostDir = path.join(repoRoot, "packages/daemon", "dist-selfhost");
+  await rm(daemonSelfhostDir, { recursive: true, force: true });
+  run("pnpm", ["--filter", "@botiverse/raft-daemon", "exec", "tsup", "--config", "tsup.selfhost.config.ts"], { cwd: repoRoot });
+  const { cp } = await import("node:fs/promises");
+  await cp(path.join(repoRoot, "packages/cli/dist"), path.join(daemonSelfhostDir, "cli"), { recursive: true });
+  run("node", ["scripts/write-dist-bins.mjs", "--dist", "dist-selfhost"], {
     cwd: path.join(repoRoot, "packages/daemon"),
-    shell: process.platform === "win32",
   });
-  const daemonPackedName = `${daemonPackage.name.replace(/^@/, "").replace("/", "-")}-${daemonPackage.version}.tgz`;
+  run("node", [
+    path.join(repoRoot, "scripts/pack-selfhost-tarball.mjs"),
+    "--package-dir", "packages/daemon", "--dist-dir", "dist-selfhost",
+    "--out", "packages/computer/dist-native", "--name", "raft-daemon",
+  ], { cwd: repoRoot });
   const daemonDest = path.join(seaDir, `raft-daemon-${daemonPackage.version}.tgz`);
-  await rename(path.join(seaDir, daemonPackedName), daemonDest);
 
   const buildDownloadsArgs = [
     path.join(repoRoot, "scripts/build-downloads.mjs"),
@@ -109,9 +123,18 @@ async function main() {
     "--commit", sha,
     "--out", outDir,
     "--cli", cliDest,
+    "--computer-wasm", path.join(seaDir, "photon_rs_bg.wasm"),
     ...seaFiles.flatMap(([platform, file]) => [`--computer-${platform}`, file]),
   ];
   run("node", buildDownloadsArgs, { cwd: repoRoot });
+  // Acceptance D3 verification baked into the pipeline: the tarballs must
+  // install with ZERO registry access and the daemon must complete a real
+  // connection handshake from the installed bundle.
+  run("node", [
+    path.join(repoRoot, "scripts/verify-selfhost-tarball.mjs"),
+    "--cli", cliDest,
+    "--daemon", daemonDest,
+  ], { cwd: repoRoot });
   console.log(`[release] done: ${outDir} (computer ${computerPackage.version} / cli ${cliVersion} / daemon ${daemonPackage.version}, ${platforms.length} platforms, sha ${sha.slice(0, 8)})`);
 }
 

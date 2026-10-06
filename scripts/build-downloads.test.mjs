@@ -19,6 +19,7 @@ const script = join(dirname(fileURLToPath(import.meta.url)), "build-downloads.mj
 
 const SEA_PAYLOAD = "sea-payload";
 const TGZ_PAYLOAD = "tgz-payload";
+const WASM_PAYLOAD = "wasm-payload";
 
 async function buildDownloads(outDir, extraArgs) {
   const { stdout } = await run(process.execPath, [script, "--out", outDir, ...extraArgs]);
@@ -36,6 +37,8 @@ test("divergent computer/cli versions stamp their own trees and manifests", asyn
   writeFileSync(sea, SEA_PAYLOAD);
   const tgz = join(root, "cli-packed.tgz");
   writeFileSync(tgz, TGZ_PAYLOAD);
+  const wasm = join(root, "photon_rs_bg.wasm");
+  writeFileSync(wasm, WASM_PAYLOAD);
   const outDir = join(root, "out");
 
   const stdout = await buildDownloads(outDir, [
@@ -44,6 +47,7 @@ test("divergent computer/cli versions stamp their own trees and manifests", asyn
     "--daemon-version", "1.0.25",
     "--commit", "0123456789abcdef",
     "--computer-darwin-arm64", sea,
+    "--computer-wasm", wasm,
     "--cli", tgz,
   ]);
   assert.match(stdout, /computer 1\.0\.28/);
@@ -69,6 +73,15 @@ test("divergent computer/cli versions stamp their own trees and manifests", asyn
     size: Buffer.byteLength(SEA_PAYLOAD),
   });
   assert.equal(readFileSync(join(compDir, "raft-computer-darwin-arm64"), "utf8"), SEA_PAYLOAD);
+
+  // D1: the photonWasm sidecar must exist and its manifest entry must match
+  // the shipped bytes (install.sh refuses manifests without it).
+  assert.deepEqual(compManifest.photonWasm, {
+    file: "photon_rs_bg.wasm",
+    sha256: createHash("sha256").update(WASM_PAYLOAD).digest("hex"),
+    size: Buffer.byteLength(WASM_PAYLOAD),
+  });
+  assert.equal(readFileSync(join(compDir, "photon_rs_bg.wasm"), "utf8"), WASM_PAYLOAD);
 
   const cliDir = join(outDir, "cli", "0.0.24-zcode.1");
   const cliManifest = readJson(join(cliDir, "manifest.json"));
@@ -96,13 +109,15 @@ test("--daemon adds the daemon tarball tree; omitting it stays cli-only", async 
   writeFileSync(tgz, TGZ_PAYLOAD);
   const daemonTgz = join(root, "daemon.tgz");
   writeFileSync(daemonTgz, "daemon-payload");
+  const wasm = join(root, "photon_rs_bg.wasm");
+  writeFileSync(wasm, WASM_PAYLOAD);
 
   // --daemon without --daemon-version (and vice versa) is refused.
   await assert.rejects(
     buildDownloads(join(root, "out0"), [
       "--computer-version", "1.0.28", "--cli-version", "0.0.24",
       "--daemon", daemonTgz,
-      "--computer-darwin-arm64", sea, "--cli", tgz,
+      "--computer-darwin-arm64", sea, "--computer-wasm", wasm, "--cli", tgz,
     ]),
     /--daemon requires --daemon-version/,
   );
@@ -114,6 +129,7 @@ test("--daemon adds the daemon tarball tree; omitting it stays cli-only", async 
     "--daemon", daemonTgz,
     "--commit", "0123456789abcdef",
     "--computer-darwin-arm64", sea,
+    "--computer-wasm", wasm,
     "--cli", tgz,
   ]);
   const latest = readJson(join(root, "out", "daemon", "manifest.json"));
@@ -134,7 +150,9 @@ test("--version shorthand stamps both trees when the products match", async (t) 
   writeFileSync(tgz, TGZ_PAYLOAD);
   const outDir = join(root, "out");
 
-  await buildDownloads(outDir, ["--version", "2.0.0", "--computer-linux-x64", sea, "--cli", tgz]);
+  const wasm = join(root, "photon_rs_bg.wasm");
+  writeFileSync(wasm, WASM_PAYLOAD);
+  await buildDownloads(outDir, ["--version", "2.0.0", "--computer-linux-x64", sea, "--computer-wasm", wasm, "--cli", tgz]);
   assert.equal(readJson(join(outDir, "computer", "manifest.json")).version, "2.0.0");
   assert.equal(readJson(join(outDir, "cli", "manifest.json")).version, "2.0.0");
   assert.ok(existsSync(join(outDir, "computer", "2.0.0", "raft-computer-linux-x64")));

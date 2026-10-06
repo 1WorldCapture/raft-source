@@ -64,7 +64,7 @@ export async function resolveManualCommandValues(): Promise<ManualCommandValues>
 
   const cliVersion = await readLatestVersion("cli");
   if (cliVersion) {
-    values.cliInstallCommand = `npm i -g ${origin}/downloads/cli/raft-${cliVersion}.tgz`;
+    values.cliInstallCommand = `npm i -g ${origin}/downloads/cli/${cliVersion}/raft-${cliVersion}.tgz`;
   } else {
     console.warn(
       "[manual-template] private deployment without a CLI manifest: the CLI install command stays official",
