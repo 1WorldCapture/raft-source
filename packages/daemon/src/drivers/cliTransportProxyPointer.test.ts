@@ -118,13 +118,14 @@ function makeCtx(root: string, launchId: string): SpawnContext {
     agentCredentialProxyInboxCoordinator: {
       getBoundary: () => undefined,
       getPendingMessages: () => [],
+      consumeVisibleMessages: () => {},
     },
   } as SpawnContext;
 }
 
 test(
   "daemon restart: a stale launch's wrapper follows the live proxy pointer and still sends",
-  { skip: process.platform === "win32" || !realCliExists },
+  { skip: process.platform === "win32" || !realCliExists, timeout: 60_000 },
   async () => {
     const root = mkdtempSync(path.join(os.tmpdir(), "raft-pointer-restart-"));
     // The pointer lives at the agent's cli-transport root (one level above
@@ -180,7 +181,6 @@ test(
       rmSync(root, { recursive: true, force: true });
     }
   },
-  { timeout: 60_000 },
 );
 
 test("pointer files are 0600 and atomically refreshed per registration", () => {
@@ -231,15 +231,23 @@ test(
       return out.stdout;
     };
     try {
+      // The referenced token file must really exist and be readable.
+      const tokenFile = path.join(root, "tok");
+      writeFileSync(tokenFile, "t", { mode: 0o600 });
       // Valid loopback pointer wins over the baked-in value.
       writeFileSync(path.join(root, "proxy-current.url"), "http://127.0.0.1:4321", { mode: 0o600 });
-      writeFileSync(path.join(root, "proxy-current.token-path"), "/tmp/tok", { mode: 0o600 });
+      writeFileSync(path.join(root, "proxy-current.token-path"), tokenFile, { mode: 0o600 });
       assert.equal(run(), "http://127.0.0.1:4321");
       // Garbage URL is ignored (loopback case does not match) — baked-in kept.
       writeFileSync(path.join(root, "proxy-current.url"), "http://evil.example.com:1234", { mode: 0o600 });
       assert.equal(run(), "http://127.0.0.1:9999");
       // Truncated (half-written looking) URL without a port is not loopback-with-port.
       writeFileSync(path.join(root, "proxy-current.url"), "http://127.0.0.1", { mode: 0o600 });
+      assert.equal(run(), "http://127.0.0.1:9999");
+      // Referenced token file missing: override skipped (consistency with the
+      // .cmd `if not exist` and .ps1 Test-Path checks).
+      writeFileSync(path.join(root, "proxy-current.url"), "http://127.0.0.1:4321", { mode: 0o600 });
+      writeFileSync(path.join(root, "proxy-current.token-path"), path.join(root, "gone.token"), { mode: 0o600 });
       assert.equal(run(), "http://127.0.0.1:9999");
       // Missing token-path file: override skipped entirely.
       rmSync(path.join(root, "proxy-current.token-path"));
@@ -253,3 +261,41 @@ test(
     }
   },
 );
+
+test("cmd wrapper pointer override is flat/paren-free (cmd.exe expands %VAR% inside ( ) at parse time)", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "raft-pointer-cmd-"));
+  try {
+    const r = await prepareCliTransport(makeCtx(root, "launch-cmd"), {}, "win32");
+    // wrapperPath IS slock.cmd on the win32 platform.
+    const body = readFileSync(r.wrapperPath, "utf8");
+    const start = body.indexOf('set "RAFT_PP_DIR=');
+    // lastIndexOf: earlier ":pp_done" occurrences are the goto targets.
+    const end = body.lastIndexOf(":pp_done");
+    assert.ok(start > 0 && end > start, "cmd wrapper carries the pointer override block");
+    const block = body.slice(start, end + ":pp_done".length);
+    // PM review fix: the previous ( )-block version could never fire — cmd.exe
+    // expands %VAR% inside a block at PARSE time, i.e. before `set /p` runs,
+    // so every check saw the empty pre-read value. CI cannot run cmd.exe, so
+    // this pins the generated SHAPE: flat statements + goto, no parens.
+    assert.ok(!block.includes("(") && !block.includes(")"), `pointer block must be paren-free:\n${block}`);
+    assert.ok(block.includes("goto :pp_done"), "flat flow uses goto, not ( ) blocks");
+    assert.ok(
+      block.includes('if not "%RAFT_PP_URL:~0,17%"=="http://127.0.0.1:"'),
+      "loopback prefix check uses plain per-line expansion (executed AFTER set /p)",
+    );
+    assert.ok(
+      block.includes('if not exist "%RAFT_PP_TOK%"'),
+      "referenced token file must exist (consistency with POSIX -r / PS Test-Path)",
+    );
+    assert.ok(
+      block.includes('set "SLOCK_AGENT_PROXY_URL=%RAFT_PP_URL%"'),
+      "override re-exports the pointer URL",
+    );
+    // The label must sit before the CLI invocation so the localized values
+    // (no setlocal needed) reach the child command line.
+    const cliLine = body.indexOf('"%SLOCK_CLI%" %*');
+    assert.ok(cliLine > end, "pointer block completes before the CLI is invoked");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

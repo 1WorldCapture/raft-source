@@ -91,6 +91,7 @@ function makeCtx(root: string, upstreamUrl: string, launchId: string): SpawnCont
     agentCredentialProxyInboxCoordinator: {
       getBoundary: () => undefined,
       getPendingMessages: () => [],
+      consumeVisibleMessages: () => {},
     },
   } as unknown as SpawnContext;
 }

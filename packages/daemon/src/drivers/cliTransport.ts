@@ -379,7 +379,7 @@ export function buildPosixProxyPointerOverrideBlock(agentRoot: string): string {
     `  __pp_tok=$(tr -d '\\r\\n' < "$__pp_dir/proxy-current.token-path" 2>/dev/null)`,
     `  case "$__pp_url" in`,
     `    http://127.0.0.1:*|http://localhost:*)`,
-    `      if [ -n "$__pp_url" ] && [ -n "$__pp_tok" ]; then`,
+    `      if [ -n "$__pp_url" ] && [ -n "$__pp_tok" ] && [ -r "$__pp_tok" ]; then`,
     `        export SLOCK_AGENT_PROXY_URL="$__pp_url" SLOCK_AGENT_PROXY_TOKEN_FILE="$__pp_tok"`,
     `      fi ;;`,
     `  esac`,
@@ -813,15 +813,23 @@ export async function prepareCliTransport(
         `set "SLOCK_AGENT_PROXY_TOKEN_FILE=${agentCredentialProxyTokenFile!}"`,
         `set "SLOCK_AGENT_ACTIVE_CAPABILITIES=${DEFAULT_ACTIVE_CAPABILITIES}"`,
         // Live proxy pointer override (see the POSIX block): loopback-only.
+        // FLAT and paren-free ON PURPOSE: cmd.exe expands every %VAR% inside a
+        // ( ) block at PARSE time — before the set /p lines run — so checks
+        // inside a block would always see the empty pre-read value. One
+        // statement per line keeps %VAR% expansion at each line's own
+        // execution time; no EnableDelayedExpansion needed (and no ! escaping
+        // surprises for values read from the pointers).
         `set "RAFT_PP_DIR=%~dp0.."`,
-        `if exist "%RAFT_PP_DIR%\\proxy-current.url" if exist "%RAFT_PP_DIR%\\proxy-current.token-path" (`,
-        `  set /p "RAFT_PP_URL="<"%RAFT_PP_DIR%\\proxy-current.url"`,
-        `  set /p "RAFT_PP_TOK="<"%RAFT_PP_DIR%\\proxy-current.token-path"`,
-        `  if /i "%RAFT_PP_URL:~0,17%"=="http://127.0.0.1:" (`,
-        `    set "SLOCK_AGENT_PROXY_URL=%RAFT_PP_URL%"`,
-        `    set "SLOCK_AGENT_PROXY_TOKEN_FILE=%RAFT_PP_TOK%"`,
-        `  )`,
-        `)`,
+        `if not exist "%RAFT_PP_DIR%\\proxy-current.url" goto :pp_done`,
+        `if not exist "%RAFT_PP_DIR%\\proxy-current.token-path" goto :pp_done`,
+        `set /p "RAFT_PP_URL="<"%RAFT_PP_DIR%\\proxy-current.url"`,
+        `set /p "RAFT_PP_TOK="<"%RAFT_PP_DIR%\\proxy-current.token-path"`,
+        `if not "%RAFT_PP_URL:~0,17%"=="http://127.0.0.1:" goto :pp_done`,
+        `if "%RAFT_PP_TOK%"=="" goto :pp_done`,
+        `if not exist "%RAFT_PP_TOK%" goto :pp_done`,
+        `set "SLOCK_AGENT_PROXY_URL=%RAFT_PP_URL%"`,
+        `set "SLOCK_AGENT_PROXY_TOKEN_FILE=%RAFT_PP_TOK%"`,
+        `:pp_done`,
         "",
       ].join("\r\n")
       : `set "SLOCK_AGENT_TOKEN_FILE=${tokenFile}"\r\n`);
