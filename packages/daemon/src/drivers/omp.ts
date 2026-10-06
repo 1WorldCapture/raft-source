@@ -225,6 +225,7 @@ export class OmpDriver implements RuntimeDriver {
   private pending = new Map<string, PendingOmpRpcRequest>();
   private readyTimer: NodeJS.Timeout | null = null;
   private stderrTail = "";
+  private readyDeferred: { promise: Promise<void>; resolve: () => void; reject: (error: Error) => void } | null = null;
 
   // Transport state, exposed for observability and the phase-1 turn work (#3+).
   private ready = false;
@@ -239,6 +240,26 @@ export class OmpDriver implements RuntimeDriver {
   /** True once the ready frame has been seen (and negotiation dispatched if offered). */
   get isReady(): boolean {
     return this.ready;
+  }
+
+  private createReadyDeferred(): { promise: Promise<void>; resolve: () => void; reject: (error: Error) => void } {
+    let resolve!: () => void;
+    let reject!: (error: Error) => void;
+    const promise = new Promise<void>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  }
+
+  /**
+   * Resolves once the transport is usable: the ready frame has been seen AND
+   * protocol negotiation has settled (confirmed v2, or a v1-only peer, or a
+   * failed negotiation — which rejects). Task #4's turn sends should await
+   * this instead of racing the handshake.
+   */
+  whenReady(): Promise<void> {
+    return this.readyDeferred?.promise ?? Promise.reject(new OmpRpcProtocolError("OMP RPC process is not running"));
   }
 
   /** Protocol version after negotiation: 1, 2, or 0 before the ready frame. */
@@ -286,6 +307,7 @@ export class OmpDriver implements RuntimeDriver {
     this.frameErrorCount = 0;
     this.lastFrameError = null;
     this.lastProtocolError = null;
+    this.readyDeferred = this.createReadyDeferred();
 
     const command = launchOverrides.command ?? resolveOmpCommand() ?? OMP_BINARY;
     const args = launchOverrides.args ?? ["--mode", "rpc"];
@@ -301,24 +323,37 @@ export class OmpDriver implements RuntimeDriver {
     });
     this.process = proc;
 
+    // Every handler closes over its own proc and checks it against the
+    // driver's current process: a late exit/error from a PREVIOUS generation
+    // (stop() then spawn() again — the resume flow of task #4) must never
+    // clear the new session's state or reject its pending requests.
     proc.stderr?.on("data", (chunk: Buffer) => {
+      if (this.process !== proc) return;
       this.stderrTail = (this.stderrTail + chunk.toString("utf8")).slice(-STDERR_TAIL_LIMIT);
     });
 
     proc.stdin?.on("error", (error) => {
       // A dead child turns stdin writes into async EPIPE errors; they must
       // become typed request rejections, never an uncaught daemon crash.
+      if (this.process !== proc) return;
       this.failAllPending(new OmpRpcProcessExitedError(null, null, `stdin error: ${error.message}\n${this.stderrTail}`));
     });
 
     proc.on("error", (error) => {
       // Spawn failures (ENOENT etc.); the exit handler covers real exits.
+      if (this.process !== proc) return;
       this.failAllPending(new OmpRpcProcessExitedError(null, null, `${error.message}\n${this.stderrTail}`));
     });
 
     proc.on("exit", (code, signal) => {
+      // Sweep lingering group members (a crashed omp can leave bash tools /
+      // subagents alive) even when the event is from a stale generation.
+      if (proc.pid) killProcessTree(proc.pid, "SIGKILL");
+      if (this.process !== proc) return;
       this.clearReadyTimer();
       this.process = null;
+      this.readyDeferred?.reject(new OmpRpcProcessExitedError(code, signal, this.stderrTail));
+      this.readyDeferred = null;
       this.failAllPending(new OmpRpcProcessExitedError(code, signal, this.stderrTail));
     });
 
@@ -331,6 +366,8 @@ export class OmpDriver implements RuntimeDriver {
         `OMP RPC process did not send a ready frame within ${launchOverrides.readyTimeoutMs ?? OMP_RPC_READY_TIMEOUT_MS}ms. stderr: ${this.stderrTail.trim()}`,
       );
       this.recordProtocolError(timeoutError.message);
+      this.readyDeferred?.reject(timeoutError);
+      this.readyDeferred = null;
       this.killProcess();
       this.failAllPending(timeoutError);
     }, launchOverrides.readyTimeoutMs ?? OMP_RPC_READY_TIMEOUT_MS);
@@ -420,32 +457,56 @@ export class OmpDriver implements RuntimeDriver {
   }
 
   /**
-   * Stop the runtime: best-effort abort, then take down the whole process tree
-   * (omp spawns bash tools, subagents, kernels). SIGTERM first so omp can drain,
-   * SIGKILL after a grace period. The kill passes address the process group by
-   * pid even if the parent already exited — a child that ignored SIGTERM must
-   * not outlive the stop. Idempotent.
+   * Stop the runtime: best-effort abort FIRST (written straight to stdin —
+   * request() would refuse because it tears the session down), then take down
+   * the whole process tree (omp spawns bash tools, subagents, kernels) with
+   * SIGTERM, SIGKILL after the grace period. The abort gets a head start so
+   * the child can read it before the SIGTERM lands. The pid-addressed kills
+   * reach the group even after the parent is gone. Idempotent.
    */
   stop(opts: { sigtermGraceMs?: number } = {}): void {
     const proc = this.process;
     if (!proc) return;
-    this.process = null;
     const pid = proc.pid;
-    if (this.ready && pid) {
-      // Fire-and-forget: the abort command may or may not land before the tree
-      // kill, and neither outcome changes the shutdown sequence.
-      void this.request({ type: "abort" }, { timeoutMs: OMP_STOP_ABORT_HEAD_START_MS })
-        .catch(() => {});
+
+    if (this.ready && pid && proc.stdin?.writable) {
+      try {
+        const line = encodeOmpRpcFrame(
+          { id: `omp-stop-${++this.requestCounter}`, type: "abort" },
+          { maxPhysicalFrameBytes: this.maxFrameBytes },
+        );
+        proc.stdin.write(line);
+      } catch {
+        // The child is already gone; the tree kill below still runs.
+      }
     }
+
+    const failPending = () => {
+      this.readyDeferred?.reject(new OmpRpcProtocolError("OMP RPC session stopped"));
+      this.readyDeferred = null;
+      this.failAllPending(new OmpRpcProtocolError("OMP RPC session stopped"));
+    };
+
     if (!pid) {
+      this.process = null;
       proc.kill();
+      failPending();
       return;
     }
-    killProcessTree(pid, "SIGTERM");
-    const sigkillTimer = setTimeout(() => {
-      killProcessTree(pid, "SIGKILL");
-    }, opts.sigtermGraceMs ?? OMP_STOP_SIGTERM_GRACE_MS);
-    sigkillTimer.unref?.();
+
+    // Give the abort a real head start: SIGTERM goes out after the write has
+    // had a moment to be read, then SIGKILL after the grace period.
+    const sigtermTimer = setTimeout(() => {
+      killProcessTree(pid, "SIGTERM");
+      const sigkillTimer = setTimeout(() => {
+        killProcessTree(pid, "SIGKILL");
+      }, opts.sigtermGraceMs ?? OMP_STOP_SIGTERM_GRACE_MS);
+      sigkillTimer.unref?.();
+    }, OMP_STOP_ABORT_HEAD_START_MS);
+    sigtermTimer.unref?.();
+
+    this.process = null;
+    failPending();
   }
 
   private handleReady(frame: OmpRpcReadyFrame): void {
@@ -464,6 +525,8 @@ export class OmpDriver implements RuntimeDriver {
     if (!supported.includes(2)) {
       // v1-only server: the 1 MiB physical cap stands, nothing to negotiate.
       this.negotiatedProtocolVersion = null;
+      this.readyDeferred?.resolve();
+      this.readyDeferred = null;
       return;
     }
     // The server advertised v2, so a failed handshake is an inconsistent peer,
@@ -478,10 +541,14 @@ export class OmpDriver implements RuntimeDriver {
           throw new OmpRpcProtocolError("OMP RPC protocol v2 negotiation failed: server did not confirm v2");
         }
         this.negotiatedProtocolVersion = 2;
+        this.readyDeferred?.resolve();
+        this.readyDeferred = null;
       })
       .catch((error: unknown) => {
         const message = error instanceof Error ? error.message : String(error);
         this.recordProtocolError(message);
+        this.readyDeferred?.reject(error instanceof Error ? error : new Error(message));
+        this.readyDeferred = null;
         this.killProcess();
         this.failAllPending(error instanceof Error ? error : new Error(message));
       });
@@ -508,12 +575,24 @@ export class OmpDriver implements RuntimeDriver {
     }
   }
 
+  /**
+   * Kill the current process tree (SIGTERM, then SIGKILL after the grace
+   * period) — never just the parent: omp's bash tools / subagents must not be
+   * left behind on a ready timeout or a failed negotiation.
+   */
   private killProcess(): void {
-    try {
-      this.process?.kill();
-    } catch {
-      // Already gone.
+    const proc = this.process;
+    this.process = null;
+    if (!proc?.pid) {
+      proc?.kill();
+      return;
     }
+    const pid = proc.pid;
+    killProcessTree(pid, "SIGTERM");
+    const sigkillTimer = setTimeout(() => {
+      killProcessTree(pid, "SIGKILL");
+    }, OMP_STOP_SIGTERM_GRACE_MS);
+    sigkillTimer.unref?.();
   }
 
   private clearReadyTimer(): void {

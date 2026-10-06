@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import { execFile } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -276,5 +276,115 @@ test("stop takes down the whole process tree — no orphans survive", async () =
     assert.equal(await processAlive(childPid), false, "the spawned grandchild must not outlive stop");
   } finally {
     fake.driver.stop({ sigtermGraceMs: 100 });
+  }
+});
+
+test("stop delivers the abort command before the SIGTERM lands", async () => {
+  const workspace = mkdtempSync(path.join(os.tmpdir(), "slock-omp-abort-"));
+  const logPath = path.join(workspace, "events.log");
+  const scriptPath = path.join(workspace, "fake-omp-abort.cjs");
+  writeFileSync(scriptPath, `
+const fs = require("node:fs");
+const log = (event) => fs.appendFileSync(process.argv[2], event + "\\n");
+const send = (frame) => process.stdout.write(JSON.stringify(frame) + "\\n");
+send({ type: "ready", protocolVersion: 1, supportedProtocolVersions: [1, 2], maxFrameBytes: 1048576, maxReassembledFrameBytes: 67108864 });
+process.stdin.setEncoding("utf8");
+let buffer = "";
+process.stdin.on("data", (chunk) => {
+  buffer += chunk;
+  let index;
+  while ((index = buffer.indexOf("\\n")) >= 0) {
+    const line = buffer.slice(0, index);
+    buffer = buffer.slice(index + 1);
+    if (!line.trim()) continue;
+    const frame = JSON.parse(line);
+    log("frame:" + frame.type);
+    if (frame.type === "negotiate_protocol") {
+      send({ id: frame.id, type: "response", command: "negotiate_protocol", success: true, data: { protocolVersion: 2 } });
+    } else {
+      send({ id: frame.id, type: "response", command: frame.type, success: true, data: {} });
+    }
+  }
+});
+process.on("SIGTERM", () => {
+  log("SIGTERM");
+  process.exit(0);
+});
+`);
+
+  const driver = new OmpDriver();
+  const { process: proc } = await driver.spawn(makeSpawnContext(workspace), {
+    command: process.execPath,
+    args: [scriptPath, logPath],
+    readyTimeoutMs: 5000,
+  });
+  try {
+    // Drain stdout so negotiation settles, like the session machinery would.
+    let stdoutBuffer = "";
+    proc.stdout?.setEncoding("utf8");
+    proc.stdout?.on("data", (chunk: string) => {
+      stdoutBuffer += chunk;
+      let index: number;
+      while ((index = stdoutBuffer.indexOf("\n")) >= 0) {
+        const line = stdoutBuffer.slice(0, index);
+        stdoutBuffer = stdoutBuffer.slice(index + 1);
+        if (line.trim()) driver.parseLine(line);
+      }
+    });
+    for (let i = 0; i < 300 && driver.activeProtocolVersion === 0; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(driver.isReady, true);
+
+    driver.stop({ sigtermGraceMs: 200 });
+    await new Promise((resolve) => setTimeout(resolve, 700));
+
+    const events = readFileSync(logPath, "utf8").trim().split("\n")
+      .filter((event) => event === "frame:abort" || event === "SIGTERM");
+    assert.equal(events[0], "frame:abort", "the abort command must reach the child first");
+    assert.equal(events[1], "SIGTERM", "SIGTERM must only land after the abort was delivered");
+  } finally {
+    driver.stop({ sigtermGraceMs: 100 });
+  }
+});
+
+test("a stale process exit does not disturb a freshly spawned session", async () => {
+  const fakeA = await startFakeOmp("echo");
+  await fakeA.waitReadyNegotiated();
+
+  // stop() then spawn() again on the SAME driver — the resume flow of task #4.
+  fakeA.driver.stop({ sigtermGraceMs: 50 });
+  const workspaceB = mkdtempSync(path.join(os.tmpdir(), "slock-omp-restart-"));
+  const scriptB = path.join(workspaceB, "fake-omp-b.cjs");
+  writeFileSync(scriptB, FAKE_OMP_SCRIPT);
+  const { process: procB } = await fakeA.driver.spawn(makeSpawnContext(workspaceB), {
+    command: process.execPath,
+    args: [scriptB, "echo"],
+    readyTimeoutMs: 5000,
+  });
+  let stdoutBuffer = "";
+  procB.stdout?.setEncoding("utf8");
+  procB.stdout?.on("data", (chunk: string) => {
+    stdoutBuffer += chunk;
+    let index: number;
+    while ((index = stdoutBuffer.indexOf("\n")) >= 0) {
+      const line = stdoutBuffer.slice(0, index);
+      stdoutBuffer = stdoutBuffer.slice(index + 1);
+      if (line.trim()) fakeA.driver.parseLine(line);
+    }
+  });
+
+  try {
+    // A's exit fires while B is starting; the driver must stay on B's side.
+    await fakeA.sleep(300);
+    assert.equal(fakeA.driver.isReady, true, "the new session must reach ready");
+    assert.equal(fakeA.driver.activeProtocolVersion, 2, "the new session must negotiate v2");
+    assert.equal(fakeA.driver.protocolError, null, "the stale exit must not surface as a protocol error");
+
+    const response = await fakeA.driver.request({ type: "get_state" });
+    assert.equal(response.success, true, "the new session must answer requests");
+    assert.equal(procB.exitCode, null, "the new process must still be alive");
+  } finally {
+    fakeA.driver.stop({ sigtermGraceMs: 100 });
   }
 });
