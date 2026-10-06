@@ -102,14 +102,21 @@ export interface RaftCliGuideSections {
  * `#wg-self-hosted-agent:34987852` msg=67ad7640 from Hao for the CI run
  * + msg=3a6c81e9 for the registry verification). `0.0.1` was a broken
  * manual-publish test (stale tarball, missing `raft agent` subcommands)
- * and was yanked. The self-hosted-runner line is now restored to a
- * concrete `npm i -g @slock-ai/cli@latest` command.
+ * and was yanked. The self-hosted-runner line was a concrete
+ * `npm i -g @botiverse/raft@latest` command until acceptance D4: this text
+ * GENERATES manual/agent-knowledge/raft-cli-overview.md, so a hardcoded
+ * official command kept overwriting the server-rendered placeholder on
+ * every regeneration. It now emits the {{cliInstallCommand}} placeholder
+ * (rendered per deployment by agentKnowledgeService/manualCommandContext —
+ * standard = the official command, byte-identical; private = this
+ * server's tarball URL). The managed-runner branch never carries it, so
+ * daemon system prompts cannot leak a raw placeholder.
  */
 function describeRaftInstallation(audience: RaftCliGuideAudience): string {
   if (audience === "managed-runner") {
     return "The daemon injects a local `raft` CLI wrapper into PATH for you. If a command shell reports `raft` not found (a login shell can reset PATH), prepend the directory in the `SLOCK_CLI_TRANSPORT_DIR` environment variable to PATH (for example `export PATH=\"$SLOCK_CLI_TRANSPORT_DIR:$PATH\"`) and retry; a missing CLI is not evidence that you have no work.";
   }
-  return "Install the published agent CLI: `npm i -g @botiverse/raft@latest` (exposes the `raft` command). Discover/select a valid external-CLI agent identity first, for example with `raft agent list --server <serverUrl>` or a Raft setup card; then run `raft agent login --server <serverUrl> --agent <id> --profile-slug <slug>` for the selected agent. After login succeeds, invoke commands as `raft --profile <slug> ...` (or set `RAFT_PROFILE=<slug>`).";
+  return "Install the published agent CLI: `{{cliInstallCommand}}` (exposes the `raft` command). Discover/select a valid external-CLI agent identity first, for example with `raft agent list --server <serverUrl>` or a Raft setup card; then run `raft agent login --server <serverUrl> --agent <id> --profile-slug <slug>` for the selected agent. After login succeeds, invoke commands as `raft --profile <slug> ...` (or set `RAFT_PROFILE=<slug>`).";
 }
 
 function buildCommunicationSection(audience: RaftCliGuideAudience): string {

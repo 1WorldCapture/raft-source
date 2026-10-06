@@ -11,7 +11,10 @@ import { fileURLToPath } from "node:url";
 // listed in package.json `exports` — removing them there breaks the shim.
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
-const distDir = join(root, "dist");
+// Optional --dist <dir> for alternate build targets (self-host bundle,
+// acceptance D3); default keeps the official `dist` untouched.
+const distArgIndex = process.argv.indexOf("--dist");
+const distDir = join(root, distArgIndex !== -1 && process.argv[distArgIndex + 1] ? process.argv[distArgIndex + 1] : "dist");
 
 for (const bin of ["raft-daemon.js", "slock-daemon.js"]) {
   const path = join(distDir, bin);

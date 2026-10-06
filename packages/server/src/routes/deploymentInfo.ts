@@ -75,8 +75,8 @@ deploymentInfoRouter.get("/", async (req, res) => {
     deploymentMode: "private",
     downloads: {
       computerBase: `${origin}/downloads/computer`,
-      ...(cliVersion ? { cli: `${origin}/downloads/cli/raft-${cliVersion}.tgz` } : {}),
-      ...(daemonVersion ? { daemon: `${origin}/downloads/daemon/raft-daemon-${daemonVersion}.tgz` } : {}),
+      ...(cliVersion ? { cli: `${origin}/downloads/cli/${cliVersion}/raft-${cliVersion}.tgz` } : {}),
+      ...(daemonVersion ? { daemon: `${origin}/downloads/daemon/${daemonVersion}/raft-daemon-${daemonVersion}.tgz` } : {}),
     },
     ...linksField,
   });

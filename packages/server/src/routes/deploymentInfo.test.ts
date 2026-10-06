@@ -22,8 +22,12 @@ beforeAll(async () => {
   dir = await mkdtemp(path.join(tmpdir(), "deployment-info-"));
   await mkdir(path.join(dir, "cli"), { recursive: true });
   await mkdir(path.join(dir, "daemon"), { recursive: true });
+  await mkdir(path.join(dir, "cli", "0.0.24-zcode.1"), { recursive: true });
+  await mkdir(path.join(dir, "daemon", "1.0.25"), { recursive: true });
   await writeFile(path.join(dir, "cli", "manifest.json"), JSON.stringify({ version: "0.0.24-zcode.1" }));
   await writeFile(path.join(dir, "daemon", "manifest.json"), JSON.stringify({ version: "1.0.25" }));
+  await writeFile(path.join(dir, "cli", "0.0.24-zcode.1", "raft-0.0.24-zcode.1.tgz"), "cli-bytes");
+  await writeFile(path.join(dir, "daemon", "1.0.25", "raft-daemon-1.0.25.tgz"), "daemon-bytes");
   process.env.RAFT_DOWNLOADS_DIR = dir;
 
   app = express();
@@ -68,10 +72,25 @@ describe("GET /api/deployment-info", () => {
       deploymentMode: "private",
       downloads: {
         computerBase: "https://raft.internal.example:18443/downloads/computer",
-        cli: "https://raft.internal.example:18443/downloads/cli/raft-0.0.24-zcode.1.tgz",
-        daemon: "https://raft.internal.example:18443/downloads/daemon/raft-daemon-1.0.25.tgz",
+        cli: "https://raft.internal.example:18443/downloads/cli/0.0.24-zcode.1/raft-0.0.24-zcode.1.tgz",
+        daemon: "https://raft.internal.example:18443/downloads/daemon/1.0.25/raft-daemon-1.0.25.tgz",
       },
     });
+  });
+
+  test("every served download URL resolves to a real file in the downloads tree (acceptance D2)", async () => {
+    process.env.RAFT_DEPLOYMENT_MODE = "private";
+    process.env.SERVER_URL = "https://raft.internal.example:18443";
+    const res = await fetch(`${baseUrl}/api/deployment-info`);
+    const { downloads } = (await res.json()) as { downloads: Record<string, string> };
+    const { access } = await import("node:fs/promises");
+    // File URLs (cli/daemon) must resolve to real files; computerBase is a
+    // directory prefix by contract, checked separately when the tree has one.
+    for (const [key, url] of Object.entries(downloads)) {
+      if (key === "computerBase") continue;
+      const filePath = url.replace("https://raft.internal.example:18443/downloads/", "");
+      await access(path.join(dir, filePath)); // throws (fails the test) if the URL is a 404
+    }
   });
 
   test("forged Host / X-Forwarded-Host never move the download URLs (host-header injection)", async () => {
