@@ -4319,6 +4319,8 @@ export const zhCn: Record<MessageId, string> = {
   "workspace.unresolved.threadIdentityMissing": "此消息列标签缺少父频道与根消息标识。",
   "desktop.handshake.recoverTitle": "Raft Desktop 需要恢复",
   "desktop.handshake.recoverBody": "无法验证此页面。请按原生恢复窗口的指引安全重试。",
+  "desktop.privateUpdate.pill": "新版 v{version}",
+  "desktop.privateUpdate.hint": "从你的服务器下载 Raft Desktop {version} 后手动安装。安装包未签名：下载后请右键→打开（或在“系统设置 → 隐私与安全性”里允许），再拖动覆盖已安装的应用。",
   "desktop.serverOrigin.settingsAria": "服务器地址设置",
   "desktop.serverOrigin.title": "服务器地址",
   "desktop.serverOrigin.currentOrigin": "当前服务器",
