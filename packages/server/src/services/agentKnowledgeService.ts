@@ -9,6 +9,7 @@ import {
 import { and, eq, isNull } from "drizzle-orm";
 import { getDb } from "../db/index.js";
 import { agentKnowledgeEvents, agents } from "../db/schema.js";
+import { renderManualCommands, resolveManualCommandValues } from "./manualCommandContext.js";
 
 export const AGENT_KNOWLEDGE_STATUSES = ["success", "not_found", "denied", "error"] as const;
 export type AgentKnowledgeStatus = (typeof AGENT_KNOWLEDGE_STATUSES)[number];
@@ -1257,7 +1258,11 @@ async function readKnowledgeContent(entry: KnowledgeRegistryEntry): Promise<stri
   for (const root of knowledgeRootCandidates()) {
     try {
       const source = await readFile(path.join(root, entry.sourcePath), "utf8");
-      return sanitizeAgentKnowledgeContent(source);
+      // Install-command placeholders render per deployment (task #6):
+      // standard = byte-identical official commands; private = this
+      // server's /downloads URLs (origin from SERVER_URL only).
+      const rendered = renderManualCommands(source, await resolveManualCommandValues());
+      return sanitizeAgentKnowledgeContent(rendered);
     } catch {
       // Try the next candidate; missing deployed docs should be visible as an error event.
     }

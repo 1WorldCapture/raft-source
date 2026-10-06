@@ -167,6 +167,7 @@ import AgentProfileOverflowMenu from "./AgentProfileOverflowMenu";
 
 import { formatActivityText } from "../../utils/activity";
 import { getServerUrl } from "../../utils/server";
+import { useDeploymentDownloads, useDeploymentMode } from "../../utils/deploymentMode";
 import { avatarUploadApiErrorMessage, isAvatarFileTooLarge, isAvatarTooLargeError, PROFILE_AVATAR_ACCEPT } from "../../utils/avatarUpload";
 import { canViewMachineRuntimeAccountUsage } from "../../utils/machineRuntimeUsageVisibility";
 import StatusDot from "../ui/StatusDot";
@@ -964,7 +965,15 @@ function AgentProfileInfo({ agent, canManageAgent, canChangeAgentRole, onOpenPro
 
   const externalProfileSlug = agent.name.replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") || agent.id.slice(0, 8);
   const externalLoginCommand = `raft agent login --server ${getServerUrl()} --agent ${agent.id} --profile-slug ${externalProfileSlug}`;
-  const externalCliInstallCommand = "npm i -g @botiverse/raft@latest";
+  // CLI install command (task #6): private deployments install this
+  // server's tarball (`/api/deployment-info` downloads.cli) instead of the
+  // public registry; anything else keeps the official command (same
+  // fallback semantics as the manual renderer).
+  const deploymentModeForCli = useDeploymentMode();
+  const deploymentDownloadsForCli = useDeploymentDownloads();
+  const externalCliInstallCommand = deploymentModeForCli === "private" && deploymentDownloadsForCli?.cli
+    ? `npm i -g ${deploymentDownloadsForCli.cli}`
+    : "npm i -g @botiverse/raft@latest";
   const externalClaudeSessionPrompt = formatMessage({ id: "agent.externalSetup.connectedPrompt" });
   const externalClaudeStartCommand = [
     `RAFT_EXPECTED_AGENT_ID=${agent.id} RAFT_PROFILE=${externalProfileSlug} claude \\`,

@@ -118,12 +118,22 @@ HTTPS（或 Tailscale tailnet）。若用 `http://` origin，安装与升级都�
 服务上下文同样生效）。此后 `raft-computer upgrade` 与服务端触发的升级检查都从
 `${服务器 origin}/downloads/computer/manifest.json` 解析最新版本；多服务器混接
 （不同 origin）会明确报错而非挑边，可用 `RAFT_COMPUTER_UPGRADE_BASE_URL` 显式指定。
-`RAFT_DEPLOYMENT_MODE=private` 环境变量 + 已连接服务器同样触发（等价开关）。换版本=重跑脚本+`docker compose restart server web`。
+`RAFT_DEPLOYMENT_MODE=private` 环境变量 + 已连接服务器同样触发（等价开关）。
+
+**CLI / daemon 从本服务器安装（task #6）**：`GET /api/deployment-info` 在私有模式下
+附带服务器渲染的下载 URL（origin 只取配置的 `SERVER_URL`，**绝不取请求 Host**——
+防 Host 头注入）。web 界面与 agent 指引（manual `raft-cli-overview` 等）中的安装命令
+按此生成为 `npm i -g ${origin}/downloads/cli/raft-<v>.tgz`（CLI）与两段式
+`npm i -g <daemon-url> && raft-daemon --server-url … --api-key …`（daemon）。
+**注意**：机器上已全局安装的官方 `@botiverse/raft-daemon` 会被上述安装**覆盖**为
+本服务器版本——这是预期行为（私有部署的机器必须用同源产物）。manual 占位符在
+服务器缺产物/缺 SERVER_URL 时回退官方命令并记警告日志；官方部署渲染逐字节不变
+（快照测试锁定）。换版本=重跑脚本+`docker compose restart server web`。
 server 侧 `RAFT_DEPLOYMENT_MODE=private`（compose 已设）使「最新版本」查询读本地
 manifest 而非官网——官方部署不受影响（唯一判断入口
 `isPrivateDeploymentMode`，shared）。
 
 ## 已知边界（二期处理）
 
-- web 生成的 Computer 安装命令在私有模式下已指向本服务器 `/downloads/`（task #5：`/api/deployment-info` 运行时判定 + `RAFT_COMPUTER_INSTALL_BACKEND=server` 持久化）；**daemon 的 `npx @botiverse/raft-daemon` 连接命令仍走 npm——task #6 处理**（CLI/daemon 从本服务器分发）。
+- web 的 Computer 安装命令（task #5）与 CLI/daemon 安装命令（task #6）在私有模式下均已指向本服务器 `/downloads/`；agent 详情页的 `claude plugin marketplace add botiverse/…`（GitHub 公网）仍在——task #7 链接中性化处理。
 - 私有模式下「最新版本」已读本地 manifest（本条）；官方部署的外部查询行为不变。

@@ -87,6 +87,44 @@ test("divergent computer/cli versions stamp their own trees and manifests", asyn
   }
 });
 
+test("--daemon adds the daemon tarball tree; omitting it stays cli-only", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "build-downloads-daemon-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const sea = join(root, "raft-computer-darwin-arm64");
+  writeFileSync(sea, SEA_PAYLOAD);
+  const tgz = join(root, "cli.tgz");
+  writeFileSync(tgz, TGZ_PAYLOAD);
+  const daemonTgz = join(root, "daemon.tgz");
+  writeFileSync(daemonTgz, "daemon-payload");
+
+  // --daemon without --daemon-version (and vice versa) is refused.
+  await assert.rejects(
+    buildDownloads(join(root, "out0"), [
+      "--computer-version", "1.0.28", "--cli-version", "0.0.24",
+      "--daemon", daemonTgz,
+      "--computer-darwin-arm64", sea, "--cli", tgz,
+    ]),
+    /--daemon requires --daemon-version/,
+  );
+
+  await buildDownloads(join(root, "out"), [
+    "--computer-version", "1.0.28",
+    "--cli-version", "0.0.24",
+    "--daemon-version", "1.0.25",
+    "--daemon", daemonTgz,
+    "--commit", "0123456789abcdef",
+    "--computer-darwin-arm64", sea,
+    "--cli", tgz,
+  ]);
+  const latest = readJson(join(root, "out", "daemon", "manifest.json"));
+  assert.equal(latest.version, "1.0.25");
+  assert.equal(latest.commit, "0123456789abcdef");
+  const dir = join(root, "out", "daemon", "1.0.25");
+  const manifest = readJson(join(dir, "manifest.json"));
+  assert.equal(manifest.targets.npm.file, "raft-daemon-1.0.25.tgz");
+  assert.equal(readFileSync(join(dir, "raft-daemon-1.0.25.tgz"), "utf8"), "daemon-payload");
+});
+
 test("--version shorthand stamps both trees when the products match", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "build-downloads-shorthand-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));

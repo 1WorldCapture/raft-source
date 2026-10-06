@@ -49,9 +49,12 @@ test("add computer dialog uses the shared explicit platform command selector", (
   assert.match(source, /legacyApiKey: apiKey/);
   assert.match(source, /computerCommands\?\.install/);
   assert.match(source, /computerCommands\?\.setup/);
-  assert.match(source, /const macLinuxDaemonCommand = getDaemonConnectCommand\(\{/);
+  // Daemon commands flow through the shared generator; since task #6 the
+  // declaration is gated on the deployment-mode resolution (loading → null,
+  // private → server tarball install), so the call sits in a conditional.
+  assert.match(source, /const macLinuxDaemonCommand = daemonCommandResolved\s*\?\s*getDaemonConnectCommand\(\{/);
   assert.match(source, /platform: "mac-linux"/);
-  assert.match(source, /const windowsDaemonCommand = getDaemonConnectCommand\(\{/);
+  assert.match(source, /const windowsDaemonCommand = daemonCommandResolved\s*\?\s*getDaemonConnectCommand\(\{/);
   assert.match(source, /platform: "windows"/);
   assert.match(source, /<ComputerCommandGuide/);
   assert.match(source, /macLinuxDaemonCommand=\{macLinuxDaemonCommand\}/);

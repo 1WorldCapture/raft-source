@@ -124,6 +124,13 @@ export interface DaemonConnectCommandOptions {
   serverUrl: string;
   distTag?: string;
   platform?: ComputerCommandPlatform;
+  /** Private deployments (task #6): the daemon tarball URL from
+   *  /api/deployment-info (server-rendered, SERVER_URL-based). When set,
+   *  the command becomes a two-step `npm i -g <url>` + `raft-daemon …`
+   *  instead of the public-registry npx form. The global install
+   *  intentionally OVERRIDES any official @botiverse/raft-daemon copy on
+   *  the machine — documented, expected behavior for private deployments. */
+  installUrl?: string | null;
 }
 
 export function getDaemonConnectCommand({
@@ -132,7 +139,17 @@ export function getDaemonConnectCommand({
   serverUrl,
   distTag = "latest",
   platform = "mac-linux",
+  installUrl,
 }: DaemonConnectCommandOptions): string {
+  if (installUrl) {
+    // Two-step form (PM-approved): install the tarball once, then run the
+    // bin directly — consistent with the CLI install command style.
+    if (platform === "windows") {
+      return `npm i -g ${installUrl}; raft-daemon --server-url ${serverUrl} --api-key ${apiKey}`;
+    }
+    const suffix = serverName ? ` # ${serverName}` : "";
+    return `npm i -g ${installUrl} && raft-daemon --server-url ${serverUrl} --api-key ${apiKey}${suffix}`;
+  }
   const packageSpec = `@botiverse/raft-daemon@${distTag}`;
   if (platform === "windows") {
     return `npx.cmd ${packageSpec} --server-url ${serverUrl} --api-key ${apiKey}`;
