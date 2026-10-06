@@ -354,6 +354,82 @@ function buildCliTransportLaunchPart(launchId?: string | null): string {
   return safePathPart(launchId || `pid-${process.pid}`);
 }
 
+/** Names of the per-agent live proxy pointer files (see writeAgentProxyPointerFiles). */
+export const AGENT_PROXY_POINTER_FILES = [
+  "proxy-current.url",
+  "proxy-current.token-path",
+  "proxy-current.json",
+] as const;
+
+/**
+ * POSIX wrapper fragment: when the agent's live proxy pointer files exist,
+ * re-export the proxy URL and token-file path from them, overriding the
+ * values baked in when this wrapper was written (those die with a daemon
+ * restart). Loopback-only on purpose: the pointer files must never be able
+ * to redirect the agent credential token to a non-local endpoint.
+ */
+export function buildPosixProxyPointerOverrideBlock(agentRoot: string): string {
+  const dir = shellSingleQuote(agentRoot);
+  return [
+    `# Live proxy pointer (daemon rewrites on every registration): prefer the`,
+    `# current registration over the values baked in at wrapper-write time.`,
+    `__pp_dir=${dir}`,
+    `if [ -r "$__pp_dir/proxy-current.url" ] && [ -r "$__pp_dir/proxy-current.token-path" ]; then`,
+    `  __pp_url=$(tr -d '\\r\\n' < "$__pp_dir/proxy-current.url" 2>/dev/null)`,
+    `  __pp_tok=$(tr -d '\\r\\n' < "$__pp_dir/proxy-current.token-path" 2>/dev/null)`,
+    `  case "$__pp_url" in`,
+    `    http://127.0.0.1:*|http://localhost:*)`,
+    `      if [ -n "$__pp_url" ] && [ -n "$__pp_tok" ]; then`,
+    `        export SLOCK_AGENT_PROXY_URL="$__pp_url" SLOCK_AGENT_PROXY_TOKEN_FILE="$__pp_tok"`,
+    `      fi ;;`,
+    `  esac`,
+    `  unset __pp_dir __pp_url __pp_tok`,
+    `fi\n`,
+  ].join("\n");
+}
+
+/**
+ * Atomically (tmp file + rename) publish the CURRENT agent credential proxy
+ * endpoint under the agent's cli-transport root. Wrappers read these pointer
+ * files at EXEC time and prefer them over their baked-in values, so a wrapper
+ * from an older launch keeps working after a daemon restart (which clears the
+ * in-memory proxy registrations and may move the proxy port).
+ *
+ * Security: each file is 0600 in the agent's own cli-transport root. The
+ * pointer carries the proxy URL and the PATH of the 0600 token file — never
+ * the token value itself — so the readable-secret surface is unchanged.
+ * Writes are per-agent and last-registration-wins, matching the APM's
+ * single-active-launch invariant.
+ */
+export function writeAgentProxyPointerFiles(input: {
+  agentRoot: string;
+  proxyUrl: string;
+  tokenFile: string;
+  launchId?: string | null;
+}): void {
+  const writePointer = (name: string, content: string): void => {
+    const finalPath = path.join(input.agentRoot, name);
+    const tmpPath = `${finalPath}.tmp-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
+    writeFileSync(tmpPath, content, { mode: 0o600 });
+    renameSync(tmpPath, finalPath);
+  };
+  writePointer("proxy-current.url", `${input.proxyUrl}\n`);
+  writePointer("proxy-current.token-path", `${input.tokenFile}\n`);
+  writePointer(
+    "proxy-current.json",
+    `${JSON.stringify(
+      {
+        proxyUrl: input.proxyUrl,
+        tokenFile: input.tokenFile,
+        launchId: input.launchId ?? null,
+        updatedAt: new Date().toISOString(),
+      },
+      null,
+      2,
+    )}\n`,
+  );
+}
+
 function cleanupWorkspaceCliTransportFiles(workingDirectory: string): void {
   const legacySlockDir = path.join(workingDirectory, ".slock");
   for (const filename of WORKSPACE_CLI_TRANSPORT_FILENAMES) {
@@ -665,6 +741,19 @@ export async function prepareCliTransport(
     mkdirSync(proxyTokenDir, { recursive: true, mode: 0o700 });
     agentCredentialProxyTokenFile = path.join(proxyTokenDir, `${launchPart}.token`);
     writeFileSync(agentCredentialProxyTokenFile, agentCredentialProxy.proxyToken, { mode: 0o600 });
+    // Live pointer for wrappers: a daemon restart clears the in-memory proxy
+    // registrations and may move the proxy port, which would strand any
+    // already-running agent holding an older launch's wrapper (baked-in dead
+    // URL + token). Wrappers read these pointer files at EXEC time and prefer
+    // them over their baked-in values, so an old wrapper follows the current
+    // registration. Token stays in its own 0600 file; the pointer only ever
+    // carries its PATH.
+    writeAgentProxyPointerFiles({
+      agentRoot: path.dirname(slockDir),
+      proxyUrl: agentCredentialProxy.proxyUrl,
+      tokenFile: agentCredentialProxyTokenFile,
+      launchId: ctx.launchId,
+    });
   } else {
     writeFileSync(tokenFile, ctx.config.authToken || ctx.daemonApiKey, { mode: 0o600 });
   }
@@ -695,8 +784,12 @@ export async function prepareCliTransport(
   // We never inline raw token *contents* — only the path to the token file
   // (file mode 0o600, written elsewhere). Same secret surface as before.
   const posixIdentityPrefix = `SLOCK_AGENT_ID=${shellSingleQuote(ctx.agentId)} SLOCK_SERVER_URL=${shellSingleQuote(ctx.config.serverUrl)} `;
+  // Proxy mode exports the baked-in credential vars, then lets the live
+  // pointer override them at exec time (a daemon restart moves the proxy
+  // registration; the wrapper must follow it). Non-proxy mode keeps the
+  // exec-prefix form.
   const posixCredentialPrefix = posixIdentityPrefix + (agentCredentialProxy
-    ? `SLOCK_AGENT_PROXY_URL=${shellSingleQuote(agentCredentialProxy.proxyUrl)} SLOCK_AGENT_PROXY_TOKEN_FILE=${shellSingleQuote(agentCredentialProxyTokenFile!)} SLOCK_AGENT_ACTIVE_CAPABILITIES=${shellSingleQuote(DEFAULT_ACTIVE_CAPABILITIES)} `
+    ? `export SLOCK_AGENT_PROXY_URL=${shellSingleQuote(agentCredentialProxy.proxyUrl)} SLOCK_AGENT_PROXY_TOKEN_FILE=${shellSingleQuote(agentCredentialProxyTokenFile!)} SLOCK_AGENT_ACTIVE_CAPABILITIES=${shellSingleQuote(DEFAULT_ACTIVE_CAPABILITIES)}\n${buildPosixProxyPointerOverrideBlock(path.dirname(slockDir))}`
     : `SLOCK_AGENT_TOKEN_FILE=${shellSingleQuote(tokenFile)} `);
   // Exec-time fallback mirrors the spawn-time one: the tree can mutate AFTER
   // the wrapper is written but before the agent's next command runs.
@@ -715,7 +808,22 @@ export async function prepareCliTransport(
     const cmdIdentityLines =
       `set "SLOCK_AGENT_ID=${ctx.agentId}"\r\nset "SLOCK_SERVER_URL=${ctx.config.serverUrl}"\r\n`;
     const cmdCredentialLine = cmdIdentityLines + (agentCredentialProxy
-      ? `set "SLOCK_AGENT_PROXY_URL=${agentCredentialProxy.proxyUrl}"\r\nset "SLOCK_AGENT_PROXY_TOKEN_FILE=${agentCredentialProxyTokenFile!}"\r\nset "SLOCK_AGENT_ACTIVE_CAPABILITIES=${DEFAULT_ACTIVE_CAPABILITIES}"\r\n`
+      ? [
+        `set "SLOCK_AGENT_PROXY_URL=${agentCredentialProxy.proxyUrl}"`,
+        `set "SLOCK_AGENT_PROXY_TOKEN_FILE=${agentCredentialProxyTokenFile!}"`,
+        `set "SLOCK_AGENT_ACTIVE_CAPABILITIES=${DEFAULT_ACTIVE_CAPABILITIES}"`,
+        // Live proxy pointer override (see the POSIX block): loopback-only.
+        `set "RAFT_PP_DIR=%~dp0.."`,
+        `if exist "%RAFT_PP_DIR%\\proxy-current.url" if exist "%RAFT_PP_DIR%\\proxy-current.token-path" (`,
+        `  set /p "RAFT_PP_URL="<"%RAFT_PP_DIR%\\proxy-current.url"`,
+        `  set /p "RAFT_PP_TOK="<"%RAFT_PP_DIR%\\proxy-current.token-path"`,
+        `  if /i "%RAFT_PP_URL:~0,17%"=="http://127.0.0.1:" (`,
+        `    set "SLOCK_AGENT_PROXY_URL=%RAFT_PP_URL%"`,
+        `    set "SLOCK_AGENT_PROXY_TOKEN_FILE=%RAFT_PP_TOK%"`,
+        `  )`,
+        `)`,
+        "",
+      ].join("\r\n")
       : `set "SLOCK_AGENT_TOKEN_FILE=${tokenFile}"\r\n`);
     const cmdCliFallbackLines = cliPath === "__cli"
       ? []
@@ -757,6 +865,18 @@ export async function prepareCliTransport(
           `$env:SLOCK_AGENT_PROXY_URL=${powershellSingleQuote(agentCredentialProxy.proxyUrl)}`,
           `$env:SLOCK_AGENT_PROXY_TOKEN_FILE=${powershellSingleQuote(agentCredentialProxyTokenFile!)}`,
           `$env:SLOCK_AGENT_ACTIVE_CAPABILITIES=${powershellSingleQuote(DEFAULT_ACTIVE_CAPABILITIES)}`,
+          // Live proxy pointer override (see the POSIX block): loopback-only.
+          `$ppDir = Split-Path -Parent $PSScriptRoot`,
+          `$ppUrlFile = Join-Path $ppDir 'proxy-current.url'`,
+          `$ppTokFile = Join-Path $ppDir 'proxy-current.token-path'`,
+          `if ((Test-Path $ppUrlFile) -and (Test-Path $ppTokFile)) {`,
+          `  $ppUrl = (Get-Content $ppUrlFile -Raw -ErrorAction SilentlyContinue)`,
+          `  $ppTok = (Get-Content $ppTokFile -Raw -ErrorAction SilentlyContinue)`,
+          `  if ($ppUrl -and $ppTok -and $ppUrl.Trim().StartsWith('http://127.0.0.1:')) {`,
+          `    $env:SLOCK_AGENT_PROXY_URL = $ppUrl.Trim()`,
+          `    $env:SLOCK_AGENT_PROXY_TOKEN_FILE = $ppTok.Trim()`,
+          `  }`,
+          `}`,
         ]
         : [
           `$env:SLOCK_AGENT_TOKEN_FILE=${powershellSingleQuote(tokenFile)}`,
