@@ -24,6 +24,7 @@
   },
   "scripts": {
     "check:misc": "bash scripts/check-misc.sh",
+    "check:no-build-artifacts": "bash scripts/check-no-build-artifacts.sh",
     "perf:boot-profile": "node scripts/perf/boot-profile.cjs",
     "test:raftdev": "node --import tsx --test scripts/dev/raftdev-*.test.ts",
     "test:source-available": "node --test scripts/source-available/export-snapshot.test.mjs scripts/source-available/release.test.mjs",

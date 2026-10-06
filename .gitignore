@@ -68,3 +68,5 @@ Resolve each block faithfully: keep one side (`@ours`/`@theirs`), or combine the
 deploy/docker/downloads/
 # SEA build outputs (scripts/build-release-artifacts.mjs working dir)
 packages/computer/dist-native/
+# Self-host bundle build output (scripts/pack-selfhost-tarball.mjs source dir)
+packages/daemon/dist-selfhost/
