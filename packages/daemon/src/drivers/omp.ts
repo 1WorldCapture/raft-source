@@ -44,26 +44,25 @@ const OMP_SYSTEM_PROMPT_FILE = "omp-system-prompt.md";
 const OMP_CONFIG_OVERLAY_FILE = "omp-config-overlay.yml";
 
 /**
- * Discovery providers disabled for managed agents (task #5). `--system-prompt`
- * only replaces the instruction block — omp's generated `<project-context>`
- * footer would still render every discovered context file, so a workspace
- * AGENTS.md / CLAUDE.md would silently stack under the Raft standing prompt.
- * `disabledProviders` is a whole-provider switch (context files, rules, MCP
- * servers, …), and it is the only CLI-level knob; suppressing user-level
- * context as well is accepted so the managed prompt stays authoritative.
+ * Project-level context files disabled for managed agents (task #5, PM
+ * ruling). `--system-prompt` only replaces the instruction block — omp's
+ * generated `<project-context>` footer would still render every discovered
+ * context file, so a workspace AGENTS.md would silently stack under the
+ * Raft standing prompt. `context-file:project:<basename>` ids hit every
+ * provider and every directory depth at PROJECT level only, keeping the
+ * provider's user-level context (the owner ruled user-level preferences
+ * stay, matching the Cursor SDK decision) and everything else the provider
+ * contributes (MCP servers, skills, rules, …). System-prompt REPLACEMENT
+ * files (SYSTEM.md/SYSTEM_TEMPLATE.md) need no entry: the explicit
+ * --system-prompt flag outranks them by documented CLI precedence.
  * Authentication / the user's subscription live outside the provider system
  * and are unaffected (task #5 spec: use ~/.omp, never modify it).
  */
-const OMP_DISABLED_DISCOVERY_PROVIDERS = [
-  "native",
-  "claude",
-  "codex",
-  "gemini",
-  "opencode",
-  "github",
-  "agents",
-  "agents-md",
-  "claude-md",
+const OMP_DISABLED_PROJECT_CONTEXT_FILES = [
+  "AGENTS.md",
+  "CLAUDE.md",
+  "GEMINI.md",
+  "copilot-instructions.md",
 ];
 
 /** Bound for the ready frame and each RPC request, mirroring the bundled clients. */
@@ -222,11 +221,11 @@ interface OmpHostToolCancelFrame {
 function buildOmpConfigOverlay(): string {
   return [
     "# Written by the Raft daemon (task #5): managed agents get the Raft",
-    "# standing prompt as their sole instruction source — omp's context-file",
-    "# discovery (workspace AGENTS.md/CLAUDE.md, user-level equivalents) must",
-    "# not stack underneath it.",
-    "disabledProviders:",
-    ...OMP_DISABLED_DISCOVERY_PROVIDERS.map((provider) => `  - ${provider}`),
+    "# standing prompt as their sole instruction source — PROJECT-level",
+    "# context files (workspace AGENTS.md/CLAUDE.md/…) must not stack",
+    "# underneath it, while the user's own user-level context stays loaded.",
+    "disabledExtensions:",
+    ...OMP_DISABLED_PROJECT_CONTEXT_FILES.map((name) => `  - context-file:project:${name}`),
     "",
   ].join("\n");
 }

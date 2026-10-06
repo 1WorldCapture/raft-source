@@ -11,7 +11,7 @@
  */
 import { test, describe } from "vitest";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createServer, type Server } from "node:http";
@@ -38,6 +38,13 @@ describe.skipIf(!ompAvailable)("omp real CLI integration (task #5)", () => {
   const agentDir = mkdtempSync(path.join(os.tmpdir(), "slock-omp-e2e-agent-"));
   writeFileSync(path.join(workspace, "AGENTS.md"), `# AGENTS\n\n${AGENTS_SENTINEL} do not leak\n`);
   writeFileSync(path.join(workspace, "SYSTEM.md"), `${AGENTS_SENTINEL}-system-md\n`);
+  mkdirSync(path.join(workspace, ".omp"), { recursive: true });
+  writeFileSync(path.join(workspace, ".omp", "AGENTS.md"), `# AGENTS\n\n${AGENTS_SENTINEL}-ompdir do not leak\n`);
+  // The user-level context file in the redirected agent dir must SURVIVE
+  // (PM task #5 ruling: user-level preferences stay, matching the Cursor
+  // SDK decision) — only project-level discovery is disabled.
+  const userContextMarker = "RAFT-USER-CONTEXT-KEPT-K4M8";
+  writeFileSync(path.join(agentDir, "AGENTS.md"), `# AGENTS\n\n${userContextMarker} user prefs\n`);
 
   let mockServer: Server;
   let mockPort = 0;
@@ -175,6 +182,8 @@ describe.skipIf(!ompAvailable)("omp real CLI integration (task #5)", () => {
         const promptText = await readSystemPrompt(fresh);
         assert.ok(promptText.includes(STANDING_MARKER), "the standing prompt must replace the default instruction block");
         assert.ok(!promptText.includes(AGENTS_SENTINEL), "workspace AGENTS.md/SYSTEM.md must not stack under the standing prompt");
+        assert.ok(!promptText.includes(`${AGENTS_SENTINEL}-ompdir`), "project .omp/AGENTS.md must be disabled too");
+        assert.ok(promptText.includes(userContextMarker), "user-level context must stay loaded (PM ruling)");
 
         // A real turn through the mock provider materializes the session.
         const idle = fresh.encodeStdinMessage("materialize please", null, { mode: "idle" });
@@ -222,6 +231,7 @@ describe.skipIf(!ompAvailable)("omp real CLI integration (task #5)", () => {
           const resumedPrompt = await readSystemPrompt(resumed);
           assert.ok(resumedPrompt.includes(STANDING_MARKER), "the standing prompt must survive resume");
           assert.ok(!resumedPrompt.includes(AGENTS_SENTINEL), "discovery isolation must survive resume");
+          assert.ok(resumedPrompt.includes(userContextMarker), "user-level context must survive resume too");
         } finally {
           resumed.stop({ sigtermGraceMs: 100 });
         }

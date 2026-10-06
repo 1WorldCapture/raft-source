@@ -1034,10 +1034,11 @@ test("launch argv carries the standing prompt file and the isolation overlay, fr
     assert.ok(promptFlag > 0 && configFlag > promptFlag, `argv must carry both flags: ${argvDump.argv.join(" ")}`);
     assert.equal(readFileSync(argvDump.argv[promptFlag + 1], "utf8"), STANDING, "the prompt file must hold the standing prompt verbatim");
     const overlay = readFileSync(argvDump.argv[configFlag + 1], "utf8");
-    assert.match(overlay, /disabledProviders:/);
-    for (const provider of ["native", "claude", "codex", "gemini", "opencode", "github", "agents", "agents-md", "claude-md"]) {
-      assert.ok(overlay.includes(`- ${provider}`), `overlay must disable ${provider}`);
+    assert.match(overlay, /disabledExtensions:/);
+    for (const name of ["AGENTS.md", "CLAUDE.md", "GEMINI.md", "copilot-instructions.md"]) {
+      assert.ok(overlay.includes(`- context-file:project:${name}`), `overlay must disable the project-level ${name}`);
     }
+    assert.ok(!overlay.includes("disabledProviders:"), "provider-level kills stay off: user-level context remains loaded (PM ruling)");
     // CLI env proof (task #5 acceptance): the raft wrapper dir leads PATH.
     assert.equal(argvDump.pathHead, argvDump.slockCliTransportDir, "the CLI transport dir must lead PATH so bash reaches raft");
     assert.equal(argvDump.slockServerUrl, fresh.mock.url, "the server URL env must point at the daemon endpoint");
