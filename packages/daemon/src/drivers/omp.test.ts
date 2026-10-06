@@ -139,11 +139,11 @@ test("driver carries the phase-1 target contract", () => {
   assert.equal(driver.busyDeliveryMode, "direct");
 });
 
-test("the registration stub refuses to launch sessions", async () => {
+test("the driver refuses protocol sends before it is ready", async () => {
   const driver = new OmpDriver();
   await assert.rejects(
-    () => driver.spawn({} as never),
-    /task #2/,
+    () => driver.request({ type: "get_state" }),
+    /not ready/,
   );
   assert.deepEqual(driver.parseLine("{}"), []);
   assert.equal(driver.encodeStdinMessage("hello", null), null);
