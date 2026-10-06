@@ -37,6 +37,11 @@ export interface DeploymentDownloads {
   computerBase: string;
   cli?: string;
   daemon?: string;
+  /** Desktop installers from this deployment (private mode, task #12). */
+  desktop?: {
+    version: string;
+    dmg: { arm64: string; x64: string };
+  };
 }
 
 /** Operator-configured replacements for official link surfaces (task #7). */

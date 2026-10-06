@@ -30,7 +30,7 @@ function configuredOrigin(): string | null {
   return origin ? origin : null;
 }
 
-async function readLatestVersion(product: "cli" | "daemon"): Promise<string | null> {
+async function readLatestVersion(product: "cli" | "daemon" | "desktop"): Promise<string | null> {
   try {
     const raw = await readFile(path.join(downloadsDir(), product, "manifest.json"), "utf8");
     const parsed = JSON.parse(raw) as { version?: unknown };
@@ -67,9 +67,10 @@ deploymentInfoRouter.get("/", async (req, res) => {
     res.json({ deploymentMode: "private", ...linksField });
     return;
   }
-  const [cliVersion, daemonVersion] = await Promise.all([
+  const [cliVersion, daemonVersion, desktopVersion] = await Promise.all([
     readLatestVersion("cli"),
     readLatestVersion("daemon"),
+    readLatestVersion("desktop"),
   ]);
   res.json({
     deploymentMode: "private",
@@ -77,6 +78,20 @@ deploymentInfoRouter.get("/", async (req, res) => {
       computerBase: `${origin}/downloads/computer`,
       ...(cliVersion ? { cli: `${origin}/downloads/cli/${cliVersion}/raft-${cliVersion}.tgz` } : {}),
       ...(daemonVersion ? { daemon: `${origin}/downloads/daemon/${daemonVersion}/raft-daemon-${daemonVersion}.tgz` } : {}),
+      // Desktop installers (task #12): per-arch dmg links for the web's
+      // download entry; the app's in-app updater reads latest-mac.yml from
+      // the same tree. Same SERVER_URL-only rule as every other URL here.
+      ...(desktopVersion
+        ? {
+          desktop: {
+            version: desktopVersion,
+            dmg: {
+              arm64: `${origin}/downloads/desktop/${desktopVersion}/Raft-Desktop-${desktopVersion}-arm64.dmg`,
+              x64: `${origin}/downloads/desktop/${desktopVersion}/Raft-Desktop-${desktopVersion}-x64.dmg`,
+            },
+          },
+        }
+        : {}),
     },
     ...linksField,
   });
