@@ -139,7 +139,16 @@ HTTPS（或 Tailscale tailnet）。若用 `http://` origin，安装与升级都�
   origin**（`${origin}/s/<slug>/...`），社区链接隐藏；web 的 docs 入口私有下隐藏（可用
   `RAFT_PUBLIC_DOCS_URL` 配置）；邮件中的官方链接隐藏（社区/移动端 CTA/文档），
   许可与隐私链接保留但可用 `RAFT_PUBLIC_TERMS_URL`/`RAFT_PUBLIC_PRIVACY_URL` 替换；
-  agent 外部指引的 `claude plugin marketplace` 步骤私有下省略并附内网说明。换版本=重跑脚本+`docker compose restart server web`。
+  agent 外部指引的 `claude plugin marketplace` 步骤私有下省略并附内网说明。
+
+**Managed MCP 内网放行名单（task #9）**：
+内网 MCP 服务器默认被 SSRF 防护封锁（与官方云一致）。私有模式下管理员可显式放行：
+`RAFT_MANAGED_MCP_ALLOWED_NETWORKS=10.20.0.0/16,100.64.0.0/10`（CIDR，IPv4/IPv6）作用于
+**DNS 解析后的实际 IP**，且只有通过判定的地址会用于建连（混合解析绝不让连接落到被封地址）；
+`RAFT_MANAGED_MCP_ALLOWED_HOSTS=mcp.corp.example` 仅越过 `.internal`/`.local` 等后缀预检，
+IP 仍须落名单或公网。**安全底线**：环回（127/8、::1）、链路本地（169.254/16、fe80::/10，
+含云元数据端点）、未指定（0.0.0.0/8、::）与组播段**永不可放行**——配置了也会被忽略并记警告。
+建议配最小范围。官方云部署完全忽略这两个 env（行为逐字节不变）。换版本=重跑脚本+`docker compose restart server web`。
 server 侧 `RAFT_DEPLOYMENT_MODE=private`（compose 已设）使「最新版本」查询读本地
 manifest 而非官网——官方部署不受影响（唯一判断入口
 `isPrivateDeploymentMode`，shared）。

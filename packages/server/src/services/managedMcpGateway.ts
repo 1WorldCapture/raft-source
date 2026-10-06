@@ -7,6 +7,7 @@ import { OAuthError, ServerError, TemporarilyUnavailableError } from "@modelcont
 import { Agent, fetch as undiciFetch } from "undici";
 import {
   clearClockTimeout,
+  isPrivateDeploymentMode,
   MANAGED_MCP_MAX_CATALOG_BYTES,
   MANAGED_MCP_MAX_RESULT_BYTES,
   MANAGED_MCP_MAX_TOOLS_PER_SERVER,
@@ -67,10 +68,131 @@ function normalizedMappedIpv4(address: string): string {
   return address.toLowerCase().startsWith("::ffff:") ? address.slice(7) : address;
 }
 
+// --- Private-deployment allowlist (task #9) ---------------------------------
+//
+// Private deployments host MCP servers on internal networks the static block
+// table rejects by design. An ADMINISTRATOR-configured allowlist
+// (RAFT_MANAGED_MCP_ALLOWED_NETWORKS / _ALLOWED_HOSTS) can re-open those in
+// private mode ONLY — official deployments ignore the env entirely
+// (byte-identical behavior). Hard-blocked ranges (loopback, link-local /
+// cloud-metadata, unspecified, multicast) are NEVER re-openable, even when
+// the allowlist names them; such entries warn and are ignored.
+
+const HARD_BLOCKED_ADDRESSES = new BlockList();
+for (const [network, prefix] of [
+  ["0.0.0.0", 8], ["127.0.0.0", 8], ["169.254.0.0", 16], ["224.0.0.0", 4],
+] as const) HARD_BLOCKED_ADDRESSES.addSubnet(network, prefix, "ipv4");
+for (const [network, prefix] of [
+  ["::", 128], ["::1", 128], ["fe80::", 10], ["ff00::", 8],
+] as const) HARD_BLOCKED_ADDRESSES.addSubnet(network, prefix, "ipv6");
+
+const ALLOWLIST_NETWORKS_ENV = "RAFT_MANAGED_MCP_ALLOWED_NETWORKS";
+const ALLOWLIST_HOSTS_ENV = "RAFT_MANAGED_MCP_ALLOWED_HOSTS";
+
+let allowlistCache: { envSnapshot: string; networks: BlockList; hosts: Set<string> } | null = null;
+
+/** Parse the allowlist env once per unique env snapshot. Malformed entries
+ *  warn and are skipped — one bad CIDR must not disable the whole list. */
+function readPrivateAllowlist(): { networks: BlockList; hosts: Set<string> } | null {
+  if (!isPrivateDeploymentMode()) return null;
+  const networksRaw = process.env[ALLOWLIST_NETWORKS_ENV]?.trim() ?? "";
+  const hostsRaw = process.env[ALLOWLIST_HOSTS_ENV]?.trim() ?? "";
+  const envSnapshot = `${networksRaw}\n${hostsRaw}`;
+  if (allowlistCache?.envSnapshot === envSnapshot) return allowlistCache;
+
+  const networks = new BlockList();
+  for (const entry of networksRaw.split(",").map((item) => item.trim()).filter(Boolean)) {
+    const [network, prefixRaw] = entry.split("/");
+    const prefix = prefixRaw === undefined ? undefined : Number(prefixRaw);
+    if (!network || isIP(network) === 0 || prefix !== undefined && (!Number.isInteger(prefix) || prefix < 0)) {
+      console.warn(`[managed-mcp] ignoring malformed ${ALLOWLIST_NETWORKS_ENV} entry "${entry}"`);
+      continue;
+    }
+    if (HARD_BLOCKED_ADDRESSES.check(network, isIP(network) === 4 ? "ipv4" : "ipv6")
+      || (prefix !== undefined && hardBlockedSubnet(network, prefix))) {
+      console.warn(`[managed-mcp] ${ALLOWLIST_NETWORKS_ENV} entry "${entry}" covers a hard-blocked range (loopback / link-local / unspecified / multicast); ignored`);
+      continue;
+    }
+    if (prefix === undefined) networks.addAddress(network, isIP(network) === 4 ? "ipv4" : "ipv6");
+    else networks.addSubnet(network, prefix, isIP(network) === 4 ? "ipv4" : "ipv6");
+  }
+  const hosts = new Set(
+    hostsRaw.split(",").map((item) => item.trim().toLowerCase().replace(/\.$/u, "")).filter(Boolean),
+  );
+  allowlistCache = { envSnapshot, networks, hosts };
+  return allowlistCache;
+}
+
+/** Whether a configured subnet overlaps a hard-blocked range (conservative:
+ *  checks the network address and the broadcast/last address). */
+function hardBlockedSubnet(network: string, prefix: number): boolean {
+  // Narrow guard: only flag prefixes that sit inside hard-blocked space or
+  // cover it — exact containment via the block table on both ends.
+  const family = isIP(network) === 4 ? "ipv4" : "ipv6";
+  if (HARD_BLOCKED_ADDRESSES.check(network, family)) return true;
+  // A prefix wider than (containing) a hard-blocked network also covers it;
+  // approximate with the table by checking a representative late address.
+  const last = subnetLastAddress(network, prefix);
+  return last !== null && HARD_BLOCKED_ADDRESSES.check(last, family);
+}
+
+function subnetLastAddress(network: string, prefix: number): string | null {
+  if (isIP(network) === 4) {
+    const parts = network.split(".").map(Number);
+    if (parts.length !== 4 || parts.some((n) => Number.isNaN(n))) return null;
+    const bits = 32 - prefix;
+    const size = bits >= 31 ? 1 : 2 ** bits;
+    let value = ((parts[0]! * 256 + parts[1]!) * 256 + parts[2]!) * 256 + parts[3]!;
+    value += size - 1;
+    return [value >>> 24, (value >>> 16) & 255, (value >>> 8) & 255, value & 255].map((n) => n & 255).join(".");
+  }
+  // IPv6: expand and add the host range (BigInt for the 128-bit space).
+  const groups = network.split(":");
+  if (groups.length !== 8) return null; // only fully-expanded forms are configured in practice
+  let value = 0n;
+  for (const group of groups) value = (value << 16n) + BigInt(parseInt(group || "0", 16));
+  const hostBits = 128n - BigInt(prefix);
+  value += hostBits >= 127n ? 0n : (1n << hostBits) - 1n;
+  const hex = value.toString(16).padStart(32, "0");
+  return `${hex.slice(0, 4)}:${hex.slice(4, 8)}:${hex.slice(8, 12)}:${hex.slice(12, 16)}:${hex.slice(16, 20)}:${hex.slice(20, 24)}:${hex.slice(24, 28)}:${hex.slice(28, 32)}`;
+}
+
+function allowlistHit(address: string): boolean {
+  const allowlist = readPrivateAllowlist();
+  if (!allowlist) return false;
+  const normalized = normalizedMappedIpv4(address);
+  const family = isIP(normalized);
+  return family !== 0 && allowlist.networks.check(normalized, family === 4 ? "ipv4" : "ipv6");
+}
+
 export function isManagedMcpAddressAllowed(address: string): boolean {
   const normalized = normalizedMappedIpv4(address);
   const family = isIP(normalized);
-  return family !== 0 && !blockedAddresses.check(normalized, family === 4 ? "ipv4" : "ipv6");
+  if (family === 0) return false;
+  // Hard floor first: loopback / link-local (cloud metadata) / unspecified /
+  // multicast are never allowlist-reopenable.
+  if (HARD_BLOCKED_ADDRESSES.check(normalized, family === 4 ? "ipv4" : "ipv6")) return false;
+  // Private-mode administrator allowlist re-opens explicitly trusted ranges.
+  if (allowlistHit(normalized)) {
+    console.info(`[managed-mcp] address ${normalized} allowed by ${ALLOWLIST_NETWORKS_ENV}`);
+    return true;
+  }
+  // Default posture: the static block table (official behavior unchanged).
+  return !blockedAddresses.check(normalized, family === 4 ? "ipv4" : "ipv6");
+}
+
+/** Whether the hostname pre-check (suffix blacklist) may be bypassed under
+ *  the private allowlist. The IP checks still apply after DNS resolution. */
+function allowlistedHostname(hostname: string): boolean {
+  const allowlist = readPrivateAllowlist();
+  if (!allowlist || hostname === "localhost") return false;
+  return allowlist.hosts.has(hostname);
+}
+
+function privateAllowlistHint(): string {
+  return isPrivateDeploymentMode()
+    ? ` If this MCP server lives on your internal network, ask the administrator to add its network to ${ALLOWLIST_NETWORKS_ENV} (loopback, link-local, unspecified and multicast ranges can never be allowed).`
+    : "";
 }
 
 export function validateManagedMcpEndpoint(raw: string): URL {
@@ -84,24 +206,32 @@ export function validateManagedMcpEndpoint(raw: string): URL {
     throw new ManagedMcpGatewayError("MCP endpoint must be an HTTPS URL without credentials or a fragment", "managed_mcp_endpoint_invalid");
   }
   const hostname = url.hostname.toLowerCase().replace(/\.$/u, "").replace(/^\[|\]$/gu, "");
-  if (!hostname || hostname === "localhost" || hostname.endsWith(".localhost") || hostname.endsWith(".local") || hostname.endsWith(".internal")) {
-    throw new ManagedMcpGatewayError("MCP endpoint host is not allowed", "managed_mcp_endpoint_blocked");
+  const suffixBlocked = hostname === "localhost" || hostname.endsWith(".localhost") || hostname.endsWith(".local") || hostname.endsWith(".internal");
+  if (!hostname || (suffixBlocked && !allowlistedHostname(hostname))) {
+    throw new ManagedMcpGatewayError(`MCP endpoint host is not allowed.${privateAllowlistHint()}`, "managed_mcp_endpoint_blocked");
   }
   if (isIP(hostname) && !isManagedMcpAddressAllowed(hostname)) {
-    throw new ManagedMcpGatewayError("MCP endpoint address is not allowed", "managed_mcp_endpoint_blocked");
+    throw new ManagedMcpGatewayError(`MCP endpoint address is not allowed.${privateAllowlistHint()}`, "managed_mcp_endpoint_blocked");
   }
   return url;
 }
 
-async function safeLookup(
+/** Exported for the task-#9 filter-semantics tests: only judgment-passing
+ *  addresses may reach the connection layer. */
+export async function safeLookup(
   hostname: string,
   options: dns.LookupOneOptions | dns.LookupAllOptions,
   callback: (err: NodeJS.ErrnoException | null, address: string | dns.LookupAddress[], family?: number) => void,
 ): Promise<void> {
   try {
-    const addresses = await dns.promises.lookup(hostname, { all: true, verbatim: true });
-    if (addresses.length === 0 || addresses.some(({ address }) => !isManagedMcpAddressAllowed(address))) {
-      callback(Object.assign(new Error("MCP endpoint resolved to a blocked address"), { code: "EACCES" }), "", 0);
+    const resolved = await dns.promises.lookup(hostname, { all: true, verbatim: true });
+    // Task #9 filter semantics (PM review): only addresses that PASS the
+    // judgment reach the connection layer — a mixed resolution
+    // [allowed, blocked] must never let the connection fall onto the blocked
+    // address; an all-blocked resolution is refused outright.
+    const addresses = resolved.filter(({ address }) => isManagedMcpAddressAllowed(address));
+    if (addresses.length === 0) {
+      callback(Object.assign(new Error(`MCP endpoint resolved to a blocked address.${privateAllowlistHint()}`), { code: "EACCES" }), "", 0);
       return;
     }
     if ("all" in options && options.all) {
@@ -109,7 +239,7 @@ async function safeLookup(
       return;
     }
     const requestedFamily = "family" in options && typeof options.family === "number" ? options.family : 0;
-    const selected = addresses.find((item) => requestedFamily === 0 || item.family === requestedFamily) ?? addresses[0];
+    const selected = addresses.find((item) => requestedFamily === 0 || item.family === requestedFamily) ?? addresses[0]!;
     callback(null, selected.address, selected.family);
   } catch (error) {
     callback(error as NodeJS.ErrnoException, "", 0);
