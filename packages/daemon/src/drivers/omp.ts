@@ -3,6 +3,8 @@ import os from "node:os";
 import path from "node:path";
 
 import { buildCliTransportSystemPrompt, prepareCliTransport } from "./cliTransport.js";
+import { logger } from "../logger.js";
+import { createOmpEventMappingState, mapOmpRpcFrameToParsedEvents, type OmpEventMappingState } from "./ompEventNormalizer.js";
 import {
   MAX_OMP_RPC_FRAME_BYTES,
   MAX_OMP_RPC_REASSEMBLED_BYTES,
@@ -194,6 +196,35 @@ export interface OmpRpcLaunchOverrides {
 
 const STDERR_TAIL_LIMIT = 4000;
 
+/** Phase-1 log-only frame categories: never mapped, never dropped silently. */
+const OMP_LOG_ONLY_FRAME_TYPES = new Set([
+  "advisor_cost_changed",
+  "advisor_yielded",
+  "subagent_lifecycle",
+  "subagent_progress",
+  "subagent_event",
+  "btw_delta",
+  "btw_record",
+  "live_phase",
+  "live_levels",
+  "live_transcript",
+  "live_end",
+  "command_output",
+  "available_commands_update",
+  "extension_error",
+  "extension_ui_request",
+  "session_info_update",
+  "config_update",
+  "queue_update",
+  "model_changed",
+  "thinking_level_changed",
+  "config_warnings_changed",
+  "goal_updated",
+  "agent_start",
+  "turn_start",
+  "turn_end",
+]);
+
 export class OmpDriver implements RuntimeDriver {
   readonly id = "omp";
   // Phase-1 target contract: `omp --mode rpc` is a long-lived stdio process
@@ -226,6 +257,7 @@ export class OmpDriver implements RuntimeDriver {
   private readyTimer: NodeJS.Timeout | null = null;
   private stderrTail = "";
   private readyDeferred: { promise: Promise<void>; resolve: () => void; reject: (error: Error) => void } | null = null;
+  private eventState: OmpEventMappingState = createOmpEventMappingState();
 
   // Transport state, exposed for observability and the phase-1 turn work (#3+).
   private ready = false;
@@ -307,6 +339,7 @@ export class OmpDriver implements RuntimeDriver {
     this.frameErrorCount = 0;
     this.lastFrameError = null;
     this.lastProtocolError = null;
+    this.eventState = createOmpEventMappingState();
     this.readyDeferred = this.createReadyDeferred();
 
     const command = launchOverrides.command ?? resolveOmpCommand() ?? OMP_BINARY;
@@ -401,9 +434,11 @@ export class OmpDriver implements RuntimeDriver {
       this.handleResponse(frame as unknown as OmpRpcResponseFrame);
       return [];
     }
-    // Agent/session events and every other outbound category are event-mapping
-    // territory (phase-1 task #3); the transport ignores them for now.
-    return [];
+    if (typeof type === "string" && OMP_LOG_ONLY_FRAME_TYPES.has(type)) {
+      logger.info(`[omp] ${type} frame observed (phase-1 log-only, not mapped)`);
+      return [];
+    }
+    return mapOmpRpcFrameToParsedEvents(frame, this.eventState);
   }
 
   /**

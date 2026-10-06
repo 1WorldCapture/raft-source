@@ -1,0 +1,74 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`the recorded real-session fixture maps to a stable event stream 1`] = `
+[
+  {
+    "kind": "thinking",
+    "text": "",
+  },
+  {
+    "input": {
+      "path": "<WORKSPACE>/a.txt:raw",
+    },
+    "kind": "tool_call",
+    "name": "read",
+  },
+  {
+    "kind": "tool_output",
+    "name": "read",
+    "text": "The quick brown fox jumps over the lazy dog.
+Line two of the synthetic fixture file.
+",
+  },
+  {
+    "kind": "thinking",
+    "text": "Reading a.txt to provide a one-sentence summary.
+
+Using the Read tool to fetch a.txt. The response will be in Chinese per AGENTS.md.",
+  },
+  {
+    "kind": "text",
+    "text": "",
+  },
+  {
+    "kind": "text",
+    "text": "我先读取当前目录里的 \`a.txt\`，再用一句话概括内容。",
+  },
+  {
+    "kind": "thinking",
+    "text": "",
+  },
+  {
+    "kind": "thinking",
+    "text": "The file contains the sentence "The quick brown fox jumps over the lazy dog."
+
+第二行是合成夹具的说明文字。",
+  },
+  {
+    "kind": "text",
+    "text": "",
+  },
+  {
+    "kind": "text",
+    "text": "\`a.txt\` 是一份两行的合成测试文件，第一行是全字母句 “The quick brown fox jumps over the lazy dog”，第二行标明这是夹具文件的第二行。",
+  },
+  {
+    "attrs": {
+      "cacheRead": 1152,
+      "cacheWrite": 0,
+      "costTotal": 0.10943199999999999,
+      "input": 25708,
+      "output": 454,
+      "reasoningTokens": 342,
+      "totalTokens": 27314,
+    },
+    "kind": "telemetry",
+    "name": "token_usage",
+    "source": "omp_message_end_usage",
+    "usageKind": "per_turn",
+  },
+  {
+    "kind": "turn_end",
+  },
+]
+`;
