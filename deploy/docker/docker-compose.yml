@@ -75,11 +75,19 @@ services:
       RAFT_RUN_MIGRATIONS: "1"
       RAFT_MIGRATION_TIMEOUT_MS: ${RAFT_MIGRATION_TIMEOUT_MS:-60000}
       REDIS_URL: redis://redis:6379
+      # Private deployment: this server is the only release authority for its
+      # clients (shared predicate isPrivateDeploymentMode). Version lookups
+      # read the local manifest; artifacts are served from the shared dir.
+      RAFT_DEPLOYMENT_MODE: private
+      RAFT_DOWNLOADS_DIR: /app/downloads
       # Exactly one proxy hop: the web nginx in front of the server.
       # NODE_ENV stays unset on purpose (docs/self-hosting/source-deploy.md:
       # setting it to production flips native-push validation, translations
       # and Slack Bridge behavior that need separate evaluation).
       TRUST_PROXY: "1"
+    volumes:
+      # Same host directory the web container serves /downloads from.
+      - ./downloads:/app/downloads:ro
     depends_on:
       db:
         condition: service_healthy
@@ -99,6 +107,8 @@ services:
       RAFT_SERVER_UPSTREAM: server:3001
     volumes:
       - ./certs:/etc/nginx/certs:ro
+      # Serves /downloads/ directly (alias) so artifact bytes bypass Node.
+      - ./downloads:/usr/share/nginx/downloads:ro
     ports:
       - "${RAFT_HTTP_PORT:-18443}:443"
     depends_on:

@@ -3842,6 +3842,29 @@ export function hasPlaceholderHandle(name: string | null | undefined): boolean {
   return !!name && name.toLowerCase().startsWith(PROFILE_SETUP_PLACEHOLDER_PREFIX);
 }
 
+/**
+ * The ONE canonical private-deployment predicate for the whole repo
+ * (server / web / computer). Private mode means: this Raft server is the
+ * only release authority for its clients — version lookups read the local
+ * /downloads manifest instead of the official CDN/npm (task #4), telemetry
+ * stays off and official links are neutralized (task #7). Every feature
+ * that needs "are we self-hosted/private?" must branch on THIS helper, not
+ * on its own env sniff — one entry point, one switch.
+ */
+export function isPrivateDeploymentMode(
+  raw: string | undefined = readProcessEnv().RAFT_DEPLOYMENT_MODE,
+): boolean {
+  return raw === "private";
+}
+
+// Node-free `process.env` read: shared code is compiled by the web build too
+// (no Node type definitions there). In a browser this is simply undefined —
+// web surfaces learn the mode from server-provided config, never from env.
+function readProcessEnv(): Record<string, string | undefined> {
+  const proc = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process;
+  return proc?.env ?? {};
+}
+
 export function accountNeedsIdentitySetup(user: {
   name?: string | null;
   profileSetupCompletedAt?: string | Date | null;

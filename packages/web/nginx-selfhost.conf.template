@@ -58,6 +58,20 @@ server {
         application/xml
         image/svg+xml;
 
+    # Client artifacts are served straight off the shared downloads volume —
+    # binary bytes never cross the Node event loop. Root manifests are the
+    # only mutable files (they flip on a version swap); everything under a
+    # version directory is immutable.
+    location = /downloads/computer/manifest.json { alias /usr/share/nginx/downloads/computer/manifest.json; default_type application/json; add_header Cache-Control "no-cache, must-revalidate" always; }
+    location = /downloads/cli/manifest.json { alias /usr/share/nginx/downloads/cli/manifest.json; default_type application/json; add_header Cache-Control "no-cache, must-revalidate" always; }
+    location ^~ /downloads/ {
+        # No try_files here on purpose: inside an alias location it checks the
+        # full $uri (with the /downloads/ prefix) against the filesystem and
+        # misses (nginx ticket #97); alias alone 404s missing files correctly.
+        alias /usr/share/nginx/downloads/;
+        add_header Cache-Control "public, immutable, max-age=31536000";
+    }
+
     # Everything the official template forwards, plus server-only public
     # routes. One shared proxy semantics (raft-proxy.conf): upgrade map,
     # long timeouts (socket.io, the daemon link and SSE stay open), and
