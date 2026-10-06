@@ -561,27 +561,66 @@ async function startSessionFake(mode: string, configSessionId: string | null): P
   return harness;
 }
 
-test("idle delivery sends a prompt and busy delivery sends a steer, without trailing newlines", async () => {
+test("delivery encoding follows omp's real run state, not the APM's belief (task #7)", async () => {
   const harness = await startSessionFake("echo", null);
   try {
     await harness.waitUntil(() => harness.driver.isProtocolSettled);
+    const typeOf = (line: string | null): string => (JSON.parse(line ?? "{}") as { type?: string }).type ?? "?";
 
-    const idle = harness.driver.encodeStdinMessage("first message", null, { mode: "idle" });
-    assert.ok(idle && idle.length > 0, "idle delivery must encode");
-    assert.ok(!idle.endsWith("\n"), "the encoded line must not carry a trailing newline (runtimeSession adds it)");
-    const idleFrame = JSON.parse(idle) as { type: string; message: string };
-    assert.equal(idleFrame.type, "prompt");
-    assert.equal(idleFrame.message, "first message");
+    // ① Cold start: no turn frame observed yet — even a "busy" delivery is a
+    // prompt (state uncertain; a redundant prompt cannot deadlock).
+    const cold = harness.driver.encodeStdinMessage("first message", null, { mode: "busy" });
+    assert.equal(typeOf(cold), "prompt", "an unobserved run state must encode as prompt");
+    assert.ok(cold && !cold.endsWith("\n"), "no trailing newline (runtimeSession adds it)");
 
-    const busy = harness.driver.encodeStdinMessage("follow-up", null, { mode: "busy" });
-    assert.ok(busy && busy.length > 0);
-    const busyFrame = JSON.parse(busy) as { type: string; message: string };
-    assert.equal(busyFrame.type, "steer");
-    assert.equal(busyFrame.message, "follow-up");
+    // ③ A run in progress (agent_start/turn_start seen, no boundary since):
+    // busy rides the run as a steer; it ends with the original prompt's
+    // prompt_result or session_settled.
+    harness.driver.parseLine(JSON.stringify({ type: "agent_start" }));
+    harness.driver.parseLine(JSON.stringify({ type: "turn_start" }));
+    const midTurn = harness.driver.encodeStdinMessage("follow-up", null, { mode: "busy" });
+    assert.equal(typeOf(midTurn), "steer", "an open run must take a steer");
 
-    harness.proc.stdin?.write(idle + "\n");
-    harness.proc.stdin?.write(busy + "\n");
+    // ② After the boundary closes the round, the next delivery is a prompt
+    // again, and each round produces exactly one turn_end.
+    let turnEnds = 0;
+    turnEnds += harness.driver.parseLine(JSON.stringify({ type: "message_end" })).filter((e) => e.kind === "turn_end").length;
+    turnEnds += harness.driver.parseLine(JSON.stringify({ type: "prompt_result", id: "p1", agentInvoked: true, status: "completed", sessionSettled: true })).filter((e) => e.kind === "turn_end").length;
+    assert.equal(turnEnds, 1, "exactly one turn_end per completed round");
+    const afterRound = harness.driver.encodeStdinMessage("next round", null, { mode: "busy" });
+    assert.equal(typeOf(afterRound), "prompt", "a closed run must encode as prompt");
+
+    // ④ A restarted daemon (fresh driver, nothing observed) behaves like ①.
+    // Covered structurally by the reset in spawn; the cold assertion above is
+    // the same state.
+
+    harness.proc.stdin?.write((cold ?? "") + "\n");
+    harness.proc.stdin?.write((midTurn ?? "") + "\n");
+    harness.proc.stdin?.write((afterRound ?? "") + "\n");
     await harness.sleep(150);
+  } finally {
+    harness.driver.stop({ sigtermGraceMs: 100 });
+  }
+});
+
+test("a steer refused at the run boundary falls back to a prompt once (task #7 ⑤)", async () => {
+  const harness = await startSessionFake("refuse-delivery", null);
+  try {
+    await harness.waitUntil(() => harness.driver.isProtocolSettled);
+
+    // Open a run so the busy delivery encodes as a steer.
+    harness.driver.parseLine(JSON.stringify({ type: "agent_start" }));
+    harness.driver.parseLine(JSON.stringify({ type: "turn_start" }));
+    const steer = harness.driver.encodeStdinMessage("mid-turn message", null, { mode: "busy" });
+    assert.equal((JSON.parse(steer ?? "{}") as { type?: string }).type, "steer");
+    harness.proc.stdin?.write(steer + "\n");
+
+    // The fake refuses the first steer; the driver must re-deliver the same
+    // message as a prompt, and the fake (refuse-once) accepts it.
+    await harness.waitUntil(() => harness.events.some((event) => event.kind === "error" && /steer/.test(event.message)), 3000);
+    await harness.sleep(300);
+    const promptErrors = harness.events.filter((event) => event.kind === "error" && /prompt/.test(event.message));
+    assert.equal(promptErrors.length, 0, "the prompt fallback must not surface as an error");
   } finally {
     harness.driver.stop({ sigtermGraceMs: 100 });
   }

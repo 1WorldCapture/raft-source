@@ -635,6 +635,16 @@ export class OmpDriver implements RuntimeDriver {
   readonly busyDeliveryMode = "direct" as const;
   readonly supportsNativeStandingPrompt = true;
 
+  /**
+   * omp's real run state, from the turn machine (task #7): turn frames
+   * observed and no boundary since = a run is live; anything else (nothing
+   * observed yet, or a boundary closed the turn) = no run in progress, so
+   * deliveries must reach omp as prompts to carry their own boundary.
+   */
+  isRunInProgress(): boolean {
+    return this.turnFramesObserved && !this.eventState.turnClosed;
+  }
+
   private process: ChildProcess | null = null;
   private decoder = new OmpRpcFrameDecoder();
   private requestCounter = 0;
@@ -664,8 +674,10 @@ export class OmpDriver implements RuntimeDriver {
   private resumeAttempted = false;
   private resumeFallbackNotice: string | null = null;
   private launchRetryUsed = false;
-  /** Ids issued by encodeStdinMessage; refusals surface as error events. */
-  private deliveryIds = new Map<string, string>();
+  /** Ids issued by encodeStdinMessage; refusals surface as error events —
+   *  except a refused steer, which falls back to a prompt once (task #7:
+   *  a steer racing omp's turn end must not strand the message). */
+  private deliveryIds = new Map<string, { command: "prompt" | "steer"; fallbackText?: string }>();
 
   // Raft integration (task #5): launch files, managed MCP host tools.
   private systemPromptPath: string | null = null;
@@ -674,6 +686,13 @@ export class OmpDriver implements RuntimeDriver {
   private hostTools: ManagedMcpRuntimeTool[] = [];
   /** In-flight host_tool_call executions keyed by the omp frame id. */
   private hostToolCalls = new Map<string, { controller: AbortController }>();
+  /**
+   * Whether any turn-lifecycle frame has been observed since spawn (task #7).
+   * Until one arrives the run state is UNKNOWN: the delivery encoder must
+   * prefer prompt, because a redundant prompt completes exactly once while a
+   * premature steer can strand the APM's busy belief forever.
+   */
+  private turnFramesObserved = false;
 
   /** True once the ready frame has been seen (and negotiation dispatched if offered). */
   get isReady(): boolean {
@@ -793,6 +812,7 @@ export class OmpDriver implements RuntimeDriver {
     this.readyDeferred = this.createReadyDeferred();
     this.deliveryIds.clear();
     this.hostToolCalls.clear();
+    this.turnFramesObserved = false;
     this.sessionId = null;
     this.resumeFallbackNotice = null;
     this.launchRetryUsed = false;
@@ -848,6 +868,7 @@ export class OmpDriver implements RuntimeDriver {
         this.protocolSettled = false;
         this.readyDeferred = this.createReadyDeferred();
         this.hostToolCalls.clear();
+        this.turnFramesObserved = false;
         return this.launchChild(ctx, spawnEnv, launchOverrides, null);
       }
       // Ready: settle the driver from the buffered lines (ready → negotiate →
@@ -1071,6 +1092,12 @@ export class OmpDriver implements RuntimeDriver {
     }
 
     const type = (frame as { type?: unknown }).type;
+    if (type === "agent_start" || type === "turn_start" || type === "turn_end" || type === "prompt_result" || type === "session_settled") {
+      // Task #7: the delivery encoder keys on whether omp's run state has
+      // been observed at all (see encodeStdinMessage) — any turn-lifecycle
+      // frame counts as an observation.
+      this.turnFramesObserved = true;
+    }
     if (type === "ready") {
       this.handleReady(frame as unknown as OmpRpcReadyFrame);
       return queued;
@@ -1379,12 +1406,27 @@ export class OmpDriver implements RuntimeDriver {
     // session machinery) have no pending entry; a refusal must surface as an
     // error event instead of vanishing (PM task #4 review).
     if (this.deliveryIds.has(frame.id)) {
-      const command = this.deliveryIds.get(frame.id)!;
+      const delivery = this.deliveryIds.get(frame.id)!;
       this.deliveryIds.delete(frame.id);
+      if (frame.success === false && delivery.command === "steer" && delivery.fallbackText !== undefined) {
+        // A steer refused at the run boundary (it raced omp's turn end):
+        // re-send the same message as a prompt once, so the delivery still
+        // lands and produces its own prompt_result boundary (task #7).
+        const retried = this.encodeStdinMessage(delivery.fallbackText, null, { mode: "idle" });
+        if (retried !== null) {
+          try {
+            this.process?.stdin?.write(retried + "\n");
+          } catch {
+            // Stdin died; the exit path fails pending state.
+          }
+          logger.info("[omp] steer refused at the run boundary; re-delivered as prompt");
+          return events;
+        }
+      }
       if (frame.success === false) {
         events.push({
           kind: "error",
-          message: `OMP refused ${command}: ${frame.error ?? "unknown error"}`,
+          message: `OMP refused ${delivery.command}: ${frame.error ?? "unknown error"}`,
         });
       }
     }
@@ -1477,7 +1519,17 @@ export class OmpDriver implements RuntimeDriver {
   ): string | null {
     const proc = this.process;
     if (!proc || !this.ready || this.lastProtocolError) return null;
-    const commandType = opts?.mode === "idle" ? "prompt" : "steer";
+    // Turn-state-driven encoding (task #7, PM ruling): the APM's idle/busy
+    // belief can diverge from omp's real run state — a steer-driven turn
+    // emits no prompt_result, so a busy belief can outlive the actual run
+    // and a mention queued against it would never flush. Encode by what omp
+    // can actually answer: a run in progress (turn frames observed, no
+    // boundary since) takes a steer and ends with the original prompt's
+    // prompt_result or session_settled; everything else — cold start, after
+    // a boundary, state uncertain — takes a prompt, because every prompt id
+    // completes exactly once and a redundant prompt cannot deadlock.
+    const runInProgress = this.turnFramesObserved && !this.eventState.turnClosed;
+    const commandType: "prompt" | "steer" = opts?.mode === "busy" && runInProgress ? "steer" : "prompt";
     const id = `omp-${++this.requestCounter}`;
     let line: string;
     try {
@@ -1488,7 +1540,7 @@ export class OmpDriver implements RuntimeDriver {
     } catch {
       return null;
     }
-    this.deliveryIds.set(id, commandType);
+    this.deliveryIds.set(id, commandType === "steer" ? { command: commandType, fallbackText: text } : { command: commandType });
     // Bound the tracking table: unanswered deliveries are rare and the
     // responses free their slots; overflow sheds the oldest.
     while (this.deliveryIds.size > 256) {

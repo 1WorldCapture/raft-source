@@ -4582,7 +4582,11 @@ export class AgentProcessManager {
     }
 
     this.busyDelivery.reconcile(agentId, ap, "delivery_route");
-    const isIdle = this.isApmIdle(ap);
+    // The driver's own protocol state outranks the process-level busy
+    // belief (task #7): a steer-driven omp turn emits no prompt_result, so
+    // the process-level state can stay busy long after the run ended —
+    // trusting it here would queue every later mention forever.
+    const isIdle = this.isApmIdle(ap) || ap.driver.isRunInProgress?.() === false;
 
     if (trackedBegin === "accepted" && !isIdle) {
       if (!ap.driver.supportsStdinNotification || !ap.sessionId || !this.canDeliverToRuntimeSession(ap)) {
