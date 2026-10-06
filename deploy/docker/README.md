@@ -93,13 +93,17 @@ compose 把 `${RAFT_HTTP_PORT:-18443}` 映射到 443。`RAFT_PUBLIC_ORIGIN` 必�
 二进制不经过 Node）。用仓库根的脚本从**与 server 镜像同一 commit** 构建的产物生成：
 
 ```sh
-node scripts/build-downloads.mjs --version <v> --out deploy/docker/downloads \
+node scripts/build-release-artifacts.mjs --out deploy/docker/downloads
+# 或手工喂已构建的产物（两个产品版本独立，分别指定）：
+node scripts/build-downloads.mjs --computer-version <v> --cli-version <v> \
+  --commit <sha> --out deploy/docker/downloads \
   --computer-darwin-arm64 <sea 文件> --computer-darwin-x64 <sea 文件> \
-  --computer-linux-x64 <sea 文件> --cli <raft-<v>.tgz>
+  --computer-linux-x64 <sea 文件> --cli <raft-<cli-v>.tgz>
 ```
 
 manifest 格式与 Computer 的 legacy-cdn 读取器逐字段兼容（platform key =
-`<node-platform>-<arch>`）。换版本=重跑脚本+`docker compose restart server web`。
+`<node-platform>-<arch>`），并带 `commit` 字段记录产物来源 sha——验收时可直接
+与 server 镜像的构建 SHA 比对（同 commit 契约）。换版本=重跑脚本+`docker compose restart server web`。
 server 侧 `RAFT_DEPLOYMENT_MODE=private`（compose 已设）使「最新版本」查询读本地
 manifest 而非官网——官方部署不受影响（唯一判断入口
 `isPrivateDeploymentMode`，shared）。

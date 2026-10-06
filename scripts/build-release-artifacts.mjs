@@ -5,17 +5,23 @@
 // "Same-commit" is the contract: every artifact (Computer SEA per platform,
 // CLI tarball, daemon version stamp) comes from this one checkout, matching
 // the server image built from the same SHA. The script refuses to run over
-// a dirty tree so nobody ships artifacts mixing uncommitted changes.
+// a dirty tree so nobody ships artifacts mixing uncommitted changes, and
+// stamps the sha into every manifest (--commit) so the contract is
+// verifiable on the served artifacts themselves.
 //
-// Usage (repo root, network available — the SEA step downloads the target
-// platform's official node binary):
+// Usage (repo root; the BUILD host needs network — the SEA step downloads
+// the target platform's official node binary. The DEPLOYMENT does not:
+// everything below is served offline from ./downloads):
 //   node scripts/build-release-artifacts.mjs --out deploy/docker/downloads \
 //     [--platforms darwin-arm64,darwin-x64,linux-x64] [--force]
 //
 // Each (platform, arch) runs packages/computer/scripts/native/build.mjs;
-// the CLI is bundled and packed; the daemon version is read from
-// packages/daemon/package.json. Everything is then handed to
-// scripts/build-downloads.mjs, which writes the manifest tree.
+// the CLI is bundled and packed. Product versions are read from their OWN
+// package.json — @botiverse/raft-computer for the SEA tree,
+// @botiverse/raft for the CLI tree, @botiverse/raft-daemon for the daemon
+// stamp — the three version independently and must never be conflated.
+// Everything is then handed to scripts/build-downloads.mjs, which writes
+// the manifest tree.
 
 import { execFileSync } from "node:child_process";
 import { readFile, rename, rm } from "node:fs/promises";
@@ -78,18 +84,24 @@ async function main() {
   const cliDest = path.join(seaDir, `raft-${cliVersion}.tgz`);
   await rename(path.join(seaDir, packedName), cliDest);
 
+  // Independent product versions: the SEA tree carries the Computer package
+  // version, the CLI tree the CLI package version, the latest pointer the
+  // daemon package version. Never pass one package's version for another.
+  const computerPackage = JSON.parse(await readFile(path.join(repoRoot, "packages/computer/package.json"), "utf8"));
   const daemonPackage = JSON.parse(await readFile(path.join(repoRoot, "packages/daemon/package.json"), "utf8"));
 
   const buildDownloadsArgs = [
     path.join(repoRoot, "scripts/build-downloads.mjs"),
-    "--version", cliVersion,
+    "--computer-version", computerPackage.version,
+    "--cli-version", cliVersion,
     "--daemon-version", daemonPackage.version,
+    "--commit", sha,
     "--out", outDir,
     "--cli", cliDest,
     ...seaFiles.flatMap(([platform, file]) => [`--computer-${platform}`, file]),
   ];
   run("node", buildDownloadsArgs, { cwd: repoRoot });
-  console.log(`[release] done: ${outDir} (computer ${cliVersion} / daemon ${daemonPackage.version}, ${platforms.length} platforms, sha ${sha.slice(0, 8)})`);
+  console.log(`[release] done: ${outDir} (computer ${computerPackage.version} / cli ${cliVersion} / daemon ${daemonPackage.version}, ${platforms.length} platforms, sha ${sha.slice(0, 8)})`);
 }
 
 main().catch((err) => {
