@@ -692,6 +692,7 @@ export const zhCn: Record<MessageId, string> = {
   "agent.detail.otherAgentRuntimeDescription": "用于其他 Agent 运行时或自定义 harness 的流程。",
   "agent.detail.copySetup": "复制设置",
   "agent.detail.externalClaudeInstallTitle": "安装或升级 Raft CLI 和 Claude Code 频道插件",
+  "agent.detail.externalClaudeMarketplacePrivate": "本部署处于内网，无法访问 Claude Code 插件市场；插件步骤请在外部可联网的机器上完成。",
   "agent.detail.externalLoginProfileTitle": "登录此 Agent profile",
   "agent.detail.externalClaudeStartTitle": "启动带 Raft 频道的 Claude Code",
   "agent.detail.externalInstallRaftCliTitle": "安装或升级 Raft CLI",

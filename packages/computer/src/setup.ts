@@ -74,6 +74,7 @@ import type { ComputerTracer } from "./lib/traceTypes.js";
 import { formatUpgradeLogTimestamp, resolveRaftHome, serverAttachmentPath } from "./paths.js";
 import { resolveServerUrl, resolveServerUrlEnv } from "./serverUrl.js";
 import { formatServerSlugDisplay, migrateKnownServerUrl, normalizeServerSlug, resolveAttachedServerSlug } from "./serverState.js";
+import { isPrivateClientContext, resolveAttachmentWebOrigin } from "./computerRelease.js";
 import {
   adoptLegacyByDaemonId as adoptLegacyByDaemonIdService,
   adoptLegacyByFingerprint as adoptLegacyByFingerprintService,
@@ -1183,9 +1184,21 @@ async function attachFromSetup(
   }
 }
 
-function emitSetupRunningSummary(emit: (line: string) => void, opts: SetupOptions): void {
+/** Private deployments (task #7): the slug's own attachment origin when the
+ *  machine is in a private context, else null (official URL). */
+async function resolvePrivateAppServerUrl(slockHome: string, serverSlug: string): Promise<string | null> {
+  if (!(await isPrivateClientContext(slockHome))) return null;
+  return resolveAttachmentWebOrigin(slockHome, serverSlug);
+}
+
+async function emitSetupRunningSummary(
+  emit: (line: string) => void,
+  slockHome: string,
+  opts: SetupOptions,
+): Promise<void> {
   emit("Raft Computer is running. Agents can now use this computer.");
-  emit(`Next: chat with your agents at ${appServerUrl(opts.serverSlug)}`);
+  const privateOrigin = await resolvePrivateAppServerUrl(slockHome, opts.serverSlug);
+  emit(`Next: chat with your agents at ${privateOrigin ? `${privateOrigin}/s/${normalizeServerSlug(opts.serverSlug)}` : appServerUrl(opts.serverSlug)}`);
   emit("(check this computer anytime with `raft-computer status`)");
 }
 
@@ -1364,9 +1377,15 @@ export async function setupCore(
       // not required, so wiped state and brand-new checkouts remain supported.
       const machineId = opts.machine.trim();
       if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(machineId)) {
+        // Private deployments (task #7): point at THIS server's computers
+        // page when the slug's attachment origin is known.
+        const privateOrigin = await resolvePrivateAppServerUrl(slockHome, opts.serverSlug);
+        const computersUrl = privateOrigin
+          ? `${privateOrigin}/s/${encodeURIComponent(opts.serverSlug)}/computers`
+          : `https://app.raft.build/s/${encodeURIComponent(opts.serverSlug)}/computers`;
         throw new ComputerError(
           "SETUP_MACHINE_INVALID",
-          `--machine expects the machine id shown on the web Computers page (a UUID), got: ${machineId}. Open https://app.raft.build/s/${encodeURIComponent(opts.serverSlug)}/computers and copy the id from your computer's Migrate command.`,
+          `--machine expects the machine id shown on the web Computers page (a UUID), got: ${machineId}. Open ${computersUrl} and copy the id from your computer's Migrate command.`,
         );
       }
       recordMigrationDecision(tracer, migrationAttemptId, {
@@ -1712,7 +1731,7 @@ export async function setupCore(
   if (shouldPushMigrationDiagnosticsAfterStart) {
     await forceMigrationDiagnostics(slockHome, diagnosticsPush, emit, migrationAttemptId);
   }
-  emitSetupRunningSummary(emit, opts);
+  await emitSetupRunningSummary(emit, slockHome, opts);
   return;
   }
 }

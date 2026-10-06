@@ -985,12 +985,20 @@ function AgentProfileInfo({ agent, canManageAgent, canChangeAgentRole, onOpenPro
       title: formatMessage({ id: "agent.detail.externalClaudeInstallTitle" }),
       command: [
         externalCliInstallCommand,
-        "claude plugin marketplace add botiverse/raft-external-agents",
-        "claude plugin marketplace update raft",
-        "claude plugin install raft-channel@raft",
-        "claude plugin update raft-channel@raft",
+        // Task #7: the marketplace commands reach GitHub and can never work
+        // in an air-gapped private deployment — omitted there with a note.
+        ...(deploymentModeForCli === "private"
+          ? []
+          : [
+              "claude plugin marketplace add botiverse/raft-external-agents",
+              "claude plugin marketplace update raft",
+              "claude plugin install raft-channel@raft",
+              "claude plugin update raft-channel@raft",
+            ]),
       ].join(" && "),
-      description: "",
+      description: deploymentModeForCli === "private"
+        ? formatMessage({ id: "agent.detail.externalClaudeMarketplacePrivate" })
+        : "",
     },
     {
       title: formatMessage({ id: "agent.detail.externalLoginProfileTitle" }),

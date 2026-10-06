@@ -29,6 +29,7 @@ import {
 } from "../paths.js";
 import { formatServerSlugDisplay, normalizeServerSlug, resolveAttachedServerSlug } from "../serverState.js";
 import { canonicalizeServerUrl, resolveServerUrl, resolveServerUrlEnv } from "../serverUrl.js";
+import { isPrivateClientContext, resolveAttachmentWebOrigin } from "../computerRelease.js";
 import type { ComputerApiEvent } from "../lib/events.js";
 import { ComputerServiceError } from "./errors.js";
 import {
@@ -87,16 +88,22 @@ function emit(opts: AttachOptions | undefined, event: ComputerApiEvent): void {
   }
 }
 
-function attachNotAuthorizedMessage(
+async function attachNotAuthorizedMessage(
   slugForServer: string,
   slockHome: string,
   identity: UserSessionIdentity | null,
-): string {
+): Promise<string> {
+  // Private deployments (task #7): link to THIS server's dashboard when the
+  // slug's attachment origin is known.
+  const privateWebOrigin = (await isPrivateClientContext(slockHome))
+    ? await resolveAttachmentWebOrigin(slockHome, slugForServer)
+    : null;
   return accountUnavailableMessage({
     serverLabel: formatServerSlugDisplay(slugForServer),
     serverSlug: slugForServer,
     slockHome,
     identity,
+    privateWebOrigin,
   });
 }
 
@@ -217,7 +224,7 @@ export async function attach(input: AttachInput, options: AttachOptions = {}): P
   if (attached.status === "not_authorized") {
     throw new ComputerServiceError(
       "ATTACH_NOT_AUTHORIZED",
-      attachNotAuthorizedMessage(slugForServer, slockHome, await readUserSessionIdentity(slockHome)),
+      await attachNotAuthorizedMessage(slugForServer, slockHome, await readUserSessionIdentity(slockHome)),
     );
   }
   if (attached.status === "requires_admin") {

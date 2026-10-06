@@ -32,6 +32,9 @@ export interface AccountUnavailableMessageInput {
   env?: NodeJS.ProcessEnv;
   homeDir?: string;
   platform?: NodeJS.Platform;
+  /** Private deployments (task #7): the slug attachment's own web origin —
+   *  the dashboard link points there instead of app.raft.build. */
+  privateWebOrigin?: string | null;
 }
 
 export function resolveAccountUnavailableLocale(
@@ -53,7 +56,9 @@ export function accountUnavailableMessage(
   const profileCommand = markdownCodeSpan(
     profileRecoveryCommand(alternateHome, input.serverLabel, platform, homeDir),
   );
-  const webUrl = `https://app.raft.build/s/${encodeURIComponent(input.serverSlug)}/`;
+  const webUrl = input.privateWebOrigin
+    ? `${input.privateWebOrigin}/s/${encodeURIComponent(input.serverSlug)}/`
+    : `https://app.raft.build/s/${encodeURIComponent(input.serverSlug)}/`;
 
   return interpolate(ACCOUNT_UNAVAILABLE_MESSAGES[locale].serverUnavailable, {
     server: input.serverLabel,

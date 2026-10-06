@@ -128,7 +128,18 @@ HTTPS（或 Tailscale tailnet）。若用 `http://` origin，安装与升级都�
 **注意**：机器上已全局安装的官方 `@botiverse/raft-daemon` 会被上述安装**覆盖**为
 本服务器版本——这是预期行为（私有部署的机器必须用同源产物）。manual 占位符在
 服务器缺产物/缺 SERVER_URL 时回退官方命令并记警告日志；官方部署渲染逐字节不变
-（快照测试锁定）。换版本=重跑脚本+`docker compose restart server web`。
+（快照测试锁定）。
+
+**遥测与官方链接（task #7）**：
+- **遥测默认关（隐私红线）**：daemon/Computer 的 trace 上报四层策略——
+  `SLOCK_DAEMON_TRACE_UPLOAD_DISABLED=1`（最高）> `SLOCK_DAEMON_TRACE_UPLOAD_URL`
+  显式设置（**唯一的显式打开方式**，指向自选 worker）> 私有上下文（`RAFT_DEPLOYMENT_MODE=private`
+  env 或安装器持久化的 `computer/release-backend=server`）默认关 > 官方部署默认开（行为不变）。
+- **链接中性化**：CLI 帮助/doctor/setup 输出中的 dashboard 深链接改拼 **slug 所属附件的
+  origin**（`${origin}/s/<slug>/...`），社区链接隐藏；web 的 docs 入口私有下隐藏（可用
+  `RAFT_PUBLIC_DOCS_URL` 配置）；邮件中的官方链接隐藏（社区/移动端 CTA/文档），
+  许可与隐私链接保留但可用 `RAFT_PUBLIC_TERMS_URL`/`RAFT_PUBLIC_PRIVACY_URL` 替换；
+  agent 外部指引的 `claude plugin marketplace` 步骤私有下省略并附内网说明。换版本=重跑脚本+`docker compose restart server web`。
 server 侧 `RAFT_DEPLOYMENT_MODE=private`（compose 已设）使「最新版本」查询读本地
 manifest 而非官网——官方部署不受影响（唯一判断入口
 `isPrivateDeploymentMode`，shared）。

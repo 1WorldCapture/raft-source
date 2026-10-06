@@ -1,10 +1,11 @@
 import { clearClockTimeout, setClockTimeout, isPrivateDeploymentMode } from "@botiverse/raft-shared";
 import { ComputerServiceError } from "./services/errors.js";
-import { listServerAttachments } from "./serverState.js";
+import { listServerAttachments, resolveAttachedServerSlug } from "./serverState.js";
 import { canonicalizeServerUrl } from "./serverUrl.js";
 import {
   parseReleaseBackend,
   readReleaseBackend,
+  readReleaseBackendSync,
   RELEASE_BACKEND_ENV,
   type ReleaseBackend,
 } from "./lib/releaseBackendState.js";
@@ -109,6 +110,46 @@ export async function resolveUpgradeSourceForHome(
     ? await resolveServerDownloadsBase(slockHome)
     : resolveUpgradeBaseUrl(env);
   return { backend, baseUrl };
+}
+
+// --- private client context (task #7: telemetry + link neutralization) ----
+
+/**
+ * Whether THIS client machine operates in a private deployment context —
+ * the same two triggers as the release backend (task #5): the canonical
+ * env switch, or the installer-persisted server backend. Daemon and
+ * Computer telemetry/link surfaces share this single predicate.
+ */
+export async function isPrivateClientContext(
+  slockHome: string,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<boolean> {
+  if (isPrivateDeploymentMode(env.RAFT_DEPLOYMENT_MODE)) return true;
+  return (await readReleaseBackend(slockHome)) === "server";
+}
+
+/** Synchronous twin for the CLI error presenter (cannot await). */
+export function isPrivateClientContextSync(
+  slockHome: string,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  if (isPrivateDeploymentMode(env.RAFT_DEPLOYMENT_MODE)) return true;
+  return readReleaseBackendSync(slockHome) === "server";
+}
+
+/**
+ * The dashboard web origin OWNED BY this slug's attachment (private-neutral
+ * deep links): the server and the web UI are same-origin in the standard
+ * self-host topology, so the attachment's serverUrl IS the dashboard origin.
+ * Per-slug — a multi-server Computer never borrows another attachment's
+ * origin. null when the slug has no attachment.
+ */
+export async function resolveAttachmentWebOrigin(
+  slockHome: string,
+  serverSlug: string,
+): Promise<string | null> {
+  const attachment = await resolveAttachedServerSlug(slockHome, serverSlug);
+  return attachment ? canonicalizeServerUrl(attachment.serverUrl) : null;
 }
 
 export type ComputerLatestVersionResolveResult =

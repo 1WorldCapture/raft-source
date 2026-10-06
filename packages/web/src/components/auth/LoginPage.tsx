@@ -1,6 +1,8 @@
 import { useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import { useIntl } from "react-intl";
+import { useDeploymentLinks } from "../../utils/deploymentMode";
+import { effectiveLegalUrls } from "../../utils/legalLinks";
 import { CURRENT_LEGAL_ACCEPTANCE } from "@botiverse/raft-shared";
 import { useAuthStore } from "../../store/authStore";
 import type { SocialAuthProviderId } from "../../hooks/useAuthProviders";
@@ -22,6 +24,7 @@ interface LoginPageProps {
 
 export default function LoginPage({ onSwitchToRegister, onForgotPassword }: LoginPageProps) {
   const { formatMessage } = useIntl();
+  const legalUrls = effectiveLegalUrls(useDeploymentLinks());
   const login = useAuthStore((s) => s.login);
   const loading = useAuthStore((s) => s.loading);
   const { enabledProviders } = useAuthProviders();
@@ -149,7 +152,7 @@ export default function LoginPage({ onSwitchToRegister, onForgotPassword }: Logi
               terms: (c: ReactNode) => (
                 <a
                   key="terms"
-                  href={CURRENT_LEGAL_ACCEPTANCE.termsUrl}
+                  href={legalUrls.termsUrl}
                   target="_blank"
                   rel="noreferrer"
                   className="underline hover:text-black"
@@ -160,7 +163,7 @@ export default function LoginPage({ onSwitchToRegister, onForgotPassword }: Logi
               privacy: (c: ReactNode) => (
                 <a
                   key="privacy"
-                  href={CURRENT_LEGAL_ACCEPTANCE.privacyUrl}
+                  href={legalUrls.privacyUrl}
                   target="_blank"
                   rel="noreferrer"
                   className="underline hover:text-black"

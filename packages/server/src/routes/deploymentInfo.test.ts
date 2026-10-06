@@ -92,4 +92,25 @@ describe("GET /api/deployment-info", () => {
     const res = await fetch(`${baseUrl}/api/deployment-info`);
     assert.deepEqual(await res.json(), { deploymentMode: "private" });
   });
+
+  test("operator-configured link replacements ride along (task #7)", async () => {
+    process.env.RAFT_DEPLOYMENT_MODE = "private";
+    process.env.SERVER_URL = "https://raft.internal.example:18443";
+    process.env.RAFT_PUBLIC_DOCS_URL = "https://docs.internal.example";
+    process.env.RAFT_PUBLIC_TERMS_URL = "https://internal.example/terms";
+    process.env.RAFT_PUBLIC_PRIVACY_URL = "https://internal.example/privacy";
+    try {
+      const res = await fetch(`${baseUrl}/api/deployment-info`);
+      const body = (await res.json()) as { links?: Record<string, unknown> };
+      assert.equal(body.links?.docsUrl, "https://docs.internal.example");
+      assert.deepEqual(body.links?.legal, {
+        termsUrl: "https://internal.example/terms",
+        privacyUrl: "https://internal.example/privacy",
+      });
+    } finally {
+      delete process.env.RAFT_PUBLIC_DOCS_URL;
+      delete process.env.RAFT_PUBLIC_TERMS_URL;
+      delete process.env.RAFT_PUBLIC_PRIVACY_URL;
+    }
+  });
 });

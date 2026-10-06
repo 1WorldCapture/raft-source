@@ -20,6 +20,21 @@ const SYSTEM_FONT_FAMILY = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Robot
 const RAFT_DISPLAY_FONT_FAMILY = "'Space Grotesk', Arial, sans-serif";
 const NEWSLETTER_FOOTER_LINK = "#9A9A9A";
 const PRIVACY_URL = "https://raft.build/privacy";
+
+// --- Private deployment link neutralization (task #7) -----------------------
+// Official links render ONLY in official deployments; private ones hide
+// them (or swap in the operator-configured URL via RAFT_PUBLIC_* env).
+import { isPrivateDeploymentMode } from "@botiverse/raft-shared";
+
+/** Operator-configured replacements for official link surfaces. */
+function publicDocsUrl(): string | null {
+  return process.env.RAFT_PUBLIC_DOCS_URL?.trim() || null;
+}
+
+function privacyPolicyUrl(): string | null {
+  if (!isPrivateDeploymentMode()) return PRIVACY_URL;
+  return process.env.RAFT_PUBLIC_PRIVACY_URL?.trim() || null;
+}
 const NEWSLETTER_LEGAL_ADDRESS = "Botiverse, Inc. · 1111B S Governors Ave, Suite 95905, Dover, DE 19904, US";
 const ONBOARDING_AGENT_DOCS_URL = "https://docs.raft.build/meet-your-onboarding-agent/";
 export const MOBILE_APP_DOWNLOAD_URL = "https://app.raft.build/download";
@@ -258,7 +273,10 @@ function emailButton(
 </div>`;
 }
 
-function feedbackCommunityUrl(): string {
+function feedbackCommunityUrl(): string | null {
+  if (isPrivateDeploymentMode()) {
+    return process.env.FEEDBACK_RECEIPT_COMMUNITY_URL?.trim() || null;
+  }
   return process.env.FEEDBACK_RECEIPT_COMMUNITY_URL || "https://app.raft.build/join/2ygbinDD9pvXuySuJrSEjg";
 }
 
@@ -284,9 +302,10 @@ export function renderFeedbackReportReceiptEmailHtml(input: {
     <h1 style="margin: 0 0 16px 0; color: ${SLOCK_INK}; font-size: 22px; font-weight: bold;">We got your feedback 🙏</h1>
     ${greeting}
     <p style="margin: 0 0 8px 0; color: ${SLOCK_INK}; font-size: 15px; line-height: 1.5;">Thanks for sending this our way — your report came through and it's with our team. We'll follow up.</p>
+    ${communityUrl ? `
     <p style="margin: 0; color: ${SLOCK_INK}; font-size: 15px; line-height: 1.5;">Have a question or want to reach us? Come say hi in our community.</p>
     ${emailButton(communityUrl, "Join the Raft community")}
-    <p class="slock-muted" style="margin: 0 0 16px 0; color: ${SLOCK_MUTED}; font-size: 13px; line-height: 1.5;">Or copy this link: <a class="slock-link" href="${communityUrl}" style="color: ${SLOCK_LINK}; word-break: break-all;">${communityUrl}</a></p>
+    <p class="slock-muted" style="margin: 0 0 16px 0; color: ${SLOCK_MUTED}; font-size: 13px; line-height: 1.5;">Or copy this link: <a class="slock-link" href="${communityUrl}" style="color: ${SLOCK_LINK}; word-break: break-all;">${communityUrl}</a></p>` : ""}
     <p style="margin: 0; color: ${SLOCK_INK}; font-size: 15px; line-height: 1.5;">Thanks for helping make ${BRAND_NAME} better.</p>
     <p style="margin: 24px 0 0 0; color: ${SLOCK_INK}; font-size: 15px; line-height: 1.5;">— Cindy &amp; the ${BRAND_NAME} team</p>
   `);
@@ -407,18 +426,28 @@ function onboardingBookingLink(): string {
 }
 
 function onboardingAgentDocsLink(): string {
-  return `<a class="slock-link" href="${ONBOARDING_AGENT_DOCS_URL}" style="color: ${SLOCK_LINK}; text-decoration: underline;">here's a short guide</a>`;
+  // Private deployments (task #7): link only to an operator-configured
+  // docs site; otherwise plain text without an official link.
+  const href = isPrivateDeploymentMode() ? publicDocsUrl() : ONBOARDING_AGENT_DOCS_URL;
+  return href
+    ? `<a class="slock-link" href="${escapeHtmlText(href)}" style="color: ${SLOCK_LINK}; text-decoration: underline;">here's a short guide</a>`
+    : `here's a short guide`;
 }
 
 function renderNewsletterStyleFooter(): string {
-  const privacyUrl = escapeHtmlText(PRIVACY_URL);
+  const privacyUrl = privacyPolicyUrl();
   const legalAddress = escapeHtmlText(NEWSLETTER_LEGAL_ADDRESS);
+  // Private deployments without a configured privacy URL keep only the
+  // legal address — never a link to the official site (task #7).
+  const privacyHtml = privacyUrl
+    ? `<a href="${escapeHtmlText(privacyUrl)}" style="color:${NEWSLETTER_FOOTER_LINK};text-decoration:underline;">Privacy Policy</a> · `
+    : "";
 
   // Onboarding welcome/day-1 are relationship emails, not marketing: no unsubscribe.
   return `
           <tr>
             <td style="padding-top: 24px; text-align: center;">
-              <p class="slock-footer-links" style="font-size:10px;line-height:1.5;color:${NEWSLETTER_FOOTER_LINK};margin:0;text-align:center;"><a href="${privacyUrl}" style="color:${NEWSLETTER_FOOTER_LINK};text-decoration:underline;">Privacy Policy</a> · <span style="color:${NEWSLETTER_FOOTER_LINK};text-decoration:none;">${legalAddress}</span></p>
+              <p class="slock-footer-links" style="font-size:10px;line-height:1.5;color:${NEWSLETTER_FOOTER_LINK};margin:0;text-align:center;">${privacyHtml}<span style="color:${NEWSLETTER_FOOTER_LINK};text-decoration:none;">${legalAddress}</span></p>
             </td>
           </tr>`;
 }
@@ -599,6 +628,9 @@ export async function sendMobileAppDownloadEmail(
   } = {},
 ): Promise<string | null> {
   const copy = mobileAppEmailCopy(options.locale);
+  // Private deployments (task #7): the official mobile-app journey is
+  // meaningless — the download CTA points at the official site.
+  if (isPrivateDeploymentMode()) return null;
   return sendEmail(to, copy.subject, renderMobileAppDownloadEmailHtml(options.locale), {
     from: mobileAppEmailFromEmail(),
     replyTo: mobileAppEmailReplyToEmail(),

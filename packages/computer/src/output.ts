@@ -4,6 +4,7 @@
 // guarantee, and support link.
 import { isComputerError } from "./lib/errors.js";
 import { formatRaftHomeForDisplay, resolveRaftHome } from "./paths.js";
+import { isPrivateClientContextSync } from "./computerRelease.js";
 
 const SUPPORT_URL = "https://app.raft.build/s/community/";
 
@@ -36,7 +37,10 @@ export function formatHumanError(code: string, message: string, next = inferNext
     formatWhatHappened(code, message),
     `Next: ${next.length > 0 ? next.join(" && ") : fallbackNextCommand(code)}`,
     `State: ${stateGuarantee(code)}`,
-    `Help: ${SUPPORT_URL}`,
+    // Private deployments never point users at the official community
+    // (task #7 link neutralization); the line is omitted rather than
+    // guessed — the error's own Next: guidance stays.
+    ...(isPrivateClientContextSync(resolveRaftHome()) ? [] : [`Help: ${SUPPORT_URL}`]),
   ];
   const note = postHelpNote(code, message);
   if (note) lines.push(note);
