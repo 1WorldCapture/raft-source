@@ -19,6 +19,8 @@ import { BrowserWindow, app, dialog, ipcMain, nativeImage, protocol, session, sh
 import { ELECTRON_IPC_CHANNELS } from "@raft/desktop-contract";
 import { createComputerApi, runResident, runService } from "@botiverse/raft-computer/lib";
 import { installApplicationMenu } from "../main/appMenu.js";
+import { createCursorSdkControls } from "./cursorSdkControls.js";
+import { isCursorSdkE2eBuild } from "../main/cursorSdkE2eBuild.js";
 import {
   applyDownloadedUpdate,
   checkForUpdatesManually,
@@ -40,6 +42,7 @@ import { buildApiOrigins, isOfficialApiBuild } from "./configuredApiOrigin.js";
 import { requestStorageWipeAndRelaunch, resolvePendingStorageWipe } from "./storageDoctor.js";
 import { createOAuthCoordinator } from "./oauthCoordinator.js";
 import { ComputerHost } from "./computerHost.js";
+import { resolveBundledCursorSdkAssets } from "./cursorSdkAssets.js";
 import { installStatusMonitorLifecycle } from "../main/statusMonitorLifecycle.js";
 import { createStatusMonitor } from "../main/statusMonitor.js";
 import { createAppProtocolHandler } from "../main/appProtocol.js";
@@ -64,6 +67,7 @@ const TRAFFIC_LIGHT_INSET_X = 16;
 const TRAFFIC_LIGHT_INSET_Y = 16;
 
 const APP_VERSION = app.getVersion();
+const desktopUpdaterAllowed = isOfficialApiBuild() && !isCursorSdkE2eBuild(APP_VERSION);
 
 // ─── Computer host (raft-computer) argv dispatch ──────────────────────────────
 // The detached Computer service re-execs THIS binary with a hidden `__service` /
@@ -103,6 +107,29 @@ if (!process.env.RAFT_COMPUTER_CLI_PATH) {
   }
 }
 
+// Cursor SDK runtime assets (cursor-sdk runtime id): the daemon refuses to
+// import @cursor/sdk in-process; it spawns the STAGED Node binary against the
+// staged host entries instead. Packaged builds ship the asset root under
+// <resources>/cursor-sdk (electron-builder extraResources) and we publish its
+// exact location via RAFT_CURSOR_SDK_ASSETS BEFORE any daemon import — the
+// detached __service/__run children inherit it, so every daemon this app
+// spawns resolves the same root. Dev (unpackaged) builds leave it unset: the
+// daemon then discovers packages/daemon/runtime-assets/cursor/<version>/<target>
+// built by `pnpm --filter @botiverse/raft-daemon build:cursor-assets`.
+const bundledCursorSdkAssets = resolveBundledCursorSdkAssets({
+  isPackaged: app.isPackaged,
+  resourcesPath: process.resourcesPath,
+});
+if (bundledCursorSdkAssets.root) {
+  process.env.RAFT_CURSOR_SDK_ASSETS = bundledCursorSdkAssets.root;
+} else if (bundledCursorSdkAssets.missing && !process.env.RAFT_CURSOR_SDK_ASSETS) {
+  // Fail loud but non-fatal: the cursor-sdk runtime reports unavailable with
+  // an actionable diagnostic; every other runtime is unaffected.
+  console.warn(
+    `[raft-desktop] packaged build is missing cursor-sdk assets under ${process.resourcesPath}; the cursor-sdk runtime will be unavailable until the app is rebuilt with build:cursor-assets.`,
+  );
+}
+
 const headlessMode = findHeadlessMode(process.argv);
 
 // Dev-only: point this instance at its own userData directory. The
@@ -120,6 +147,10 @@ if (userDataOverride) app.setPath("userData", userDataOverride);
 // lock and has consumed any pending wipe (see the lock-held branch below).
 let storageWipedThisBoot = false;
 let computerHost: ComputerHost | null = null;
+const cursorSdkControls = createCursorSdkControls(() => {
+  if (!computerHost) throw new Error("Local Computer is not ready.");
+  return computerHost.slockHome;
+});
 let menubarResident: MenubarResident | null = null;
 let mainWindow: BrowserWindow | null = null;
 let lifecycle = INITIAL_LIFECYCLE_STATE;
@@ -561,6 +592,7 @@ function applyLifecycle(event: LifecycleEvent): void {
 }
 
 function markQuitting(): void {
+  cursorSdkControls.cancelLogin();
   computerStatusMonitor?.setActive(false);
   applyLifecycle({ type: "before-quit" });
 }
@@ -694,6 +726,12 @@ if (headlessMode?.mode === "__service") {
     installApiCorsBridge();
     registerIpcHandlers();
     installApplicationMenu({
+      cursorSdk: {
+        status: () => { void cursorSdkControls.showStatus(); },
+        login: () => { void cursorSdkControls.connect(); },
+        cancelLogin: () => { cursorSdkControls.cancelLogin(); },
+        disconnect: () => { void cursorSdkControls.disconnect(); },
+      },
       openAbout: () => {
         // A native About panel; the app's own UI can add a richer one later.
         app.setAboutPanelOptions({
@@ -703,7 +741,7 @@ if (headlessMode?.mode === "__service") {
         });
         app.showAboutPanel();
       },
-      checkForUpdates: () => void checkForUpdatesManually({ markQuitting, updaterAllowed: isOfficialApiBuild() }),
+      checkForUpdates: () => void checkForUpdatesManually({ markQuitting, updaterAllowed: desktopUpdaterAllowed }),
       reload: () => focusedWindow()?.webContents.reload(),
       zoom,
       focusedServerWindow: () => focusedWindow(),
@@ -711,7 +749,7 @@ if (headlessMode?.mode === "__service") {
 
     // Self-hosted builds (VITE_API_URL → non-official origin) must not pull
     // official updates over a self-hosted install (see autoUpdater.ts).
-    const updaterDeps = { markQuitting, updaterAllowed: isOfficialApiBuild() };
+    const updaterDeps = { markQuitting, updaterAllowed: desktopUpdaterAllowed };
     initializeAutoUpdater(updaterDeps);
     registerAppUpdateIpc(updaterDeps);
 

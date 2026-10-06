@@ -5,6 +5,7 @@ import { GrokDriver } from "./grok.js";
 import { AntigravityDriver } from "./antigravity.deprecated.js";
 import { CopilotDriver } from "./copilot.js";
 import { CursorDriver } from "./cursor.js";
+import { CursorSdkDriver } from "./cursor-sdk.js";
 import { GeminiDriver } from "./gemini.js";
 import { KimiDriver } from "./kimi.js";
 import { KimiSdkDriver } from "./kimi-sdk.js";
@@ -51,6 +52,7 @@ const driverFactories: Record<string, () => RuntimeDriver> = {
   antigravity: () => new AntigravityDriver(),
   copilot: () => new CopilotDriver(),
   cursor: () => new CursorDriver(),
+  "cursor-sdk": () => new CursorSdkDriver(),
   gemini: () => new GeminiDriver(),
   // Two separate Kimi runtimes (per #proj-runtime:cc818e65 6/16 consensus):
   //   - `kimi`     = legacy kimi-cli child-process driver. Backward-compat for

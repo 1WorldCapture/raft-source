@@ -170,6 +170,9 @@ export function supportsRuntimeApiUrl(runtime: string): boolean {
 }
 
 export function runtimeApiUrlUnsupportedCopy(runtime: string): string | null {
+  if (runtime === "cursor-sdk") {
+    return "Cursor SDK uses the Cursor account connected on this computer. Manage its login from the desktop Cursor SDK menu, not a per-agent API URL.";
+  }
   if (runtime === "cursor") {
     return "Cursor CLI does not expose a per-agent API URL flag or env var. Configure provider routing in Cursor itself.";
   }
@@ -177,7 +180,7 @@ export function runtimeApiUrlUnsupportedCopy(runtime: string): string | null {
 }
 
 export function supportsRuntimeCustomModelName(runtime: string): boolean {
-  return runtime === "builtin" || runtime === "claude" || runtime === "codex" || runtime === "cursor" || runtime === "copilot" || runtime === "pi";
+  return runtime === "builtin" || runtime === "claude" || runtime === "codex" || runtime === "cursor" || runtime === "cursor-sdk" || runtime === "copilot" || runtime === "pi";
 }
 
 /** Antigravity owns model selection internally; its Web model field is ignored. */

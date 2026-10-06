@@ -12,6 +12,12 @@ export interface AppMenuActions {
   reload(): void;
   zoom(direction: "in" | "out" | "reset"): void;
   focusedServerWindow(): BrowserWindow | null;
+  cursorSdk?: {
+    status(): void;
+    login(): void;
+    cancelLogin(): void;
+    disconnect(): void;
+  };
 }
 
 export function installApplicationMenu(actions: AppMenuActions): void {
@@ -80,6 +86,16 @@ export function installApplicationMenu(actions: AppMenuActions): void {
         },
       ],
     },
+    ...(actions.cursorSdk ? [{
+      label: "Cursor SDK",
+      submenu: [
+        { label: "Connection Status…", click: () => actions.cursorSdk!.status() },
+        { label: "Connect / Sign In…", click: () => actions.cursorSdk!.login() },
+        { label: "Cancel Sign In", click: () => actions.cursorSdk!.cancelLogin() },
+        { type: "separator" as const },
+        { label: "Disconnect from Raft…", click: () => actions.cursorSdk!.disconnect() },
+      ],
+    }] : []),
     {
       label: "Window",
       role: "windowMenu",

@@ -126,6 +126,11 @@ export * from "./agentMigrationObjectStoreBundle.js";
 export * from "./agentMigrationResumableBundle.js";
 export * from "./agentMigrationImport.js";
 export * from "./legacySupervisor.js";
+// Cursor SDK runtime-auth broker (AUTH worker): credential leases, live
+// model detection, and the owner login/status/logout controls the Computer
+// surface drives. The auth host entry itself (cursorSdk/authHost.ts) is a
+// standalone process source, not an in-daemon API.
+export * from "./runtimeAuth/cursor/nativeCredentialBroker.js";
 import { readSecretFileSync } from "./secretFile.js";
 import {
   createRuntimeAccountUsageCollector,

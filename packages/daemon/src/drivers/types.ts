@@ -132,9 +132,31 @@ export type ParsedEvent =
       kind: "delivery_error";
       message: string;
       requestMethod: "turn/start" | "turn/steer";
-      source: "codex_app_server_response" | "grok_acp_response" | "kimi_sdk_response" | "pi_sdk_response";
+      source:
+        | "codex_app_server_response"
+        | "grok_acp_response"
+        | "kimi_sdk_response"
+        | "pi_sdk_response"
+        | "cursor_sdk_response";
       code?: "turn.agent_busy" | "runtime.delivery_error";
       payloadBytes?: number;
+    }
+  // Delivery-outcome acknowledgment for runtimes in the attempt protocol
+  // (cursor-sdk): answers one follow-up send that carried an APM-owned
+  // `attemptId`. `delivered` = the submission reached the conversation;
+  // `deferred_to_idle` = the runtime reverted the submission — a native
+  // revert, NOT a runtime error (no error UI; the APM restores only the
+  // relevant delivery debt instead); `unknown` = the acknowledgment did not
+  // settle before its deadline (never mapped from revert), retained safely by
+  // the APM until a terminal boundary. Exactly one outcome per attemptId;
+  // outcomes for old epoch/run/attempt identities are discarded by the APM
+  // watermark. This event is daemon control-plane: it must not refresh turn
+  // progress, clear startup state, or drive activity.
+  | {
+      kind: "delivery_outcome";
+      source: "cursor_sdk";
+      attemptId: string;
+      outcome: "delivered" | "deferred_to_idle" | "unknown";
     }
   | {
       kind: "internal_progress";
@@ -396,6 +418,13 @@ export interface RuntimeSession {
     mode: "idle" | "busy";
     text: string;
     sessionId?: string | null;
+    /**
+     * APM-owned delivery-attempt identity for drivers participating in the
+     * delivery-outcome protocol. Optional and purely advisory for every other
+     * driver: a synchronous `ok` still only means the input was accepted into
+     * the runtime's bounded local queue, never a native acknowledgment.
+     */
+    attemptId?: string;
   }): RuntimeSendResult | Promise<RuntimeSendResult>;
   stop(opts?: {
     signal?: NodeJS.Signals;
@@ -500,6 +529,17 @@ export interface RuntimeDriver {
    * native turn. Drivers without a narrower native gate may omit this method.
    */
   busyDeliveryReadiness?(): RuntimeBusyDeliveryReadiness;
+
+  /**
+   * Whether this runtime participates in the delivery-outcome attempt
+   * protocol. When true, the APM attaches a monotonic `attemptId` to follow-up
+   * sends and settles exactly one `delivery_outcome` event per attempt:
+   * delivered / deferred_to_idle (native revert — restored as delivery debt,
+   * never surfaced as a runtime error) / unknown (ACK timeout — retained by
+   * the APM until a terminal boundary). Drivers that do not opt in never
+   * receive an attemptId and their behavior is unchanged.
+   */
+  readonly deliveryOutcomeAttempts?: boolean;
 
   /**
    * Best-effort availability probe for this runtime on the current machine.

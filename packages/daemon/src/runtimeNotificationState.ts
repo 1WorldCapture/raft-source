@@ -181,6 +181,44 @@ export class RuntimeNotificationState {
     });
   }
 
+  /**
+   * Remove EXACTLY the given still-unread messages from the contributed memo
+   * (delivery-outcome revert path). Unlike clearNoticeFingerprint() this is
+   * scoped: identities contributed by other, still-standing notices remain,
+   * so previously delivered messages are never re-notified. If the last
+   * successfully written notice fingerprint is exactly the fingerprint of the
+   * removed set, that written-notice memo is cleared too — the runtime
+   * reverted precisely that write, so it must not be treated as an
+   * already-delivered unread-set. Returns how many identities were removed.
+   */
+  uncontributeMessages(messages: readonly InboxNoticeIdentityMessage[], sessionId: string | null): number {
+    if (this.contributedSessionId !== sessionId) return 0;
+    let removed = 0;
+    const removedIdentities: string[] = [];
+    for (const message of messages) {
+      const identity = inboxNoticeMessageIdentity(message);
+      if (identity.length === 0) continue;
+      if (this.contributedIdentities.delete(identity)) {
+        removed += 1;
+        removedIdentities.push(identity);
+      }
+    }
+    const removedSetFingerprint = removedIdentities.length > 0
+      ? [...removedIdentities].sort().join(",")
+      : "";
+    if (
+      removedSetFingerprint.length > 0 &&
+      this.lastNoticeSessionId === sessionId &&
+      this.lastNoticeFingerprint === removedSetFingerprint
+    ) {
+      this.lastNoticeFingerprint = null;
+      this.lastNoticeSessionId = null;
+      this.lastEncodeFailedFingerprint = null;
+      this.lastEncodeFailedSessionId = null;
+    }
+    return removed;
+  }
+
   pruneContributedToPending(messages: readonly InboxNoticeIdentityMessage[], sessionId: string | null) {
     this.ensureContributionSession(sessionId);
     if (this.contributedIdentities.size === 0) return;

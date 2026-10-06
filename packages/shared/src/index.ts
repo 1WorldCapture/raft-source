@@ -944,6 +944,7 @@ export type RuntimeId =
   | "kimi-sdk"
   | "kimi"
   | "copilot"
+  | "cursor-sdk"
   | "cursor"
   | "gemini"
   | "opencode"
@@ -1732,6 +1733,9 @@ export const RUNTIMES: RuntimeInfo[] = [
   { id: "kimi-sdk", displayName: "Kimi Code", abbreviation: "KC", binary: "", supported: true },
   { id: "kimi", displayName: "Kimi CLI", abbreviation: "KL", binary: "kimi", supported: true, deprecated: true },
   { id: "copilot", displayName: "Copilot CLI", abbreviation: "CP", binary: "copilot", supported: true },
+  // SDK assets are shipped by Computer, not discovered as a user-installed CLI.
+  // Keep legacy Cursor CLI independently addressable for existing sessions.
+  { id: "cursor-sdk", displayName: "Cursor SDK", abbreviation: "CS", binary: "", supported: true },
   { id: "cursor", displayName: "Cursor CLI", abbreviation: "CU", binary: "cursor-agent", supported: true },
   // Gemini CLI: deprecated — no longer maintained upstream, replaced by
   // Antigravity CLI (`antigravity` → "Antigravity CLI"). Kept for backward
@@ -1861,7 +1865,7 @@ export const CURSOR_MODEL_PROBE_TIMEOUT_MS = 20_000;
 
 /** Leave transport time for a Cursor probe to finish before the Server gives up. */
 export function getRuntimeModelDetectionTimeoutMs(runtime: string): number {
-  return runtime === "cursor" ? CURSOR_MODEL_PROBE_TIMEOUT_MS + 5_000 : 5_000;
+  return runtime === "cursor" || runtime === "cursor-sdk" ? CURSOR_MODEL_PROBE_TIMEOUT_MS + 5_000 : 5_000;
 }
 
 /**
@@ -2024,6 +2028,11 @@ export const RUNTIME_MODELS: Record<string, RuntimeModelInfo[]> = {
     { id: "gpt-5.2", label: "GPT-5.2" },
     { id: "claude-4-sonnet", label: "Claude 4 Sonnet" },
     { id: "claude-4.5-sonnet", label: "Claude 4.5 Sonnet" },
+  ],
+  // Default-seeding metadata only: the selectable SDK catalog must come from
+  // the user's bound, verified Cursor connection, never this static fallback.
+  "cursor-sdk": [
+    { id: "default", label: "Cursor configured default", verified: "suggestion_only" },
   ],
   cursor: [
     { id: "composer-2-fast", label: "Composer 2 Fast" },
@@ -2188,6 +2197,15 @@ const CONTROLLED_RUNTIME_ENV_KEYS: Record<string, readonly string[]> = {
   // directly, including defensive aliases such as ANTHROPIC_OAUTH_TOKEN.
   builtin: BUILTIN_RUNTIME_HOST_PROVIDER_ENV_SCRUB_KEYS,
   claude: ["ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY", "ANTHROPIC_CUSTOM_MODEL_OPTION"],
+  // Cursor SDK identity/backend/asset selection belongs to the local owner
+  // control plane. Remote agent config must not override a bound connection.
+  "cursor-sdk": [
+    "CURSOR_API_KEY", "CURSOR_AUTH_TOKEN", "CURSOR_BACKEND_URL",
+    "CURSOR_API_BASE_URL", "CURSOR_WEBSITE_URL", "RAFT_CURSOR_SDK_ASSETS",
+    // The SDK host receives a private credential lease; remote configuration
+    // cannot install Node preload hooks or disable its TLS verification.
+    "NODE_OPTIONS", "NODE_PATH", "NODE_TLS_REJECT_UNAUTHORIZED",
+  ],
   // Pi-runtime builtin-provider env vars (e.g. DEEPSEEK_API_KEY). Owned by
   // PiRuntimeProviderConfig.pi-builtin → buildLaunchPlan, not by
   // user-supplied envVars: reading from PI_BUILTIN_PROVIDER_ENV_KEYS keeps

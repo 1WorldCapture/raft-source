@@ -77,6 +77,12 @@ export type ComputerApiEvent =
   | { kind: "stop.signaled"; pid: number }
   | { kind: "stop.stopped"; pid: number }
 
+  // --- cursor-sdk runtime auth (runtimeAuth service) ---
+  // The browser login URL for the owner surface to present. SECRET-adjacent:
+  // it is a one-shot login grant URL — route it to the owner callback /
+  // presenter only, never into logs.
+  | { kind: "cursor-sdk.login-url"; url: string }
+
   // --- diagnostics push (DiagnosticsPush) ---
   | { kind: "diagnosticsPush.queued"; correlationId: string }
 

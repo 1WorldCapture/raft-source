@@ -12,6 +12,7 @@ import { test } from "vitest";
  * they belong to the first launch/usage read that actually needs them.
  */
 const HEAVY_PACKAGES = [
+  "@cursor/sdk",
   "@botiverse/kimi-code-sdk",
   "@botiverse/oar",
   "@earendil-works/pi-coding-agent",

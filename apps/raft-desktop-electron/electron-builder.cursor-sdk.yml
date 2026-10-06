@@ -1,0 +1,22 @@
+# Local E2E build, never a release channel. Inherit canonical runtime resources.
+# Usage (after build): CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder
+#   --mac dmg zip --arm64 --config electron-builder.cursor-sdk.yml --publish never
+extends: ./electron-builder.yml
+extraMetadata:
+  version: 0.1.8-cursor-sdk.2
+artifactName: Raft-Desktop-Cursor-SDK-${version}-${arch}.${ext}
+directories:
+  output: release-cursor-sdk
+  buildResources: build
+publish: null
+mac:
+  identity: null
+  target:
+    - target: dmg
+      arch:
+        - arm64
+    - target: zip
+      arch:
+        - arm64
+dmg:
+  sign: false

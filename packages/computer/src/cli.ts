@@ -50,6 +50,7 @@ import { randomUUID } from "node:crypto";
 import { Command } from "commander";
 
 import { runLogin, runLogout } from "./login.js";
+import { runCursorSdkLogin, runCursorSdkLogout, runCursorSdkStatus } from "./cursorSdkAuth.js";
 import { runAttach } from "./attach.js";
 import { runSetup } from "./setup.js";
 import { formatStatusReport } from "./status.js";
@@ -322,6 +323,22 @@ program
   .action(withCliExit(async () => {
     await runLogout();
   }));
+
+// Canonical provider-auth command tree (runtime auth <verb> cursor).
+const runtimeAuthCommand = program.command("runtime").description("Manage local agent runtimes.")
+  .command("auth").description("Manage local runtime account connections.");
+function requireCursorProvider(provider: string): void {
+  if (provider !== "cursor") throw new Error("Only the cursor provider is supported by this preview.");
+}
+runtimeAuthCommand.command("status").argument("<provider>")
+  .action(withCliExit(async (provider: string) => { requireCursorProvider(provider); await runCursorSdkStatus(); }));
+runtimeAuthCommand.command("login").argument("<provider>")
+  .option("--browser", "Use official browser login instead of the saved SDK connection")
+  .action(withCliExit(async (provider: string, options: { browser?: boolean }) => {
+    requireCursorProvider(provider); await runCursorSdkLogin({ reuseExisting: !options.browser });
+  }));
+runtimeAuthCommand.command("logout").argument("<provider>")
+  .action(withCliExit(async (provider: string) => { requireCursorProvider(provider); await runCursorSdkLogout(); }));
 
 // --- attach <serverSlug> (add-not-replace) ---
 program
