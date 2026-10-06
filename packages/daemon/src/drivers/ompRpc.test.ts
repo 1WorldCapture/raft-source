@@ -527,6 +527,10 @@ async function startSessionFake(mode: string, configSessionId: string | null): P
       if (line.trim()) harness.events.push(...driver.parseLine(line));
     }
   });
+  // The resume handoff leaves stdout explicitly paused; attaching a data
+  // listener does not clear an explicit pause (verified on Node 26), so the
+  // machinery resume() is part of the handover contract.
+  proc.stdout?.resume();
   return harness;
 }
 
@@ -579,7 +583,7 @@ test("resume succeeds with the recorded session id and announces session_init", 
   try {
     await harness.waitUntil(() => harness.driver.currentSessionId !== null);
 
-    assert.equal(harness.driver.currentSessionId, "recorded-session-42");
+        assert.equal(harness.driver.currentSessionId, "recorded-session-42");
     const init = harness.events.find((event) => event.kind === "session_init") as { sessionId: string };
     assert.equal(init.sessionId, "recorded-session-42");
     assert.equal(harness.driver.resumeFallback, null, "a successful resume must not raise the fallback diagnostic");
@@ -619,6 +623,95 @@ test("a resume that exits late (past any fixed window) still falls back", async 
     assert.match(diagnostic.message ?? "", /lost-session-late/);
   } finally {
     harness.driver.stop({ sigtermGraceMs: 100 });
+  }
+});
+
+test("resume handoff delivers every byte exactly once, in wire order", async () => {
+  // PM task #4 r3: ready + a following frame + half a negotiate response
+  // sharing ONE write must all survive the resume handoff — the scanner
+  // pauses the stream at handoff and unshifts the tail, so the session
+  // machinery's reader replays every byte and completes the partial line.
+  const workspace = mkdtempSync(path.join(os.tmpdir(), "slock-omp-handoff-"));
+  const scriptPath = path.join(workspace, "fake-omp-handoff.cjs");
+  // Negotiate is the first request after spawn (the counter resets per
+  // launch), so its id is omp-1 and the fake can pre-write half the response.
+  const negotiateResponse = JSON.stringify({
+    id: "omp-1",
+    type: "response",
+    command: "negotiate_protocol",
+    success: true,
+    data: { protocolVersion: 2 },
+  });
+  const negotiateFirstHalf = negotiateResponse.slice(0, Math.floor(negotiateResponse.length / 2));
+  writeFileSync(scriptPath, `
+const ready = JSON.stringify({ type: "ready", protocolVersion: 1, supportedProtocolVersions: [1, 2], maxFrameBytes: 1048576, maxReassembledFrameBytes: 67108864 });
+const toolCall = JSON.stringify({ type: "tool_execution_start", toolCallId: "call-1", toolName: "read", args: { path: "a.txt" } });
+// ONE write: ready + notice frame + the first half of a negotiate response.
+process.stdout.write(ready + "\\n" + toolCall + "\\n" + ${JSON.stringify(negotiateFirstHalf)});
+let buffer = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  buffer += chunk;
+  let index;
+  while ((index = buffer.indexOf("\\n")) >= 0) {
+    const line = buffer.slice(0, index);
+    buffer = buffer.slice(index + 1);
+    if (!line.trim()) continue;
+    const frame = JSON.parse(line);
+    if (frame.type === "negotiate_protocol") {
+      // The remaining half arrives later; it completes the unshifted partial line.
+      process.stdout.write(${JSON.stringify(negotiateResponse.slice(Math.floor(negotiateResponse.length / 2)))} + "\\n");
+    } else if (frame.type === "get_state") {
+      process.stdout.write(JSON.stringify({ id: frame.id, type: "response", command: "get_state", success: true, data: { sessionId: "handoff-session-1" } }) + "\\n");
+    }
+  }
+});
+`);
+
+  const driver = new OmpDriver();
+  const ctx = makeSpawnContext(workspace);
+  (ctx.config as { sessionId?: string | null }).sessionId = "recorded-handoff";
+  const { process: proc } = await driver.spawn(ctx, {
+    command: process.execPath,
+    extraArgs: [scriptPath],
+  });
+
+  // The session machinery: every complete stdout line goes through parseLine.
+  const events: ParsedEvent[] = [];
+  let stdoutBuffer = "";
+  proc.stdout?.setEncoding("utf8");
+  proc.stdout?.on("data", (chunk: string) => {
+    stdoutBuffer += chunk;
+    let index: number;
+    while ((index = stdoutBuffer.indexOf("\n")) >= 0) {
+      const line = stdoutBuffer.slice(0, index);
+      stdoutBuffer = stdoutBuffer.slice(index + 1);
+      if (line.trim()) events.push(...driver.parseLine(line));
+    }
+  });
+  // Same handover contract as the production machinery: clear the explicit
+  // pause the resume handoff left on the stream.
+  proc.stdout?.resume();
+
+  try {
+    const started = Date.now();
+    while ((!driver.isProtocolSettled || driver.currentSessionId === null) && Date.now() - started < 5000) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    const kinds = events.map((event) => event.kind);
+    assert.deepEqual(
+      kinds.filter((kind) => kind === "tool_call"),
+      ["tool_call"],
+      "the tool call sharing the ready chunk must be mapped exactly once",
+    );
+    assert.ok(kinds.indexOf("tool_call") < kinds.indexOf("session_init"), "wire order must be preserved into the event stream");
+    assert.ok(events.some((event) => event.kind === "session_init"), "get_state after settle must announce session_init");
+    assert.equal(driver.currentSessionId, "handoff-session-1");
+    assert.equal(driver.activeProtocolVersion, 2, "the split negotiate response must complete and settle v2");
+    assert.equal(driver.frameErrors.count, 0, "no byte may be lost or duplicated into a frame error");
+  } finally {
+    driver.stop({ sigtermGraceMs: 100 });
   }
 });
 

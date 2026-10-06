@@ -272,6 +272,8 @@ export class OmpDriver implements RuntimeDriver {
   private stderrTail = "";
   private readyDeferred: { promise: Promise<void>; resolve: () => void; reject: (error: Error) => void } | null = null;
   private eventState: OmpEventMappingState = createOmpEventMappingState();
+  /** Events produced before the session machinery attaches; drained on the next parseLine. */
+  private queuedEvents: ParsedEvent[] = [];
 
   // Transport state, exposed for observability and the phase-1 turn work (#3+).
   private ready = false;
@@ -444,11 +446,11 @@ export class OmpDriver implements RuntimeDriver {
         return this.launchChild(ctx, spawnEnv, launchOverrides, null);
       }
       // Ready: settle the driver from the buffered lines (ready → negotiate →
-      // …). Their event returns are empty at this stage (transport frames
-      // only); the machinery attaches right after spawn returns and drives
-      // every later frame itself.
+      // …). Event-producing frames among them (a tool call sharing the ready
+      // chunk, an early session_init) are queued and drained into the
+      // machinery's first parseLine call, in wire order.
       for (const line of firstOutcome.bufferedLines) {
-        this.parseLine(line);
+        this.queuedEvents.push(...this.parseLine(line));
       }
     }
 
@@ -460,13 +462,19 @@ export class OmpDriver implements RuntimeDriver {
    * first, capped by the ready timeout. Raw line scanning only — parsed
    * processing happens in spawn's handoff (bufferedLines) so parseLine is
    * never called twice per line.
+   *
+   * Data safety (PM task #4 r3): at handoff the stream is PAUSED (removing a
+   * data listener does not stop a flowing stream) and any bytes after the
+   * ready line are pushed back with unshift, so the session machinery's
+   * reader — attaching right after spawn returns — replays every byte, even
+   * a partial line sharing the ready chunk.
    */
   private awaitResumeHandshake(
     proc: ChildProcess,
     readyTimeoutMs: number,
   ): Promise<{ outcome: "ready"; bufferedLines: string[] } | { outcome: "exit"; summary: string } | { outcome: "timeout" }> {
     return new Promise((resolve) => {
-      let buffer = "";
+      let buffer = Buffer.alloc(0);
       let settled = false;
       const finish = (result: { outcome: "ready"; bufferedLines: string[] } | { outcome: "exit"; summary: string } | { outcome: "timeout" }): void => {
         if (settled) return;
@@ -478,14 +486,31 @@ export class OmpDriver implements RuntimeDriver {
       };
       const completeLines: string[] = [];
       const onStdout = (chunk: Buffer): void => {
-        buffer += chunk.toString("utf8");
+        buffer = Buffer.concat([buffer, chunk]);
         let index: number;
-        while ((index = buffer.indexOf("\n")) >= 0) {
-          const line = buffer.slice(0, index);
-          buffer = buffer.slice(index + 1);
+        while ((index = buffer.indexOf(0x0a)) >= 0) {
+          const lineBytes = buffer.subarray(0, index);
+          buffer = buffer.subarray(index + 1);
+          const line = lineBytes.toString("utf8");
           if (!line.trim()) continue;
+          let frameType: unknown = null;
+          try {
+            const value: unknown = JSON.parse(line);
+            if (typeof value === "object" && value !== null) frameType = (value as { type?: unknown }).type;
+          } catch {
+            // Unparseable lines stay buffered like any other line.
+          }
           completeLines.push(line);
-          if (line.includes('"type":"ready"')) {
+          if (frameType === "ready") {
+            // Stop the stream before nobody owns it, and return every byte
+            // after the ready line to the front of the queue. The explicit
+            // pause is half of the handover contract: the session machinery
+            // resumes the stream after attaching its reader (runtimeSession
+            // attachProcess) — a plain data listener does not clear an
+            // explicit pause (verified on Node 26).
+            proc.stdout?.pause();
+            if (buffer.byteLength > 0) proc.stdout?.unshift(buffer);
+            buffer = Buffer.alloc(0);
             finish({ outcome: "ready", bufferedLines: completeLines });
             return;
           }
@@ -602,32 +627,43 @@ export class OmpDriver implements RuntimeDriver {
   parseLine(line: string): ParsedEvent[] {
     if (!this.process) return [];
 
+    // Events produced before the machinery attached (the resume handshake's
+    // handoff) lead the first parseLine result, in wire order.
+    let queued = this.queuedEvents;
+    if (queued.length > 0) this.queuedEvents = [];
+
     let frame: object;
     try {
       const decoded = this.decoder.pushLine(line);
       // An in-progress rpc_chunk sequence has nothing to dispatch yet.
-      if (!decoded) return [];
+      if (!decoded) {
+        if (queued.length > 0) return queued;
+        return [];
+      }
       frame = decoded;
     } catch (error) {
       const message = error instanceof OmpRpcFrameError ? error.message : String(error);
       this.frameErrorCount += 1;
       this.lastFrameError = message;
+      if (queued.length > 0) return queued;
       return [];
     }
 
     const type = (frame as { type?: unknown }).type;
     if (type === "ready") {
       this.handleReady(frame as unknown as OmpRpcReadyFrame);
-      return [];
+      return queued;
     }
     if (type === "response") {
-      return this.handleResponse(frame as unknown as OmpRpcResponseFrame);
+      const events = this.handleResponse(frame as unknown as OmpRpcResponseFrame);
+      return [...queued, ...events];
     }
     if (typeof type === "string" && OMP_LOG_ONLY_FRAME_TYPES.has(type)) {
       logger.info(`[omp] ${type} frame observed (phase-1 log-only, not mapped)`);
-      return [];
+      return queued;
     }
-    return mapOmpRpcFrameToParsedEvents(frame, this.eventState);
+    const mapped = mapOmpRpcFrameToParsedEvents(frame, this.eventState);
+    return queued.length > 0 ? [...queued, ...mapped] : mapped;
   }
 
   /**
