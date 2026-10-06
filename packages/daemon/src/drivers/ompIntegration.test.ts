@@ -33,7 +33,9 @@ const ompAvailable = await (async () => {
   }
 })();
 
-describe.skipIf(!ompAvailable)("omp real CLI integration (task #5)", () => {
+// The env switch is part of the gate (pi precedent): a bare `vitest run`
+    // must never launch the real binary, even when omp is installed.
+describe.skipIf(!process.env.RUN_OMP_INTEGRATION_TESTS || !ompAvailable)("omp real CLI integration (task #5)", () => {
   const workspace = mkdtempSync(path.join(os.tmpdir(), "slock-omp-e2e-"));
   const agentDir = mkdtempSync(path.join(os.tmpdir(), "slock-omp-e2e-agent-"));
   writeFileSync(path.join(workspace, "AGENTS.md"), `# AGENTS\n\n${AGENTS_SENTINEL} do not leak\n`);

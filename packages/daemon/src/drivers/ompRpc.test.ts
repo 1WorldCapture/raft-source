@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import { execFile } from "node:child_process";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -1061,4 +1061,152 @@ test("launch argv carries the standing prompt file and the isolation overlay, fr
     resumed.cleanup();
     await resumed.mock.close();
   }
+});
+
+// ============================================================================
+// Task #6 — models & login: detectModels, --model/--thinking launch fields
+// ============================================================================
+
+import { detectOmpModels, mapOmpThinkingLevel } from "./omp.js";
+
+const FAKE_DETECT_SCRIPT = `
+const mode = process.argv[2];
+const send = (frame) => process.stdout.write(JSON.stringify(frame) + "\\n");
+send({ type: "ready", protocolVersion: 1, supportedProtocolVersions: [1, 2], maxFrameBytes: 1048576, maxReassembledFrameBytes: 67108864 });
+let buffer = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  buffer += chunk;
+  let index;
+  while ((index = buffer.indexOf("\\n")) >= 0) {
+    const line = buffer.slice(0, index);
+    buffer = buffer.slice(index + 1);
+    if (!line.trim()) continue;
+    const frame = JSON.parse(line);
+    if (frame.type === "negotiate_protocol") {
+      send({ id: frame.id, type: "response", command: "negotiate_protocol", success: true, data: { protocolVersion: 2 } });
+    } else if (frame.type === "get_login_providers") {
+      const providers = mode === "detect-nologin"
+        ? [{ id: "cursor", available: true, authenticated: false }, { id: "kimi-code", available: true, authenticated: false }]
+        : [{ id: "cursor", available: true, authenticated: false }, { id: "kimi-code", available: true, authenticated: true }];
+      send({ id: frame.id, type: "response", command: "get_login_providers", success: true, data: { providers } });
+    } else if (frame.type === "get_available_models") {
+      const models = mode === "detect-empty" ? [] : [
+        { id: "k3", provider: "kimi-code", name: "K3", reasoning: true, thinking: { efforts: ["low", "medium", "high", "xhigh"] } },
+        { id: "composer-1", provider: "cursor", name: "Composer 1", reasoning: false },
+        { id: "ghost", provider: "unauthenticated-provider", name: "Ghost" },
+      ];
+      send({ id: frame.id, type: "response", command: "get_available_models", success: true, data: { models } });
+    }
+  }
+});
+`;
+
+test("detectModels returns live launchable models filtered to authenticated providers", async () => {
+  const outcome = await detectOmpModels({
+    command: process.execPath,
+    args: [writeDetectScript("detect-ok"), "detect-ok"],
+  });
+  assert.equal(outcome.kind, "live");
+  const models = outcome.kind === "live" ? outcome.value.models : [];
+  assert.deepEqual(models.map((model) => model.id), ["kimi-code/k3"],
+    "unauthenticated providers (cursor, ghost) must be dropped (cross-check against get_login_providers)");
+  assert.equal(models[0]?.verified, "launchable");
+  assert.match(models[0]?.label ?? "", /K3/);
+  assert.deepEqual(models[0]?.supportedReasoningEfforts, ["low", "medium", "high", "xhigh"]);
+});
+
+test("detectModels reports missing_config with omp_login recovery when nothing is logged in", async () => {
+  const outcome = await detectOmpModels({
+    command: process.execPath,
+    args: [writeDetectScript("detect-nologin"), "detect-nologin"],
+  });
+  assert.deepEqual(outcome, { kind: "missing_config", recovery: "omp_login" });
+});
+
+test("detectModels reports no_models when logged in but the catalog is empty", async () => {
+  const outcome = await detectOmpModels({
+    command: process.execPath,
+    args: [writeDetectScript("detect-empty"), "detect-empty"],
+  });
+  assert.deepEqual(outcome, { kind: "no_models", recovery: "omp_login" });
+});
+
+test("mapOmpThinkingLevel maps Raft efforts onto omp's vocabulary", () => {
+  assert.equal(mapOmpThinkingLevel("low"), "low");
+  assert.equal(mapOmpThinkingLevel("xhigh"), "xhigh");
+  assert.equal(mapOmpThinkingLevel("max"), "max");
+  assert.equal(mapOmpThinkingLevel("ultra"), "max", "ultra clamps to omp's top level");
+  assert.equal(mapOmpThinkingLevel("nonsense"), null);
+});
+
+function writeDetectScript(mode: string): string {
+  const workspace = mkdtempSync(path.join(os.tmpdir(), "slock-omp-detect-"));
+  const scriptPath = path.join(workspace, "fake-omp-detect.cjs");
+  writeFileSync(scriptPath, FAKE_DETECT_SCRIPT);
+  return scriptPath;
+}
+
+test("launch argv carries --model and --thinking from the runtime config", async () => {
+  const workspace = mkdtempSync(path.join(os.tmpdir(), "slock-omp-launch-"));
+  const scriptPath = path.join(workspace, "fake-omp-session.cjs");
+  writeFileSync(scriptPath, FAKE_SESSION_SCRIPT);
+  const argvLogPath = path.join(workspace, "argv.json");
+  process.env.OMP_FAKE_ARGV_LOG = argvLogPath;
+
+  const driver = new OmpDriver();
+  const ctx = makeSpawnContext(workspace);
+  ctx.config = { ...ctx.config, model: "cursor/k3", reasoningEffort: "ultra" } as typeof ctx.config;
+  const spawn = await driver.spawn(ctx, { command: process.execPath, extraArgs: [scriptPath, "echo"] });
+  try {
+    // The fake dumps argv at startup; poll briefly for the file to land.
+    const started = Date.now();
+    while (!existsSync(argvLogPath) && Date.now() - started < 3000) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    const dump = JSON.parse(readFileSync(argvLogPath, "utf8")) as { argv: string[] };
+    const modelFlag = dump.argv.indexOf("--model");
+    const thinkingFlag = dump.argv.indexOf("--thinking");
+    assert.ok(modelFlag > 0, `argv must carry --model: ${dump.argv.join(" ")}`);
+    assert.equal(dump.argv[modelFlag + 1], "cursor/k3");
+    assert.ok(thinkingFlag > modelFlag, "argv must carry --thinking");
+    assert.equal(dump.argv[thinkingFlag + 1], "max", "ultra must clamp to omp's max level");
+  } finally {
+    driver.stop({ sigtermGraceMs: 100 });
+    delete process.env.OMP_FAKE_ARGV_LOG;
+  }
+});
+
+test("a bad --model id surfaces the omp stderr through the whenReady rejection", async () => {
+  const workspace = mkdtempSync(path.join(os.tmpdir(), "slock-omp-badmodel-"));
+  const scriptPath = path.join(workspace, "fake-omp-badmodel.cjs");
+  // Real omp exits BEFORE the ready frame with a "Model not found" stderr
+  // when --model names an unknown id (measured on 18.6.1); the fake mirrors
+  // that shape. The fresh-launch flow resolves spawn() immediately and the
+  // failure surfaces through whenReady().
+  writeFileSync(scriptPath, `
+if (process.argv.includes("--model")) {
+  process.stderr.write("Model not found: cursor/definitely-not-XYZ\\n");
+  process.stderr.write("Run omp models find <pattern> to search, or omp models to list all.\\n");
+  process.exit(3);
+}
+process.stdout.write(JSON.stringify({ type: "ready", protocolVersion: 1, supportedProtocolVersions: [1, 2], maxFrameBytes: 1048576, maxReassembledFrameBytes: 67108864 }) + "\\n");
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", () => {});
+`);
+
+  const driver = new OmpDriver();
+  const ctx = makeSpawnContext(workspace);
+  ctx.config = { ...ctx.config, model: "cursor/definitely-not-XYZ" } as typeof ctx.config;
+  await driver.spawn(ctx, { command: process.execPath, extraArgs: [scriptPath] });
+  await assert.rejects(
+    () => driver.whenReady(),
+    (error: unknown) => {
+      assert.ok(error instanceof OmpRpcProcessExitedError, `expected OmpRpcProcessExitedError, got ${String(error)}`);
+      assert.match(error.message, /Model not found/);
+      assert.match(error.message, /omp models find/, "the stderr guidance must reach the operator");
+      return true;
+    },
+    "the failure must surface quickly instead of waiting out the ready timer",
+  );
 });

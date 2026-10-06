@@ -1,9 +1,21 @@
 import { spawn as childSpawn, type ChildProcess } from "node:child_process";
-import { writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
 import type { ManagedMcpRuntimeTool } from "@botiverse/raft-shared";
+import {
+  getRuntimeProviderDisplayName,
+  humanizeRuntimeProviderSegment,
+  hydrateRuntimeConfig,
+  runtimeConfigToLaunchFields,
+  runtimeModelSourceOutcomeFromSet,
+} from "@botiverse/raft-shared";
+import type {
+  RuntimeModelInfo,
+  RuntimeModelSet,
+  RuntimeModelSourceOutcome,
+} from "@botiverse/raft-shared";
 
 import { buildCliTransportSystemPrompt, prepareCliTransport } from "./cliTransport.js";
 import {
@@ -28,7 +40,7 @@ import {
 } from "./ompRpcFrame.js";
 import { firstExistingPath, readCommandVersion, resolveCommandOnPath, type ProbeDeps } from "./probe.js";
 import type { AgentConfig, AxSurfaceText } from "@botiverse/raft-shared";
-import type { ParsedEvent, RuntimeDriver, RuntimeProbeResult, SpawnContext, SpawnResult } from "./types.js";
+import type { ParsedEvent, RuntimeDriver, RuntimeModelDetectionContext, RuntimeProbeResult, SpawnContext, SpawnResult } from "./types.js";
 
 // OMP (oh-my-pi) ships a Bun-only SDK, so the daemon drives it as a
 // `omp --mode rpc` child process over stdio NDJSON. Task #2 owns the transport
@@ -230,6 +242,264 @@ function buildOmpConfigOverlay(): string {
   ].join("\n");
 }
 
+// ── Model detection (task #6) ──────────────────────────────────────────────
+
+interface OmpLoginProviderFrame {
+  providers?: Array<{ id?: unknown; available?: unknown; authenticated?: unknown }>;
+}
+
+interface OmpCatalogModelFrame {
+  id?: unknown;
+  provider?: unknown;
+  name?: unknown;
+  reasoning?: unknown;
+  thinking?: { efforts?: unknown } | null;
+}
+
+/** omp reasoning-effort vocabulary, from the ThinkingLevel constant (18.6.x). */
+const OMP_THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
+
+/** Map a Raft reasoning effort onto omp's --thinking vocabulary (task #6). */
+export function mapOmpThinkingLevel(effort: string): string | null {
+  if (effort === "ultra") return "max";
+  return OMP_THINKING_LEVELS.has(effort) ? effort : null;
+}
+
+type OmpDetectResult =
+  | { kind: "live"; set: RuntimeModelSet }
+  | { kind: "missing_config" }
+  | { kind: "no_models" }
+  | { kind: "error"; message: string };
+
+interface OmpDetectCache {
+  at: number;
+  agentDbMtimeMs: number | null;
+  result: OmpDetectResult;
+}
+
+/**
+ * Probe results are cached: every detection spawns an omp process (0.8–1.6s
+ * measured), and the web model picker calls this on every open. The cache
+ * invalidates on the auth store's mtime (agent.db changes when `omp login`
+ * writes credentials) or after a hard TTL — a short-TTL-only cache would
+ * still re-probe on every picker open after a minute, while mtime alone
+ * would miss upstream storage moves.
+ */
+const OMP_DETECT_CACHE_TTL_MS = 10 * 60_000;
+let ompDetectCache: OmpDetectCache | null = null;
+let ompDetectInFlight: Promise<OmpDetectResult> | null = null;
+
+function ompAgentDbMtimeMs(): number | null {
+  try {
+    return statSync(path.join(os.homedir(), ".omp", "agent", "agent.db")).mtimeMs;
+  } catch {
+    return null;
+  }
+}
+
+function ompModelLabel(model: OmpCatalogModelFrame): string {
+  const provider = typeof model.provider === "string" ? model.provider : "unknown";
+  const name = typeof model.name === "string" && model.name.trim() ? model.name : humanizeRuntimeProviderSegment(typeof model.id === "string" ? model.id : provider);
+  return `${name} · ${getRuntimeProviderDisplayName(provider)}`;
+}
+
+function ompModelEfforts(model: OmpCatalogModelFrame): string[] | undefined {
+  const efforts = model.thinking?.efforts;
+  if (Array.isArray(efforts)) {
+    const levels = efforts.filter((level): level is string => typeof level === "string" && OMP_THINKING_LEVELS.has(level) && level !== "off" && level !== "inherit" && level !== "minimal");
+    if (levels.length > 0) return levels;
+  }
+  return undefined;
+}
+
+function buildOmpDetectResult(
+  loginProviders: OmpLoginProviderFrame["providers"],
+  catalog: OmpCatalogModelFrame[],
+): OmpDetectResult {
+  const authenticated = new Set(
+    (loginProviders ?? [])
+      .filter((provider) => provider.authenticated === true)
+      .map((provider) => (typeof provider.id === "string" ? provider.id : ""))
+      .filter((id) => id),
+  );
+  if (authenticated.size === 0) {
+    return { kind: "missing_config" };
+  }
+  const models: RuntimeModelInfo[] = [];
+  const seen = new Set<string>();
+  for (const model of catalog) {
+    const provider = typeof model.provider === "string" ? model.provider : "";
+    const id = typeof model.id === "string" ? model.id : "";
+    if (!provider || !id || !authenticated.has(provider)) continue;
+    const modelId = `${provider}/${id}`;
+    if (seen.has(modelId)) continue;
+    seen.add(modelId);
+    models.push({
+      id: modelId,
+      label: ompModelLabel(model),
+      verified: "launchable",
+      supportedReasoningEfforts: ompModelEfforts(model),
+    });
+  }
+  if (models.length === 0) {
+    return { kind: "no_models" };
+  }
+  return { kind: "live", set: { models } };
+}
+
+/**
+ * One-shot `omp --mode rpc` probe for the model catalog (task #6). The probe
+ * runs with --no-session in a throwaway cwd, is bounded by a watchdog, and
+ * is torn down by process-tree kill + temp-dir removal — the caller never
+ * waits on omp longer than OMP_DETECT_TIMEOUT_MS.
+ */
+async function probeOmpModels(deps: { command?: string; args?: string[]; timeoutMs?: number } = {}): Promise<OmpDetectResult> {
+  const workspace = mkdtempSync(path.join(os.tmpdir(), "slock-omp-detect-"));
+  const command = deps.command ?? resolveOmpCommand() ?? OMP_BINARY;
+  const args = deps.args ?? ["--mode", "rpc", "--no-session", "--session-dir", path.join(workspace, ".omp-sessions")];
+  const timeoutMs = deps.timeoutMs ?? 15_000;
+
+  return await new Promise<OmpDetectResult>((resolve) => {
+    const proc = childSpawn(command, args, { cwd: workspace, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
+    // The catalog can exceed v1's 1 MiB physical frame once negotiated to
+    // v2, so decoded frames come through the same framing decoder the
+    // driver uses (handles both plain JSONL and rpc_chunk reassembly).
+    const decoder = new OmpRpcFrameDecoder();
+    let stdoutBuffer = Buffer.alloc(0);
+    let negotiateSent = false;
+    let loginResponse: OmpLoginProviderFrame["providers"] | null = null;
+    let catalogResponse: OmpCatalogModelFrame[] | null = null;
+    let settled = false;
+
+    const finish = (result: OmpDetectResult): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(watchdog);
+      proc.stdout?.off("data", onStdout);
+      proc.removeAllListeners("exit");
+      try {
+        proc.stdin?.end();
+      } catch {
+        // Already gone.
+      }
+      try {
+        if (proc.pid) killProcessTree(proc.pid, "SIGKILL");
+      } catch {
+        // Already gone.
+      }
+      rmSync(workspace, { recursive: true, force: true });
+      resolve(result);
+    };
+
+    const send = (frame: Record<string, unknown>): void => {
+      try {
+        proc.stdin?.write(`${JSON.stringify(frame)}\n`);
+      } catch {
+        // Stdin died; the watchdog or exit handles the outcome.
+      }
+    };
+
+    const onFrame = (frame: Record<string, unknown>): void => {
+      if (frame.type === "ready" && !negotiateSent) {
+        negotiateSent = true;
+        send({ id: "d1", type: "negotiate_protocol", protocolVersion: 2 });
+        return;
+      }
+      if (frame.type === "response") {
+        const data = frame.data as Record<string, unknown> | undefined;
+        if (frame.command === "get_login_providers") {
+          loginResponse = (data?.providers ?? []) as OmpLoginProviderFrame["providers"];
+        } else if (frame.command === "get_available_models") {
+          catalogResponse = (data?.models ?? []) as OmpCatalogModelFrame[];
+        }
+        if (loginResponse && catalogResponse) {
+          finish(buildOmpDetectResult(loginResponse, catalogResponse));
+        }
+      }
+    };
+
+    const onStdout = (chunk: Buffer): void => {
+      stdoutBuffer = Buffer.concat([stdoutBuffer, chunk]);
+      let index: number;
+      while ((index = stdoutBuffer.indexOf(0x0a)) >= 0) {
+        const lineBytes = stdoutBuffer.subarray(0, index);
+        stdoutBuffer = stdoutBuffer.subarray(index + 1);
+        if (!lineBytes.toString("utf8").trim()) continue;
+        let frame: Record<string, unknown> | null;
+        try {
+          frame = decoder.pushLine(lineBytes.toString("utf8")) as Record<string, unknown> | null;
+        } catch {
+          continue;
+        }
+        if (frame) onFrame(frame);
+      }
+    };
+
+    const watchdog = setTimeout(() => {
+      finish({ kind: "error", message: `OMP model probe timed out after ${timeoutMs}ms` });
+    }, timeoutMs);
+    watchdog.unref?.();
+
+    proc.stdout?.on("data", onStdout);
+    proc.on("error", (error) => {
+      finish({ kind: "error", message: error.message });
+    });
+    proc.on("exit", (code, signal) => {
+      finish({ kind: "error", message: `OMP model probe exited early (${code ?? signal ?? "unknown"})` });
+    });
+
+    send({ id: "d0", type: "get_login_providers" });
+    send({ id: "d2", type: "get_available_models" });
+  });
+}
+
+/**
+ * Cached omp model detection (task #6): TTL + auth-store mtime invalidation
+ * on top of a single-flight probe, so picker opens and retries stay cheap
+ * and a fresh `omp login` is visible within one cache generation.
+ */
+export async function detectOmpModels(deps: { command?: string; args?: string[]; timeoutMs?: number } = {}): Promise<RuntimeModelSourceOutcome> {
+  const bypassCache = deps.args !== undefined;
+  if (!bypassCache) {
+    if (ompDetectInFlight) return toOmpDetectOutcome(await ompDetectInFlight);
+    const mtime = ompAgentDbMtimeMs();
+    if (ompDetectCache) {
+      const fresh = Date.now() - ompDetectCache.at < OMP_DETECT_CACHE_TTL_MS;
+      const sameAuth = ompDetectCache.agentDbMtimeMs === mtime;
+      if (fresh && sameAuth) return toOmpDetectOutcome(ompDetectCache.result);
+    }
+  }
+
+  const probe = probeOmpModels(deps).then((result) => {
+    if (!bypassCache) {
+      ompDetectCache = { at: Date.now(), agentDbMtimeMs: ompAgentDbMtimeMs(), result };
+    }
+    ompDetectInFlight = null;
+    return result;
+  }).catch((error: unknown) => {
+    ompDetectInFlight = null;
+    return { kind: "error", message: error instanceof Error ? error.message : String(error) } satisfies OmpDetectResult;
+  });
+  if (!bypassCache) ompDetectInFlight = probe;
+  return toOmpDetectOutcome(await probe);
+}
+
+function toOmpDetectOutcome(result: OmpDetectResult): RuntimeModelSourceOutcome {
+  switch (result.kind) {
+    case "live":
+      return runtimeModelSourceOutcomeFromSet(result.set);
+    case "missing_config":
+      // Never silent: the recovery string drives the web copy telling the
+      // user to run `omp login <provider>` on this machine (task #6 spec).
+      return { kind: "missing_config", recovery: "omp_login" };
+    case "no_models":
+      return { kind: "no_models", recovery: "omp_login" };
+    case "error":
+      logger.warn(`[omp] model detection failed: ${result.message}`);
+      return { kind: "error", retryable: true };
+  }
+}
+
 export class OmpRpcProcessExitedError extends Error {
   readonly code: number | null;
   readonly signal: string | null;
@@ -336,6 +606,16 @@ export class OmpDriver implements RuntimeDriver {
   readonly model = {
     detectedModelsVerifiedAs: "launchable" as const,
   };
+
+  /**
+   * Live model catalog from the local omp login state (task #6): one-shot
+   * RPC probe, cached with TTL + auth-store mtime invalidation, mapped onto
+   * the closed source-outcome contract (missing_config/omp_login when
+   * nothing is logged in — never a silent empty list).
+   */
+  async detectModels(_ctx?: RuntimeModelDetectionContext): Promise<RuntimeModelSourceOutcome> {
+    return detectOmpModels();
+  }
   readonly supportsStdinNotification = true;
   readonly busyDeliveryMode = "direct" as const;
   readonly supportsNativeStandingPrompt = true;
@@ -654,13 +934,19 @@ export class OmpDriver implements RuntimeDriver {
       // order-independently. --system-prompt and --config ride along on both
       // fresh and resumed launches: resumed sessions re-apply the current
       // standing prompt (task #5 — new / resumed / woken launches must all
-      // run with it).
+      // run with it). Model and thinking level come from the agent's runtime
+      // config (task #6); a bad --model id exits pre-ready with a
+      // "Model not found" stderr, which the exit handler surfaces verbatim.
+      const launchFields = runtimeConfigToLaunchFields(hydrateRuntimeConfig(ctx.config));
+      const thinkingLevel = launchFields.reasoningEffort ? mapOmpThinkingLevel(launchFields.reasoningEffort) : null;
       args = [
         ...(launchOverrides.extraArgs ?? []),
         "--mode", "rpc",
         "--session-dir", this.sessionDir!,
         ...(this.systemPromptPath ? ["--system-prompt", this.systemPromptPath] : []),
         ...(this.configOverlayPath ? ["--config", this.configOverlayPath] : []),
+        ...(launchFields.model && launchFields.model !== "default" ? ["--model", launchFields.model] : []),
+        ...(thinkingLevel ? ["--thinking", thinkingLevel] : []),
       ];
       if (resumeSessionId) args = [...args, "--resume", resumeSessionId];
     }

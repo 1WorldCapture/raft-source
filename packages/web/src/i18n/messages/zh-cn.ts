@@ -925,6 +925,10 @@ export const zhCn: Record<MessageId, string> = {
   "agent.runtimeModels.loading": "正在检查此 Computer 上的模型…",
   "agent.runtimeModels.kimiLoginRequired":
     "此 Computer 尚未登录 Kimi。请在该 Computer 上运行 <command>kimi login</command>，然后重试模型检查。",
+  "agent.runtimeModels.ompLoginRequired":
+    "此 Computer 上的 OMP 尚未登录任何服务商。请在该电脑上运行 <command>omp login <服务商></command>（例如 <command>omp login cursor</command>），然后重试模型检查。",
+  "agent.runtimeModels.ompNoModels":
+    "{runtimeName} 已登录，但此 Computer 未报告任何可用模型。",
   "agent.runtimeModels.missingConfig":
     "需要先在此 Computer 上配置 {runtimeName}，才能加载其模型。",
   "agent.runtimeModels.noModels":

@@ -931,6 +931,10 @@ export const en = {
   "agent.runtimeModels.loading": "Checking models on this Computer…",
   "agent.runtimeModels.kimiLoginRequired":
     "Kimi is not signed in on this Computer. Run <command>kimi login</command> there, then retry the model check.",
+  "agent.runtimeModels.ompLoginRequired":
+    "OMP is not signed in to any provider on this Computer. Run <command>omp login <provider></command> there (for example <command>omp login cursor</command>), then retry the model check.",
+  "agent.runtimeModels.ompNoModels":
+    "{runtimeName} is signed in, but this Computer reported no available models.",
   "agent.runtimeModels.missingConfig":
     "{runtimeName} needs configuration on this Computer before its models can be loaded.",
   "agent.runtimeModels.noModels":

@@ -15,6 +15,8 @@ import {
   Input,
   Select,
   SelectContent,
+  SelectGroup,
+  SelectGroupLabel,
   SelectIcon,
   SelectItem,
   SelectItemIndicator,
@@ -194,10 +196,19 @@ function renderSelectItems(options: readonly RuntimeOption[]) {
  *  so the end of that chain needs asserting somewhere. */
 export { RuntimeSelectControl as RuntimeSelectControlForTest };
 
+/** Optional rendered grouping for large catalogs (task #6: omp's 100+
+ * model list groups by provider). Options stay flat for value validation;
+ * groups only change how the popup is laid out. */
+interface RuntimeOptionGroup {
+  label: string;
+  options: readonly RuntimeOption[];
+}
+
 function RuntimeSelectControl({
   value,
   onValueChange,
   options,
+  groups,
   placeholder,
   portalContainer,
   testId,
@@ -207,6 +218,7 @@ function RuntimeSelectControl({
   value: string;
   onValueChange: (value: string) => void;
   options: readonly RuntimeOption[];
+  groups?: readonly RuntimeOptionGroup[];
   placeholder: string;
   portalContainer?: RefObject<HTMLElement | null>;
   testId?: string;
@@ -244,7 +256,16 @@ function RuntimeSelectControl({
       <SelectContent
         portalProps={portalContainer ? { container: portalContainer } : undefined}
       >
-        <SelectList>{renderSelectItems(options)}</SelectList>
+        <SelectList>
+          {groups
+            ? groups.map((group) => (
+              <SelectGroup key={group.label}>
+                <SelectGroupLabel>{`${group.label} · ${group.options.length}`}</SelectGroupLabel>
+                {renderSelectItems(group.options)}
+              </SelectGroup>
+            ))
+            : renderSelectItems(options)}
+        </SelectList>
       </SelectContent>
     </Select>
   );
@@ -253,6 +274,25 @@ function RuntimeSelectControl({
 export interface EnvVarEntry {
   key: string;
   value: string;
+}
+
+/** Group `provider/model` option ids by provider for the omp picker (task #6);
+ * ids without a provider segment fall into one trailing group. */
+function groupRuntimeOptionsByProvider(options: readonly RuntimeOption[]): Array<{ label: string; options: RuntimeOption[] }> {
+  const groups = new Map<string, RuntimeOption[]>();
+  for (const option of options) {
+    const separator = option.value.indexOf("/");
+    const provider = separator > 0 ? option.value.slice(0, separator) : "other";
+    const bucket = groups.get(provider);
+    if (bucket) bucket.push(option);
+    else groups.set(provider, [option]);
+  }
+  return [...groups.entries()]
+    .map(([provider, groupOptions]) => ({
+      label: getRuntimeProviderDisplayName(provider),
+      options: groupOptions,
+    }))
+    .sort((a, b) => b.options.length - a.options.length);
 }
 
 function runtimeModelSourceStatus(
@@ -276,15 +316,26 @@ function runtimeModelSourceStatus(
             ),
           },
         )
+        : source.recovery === "omp_login"
+          ? intl.formatMessage(
+            { id: "agent.runtimeModels.ompLoginRequired" },
+            {
+              command: (chunks) => (
+                <code key="command" className="font-mono font-bold">{chunks}</code>
+              ),
+            },
+          )
+          : intl.formatMessage(
+            { id: "agent.runtimeModels.missingConfig" },
+            { runtimeName },
+          );
+    case "no_models":
+      return source.recovery === "omp_login"
+        ? intl.formatMessage({ id: "agent.runtimeModels.ompNoModels" }, { runtimeName })
         : intl.formatMessage(
-          { id: "agent.runtimeModels.missingConfig" },
+          { id: "agent.runtimeModels.noModels" },
           { runtimeName },
         );
-    case "no_models":
-      return intl.formatMessage(
-        { id: "agent.runtimeModels.noModels" },
-        { runtimeName },
-      );
     case "unsupported":
       return runtimeIgnoresModel(runtime)
         ? intl.formatMessage(
@@ -710,6 +761,7 @@ function SchemaDrivenRuntimeFields({
             value={model}
             onValueChange={onModelChange}
             options={modelOptions}
+            groups={definition.runtimeId === "omp" ? groupRuntimeOptionsByProvider(modelOptions) : undefined}
             placeholder={labels.model?.placeholder ?? formatMessage({ id: "agent.runtimeConfig.model" })}
             portalContainer={portalContainer}
             testId="schema-runtime-model-select"
