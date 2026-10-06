@@ -104,17 +104,25 @@ function readPrivateAllowlist(): { networks: BlockList; hosts: Set<string> } | n
   for (const entry of networksRaw.split(",").map((item) => item.trim()).filter(Boolean)) {
     const [network, prefixRaw] = entry.split("/");
     const prefix = prefixRaw === undefined ? undefined : Number(prefixRaw);
-    if (!network || isIP(network) === 0 || prefix !== undefined && (!Number.isInteger(prefix) || prefix < 0)) {
+    const family = network ? isIP(network) : 0;
+    const maxPrefix = family === 6 ? 128 : 32;
+    if (!network || family === 0 || prefix !== undefined && (!Number.isInteger(prefix) || prefix < 0 || prefix > maxPrefix)) {
       console.warn(`[managed-mcp] ignoring malformed ${ALLOWLIST_NETWORKS_ENV} entry "${entry}"`);
       continue;
     }
-    if (HARD_BLOCKED_ADDRESSES.check(network, isIP(network) === 4 ? "ipv4" : "ipv6")
+    if (HARD_BLOCKED_ADDRESSES.check(network, family === 4 ? "ipv4" : "ipv6")
       || (prefix !== undefined && hardBlockedSubnet(network, prefix))) {
       console.warn(`[managed-mcp] ${ALLOWLIST_NETWORKS_ENV} entry "${entry}" covers a hard-blocked range (loopback / link-local / unspecified / multicast); ignored`);
       continue;
     }
-    if (prefix === undefined) networks.addAddress(network, isIP(network) === 4 ? "ipv4" : "ipv6");
-    else networks.addSubnet(network, prefix, isIP(network) === 4 ? "ipv4" : "ipv6");
+    try {
+      if (prefix === undefined) networks.addAddress(network, family === 4 ? "ipv4" : "ipv6");
+      else networks.addSubnet(network, prefix, family === 4 ? "ipv4" : "ipv6");
+    } catch (error) {
+      // Belt-and-braces: the validation above should make this unreachable;
+      // a BlockList rejection must never take down the whole gateway.
+      console.warn(`[managed-mcp] ignoring ${ALLOWLIST_NETWORKS_ENV} entry "${entry}" rejected by the block list: ${(error as Error).message}`);
+    }
   }
   const hosts = new Set(
     hostsRaw.split(",").map((item) => item.trim().toLowerCase().replace(/\.$/u, "")).filter(Boolean),
@@ -123,8 +131,14 @@ function readPrivateAllowlist(): { networks: BlockList; hosts: Set<string> } | n
   return allowlistCache;
 }
 
-/** Whether a configured subnet overlaps a hard-blocked range (conservative:
- *  checks the network address and the broadcast/last address). */
+/**
+ * WARNING-ONLY heuristic for "this entry covers a hard-blocked range":
+ * checks the subnet's first and last addresses, so a hard-blocked range
+ * landing mid-subnet (e.g. 160.0.0.0/3 vs 169.254/16) or compressed IPv6
+ * input is NOT detected here and simply won't log the warning. SECURITY is
+ * NOT affected: isManagedMcpAddressAllowed checks the hard floor per
+ * address, before any allowlist, so those addresses stay blocked regardless.
+ */
 function hardBlockedSubnet(network: string, prefix: number): boolean {
   // Narrow guard: only flag prefixes that sit inside hard-blocked space or
   // cover it — exact containment via the block table on both ends.

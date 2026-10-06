@@ -182,3 +182,12 @@ describe("safeLookup filter semantics (private mode)", () => {
     assert.equal(result.address, "8.8.8.8", "private address filtered out in official mode");
   });
 });
+
+test("out-of-range prefixes are skipped without breaking the list (PM must-fix)", () => {
+  process.env.RAFT_DEPLOYMENT_MODE = "private";
+  // /40 (v4) and /200 (v6) exceed the address family's bits — previously a
+  // RangeError inside the lazy allowlist load would fail EVERY call.
+  process.env.RAFT_MANAGED_MCP_ALLOWED_NETWORKS = "10.0.0.0/40,fd00::/200,10.20.0.0/16";
+  assert.equal(isManagedMcpAddressAllowed("10.20.1.5"), true, "valid entry still honored");
+  assert.equal(isManagedMcpAddressAllowed("10.21.0.1"), false);
+});
