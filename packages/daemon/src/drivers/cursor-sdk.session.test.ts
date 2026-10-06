@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -302,6 +302,57 @@ function makeSession(
   );
   return { session, ids };
 }
+
+// ── Standing-prompt rule mount ──────────────────────────────────────────────
+
+test("host launch mounts the standing prompt as an alwaysApply project rule and refreshes it on relaunch", async () => {
+  const { deps, cleanup } = makeSessionDeps();
+  const workspace = mkdtempSync(path.join(os.tmpdir(), "cursor-sdk-rule-ws-"));
+  const rulePath = path.join(workspace, ".cursor", "rules", "raft-agent.mdc");
+  try {
+    // First launch: the rule file must exist and carry the exact prompt.
+    const session = new CursorSdkRuntimeSession(
+      makeSpawnContext({
+        standingPrompt: "always reply via the raft CLI" as SpawnContext["standingPrompt"],
+        workingDirectory: workspace,
+      }),
+      () => {},
+      deps,
+    );
+    const startResult = await session.start({ text: "first turn" });
+    assert.deepEqual(startResult, { ok: true, acceptedAs: "prompt" });
+    assert.equal(existsSync(rulePath), true, "rule file written on first launch");
+    assert.equal(
+      readFileSync(rulePath, "utf8"),
+      ["---", "alwaysApply: true", "---", "", "always reply via the raft CLI", ""].join("\n"),
+    );
+    await session.stop({ reason: "test-done" });
+    assert.equal(session.closed, true);
+
+    // Second launch (a fresh session over the same workspace, as a resume
+    // relaunch would be): the rule file must be OVERWRITTEN with the latest
+    // prompt, never left stale.
+    const relaunched = new CursorSdkRuntimeSession(
+      makeSpawnContext({
+        standingPrompt: "updated standing instructions v2" as SpawnContext["standingPrompt"],
+        workingDirectory: workspace,
+      }),
+      () => {},
+      deps,
+    );
+    const relaunchResult = await relaunched.start({ text: "relaunched turn" });
+    assert.deepEqual(relaunchResult, { ok: true, acceptedAs: "prompt" });
+    assert.equal(
+      readFileSync(rulePath, "utf8"),
+      ["---", "alwaysApply: true", "---", "", "updated standing instructions v2", ""].join("\n"),
+      "rule file refreshed with the latest standing prompt",
+    );
+    await relaunched.stop({ reason: "test-done" });
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+    cleanup();
+  }
+});
 
 // ── Same-host follow-up ─────────────────────────────────────────────────────
 

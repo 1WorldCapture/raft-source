@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
+import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import {
   hydrateRuntimeConfig,
@@ -556,6 +557,13 @@ export class CursorSdkRuntimeSession implements RuntimeSession {
     });
     this.assertStartAlive();
     const slockHome = transport.slockHome;
+
+    // Mount the standing prompt as a Cursor project rule BEFORE the host
+    // starts, on every launch (create and resume): rules load through the
+    // project setting source at agent creation/resume, and the prompt may
+    // have changed since the previous launch.
+    this.assertStartAlive();
+    writeStandingPromptRuleFile(this.ctx.workingDirectory, this.ctx.standingPrompt);
 
     // Credential lease: bounded, fail closed. No ambient-key fallback and no
     // access-token-as-API-key substitution — the broker owns that boundary.
@@ -1214,6 +1222,36 @@ function safePathPart(value: string): string {
 }
 
 /**
+ * Relative path (inside the agent workspace) of the project rule file that
+ * carries the Raft standing prompt. Loaded by the SDK through the "project"
+ * setting source (alwaysApply), never through an SDK systemPrompt
+ * replacement.
+ */
+const STANDING_PROMPT_RULE_RELATIVE_PATH = path.join(".cursor", "rules", "raft-agent.mdc");
+
+/**
+ * Mount the Raft standing prompt as a Cursor project rule so it reaches the
+ * SDK agent as ambient context. This is the cursor-sdk standing-prompt
+ * surface: the SDK systemPrompt option would replace the whole harness
+ * prompt (dropping the tool protocol) and requires server permission, and
+ * without any mount a message-woken agent would never see the Raft/CLI
+ * guidance at all (the APM wake path only sends the inbox notice).
+ *
+ * Re-written on EVERY host launch (create and resume): the standing prompt
+ * may change between runs, and rules load at agent creation/resume, so the
+ * file must reflect the latest prompt before the host reads it.
+ */
+function writeStandingPromptRuleFile(workingDirectory: string, standingPrompt: string): void {
+  const rulePath = path.join(workingDirectory, STANDING_PROMPT_RULE_RELATIVE_PATH);
+  mkdirSync(path.dirname(rulePath), { recursive: true });
+  writeFileSync(
+    rulePath,
+    ["---", "alwaysApply: true", "---", "", standingPrompt.trim(), ""].join("\n"),
+    "utf8",
+  );
+}
+
+/**
  * Cursor identity/backend/asset env keys are owner-controlled (mirrors the
  * shared registry's CONTROLLED_RUNTIME_ENV_KEYS for cursor-sdk): ambient or
  * remote-config values must never reach the host.
@@ -1319,10 +1357,16 @@ export class CursorSdkDriver implements RuntimeDriver {
   // runtime into attempt watermarks. The APM attaches a monotonic attemptId to
   // follow-up sends and settles the session's delivery_outcome events
   // (delivered / deferred_to_idle / unknown); no other driver is affected.
-  // supportsNativeStandingPrompt is deliberately NOT set: the standing prompt
-  // rides the registered prompt path (first-turn ctx.prompt); no SDK
-  // systemPrompt replacement, and the current SDK user echo never becomes
-  // another user message.
+  /**
+   * The standing prompt reaches the SDK agent as a Cursor project rule
+   * (writeStandingPromptRuleFile, mounted on every launch), so the APM may
+   * use the native standing-prompt startup input on cold starts instead of
+   * duplicating the whole prompt as a first user message. Deliberately NOT
+   * an SDK systemPrompt replacement: that would drop the harness prompt
+   * (tool protocol) and requires server permission. The current SDK user
+   * echo never becomes another user message.
+   */
+  readonly supportsNativeStandingPrompt = true;
 
   private sessionId: string | null = null;
   private activeSession: CursorSdkRuntimeSession | null = null;

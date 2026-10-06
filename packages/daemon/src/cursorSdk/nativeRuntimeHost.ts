@@ -162,6 +162,10 @@ export class NativeCursorHost {
       this.releaseLock = await (this.deps.lock ?? acquireNativeHostLock)(input.hostDataDir);
       const vendor = await (this.deps.loadSdk ?? (() => import("@cursor/sdk")))();
       if (this.stopping) return;
+      // "project" is load-bearing: the driver mounts the Raft standing
+      // prompt as a project rule (.cursor/rules/raft-agent.mdc) on every
+      // launch; without the project setting source the agent would never
+      // load it.
       const settings: SettingSource[] = ["project", "user", "team", "mdm", "plugins"];
       const options: AgentOptions = {
         apiKey: input.auth.apiKey,

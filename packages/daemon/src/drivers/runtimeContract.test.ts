@@ -54,6 +54,8 @@ const expectedContracts = {
     stdoutChannel: "diagnostic",
     session: { recovery: "resume_or_fresh" },
     modelVerifiedAs: "launchable",
+    // Standing prompt rides a Cursor project rule mounted on every launch.
+    nativeStandingPrompt: true,
   },
   cursor: {
     lifecycle: { kind: "per_turn", start: "immediate", exit: "natural", inFlightWake: "spawn_new" },
