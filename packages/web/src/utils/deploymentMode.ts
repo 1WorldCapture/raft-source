@@ -24,7 +24,7 @@
 //                   deployment mode cannot change under a running page).
 import { useSyncExternalStore } from "react";
 
-import { RUNTIME_API_BASE } from "../desktopRuntimeEnvironment";
+import { RUNTIME_API_BASE, RUNTIME_API_ORIGIN } from "../desktopRuntimeEnvironment";
 
 export type DeploymentMode = "private" | "standard";
 export type DeploymentModeResolution = DeploymentMode | "unknown";
@@ -64,6 +64,51 @@ function notify(): void {
   for (const listener of listeners) listener();
 }
 
+function safeOrigin(value: string): string | null {
+  try {
+    return new URL(value).origin;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Validate and extract the desktop installer block from the server's
+ * downloads payload (task #12 — D3 fix). Every dmg URL must be an absolute
+ * http(s) URL, and — when this page's API origin is known — same-origin with
+ * it: the server builds these URLs from SERVER_URL only (which is also what
+ * the API origin resolves to), so anything else means a misconfigured or
+ * hostile payload, and the whole desktop block is dropped rather than
+ * rendered (the download section stays hidden; the other downloads fields
+ * are unaffected). Scheme follows the deployment: an https stack can only
+ * produce https links under this rule, while a plain-http intranet stack
+ * (a phase 3-1 supported topology) still works. An empty `apiOrigin`
+ * degrades to the scheme-only check — a branch only node-run unit tests of
+ * this module can reach (no page location); production always has a known
+ * origin, so the same-origin gate is always in force there.
+ */
+export function parseDesktopDownloads(
+  downloads: Record<string, unknown>,
+  apiOrigin: string,
+): NonNullable<DeploymentDownloads["desktop"]> | null {
+  const desktop = downloads.desktop;
+  if (typeof desktop !== "object" || desktop === null) return null;
+  const { version, dmg } = desktop as { version?: unknown; dmg?: unknown };
+  if (typeof version !== "string" || !version) return null;
+  if (typeof dmg !== "object" || dmg === null) return null;
+  const { arm64, x64 } = dmg as { arm64?: unknown; x64?: unknown };
+  const trustedOrigin = safeOrigin(apiOrigin);
+  const acceptable = (candidate: unknown): candidate is string => {
+    if (typeof candidate !== "string" || !candidate) return false;
+    const origin = safeOrigin(candidate);
+    if (origin === null) return false;
+    if (!origin.startsWith("http://") && !origin.startsWith("https://")) return false;
+    return trustedOrigin === null || origin === trustedOrigin;
+  };
+  if (!acceptable(arm64) || !acceptable(x64)) return null;
+  return { version, dmg: { arm64, x64 } };
+}
+
 function parseDeploymentInfo(body: unknown): DeploymentInfo | null {
   if (typeof body !== "object" || body === null) return null;
   const mode = (body as { deploymentMode?: unknown }).deploymentMode;
@@ -72,11 +117,14 @@ function parseDeploymentInfo(body: unknown): DeploymentInfo | null {
   if (mode === "private") {
     const downloads = (body as { downloads?: unknown }).downloads;
     if (typeof downloads === "object" && downloads !== null) {
-      const { computerBase, cli, daemon } = downloads as Record<string, unknown>;
+      const record = downloads as Record<string, unknown>;
+      const { computerBase, cli, daemon } = record;
       if (typeof computerBase === "string" && computerBase) {
         const parsed: DeploymentDownloads = { computerBase };
         if (typeof cli === "string" && cli) parsed.cli = cli;
         if (typeof daemon === "string" && daemon) parsed.daemon = daemon;
+        const desktop = parseDesktopDownloads(record, RUNTIME_API_ORIGIN);
+        if (desktop) parsed.desktop = desktop;
         info.downloads = parsed;
       }
     }
