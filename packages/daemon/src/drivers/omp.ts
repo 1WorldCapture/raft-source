@@ -634,6 +634,11 @@ export class OmpDriver implements RuntimeDriver {
   readonly supportsStdinNotification = true;
   readonly busyDeliveryMode = "direct" as const;
   readonly supportsNativeStandingPrompt = true;
+  /** This driver forwards ctx.prompt itself (deliverStartupPrompt, post-
+   *  handshake), so the APM's launch activation booking (spawn_prompt) is a
+   *  real carrier for omp — the session_init delivery fallback must not
+   *  re-inject the same startup input. */
+  readonly consumesSpawnPrompt = true;
 
   /**
    * omp's real run state, from the turn machine (task #7): turn frames
@@ -678,6 +683,10 @@ export class OmpDriver implements RuntimeDriver {
    *  except a refused steer, which falls back to a prompt once (task #7:
    *  a steer racing omp's turn end must not strand the message). */
   private deliveryIds = new Map<string, { command: "prompt" | "steer"; fallbackText?: string }>();
+  /** Activation input folded into ctx.prompt by the APM, forwarded once the
+   *  handshake settles (the spawn_prompt carrier — omp has no spawn-time
+   *  prompt flag, so the driver must forward it itself). */
+  private startupPrompt: string | null = null;
 
   // Raft integration (task #5): launch files, managed MCP host tools.
   private systemPromptPath: string | null = null;
@@ -766,8 +775,47 @@ export class OmpDriver implements RuntimeDriver {
     return { available: true, version: version ?? undefined };
   }
 
-  async spawn(ctx: SpawnContext, launchOverrides: OmpRpcLaunchOverrides = {}): Promise<SpawnResult> {
-    const { spawnEnv, slockDir } = await prepareCliTransport(ctx, { NO_COLOR: "1" });
+  /**
+   * Bind the pending startup prompt to the CURRENT handshake deferred. The
+   * resume fallback replaces that deferred after a failed first attempt, so
+   * the carrier re-mounts against the fresh launch (the failed attempt's
+   * rejection is deliberately ignored — a terminal failure surfaces through
+   * the exit/protocol paths instead).
+   */
+  private mountStartupPromptCarrier(): void {
+    if (!this.startupPrompt || !this.readyDeferred) return;
+    void this.readyDeferred.promise.then(() => {
+      const text = this.startupPrompt;
+      this.startupPrompt = null;
+      if (text) this.deliverStartupPrompt(text);
+    }, () => {
+      // Handshake failed; see mountStartupPromptCarrier's doc.
+    });
+  }
+
+  /**
+   * Forward the launch's activation input (wake message / resume catch-up
+   * folded into ctx.prompt by the APM) as the session's first prompt. Sends
+   * only after whenReady settles, so host tools register before the first
+   * model call (task #5 contract), and rides the same encode path — and the
+   * prompt_result exactly-once turn accounting (task #7) — as any idle
+   * delivery: the turn frames it produces mark the run in progress, so later
+   * deliveries encode as steer until the boundary closes it.
+   */
+  private deliverStartupPrompt(text: string): void {
+    const proc = this.process;
+    if (!proc || !proc.stdin?.writable) return;
+    const encoded = this.encodeStdinMessage(text, null, { mode: "idle" });
+    if (!encoded) return;
+    try {
+      proc.stdin.write(`${encoded}\n`);
+    } catch {
+      // A dead child turns this into a stdin error; the exit path already
+      // fails pending requests and surfaces diagnostics.
+    }
+  }
+
+  async spawn(ctx: SpawnContext, launchOverrides: OmpRpcLaunchOverrides = {}): Promise<SpawnResult> {    const { spawnEnv, slockDir } = await prepareCliTransport(ctx, { NO_COLOR: "1" });
 
     // Managed-agent launch files live in the per-agent CLI transport dir —
     // 0600, outside the workspace, rewritten every spawn (task #5). The
@@ -825,6 +873,14 @@ export class OmpDriver implements RuntimeDriver {
     this.launchRetryUsed = false;
     this.deliveryIds.clear();
 
+    // The APM folds the launch's activation input (wake message, resume
+    // catch-up) into ctx.prompt and books it as delivered(spawn_prompt).
+    // argv-style runtimes carry that text at exec; omp has no spawn-time
+    // prompt flag, so the carrier is real only if this driver forwards it
+    // after the handshake settles.
+    this.startupPrompt = typeof ctx.prompt === "string" && ctx.prompt.trim().length > 0 ? ctx.prompt : null;
+    this.mountStartupPromptCarrier();
+
     // Per-workspace session isolation (PM task #4): never mix with the
     // user's own omp sessions in ~/.omp.
     this.sessionDir = launchOverrides.args ? null : path.join(ctx.workingDirectory, ".omp-sessions");
@@ -876,6 +932,9 @@ export class OmpDriver implements RuntimeDriver {
         this.readyDeferred = this.createReadyDeferred();
         this.hostToolCalls.clear();
         this.turnFramesObserved = false;
+        // The startup prompt never reached the failed first attempt; re-mount
+        // the carrier on the fresh launch's handshake deferred.
+        this.mountStartupPromptCarrier();
         return this.launchChild(ctx, spawnEnv, launchOverrides, null);
       }
       // Ready: settle the driver from the buffered lines (ready → negotiate →

@@ -478,6 +478,17 @@ export interface RuntimeDriver {
   readonly liveSessionReadyAt?: "session_init" | "turn_end";
 
   /**
+   * The driver forwards the spawn context's prompt (the launch's activation
+   * input folded in by the agent process manager) to the runtime itself. For
+   * such drivers the spawn_prompt activation booking is a real carrier, so
+   * the session_init delivery fallback must not re-inject the same startup
+   * input. Drivers that consume ctx.prompt at exec (argv-style) vs. drivers
+   * that ignore it entirely must NOT set this flag — the fallback stays
+   * their delivery path.
+   */
+  readonly consumesSpawnPrompt?: boolean;
+
+  /**
    * Whether the runtime keeps a live process that can accept follow-up messages
    * over stdin while the daemon keeps it alive.
    */

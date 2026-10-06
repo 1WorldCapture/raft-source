@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import { execFile } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -517,7 +517,11 @@ interface SessionHarness {
   waitUntil(predicate: () => boolean, ms?: number): Promise<void>;
 }
 
-async function startSessionFake(mode: string, configSessionId: string | null): Promise<SessionHarness> {
+async function startSessionFake(
+  mode: string,
+  configSessionId: string | null,
+  options: { prompt?: string | null } = {},
+): Promise<SessionHarness> {
   const workspace = mkdtempSync(path.join(os.tmpdir(), "slock-omp-session-"));
   const scriptPath = path.join(workspace, "fake-omp-session.cjs");
   writeFileSync(scriptPath, FAKE_SESSION_SCRIPT);
@@ -525,6 +529,7 @@ async function startSessionFake(mode: string, configSessionId: string | null): P
   const driver = new OmpDriver();
   const ctx = makeSpawnContext(workspace);
   if (configSessionId) (ctx.config as { sessionId?: string | null }).sessionId = configSessionId;
+  if (options.prompt !== undefined) ctx.prompt = (options.prompt ?? "") as typeof ctx.prompt;
   const { process: proc } = await driver.spawn(ctx, {
     command: process.execPath,
     extraArgs: [scriptPath, mode],
@@ -604,7 +609,9 @@ test("delivery encoding follows omp's real run state, not the APM's belief (task
 });
 
 test("a steer refused at the run boundary falls back to a prompt once (task #7 ⑤)", async () => {
-  const harness = await startSessionFake("refuse-delivery", null);
+  // prompt: "" keeps the fake's refuse-once aimed at THIS test's steer —
+  // the startup carrier must not consume the refusal.
+  const harness = await startSessionFake("refuse-delivery", null, { prompt: "" });
   try {
     await harness.waitUntil(() => harness.driver.isProtocolSettled);
 
@@ -627,7 +634,8 @@ test("a steer refused at the run boundary falls back to a prompt once (task #7 �
 });
 
 test("a refused prompt or steer surfaces as an error event", async () => {
-  const harness = await startSessionFake("refuse-delivery", null);
+  // prompt: "" keeps the fake's refuse-once aimed at THIS test's delivery.
+  const harness = await startSessionFake("refuse-delivery", null, { prompt: "" });
   try {
     await harness.waitUntil(() => harness.driver.isProtocolSettled);
 
@@ -792,6 +800,83 @@ test("a fresh launch (no recorded session) does not pass --resume and gets a fre
 });
 
 // ============================================================================
+// Spawn_prompt carrier — the APM books launch activation as
+// delivered(spawn_prompt), so the driver MUST forward ctx.prompt itself
+// (resume launches strand the startup input otherwise: the session_init
+// fallback never fires when the session id is preset and unchanged).
+// ============================================================================
+
+test("fresh launch forwards ctx.prompt as exactly one post-handshake prompt", async () => {
+  const frameLogPath = path.join(os.tmpdir(), `slock-omp-startup-fresh-${process.pid}-${Date.now()}.jsonl`);
+  process.env.OMP_FAKE_FRAME_LOG = frameLogPath;
+  let harness: SessionHarness | null = null;
+  try {
+    harness = await startSessionFake("echo", null);
+    await harness.waitUntil(() => existsSync(frameLogPath) && readJsonLines(frameLogPath).some((frame) => frame.type === "prompt" && frame.message === "hello"));
+    await harness.sleep(250);
+    const prompts = readJsonLines(frameLogPath).filter((frame) => frame.type === "prompt");
+    assert.equal(prompts.length, 1, "exactly one startup prompt, no duplicates");
+    assert.equal(harness.events.filter((event) => event.kind === "error").length, 0, "the carrier delivery must resolve cleanly");
+  } finally {
+    harness?.driver.stop({ sigtermGraceMs: 100 });
+    delete process.env.OMP_FAKE_FRAME_LOG;
+    rmSync(frameLogPath, { force: true });
+  }
+});
+
+test("resume launch forwards ctx.prompt once after the handshake settles", async () => {
+  const frameLogPath = path.join(os.tmpdir(), `slock-omp-startup-resume-${process.pid}-${Date.now()}.jsonl`);
+  process.env.OMP_FAKE_FRAME_LOG = frameLogPath;
+  let harness: SessionHarness | null = null;
+  try {
+    harness = await startSessionFake("echo", "recorded-session-42");
+    await harness.waitUntil(() => existsSync(frameLogPath) && readJsonLines(frameLogPath).some((frame) => frame.type === "prompt" && frame.message === "hello"));
+    await harness.sleep(250);
+    const prompts = readJsonLines(frameLogPath).filter((frame) => frame.type === "prompt");
+    assert.equal(prompts.length, 1, "the resume launch must deliver the startup input exactly once");
+    assert.equal(harness.driver.currentSessionId, "recorded-session-42", "the carrier rides the resumed session");
+  } finally {
+    harness?.driver.stop({ sigtermGraceMs: 100 });
+    delete process.env.OMP_FAKE_FRAME_LOG;
+    rmSync(frameLogPath, { force: true });
+  }
+});
+
+test("a failed resume re-mounts the carrier so the startup input is not lost", async () => {
+  const frameLogPath = path.join(os.tmpdir(), `slock-omp-startup-fallback-${process.pid}-${Date.now()}.jsonl`);
+  process.env.OMP_FAKE_FRAME_LOG = frameLogPath;
+  let harness: SessionHarness | null = null;
+  try {
+    harness = await startSessionFake("resume-crash", "lost-session-7");
+    await harness.waitUntil(() => harness.driver.currentSessionId === "fresh-session-1", 5000);
+    await harness.waitUntil(() => existsSync(frameLogPath) && readJsonLines(frameLogPath).some((frame) => frame.type === "prompt" && frame.message === "hello"));
+    const prompts = readJsonLines(frameLogPath).filter((frame) => frame.type === "prompt");
+    assert.equal(prompts.length, 1, "the carrier must re-mount on the fallback launch and deliver once");
+  } finally {
+    harness?.driver.stop({ sigtermGraceMs: 100 });
+    delete process.env.OMP_FAKE_FRAME_LOG;
+    rmSync(frameLogPath, { force: true });
+  }
+});
+
+test("no ctx.prompt — the carrier sends no startup prompt", async () => {
+  const frameLogPath = path.join(os.tmpdir(), `slock-omp-startup-none-${process.pid}-${Date.now()}.jsonl`);
+  process.env.OMP_FAKE_FRAME_LOG = frameLogPath;
+  let harness: SessionHarness | null = null;
+  try {
+    harness = await startSessionFake("echo", null, { prompt: "" });
+    await harness.waitUntil(() => harness.driver.isProtocolSettled);
+    await harness.sleep(300);
+    const prompts = existsSync(frameLogPath) ? readJsonLines(frameLogPath).filter((frame) => frame.type === "prompt") : [];
+    assert.equal(prompts.length, 0, "an empty ctx.prompt must not produce a startup prompt");
+  } finally {
+    harness?.driver.stop({ sigtermGraceMs: 100 });
+    delete process.env.OMP_FAKE_FRAME_LOG;
+    rmSync(frameLogPath, { force: true });
+  }
+});
+
+// ============================================================================
 // Task #5 — Raft integration: system prompt, CLI env, managed MCP host tools
 // ============================================================================
 
@@ -895,6 +980,7 @@ async function startHostToolsFake(options: {
   standingPrompt?: string;
   hostToolMode?: "call" | "unknown" | "cancel";
   mock?: ManagedMcpMock;
+  prompt?: string | null;
 } = {}): Promise<HostToolsHarness> {
   const workspace = mkdtempSync(path.join(os.tmpdir(), "slock-omp-hosttools-"));
   const scriptPath = path.join(workspace, "fake-omp-session.cjs");
@@ -913,6 +999,7 @@ async function startHostToolsFake(options: {
   (ctx.config as { agentCredentialKey?: string | null }).agentCredentialKey = "test-agent-credential";
   if (options.sessionId) (ctx.config as { sessionId?: string | null }).sessionId = options.sessionId;
   if (options.standingPrompt) ctx.standingPrompt = options.standingPrompt;
+  if (options.prompt !== undefined) ctx.prompt = (options.prompt ?? "") as typeof ctx.prompt;
   const { process: proc } = await driver.spawn(ctx, {
     command: process.execPath,
     extraArgs: [scriptPath, "host-tools"],
@@ -970,6 +1057,13 @@ test("managed tools ride the ready chain: set_host_tools lands before get_state 
     const setToolsFrame = frames[setTools] as { tools?: Array<{ name?: string; parameters?: { required?: string[] } }> };
     assert.equal(setToolsFrame.tools?.[0]?.name, "srv_tool");
     assert.deepEqual(setToolsFrame.tools?.[0]?.parameters?.required, ["x"], "the input schema must pass through");
+    // The spawn_prompt carrier (ctx.prompt forwarding): the startup prompt
+    // may only reach omp AFTER host tools register — the first model call of
+    // the launch must see the managed tools (task #5 contract).
+    const startupPromptIndex = types.indexOf("prompt");
+    assert.ok(startupPromptIndex > setTools, `startup prompt must follow host tool registration, saw: ${types.join(",")}`);
+    const startupPrompt = frames[startupPromptIndex] as { message?: string };
+    assert.equal(startupPrompt.message, "hello", "the carrier forwards the launch's ctx.prompt verbatim");
   } finally {
     harness.cleanup();
     await harness.mock.close();
@@ -977,7 +1071,7 @@ test("managed tools ride the ready chain: set_host_tools lands before get_state 
 });
 
 test("a host tool call executes against the managed endpoint and completes exactly once", async () => {
-  const harness = await startHostToolsFake({ hostToolMode: "call" });
+  const harness = await startHostToolsFake({ hostToolMode: "call", prompt: "" });
   try {
     await harness.waitUntil(() => harness.driver.isProtocolSettled);
 
@@ -1008,7 +1102,7 @@ test("a host tool call executes against the managed endpoint and completes exact
 
 test("a managed tool error surfaces as an isError host_tool_result", async () => {
   const mock = await startManagedMcpMock({ callResult: { content: [{ type: "text", text: "boom" }], isError: true } });
-  const harness = await startHostToolsFake({ hostToolMode: "call", mock });
+  const harness = await startHostToolsFake({ hostToolMode: "call", mock, prompt: "" });
   try {
     await harness.waitUntil(() => harness.driver.isProtocolSettled);
     const idle = harness.driver.encodeStdinMessage("run the tool", null, { mode: "idle" });
@@ -1024,7 +1118,7 @@ test("a managed tool error surfaces as an isError host_tool_result", async () =>
 });
 
 test("an unknown host tool is refused immediately without touching the endpoint", async () => {
-  const harness = await startHostToolsFake({ hostToolMode: "unknown" });
+  const harness = await startHostToolsFake({ hostToolMode: "unknown", prompt: "" });
   try {
     await harness.waitUntil(() => harness.driver.isProtocolSettled);
     const idle = harness.driver.encodeStdinMessage("run the tool", null, { mode: "idle" });
@@ -1043,7 +1137,7 @@ test("an unknown host tool is refused immediately without touching the endpoint"
 test("host_tool_cancel aborts the in-flight managed call and no result is sent", async () => {
   // callStatus 0 = the mock holds the request open and reports client aborts.
   const mock = await startManagedMcpMock({ callStatus: 0 });
-  const harness = await startHostToolsFake({ hostToolMode: "cancel", mock });
+  const harness = await startHostToolsFake({ hostToolMode: "cancel", mock, prompt: "" });
   try {
     await harness.waitUntil(() => harness.driver.isProtocolSettled);
     const idle = harness.driver.encodeStdinMessage("run the tool", null, { mode: "idle" });
