@@ -2931,7 +2931,7 @@ export function isReasoningEffortAllowedForModel(runtime: string, modelId: strin
 }
 
 /** Runtimes that support configurable reasoning effort. */
-export const REASONING_EFFORT_RUNTIMES = new Set(["builtin", "claude", "codex", "grok", "copilot", "pi", "kimi-sdk"]);
+export const REASONING_EFFORT_RUNTIMES = new Set(["builtin", "claude", "codex", "grok", "copilot", "pi", "kimi-sdk", "omp"]);
 
 /** Runtimes that support the shared fast-mode launch variant. */
 export const RUNTIME_FAST_MODE_RUNTIMES = new Set(["claude", "codex"]);
