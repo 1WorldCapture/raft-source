@@ -439,11 +439,20 @@ const FAKE_SESSION_SCRIPT = `
 const fs = require("node:fs");
 const mode = process.argv[2] ?? "echo";
 const send = (frame) => process.stdout.write(JSON.stringify(frame) + "\\n");
-if (mode === "resume-crash" && process.argv.includes("--resume")) {
+if ((mode === "resume-crash" || mode === "resume-crash-late") && process.argv.includes("--resume")) {
+  // A failed resume dies BEFORE the ready frame (session load happens
+  // first); resume-crash-late models the slow path where extension
+  // discovery + session load push the exit well past any fixed window
+  // (PM task #4 r2: measured 1.6s on real omp 18.6.1).
   process.stderr.write("Could not restore model cursor/gone-model\\n");
-  process.exit(3);
+  if (mode === "resume-crash-late") {
+    setTimeout(() => process.exit(3), 1200);
+  } else {
+    process.exit(3);
+  }
+} else {
+  send({ type: "ready", protocolVersion: 1, supportedProtocolVersions: [1, 2], maxFrameBytes: 1048576, maxReassembledFrameBytes: 67108864 });
 }
-send({ type: "ready", protocolVersion: 1, supportedProtocolVersions: [1, 2], maxFrameBytes: 1048576, maxReassembledFrameBytes: 67108864 });
 const sessionId = process.argv.includes("--resume") ? process.argv[process.argv.indexOf("--resume") + 1] : "fresh-session-1";
 if (process.argv[3] === "record") {
   fs.writeFileSync(process.argv[4], JSON.stringify(process.argv.slice(2)));
@@ -591,6 +600,23 @@ test("a failed resume falls back to a fresh session with a diagnostic", async ()
     assert.ok(diagnostic, "the fallback must surface a diagnostic");
     assert.match(diagnostic.message ?? "", /could not resume session lost-session-7/);
     assert.match(diagnostic.message ?? "", /Could not restore model/, "the diagnostic carries the first exit's stderr summary");
+  } finally {
+    harness.driver.stop({ sigtermGraceMs: 100 });
+  }
+});
+
+test("a resume that exits late (past any fixed window) still falls back", async () => {
+  // PM task #4 r2: the fallback condition is exit-before-ready, not a fixed
+  // timer — real omp's extension discovery + session load can push a failed
+  // resume's exit well past a small window (measured 1.6s on 18.6.1).
+  const harness = await startSessionFake("resume-crash-late", "lost-session-late");
+  try {
+    await harness.waitUntil(() => harness.driver.currentSessionId !== null, 8000);
+
+    assert.equal(harness.driver.currentSessionId, "fresh-session-1", "the late exit must still fall back to a fresh session");
+    const diagnostic = harness.events.find((event) => event.kind === "runtime_diagnostic") as { message?: string };
+    assert.ok(diagnostic, "the fallback must surface a diagnostic");
+    assert.match(diagnostic.message ?? "", /lost-session-late/);
   } finally {
     harness.driver.stop({ sigtermGraceMs: 100 });
   }

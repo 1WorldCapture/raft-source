@@ -47,11 +47,11 @@ const OMP_STOP_SIGTERM_GRACE_MS = 3000;
 const OMP_STOP_ABORT_HEAD_START_MS = 100;
 
 /**
- * How long a --resume first attempt must survive to be trusted with the
- * session; an omp dying inside the window (bad session, unavailable saved
- * model, broken binary) triggers the one-shot fresh relaunch.
+
+
+
  */
-const OMP_RESUME_FALLBACK_WINDOW_MS = 400;
+
 
 function killPosixProcessTree(pid: number, signal: "SIGTERM" | "SIGKILL"): void {
   try {
@@ -321,6 +321,10 @@ export class OmpDriver implements RuntimeDriver {
       resolve = res;
       reject = rej;
     });
+    // The deferred may be discarded without a consumer (never-ready tests,
+    // stop() races); mark it handled so abandonment is never an unhandled
+    // rejection. Real consumers via whenReady() still receive the rejection.
+    promise.catch(() => {});
     return { promise, resolve, reject };
   }
 
@@ -398,24 +402,38 @@ export class OmpDriver implements RuntimeDriver {
 
     const firstAttempt = await this.launchChild(ctx, spawnEnv, launchOverrides, resumeSessionId);
 
-    // Resume fallback (PM task #4): a --resume launch that dies before it can
-    // serve gets exactly one fresh relaunch, and the fallback process — not
-    // the dead one — is what spawn returns, so the session machinery attaches
-    // to the live child. The window needs no stdout listening: with no reader
-    // attached the child's output simply stays buffered (paused stream), so
-    // the machinery replays every frame from the start. An omp that cannot
-    // resume may just as well be a broken binary or a logged-out machine, so
-    // the fallback diagnostic carries the first exit's stderr summary; a
-    // fallback launch failing pre-ready is the REAL startup error and is not
-    // retried again.
+    // Resume fallback (PM task #4 r2): the condition is "exited before the
+    // ready frame" — wait for ready or exit, whichever comes first, capped by
+    // the ready timeout. Measured on a real omp 18.6.1 (owner's Mac, temp
+    // session dir): a nonexistent session id exits pre-ready at ~1.6s
+    // (extension discovery + session load take longer than any fixed window),
+    // while a session whose saved model is unavailable still reaches ready at
+    // ~0.8s and surfaces model problems per-turn. The scanner buffers raw
+    // lines without parsing; on ready it hands the buffered lines to
+    // parseLine so the driver settles (negotiation sent) before the session
+    // machinery attaches. An omp that cannot resume may just as well be a
+    // broken binary or a logged-out machine, so the fallback diagnostic
+    // carries the first exit's stderr summary; a fallback launch failing
+    // pre-ready is the REAL startup error and is not retried again.
     if (resumeSessionId !== null && !launchOverrides.args) {
-      const firstOutcome = await this.awaitResumeFallbackWindow(firstAttempt.process, OMP_RESUME_FALLBACK_WINDOW_MS);
+      const firstOutcome = await this.awaitResumeHandshake(firstAttempt.process, launchOverrides.readyTimeoutMs ?? OMP_RPC_READY_TIMEOUT_MS);
+      if (firstOutcome.outcome === "timeout") {
+        const timeoutError = new OmpRpcProtocolError(
+          `OMP RPC process did not send a ready frame within ${launchOverrides.readyTimeoutMs ?? OMP_RPC_READY_TIMEOUT_MS}ms. stderr: ${this.stderrTail.trim()}`,
+        );
+        this.recordProtocolError(timeoutError.message);
+        this.killProcess();
+        throw timeoutError;
+      }
       if (firstOutcome.outcome === "exit") {
         this.launchRetryUsed = true;
         const firstExitSummary = this.stderrTail.trim().slice(-600) || firstOutcome.summary;
         this.resumeFallbackNotice = `OMP could not resume session ${resumeSessionId}; started a fresh session. First exit: ${firstExitSummary}`;
         logger.info(`[omp] ${this.resumeFallbackNotice}`);
-        // Reset per-generation state for the fresh launch.
+        // Reset per-generation state for the fresh launch. The first
+        // attempt's readyDeferred was rejected by its exit handler; silence
+        // the abandoned promise before replacing it.
+        this.readyDeferred?.promise.catch(() => {});
         this.decoder = new OmpRpcFrameDecoder();
         this.pending.clear();
         this.clearReadyTimer();
@@ -425,35 +443,60 @@ export class OmpDriver implements RuntimeDriver {
         this.readyDeferred = this.createReadyDeferred();
         return this.launchChild(ctx, spawnEnv, launchOverrides, null);
       }
+      // Ready: settle the driver from the buffered lines (ready → negotiate →
+      // …). Their event returns are empty at this stage (transport frames
+      // only); the machinery attaches right after spawn returns and drives
+      // every later frame itself.
+      for (const line of firstOutcome.bufferedLines) {
+        this.parseLine(line);
+      }
     }
 
     return firstAttempt;
   }
 
   /**
-   * Watch a resume attempt for its first window: an early exit resolves with
-   * the exit summary, a surviving launch resolves after the window and leaves
-   * the process untouched (its buffered stdout belongs to the session
-   * machinery's attach).
+   * Watch a resume attempt until the ready frame or an exit, whichever comes
+   * first, capped by the ready timeout. Raw line scanning only — parsed
+   * processing happens in spawn's handoff (bufferedLines) so parseLine is
+   * never called twice per line.
    */
-  private awaitResumeFallbackWindow(
+  private awaitResumeHandshake(
     proc: ChildProcess,
-    windowMs: number,
-  ): Promise<{ outcome: "survived" } | { outcome: "exit"; summary: string }> {
+    readyTimeoutMs: number,
+  ): Promise<{ outcome: "ready"; bufferedLines: string[] } | { outcome: "exit"; summary: string } | { outcome: "timeout" }> {
     return new Promise((resolve) => {
+      let buffer = "";
       let settled = false;
-      const finish = (result: { outcome: "survived" } | { outcome: "exit"; summary: string }): void => {
+      const finish = (result: { outcome: "ready"; bufferedLines: string[] } | { outcome: "exit"; summary: string } | { outcome: "timeout" }): void => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
+        proc.stdout?.off("data", onStdout);
         proc.off("exit", onExit);
         resolve(result);
+      };
+      const completeLines: string[] = [];
+      const onStdout = (chunk: Buffer): void => {
+        buffer += chunk.toString("utf8");
+        let index: number;
+        while ((index = buffer.indexOf("\n")) >= 0) {
+          const line = buffer.slice(0, index);
+          buffer = buffer.slice(index + 1);
+          if (!line.trim()) continue;
+          completeLines.push(line);
+          if (line.includes('"type":"ready"')) {
+            finish({ outcome: "ready", bufferedLines: completeLines });
+            return;
+          }
+        }
       };
       const onExit = (code: number | null, signal: NodeJS.Signals | null): void => {
         finish({ outcome: "exit", summary: `exit ${code ?? signal ?? "unknown"}` });
       };
-      const timer = setTimeout(() => finish({ outcome: "survived" }), windowMs);
+      const timer = setTimeout(() => finish({ outcome: "timeout" }), readyTimeoutMs);
       timer.unref?.();
+      proc.stdout?.on("data", onStdout);
       proc.on("exit", onExit);
     });
   }
