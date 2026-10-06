@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { OmpDriver, OmpRpcProcessExitedError, OmpRpcProtocolError, OmpRpcRequestTimeoutError } from "./omp.js";
-import type { SpawnContext } from "./types.js";
+import type { ParsedEvent, SpawnContext } from "./types.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -25,6 +25,7 @@ if (mode !== "never-ready") {
 }
 
 const pendingStates = [];
+let sawFirstGetState = false;
 process.stdin.setEncoding("utf8");
 let buffer = "";
 process.stdin.on("data", (chunk) => {
@@ -36,14 +37,24 @@ process.stdin.on("data", (chunk) => {
     if (line.trim()) {
       let frame;
       try { frame = JSON.parse(line); } catch { continue; }
-      if (mode === "silent") continue;
       if (frame.type === "negotiate_protocol") {
+        // Negotiation is answered in every mode — the handshake must settle
+        // even for a peer that never answers user commands.
         send({ id: frame.id, type: "response", command: "negotiate_protocol", success: true, data: { protocolVersion: frame.protocolVersion } });
+      } else if (mode === "silent") {
+        continue;
       } else if (mode === "out-of-order" && frame.type === "get_state") {
-        pendingStates.push(frame.id);
-        if (pendingStates.length === 2) {
-          send({ id: pendingStates[1], type: "response", command: "get_state", success: true, data: { which: "second" } });
-          send({ id: pendingStates[0], type: "response", command: "get_state", success: true, data: { which: "first" } });
+        // The driver's own settle-time get_state arrives first and gets a
+        // plain echo; the out-of-order dance plays for the next two.
+        if (!sawFirstGetState) {
+          sawFirstGetState = true;
+          send({ id: frame.id, type: "response", command: "get_state", success: true, data: {} });
+        } else {
+          pendingStates.push(frame.id);
+          if (pendingStates.length === 2) {
+            send({ id: pendingStates[1], type: "response", command: "get_state", success: true, data: { which: "second" } });
+            send({ id: pendingStates[0], type: "response", command: "get_state", success: true, data: { which: "first" } });
+          }
         }
       } else if (mode === "chunked" && frame.type === "get_state") {
         const payload = Buffer.from(JSON.stringify({ id: frame.id, type: "response", command: "get_state", success: true, data: { blob: "c".repeat(1024 * 1024 + 512) } }), "utf8");
@@ -52,7 +63,7 @@ process.stdin.on("data", (chunk) => {
         for (let i = 0; i < count; i++) {
           send({ type: "rpc_chunk", chunkId: "rpc-1", index: i, count, byteLength: payload.byteLength, data: payload.subarray(i * chunkSize, (i + 1) * chunkSize).toString("base64") });
         }
-      } else if (mode === "crash-on-command" && frame.type === "get_state") {
+      } else if (mode === "crash-on-command" && frame.type === "get_entries") {
         process.exit(7);
       } else if (mode === "spawn-child" && frame.type === "get_state") {
         const { spawn } = require("node:child_process");
@@ -140,10 +151,14 @@ async function startFakeOmp(mode: string, overrides: { readyTimeoutMs?: number }
     proc,
     sleep: (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
     waitReadyNegotiated: async () => {
-      for (let i = 0; i < 500 && driver.activeProtocolVersion === 0; i += 1) {
+      // protocolSettled, not activeProtocolVersion: the version flips to 1 on
+      // the ready frame before the negotiation confirms, so waiting on it
+      // races the handshake.
+      for (let i = 0; i < 500 && !driver.isProtocolSettled; i += 1) {
         await new Promise((resolve) => setTimeout(resolve, 10));
       }
       assert.equal(driver.isReady, true, "fake omp never became ready");
+      assert.equal(driver.isProtocolSettled, true, "fake omp handshake never settled");
     },
   };
 }
@@ -160,7 +175,8 @@ async function processAlive(pid: number): Promise<boolean> {
 test("ready frame arms the driver and a supported v2 is negotiated", async () => {
   const fake = await startFakeOmp("echo");
   try {
-    assert.equal(fake.driver.isReady, false);
+    // The ready frame may land while spawn's async env setup yields; only the
+    // settled state is contractual.
     await fake.waitReadyNegotiated();
     assert.equal(fake.driver.activeProtocolVersion, 2);
     assert.equal(fake.driver.protocolError, null);
@@ -244,8 +260,9 @@ test("an abnormal exit rejects in-flight requests with a typed error", async () 
   const fake = await startFakeOmp("crash-on-command");
   try {
     await fake.waitReadyNegotiated();
+    await fake.sleep(100); // let the settle-time get_state echo land first
 
-    const pending = fake.driver.request({ type: "get_state" });
+    const pending = fake.driver.request({ type: "get_entries" });
     await assert.rejects(pending, (error: unknown) => {
       assert.ok(error instanceof OmpRpcProcessExitedError);
       assert.match((error as OmpRpcProcessExitedError).message, /code 7/);
@@ -413,5 +430,178 @@ test("a stale process exit does not disturb a freshly spawned session", async ()
     assert.equal(procB.exitCode, null, "the new process must still be alive");
   } finally {
     fakeA.driver.stop({ sigtermGraceMs: 100 });
+  }
+});
+
+// ── Session control (phase-1 task #4) ──
+
+const FAKE_SESSION_SCRIPT = `
+const fs = require("node:fs");
+const mode = process.argv[2] ?? "echo";
+const send = (frame) => process.stdout.write(JSON.stringify(frame) + "\\n");
+if (mode === "resume-crash" && process.argv.includes("--resume")) {
+  process.stderr.write("Could not restore model cursor/gone-model\\n");
+  process.exit(3);
+}
+send({ type: "ready", protocolVersion: 1, supportedProtocolVersions: [1, 2], maxFrameBytes: 1048576, maxReassembledFrameBytes: 67108864 });
+const sessionId = process.argv.includes("--resume") ? process.argv[process.argv.indexOf("--resume") + 1] : "fresh-session-1";
+if (process.argv[3] === "record") {
+  fs.writeFileSync(process.argv[4], JSON.stringify(process.argv.slice(2)));
+}
+let refused = mode === "refuse-delivery";
+process.stdin.setEncoding("utf8");
+let buffer = "";
+process.stdin.on("data", (chunk) => {
+  buffer += chunk;
+  let index;
+  while ((index = buffer.indexOf("\\n")) >= 0) {
+    const line = buffer.slice(0, index);
+    buffer = buffer.slice(index + 1);
+    if (!line.trim()) continue;
+    const frame = JSON.parse(line);
+    if (frame.type === "negotiate_protocol") {
+      send({ id: frame.id, type: "response", command: "negotiate_protocol", success: true, data: { protocolVersion: 2 } });
+    } else if (frame.type === "get_state") {
+      send({ id: frame.id, type: "response", command: "get_state", success: true, data: { sessionId, sessionFile: "/tmp/s.jsonl" } });
+    } else if (refused && (frame.type === "prompt" || frame.type === "steer")) {
+      send({ id: frame.id, type: "response", command: frame.type, success: false, error: "model not available" });
+      refused = false;
+    } else if (frame.id !== undefined) {
+      send({ id: frame.id, type: "response", command: frame.type, success: true, data: {} });
+    }
+  }
+});
+`;
+
+interface SessionHarness {
+  driver: OmpDriver;
+  proc: import("node:child_process").ChildProcess;
+  events: ParsedEvent[];
+  sleep(ms: number): Promise<void>;
+  waitUntil(predicate: () => boolean, ms?: number): Promise<void>;
+}
+
+async function startSessionFake(mode: string, configSessionId: string | null): Promise<SessionHarness> {
+  const workspace = mkdtempSync(path.join(os.tmpdir(), "slock-omp-session-"));
+  const scriptPath = path.join(workspace, "fake-omp-session.cjs");
+  writeFileSync(scriptPath, FAKE_SESSION_SCRIPT);
+
+  const driver = new OmpDriver();
+  const ctx = makeSpawnContext(workspace);
+  if (configSessionId) (ctx.config as { sessionId?: string | null }).sessionId = configSessionId;
+  const { process: proc } = await driver.spawn(ctx, {
+    command: process.execPath,
+    extraArgs: [scriptPath, mode],
+  });
+
+  const harness: SessionHarness = {
+    driver,
+    proc,
+    events: [],
+    sleep: (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
+    waitUntil: async (predicate: () => boolean, ms = 3000) => {
+      const started = Date.now();
+      while (!predicate() && Date.now() - started < ms) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+    },
+  };
+
+  let stdoutBuffer = "";
+  proc.stdout?.setEncoding("utf8");
+  proc.stdout?.on("data", (chunk: string) => {
+    stdoutBuffer += chunk;
+    let index: number;
+    while ((index = stdoutBuffer.indexOf("\n")) >= 0) {
+      const line = stdoutBuffer.slice(0, index);
+      stdoutBuffer = stdoutBuffer.slice(index + 1);
+      if (line.trim()) harness.events.push(...driver.parseLine(line));
+    }
+  });
+  return harness;
+}
+
+test("idle delivery sends a prompt and busy delivery sends a steer, without trailing newlines", async () => {
+  const harness = await startSessionFake("echo", null);
+  try {
+    await harness.waitUntil(() => harness.driver.isProtocolSettled);
+
+    const idle = harness.driver.encodeStdinMessage("first message", null, { mode: "idle" });
+    assert.ok(idle && idle.length > 0, "idle delivery must encode");
+    assert.ok(!idle.endsWith("\n"), "the encoded line must not carry a trailing newline (runtimeSession adds it)");
+    const idleFrame = JSON.parse(idle) as { type: string; message: string };
+    assert.equal(idleFrame.type, "prompt");
+    assert.equal(idleFrame.message, "first message");
+
+    const busy = harness.driver.encodeStdinMessage("follow-up", null, { mode: "busy" });
+    assert.ok(busy && busy.length > 0);
+    const busyFrame = JSON.parse(busy) as { type: string; message: string };
+    assert.equal(busyFrame.type, "steer");
+    assert.equal(busyFrame.message, "follow-up");
+
+    harness.proc.stdin?.write(idle + "\n");
+    harness.proc.stdin?.write(busy + "\n");
+    await harness.sleep(150);
+  } finally {
+    harness.driver.stop({ sigtermGraceMs: 100 });
+  }
+});
+
+test("a refused prompt or steer surfaces as an error event", async () => {
+  const harness = await startSessionFake("refuse-delivery", null);
+  try {
+    await harness.waitUntil(() => harness.driver.isProtocolSettled);
+
+    const encoded = harness.driver.encodeStdinMessage("do things", null, { mode: "idle" });
+    assert.ok(encoded);
+    harness.proc.stdin?.write(encoded + "\n");
+
+    await harness.waitUntil(() => harness.events.some((event) => event.kind === "error"));
+    const errorEvent = harness.events.find((event) => event.kind === "error") as { message: string };
+    assert.match(errorEvent.message, /OMP refused prompt/);
+    assert.match(errorEvent.message, /model not available/);
+  } finally {
+    harness.driver.stop({ sigtermGraceMs: 100 });
+  }
+});
+
+test("resume succeeds with the recorded session id and announces session_init", async () => {
+  const harness = await startSessionFake("echo", "recorded-session-42");
+  try {
+    await harness.waitUntil(() => harness.driver.currentSessionId !== null);
+
+    assert.equal(harness.driver.currentSessionId, "recorded-session-42");
+    const init = harness.events.find((event) => event.kind === "session_init") as { sessionId: string };
+    assert.equal(init.sessionId, "recorded-session-42");
+    assert.equal(harness.driver.resumeFallback, null, "a successful resume must not raise the fallback diagnostic");
+  } finally {
+    harness.driver.stop({ sigtermGraceMs: 100 });
+  }
+});
+
+test("a failed resume falls back to a fresh session with a diagnostic", async () => {
+  const harness = await startSessionFake("resume-crash", "lost-session-7");
+  try {
+    await harness.waitUntil(() => harness.driver.currentSessionId !== null, 5000);
+
+    assert.equal(harness.driver.currentSessionId, "fresh-session-1", "the fallback must start a fresh session");
+    const init = harness.events.find((event) => event.kind === "session_init") as { sessionId: string };
+    assert.equal(init.sessionId, "fresh-session-1");
+    const diagnostic = harness.events.find((event) => event.kind === "runtime_diagnostic") as { message?: string };
+    assert.ok(diagnostic, "the fallback must surface a diagnostic");
+    assert.match(diagnostic.message ?? "", /could not resume session lost-session-7/);
+    assert.match(diagnostic.message ?? "", /Could not restore model/, "the diagnostic carries the first exit's stderr summary");
+  } finally {
+    harness.driver.stop({ sigtermGraceMs: 100 });
+  }
+});
+
+test("a fresh launch (no recorded session) does not pass --resume and gets a fresh id", async () => {
+  const harness = await startSessionFake("echo", null);
+  try {
+    await harness.waitUntil(() => harness.driver.currentSessionId !== null);
+    assert.equal(harness.driver.currentSessionId, "fresh-session-1");
+  } finally {
+    harness.driver.stop({ sigtermGraceMs: 100 });
   }
 });

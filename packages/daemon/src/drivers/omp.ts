@@ -4,7 +4,12 @@ import path from "node:path";
 
 import { buildCliTransportSystemPrompt, prepareCliTransport } from "./cliTransport.js";
 import { logger } from "../logger.js";
-import { createOmpEventMappingState, mapOmpRpcFrameToParsedEvents, type OmpEventMappingState } from "./ompEventNormalizer.js";
+import {
+  closeOmpTurnOnProcessExit,
+  createOmpEventMappingState,
+  mapOmpRpcFrameToParsedEvents,
+  type OmpEventMappingState,
+} from "./ompEventNormalizer.js";
 import {
   MAX_OMP_RPC_FRAME_BYTES,
   MAX_OMP_RPC_REASSEMBLED_BYTES,
@@ -40,6 +45,13 @@ const OMP_STOP_SIGTERM_GRACE_MS = 3000;
 
 /** Head start given to a best-effort abort command before the tree kill. */
 const OMP_STOP_ABORT_HEAD_START_MS = 100;
+
+/**
+ * How long a --resume first attempt must survive to be trusted with the
+ * session; an omp dying inside the window (bad session, unavailable saved
+ * model, broken binary) triggers the one-shot fresh relaunch.
+ */
+const OMP_RESUME_FALLBACK_WINDOW_MS = 400;
 
 function killPosixProcessTree(pid: number, signal: "SIGTERM" | "SIGKILL"): void {
   try {
@@ -188,8 +200,10 @@ interface PendingOmpRpcRequest {
 export interface OmpRpcLaunchOverrides {
   /** Test seam: launch this command instead of the resolved omp binary. */
   command?: string;
-  /** Test seam: replace the omp argument list entirely. */
+  /** Test seam: replace the omp argument list entirely (no session args). */
   args?: string[];
+  /** Test seam: append to the built argument list (keeps session args). */
+  extraArgs?: string[];
   /** Test seam: bound the ready-frame wait instead of the 30s default. */
   readyTimeoutMs?: number;
 }
@@ -263,15 +277,41 @@ export class OmpDriver implements RuntimeDriver {
   private ready = false;
   private protocolVersion = 0;
   private negotiatedProtocolVersion: number | null = null;
+  /** Set once negotiation has settled (v2 confirmed, or the peer is v1-only). */
+  private protocolSettled = false;
   private maxFrameBytes: number = MAX_OMP_RPC_FRAME_BYTES;
   private maxReassembledFrameBytes: number = MAX_OMP_RPC_REASSEMBLED_BYTES;
   private frameErrorCount = 0;
   private lastFrameError: string | null = null;
   private lastProtocolError: string | null = null;
 
+  // Session state (phase-1 task #4).
+  private sessionId: string | null = null;
+  private sessionDir: string | null = null;
+  private resumeAttempted = false;
+  private resumeFallbackNotice: string | null = null;
+  private launchRetryUsed = false;
+  /** Ids issued by encodeStdinMessage; refusals surface as error events. */
+  private deliveryIds = new Map<string, string>();
+
   /** True once the ready frame has been seen (and negotiation dispatched if offered). */
   get isReady(): boolean {
     return this.ready;
+  }
+
+  /** Runtime-native session identity observed via get_state after startup. */
+  get currentSessionId(): string | null {
+    return this.sessionId;
+  }
+
+  /** True when the handshake fully settled: sends are safe. */
+  get isProtocolSettled(): boolean {
+    return this.protocolSettled;
+  }
+
+  /** Non-null when a --resume attempt fell back to a fresh session. */
+  get resumeFallback(): string | null {
+    return this.resumeFallbackNotice;
   }
 
   private createReadyDeferred(): { promise: Promise<void>; resolve: () => void; reject: (error: Error) => void } {
@@ -334,6 +374,7 @@ export class OmpDriver implements RuntimeDriver {
     this.ready = false;
     this.protocolVersion = 0;
     this.negotiatedProtocolVersion = null;
+    this.protocolSettled = false;
     this.maxFrameBytes = MAX_OMP_RPC_FRAME_BYTES;
     this.maxReassembledFrameBytes = MAX_OMP_RPC_REASSEMBLED_BYTES;
     this.frameErrorCount = 0;
@@ -341,9 +382,101 @@ export class OmpDriver implements RuntimeDriver {
     this.lastProtocolError = null;
     this.eventState = createOmpEventMappingState();
     this.readyDeferred = this.createReadyDeferred();
+    this.deliveryIds.clear();
+    this.sessionId = null;
+    this.resumeFallbackNotice = null;
+    this.launchRetryUsed = false;
+    this.deliveryIds.clear();
 
+    // Per-workspace session isolation (PM task #4): never mix with the
+    // user's own omp sessions in ~/.omp.
+    this.sessionDir = launchOverrides.args ? null : path.join(ctx.workingDirectory, ".omp-sessions");
+
+    const resumeSessionId = typeof ctx.config.sessionId === "string" && ctx.config.sessionId.trim()
+      ? ctx.config.sessionId
+      : null;
+
+    const firstAttempt = await this.launchChild(ctx, spawnEnv, launchOverrides, resumeSessionId);
+
+    // Resume fallback (PM task #4): a --resume launch that dies before it can
+    // serve gets exactly one fresh relaunch, and the fallback process — not
+    // the dead one — is what spawn returns, so the session machinery attaches
+    // to the live child. The window needs no stdout listening: with no reader
+    // attached the child's output simply stays buffered (paused stream), so
+    // the machinery replays every frame from the start. An omp that cannot
+    // resume may just as well be a broken binary or a logged-out machine, so
+    // the fallback diagnostic carries the first exit's stderr summary; a
+    // fallback launch failing pre-ready is the REAL startup error and is not
+    // retried again.
+    if (resumeSessionId !== null && !launchOverrides.args) {
+      const firstOutcome = await this.awaitResumeFallbackWindow(firstAttempt.process, OMP_RESUME_FALLBACK_WINDOW_MS);
+      if (firstOutcome.outcome === "exit") {
+        this.launchRetryUsed = true;
+        const firstExitSummary = this.stderrTail.trim().slice(-600) || firstOutcome.summary;
+        this.resumeFallbackNotice = `OMP could not resume session ${resumeSessionId}; started a fresh session. First exit: ${firstExitSummary}`;
+        logger.info(`[omp] ${this.resumeFallbackNotice}`);
+        // Reset per-generation state for the fresh launch.
+        this.decoder = new OmpRpcFrameDecoder();
+        this.pending.clear();
+        this.clearReadyTimer();
+        this.stderrTail = "";
+        this.ready = false;
+        this.protocolSettled = false;
+        this.readyDeferred = this.createReadyDeferred();
+        return this.launchChild(ctx, spawnEnv, launchOverrides, null);
+      }
+    }
+
+    return firstAttempt;
+  }
+
+  /**
+   * Watch a resume attempt for its first window: an early exit resolves with
+   * the exit summary, a surviving launch resolves after the window and leaves
+   * the process untouched (its buffered stdout belongs to the session
+   * machinery's attach).
+   */
+  private awaitResumeFallbackWindow(
+    proc: ChildProcess,
+    windowMs: number,
+  ): Promise<{ outcome: "survived" } | { outcome: "exit"; summary: string }> {
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = (result: { outcome: "survived" } | { outcome: "exit"; summary: string }): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        proc.off("exit", onExit);
+        resolve(result);
+      };
+      const onExit = (code: number | null, signal: NodeJS.Signals | null): void => {
+        finish({ outcome: "exit", summary: `exit ${code ?? signal ?? "unknown"}` });
+      };
+      const timer = setTimeout(() => finish({ outcome: "survived" }), windowMs);
+      timer.unref?.();
+      proc.on("exit", onExit);
+    });
+  }
+
+  private async launchChild(
+    ctx: SpawnContext,
+    spawnEnv: NodeJS.ProcessEnv,
+    launchOverrides: OmpRpcLaunchOverrides,
+    resumeSessionId: string | null,
+  ): Promise<SpawnResult> {
+    const resuming = resumeSessionId !== null && !launchOverrides.args;
+    this.resumeAttempted = resuming;
     const command = launchOverrides.command ?? resolveOmpCommand() ?? OMP_BINARY;
-    const args = launchOverrides.args ?? ["--mode", "rpc"];
+    let args: string[];
+    if (launchOverrides.args) {
+      args = launchOverrides.args;
+    } else {
+      // extraArgs leads the list so a script seam (command: node, extraArgs:
+      // [script, mode]) sees its own argv first; omp itself treats flags
+      // order-independently.
+      args = [...(launchOverrides.extraArgs ?? []), "--mode", "rpc", "--session-dir", this.sessionDir!];
+      if (resumeSessionId) args = [...args, "--resume", resumeSessionId];
+    }
 
     const proc = childSpawn(command, args, {
       cwd: ctx.workingDirectory,
@@ -384,6 +517,16 @@ export class OmpDriver implements RuntimeDriver {
       if (proc.pid) killProcessTree(proc.pid, "SIGKILL");
       if (this.process !== proc) return;
       this.clearReadyTimer();
+
+      // Map the closing turn exactly once before the failure path (PM task
+      // #3: an interrupted turn ends with an error and a turn_end, never
+      // hangs). The turn layer consumes the closure from #5 on; here it is
+      // logged so the exactly-once behavior is observable in the field.
+      const turnClosure = closeOmpTurnOnProcessExit(this.eventState, `process exited (${code ?? signal ?? "unknown"})`);
+      if (turnClosure.length > 0) {
+        logger.info(`[omp] turn closed by process exit: ${turnClosure.map((event) => event.kind).join("+")}`);
+      }
+
       this.process = null;
       this.readyDeferred?.reject(new OmpRpcProcessExitedError(code, signal, this.stderrTail));
       this.readyDeferred = null;
@@ -392,19 +535,23 @@ export class OmpDriver implements RuntimeDriver {
 
     // The ready frame must arrive on its own; nothing the daemon sends can
     // prompt it. A launch that never becomes ready is killed here instead of
-    // leaving a silent child behind for the session watchdog.
-    this.readyTimer = setTimeout(() => {
-      this.readyTimer = null;
-      const timeoutError = new OmpRpcProtocolError(
-        `OMP RPC process did not send a ready frame within ${launchOverrides.readyTimeoutMs ?? OMP_RPC_READY_TIMEOUT_MS}ms. stderr: ${this.stderrTail.trim()}`,
-      );
-      this.recordProtocolError(timeoutError.message);
-      this.readyDeferred?.reject(timeoutError);
-      this.readyDeferred = null;
-      this.killProcess();
-      this.failAllPending(timeoutError);
-    }, launchOverrides.readyTimeoutMs ?? OMP_RPC_READY_TIMEOUT_MS);
-    this.readyTimer.unref?.();
+    // leaving a silent child behind for the session watchdog. Resume first
+    // attempts are watched by spawn's outcome watcher instead (its timeout
+    // decides the fallback), so the two timers never race on one process.
+    if (!resumeSessionId) {
+      this.readyTimer = setTimeout(() => {
+        this.readyTimer = null;
+        const timeoutError = new OmpRpcProtocolError(
+          `OMP RPC process did not send a ready frame within ${launchOverrides.readyTimeoutMs ?? OMP_RPC_READY_TIMEOUT_MS}ms. stderr: ${this.stderrTail.trim()}`,
+        );
+        this.recordProtocolError(timeoutError.message);
+        this.readyDeferred?.reject(timeoutError);
+        this.readyDeferred = null;
+        this.killProcess();
+        this.failAllPending(timeoutError);
+      }, launchOverrides.readyTimeoutMs ?? OMP_RPC_READY_TIMEOUT_MS);
+      this.readyTimer.unref?.();
+    }
 
     return { process: proc };
   }
@@ -431,8 +578,7 @@ export class OmpDriver implements RuntimeDriver {
       return [];
     }
     if (type === "response") {
-      this.handleResponse(frame as unknown as OmpRpcResponseFrame);
-      return [];
+      return this.handleResponse(frame as unknown as OmpRpcResponseFrame);
     }
     if (typeof type === "string" && OMP_LOG_ONLY_FRAME_TYPES.has(type)) {
       logger.info(`[omp] ${type} frame observed (phase-1 log-only, not mapped)`);
@@ -560,8 +706,7 @@ export class OmpDriver implements RuntimeDriver {
     if (!supported.includes(2)) {
       // v1-only server: the 1 MiB physical cap stands, nothing to negotiate.
       this.negotiatedProtocolVersion = null;
-      this.readyDeferred?.resolve();
-      this.readyDeferred = null;
+      this.settleProtocol();
       return;
     }
     // The server advertised v2, so a failed handshake is an inconsistent peer,
@@ -576,8 +721,7 @@ export class OmpDriver implements RuntimeDriver {
           throw new OmpRpcProtocolError("OMP RPC protocol v2 negotiation failed: server did not confirm v2");
         }
         this.negotiatedProtocolVersion = 2;
-        this.readyDeferred?.resolve();
-        this.readyDeferred = null;
+        this.settleProtocol();
       })
       .catch((error: unknown) => {
         const message = error instanceof Error ? error.message : String(error);
@@ -589,13 +733,65 @@ export class OmpDriver implements RuntimeDriver {
       });
   }
 
-  private handleResponse(frame: OmpRpcResponseFrame): void {
-    if (typeof frame.id !== "string") return;
+  /**
+   * The handshake is complete: turn sends are safe, and the session identity
+   * can be read (get_state) so the daemon can persist it for resume.
+   */
+  private settleProtocol(): void {
+    this.protocolSettled = true;
+    this.readyDeferred?.resolve();
+    this.readyDeferred = null;
+    void this.request({ type: "get_state" }).catch(() => {
+      // get_state is best-effort identity capture; the turn machinery
+      // surfaces real failures. Nothing to clean up.
+    });
+  }
+
+  private handleResponse(frame: OmpRpcResponseFrame): ParsedEvent[] {
+    if (typeof frame.id !== "string") return [];
+    const events: ParsedEvent[] = [];
+
+    // Fire-and-forget deliveries (encodeStdinMessage lines written by the
+    // session machinery) have no pending entry; a refusal must surface as an
+    // error event instead of vanishing (PM task #4 review).
+    if (this.deliveryIds.has(frame.id)) {
+      const command = this.deliveryIds.get(frame.id)!;
+      this.deliveryIds.delete(frame.id);
+      if (frame.success === false) {
+        events.push({
+          kind: "error",
+          message: `OMP refused ${command}: ${frame.error ?? "unknown error"}`,
+        });
+      }
+    }
+
+    // Session identity capture: settleProtocol's get_state announces the
+    // runtime session exactly once, synchronously with the response frame so
+    // the session machinery sees session_init on the parseLine channel.
+    if (!this.sessionId && frame.success && frame.command === "get_state") {
+      const data = frame.data as { sessionId?: unknown } | undefined;
+      if (data && typeof data.sessionId === "string" && data.sessionId) {
+        this.sessionId = data.sessionId;
+        events.push({ kind: "session_init", sessionId: data.sessionId });
+        if (this.resumeFallbackNotice) {
+          events.push({
+            kind: "runtime_diagnostic",
+            severity: "warning",
+            source: "omp_rpc_notification",
+            itemType: "resume_fallback",
+            message: this.resumeFallbackNotice,
+          });
+          this.resumeFallbackNotice = null;
+        }
+      }
+    }
+
     const pending = this.pending.get(frame.id);
-    if (!pending) return;
+    if (!pending) return events;
     this.pending.delete(frame.id);
     if (pending.timer) clearTimeout(pending.timer);
     pending.resolve(frame);
+    return events;
   }
 
   private recordProtocolError(message: string): void {
@@ -637,12 +833,46 @@ export class OmpDriver implements RuntimeDriver {
     }
   }
 
+  /**
+   * Encode a live delivery: `prompt` when idle, `steer` when the agent is
+   * busy (omp queues steering mid-run natively). The returned line carries NO
+   * trailing newline — the session machinery appends one (PM task #4 review:
+   * a doubled newline is an empty frame and a parse error on the wire).
+   *
+   * Early writes are safe: omp claims stdin at startup and parses buffered
+   * lines once it is up (docs/rpc.md "Startup"), so a delivery raced against
+   * the handshake is processed in wire order instead of being dropped —
+   * returning null here would be permanent ("unsupported"), never a retry.
+   * The delivery id is tracked so a refusal (success:false) surfaces as an
+   * error event rather than vanishing.
+   */
   encodeStdinMessage(
-    _text: string,
+    text: string,
     _sessionId: string | null,
-    _opts?: { mode?: "idle" | "busy" },
+    opts?: { mode?: "idle" | "busy" },
   ): string | null {
-    return null;
+    const proc = this.process;
+    if (!proc || !this.ready || this.lastProtocolError) return null;
+    const commandType = opts?.mode === "idle" ? "prompt" : "steer";
+    const id = `omp-${++this.requestCounter}`;
+    let line: string;
+    try {
+      line = encodeOmpRpcFrame(
+        { id, type: commandType, message: text },
+        { maxPhysicalFrameBytes: this.maxFrameBytes },
+      );
+    } catch {
+      return null;
+    }
+    this.deliveryIds.set(id, commandType);
+    // Bound the tracking table: unanswered deliveries are rare and the
+    // responses free their slots; overflow sheds the oldest.
+    while (this.deliveryIds.size > 256) {
+      const oldest = this.deliveryIds.keys().next().value;
+      if (oldest === undefined) break;
+      this.deliveryIds.delete(oldest);
+    }
+    return line.replace(/\n$/, "");
   }
 
   buildSystemPrompt(config: AgentConfig): AxSurfaceText {
