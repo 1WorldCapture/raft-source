@@ -1,0 +1,8 @@
+{
+  "name": "@botiverse/raft",
+  "version": "0.0.24-zcode.1",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  }
+}

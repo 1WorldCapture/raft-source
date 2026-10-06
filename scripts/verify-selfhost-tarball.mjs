@@ -26,6 +26,17 @@ function parseArgs(argv) {
   return args;
 }
 
+/** Child env WITHOUT this managed runtime's markers — the CLI refuses to
+ *  run (MANAGED_WRAPPER_UNAVAILABLE) when it detects a managed launch it
+ *  cannot match; a fresh install verification must run as a bare process. */
+function bareEnv(home) {
+  const env = { ...process.env, RAFT_HOME: home, SLOCK_HOME: home };
+  delete env.SLOCK_CLI_TRANSPORT_DIR;
+  delete env.SLOCK_AGENT_LAUNCH_DIR;
+  delete env.SLOCK_AGENT_ID;
+  return env;
+}
+
 function offlineInstall(prefix, tarball) {
   const res = spawnSync("npm", ["i", "--offline", "--no-audit", "--no-fund", "--prefix", prefix, tarball], {
     encoding: "utf8",
@@ -40,7 +51,7 @@ async function runBin(prefix, bin, args) {
   const res = spawnSync(path.join(prefix, "node_modules", ".bin", bin), args, {
     encoding: "utf8",
     timeout: 30_000,
-    env: { ...process.env, RAFT_HOME: path.join(prefix, "home"), SLOCK_HOME: path.join(prefix, "home") },
+    env: bareEnv(path.join(prefix, "home")),
   });
   if (res.status !== 0) {
     throw new Error(`${bin} ${args.join(" ")} failed:\n${res.stdout}\n${res.stderr}`);
@@ -66,7 +77,7 @@ async function verifyDaemonHandshake(prefix) {
   const daemon = spawn(
     path.join(prefix, "node_modules", ".bin", "raft-daemon"),
     ["--server-url", `http://127.0.0.1:${port}`, "--api-key", "sk_machine_selfhostverify"],
-    { env: { ...process.env, RAFT_HOME: home, SLOCK_HOME: home }, stdio: "ignore" },
+    { env: bareEnv(home), stdio: "ignore" },
   );
   try {
     const deadline = Date.now() + 30_000;
