@@ -96,7 +96,7 @@ export type ParsedEvent =
   | ({ kind: "thinking"; text: string; runtimeTurn?: RuntimeTurnAttribution } & SubagentLineage)
   | ({ kind: "text"; text: string; runtimeTurn?: RuntimeTurnAttribution } & SubagentLineage)
   | ({ kind: "tool_call"; name: string; input: any } & SubagentLineage)
-  | ({ kind: "tool_output"; name: string } & SubagentLineage)
+  | ({ kind: "tool_output"; name: string; /** Result text when the runtime carries it (truncated by the driver); absent otherwise. */ text?: string; /** True when the runtime marked the tool result as an error. */ isError?: boolean } & SubagentLineage)
   | { kind: "compaction_started" }
   | { kind: "compaction_finished" }
   | {
@@ -192,7 +192,7 @@ export type ParsedEvent =
   | {
       kind: "runtime_diagnostic";
       severity: "warning";
-      source: "codex_app_server_notification" | "grok_acp_notification";
+      source: "codex_app_server_notification" | "grok_acp_notification" | "omp_rpc_notification";
       itemType: string;
       message: string;
       details?: string;

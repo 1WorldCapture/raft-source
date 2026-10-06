@@ -170,6 +170,33 @@ test("ready frame arms the driver and a supported v2 is negotiated", async () =>
   }
 });
 
+test("parseLine routes mapped frames to the event normalizer and drops log-only ones", async () => {
+  const fake = await startFakeOmp("echo");
+  try {
+    await fake.waitReadyNegotiated();
+
+    const mapped = fake.driver.parseLine(JSON.stringify({
+      type: "tool_execution_start",
+      toolCallId: "call-1",
+      toolName: "read",
+      args: { path: "a.txt" },
+    }));
+    assert.deepEqual(mapped, [{ kind: "tool_call", name: "read", input: { path: "a.txt" } }]);
+
+    const logOnly = fake.driver.parseLine(JSON.stringify({
+      type: "subagent_lifecycle",
+      subagentId: "s1",
+      status: "started",
+    }));
+    assert.deepEqual(logOnly, []);
+
+    const empty = fake.driver.parseLine(JSON.stringify({ type: "queue_update", steering: [], followUp: [] }));
+    assert.deepEqual(empty, []);
+  } finally {
+    fake.driver.stop({ sigtermGraceMs: 100 });
+  }
+});
+
 test("a v1-only server stays on v1 without a negotiation failure", async () => {
   const fake = await startFakeOmp("v1-only");
   try {
