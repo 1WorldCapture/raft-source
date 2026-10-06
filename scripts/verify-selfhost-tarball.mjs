@@ -100,13 +100,15 @@ async function main() {
     try {
       offlineInstall(prefix, tarball);
       if (label === "cli") {
-        const out = runBin(prefix, "raft", ["--version"]);
+        const out = String((await runBin(prefix, "raft", ["--version"])) ?? "");
         if (!out.trim()) throw new Error("raft --version printed nothing");
         console.log(`[selfhost-verify] cli offline install + --version OK (${out.trim().split("\n")[0]})`);
       } else {
-        runBin(prefix, "raft-daemon", ["--version"]);
+        // The daemon bin has no --version flag (bare invocation prints usage
+        // and exits 1 by design) — the REAL run proof is the handshake below,
+        // which exercises the bundled network stack from the installed bin.
         await verifyDaemonHandshake(prefix);
-        console.log("[selfhost-verify] daemon offline install + --version + server handshake OK");
+        console.log("[selfhost-verify] daemon offline install + server handshake OK");
       }
     } catch (err) {
       failures.push(`${label}: ${err.message}`);
