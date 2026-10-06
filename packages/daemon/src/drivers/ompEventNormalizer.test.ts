@@ -92,19 +92,91 @@ test("agentInvoked=false completes locally without turn events", () => {
   assert.deepEqual(events, []);
 });
 
-test("an aborted agent-invoked prompt ends the turn exactly once", () => {
+test("an aborted agent-invoked prompt ends the turn exactly once, error before turn_end", () => {
   const state = createOmpEventMappingState();
   const first = mapOmpRpcFrameToParsedEvents(
     { type: "prompt_result", id: "p1", agentInvoked: true, status: "aborted", sessionSettled: true },
     state,
   );
-  assert.deepEqual(first.map((event) => event.kind), ["turn_end", "error"]);
+  assert.deepEqual(first.map((event) => event.kind), ["error", "turn_end"]);
 
   const second = mapOmpRpcFrameToParsedEvents(
     { type: "prompt_result", id: "p1", agentInvoked: true, status: "aborted", sessionSettled: true },
     state,
   );
   assert.deepEqual(second, [], "the closed turn must not end twice");
+});
+
+test("three consecutive turns each end exactly once on the same state", () => {
+  const state = createOmpEventMappingState();
+  const runTurn = (id: string): string[] => {
+    const kinds: string[] = [];
+    kinds.push(...mapOmpRpcFrameToParsedEvents({ type: "agent_start" }, state).map((event) => event.kind));
+    kinds.push(...mapOmpRpcFrameToParsedEvents(
+      { type: "message_start", message: { role: "assistant", content: [], usage: {}, stopReason: "stop", api: "a", provider: "p", model: "m", timestamp: 0 } },
+      state,
+    ).map((event) => event.kind));
+    kinds.push(...mapOmpRpcFrameToParsedEvents({ type: "agent_end", messages: [], isTerminal: true, yielded: true }, state).map((event) => event.kind));
+    kinds.push(...mapOmpRpcFrameToParsedEvents(
+      { type: "prompt_result", id, agentInvoked: true, status: "completed", sessionSettled: true },
+      state,
+    ).map((event) => event.kind));
+    return kinds;
+  };
+
+  assert.deepEqual(runTurn("t1"), ["turn_end"]);
+  assert.deepEqual(runTurn("t2"), ["turn_end"], "the second turn must still end");
+  assert.deepEqual(runTurn("t3"), ["turn_end"], "the third turn must still end");
+});
+
+test("an aborted middle turn does not block later turns", () => {
+  const state = createOmpEventMappingState();
+
+  mapOmpRpcFrameToParsedEvents({ type: "agent_start" }, state);
+  const aborted = mapOmpRpcFrameToParsedEvents(
+    { type: "prompt_result", id: "t1", agentInvoked: true, status: "aborted", sessionSettled: true },
+    state,
+  );
+  assert.deepEqual(aborted.map((event) => event.kind), ["error", "turn_end"]);
+
+  mapOmpRpcFrameToParsedEvents({ type: "agent_start" }, state);
+  const next = mapOmpRpcFrameToParsedEvents(
+    { type: "prompt_result", id: "t2", agentInvoked: true, status: "completed", sessionSettled: true },
+    state,
+  );
+  assert.deepEqual(next.map((event) => event.kind), ["turn_end"]);
+});
+
+test("a held turn survives a background follow-up run's agent_start", () => {
+  const state = createOmpEventMappingState();
+
+  mapOmpRpcFrameToParsedEvents(
+    { type: "prompt_result", id: "p1", agentInvoked: true, status: "completed", sessionSettled: false },
+    state,
+  );
+  // The background job wakes a follow-up run BEFORE session_settled arrives.
+  mapOmpRpcFrameToParsedEvents({ type: "agent_start" }, state);
+  mapOmpRpcFrameToParsedEvents({ type: "agent_end", messages: [], isTerminal: true, yielded: true }, state);
+
+  const settled = mapOmpRpcFrameToParsedEvents({ type: "session_settled" }, state);
+  assert.deepEqual(settled.map((event) => event.kind), ["turn_end"], "the held turn must still flush exactly once");
+});
+
+test("prompt_result error surfaces before the turn_end it closes with", () => {
+  const state = createOmpEventMappingState();
+  const events = mapOmpRpcFrameToParsedEvents(
+    {
+      type: "prompt_result",
+      id: "p1",
+      agentInvoked: true,
+      status: "error",
+      sessionSettled: true,
+      error: { message: "provider exploded", retryable: false },
+    },
+    state,
+  );
+  assert.deepEqual(events.map((event) => event.kind), ["error", "turn_end"]);
+  assert.equal((events[0] as { message: string }).message, "provider exploded");
 });
 
 test("agent_end never closes a turn by itself", () => {

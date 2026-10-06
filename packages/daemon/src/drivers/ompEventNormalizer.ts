@@ -233,6 +233,15 @@ export function mapOmpRpcFrameToParsedEvents(frame: object, state: OmpEventMappi
       });
       return events;
     }
+    case "agent_start": {
+      // A new run reopens the turn machine. pendingTurnEnd is deliberately
+      // preserved: a held turn (sessionSettled=false) flushes on
+      // session_settled, and per the protocol a background follow-up run's
+      // agent_start arrives BEFORE that flush — clearing the pending end here
+      // would strand the turn.
+      state.turnClosed = false;
+      return events;
+    }
     case "prompt_result": {
       const agentInvoked = (frame as WireFrame).agentInvoked === true;
       if (!agentInvoked) {
@@ -248,16 +257,16 @@ export function mapOmpRpcFrameToParsedEvents(frame: object, state: OmpEventMappi
       // holds for session_settled (background work may still wake the run).
       if (state.turnClosed) return events;
       state.pendingTurnEnd = true;
-      if ((frame as WireFrame).sessionSettled === true) {
-        state.pendingTurnEnd = false;
-        state.turnClosed = true;
-        events.push({ kind: "turn_end" });
-      }
       const error = (frame as WireFrame).error;
       if ((frame as WireFrame).status === "error" && isRecord(error) && typeof error.message === "string") {
         events.push({ kind: "error", message: error.message });
       } else if ((frame as WireFrame).status === "aborted") {
         events.push({ kind: "error", message: "OMP turn aborted" });
+      }
+      if ((frame as WireFrame).sessionSettled === true) {
+        state.pendingTurnEnd = false;
+        state.turnClosed = true;
+        events.push({ kind: "turn_end" });
       }
       return events;
     }
