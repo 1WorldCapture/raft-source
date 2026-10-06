@@ -146,7 +146,8 @@ HTTPS（或 Tailscale tailnet）。若用 `http://` origin，安装与升级都�
 `RAFT_MANAGED_MCP_ALLOWED_NETWORKS=10.20.0.0/16,100.64.0.0/10`（CIDR，IPv4/IPv6）作用于
 **DNS 解析后的实际 IP**，且只有通过判定的地址会用于建连（混合解析绝不让连接落到被封地址）；
 `RAFT_MANAGED_MCP_ALLOWED_HOSTS=mcp.corp.example` 仅越过 `.internal`/`.local` 等后缀预检，
-IP 仍须落名单或公网。**安全底线**：环回（127/8、::1）、链路本地（169.254/16、fe80::/10，
+IP 仍须落名单或公网。**注意：修改 .env 后要用 `docker compose up -d`（重建容器）才会重新
+读取环境变量——`docker compose restart` 不会**。**安全底线**：环回（127/8、::1）、链路本地（169.254/16、fe80::/10，
 含云元数据端点）、未指定（0.0.0.0/8、::）与组播段**永不可放行**——配置了也会被忽略并记警告。
 建议配最小范围。官方云部署完全忽略这两个 env（行为逐字节不变）。换版本=重跑脚本+`docker compose restart server web`。
 server 侧 `RAFT_DEPLOYMENT_MODE=private`（compose 已设）使「最新版本」查询读本地
