@@ -1,10 +1,11 @@
 #!/bin/sh
 # Guard: build artifacts must never enter the repo (two near-misses with
-# dist-native, one real miss with dist-selfhost — PM review, PR #166).
+# dist-native, one real miss with dist-selfhost — PM review, PR #166;
+# desktop release/ joined in task #12: ~1GB of dmg/zip per arch).
 # Fails when the git index (the next commit) contains any known build-output path.
 set -eu
 
-PATTERNS="packages/computer/dist-native packages/daemon/dist-selfhost packages/daemon/dist packages/cli/dist"
+PATTERNS="packages/computer/dist-native packages/daemon/dist-selfhost packages/daemon/dist packages/cli/dist apps/raft-desktop-electron/release"
 
 # The INDEX is what the next commit will contain — the single source of
 # truth for "is an artifact about to land". (Checking HEAD as well would

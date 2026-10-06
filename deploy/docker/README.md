@@ -141,6 +141,27 @@ HTTPS（或 Tailscale tailnet）。若用 `http://` origin，安装与升级都�
   许可与隐私链接保留但可用 `RAFT_PUBLIC_TERMS_URL`/`RAFT_PUBLIC_PRIVACY_URL` 替换；
   agent 外部指引的 `claude plugin marketplace` 步骤私有下省略并附内网说明。
 
+**Desktop 安装包（三期 task #12）**：`./downloads/desktop/` 由
+`scripts/build-release-artifacts.mjs` 在 **macOS 构建机**上生成（非 macOS
+跳过并提示，可稍后在同 commit 的 Mac 上补跑该步骤）：
+```
+desktop/<v>/Raft-Desktop-<v>-{arm64,x64}.dmg|.zip   （electron-builder，不签名）
+desktop/latest-mac.yml   ← 双架构合成 feed（每个 entries 带 <v>/ 前缀 url + sha512）
+desktop/manifest.json    ← {version, commit, embedded:{computer,cli,daemon}}
+```
+双架构 latest-mac.yml 是合成的（electron-builder 每架构各写一份会互相覆盖）。
+**两种部署形态的分发路径**：
+1. **compose 栈（本任务范围，直接可用）**：nginx 经 alias 直出整棵
+   `/downloads/`，desktop/ 天然可访问，无需任何服务端改动。
+2. **源码栈（pm2 + 应用路由）**：`downloadsRouter` 的产品白名单目前只有
+   computer/cli（daemon 当时也 404 过，靠 nginx 临时补段解决）。desktop
+   的源码形态统一处理已记单独待办，本任务不扩大范围。
+应用内更新：desktop 连私有服务器时由 `main/privateUpdateChecker.ts` 读
+`/downloads/desktop/latest-mac.yml` 检测并提示手动安装（未签名包的
+Gatekeeper 步骤见 desktop README）；`GET /api/deployment-info` 私有模式下
+附带 `downloads.desktop`（版本 + 双架构 dmg URL，**只取 SERVER_URL**），
+网页设置页据此显示下载入口（官方部署字段缺席=零差异）。
+
 **Managed MCP 内网放行名单（task #9）**：
 内网 MCP 服务器默认被 SSRF 防护封锁（与官方云一致）。私有模式下管理员可显式放行：
 `RAFT_MANAGED_MCP_ALLOWED_NETWORKS=10.20.0.0/16,100.64.0.0/10`（CIDR，IPv4/IPv6）作用于

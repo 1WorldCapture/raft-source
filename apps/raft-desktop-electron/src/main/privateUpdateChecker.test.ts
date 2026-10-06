@@ -20,26 +20,27 @@ import {
 
 const ORIGIN = "https://raft.internal.example:8443";
 
-// A realistic dual-arch latest-mac.yml as task #12's tree will publish it:
+// A realistic dual-arch latest-mac.yml exactly as scripts/build-desktop-feed.mjs
+// publishes it (task #12): version-prefixed urls under /downloads/desktop/,
 // zip (updater artifact) AND dmg (manual install) for both architectures,
 // unordered. PR #171 review: the checker must pick the dmg for THIS arch,
 // never the first entry.
 const DUAL_ARCH_YML = [
   "version: 0.2.0",
   "releaseDate: '2026-10-06T13:00:00.000Z'",
-  "path: Raft-Desktop-0.2.0-arm64-mac.zip",
+  "path: 0.2.0/Raft-Desktop-0.2.0-arm64-mac.zip",
   "sha512: AAAA",
   "files:",
-  "  - url: Raft-Desktop-0.2.0-x64-mac.zip",
+  "  - url: 0.2.0/Raft-Desktop-0.2.0-x64-mac.zip",
   "    sha512: BBBB",
   "    size: 191000000",
-  "  - url: Raft-Desktop-0.2.0-x64.dmg",
+  "  - url: 0.2.0/Raft-Desktop-0.2.0-x64.dmg",
   "    sha512: CCCC",
   "    size: 201000000",
-  "  - url: Raft-Desktop-0.2.0-arm64-mac.zip",
+  "  - url: 0.2.0/Raft-Desktop-0.2.0-arm64-mac.zip",
   "    sha512: DDDD",
   "    size: 193000000",
-  "  - url: Raft-Desktop-0.2.0-arm64.dmg",
+  "  - url: 0.2.0/Raft-Desktop-0.2.0-arm64.dmg",
   "    sha512: EEEE",
   "    size: 210000000",
 ].join("\n");
@@ -49,10 +50,10 @@ test("parseLatestMacYml reads the version and every files entry", () => {
   assert.ok(parsed);
   assert.equal(parsed.version, "0.2.0");
   assert.deepEqual(parsed.files.map((f) => f.url), [
-    "Raft-Desktop-0.2.0-x64-mac.zip",
-    "Raft-Desktop-0.2.0-x64.dmg",
-    "Raft-Desktop-0.2.0-arm64-mac.zip",
-    "Raft-Desktop-0.2.0-arm64.dmg",
+    "0.2.0/Raft-Desktop-0.2.0-x64-mac.zip",
+    "0.2.0/Raft-Desktop-0.2.0-x64.dmg",
+    "0.2.0/Raft-Desktop-0.2.0-arm64-mac.zip",
+    "0.2.0/Raft-Desktop-0.2.0-arm64.dmg",
   ]);
   assert.equal(parsed.files.find((f) => f.url.endsWith("arm64.dmg"))?.size, 210000000);
 });
@@ -67,8 +68,8 @@ test("parseLatestMacYml rejects missing fields and non-strict versions", () => {
 
 test("selectDownloadFile picks the dmg for THIS arch only", () => {
   const parsed = parseLatestMacYml(DUAL_ARCH_YML)!;
-  assert.equal(selectDownloadFile(parsed.files, "arm64")?.url, "Raft-Desktop-0.2.0-arm64.dmg");
-  assert.equal(selectDownloadFile(parsed.files, "x64")?.url, "Raft-Desktop-0.2.0-x64.dmg");
+  assert.equal(selectDownloadFile(parsed.files, "arm64")?.url, "0.2.0/Raft-Desktop-0.2.0-arm64.dmg");
+  assert.equal(selectDownloadFile(parsed.files, "x64")?.url, "0.2.0/Raft-Desktop-0.2.0-x64.dmg");
   // Zips only, or no entry for this arch → nothing to offer.
   const zipsOnly = parsed.files.filter((f) => f.url.endsWith(".zip"));
   assert.equal(selectDownloadFile(zipsOnly, "arm64"), null);
@@ -134,7 +135,10 @@ test("checker: newer version becomes available and opens THIS arch's dmg", async
   await checker.check();
   assert.deepEqual(checker.status(), { state: "available", version: "0.2.0", size: 210000000 });
   assert.equal(checker.openDownload(), true);
-  assert.deepEqual(opened, [`${ORIGIN}/downloads/desktop/Raft-Desktop-0.2.0-arm64.dmg`]);
+  // Version-prefixed feed urls resolve into the versioned directory and
+  // still pass the same-origin gate (end-to-end contract with task #12's
+  // scripts/build-desktop-feed.mjs output).
+  assert.deepEqual(opened, [`${ORIGIN}/downloads/desktop/0.2.0/Raft-Desktop-0.2.0-arm64.dmg`]);
 });
 
 test("checker: x64 machine gets the x64 dmg from the same feed", async () => {
@@ -143,7 +147,7 @@ test("checker: x64 machine gets the x64 dmg from the same feed", async () => {
   await checker.check();
   assert.deepEqual(checker.status(), { state: "available", version: "0.2.0", size: 201000000 });
   assert.equal(checker.openDownload(), true);
-  assert.deepEqual(opened, [`${ORIGIN}/downloads/desktop/Raft-Desktop-0.2.0-x64.dmg`]);
+  assert.deepEqual(opened, [`${ORIGIN}/downloads/desktop/0.2.0/Raft-Desktop-0.2.0-x64.dmg`]);
 });
 
 test("checker: same/older version, 404, zips-only, tampered feed, and network failure all stay quiet", async () => {
@@ -154,7 +158,7 @@ test("checker: same/older version, 404, zips-only, tampered feed, and network fa
     () => new Response(DUAL_ARCH_YML.replace("version: 0.2.0", "version: 0.1.7")), // older
     () => new Response("not found", { status: 404 }), // no desktop artifacts yet
     () => new Response(zipsOnly), // no dmg for manual install
-    () => new Response(DUAL_ARCH_YML.replace("Raft-Desktop-0.2.0-arm64.dmg", "https://evil.example/x.dmg")), // tampered
+    () => new Response(DUAL_ARCH_YML.replace("0.2.0/Raft-Desktop-0.2.0-arm64.dmg", "https://evil.example/x.dmg")), // tampered
     () => new Error("ENETDOWN"),
   ]) {
     const checker = checkerWith(feed, opened);

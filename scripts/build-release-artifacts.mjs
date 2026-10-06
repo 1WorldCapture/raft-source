@@ -135,6 +135,46 @@ async function main() {
     "--cli", cliDest,
     "--daemon", daemonDest,
   ], { cwd: repoRoot });
+
+  // Desktop artifacts (task #12, phase 3-3): macOS-only — electron-builder
+  // mac dmg targets require a Mac build host. Non-macOS hosts skip with an
+  // explicit note (the rest of the tree stays complete; the desktop feed can
+  // be added later by re-running this step on a Mac at the SAME commit).
+  // Unsigned on purpose (PM decision): CSC_IDENTITY_AUTO_DISCOVERY=false
+  // stops electron-builder from picking up a local certificate, so pipeline
+  // output is reproducible; deployments that want signed builds make their
+  // own choice and the Gatekeeper copy in the app covers the unsigned case.
+  if (process.platform !== "darwin") {
+    console.log(
+      "[release] skipping desktop artifacts: electron-builder mac targets require macOS — " +
+        "re-run this script on a Mac from the same commit to publish the desktop feed",
+    );
+  } else {
+    const desktopPackage = JSON.parse(await readFile(path.join(repoRoot, "apps/raft-desktop-electron/package.json"), "utf8"));
+    run("pnpm", ["--filter", "@botiverse/raft-desktop-electron", "dist:mac"], {
+      cwd: repoRoot,
+      env: { ...process.env, CSC_IDENTITY_AUTO_DISCOVERY: "false" },
+    });
+    // The embedded product versions come from the SAME source tsup defines
+    // into the main bundle, so the manifest can never disagree with the
+    // baked values.
+    const embedded = JSON.parse(execFileSync(
+      "node",
+      ["--input-type=module", "-e",
+        "import { embeddedComputerVersions } from './packages/computer/scripts/embeddedVersionDefines.mjs'; console.log(JSON.stringify(embeddedComputerVersions()))"],
+      { cwd: repoRoot, encoding: "utf8" },
+    ));
+    run("node", [
+      path.join(repoRoot, "scripts/build-desktop-feed.mjs"),
+      "--release-dir", path.join(repoRoot, "apps/raft-desktop-electron/release"),
+      "--version", desktopPackage.version,
+      "--commit", sha,
+      "--embedded-computer", embedded.computer,
+      "--embedded-cli", embedded.cli,
+      "--embedded-daemon", embedded.daemon,
+      "--out", path.join(outDir, "desktop"),
+    ], { cwd: repoRoot });
+  }
   console.log(`[release] done: ${outDir} (computer ${computerPackage.version} / cli ${cliVersion} / daemon ${daemonPackage.version}, ${platforms.length} platforms, sha ${sha.slice(0, 8)})`);
 }
 

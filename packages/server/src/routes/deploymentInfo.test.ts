@@ -24,8 +24,12 @@ beforeAll(async () => {
   await mkdir(path.join(dir, "daemon"), { recursive: true });
   await mkdir(path.join(dir, "cli", "0.0.24-zcode.1"), { recursive: true });
   await mkdir(path.join(dir, "daemon", "1.0.25"), { recursive: true });
+  await mkdir(path.join(dir, "desktop", "0.2.0"), { recursive: true });
   await writeFile(path.join(dir, "cli", "manifest.json"), JSON.stringify({ version: "0.0.24-zcode.1" }));
   await writeFile(path.join(dir, "daemon", "manifest.json"), JSON.stringify({ version: "1.0.25" }));
+  await writeFile(path.join(dir, "desktop", "manifest.json"), JSON.stringify({ version: "0.2.0", commit: "fixture" }));
+  await writeFile(path.join(dir, "desktop", "0.2.0", "Raft-Desktop-0.2.0-arm64.dmg"), "desktop-arm64");
+  await writeFile(path.join(dir, "desktop", "0.2.0", "Raft-Desktop-0.2.0-x64.dmg"), "desktop-x64");
   await writeFile(path.join(dir, "cli", "0.0.24-zcode.1", "raft-0.0.24-zcode.1.tgz"), "cli-bytes");
   await writeFile(path.join(dir, "daemon", "1.0.25", "raft-daemon-1.0.25.tgz"), "daemon-bytes");
   process.env.RAFT_DOWNLOADS_DIR = dir;
@@ -74,20 +78,55 @@ describe("GET /api/deployment-info", () => {
         computerBase: "https://raft.internal.example:18443/downloads/computer",
         cli: "https://raft.internal.example:18443/downloads/cli/0.0.24-zcode.1/raft-0.0.24-zcode.1.tgz",
         daemon: "https://raft.internal.example:18443/downloads/daemon/1.0.25/raft-daemon-1.0.25.tgz",
+        desktop: {
+          version: "0.2.0",
+          dmg: {
+            arm64: "https://raft.internal.example:18443/downloads/desktop/0.2.0/Raft-Desktop-0.2.0-arm64.dmg",
+            x64: "https://raft.internal.example:18443/downloads/desktop/0.2.0/Raft-Desktop-0.2.0-x64.dmg",
+          },
+        },
       },
     });
+  });
+
+  test("no desktop tree published → the desktop field is simply absent (task #12)", async () => {
+    process.env.RAFT_DEPLOYMENT_MODE = "private";
+    process.env.SERVER_URL = "https://raft.internal.example:18443";
+    // A pre-task-#12 tree: cli/daemon only.
+    const bare = await mkdtemp(path.join(tmpdir(), "deployment-info-bare-"));
+    try {
+      await mkdir(path.join(bare, "cli"), { recursive: true });
+      await mkdir(path.join(bare, "daemon"), { recursive: true });
+      await writeFile(path.join(bare, "cli", "manifest.json"), JSON.stringify({ version: "0.0.24-zcode.1" }));
+      await writeFile(path.join(bare, "daemon", "manifest.json"), JSON.stringify({ version: "1.0.25" }));
+      process.env.RAFT_DOWNLOADS_DIR = bare;
+      const res = await fetch(`${baseUrl}/api/deployment-info`);
+      const { downloads } = (await res.json()) as { downloads: Record<string, unknown> };
+      assert.equal("desktop" in downloads, false);
+      assert.ok("cli" in downloads && "daemon" in downloads);
+    } finally {
+      process.env.RAFT_DOWNLOADS_DIR = dir;
+      const { rm } = await import("node:fs/promises");
+      await rm(bare, { recursive: true, force: true });
+    }
   });
 
   test("every served download URL resolves to a real file in the downloads tree (acceptance D2)", async () => {
     process.env.RAFT_DEPLOYMENT_MODE = "private";
     process.env.SERVER_URL = "https://raft.internal.example:18443";
     const res = await fetch(`${baseUrl}/api/deployment-info`);
-    const { downloads } = (await res.json()) as { downloads: Record<string, string> };
+    const { downloads } = (await res.json()) as {
+      downloads: Record<string, string | { version: string; dmg: Record<string, string> }>;
+    };
     const { access } = await import("node:fs/promises");
-    // File URLs (cli/daemon) must resolve to real files; computerBase is a
-    // directory prefix by contract, checked separately when the tree has one.
-    for (const [key, url] of Object.entries(downloads)) {
-      if (key === "computerBase") continue;
+    // File URLs (cli/daemon/desktop dmg) must resolve to real files;
+    // computerBase is a directory prefix by contract, checked separately.
+    const fileUrls = Object.entries(downloads).flatMap(([key, value]) => {
+      if (key === "computerBase") return [];
+      if (typeof value === "string") return [[key, value] as const];
+      return Object.entries(value.dmg).map(([arch, url]) => [`desktop.${arch}`, url] as const);
+    });
+    for (const [key, url] of fileUrls) {
       const filePath = url.replace("https://raft.internal.example:18443/downloads/", "");
       await access(path.join(dir, filePath)); // throws (fails the test) if the URL is a 404
     }
