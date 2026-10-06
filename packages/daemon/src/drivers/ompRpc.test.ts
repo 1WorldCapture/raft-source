@@ -457,6 +457,19 @@ const sessionId = process.argv.includes("--resume") ? process.argv[process.argv.
 if (process.argv[3] === "record") {
   fs.writeFileSync(process.argv[4], JSON.stringify(process.argv.slice(2)));
 }
+// Task #5 seams: launch argv/env proof and inbound frame logging, both
+// keyed on env so the argv-based record seam above stays untouched.
+if (process.env.OMP_FAKE_ARGV_LOG) {
+  fs.writeFileSync(process.env.OMP_FAKE_ARGV_LOG, JSON.stringify({
+    argv: process.argv.slice(2),
+    pathHead: (process.env.PATH || "").split(process.platform === "win32" ? ";" : ":")[0],
+    slockCliTransportDir: process.env.SLOCK_CLI_TRANSPORT_DIR || null,
+    slockServerUrl: process.env.SLOCK_SERVER_URL || null,
+  }, null, 2));
+}
+const frameLog = process.env.OMP_FAKE_FRAME_LOG
+  ? (entry) => fs.appendFileSync(process.env.OMP_FAKE_FRAME_LOG, JSON.stringify(entry) + "\\n")
+  : null;
 let refused = mode === "refuse-delivery";
 process.stdin.setEncoding("utf8");
 let buffer = "";
@@ -468,6 +481,20 @@ process.stdin.on("data", (chunk) => {
     buffer = buffer.slice(index + 1);
     if (!line.trim()) continue;
     const frame = JSON.parse(line);
+    if (frameLog) frameLog(frame);
+    if (mode === "host-tools" && frame.type === "prompt") {
+      // Emulate omp calling back into the host (task #5): one managed tool
+      // call per prompt; "cancel" follows with a host_tool_cancel.
+      const toolMode = process.env.OMP_FAKE_HOST_TOOL_MODE || "call";
+      const toolName = toolMode === "unknown"
+        ? "missing_tool"
+        : (process.env.OMP_FAKE_HOST_TOOL_NAME || "srv_tool");
+      send({ type: "host_tool_call", id: "host_1", toolCallId: "toolu_1", toolName, arguments: { x: 1 } });
+      if (toolMode === "cancel") {
+        setTimeout(() => send({ type: "host_tool_cancel", id: "host_cancel_1", targetId: "host_1" }), 150);
+      }
+      continue;
+    }
     if (frame.type === "negotiate_protocol") {
       send({ id: frame.id, type: "response", command: "negotiate_protocol", success: true, data: { protocolVersion: 2 } });
     } else if (frame.type === "get_state") {
@@ -722,5 +749,316 @@ test("a fresh launch (no recorded session) does not pass --resume and gets a fre
     assert.equal(harness.driver.currentSessionId, "fresh-session-1");
   } finally {
     harness.driver.stop({ sigtermGraceMs: 100 });
+  }
+});
+
+// ============================================================================
+// Task #5 — Raft integration: system prompt, CLI env, managed MCP host tools
+// ============================================================================
+
+import type { Server as HttpServer, IncomingMessage, ServerResponse } from "node:http";
+import { createServer as createHttpServer } from "node:http";
+
+const MANAGED_TOOL_SNAPSHOT = {
+  catalogVersion: 1,
+  tools: [
+    {
+      mcpServerId: "mcp_1",
+      serverName: "srv",
+      toolName: "real_tool",
+      runtimeName: "srv_tool",
+      title: "Managed Tool",
+      description: "A managed tool for tests",
+      inputSchema: { type: "object", properties: { x: { type: "number" } }, required: ["x"] },
+      configVersion: 1,
+      assignmentVersion: 1,
+    },
+  ],
+};
+
+interface ManagedMcpMock {
+  url: string;
+  /** Bodies received on POST /internal/agent-api/mcp/call. */
+  calls: Array<Record<string, unknown>>;
+  /** Resolves when a /call request closes WITHOUT a response (client abort). */
+  waitAborted(): Promise<void>;
+  close(): Promise<void>;
+}
+
+function startManagedMcpMock(opts: { callResult?: unknown; callStatus?: number } = {}): Promise<ManagedMcpMock> {
+  return new Promise((resolve) => {
+    const calls: Array<Record<string, unknown>> = [];
+    let abortWait: (() => void) | null = null;
+    const server: HttpServer = createHttpServer((req: IncomingMessage, res: ServerResponse) => {
+      if (req.url === "/internal/agent-api/mcp/tools") {
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify(MANAGED_TOOL_SNAPSHOT));
+        return;
+      }
+      if (req.url === "/internal/agent-api/mcp/call" && req.method === "POST") {
+        let body = "";
+        req.on("data", (chunk: Buffer) => {
+          body += chunk.toString("utf8");
+        });
+        req.on("end", () => {
+          calls.push(JSON.parse(body || "{}") as Record<string, unknown>);
+          // A hanging call models a long-running tool; the abort test relies
+          // on the server observing the socket close before any response.
+          if (opts.callStatus === 0) {
+            abortWait?.();
+            req.on("close", () => abortWait?.());
+            return;
+          }
+          res.setHeader("Content-Type", "application/json");
+          res.statusCode = opts.callStatus ?? 200;
+          res.end(JSON.stringify(opts.callResult ?? { content: [{ type: "text", text: "managed-ok" }] }));
+        });
+        return;
+      }
+      res.statusCode = 404;
+      res.end("{}");
+    });
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      const port = typeof address === "object" && address ? address.port : 0;
+      resolve({
+        url: `http://127.0.0.1:${port}`,
+        calls,
+        waitAborted: () => new Promise((resolveAbort) => {
+          abortWait = resolveAbort;
+        }),
+        close: () => new Promise((resolveClose) => server.close(() => resolveClose())),
+      });
+    });
+  });
+}
+
+function readJsonLines(filePath: string): Array<Record<string, unknown>> {
+  return readFileSync(filePath, "utf8")
+    .split("\n")
+    .filter((line) => line.trim())
+    .map((line) => JSON.parse(line) as Record<string, unknown>);
+}
+
+interface HostToolsHarness {
+  driver: OmpDriver;
+  proc: import("node:child_process").ChildProcess;
+  events: ParsedEvent[];
+  mock: ManagedMcpMock;
+  frameLogPath: string;
+  argvLogPath: string;
+  waitUntil(predicate: () => boolean, ms?: number): Promise<void>;
+  cleanup(): void;
+}
+
+async function startHostToolsFake(options: {
+  sessionId?: string | null;
+  standingPrompt?: string;
+  hostToolMode?: "call" | "unknown" | "cancel";
+  mock?: ManagedMcpMock;
+} = {}): Promise<HostToolsHarness> {
+  const workspace = mkdtempSync(path.join(os.tmpdir(), "slock-omp-hosttools-"));
+  const scriptPath = path.join(workspace, "fake-omp-session.cjs");
+  writeFileSync(scriptPath, FAKE_SESSION_SCRIPT);
+  const mock = options.mock ?? await startManagedMcpMock();
+
+  const frameLogPath = path.join(workspace, "frames.log");
+  const argvLogPath = path.join(workspace, "argv.json");
+  process.env.OMP_FAKE_FRAME_LOG = frameLogPath;
+  process.env.OMP_FAKE_ARGV_LOG = argvLogPath;
+  if (options.hostToolMode) process.env.OMP_FAKE_HOST_TOOL_MODE = options.hostToolMode;
+
+  const driver = new OmpDriver();
+  const ctx = makeSpawnContext(workspace);
+  ctx.config.serverUrl = mock.url;
+  (ctx.config as { agentCredentialKey?: string | null }).agentCredentialKey = "test-agent-credential";
+  if (options.sessionId) (ctx.config as { sessionId?: string | null }).sessionId = options.sessionId;
+  if (options.standingPrompt) ctx.standingPrompt = options.standingPrompt;
+  const { process: proc } = await driver.spawn(ctx, {
+    command: process.execPath,
+    extraArgs: [scriptPath, "host-tools"],
+  });
+
+  const events: ParsedEvent[] = [];
+  let stdoutBuffer = "";
+  proc.stdout?.setEncoding("utf8");
+  proc.stdout?.on("data", (chunk: string) => {
+    stdoutBuffer += chunk;
+    let index: number;
+    while ((index = stdoutBuffer.indexOf("\n")) >= 0) {
+      const line = stdoutBuffer.slice(0, index);
+      stdoutBuffer = stdoutBuffer.slice(index + 1);
+      if (line.trim()) events.push(...driver.parseLine(line));
+    }
+  });
+  proc.stdout?.resume();
+
+  const cleanup = (): void => {
+    driver.stop({ sigtermGraceMs: 100 });
+    delete process.env.OMP_FAKE_FRAME_LOG;
+    delete process.env.OMP_FAKE_ARGV_LOG;
+    delete process.env.OMP_FAKE_HOST_TOOL_MODE;
+  };
+
+  return {
+    driver,
+    proc,
+    events,
+    mock,
+    frameLogPath,
+    argvLogPath,
+    waitUntil: async (predicate: () => boolean, ms = 5000) => {
+      const started = Date.now();
+      while (!predicate() && Date.now() - started < ms) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+    },
+    cleanup,
+  };
+}
+
+test("managed tools ride the ready chain: set_host_tools lands before get_state and before whenReady", async () => {
+  const harness = await startHostToolsFake();
+  try {
+    await harness.waitUntil(() => harness.driver.isProtocolSettled);
+    const frames = readJsonLines(harness.frameLogPath);
+    const types = frames.map((frame) => frame.type as string);
+    const negotiate = types.indexOf("negotiate_protocol");
+    const setTools = types.indexOf("set_host_tools");
+    const getState = types.indexOf("get_state");
+    assert.ok(negotiate >= 0 && setTools > negotiate && getState > setTools,
+      `registration must sit between negotiate and get_state, saw: ${types.join(",")}`);
+    const setToolsFrame = frames[setTools] as { tools?: Array<{ name?: string; parameters?: { required?: string[] } }> };
+    assert.equal(setToolsFrame.tools?.[0]?.name, "srv_tool");
+    assert.deepEqual(setToolsFrame.tools?.[0]?.parameters?.required, ["x"], "the input schema must pass through");
+  } finally {
+    harness.cleanup();
+    await harness.mock.close();
+  }
+});
+
+test("a host tool call executes against the managed endpoint and completes exactly once", async () => {
+  const harness = await startHostToolsFake({ hostToolMode: "call" });
+  try {
+    await harness.waitUntil(() => harness.driver.isProtocolSettled);
+
+    const idle = harness.driver.encodeStdinMessage("run the tool", null, { mode: "idle" });
+    harness.proc.stdin?.write(idle + "\n");
+    await harness.waitUntil(() => readJsonLines(harness.frameLogPath).some((frame) => frame.type === "host_tool_result"));
+
+    const results = readJsonLines(harness.frameLogPath).filter((frame) => frame.type === "host_tool_result");
+    assert.equal(results.length, 1, "exactly one completion per host_tool_call");
+    const result = results[0] as { id: string; isError?: boolean; result?: { content?: Array<{ text?: string }> } };
+    assert.equal(result.id, "host_1");
+    assert.notEqual(result.isError, true);
+    assert.equal(result.result?.content?.[0]?.text, "managed-ok");
+    assert.deepEqual(harness.mock.calls, [
+      {
+        mcpServerId: "mcp_1",
+        toolName: "real_tool",
+        arguments: { x: 1 },
+        expectedConfigVersion: 1,
+        expectedAssignmentVersion: 1,
+      },
+    ], "the managed call must carry the snapshot's identity and version pins");
+  } finally {
+    harness.cleanup();
+    await harness.mock.close();
+  }
+});
+
+test("a managed tool error surfaces as an isError host_tool_result", async () => {
+  const mock = await startManagedMcpMock({ callResult: { content: [{ type: "text", text: "boom" }], isError: true } });
+  const harness = await startHostToolsFake({ hostToolMode: "call", mock });
+  try {
+    await harness.waitUntil(() => harness.driver.isProtocolSettled);
+    const idle = harness.driver.encodeStdinMessage("run the tool", null, { mode: "idle" });
+    harness.proc.stdin?.write(idle + "\n");
+    await harness.waitUntil(() => readJsonLines(harness.frameLogPath).some((frame) => frame.type === "host_tool_result"));
+    const result = readJsonLines(harness.frameLogPath).find((frame) => frame.type === "host_tool_result") as { isError?: boolean; result?: { content?: Array<{ text?: string }> } };
+    assert.equal(result.isError, true, "the tool error must reach omp as isError");
+    assert.equal(result.result?.content?.[0]?.text, "boom");
+  } finally {
+    harness.cleanup();
+    await mock.close();
+  }
+});
+
+test("an unknown host tool is refused immediately without touching the endpoint", async () => {
+  const harness = await startHostToolsFake({ hostToolMode: "unknown" });
+  try {
+    await harness.waitUntil(() => harness.driver.isProtocolSettled);
+    const idle = harness.driver.encodeStdinMessage("run the tool", null, { mode: "idle" });
+    harness.proc.stdin?.write(idle + "\n");
+    await harness.waitUntil(() => readJsonLines(harness.frameLogPath).some((frame) => frame.type === "host_tool_result"));
+    const result = readJsonLines(harness.frameLogPath).find((frame) => frame.type === "host_tool_result") as { isError?: boolean; result?: { content?: Array<{ text?: string }> } };
+    assert.equal(result.isError, true);
+    assert.match(result.result?.content?.[0]?.text ?? "", /missing_tool/);
+    assert.equal(harness.mock.calls.length, 0, "no managed call may leave the daemon");
+  } finally {
+    harness.cleanup();
+    await harness.mock.close();
+  }
+});
+
+test("host_tool_cancel aborts the in-flight managed call and no result is sent", async () => {
+  // callStatus 0 = the mock holds the request open and reports client aborts.
+  const mock = await startManagedMcpMock({ callStatus: 0 });
+  const harness = await startHostToolsFake({ hostToolMode: "cancel", mock });
+  try {
+    await harness.waitUntil(() => harness.driver.isProtocolSettled);
+    const idle = harness.driver.encodeStdinMessage("run the tool", null, { mode: "idle" });
+    harness.proc.stdin?.write(idle + "\n");
+
+    await harness.waitUntil(() => readJsonLines(harness.frameLogPath).some((frame) => frame.type === "host_tool_cancel"));
+    await Promise.race([harness.mock.waitAborted(), new Promise((resolve) => setTimeout(resolve, 3000))]);
+
+    const results = readJsonLines(harness.frameLogPath).filter((frame) => frame.type === "host_tool_result");
+    assert.equal(results.length, 0, "a cancelled call must not complete");
+  } finally {
+    harness.cleanup();
+    await mock.close();
+  }
+});
+
+test("launch argv carries the standing prompt file and the isolation overlay, fresh and resumed", async () => {
+  const STANDING = "RAFT-STANDING-PROMPT-MARKER alpha beta";
+  // Fresh launch.
+  const fresh = await startHostToolsFake({ standingPrompt: STANDING });
+  let argvDump: { argv: string[]; pathHead: string; slockCliTransportDir: string | null; slockServerUrl: string | null };
+  try {
+    await fresh.waitUntil(() => fresh.driver.isProtocolSettled);
+    argvDump = JSON.parse(readFileSync(fresh.argvLogPath, "utf8")) as typeof argvDump;
+    const promptFlag = argvDump.argv.indexOf("--system-prompt");
+    const configFlag = argvDump.argv.indexOf("--config");
+    assert.ok(promptFlag > 0 && configFlag > promptFlag, `argv must carry both flags: ${argvDump.argv.join(" ")}`);
+    assert.equal(readFileSync(argvDump.argv[promptFlag + 1], "utf8"), STANDING, "the prompt file must hold the standing prompt verbatim");
+    const overlay = readFileSync(argvDump.argv[configFlag + 1], "utf8");
+    assert.match(overlay, /disabledExtensions:/);
+    for (const name of ["AGENTS.md", "CLAUDE.md", "GEMINI.md", "copilot-instructions.md"]) {
+      assert.ok(overlay.includes(`- context-file:project:${name}`), `overlay must disable the project-level ${name}`);
+    }
+    assert.ok(!overlay.includes("disabledProviders:"), "provider-level kills stay off: user-level context remains loaded (PM ruling)");
+    // CLI env proof (task #5 acceptance): the raft wrapper dir leads PATH.
+    assert.equal(argvDump.pathHead, argvDump.slockCliTransportDir, "the CLI transport dir must lead PATH so bash reaches raft");
+    assert.equal(argvDump.slockServerUrl, fresh.mock.url, "the server URL env must point at the daemon endpoint");
+  } finally {
+    fresh.cleanup();
+    await fresh.mock.close();
+  }
+
+  // Resumed launch (and every wake that spawns again): same flags, plus --resume.
+  const resumed = await startHostToolsFake({ standingPrompt: STANDING, sessionId: "recorded-handoff" });
+  try {
+    await resumed.waitUntil(() => resumed.driver.isProtocolSettled);
+    const dump = JSON.parse(readFileSync(resumed.argvLogPath, "utf8")) as { argv: string[] };
+    assert.ok(dump.argv.includes("--system-prompt"), "resumed launch must carry --system-prompt");
+    assert.ok(dump.argv.includes("--config"), "resumed launch must carry the isolation overlay");
+    const resumeFlag = dump.argv.indexOf("--resume");
+    assert.ok(resumeFlag > 0 && dump.argv[resumeFlag + 1] === "recorded-handoff");
+    assert.equal(readFileSync(dump.argv[dump.argv.indexOf("--system-prompt") + 1], "utf8"), STANDING);
+  } finally {
+    resumed.cleanup();
+    await resumed.mock.close();
   }
 });

@@ -63,10 +63,9 @@ function resultText(result: ManagedMcpCallResult): string {
 
 function buildTool(input: {
   tool: ManagedMcpRuntimeTool;
-  serverUrl: string;
-  token: string;
+  endpoint: ManagedMcpEndpoint;
 }): ToolDefinition {
-  const { tool } = input;
+  const { tool, endpoint } = input;
   return {
     name: tool.runtimeName,
     label: tool.title || `${tool.serverName}: ${tool.toolName}`,
@@ -74,19 +73,7 @@ function buildTool(input: {
     promptSnippet: `${tool.runtimeName}: ${tool.description || `Call ${tool.toolName} on ${tool.serverName}`}`,
     parameters: tool.inputSchema as TSchema,
     async execute(_toolCallId, params, signal) {
-      const result = await requestJson<ManagedMcpCallResult>({
-        url: new URL("/internal/agent-api/mcp/call", input.serverUrl),
-        token: input.token,
-        method: "POST",
-        body: {
-          mcpServerId: tool.mcpServerId,
-          toolName: tool.toolName,
-          arguments: params as Record<string, unknown>,
-          expectedConfigVersion: tool.configVersion,
-          expectedAssignmentVersion: tool.assignmentVersion,
-        },
-        signal,
-      });
+      const result = await callManagedMcpTool(endpoint, tool, params as Record<string, unknown>, signal);
       if (result.isError) throw new Error(resultText(result));
       return {
         content: result.content.map((block) => block.type === "text"
@@ -103,28 +90,67 @@ function buildTool(input: {
   };
 }
 
+/**
+ * Runtime-neutral Managed MCP access, shared by every non-SDK driver bridge.
+ * The server decides tool membership from the agent credential; the daemon
+ * only presents it.
+ */
+export interface ManagedMcpEndpoint {
+  serverUrl: string;
+  agentCredentialKey: string;
+}
+
+/** Fetch the tool snapshot assigned to this agent. Throws on any failure. */
+export async function fetchManagedMcpToolSnapshot(endpoint: ManagedMcpEndpoint): Promise<ManagedMcpRuntimeTool[]> {
+  const snapshot = await requestJson<ManagedMcpRuntimeSnapshot>({
+    url: new URL("/internal/agent-api/mcp/tools", endpoint.serverUrl),
+    token: endpoint.agentCredentialKey,
+  });
+  if (!isRuntimeSnapshot(snapshot)) throw new Error("Managed MCP snapshot contract is invalid");
+  return snapshot.tools;
+}
+
+/** Execute one managed MCP tool call. Throws on transport failure; a logical
+ * tool error arrives as `result.isError` and must surface as tool error text. */
+export async function callManagedMcpTool(
+  endpoint: ManagedMcpEndpoint,
+  tool: ManagedMcpRuntimeTool,
+  args: Record<string, unknown>,
+  signal?: AbortSignal,
+): Promise<ManagedMcpCallResult> {
+  return requestJson<ManagedMcpCallResult>({
+    url: new URL("/internal/agent-api/mcp/call", endpoint.serverUrl),
+    token: endpoint.agentCredentialKey,
+    method: "POST",
+    body: {
+      mcpServerId: tool.mcpServerId,
+      toolName: tool.toolName,
+      arguments: args,
+      expectedConfigVersion: tool.configVersion,
+      expectedAssignmentVersion: tool.assignmentVersion,
+    },
+    signal,
+  });
+}
+
+export function managedMcpHttpErrorDetail(error: unknown): string {
+  return error instanceof ManagedMcpHttpError
+    ? `${error.code ?? "managed_mcp_http_error"} (${error.status})`
+    : error instanceof Error ? error.message.slice(0, 200) : "unknown error";
+}
+
 export async function createManagedMcpPiTools(input: {
   serverUrl: string;
   agentCredentialKey: string | null | undefined;
   onWarning?: (message: string) => void;
 }): Promise<ToolDefinition[]> {
   if (!input.agentCredentialKey) return [];
+  const endpoint: ManagedMcpEndpoint = { serverUrl: input.serverUrl, agentCredentialKey: input.agentCredentialKey };
   try {
-    const snapshot = await requestJson<ManagedMcpRuntimeSnapshot>({
-      url: new URL("/internal/agent-api/mcp/tools", input.serverUrl),
-      token: input.agentCredentialKey,
-    });
-    if (!isRuntimeSnapshot(snapshot)) throw new Error("Managed MCP snapshot contract is invalid");
-    return snapshot.tools.map((tool) => buildTool({
-      tool,
-      serverUrl: input.serverUrl,
-      token: input.agentCredentialKey!,
-    }));
+    const tools = await fetchManagedMcpToolSnapshot(endpoint);
+    return tools.map((tool) => buildTool({ tool, endpoint }));
   } catch (error) {
-    const detail = error instanceof ManagedMcpHttpError
-      ? `${error.code ?? "managed_mcp_http_error"} (${error.status})`
-      : error instanceof Error ? error.message.slice(0, 200) : "unknown error";
-    input.onWarning?.(`Managed MCP tools unavailable for this session: ${detail}`);
+    input.onWarning?.(`Managed MCP tools unavailable for this session: ${managedMcpHttpErrorDetail(error)}`);
     return [];
   }
 }

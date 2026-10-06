@@ -1,8 +1,17 @@
 import { spawn as childSpawn, type ChildProcess } from "node:child_process";
+import { writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import type { ManagedMcpRuntimeTool } from "@botiverse/raft-shared";
+
 import { buildCliTransportSystemPrompt, prepareCliTransport } from "./cliTransport.js";
+import {
+  callManagedMcpTool,
+  fetchManagedMcpToolSnapshot,
+  managedMcpHttpErrorDetail,
+  type ManagedMcpEndpoint,
+} from "./managedMcpTools.js";
 import { logger } from "../logger.js";
 import {
   closeOmpTurnOnProcessExit,
@@ -24,10 +33,37 @@ import type { ParsedEvent, RuntimeDriver, RuntimeProbeResult, SpawnContext, Spaw
 // OMP (oh-my-pi) ships a Bun-only SDK, so the daemon drives it as a
 // `omp --mode rpc` child process over stdio NDJSON. Task #2 owns the transport
 // (framing, ready/negotiation, request correlation, lifecycle); event mapping
-// lands with task #3, session control with #4.
+// lands with task #3, session control with #4, Raft integration (system
+// prompt, CLI env, managed MCP host tools) with #5.
 export const MIN_SUPPORTED_OMP_VERSION = "18.6.0";
 
 const OMP_BINARY = "omp";
+
+/** Launch-file names written into the per-agent CLI transport dir (0600). */
+const OMP_SYSTEM_PROMPT_FILE = "omp-system-prompt.md";
+const OMP_CONFIG_OVERLAY_FILE = "omp-config-overlay.yml";
+
+/**
+ * Project-level context files disabled for managed agents (task #5, PM
+ * ruling). `--system-prompt` only replaces the instruction block — omp's
+ * generated `<project-context>` footer would still render every discovered
+ * context file, so a workspace AGENTS.md would silently stack under the
+ * Raft standing prompt. `context-file:project:<basename>` ids hit every
+ * provider and every directory depth at PROJECT level only, keeping the
+ * provider's user-level context (the owner ruled user-level preferences
+ * stay, matching the Cursor SDK decision) and everything else the provider
+ * contributes (MCP servers, skills, rules, …). System-prompt REPLACEMENT
+ * files (SYSTEM.md/SYSTEM_TEMPLATE.md) need no entry: the explicit
+ * --system-prompt flag outranks them by documented CLI precedence.
+ * Authentication / the user's subscription live outside the provider system
+ * and are unaffected (task #5 spec: use ~/.omp, never modify it).
+ */
+const OMP_DISABLED_PROJECT_CONTEXT_FILES = [
+  "AGENTS.md",
+  "CLAUDE.md",
+  "GEMINI.md",
+  "copilot-instructions.md",
+];
 
 /** Bound for the ready frame and each RPC request, mirroring the bundled clients. */
 const OMP_RPC_READY_TIMEOUT_MS = 30_000;
@@ -152,6 +188,46 @@ export interface OmpRpcResponseFrame {
   data?: unknown;
   error?: string;
   code?: string;
+}
+
+/** Outbound (docs/rpc.md "Host Tool Sub-Protocol"): registers host-owned tools. */
+interface OmpHostToolDefinition {
+  name: string;
+  label?: string;
+  description: string;
+  parameters: Record<string, unknown>;
+}
+
+/** Inbound: the agent wants the host to execute one registered tool. */
+interface OmpHostToolCallFrame {
+  type: "host_tool_call";
+  id: string;
+  toolCallId: string;
+  toolName: string;
+  arguments: Record<string, unknown>;
+}
+
+/** Inbound: a pending host tool call must be aborted. */
+interface OmpHostToolCancelFrame {
+  type: "host_tool_cancel";
+  id: string;
+  targetId: string;
+}
+
+/**
+ * Managed-agent discovery isolation overlay (task #5). Loaded with
+ * `--config` so the launch never touches the user's global omp config.
+ */
+function buildOmpConfigOverlay(): string {
+  return [
+    "# Written by the Raft daemon (task #5): managed agents get the Raft",
+    "# standing prompt as their sole instruction source — PROJECT-level",
+    "# context files (workspace AGENTS.md/CLAUDE.md/…) must not stack",
+    "# underneath it, while the user's own user-level context stays loaded.",
+    "disabledExtensions:",
+    ...OMP_DISABLED_PROJECT_CONTEXT_FILES.map((name) => `  - context-file:project:${name}`),
+    "",
+  ].join("\n");
 }
 
 export class OmpRpcProcessExitedError extends Error {
@@ -296,6 +372,14 @@ export class OmpDriver implements RuntimeDriver {
   /** Ids issued by encodeStdinMessage; refusals surface as error events. */
   private deliveryIds = new Map<string, string>();
 
+  // Raft integration (task #5): launch files, managed MCP host tools.
+  private systemPromptPath: string | null = null;
+  private configOverlayPath: string | null = null;
+  private hostToolEndpoint: ManagedMcpEndpoint | null = null;
+  private hostTools: ManagedMcpRuntimeTool[] = [];
+  /** In-flight host_tool_call executions keyed by the omp frame id. */
+  private hostToolCalls = new Map<string, { controller: AbortController }>();
+
   /** True once the ready frame has been seen (and negotiation dispatched if offered). */
   get isReady(): boolean {
     return this.ready;
@@ -369,7 +453,31 @@ export class OmpDriver implements RuntimeDriver {
   }
 
   async spawn(ctx: SpawnContext, launchOverrides: OmpRpcLaunchOverrides = {}): Promise<SpawnResult> {
-    const { spawnEnv } = await prepareCliTransport(ctx, { NO_COLOR: "1" });
+    const { spawnEnv, slockDir } = await prepareCliTransport(ctx, { NO_COLOR: "1" });
+
+    // Managed-agent launch files live in the per-agent CLI transport dir —
+    // 0600, outside the workspace, rewritten every spawn (task #5). The
+    // prompt travels as a file because omp treats a multi-line
+    // --system-prompt VALUE as a literal, while a single-line path is read
+    // as a file (docs/system-prompt-customization.md).
+    this.systemPromptPath = this.writeLaunchFile(slockDir, OMP_SYSTEM_PROMPT_FILE, ctx.standingPrompt);
+    this.configOverlayPath = this.writeLaunchFile(slockDir, OMP_CONFIG_OVERLAY_FILE, buildOmpConfigOverlay());
+
+    // Managed MCP tools (task #5): membership is the server's decision, made
+    // against the agent credential. Fetching is best-effort — a failure means
+    // the agent runs without managed tools this launch, never a dead session.
+    this.hostTools = [];
+    this.hostToolEndpoint = ctx.config.agentCredentialKey
+      ? { serverUrl: ctx.config.serverUrl, agentCredentialKey: ctx.config.agentCredentialKey }
+      : null;
+    if (this.hostToolEndpoint) {
+      try {
+        this.hostTools = await fetchManagedMcpToolSnapshot(this.hostToolEndpoint);
+      } catch (error) {
+        logger.warn(`[omp] managed MCP tools unavailable: ${managedMcpHttpErrorDetail(error)}`);
+        this.hostToolEndpoint = null;
+      }
+    }
 
     this.process = null;
     this.decoder = new OmpRpcFrameDecoder();
@@ -389,6 +497,7 @@ export class OmpDriver implements RuntimeDriver {
     this.eventState = createOmpEventMappingState();
     this.readyDeferred = this.createReadyDeferred();
     this.deliveryIds.clear();
+    this.hostToolCalls.clear();
     this.sessionId = null;
     this.resumeFallbackNotice = null;
     this.launchRetryUsed = false;
@@ -443,6 +552,7 @@ export class OmpDriver implements RuntimeDriver {
         this.ready = false;
         this.protocolSettled = false;
         this.readyDeferred = this.createReadyDeferred();
+        this.hostToolCalls.clear();
         return this.launchChild(ctx, spawnEnv, launchOverrides, null);
       }
       // Ready: settle the driver from the buffered lines (ready → negotiate →
@@ -541,8 +651,17 @@ export class OmpDriver implements RuntimeDriver {
     } else {
       // extraArgs leads the list so a script seam (command: node, extraArgs:
       // [script, mode]) sees its own argv first; omp itself treats flags
-      // order-independently.
-      args = [...(launchOverrides.extraArgs ?? []), "--mode", "rpc", "--session-dir", this.sessionDir!];
+      // order-independently. --system-prompt and --config ride along on both
+      // fresh and resumed launches: resumed sessions re-apply the current
+      // standing prompt (task #5 — new / resumed / woken launches must all
+      // run with it).
+      args = [
+        ...(launchOverrides.extraArgs ?? []),
+        "--mode", "rpc",
+        "--session-dir", this.sessionDir!,
+        ...(this.systemPromptPath ? ["--system-prompt", this.systemPromptPath] : []),
+        ...(this.configOverlayPath ? ["--config", this.configOverlayPath] : []),
+      ];
       if (resumeSessionId) args = [...args, "--resume", resumeSessionId];
     }
 
@@ -598,6 +717,7 @@ export class OmpDriver implements RuntimeDriver {
       this.process = null;
       this.readyDeferred?.reject(new OmpRpcProcessExitedError(code, signal, this.stderrTail));
       this.readyDeferred = null;
+      this.abortHostToolCalls();
       this.failAllPending(new OmpRpcProcessExitedError(code, signal, this.stderrTail));
     });
 
@@ -657,6 +777,16 @@ export class OmpDriver implements RuntimeDriver {
     if (type === "response") {
       const events = this.handleResponse(frame as unknown as OmpRpcResponseFrame);
       return [...queued, ...events];
+    }
+    if (type === "host_tool_call") {
+      // Host tool executions are daemon business, not agent-visible events:
+      // execute against the managed MCP endpoint and answer over stdin.
+      this.handleHostToolCall(frame as unknown as OmpHostToolCallFrame);
+      return queued;
+    }
+    if (type === "host_tool_cancel") {
+      this.handleHostToolCancel(frame as unknown as OmpHostToolCancelFrame);
+      return queued;
     }
     if (typeof type === "string" && OMP_LOG_ONLY_FRAME_TYPES.has(type)) {
       logger.info(`[omp] ${type} frame observed (phase-1 log-only, not mapped)`);
@@ -766,6 +896,7 @@ export class OmpDriver implements RuntimeDriver {
     sigtermTimer.unref?.();
 
     this.process = null;
+    this.abortHostToolCalls();
     failPending();
   }
 
@@ -813,17 +944,130 @@ export class OmpDriver implements RuntimeDriver {
   }
 
   /**
-   * The handshake is complete: turn sends are safe, and the session identity
-   * can be read (get_state) so the daemon can persist it for resume.
+   * The handshake is complete: turn sends are safe, host tools are mounted,
+   * and the session identity can be read (get_state) so the daemon can
+   * persist it for resume. Host tools register BEFORE whenReady resolves, so
+   * the first model call of any launch already sees them (task #5).
    */
   private settleProtocol(): void {
     this.protocolSettled = true;
-    this.readyDeferred?.resolve();
-    this.readyDeferred = null;
-    void this.request({ type: "get_state" }).catch(() => {
-      // get_state is best-effort identity capture; the turn machinery
-      // surfaces real failures. Nothing to clean up.
+    void this.registerHostTools().then(() => {
+      this.readyDeferred?.resolve();
+      this.readyDeferred = null;
+      void this.request({ type: "get_state" }).catch(() => {
+        // get_state is best-effort identity capture; the turn machinery
+        // surfaces real failures. Nothing to clean up.
+      });
     });
+  }
+
+  /**
+   * Mount the managed MCP snapshot as omp host tools (task #5). omp's
+   * response replaces the previous set, so one send per process is complete.
+   * Registration failure must not wedge the session: the agent continues
+   * without managed tools and a diagnostic explains why.
+   */
+  private async registerHostTools(): Promise<void> {
+    if (this.hostTools.length === 0) return;
+    const tools: OmpHostToolDefinition[] = this.hostTools.map((tool) => ({
+      name: tool.runtimeName,
+      ...(tool.title ? { label: tool.title } : {}),
+      description: tool.description || `Call ${tool.toolName} on the managed MCP server ${tool.serverName}.`,
+      parameters: (tool.inputSchema ?? { type: "object", properties: {} }) as Record<string, unknown>,
+    }));
+    try {
+      await this.request({ type: "set_host_tools", tools });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.warn(`[omp] set_host_tools failed: ${message}`);
+      this.queuedEvents.push({
+        kind: "runtime_diagnostic",
+        severity: "warning",
+        source: "omp_rpc_notification",
+        itemType: "host_tools_registration",
+        message: `OMP managed tools registration failed; the agent runs without managed tools this session: ${message}`,
+      });
+    }
+  }
+
+  /**
+   * Execute one agent-initiated host tool call against the managed MCP
+   * endpoint (task #5). Every accepted call gets EXACTLY ONE completion —
+   * success, tool error, or transport error — because omp holds the turn's
+   * tool call open until the result arrives; a late answer after a cancel is
+   * dropped by the generation guard.
+   */
+  private handleHostToolCall(frame: OmpHostToolCallFrame): void {
+    const tool = this.hostTools.find((candidate) => candidate.runtimeName === frame.toolName);
+    if (!tool) {
+      this.sendHostToolError(frame.id, `Managed MCP tool ${frame.toolName} is not currently available to this Agent`);
+      return;
+    }
+    const endpoint = this.hostToolEndpoint;
+    if (!endpoint) {
+      this.sendHostToolError(frame.id, "Managed MCP endpoint unavailable for this session");
+      return;
+    }
+    const controller = new AbortController();
+    this.hostToolCalls.set(frame.id, { controller });
+    void callManagedMcpTool(endpoint, tool, frame.arguments ?? {}, controller.signal)
+      .then((result) => {
+        if (this.hostToolCalls.get(frame.id)?.controller !== controller) return; // cancelled or process gone
+        this.hostToolCalls.delete(frame.id);
+        this.writeHostToolFrame({
+          type: "host_tool_result",
+          id: frame.id,
+          result: { content: result.content },
+          ...(result.isError ? { isError: true } : {}),
+        });
+      })
+      .catch((error: unknown) => {
+        if (this.hostToolCalls.get(frame.id)?.controller !== controller) return;
+        this.hostToolCalls.delete(frame.id);
+        const message = error instanceof Error ? error.message : String(error);
+        this.sendHostToolError(frame.id, `Managed MCP call failed: ${message}`);
+      });
+  }
+
+  /** Abort a pending host tool call; omp drops the request, so no result is sent. */
+  private handleHostToolCancel(frame: OmpHostToolCancelFrame): void {
+    const pending = this.hostToolCalls.get(frame.targetId);
+    if (!pending) return;
+    this.hostToolCalls.delete(frame.targetId);
+    pending.controller.abort();
+  }
+
+  /** Completion frame with a plain-text error payload (docs/rpc.md: top-level isError). */
+  private sendHostToolError(callId: string, message: string): void {
+    this.writeHostToolFrame({
+      type: "host_tool_result",
+      id: callId,
+      result: { content: [{ type: "text", text: message }] },
+      isError: true,
+    });
+  }
+
+  private writeHostToolFrame(frame: Record<string, unknown>): void {
+    const proc = this.process;
+    if (!proc?.stdin?.writable) return; // process gone mid-call: omp rejects pending calls at stdin close
+    try {
+      proc.stdin.write(encodeOmpRpcFrame(frame, { maxPhysicalFrameBytes: this.maxFrameBytes }));
+    } catch {
+      // Stdin died between the writability check and the write; the tree is
+      // being torn down anyway.
+    }
+  }
+
+  private abortHostToolCalls(): void {
+    for (const pending of this.hostToolCalls.values()) pending.controller.abort();
+    this.hostToolCalls.clear();
+  }
+
+  /** Write a 0600 launch file into the per-agent CLI transport dir. */
+  private writeLaunchFile(dir: string, name: string, content: string): string {
+    const filePath = path.join(dir, name);
+    writeFileSync(filePath, content, { mode: 0o600 });
+    return filePath;
   }
 
   private handleResponse(frame: OmpRpcResponseFrame): ParsedEvent[] {
