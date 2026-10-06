@@ -37,3 +37,8 @@ scripts/app-name-ratchet-baseline.txt.mutating
 # Self-hosting: machine-specific ops config (see docs/self-hosting/source-deploy.md)
 ops/self-host/env.local
 .DS_Store
+
+# Local self-host test artifacts (never commit: keys and per-machine overrides)
+deploy/docker/certs/
+deploy/docker/docker-compose.override.yml
+deploy/docker/.env
