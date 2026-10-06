@@ -11,6 +11,7 @@ import { execFile } from "node:child_process";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { promisify } from "node:util";
 import { PRODUCT_NAME } from "./productName.js";
@@ -20,6 +21,25 @@ const execFileAsync = promisify(execFile);
 export const LOGIN_AGENT_LABEL = "build.raft.desktop.login";
 /** Legacy headless-service login items registered by the old carrier. */
 export const LEGACY_LOGIN_LABEL_PREFIX = "build.raft.computer.login.";
+
+/**
+ * True inside an isolated test build (electron-builder.isolated.yml stamps
+ * extraMetadata.name "Raft Desktop Isolated"). Probed lazily through
+ * createRequire because this module is also imported by node-run unit tests
+ * where the electron binding resolves to the binary path string and `app`
+ * is simply absent.
+ */
+function isolatedTestBuild(): boolean {
+  try {
+    const electron = createRequire(import.meta.url)("electron") as {
+      app?: { getName(): string };
+    };
+    const name = electron.app?.getName();
+    return typeof name === "string" && name.includes("Isolated");
+  } catch {
+    return false;
+  }
+}
 
 function launchAgentsDir(): string {
   return path.join(homedir(), "Library", "LaunchAgents");
@@ -72,6 +92,13 @@ export function isHiddenLaunch(argv: ReadonlyArray<string>): boolean {
  * current session (bootout) so the change is immediate, not next-login.
  */
 export async function setLoginItemAtLogin(enabled: boolean): Promise<void> {
+  if (enabled && isolatedTestBuild()) {
+    // Guardrail (task #13 review): the login-item label is a hardcoded
+    // constant shared with the owner's app — an isolated test build
+    // registering it would clobber the OWNER's launch-at-login plist (and
+    // point it at the test binary). Isolated builds never register.
+    throw new Error("isolated test builds must not register login items");
+  }
   if (enabled) {
     // File only — deliberately NOT `launchctl bootstrap`: with RunAtLoad the
     // bootstrap would immediately run our `open` and pop the window of the
