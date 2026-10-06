@@ -189,14 +189,20 @@ export default function AddMachineDialog({ onClose }: { onClose: () => void }) {
     serverName,
     serverUrl,
   });
+  // "unknown" (resolution failed after retry) generates standard commands —
+  // ComputerCommandGuide pairs them with the contact-admin notice. null
+  // (still resolving) also generates them, but the guide renders NO command
+  // until the mode lands (PM review round 1: a private server must never
+  // flash official CDN commands).
+  const commandDeploymentMode = deploymentMode === "unknown" ? null : deploymentMode;
   const computerCommands = getComputerCommands(serverSlug, deploymentEnv, serverUrl, {
     legacyApiKey: apiKey,
-    deploymentMode,
+    deploymentMode: commandDeploymentMode,
   });
   const windowsComputerCommands = getComputerCommands(serverSlug, deploymentEnv, serverUrl, {
     legacyApiKey: apiKey,
     platform: "windows",
-    deploymentMode,
+    deploymentMode: commandDeploymentMode,
   });
   const computerSetupCommand = computerCommands?.setup ?? null;
   const computerInstall = computerCommands?.install ?? null;
@@ -327,6 +333,7 @@ export default function AddMachineDialog({ onClose }: { onClose: () => void }) {
               windowsComputerInstallCommand={windowsComputerInstall}
               macLinuxDaemonCommand={macLinuxDaemonCommand}
               windowsDaemonCommand={windowsDaemonCommand}
+              deploymentMode={deploymentMode}
             />
 
             {/* Waiting indicator */}

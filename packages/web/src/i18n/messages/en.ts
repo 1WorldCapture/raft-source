@@ -1407,6 +1407,8 @@ export const en = {
   "machine.commandGuide.daemonLegacyDescription":
     "Keep this option for existing daemon setups. New Windows x64 setups should use Raft Computer above.",
   "machine.commandGuide.preparing": "Preparing…",
+  "machine.commandGuide.computerCommandsLoading": "Confirming deployment type…",
+  "machine.commandGuide.deploymentModeUnknown": "Could not confirm the deployment type; intranet users should contact their administrator before using this command.",
   "machine.commandGuide.showLegacyDaemonCommand": "Show legacy daemon command",
   "machine.commandGuide.generateFreshDaemonConnect": "Generate a fresh daemon connect command to use this legacy option.",
   "machine.commandGuide.generateLegacyDaemonCommand": "Generate legacy daemon command",

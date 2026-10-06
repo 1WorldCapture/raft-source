@@ -3,6 +3,7 @@ import { Check, Copy, Terminal } from "lucide-react";
 import { Badge, SegmentedControl, SegmentedControlItem, SegmentedControlLabel } from "raft-ui";
 import { useIntl } from "react-intl";
 import type { ComputerCommandPlatform } from "../../utils/computerSetupCommand";
+import { deploymentModeStatus, type DeploymentModeResolution } from "../../utils/deploymentMode";
 import SectionEyebrow from "../ui/SectionEyebrow";
 
 interface ComputerCommandGuideProps {
@@ -16,6 +17,15 @@ interface ComputerCommandGuideProps {
   onPlatformChange?: (platform: ComputerCommandPlatform) => void;
   onRequestWindowsDaemonCommand?: () => void;
   windowsDaemonCommandPending?: boolean;
+  /**
+   * Runtime deployment-mode resolution status (task #5, PM review round 1):
+   * "loading" renders NO Computer command — a private server must never
+   * flash official CDN commands while /api/deployment-info is in flight;
+   * "unknown" (request failed after retry) renders the commands with a
+   * notice for intranet users instead of a silent official fallback;
+   * "resolved" (or omitted) keeps the historical behavior.
+   */
+  deploymentMode?: DeploymentModeResolution | null;
   /**
    * Offer the legacy Daemon path alongside the Computer one. Default true, because the
    * Computers page still has legitimate reasons to reach it.
@@ -109,6 +119,52 @@ function CommandRows({
   );
 }
 
+/**
+ * The Computer install/setup steps with deployment-mode gating (task #5):
+ * while the mode resolves we render NOTHING (a private server must never
+ * flash official CDN commands); after a failed resolution we render the
+ * commands plus a notice for intranet users — never a silent fallback.
+ */
+function ComputerStepsArea({
+  steps,
+  mode,
+  copiedCommand,
+  onCopy,
+  pendingLabel,
+  notice,
+}: {
+  steps: readonly CommandStep[];
+  mode: "loading" | "unknown" | "resolved";
+  copiedCommand: CopyTarget | null;
+  onCopy: (target: CopyTarget, command: string) => void;
+  pendingLabel: string;
+  notice: string;
+}) {
+  if (mode === "loading") {
+    return (
+      <div
+        className="border-2 border-black/30 bg-white px-3 py-2 text-xs font-bold text-black/50"
+        data-testid="computer-commands-pending"
+      >
+        {pendingLabel}
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-3">
+      <CommandRows steps={steps} copiedCommand={copiedCommand} onCopy={onCopy} />
+      {mode === "unknown" ? (
+        <p
+          className="border-2 border-amber-500 bg-amber-50 px-3 py-2 text-xs font-bold leading-5 text-amber-800"
+          data-testid="computer-commands-mode-unknown"
+        >
+          {notice}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 export default function ComputerCommandGuide({
   computerCommand,
   computerInstallCommand,
@@ -121,10 +177,12 @@ export default function ComputerCommandGuide({
   onRequestWindowsDaemonCommand,
   windowsDaemonCommandPending = false,
   showLegacyDaemon = true,
+  deploymentMode,
 }: ComputerCommandGuideProps) {
   const { formatMessage } = useIntl();
   const [platform, setPlatform] = useState<ComputerCommandPlatform>("mac-linux");
   const [copiedCommand, setCopiedCommand] = useState<CopyTarget | null>(null);
+  const mode = deploymentModeStatus(deploymentMode);
 
   const isComputerGuide = Boolean(
     computerCommand || computerInstallCommand || windowsComputerCommand || windowsComputerInstallCommand,
@@ -226,10 +284,13 @@ export default function ComputerCommandGuide({
               <Badge.Experimental />
             </div>
             {displayedComputerSteps.length > 0 ? (
-              <CommandRows
+              <ComputerStepsArea
                 steps={displayedComputerSteps}
+                mode={mode}
                 copiedCommand={copiedCommand}
                 onCopy={(target, command) => void handleCopy(target, command)}
+                pendingLabel={formatMessage({ id: "machine.commandGuide.computerCommandsLoading" })}
+                notice={formatMessage({ id: "machine.commandGuide.deploymentModeUnknown" })}
               />
             ) : (
               <div className="border-2 border-black/30 bg-white px-3 py-2 text-xs font-bold text-black/50">
@@ -273,10 +334,13 @@ export default function ComputerCommandGuide({
           )}
         </div>
       ) : isComputerGuide && displayedComputerSteps.length > 0 ? (
-        <CommandRows
+        <ComputerStepsArea
           steps={displayedComputerSteps}
+          mode={mode}
           copiedCommand={copiedCommand}
           onCopy={(target, command) => void handleCopy(target, command)}
+          pendingLabel={formatMessage({ id: "machine.commandGuide.computerCommandsLoading" })}
+          notice={formatMessage({ id: "machine.commandGuide.deploymentModeUnknown" })}
         />
       ) : selectedDaemonCommand && showLegacyDaemon ? (
         <CommandRows

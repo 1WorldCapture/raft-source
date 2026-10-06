@@ -98,8 +98,11 @@ export interface ComputerSetupCommandOptions {
   // Runtime deployment mode (GET /api/deployment-info; see
   // utils/deploymentMode.ts). "private" generates install commands from the
   // connected server's own /downloads tree instead of the official CDN.
-  // null (not yet resolved) behaves as "standard".
-  deploymentMode?: "private" | "standard" | null;
+  // null / "unknown" (not yet resolved, or resolution failed) generate the
+  // standard commands — the CALLER gates rendering: null renders no command
+  // at all, "unknown" renders with a notice (PM review round 1: never
+  // silently show official commands on a private server).
+  deploymentMode?: "private" | "standard" | "unknown" | null;
 }
 
 export interface ComputerCommands {

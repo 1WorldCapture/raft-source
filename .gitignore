@@ -66,3 +66,5 @@ Resolve each block faithfully: keep one side (`@ours`/`@theirs`), or combine the
 # (download cache + per-target staging output; the pin lives in
 # packages/daemon/cursor-sdk-assets.lock.json, which IS committed).
 deploy/docker/downloads/
+# SEA build outputs (scripts/build-release-artifacts.mjs working dir)
+packages/computer/dist-native/

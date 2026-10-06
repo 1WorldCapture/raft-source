@@ -46,11 +46,15 @@ export default function ServerSetupComputerRuntimePreviewPage() {
   const showCreateAgent = view === "create-agent";
   // Generated, not hardcoded (task #5): a private deployment renders the
   // install command from its own /downloads tree; the official default
-  // renders the same string this page used to hardcode.
+  // renders the same string this page used to hardcode. While the mode
+  // resolves the command stays hidden — no official-command flash on a
+  // private server (PM review round 1).
   const deploymentMode = useDeploymentMode();
   const installBase = deploymentMode === "private"
     ? `${getServerUrl().replace(/\/+$/, "")}/downloads/computer`
-    : undefined;
+    : deploymentMode === null
+      ? null
+      : undefined;
 
   return (
     <div className="relative min-h-0 flex-1 overflow-hidden bg-brutal-cream font-display">
@@ -79,7 +83,9 @@ export default function ServerSetupComputerRuntimePreviewPage() {
             offlineComputers={fixture.offlineComputers}
             serverSlug="launch"
             setupCommand="raft-computer setup /cindys-pricing-team"
-            computerInstallCommand={computerInstallCommand(undefined, null, installBase)}
+            computerInstallCommand={installBase === null
+              ? null
+              : computerInstallCommand(undefined, null, installBase ?? undefined)}
             macLinuxDaemonCommand="npx @botiverse/raft-daemon@latest --server-url https://api.raft.build --api-key sk_machine_preview0000000000000000"
             windowsDaemonCommand="npx.cmd @botiverse/raft-daemon@latest --server-url https://api.raft.build --api-key sk_machine_preview0000000000000000"
             onCopyInstallCommand={() => undefined}
