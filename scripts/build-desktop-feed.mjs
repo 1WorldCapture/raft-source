@@ -26,8 +26,10 @@
 //     --embedded-daemon <v> --out <downloads>/desktop
 
 import { createHash } from "node:crypto";
-import { copyFile, mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { createReadStream } from "node:fs";
+import { copyFile, mkdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { pipeline } from "node:stream/promises";
 
 const ARCHES = ["arm64", "x64"];
 const FORMATS = ["dmg", "zip"];
@@ -42,12 +44,19 @@ function parseArgs(argv) {
   return args;
 }
 
+/** Streamed hash — the artifacts are ~200MB each; never buffer one in memory. */
+async function hashFile(file, algorithm, encoding) {
+  const hash = createHash(algorithm);
+  await pipeline(createReadStream(file), hash);
+  return hash.digest(encoding);
+}
+
 async function sha512Base64(file) {
-  return createHash("sha512").update(await readFile(file)).digest("base64");
+  return hashFile(file, "sha512", "base64");
 }
 
 async function sha256Hex(file) {
-  return createHash("sha256").update(await readFile(file)).digest("hex");
+  return hashFile(file, "sha256", "hex");
 }
 
 export function latestMacYml(version, files) {
@@ -63,17 +72,21 @@ export function latestMacYml(version, files) {
   return `${lines.join("\n")}\n`;
 }
 
-export function desktopManifest(version, commit, embedded, files) {
+export function desktopManifest(version, commit, origin, embedded, files) {
   return {
     version,
     commit,
+    // The origin baked into this build (VITE_API_URL): must equal the
+    // SERVER_URL of the deployment serving this tree — an app installed from
+    // here talks to that server from first launch.
+    origin,
     embedded,
     files: files.map((file) => ({ name: file.name, sha256: file.sha256, size: file.size })),
   };
 }
 
 export async function buildDesktopFeed(deps) {
-  const { releaseDir, outDir, version, commit, embedded } = deps;
+  const { releaseDir, outDir, version, commit, origin, embedded } = deps;
   const versionDir = path.join(outDir, version);
   await mkdir(versionDir, { recursive: true });
 
@@ -97,14 +110,14 @@ export async function buildDesktopFeed(deps) {
   }
 
   await writeFile(path.join(outDir, "latest-mac.yml"), latestMacYml(version, ymlFiles), "utf8");
-  const manifest = desktopManifest(version, commit, embedded, manifestFiles);
+  const manifest = desktopManifest(version, commit, origin, embedded, manifestFiles);
   await writeFile(path.join(outDir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
   return manifest;
 }
 
 async function main() {
   const args = parseArgs(process.argv);
-  for (const required of ["release-dir", "version", "commit", "embedded-computer", "embedded-cli", "embedded-daemon", "out"]) {
+  for (const required of ["release-dir", "version", "commit", "origin", "embedded-computer", "embedded-cli", "embedded-daemon", "out"]) {
     if (!args[required]) throw new Error(`--${required} is required`);
   }
   const manifest = await buildDesktopFeed({
@@ -112,6 +125,7 @@ async function main() {
     outDir: path.resolve(args.out),
     version: args.version,
     commit: args.commit,
+    origin: args.origin,
     embedded: { computer: args["embedded-computer"], cli: args["embedded-cli"], daemon: args["embedded-daemon"] },
   });
   console.log(`[desktop-feed] wrote ${args.out}: version ${manifest.version}, ${manifest.files.length} files, commit ${manifest.commit.slice(0, 8)}`);

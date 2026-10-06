@@ -48,6 +48,7 @@ test("feed tree: version-prefixed dual-arch yml + same-commit manifest", async (
     outDir,
     version: "0.2.0",
     commit: "abc123def456",
+    origin: "https://raft.internal.example:18443",
     embedded: { computer: "1.0.29", cli: "0.0.24-zcode.1", daemon: "1.0.26" },
   });
 
@@ -65,6 +66,7 @@ test("feed tree: version-prefixed dual-arch yml + same-commit manifest", async (
     {
       version: "0.2.0",
       commit: "abc123def456",
+      origin: "https://raft.internal.example:18443",
       embedded: { computer: "1.0.29", cli: "0.0.24-zcode.1", daemon: "1.0.26" },
       files: manifest.files,
     },

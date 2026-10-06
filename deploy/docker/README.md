@@ -143,13 +143,17 @@ HTTPS（或 Tailscale tailnet）。若用 `http://` origin，安装与升级都�
 
 **Desktop 安装包（三期 task #12）**：`./downloads/desktop/` 由
 `scripts/build-release-artifacts.mjs` 在 **macOS 构建机**上生成（非 macOS
-跳过并提示，可稍后在同 commit 的 Mac 上补跑该步骤）：
+跳过并提示，可稍后在同 commit 的 Mac 上补跑该步骤；**macOS 上必须传
+`--desktop-origin <https-origin>`**——烘焙进 app 作为 VITE_API_URL，
+**必须等于本部署的 SERVER_URL**：漏传或误传会打出连官方服务器、开官方
+更新器的包，直接报错拒绝构建）：
 ```
 desktop/<v>/Raft-Desktop-<v>-{arm64,x64}.dmg|.zip   （electron-builder，不签名）
 desktop/latest-mac.yml   ← 双架构合成 feed（每个 entries 带 <v>/ 前缀 url + sha512）
-desktop/manifest.json    ← {version, commit, embedded:{computer,cli,daemon}}
+desktop/manifest.json    ← {version, commit, origin, embedded:{computer,cli,daemon}}
 ```
-双架构 latest-mac.yml 是合成的（electron-builder 每架构各写一份会互相覆盖）。
+双架构 latest-mac.yml 是合成的（electron-builder 每架构各写一份会互相覆盖）；
+manifest 的 origin 即烘焙 origin，验收时与 SERVER_URL 比对。
 **两种部署形态的分发路径**：
 1. **compose 栈（本任务范围，直接可用）**：nginx 经 alias 直出整棵
    `/downloads/`，desktop/ 天然可访问，无需任何服务端改动。

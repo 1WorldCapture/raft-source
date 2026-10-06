@@ -6,16 +6,14 @@
 // browser's location — matching every other private install surface. The
 // offer is hidden inside the desktop app itself (you are already running
 // it; the in-app update pill owns that flow).
+//
+// BOTH architecture links are always shown: Safari on Apple Silicon still
+// reports "Intel Mac OS X" in its UA, so client detection cannot be trusted
+// to pick one (PR #172 review). Labels carry the chip families instead.
 import { useIntl } from "react-intl";
 import { Monitor } from "lucide-react";
 import { useDeploymentDownloads } from "../../utils/deploymentMode";
 import { isElectronDesktopShell } from "../../utils/desktopShell";
-
-function macArch(): "arm64" | "x64" {
-  // Rosetta-reported Intel on Apple Silicon still installs the x64 build
-  // fine; this only picks the highlighted default.
-  return /Intel|x86_64/i.test(navigator.userAgent) ? "x64" : "arm64";
-}
 
 export function DesktopDownloadSection() {
   const { formatMessage } = useIntl();
@@ -23,10 +21,9 @@ export function DesktopDownloadSection() {
   const desktop = downloads?.desktop;
   if (!desktop || isElectronDesktopShell()) return null;
 
-  const preferred = macArch();
   const links: Array<{ key: "arm64" | "x64"; url: string }> = [
-    { key: preferred, url: desktop.dmg[preferred] },
-    ...(preferred === "arm64" ? [{ key: "x64" as const, url: desktop.dmg.x64 }] : []),
+    { key: "arm64", url: desktop.dmg.arm64 },
+    { key: "x64", url: desktop.dmg.x64 },
   ];
 
   return (
