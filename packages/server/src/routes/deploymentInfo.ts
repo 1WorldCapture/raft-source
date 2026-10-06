@@ -46,12 +46,25 @@ deploymentInfoRouter.get("/", async (req, res) => {
     res.json({ deploymentMode: "standard" });
     return;
   }
+  // Operator-configured replacements for official link surfaces (task #7):
+  // docs / legal links. Absent → the web hides docs links and keeps the
+  // official legal links (PM decision: license/privacy links stay).
+  const publicDocsUrl = process.env.RAFT_PUBLIC_DOCS_URL?.trim() || null;
+  const termsUrl = process.env.RAFT_PUBLIC_TERMS_URL?.trim() || null;
+  const privacyUrl = process.env.RAFT_PUBLIC_PRIVACY_URL?.trim() || null;
+  const links = {
+    ...(publicDocsUrl ? { docsUrl: publicDocsUrl } : {}),
+    ...(termsUrl || privacyUrl
+      ? { legal: { ...(termsUrl ? { termsUrl } : {}), ...(privacyUrl ? { privacyUrl } : {}) } }
+      : {}),
+  };
+  const linksField = Object.keys(links).length > 0 ? { links } : {};
   const origin = configuredOrigin();
   if (!origin) {
     // Private without a configured public origin: report the mode (the web
     // shows its "cannot confirm" notice rather than official commands) but
     // never guess an origin.
-    res.json({ deploymentMode: "private" });
+    res.json({ deploymentMode: "private", ...linksField });
     return;
   }
   const [cliVersion, daemonVersion] = await Promise.all([
@@ -65,6 +78,7 @@ deploymentInfoRouter.get("/", async (req, res) => {
       ...(cliVersion ? { cli: `${origin}/downloads/cli/raft-${cliVersion}.tgz` } : {}),
       ...(daemonVersion ? { daemon: `${origin}/downloads/daemon/raft-daemon-${daemonVersion}.tgz` } : {}),
     },
+    ...linksField,
   });
 });
 

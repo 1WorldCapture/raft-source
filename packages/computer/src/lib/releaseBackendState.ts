@@ -18,6 +18,7 @@
 // value without upgrade checks breaking on it.
 
 import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { releaseBackendPath } from "../paths.js";
 
@@ -62,4 +63,16 @@ export async function writeReleaseBackend(
   const p = releaseBackendPath(slockHome);
   await mkdir(dirname(p), { recursive: true });
   await writeFile(p, `${backend}\n`, { mode: 0o600 });
+}
+
+/**
+ * Synchronous twin for surfaces that cannot await (the CLI error presenter).
+ * Same leniency: absent / unreadable / unrecognized → null.
+ */
+export function readReleaseBackendSync(slockHome: string): ReleaseBackend | null {
+  try {
+    return parseReleaseBackend(readFileSync(releaseBackendPath(slockHome), "utf8"));
+  } catch {
+    return null;
+  }
 }

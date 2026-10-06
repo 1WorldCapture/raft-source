@@ -2,7 +2,7 @@ import path from "node:path";
 import os from "node:os";
 import { createHash, randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
-import { accessSync, createReadStream, createWriteStream } from "node:fs";
+import { accessSync, createReadStream, createWriteStream, readFileSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { Readable } from "node:stream";
@@ -37,6 +37,7 @@ import {
   type TraceSpanAttrContracts,
   type TraceStatus,
   type Tracer,
+  isPrivateDeploymentMode,
 } from "@botiverse/raft-shared";
 import {
   APP_CONFIG_TRACE_IDENTITY_KEYS,
@@ -150,6 +151,38 @@ import {
  * set `DISABLED=1`; those that want their own worker set the URL explicitly.
  */
 const DEFAULT_TRACE_UPLOAD_URL = "https://slock-trace-upload.botiverse.dev";
+
+/**
+ * Private deployment context (task #7, telemetry red line): the canonical
+ * env switch, or the installer-persisted server release backend under this
+ * home (same two triggers as the Computer's upgrade backend). In private
+ * contexts trace upload defaults OFF — the only way back on is an explicit
+ * SLOCK_DAEMON_TRACE_UPLOAD_URL.
+ */
+function isPrivateDaemonContext(slockHome: string): boolean {
+  if (isPrivateDeploymentMode()) return true;
+  try {
+    return readFileSync(path.join(slockHome, "computer", "release-backend"), "utf8").trim() === "server";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Resolve the trace-upload worker URL under the four-layer policy:
+ *   1. SLOCK_DAEMON_TRACE_UPLOAD_DISABLED=1 → off (unchanged, highest)
+ *   2. SLOCK_DAEMON_TRACE_UPLOAD_URL set → that URL (the explicit opt-in,
+ *      including a private context deliberately pointing somewhere)
+ *   3. private context → off (never fall back to the official default)
+ *   4. official default (unchanged for official deployments)
+ */
+export function resolveTraceUploadWorkerUrl(slockHome: string): string | undefined {
+  if (process.env.SLOCK_DAEMON_TRACE_UPLOAD_DISABLED === "1") return undefined;
+  const explicit = process.env.SLOCK_DAEMON_TRACE_UPLOAD_URL || undefined;
+  if (explicit) return explicit;
+  if (isPrivateDaemonContext(slockHome)) return undefined;
+  return DEFAULT_TRACE_UPLOAD_URL;
+}
 const RUNNER_CREDENTIAL_SCOPES = ["send", "read", "mentions", "tasks", "reactions", "server", "channels", "knowledge", "mcp"] as const;
 const RUNNER_CREDENTIAL_MINT_MAX_ATTEMPTS = 3;
 const RUNNER_CREDENTIAL_MINT_RETRY_DELAY_MS = 250;
@@ -1548,7 +1581,7 @@ export class DaemonCore {
     let connection!: DaemonConnection;
 
     this.agentsDataDir = options.dataDir ?? resolveRaftHomePath("agents", this.slockHome);
-    const traceUploadDisabled = process.env.SLOCK_DAEMON_TRACE_UPLOAD_DISABLED === "1";
+    const traceUploadWorkerUrl = resolveTraceUploadWorkerUrl(this.slockHome);
     const agentManagerOptions = {
       dataDir: this.agentsDataDir,
       serverUrl: options.serverUrl,
@@ -1559,7 +1592,7 @@ export class DaemonCore {
       daemonVersion: this.daemonVersion,
       daemonInstanceId: this.daemonInstanceId,
       computerVersion: this.computerVersion,
-      workerUrl: traceUploadDisabled ? undefined : (process.env.SLOCK_DAEMON_TRACE_UPLOAD_URL || DEFAULT_TRACE_UPLOAD_URL),
+      workerUrl: traceUploadWorkerUrl,
       serverConnected: () => connection?.connected ?? false,
       appInboxForAgent: (agentId: string) => this.getAgentAppInbox(agentId),
     };
@@ -1684,13 +1717,11 @@ export class DaemonCore {
     if (!this.shouldEnableLocalTrace()) return;
     if (this.traceBundleUploader) return;
 
-    // Highest priority off-switch: SLOCK_DAEMON_TRACE_UPLOAD_DISABLED=1
-    if (process.env.SLOCK_DAEMON_TRACE_UPLOAD_DISABLED === "1") return;
-
-    // Explicit URL override wins; otherwise fall back to the baked default.
-    // Self-host / local / staging etc. must use DISABLED=1 to opt out or
-    // set their own SLOCK_DAEMON_TRACE_UPLOAD_URL to redirect.
-    const workerUrl = process.env.SLOCK_DAEMON_TRACE_UPLOAD_URL || DEFAULT_TRACE_UPLOAD_URL;
+    // Highest priority off-switch + four-layer policy (see
+    // resolveTraceUploadWorkerUrl): private contexts default OFF, an
+    // explicit SLOCK_DAEMON_TRACE_UPLOAD_URL is the only opt-in.
+    const workerUrl = resolveTraceUploadWorkerUrl(this.slockHome);
+    if (!workerUrl) return;
     this.traceBundleUploader = new DaemonTraceBundleUploader({
       machineDir,
       serverUrl: this.options.serverUrl,

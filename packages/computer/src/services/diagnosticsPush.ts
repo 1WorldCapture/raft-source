@@ -49,6 +49,7 @@ import {
   userSessionPath,
 } from "../paths.js";
 import { isProcessAlive, readPidfileAt } from "../internal/process-primitives.js";
+import { isPrivateClientContext } from "../computerRelease.js";
 import type { ComputerApiEvent } from "../lib/events.js";
 import { canonicalizeServerUrl } from "../serverUrl.js";
 import { buildStatusReport } from "../status.js";
@@ -73,6 +74,26 @@ const RUNNER_LOG_TAIL_MAX_LINES = 120;
 const RUNNER_LOG_TAIL_MAX_LINE_CHARS = 1_000;
 const DEFAULT_TRACE_UPLOAD_URL = "https://slock-trace-upload.botiverse.dev";
 const TRACE_UPLOAD_SCOPE = "daemon-trace-bundle:create";
+
+/**
+ * The trace-upload worker URL under the four-layer policy shared with the
+ * daemon's resolveTraceUploadWorkerUrl (task #7 telemetry red line):
+ *   1. SLOCK_DAEMON_TRACE_UPLOAD_DISABLED=1 → off (enforced by the daemon's
+ *      uploader itself)
+ *   2. explicit URL (options/env) → that URL — the ONLY private-context
+ *      opt-in
+ *   3. private client context → no upload (never the official default)
+ *   4. official default (unchanged for official deployments)
+ */
+export async function resolveDiagnosticsWorkerUrl(
+  slockHome: string,
+  optionWorkerUrl?: string,
+): Promise<string | undefined> {
+  const explicit = optionWorkerUrl ?? process.env.SLOCK_DAEMON_TRACE_UPLOAD_URL ?? undefined;
+  if (explicit) return explicit;
+  if (await isPrivateClientContext(slockHome)) return undefined;
+  return DEFAULT_TRACE_UPLOAD_URL;
+}
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
 export interface DiagnosticsForcedUploadResult {
@@ -701,7 +722,8 @@ export async function diagnosticsPush(
     })),
     ...(options.includeComputerTraceRecords ? await readComputerTraceRecords(slockHome) : []),
   ];
-  const workerUrl = options.workerUrl ?? process.env.SLOCK_DAEMON_TRACE_UPLOAD_URL ?? DEFAULT_TRACE_UPLOAD_URL;
+  // Task #7 telemetry red line — see resolveDiagnosticsWorkerUrl.
+  const workerUrl = await resolveDiagnosticsWorkerUrl(slockHome, options.workerUrl);
 
   // 1. Upload-bearing markers: one per RUNNING runner, into that runner's
   // daemon `machineDir/traces` with the `daemon-trace-` glob-matching name so
@@ -719,12 +741,18 @@ export async function diagnosticsPush(
       });
       markerPaths.push(markerPath);
       if (options.forceUploadNow) {
-        uploadResults.push(await forceUploadTraceFile({
-          file: markerPath,
-          attachment: a,
-          workerUrl,
-          fetchImpl: options.fetchImpl ?? fetch,
-        }));
+        if (!workerUrl) {
+          // Private context without an explicit URL: the forced upload is
+          // disabled, reported as such (never silently skips the reason).
+          uploadResults.push({ serverId: a.serverId, status: "failed", attempted: 0, uploaded: 0, errorClass: "UPLOAD_DISABLED" });
+        } else {
+          uploadResults.push(await forceUploadTraceFile({
+            file: markerPath,
+            attachment: a,
+            workerUrl,
+            fetchImpl: options.fetchImpl ?? fetch,
+          }));
+        }
       }
     } catch {
       // Skip the failing runner — others still carry the marker.

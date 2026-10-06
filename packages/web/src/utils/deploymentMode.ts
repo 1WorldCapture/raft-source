@@ -39,9 +39,16 @@ export interface DeploymentDownloads {
   daemon?: string;
 }
 
+/** Operator-configured replacements for official link surfaces (task #7). */
+export interface DeploymentLinks {
+  docsUrl?: string;
+  legal?: { termsUrl?: string; privacyUrl?: string };
+}
+
 export interface DeploymentInfo {
   deploymentMode: DeploymentMode;
   downloads?: DeploymentDownloads;
+  links?: DeploymentLinks;
 }
 
 let cached: DeploymentInfo | "unknown" | null = null;
@@ -67,6 +74,20 @@ function parseDeploymentInfo(body: unknown): DeploymentInfo | null {
         if (typeof daemon === "string" && daemon) parsed.daemon = daemon;
         info.downloads = parsed;
       }
+    }
+    const links = (body as { links?: unknown }).links;
+    if (typeof links === "object" && links !== null) {
+      const parsed: DeploymentLinks = {};
+      const { docsUrl, legal } = links as Record<string, unknown>;
+      if (typeof docsUrl === "string" && docsUrl) parsed.docsUrl = docsUrl;
+      if (typeof legal === "object" && legal !== null) {
+        const { termsUrl, privacyUrl } = legal as Record<string, unknown>;
+        const parsedLegal: NonNullable<DeploymentLinks["legal"]> = {};
+        if (typeof termsUrl === "string" && termsUrl) parsedLegal.termsUrl = termsUrl;
+        if (typeof privacyUrl === "string" && privacyUrl) parsedLegal.privacyUrl = privacyUrl;
+        if (parsedLegal.termsUrl || parsedLegal.privacyUrl) parsed.legal = parsedLegal;
+      }
+      if (parsed.docsUrl || parsed.legal) info.links = parsed;
     }
   }
   return info;
@@ -155,6 +176,18 @@ export function useDeploymentMode(): DeploymentModeResolution | null {
  */
 export function useDeploymentDownloads(): DeploymentDownloads | null {
   return useSyncExternalStore(subscribe, getDownloadsSnapshot, getDownloadsSnapshot);
+}
+
+/**
+ * Operator-configured official-link replacements (private deployments
+ * only); null when absent.
+ */
+export function useDeploymentLinks(): DeploymentLinks | null {
+  return useSyncExternalStore(subscribe, getLinksSnapshot, getLinksSnapshot);
+}
+
+function getLinksSnapshot(): DeploymentLinks | null {
+  return cached && cached !== "unknown" ? cached.links ?? null : null;
 }
 
 /** Map a resolution to the ComputerCommandGuide display status. An absent

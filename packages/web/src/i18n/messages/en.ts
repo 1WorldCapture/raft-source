@@ -698,6 +698,7 @@ export const en = {
   "agent.detail.otherAgentRuntimeDescription": "Use this flow for another agent runtime or custom harness.",
   "agent.detail.copySetup": "Copy setup",
   "agent.detail.externalClaudeInstallTitle": "Install or upgrade Raft CLI and the Claude Code channel plugin",
+  "agent.detail.externalClaudeMarketplacePrivate": "This deployment is on a private network and cannot reach the Claude Code plugin marketplace; complete the plugin steps from a machine with external access.",
   "agent.detail.externalLoginProfileTitle": "Log in this agent profile",
   "agent.detail.externalClaudeStartTitle": "Start Claude Code with the Raft channel",
   "agent.detail.externalInstallRaftCliTitle": "Install or upgrade Raft CLI",
