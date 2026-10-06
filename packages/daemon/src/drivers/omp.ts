@@ -289,9 +289,24 @@ const OMP_DETECT_CACHE_TTL_MS = 10 * 60_000;
 let ompDetectCache: OmpDetectCache | null = null;
 let ompDetectInFlight: Promise<OmpDetectResult> | null = null;
 
+/**
+ * Resolve omp's agent directory the way omp itself does (PM task #6 review
+ * follow-up): PI_CODING_AGENT_DIR relocates it outright, a named profile
+ * (OMP_PROFILE / PI_PROFILE) moves it under ~/.omp/profiles/<name>/agent,
+ * and the default is ~/.omp/agent. The daemon's env is authoritative here
+ * because the probe and the spawned omp inherit exactly that env.
+ */
+function ompAgentDir(): string {
+  const explicit = process.env.PI_CODING_AGENT_DIR?.trim();
+  if (explicit) return explicit;
+  const profile = process.env.OMP_PROFILE?.trim() || process.env.PI_PROFILE?.trim();
+  if (profile) return path.join(os.homedir(), ".omp", "profiles", profile, "agent");
+  return path.join(os.homedir(), ".omp", "agent");
+}
+
 function ompAgentDbMtimeMs(): number | null {
   try {
-    return statSync(path.join(os.homedir(), ".omp", "agent", "agent.db")).mtimeMs;
+    return statSync(path.join(ompAgentDir(), "agent.db")).mtimeMs;
   } catch {
     return null;
   }
