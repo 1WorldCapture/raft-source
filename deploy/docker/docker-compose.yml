@@ -80,6 +80,14 @@ services:
       # read the local manifest; artifacts are served from the shared dir.
       RAFT_DEPLOYMENT_MODE: private
       RAFT_DOWNLOADS_DIR: /app/downloads
+      # Managed-MCP internal allowlist (task #9/D5): compose does variable
+      # interpolation only, so every RAFT_MANAGED_MCP_* knob must be passed
+      # through explicitly. Empty defaults keep behavior identical when the
+      # operator leaves them unset in .env. Changing .env requires
+      # `docker compose up -d` (container recreate) — `restart` re-reads
+      # nothing (check-compose-env-coverage guards future additions).
+      RAFT_MANAGED_MCP_ALLOWED_NETWORKS: ${RAFT_MANAGED_MCP_ALLOWED_NETWORKS:-}
+      RAFT_MANAGED_MCP_ALLOWED_HOSTS: ${RAFT_MANAGED_MCP_ALLOWED_HOSTS:-}
       # Exactly one proxy hop: the web nginx in front of the server.
       # NODE_ENV stays unset on purpose (docs/self-hosting/source-deploy.md:
       # setting it to production flips native-push validation, translations
