@@ -106,3 +106,70 @@ test("login item: plist shape, hidden-launch detection, legacy cleanup", async (
     }
   });
 });
+
+test("isolated test build: login items are a full no-op (task #13 review)", async (t) => {
+  const { setLoginItemAtLogin, getLoginItemAtLogin, cleanupLegacyLoginAgents, setIsolatedLoginItemsNoopForTests } =
+    await import("./loginItem.ts");
+  const os = await import("node:os");
+  const path = await import("node:path");
+  const fs = await import("node:fs/promises");
+
+  t.after(() => setIsolatedLoginItemsNoopForTests(null));
+  setIsolatedLoginItemsNoopForTests(true);
+
+  await t.test("setLoginItemAtLogin(true/false) touch nothing", async () => {
+    const home = await fs.mkdtemp(path.join(os.tmpdir(), "raft-loginitem-iso-"));
+    const realHome = process.env.HOME;
+    process.env.HOME = home;
+    try {
+      // Any filesystem or launchctl effect would land under this fake HOME's
+      // LaunchAgents; both branches must leave it untouched (and not throw —
+      // a throw would fail the host's startup converge).
+      await setLoginItemAtLogin(true);
+      await setLoginItemAtLogin(false);
+      const agents = path.join(home, "Library", "LaunchAgents");
+      const exists = await fs.stat(agents).then(() => true, () => false);
+      assert.equal(exists, false, "no LaunchAgents dir should be created");
+    } finally {
+      process.env.HOME = realHome;
+      await fs.rm(home, { recursive: true, force: true });
+    }
+  });
+
+  await t.test("getLoginItemAtLogin always reads disabled", async () => {
+    const home = await fs.mkdtemp(path.join(os.tmpdir(), "raft-loginitem-iso2-"));
+    const realHome = process.env.HOME;
+    process.env.HOME = home;
+    try {
+      // Even with the OWNER's plist present on disk, an isolated build must
+      // not adopt its state.
+      const agents = path.join(home, "Library", "LaunchAgents");
+      await fs.mkdir(agents, { recursive: true });
+      await fs.writeFile(
+        path.join(agents, `${(await import("./loginItem.ts")).LOGIN_AGENT_LABEL}.plist`),
+        "<plist></plist>",
+      );
+      assert.equal(await getLoginItemAtLogin(), false);
+    } finally {
+      process.env.HOME = realHome;
+      await fs.rm(home, { recursive: true, force: true });
+    }
+  });
+
+  await t.test("cleanupLegacyLoginAgents skips without listing or deleting", async () => {
+    let listed = false;
+    let removed = false;
+    const result = await cleanupLegacyLoginAgents(async () => {
+      listed = true;
+      return ["build.raft.computer.login.abcdef12.plist"];
+    }, {
+      readFile: (async () => "<plist></plist>") as unknown as typeof import("node:fs/promises").readFile,
+      rm: async () => { removed = true; },
+      ownExecutablePath: "/opt/x",
+      ownSlockHome: "/Users/x/.slock",
+    });
+    assert.deepEqual(result, { removed: [], skipped: [] });
+    assert.equal(listed, false, "must not even list the owner's LaunchAgents");
+    assert.equal(removed, false);
+  });
+});

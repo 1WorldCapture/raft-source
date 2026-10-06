@@ -29,7 +29,7 @@ export const LEGACY_LOGIN_LABEL_PREFIX = "build.raft.computer.login.";
  * where the electron binding resolves to the binary path string and `app`
  * is simply absent.
  */
-function isolatedTestBuild(): boolean {
+function probeIsolatedTestBuild(): boolean {
   try {
     const electron = createRequire(import.meta.url)("electron") as {
       app?: { getName(): string };
@@ -39,6 +39,16 @@ function isolatedTestBuild(): boolean {
   } catch {
     return false;
   }
+}
+
+/** Test seam for the isolated-mode no-op tests (null = use the real probe). */
+let isolatedOverrideForTests: boolean | null = null;
+export function setIsolatedLoginItemsNoopForTests(value: boolean | null): void {
+  isolatedOverrideForTests = value;
+}
+
+function isolatedTestBuild(): boolean {
+  return isolatedOverrideForTests ?? probeIsolatedTestBuild();
 }
 
 function launchAgentsDir(): string {
@@ -92,12 +102,14 @@ export function isHiddenLaunch(argv: ReadonlyArray<string>): boolean {
  * current session (bootout) so the change is immediate, not next-login.
  */
 export async function setLoginItemAtLogin(enabled: boolean): Promise<void> {
-  if (enabled && isolatedTestBuild()) {
-    // Guardrail (task #13 review): the login-item label is a hardcoded
-    // constant shared with the owner's app — an isolated test build
-    // registering it would clobber the OWNER's launch-at-login plist (and
-    // point it at the test binary). Isolated builds never register.
-    throw new Error("isolated test builds must not register login items");
+  if (isolatedTestBuild()) {
+    // Guardrail (task #13 review): EVERY login-item label this module
+    // touches is a hardcoded constant shared with the owner's app. An
+    // isolated test build must do NOTHING here — not register (would
+    // clobber the owner's plist), and not disable/clean (bootout + rm
+    // would delete the OWNER's launch-at-login).
+    console.warn(`[raft-desktop] isolated test build: ignoring setLoginItemAtLogin(${String(enabled)})`);
+    return;
   }
   if (enabled) {
     // File only — deliberately NOT `launchctl bootstrap`: with RunAtLoad the
@@ -116,8 +128,11 @@ export async function setLoginItemAtLogin(enabled: boolean): Promise<void> {
   }
 }
 
-/** Readback for the convergence contract: enabled = plist present. */
+/** Readback for the convergence contract: enabled = plist present. Isolated
+ *  test builds always read as disabled — the plist on disk (if any) belongs
+ *  to the OWNER's app and must not be adopted as this build's state. */
 export async function getLoginItemAtLogin(): Promise<boolean> {
+  if (isolatedTestBuild()) return false;
   return existsSync(loginAgentPlistPath());
 }
 
@@ -160,6 +175,13 @@ export async function cleanupLegacyLoginAgents(
   listDir: (dir: string) => Promise<string[]>,
   deps: { readFile: typeof readFile; rm: typeof rm; ownExecutablePath: string; ownSlockHome: string },
 ): Promise<LegacyCleanupResult> {
+  if (isolatedTestBuild()) {
+    // Guardrail (task #13 review): the legacy label prefix is shared with
+    // the owner's app and standalone installs — an isolated test build
+    // never deletes (or even inspects) the owner's LaunchAgents.
+    console.warn("[raft-desktop] isolated test build: skipping legacy login-agent cleanup");
+    return { removed: [], skipped: [] };
+  }
   const result: LegacyCleanupResult = { removed: [], skipped: [] };
   let entries: string[];
   try {
