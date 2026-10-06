@@ -143,15 +143,38 @@ function cliErrorFromTransportFailure(
   if (cause instanceof CliError) return cause;
 
   const method = routeKey === undefined ? undefined : agentApiContract[routeKey].method;
+  // A loopback proxy that refuses connections means the local daemon is down
+  // or restarting (its in-memory proxy registrations die with the process).
+  // Say so plainly: this is an availability problem, not a credential one.
+  const hint = transportUnavailableHint(cause);
   return new CliError({
     code: "CHECK_FAILED",
-    message,
+    message: message + hint,
     cause,
     faultDomain: "agent_api_transport",
     // A transport exception has no authoritative response. Reads are safe to
     // repeat; writes are not, because the request may have committed.
     retryable: method === "GET" ? true : method === undefined ? undefined : false,
   });
+}
+
+/**
+ * Node surfaces connection refusals as errors with code ECONNREFUSED,
+ * sometimes nested one level deep in a cause chain. A refused loopback proxy
+ * means the local daemon is down or restarting — an availability problem, not
+ * a credential one; say so plainly instead of letting it read like auth.
+ */
+export function transportUnavailableHint(cause: unknown): string {
+  for (let node: unknown = cause; node; node = (node as { cause?: unknown }).cause) {
+    const code = (node as { code?: unknown }).code;
+    if (typeof code === "string") {
+      return code === "ECONNREFUSED"
+        ? " The local Raft daemon proxy refused the connection — the daemon is likely down or restarting. Retry once it is back up; this is not a credential problem."
+        : "";
+    }
+    if (node === (node as { cause?: unknown }).cause) break;
+  }
+  return "";
 }
 
 function cliErrorFromClientFailure(failure: AgentApiClientFailure): CliError {
