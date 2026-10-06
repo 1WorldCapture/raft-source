@@ -70,7 +70,14 @@ async function main() {
     targets[platformKey] = { file: destName, sha256: await sha256(path.join(versionDir, destName)), size: info.size };
   }
   await writeFile(path.join(outDir, "computer", version, "manifest.json"), JSON.stringify({ version, targets }, null, 2) + "\n");
-  await writeFile(path.join(outDir, "computer", "manifest.json"), JSON.stringify({ version }, null, 2) + "\n");
+  // The daemon ships INSIDE the Computer SEA; the latest pointer carries the
+  // same-commit daemon version so daemonVersionService reads it in private
+  // mode (the daemon and CLI packages version independently).
+  const daemonVersion = args["daemon-version"];
+  await writeFile(
+    path.join(outDir, "computer", "manifest.json"),
+    JSON.stringify({ version, ...(daemonVersion ? { daemonVersion } : {}) }, null, 2) + "\n",
+  );
 
   const cliName = `raft-${version}.tgz`;
   const cliDir = path.join(outDir, "cli", version);

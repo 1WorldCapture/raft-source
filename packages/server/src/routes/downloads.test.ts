@@ -27,7 +27,7 @@ beforeAll(async () => {
   dir = await mkdtemp(path.join(tmpdir(), "downloads-route-"));
   await mkdir(path.join(dir, "computer", "9.9.95"), { recursive: true });
   await mkdir(path.join(dir, "cli", "9.9.95"), { recursive: true });
-  await writeFile(path.join(dir, "computer", "manifest.json"), JSON.stringify({ version: FIXTURE.computer.version }));
+  await writeFile(path.join(dir, "computer", "manifest.json"), JSON.stringify({ version: FIXTURE.computer.version, daemonVersion: "1.0.25-test" }));
   await writeFile(path.join(dir, "computer", "9.9.95", "manifest.json"), JSON.stringify(FIXTURE.computer));
   await writeFile(path.join(dir, "computer", "9.9.95", "raft-computer-darwin-arm64"), "payload");
   await writeFile(path.join(dir, "cli", "manifest.json"), JSON.stringify({ version: FIXTURE.cli.version }));
@@ -119,11 +119,11 @@ describe("version services in private mode", () => {
       await new Promise((resolve) => setImmediate(resolve));
       await new Promise((resolve) => setImmediate(resolve));
       const second = await computer.getLatestComputerVersion();
-      const secondDaemon = await daemon.getLatestDaemonVersion();
+      const secondDaemon = await daemon.getLatestDaemonVersion(); // reads computer manifest daemonVersion
       assert.ok(first === null || first === "9.9.95");
-      assert.ok(firstDaemon === null || firstDaemon === "9.9.95");
+      assert.ok(firstDaemon === null || firstDaemon === "1.0.25-test");
       assert.equal(second, "9.9.95");
-      assert.equal(secondDaemon, "9.9.95");
+      assert.equal(secondDaemon, "1.0.25-test");
     } finally {
       vi.resetModules();
       delete process.env.RAFT_DEPLOYMENT_MODE;

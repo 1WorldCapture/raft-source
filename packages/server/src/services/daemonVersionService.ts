@@ -31,9 +31,14 @@ async function refreshLatestDaemonVersion(): Promise<void> {
 
 function readLocalLatestDaemonVersion(): string | null {
   try {
+    // The daemon is NOT the CLI package (@botiverse/raft-daemon vs
+    // @botiverse/raft — independent versions). The self-hosted release tree
+    // records the daemon version the Computer SEA bundles in the COMPUTER
+    // latest manifest ({version, daemonVersion}) — build-downloads stamps it
+    // from the same-commit daemon package. Missing field degrades to null.
     const dir = process.env.RAFT_DOWNLOADS_DIR?.trim() || "/app/downloads";
-    const parsed = JSON.parse(readFileSync(path.join(dir, "cli/manifest.json"), "utf8")) as { version?: unknown };
-    return typeof parsed.version === "string" && parsed.version ? parsed.version : null;
+    const parsed = JSON.parse(readFileSync(path.join(dir, "computer/manifest.json"), "utf8")) as { daemonVersion?: unknown };
+    return typeof parsed.daemonVersion === "string" && parsed.daemonVersion ? parsed.daemonVersion : null;
   } catch {
     return null; // Same degradation as the offline external lookup.
   }
