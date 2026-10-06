@@ -19,6 +19,7 @@ import { useServerPermissions } from "../../hooks/useServerPermissions";
 import { getServerUrl } from "../../utils/server";
 import { formatRelativeTime } from "../../utils/relativeTime";
 import { getComputerCommands, getDaemonConnectCommand } from "../../utils/computerSetupCommand";
+import { useDeploymentMode } from "../../utils/deploymentMode";
 import { canViewMachineRuntimeAccountUsage } from "../../utils/machineRuntimeUsageVisibility";
 import { isAppManagedComputer } from "../../utils/computerUpgradeIndicator";
 import ConfirmDialog from "../ConfirmDialog";
@@ -658,6 +659,9 @@ export default function MachineDetailPanel({
   workspaceEmbedded?: boolean;
   deploymentEnv?: string;
 }) {
+  // Runtime deployment mode (task #5): private deployments generate install
+  // commands from this server's own /downloads tree.
+  const deploymentMode = useDeploymentMode();
   const { formatDate, formatMessage, locale } = useIntl();
   const formatMessageRef = useRef(formatMessage);
   formatMessageRef.current = formatMessage;
@@ -734,18 +738,21 @@ export default function MachineDetailPanel({
     // no fingerprint matching, works after key rotation. Legacy rows only;
     // Computer rows keep the plain setup command.
     machineId: setupMachineId,
+    deploymentMode,
   });
   const windowsMachine = machine.os?.toLowerCase().startsWith("win") ?? false;
   const windowsComputerCommands = getComputerCommands(serverSlug, deploymentEnv, serverUrl, {
     legacyApiKey: isKeyValid ? savedKey : null,
     machineId: setupMachineId,
     platform: "windows",
+    deploymentMode,
   });
   const computerFreshInstallCommands = getComputerCommands(serverSlug, deploymentEnv, serverUrl, {
     legacyApiKey: isKeyValid ? savedKey : null,
     machineId: setupMachineId,
     platform: windowsMachine ? "windows" : "mac-linux",
     version: latestComputerVersion,
+    deploymentMode,
   });
   const machineComputerCommands = windowsMachine ? windowsComputerCommands : computerCommands;
   const computerSetupCommand = machineComputerCommands?.setup ?? null;

@@ -69,7 +69,7 @@ import { withMutationLock } from "./concurrency.js";
 import { runChannelShow, runChannelSet, runChannelVersions } from "./channel.js";
 import { parseChannel, readChannel, SEMVER_RE } from "./lib/channelState.js";
 import {
-  resolveUpgradeBaseUrl,
+  resolveUpgradeSourceForHome,
 } from "./computerRelease.js";
 import { resolveComputerUpgradeTargetVersion } from "./kReleaseSource.js";
 import { ComputerServiceError } from "./services/errors.js";
@@ -657,12 +657,15 @@ program
               `Invalid --channel "${opts.channel}". Accepted: latest | alpha | pinned:<semver>.`,
             );
           }
-          const baseUrl = resolveUpgradeBaseUrl();
+          // Task #5: resolve the release source for THIS home (override > env
+          // > persisted backend > private default > hands) — private
+          // deployments resolve against the connected server's manifest.
+          const upgradeSource = await resolveUpgradeSourceForHome(slockHome);
           try {
             kTargetVersion = await resolveComputerUpgradeTargetVersion(channel!, {
               currentVersion: COMPUTER_VERSION,
               platformKey: `${process.platform}-${process.arch}`,
-            }, baseUrl);
+            }, upgradeSource.baseUrl, { backend: upgradeSource.backend });
           } catch (error) {
             if (error instanceof ComputerServiceError) presentUpgradeTargetResolutionFailure(error);
             throw error;

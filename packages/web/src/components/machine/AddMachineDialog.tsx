@@ -6,6 +6,7 @@ import { useComputerConnectionWatch } from "../../hooks/useComputerConnectionWat
 import { useServerStore } from "../../store/serverStore";
 import { useAppNavigate } from "../../hooks/useAppNavigate";
 import { getServerUrl } from "../../utils/server";
+import { useDeploymentMode } from "../../utils/deploymentMode";
 // The baseline/resolver import staging still carries is gone here: this dialog's
 // connect state machine lives in useComputerConnectionWatch now, shared with onboarding.
 import { getComputerCommands, getDaemonConnectCommand } from "../../utils/computerSetupCommand";
@@ -172,6 +173,7 @@ export default function AddMachineDialog({ onClose }: { onClose: () => void }) {
   };
 
   const deploymentEnv = import.meta.env?.VITE_DEPLOYMENT_ENV;
+  const deploymentMode = useDeploymentMode();
   const daemonDistTag = deploymentEnv === "staging" ? "staging" : "latest";
   const macLinuxDaemonCommand = getDaemonConnectCommand({
     apiKey,
@@ -189,10 +191,12 @@ export default function AddMachineDialog({ onClose }: { onClose: () => void }) {
   });
   const computerCommands = getComputerCommands(serverSlug, deploymentEnv, serverUrl, {
     legacyApiKey: apiKey,
+    deploymentMode,
   });
   const windowsComputerCommands = getComputerCommands(serverSlug, deploymentEnv, serverUrl, {
     legacyApiKey: apiKey,
     platform: "windows",
+    deploymentMode,
   });
   const computerSetupCommand = computerCommands?.setup ?? null;
   const computerInstall = computerCommands?.install ?? null;

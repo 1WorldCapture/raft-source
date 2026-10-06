@@ -23,12 +23,25 @@
 #                                which version to install; default =
 #                                https://hands.build. Pins also require this
 #                                authority; unreachable/mismatched identity fails.
-#   RAFT_COMPUTER_RELEASE_BACKEND  explicit legacy-cdn permits unattested pinned
-#                                custom/offline releases; default = hands.
+#   RAFT_COMPUTER_RELEASE_BACKEND  release authority this install resolves
+#                                through: `hands` (default), `legacy-cdn`
+#                                (unattested pinned custom/offline releases),
+#                                or `server` (self-hosted manifest tree —
+#                                version resolution reads the server's
+#                                manifest.json latest pointer and never
+#                                contacts Hands; private deployments).
 #   RAFT_COMPUTER_HANDS_APP     Hands app slug; default = raft-computer-cli.
 #   RAFT_COMPUTER_INSTALL_CHANNEL  persist a release channel after successful
 #                                install (`alpha` for staging, `latest`, or
 #                                `pinned:<semver>`); default = leave unset.
+#   RAFT_COMPUTER_INSTALL_BACKEND  persist a release backend after successful
+#                                install (`hands` | `legacy-cdn` | `server`)
+#                                so later upgrade checks resolve through the
+#                                same authority — installer shell env does
+#                                not survive into the launchd/systemd
+#                                service context, the persisted state file
+#                                does. Private deployments set this to
+#                                `server` together with RAFT_COMPUTER_RELEASE_BASE.
 #   RAFT_COMPUTER_FORCE         set to 1 to bypass the local-is-newer guard
 #                                and allow a verified downgrade.
 #   RAFT_COMPUTER_NO_MODIFY_PATH set to 1 to leave shell startup files unchanged.
@@ -257,6 +270,29 @@ semver_compare() {
 # in Hands is what makes installers pick it up. A pinned RAFT_COMPUTER_VERSION
 # or pinned:<semver> channel selects exact bytes attested by Hands.
 RELEASE_BASE="${RAFT_COMPUTER_RELEASE_BASE:-https://cdn.raft.build/computer}"
+# Security note for self-hosted (server/legacy-cdn) backends: the manifest's
+# sha256 proves INTEGRITY (bytes match the manifest), not PROVENANCE — unlike
+# Hands-attested releases there is no independent authority vouching for the
+# manifest itself. Serve the release tree over HTTPS (or a tailnet) so the
+# transport, not just the hash, protects the origin.
+case "$RELEASE_BASE" in
+  http://*)
+    warn_http_release_base() {
+      echo "install: WARNING: RELEASE_BASE '${RELEASE_BASE}' uses plain http." >&2
+      echo "install: WARNING: manifest sha256 proves integrity, not provenance; on plain http" >&2
+      echo "install: WARNING: anyone on-path can serve both the manifest and the binary." >&2
+      echo "install: WARNING: use HTTPS (or a tailnet) for install AND later upgrades." >&2
+    }
+    warn_http_release_base
+    ;;
+esac
+# Effective backend for THIS install: explicit per-process choice wins, else
+# the value the installer will persist, else hands.
+BACKEND="${RAFT_COMPUTER_RELEASE_BACKEND:-${RAFT_COMPUTER_INSTALL_BACKEND:-hands}}"
+case "$BACKEND" in
+  hands|legacy-cdn|server) ;;
+  *) err "invalid RAFT_COMPUTER_RELEASE_BACKEND: ${BACKEND} (expected hands, legacy-cdn or server)" ;;
+esac
 HANDS_ORIGIN="${RAFT_COMPUTER_HANDS_ORIGIN:-https://hands.build}"
 HANDS_APP="${RAFT_COMPUTER_HANDS_APP:-raft-computer-cli}"
 VERSION="${CLI_VERSION:-${RAFT_COMPUTER_VERSION:-}}"
@@ -298,6 +334,22 @@ persist_install_channel() {
   chmod 600 "$tmp_channel"
   mv -f "$tmp_channel" "$channel_file"
   info "release channel set to ${INSTALL_CHANNEL} (${channel_file})"
+}
+
+# Task #5: persist the release backend so later upgrade checks (including in
+# the launchd/systemd service context, where installer shell env does not
+# exist) resolve through the same authority this install used.
+persist_install_backend() {
+  [ -n "${RAFT_COMPUTER_INSTALL_BACKEND:-}" ] || return 0
+
+  backend_dir="${STATE_HOME}/computer"
+  backend_file="${backend_dir}/release-backend"
+  mkdir -p "$backend_dir"
+  tmp_backend="${backend_file}.$$"
+  printf '%s\n' "$RAFT_COMPUTER_INSTALL_BACKEND" > "$tmp_backend"
+  chmod 600 "$tmp_backend"
+  mv -f "$tmp_backend" "$backend_file"
+  info "release backend set to ${RAFT_COMPUTER_INSTALL_BACKEND} (${backend_file})"
 }
 
 # A cold probe home prevents an installed dispatcher from handing `--version`
@@ -410,21 +462,36 @@ if [ -z "$VERSION" ]; then
   esac
 fi
 if [ -z "$VERSION" ]; then
-  case "$SELECT_CHANNEL" in
-    alpha) HANDS_CHANNEL="alpha" ;;
-    *) HANDS_CHANNEL="main" ;;
-  esac
-  hands_url="${HANDS_ORIGIN%/}/public/v2/apps/${HANDS_APP}/latest?channel=${HANDS_CHANNEL}&product_type=cli-binary"
-  info "resolving the active ${HANDS_CHANNEL} release from Hands (${HANDS_APP})…"
-  _hr="$(mktemp)"
-  $DLO "$_hr" "$hands_url" \
-    || err "could not resolve the active ${HANDS_CHANNEL} release from Hands (${hands_url}); refusing to install without the release authority (no CDN-pointer fallback)"
-  HANDS_LATEST_BODY="$(tr -d '\n' < "$_hr")"
-  # Anchor the version inside the "build" object so strings elsewhere in the
-  # response (release notes, fallback release) can never be mistaken for it.
-  VERSION="$(printf '%s' "$HANDS_LATEST_BODY" | sed -n 's/.*"build"[[:space:]]*:[[:space:]]*{[^}]*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
-  rm -f "$_hr"
-  [ -n "$VERSION" ] || err "Hands ${HANDS_CHANNEL} response for ${HANDS_APP} carried no build version; refusing to continue"
+  if [ "$BACKEND" = "server" ]; then
+    # server backend: WHICH version is latest is answered by the release
+    # tree itself (its manifest.json latest pointer) — Hands is never
+    # contacted. This is what makes a private/offline install possible.
+    # (legacy-cdn deliberately keeps Hands for unpinned resolution — its
+    # documented escape hatch is PINNED custom/offline releases only.)
+    _lr="$(mktemp)"
+    $DLO "$_lr" "${RELEASE_BASE%/}/manifest.json" \
+      || err "could not read the release manifest at ${RELEASE_BASE%/}/manifest.json; refusing to install without a version pointer"
+    VERSION="$(tr -d '\n' < "$_lr" | sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
+    rm -f "$_lr"
+    [ -n "$VERSION" ] || err "release manifest at ${RELEASE_BASE%/}/manifest.json carried no version; refusing to continue"
+    info "resolved the latest release from the release manifest: ${VERSION}"
+  else
+    case "$SELECT_CHANNEL" in
+      alpha) HANDS_CHANNEL="alpha" ;;
+      *) HANDS_CHANNEL="main" ;;
+    esac
+    hands_url="${HANDS_ORIGIN%/}/public/v2/apps/${HANDS_APP}/latest?channel=${HANDS_CHANNEL}&product_type=cli-binary"
+    info "resolving the active ${HANDS_CHANNEL} release from Hands (${HANDS_APP})…"
+    _hr="$(mktemp)"
+    $DLO "$_hr" "$hands_url" \
+      || err "could not resolve the active ${HANDS_CHANNEL} release from Hands (${hands_url}); refusing to install without the release authority (no CDN-pointer fallback)"
+    HANDS_LATEST_BODY="$(tr -d '\n' < "$_hr")"
+    # Anchor the version inside the "build" object so strings elsewhere in the
+    # response (release notes, fallback release) can never be mistaken for it.
+    VERSION="$(printf '%s' "$HANDS_LATEST_BODY" | sed -n 's/.*"build"[[:space:]]*:[[:space:]]*{[^}]*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
+    rm -f "$_hr"
+    [ -n "$VERSION" ] || err "Hands ${HANDS_CHANNEL} response for ${HANDS_APP} carried no build version; refusing to continue"
+  fi
 fi
 [ "$(semver_compare "$VERSION" "$VERSION")" = "equal" ] || err "invalid release version: ${VERSION}"
 TAG="computer-v${VERSION}"
@@ -482,10 +549,11 @@ cleanup() {
   [ -z "$wasm_stage" ] || rm -f "$wasm_stage"
 }
 trap cleanup EXIT
-# Exact versions need an independent identity too. The explicit legacy-CDN
-# backend remains an operator-owned escape hatch for offline/custom releases,
-# matching the runtime updater; pinning a version alone never selects it.
-if [ -z "$HANDS_LATEST_BODY" ] && [ "${RAFT_COMPUTER_RELEASE_BACKEND:-hands}" != "legacy-cdn" ]; then
+# Exact versions need an independent identity too. The explicit legacy-cdn /
+# server backends remain operator-owned escape hatches for offline/custom and
+# self-hosted releases, matching the runtime updater; pinning a version alone
+# never selects them.
+if [ -z "$HANDS_LATEST_BODY" ] && [ "$BACKEND" = "hands" ]; then
   HANDS_CHANNEL="pinned:${VERSION}"
   hands_query_version="$(printf '%s' "$VERSION" | sed 's/+/%2B/g')"
   hands_url="${HANDS_ORIGIN%/}/public/v2/apps/${HANDS_APP}/updates/check?product_type=cli-binary&current_version=0.0.0&channel=main&platform=${PLAT}&arch=${ARCH}&sdk_version=0.5.1&version=${hands_query_version}"
@@ -832,6 +900,7 @@ INSTALLED_VERSION="$(binary_self_version "$INSTALL_DIR/$BIN_NAME" || true)"
 [ "$INSTALLED_VERSION" = "$VERSION" ] || err "installed dispatcher reported version '${INSTALLED_VERSION}', expected '${VERSION}'"
 info "installed to ${INSTALL_DIR}/${BIN_NAME}"
 persist_install_channel
+persist_install_backend
 persist_shell_path
 retire_legacy_supervisor
 if [ "$K_RESET_RESIDENT" = "1" ]; then

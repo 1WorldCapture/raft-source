@@ -33,6 +33,12 @@ import { createHash } from "node:crypto";
 import { copyFile, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
+// The installer scripts must be served from the SAME tree the install
+// commands point at (`curl .../downloads/computer/install.sh | sh`); copying
+// them from this checkout keeps them same-commit with the binaries.
+const COMPUTER_SCRIPTS_DIR = path.resolve(import.meta.dirname, "..", "packages/computer/scripts");
+const INSTALLER_FILES = ["install.sh", "install.ps1"];
+
 function parseArgs(argv) {
   const args = {};
   for (let i = 2; i < argv.length; i += 2) {
@@ -103,6 +109,12 @@ async function main() {
     path.join(outDir, "computer", "manifest.json"),
     JSON.stringify({ version: computerVersion, ...(daemonVersion ? { daemonVersion } : {}), ...(commit ? { commit } : {}) }, null, 2) + "\n",
   );
+  // Installers live at the computer-tree root so `${origin}/downloads/computer/install.sh`
+  // works without any extra routing (nginx alias serves them directly).
+  await mkdir(path.join(outDir, "computer"), { recursive: true });
+  for (const installer of INSTALLER_FILES) {
+    await copyFile(path.join(COMPUTER_SCRIPTS_DIR, installer), path.join(outDir, "computer", installer));
+  }
 
   const cliName = `raft-${cliVersion}.tgz`;
   const cliDir = path.join(outDir, "cli", cliVersion);
@@ -118,7 +130,7 @@ async function main() {
     JSON.stringify({ version: cliVersion, ...(commit ? { commit } : {}) }, null, 2) + "\n",
   );
 
-  console.log(`[build-downloads] computer ${computerVersion} [${Object.keys(targets).join(", ")}] + cli ${cliVersion} -> ${outDir}${commit ? ` (commit ${commit.slice(0, 8)})` : ""}`);
+  console.log(`[build-downloads] computer ${computerVersion} [${Object.keys(targets).join(", ")}] + cli ${cliVersion} + installers -> ${outDir}${commit ? ` (commit ${commit.slice(0, 8)})` : ""}`);
 }
 
 main().catch((err) => {
