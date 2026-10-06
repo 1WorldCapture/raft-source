@@ -6,6 +6,7 @@ import {
   getMachineRuntimeDisplayOptions,
   getSetupRuntimeOptions,
   RUNTIMES,
+  getDefaultModel,
   runtimeAvailabilitySuffix,
   type RuntimeInfo,
 } from "./index.js";
@@ -83,4 +84,20 @@ test("Antigravity remains available only to agents already using it", () => {
   assert.equal(getSetupRuntimeOptions().some((runtime) => runtime.id === "antigravity"), false);
   assert.equal(getExistingAgentRuntimeOptions("claude").some((runtime) => runtime.id === "antigravity"), false);
   assert.equal(getExistingAgentRuntimeOptions("antigravity").some((runtime) => runtime.id === "antigravity" && runtime.supported), true);
+});
+
+test("OMP registers as a supported local CLI runtime with a default-model seed", () => {
+  const omp = RUNTIMES.find((runtime) => runtime.id === "omp");
+  assert.ok(omp);
+  assert.equal(omp.displayName, "OMP");
+  assert.equal(omp.binary, "omp");
+  assert.equal(omp.deprecated, undefined);
+
+  // Local CLI semantics: undetected → "(not installed)", detected → no suffix.
+  assert.deepEqual(runtimeAvailabilitySuffix(omp, []), { kind: "notInstalled" });
+  assert.deepEqual(runtimeAvailabilitySuffix(omp, ["omp"]), { kind: "none" });
+
+  // The default entry keeps getDefaultModel away from Claude's "sonnet"
+  // fallback; live catalogs arrive from the daemon in the model task.
+  assert.equal(getDefaultModel("omp"), "default");
 });

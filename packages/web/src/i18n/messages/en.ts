@@ -1427,6 +1427,7 @@ export const en = {
   "runtime.availability.updateComputer": " (update computer)",
   "runtime.availability.comingSoon": " (coming soon)",
   "runtime.availability.deprecated": " (deprecated)",
+  "runtime.installHint.omp": "OMP is not installed on this computer. Install it with either:",
   "machine.runLabel.computerOnline": "computer online",
   "machine.runLabel.daemonOnline": "daemon online",
   "machine.attention.upgradeAvailableWithVersion": "Computer upgrade available: v{version}",

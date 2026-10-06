@@ -74,6 +74,7 @@ import type {
   ServerRole,
 } from "@botiverse/raft-shared";
 import { formatRuntimeAvailabilitySuffix, formatRuntimeLabelWithStatus } from "../../utils/runtimeAvailabilityLabel";
+import { runtimeInstallHintFor } from "../../utils/runtimeInstallHints";
 import { classifyRuntimeError, RUNTIME_ERROR_LABEL_ID } from "../../utils/classifyRuntimeError";
 import type { RuntimeErrorKind } from "../../utils/classifyRuntimeError";
 import { reasoningEffortLabelId } from "../../utils/reasoningEffortOptions";
@@ -2371,6 +2372,7 @@ function AgentProfileInfo({ agent, canManageAgent, canChangeAgentRole, onOpenPro
               )}
               <RuntimeConfigFields
                 runtime={draftRuntime}
+                runtimeInstallHint={runtimeInstallHintFor(draftRuntime, availableRuntimes)}
                 onRuntimeChange={(id) => {
                   setDraftRuntime(id);
                   const nextModel = getDefaultModel(id);

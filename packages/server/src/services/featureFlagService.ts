@@ -47,6 +47,10 @@ export const COMPOSER_RESOURCE_REFERENCES_FEATURE_FLAG_KEY = SHARED_COMPOSER_RES
 export const READ_RECEIPTS_FEATURE_FLAG_KEY = "read_receipts_v0";
 export const MOBILE_PUSH_DELIVERY_FEATURE_FLAG_KEY = "mobile_push_delivery_v0";
 export const GROK_RUNTIME_FEATURE_FLAG_KEY = "grok_runtime_v0";
+// OMP (oh-my-pi) runtime rollout. The phase-1 series lands the registration,
+// transport, and integration PRs behind this flag; the flag flips on when the
+// phase is accepted end to end (task #7).
+export const OMP_RUNTIME_FEATURE_FLAG_KEY = "omp_runtime_v0";
 export const LLM_TRANSLATION_FEATURE_FLAG_KEY = "llm_translation_v0";
 export const PROVIDER_CONNECTIONS_FEATURE_FLAG_KEY = SHARED_PROVIDER_CONNECTIONS_FEATURE_FLAG_KEY;
 export const PUBLIC_SERVER_FEATURE_FLAG_KEY = SHARED_PUBLIC_SERVER_FEATURE_FLAG_KEY;

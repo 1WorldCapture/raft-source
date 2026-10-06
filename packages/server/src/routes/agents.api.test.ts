@@ -45,6 +45,7 @@ import { mintAgentCredential, recordAgentCredentialUse } from "../services/agent
 import {
   AGENT_MIGRATION_FEATURE_FLAG_KEY,
   GROK_RUNTIME_FEATURE_FLAG_KEY,
+  OMP_RUNTIME_FEATURE_FLAG_KEY,
 } from "../services/featureFlagService.js";
 import { MAX_PROFILE_AVATAR_BYTES, PROFILE_AVATAR_TOO_LARGE_MESSAGE } from "../services/avatarService.js";
 import {
@@ -185,6 +186,17 @@ async function enableGrokRuntimeFlag(serverId: string) {
   await getDb().insert(featureFlagRules).values({
     id: randomUUID(),
     flagKey: GROK_RUNTIME_FEATURE_FLAG_KEY,
+    stage: "server",
+    priority: 0,
+    decision: "allow",
+    values: [serverId],
+  });
+}
+
+async function enableOmpRuntimeFlag(serverId: string) {
+  await getDb().insert(featureFlagRules).values({
+    id: randomUUID(),
+    flagKey: OMP_RUNTIME_FEATURE_FLAG_KEY,
     stage: "server",
     priority: 0,
     decision: "allow",
@@ -3594,6 +3606,89 @@ test("grok_runtime_v0 gates new Grok selections while preserving existing Grok a
     assert.equal(createEnabledBody.runtime, "grok");
     assert.equal(createEnabledBody.model, "grok-4.5");
     assert.equal(createEnabledBody.machineId, machine.id);
+});
+
+test("omp_runtime_v0 gates new OMP selections behind the rollout flag", async ({ app }) => {
+  const owner = await seedUser("omp-runtime-flag-owner@slock.test", "omp-runtime-flag-owner");
+  const server = await createServer("OMP Runtime Flag Server", "omp-runtime-flag-server", owner.id);
+  const ownerToken = await tokenForHuman(owner.email);
+  const [machine] = await getDb().insert(machines).values({
+    serverId: server.id,
+    userId: owner.id,
+    name: "omp-runtime-flag-machine",
+    apiKeyHash: "unused-omp-runtime-flag-machine-hash",
+    runtimes: ["codex", "omp"],
+  }).returning();
+  const codexAgent = await createAgent(server.id, "omp-flag-codex-agent", {
+    runtime: "codex",
+    model: "gpt-5",
+    machineId: machine.id,
+  });
+
+  const getRuntimeOptions = async (agentId: string) => {
+    const res = await fetch(`${app.baseUrl}/api/agents/${agentId}/runtime-options`, {
+      headers: authHeaders(ownerToken, server.id),
+    });
+    assert.equal(res.status, 200);
+    return await res.json() as { options: Array<{ runtimeId: string }> };
+  };
+
+  // Flag off: the picker omits OMP entirely and both create and transition refuse.
+  assert.equal((await getRuntimeOptions(codexAgent.id)).options.some((option) => option.runtimeId === "omp"), false);
+
+  const createDisabledRes = await fetch(`${app.baseUrl}/api/agents`, {
+    method: "POST",
+    headers: {
+      ...authHeaders(ownerToken, server.id),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      name: "disabled-omp-agent",
+      runtime: "omp",
+      model: "default",
+    }),
+  });
+  assert.equal(createDisabledRes.status, 403);
+  assert.deepEqual(await createDisabledRes.json(), {
+    error: "OMP is not enabled on this server",
+    code: "omp_runtime_disabled",
+  });
+
+  const transitionDisabledRes = await fetch(`${app.baseUrl}/api/agents/${codexAgent.id}`, {
+    method: "PATCH",
+    headers: {
+      ...authHeaders(ownerToken, server.id),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      runtime: "omp",
+      model: "default",
+    }),
+  });
+  assert.equal(transitionDisabledRes.status, 403);
+  assert.equal(((await transitionDisabledRes.json()) as { code: string }).code, "omp_runtime_disabled");
+  assert.equal((await getAgent(codexAgent.id))?.runtime, "codex");
+
+  // Flag on: the API admits OMP. The machine reports it installed, so create passes.
+  await enableOmpRuntimeFlag(server.id);
+
+  const createEnabledRes = await fetch(`${app.baseUrl}/api/agents`, {
+    method: "POST",
+    headers: {
+      ...authHeaders(ownerToken, server.id),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      name: "enabled-omp-agent",
+      runtime: "omp",
+      model: "default",
+      machineId: machine.id,
+    }),
+  });
+  assert.equal(createEnabledRes.status, 200);
+  const createEnabledBody = await createEnabledRes.json() as { runtime: string; model: string };
+  assert.equal(createEnabledBody.runtime, "omp");
+  assert.equal(createEnabledBody.model, "default");
 });
 
 test("POST /agents onboarding Cindy can recover after other agents already exist", async ({ app }) => {

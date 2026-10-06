@@ -1411,6 +1411,7 @@ export const zhCn: Record<MessageId, string> = {
   "runtime.availability.updateComputer": "（需更新计算机）",
   "runtime.availability.comingSoon": "（即将推出）",
   "runtime.availability.deprecated": "（已弃用）",
+  "runtime.installHint.omp": "此计算机上未安装 OMP，可用以下任一方式安装：",
   "machine.runLabel.computerOnline": "Computer 在线",
   "machine.runLabel.daemonOnline": "守护进程在线",
   "machine.attention.upgradeAvailableWithVersion": "Computer 有可用升级：v{version}",

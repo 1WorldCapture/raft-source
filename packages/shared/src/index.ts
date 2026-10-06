@@ -948,6 +948,7 @@ export type RuntimeId =
   | "gemini"
   | "opencode"
   | "pi"
+  | "omp"
   | "external";
 
 /**
@@ -1738,6 +1739,10 @@ export const RUNTIMES: RuntimeInfo[] = [
   { id: "gemini", displayName: "Gemini CLI", abbreviation: "GM", binary: "gemini", supported: true, deprecated: true },
   { id: "opencode", displayName: "OpenCode", abbreviation: "OC", binary: "opencode", supported: true },
   { id: "pi", displayName: "Pi", abbreviation: "PI", binary: "pi", supported: true },
+  // OMP (oh-my-pi): Bun-only SDK upstream, so the daemon drives it as a
+  // `omp --mode rpc` child process (see the daemon omp driver). Ships after
+  // pi in this list; ordering is display-only.
+  { id: "omp", displayName: "OMP", abbreviation: "OM", binary: "omp", supported: true },
 ];
 
 /**
@@ -2059,6 +2064,13 @@ export const RUNTIME_MODELS: Record<string, RuntimeModelInfo[]> = {
   // getDefaultModel("kimi-sdk") from falling through to Claude's "sonnet".
   "kimi-sdk": [
     { id: "kimi-code/kimi-for-coding", label: "Kimi for Coding (default)", verified: "launchable" },
+  ],
+  // OMP resolves models from each user's own `omp login` state (multi-provider),
+  // so the built-in entry only seeds the default-model lookup. Live catalogs
+  // come from the daemon reading the local `omp models` output; a missing or
+  // unreadable catalog stays a non-live source and must never widen this entry.
+  omp: [
+    { id: "default", label: "Configured Default / Auto" },
   ],
 };
 

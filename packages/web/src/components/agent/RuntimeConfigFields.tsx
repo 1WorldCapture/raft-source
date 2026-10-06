@@ -27,6 +27,7 @@ import StableField from "./StableField";
 import { KeyValueAddButton, KeyValueInputRow } from "../ui/KeyValueInput";
 import Tooltip from "../ui/Tooltip";
 import { reasoningEffortOptionsForModel } from "../../utils/reasoningEffortOptions";
+import type { RuntimeInstallHint } from "../../utils/runtimeInstallHints";
 import {
   builtInCatalogCapabilityIsLive,
   projectBuiltInPresetModelOptions,
@@ -394,6 +395,8 @@ interface RuntimeConfigFieldsProps {
   runtimeLabel?: string;
   /** Optional explainer under the runtime select — onboarding users have no idea what a "runtime" is. */
   runtimeHint?: string;
+  /** Inline install guidance shown when the selected runtime's binary is missing. */
+  runtimeInstallHint?: RuntimeInstallHint | null;
   /** Re-ask the computer which runtimes are installed. Omit to hide the control. */
   onRescanRuntimes?: () => void;
   runtimesRescanning?: boolean;
@@ -854,6 +857,7 @@ export default function RuntimeConfigFields({
   showRuntimeField = true,
   runtimeLabel,
   runtimeHint,
+  runtimeInstallHint = null,
   onRescanRuntimes,
   runtimesRescanning = false,
   envVarsMode = "inline",
@@ -1173,6 +1177,14 @@ export default function RuntimeConfigFields({
             placeholder={formatMessage({ id: "common.select.placeholder" })}
             portalContainer={selectPortalContainer}
           />
+          {runtimeInstallHint && (
+            <div className="mt-2 border-l-2 border-black/20 pl-2 text-xs text-black/60">
+              <p>{formatMessage({ id: runtimeInstallHint.introId })}</p>
+              {runtimeInstallHint.commands.map((command) => (
+                <code key={command} className="mt-1 block font-mono text-[11px] text-black/80">{command}</code>
+              ))}
+            </div>
+          )}
         </Field>
       )}
 

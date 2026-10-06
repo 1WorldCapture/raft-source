@@ -6,7 +6,7 @@ import {
   type RuntimeInfo,
   type RuntimeSelectionOption,
 } from "@botiverse/raft-shared";
-import { evaluateFeatureFlag, GROK_RUNTIME_FEATURE_FLAG_KEY } from "./featureFlagService.js";
+import { evaluateFeatureFlag, GROK_RUNTIME_FEATURE_FLAG_KEY, OMP_RUNTIME_FEATURE_FLAG_KEY } from "./featureFlagService.js";
 import {
   BUILTIN_PI_FORM_DEFINITION_REF,
   KIMI_SDK_FORM_DEFINITION_REF,
@@ -14,6 +14,7 @@ import {
 
 export interface RuntimeAdmissionPolicy {
   grokRuntimeEnabled: boolean;
+  ompRuntimeEnabled: boolean;
 }
 
 function capabilityStatus(
@@ -61,7 +62,8 @@ function projectRuntimeOption(input: {
 }
 
 function isRuntimeAdmittedForNewUse(runtime: RuntimeInfo, policy: RuntimeAdmissionPolicy): boolean {
-  return runtime.id !== "grok" || policy.grokRuntimeEnabled;
+  return (runtime.id !== "grok" || policy.grokRuntimeEnabled)
+    && (runtime.id !== "omp" || policy.ompRuntimeEnabled);
 }
 
 function projectNewUseOptions(
@@ -106,7 +108,8 @@ export function projectExistingAgentRuntimeOptions(
       const admissionReason: RuntimeAdmissionReason = runtime.id === currentRuntime
         ? runtime.deprecated
           ? "deprecated"
-          : runtime.id === "grok" && !policy.grokRuntimeEnabled
+          : (runtime.id === "grok" && !policy.grokRuntimeEnabled)
+            || (runtime.id === "omp" && !policy.ompRuntimeEnabled)
             ? "feature_flag_off"
             : null
         : null;
@@ -123,10 +126,17 @@ export async function resolveRuntimeAdmissionPolicy(input: {
   serverId: string;
   userId: string;
 }): Promise<RuntimeAdmissionPolicy> {
-  const evaluation = await evaluateFeatureFlag({
-    key: GROK_RUNTIME_FEATURE_FLAG_KEY,
-    serverId: input.serverId,
-    userId: input.userId,
-  });
-  return { grokRuntimeEnabled: evaluation.enabled };
+  const [grok, omp] = await Promise.all([
+    evaluateFeatureFlag({
+      key: GROK_RUNTIME_FEATURE_FLAG_KEY,
+      serverId: input.serverId,
+      userId: input.userId,
+    }),
+    evaluateFeatureFlag({
+      key: OMP_RUNTIME_FEATURE_FLAG_KEY,
+      serverId: input.serverId,
+      userId: input.userId,
+    }),
+  ]);
+  return { grokRuntimeEnabled: grok.enabled, ompRuntimeEnabled: omp.enabled };
 }

@@ -10,6 +10,7 @@ import { KimiDriver } from "./kimi.js";
 import { KimiSdkDriver } from "./kimi-sdk.js";
 import { OpenCodeDriver } from "./opencode.js";
 import { BuiltInDriver, PiDriver } from "./pi.js";
+import { OmpDriver } from "./omp.js";
 
 export type {
   RuntimeDriver,
@@ -60,6 +61,10 @@ const driverFactories: Record<string, () => RuntimeDriver> = {
   "kimi-sdk": () => new KimiSdkDriver(),
   opencode: () => new OpenCodeDriver(),
   pi: () => new PiDriver(),
+  // OMP (oh-my-pi): registration + probe in phase-1 task #1; the RPC
+  // transport (spawn/parse/stdin) lands with task #2. Server admission keeps
+  // the runtime flag-gated until the phase is accepted end to end.
+  omp: () => new OmpDriver(),
 };
 
 /** Get the driver for a runtime ID. Throws if unknown. */
