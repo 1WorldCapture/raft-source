@@ -31,6 +31,8 @@ import { formatAgentNameValidationError } from "../../i18n/nameValidation";
 import { formatRuntimeConfigBuildError } from "../../utils/runtimeConfigBuildErrorPresentation";
 import type { ResolvedAgentCreateFormDefinition, RuntimeConfig, RuntimeReasoningEffort, RuntimeFormDefinitionRef, RuntimeModelInfo, RuntimeSelectionOption, ServerPlan } from "@botiverse/raft-shared";
 import { formatRuntimeAvailabilitySuffix, formatRuntimeLabelWithStatus } from "../../utils/runtimeAvailabilityLabel";
+import { runtimeInstallHintFor } from "../../utils/runtimeInstallHints";
+import type { RuntimeInstallHint } from "../../utils/runtimeInstallHints";
 import { runtimeModelSelectionIsRunnable, useRuntimeModels } from "../../hooks/useRuntimeModels";
 import type { RuntimeModelSourceState } from "../../hooks/useRuntimeModels";
 
@@ -161,6 +163,7 @@ function OnboardingCreateCindyRuntimePanel({
   runtime,
   onRuntimeChange,
   runtimeOptions,
+  runtimeInstallHint,
   model,
   onModelChange,
   customModelMode,
@@ -207,6 +210,7 @@ function OnboardingCreateCindyRuntimePanel({
   runtime: string;
   onRuntimeChange: (runtime: string) => void;
   runtimeOptions: SelectOption[];
+  runtimeInstallHint: RuntimeInstallHint | null;
   model: string;
   onModelChange: (model: string) => void;
   customModelMode: boolean;
@@ -304,6 +308,7 @@ function OnboardingCreateCindyRuntimePanel({
         onEnvVarEntriesChange={() => undefined}
         runtimeLabel={formatMessage({ id: "agent.runtimeConfig.runtime" })}
         runtimeHint={formatMessage({ id: "agent.create.runtimeHint" })}
+        runtimeInstallHint={runtimeInstallHint}
         onRescanRuntimes={onRescanRuntimes}
         runtimesRescanning={runtimesRescanning}
         envVarsMode="hidden"
@@ -1376,6 +1381,7 @@ export default function CreateAgentDialog({
               <OnboardingCreateCindyRuntimePanel
                 showValidationErrors={validationAttempted}
                 runtime={runtime}
+                runtimeInstallHint={runtimeInstallHintFor(runtime, machineRuntimeIds)}
                 onRuntimeChange={(val) => {
                   setRuntime(val);
                   setModel(getDefaultModel(val) || "");
