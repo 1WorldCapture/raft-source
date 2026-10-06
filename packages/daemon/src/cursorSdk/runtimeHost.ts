@@ -528,8 +528,11 @@ class CursorSdkHost {
    * Agent-level options, re-applied identically on create and resume:
    * model/settings/tools/MCP must be re-injected on resume, never trusted to
    * persisted defaults. NOTE: `systemPrompt` is deliberately never set (no
-   * systemPrompt replacement — the standing prompt rides the registered
-   * prompt path), and no force-like flag is ever passed.
+   * systemPrompt replacement — the standing prompt is mounted as a Cursor
+   * project rule by the driver on every launch), and no force-like flag is
+   * ever passed. NOTE: the production run host is NativeCursorHost
+   * (nativeRuntimeHost.ts, started via runtimeHostEntry.ts); this class is
+   * kept for its helpers and tests only.
    */
   private buildAgentOptions(): Record<string, unknown> {
     const ro = this.runOptions;

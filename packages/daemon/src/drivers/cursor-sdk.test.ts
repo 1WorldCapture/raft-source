@@ -65,12 +65,11 @@ test("driver keeps the legacy persistent/direct/steer surface", () => {
   assert.equal(driver.supportsStdinNotification, true);
   assert.equal(driver.busyDeliveryMode, "direct");
   assert.equal(driver.deliveryOutcomeAttempts, true, "APM attaches attempt watermarks");
-  // Native standing prompt deliberately unsupported: the registered prompt
-  // path (ctx.prompt first turn) carries the standing instructions.
-  assert.equal(
-    (driver as unknown as Record<string, unknown>).supportsNativeStandingPrompt,
-    undefined,
-  );
+  // The standing prompt is mounted as a Cursor project rule on every launch
+  // (writeStandingPromptRuleFile), so the APM may use the native
+  // standing-prompt startup input on cold starts instead of duplicating the
+  // whole prompt as a first user message.
+  assert.equal(driver.supportsNativeStandingPrompt, true);
   // Broker detection is verified online against the bound connection.
   assert.equal(driver.model.detectedModelsVerifiedAs, "launchable");
 });
