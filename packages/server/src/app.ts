@@ -26,6 +26,7 @@ import { taskRouter } from "./routes/tasks.js";
 import { workflowRouter } from "./routes/workflows.js";
 import { reminderRouter } from "./routes/reminders.js";
 import { attachmentRouter, attachmentPublicRouter } from "./routes/attachments.js";
+import downloadsRouter from "./routes/downloads.js";
 import { externalAvatarPublicRouter } from "./routes/externalAvatars.js";
 import {
   attachmentUploadRateLimitedResponse,
@@ -496,6 +497,9 @@ export function createApp(options: CreateAppOptions = {}): Express {
     skip: (req) => shouldSkipAttachmentRateLimit({ isTestEnv, method: req.method, surface: "download" }),
     keyGenerator: rateLimitUserMachineOrIpKey,
   });
+  // Self-hosted client artifacts (task #4): public because installers run
+  // before credentials exist; the same limiter class as attachment downloads.
+  app.use("/downloads", downloadLimiter, downloadsRouter);
   app.use("/api/attachments", requireFlexAuth, requireServerForFlex, downloadLimiter, attachmentPublicRouter);
   // Intentionally unauthenticated static-asset fallback for local dev.
   // Production serves avatars directly from the CDN (`CDN_BASE_URL`) which

@@ -87,9 +87,24 @@ compose 把 `${RAFT_HTTP_PORT:-18443}` 映射到 443。`RAFT_PUBLIC_ORIGIN` 必�
 **续期**：`tailscale cert` 到期前重跑同名命令覆盖 `./certs/` 后
 `docker compose restart web`；企业 CA 按内部流程。compose 不做自动续期。
 
+## 客户端产物目录（二期 task #4）
+
+`./downloads/`（compose 同时挂给 server 与 web；nginx 经 alias 直出 `/downloads/`，
+二进制不经过 Node）。用仓库根的脚本从**与 server 镜像同一 commit** 构建的产物生成：
+
+```sh
+node scripts/build-downloads.mjs --version <v> --out deploy/docker/downloads \
+  --computer-darwin-arm64 <sea 文件> --computer-darwin-x64 <sea 文件> \
+  --computer-linux-x64 <sea 文件> --cli <raft-<v>.tgz>
+```
+
+manifest 格式与 Computer 的 legacy-cdn 读取器逐字段兼容（platform key =
+`<node-platform>-<arch>`）。换版本=重跑脚本+`docker compose restart server web`。
+server 侧 `RAFT_DEPLOYMENT_MODE=private`（compose 已设）使「最新版本」查询读本地
+manifest 而非官网——官方部署不受影响（唯一判断入口
+`isPrivateDeploymentMode`，shared）。
+
 ## 已知边界（二期处理）
 
-- web 生成的 Computer 安装命令仍指向官方 CDN（`cdn.raft.build`）——二期
-  「服务器分发客户端」改为 `/downloads/`；一期仅修复 `--server-url` 缺失 bug。
-- server 每小时的外部“最新版本”查询（npmjs/CDN/hands）在离线环境失败并被
-  吞掉，影响仅是“有新版”提示失真；二期改为读本地 manifest。
+- web 生成的 Computer 安装命令仍指向官方 CDN——task #5/#6 改为指向本服务器 `/downloads/`（路由与目录本条已就绪）。
+- 私有模式下「最新版本」已读本地 manifest（本条）；官方部署的外部查询行为不变。

@@ -1,4 +1,9 @@
 // Fetch latest daemon version from npm registry, refresh hourly.
+// Private deployments read the local /downloads manifest instead (task #4):
+// the self-hosted server is the only release authority for its clients.
+import { isPrivateDeploymentMode } from "@botiverse/raft-shared";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 let cachedLatestDaemonVersion: string | null = null;
 let lastFetchTime = 0;
 let refreshPromise: Promise<void> | null = null;
@@ -24,7 +29,25 @@ async function refreshLatestDaemonVersion(): Promise<void> {
   return refreshPromise;
 }
 
+function readLocalLatestDaemonVersion(): string | null {
+  try {
+    const dir = process.env.RAFT_DOWNLOADS_DIR?.trim() || "/app/downloads";
+    const parsed = JSON.parse(readFileSync(path.join(dir, "cli/manifest.json"), "utf8")) as { version?: unknown };
+    return typeof parsed.version === "string" && parsed.version ? parsed.version : null;
+  } catch {
+    return null; // Same degradation as the offline external lookup.
+  }
+}
+
 async function fetchLatestDaemonVersion(): Promise<void> {
+  if (isPrivateDeploymentMode()) {
+    const local = readLocalLatestDaemonVersion();
+    if (local) {
+      cachedLatestDaemonVersion = local;
+      lastFetchTime = Date.now();
+    }
+    return;
+  }
   try {
     const res = await fetch(DAEMON_LATEST_URL);
     if (res.ok) {
