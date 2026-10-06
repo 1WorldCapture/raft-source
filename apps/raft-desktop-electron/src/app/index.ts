@@ -307,13 +307,14 @@ function registerIpcHandlers(): void {
   });
   // Private update detection (phase 3-2) — inert unless a private checker
   // is running (official origins never register live handlers).
-  if (privateUpdateChecker) {
-    ipcMain.handle(ELECTRON_IPC_CHANNELS.privateUpdateStatus, () => privateUpdateChecker.status());
-    ipcMain.on(ELECTRON_IPC_CHANNELS.privateUpdateCheck, () => void privateUpdateChecker.check());
+  const checker = privateUpdateChecker;
+  if (checker) {
+    ipcMain.handle(ELECTRON_IPC_CHANNELS.privateUpdateStatus, () => checker.status());
+    ipcMain.on(ELECTRON_IPC_CHANNELS.privateUpdateCheck, () => void checker.check());
     ipcMain.on(ELECTRON_IPC_CHANNELS.privateUpdateDownload, () => {
-      privateUpdateChecker.openDownload();
+      checker.openDownload();
     });
-    privateUpdateChecker.onStatus(broadcastPrivateUpdateStatus);
+    checker.onStatus(broadcastPrivateUpdateStatus);
   }
 }
 
@@ -428,14 +429,11 @@ function registerComputerIpc(host: ComputerHost): void {
 // Private-deployment update detection (phase 3-2): unsigned builds cannot
 // use Squirrel.Mac (verified on real hardware — ShipIt rejects unsigned
 // updates), so private origins get detect → notify → manual install. Never
-// started for official origins — that path stays byte-identical.
-const privateUpdateChecker = serverOriginConfig.isOfficial()
-  ? null
-  : startPrivateUpdateChecker({
-    origin: serverOriginConfig.current(),
-    appVersion: APP_VERSION,
-    openExternal: (url) => shell.openExternal(url),
-  });
+// started for official origins — that path stays byte-identical. Created in
+// the GUI path only (single-instance lock held + app ready): this binary
+// also re-execs as headless `__service`/`__run` Computer children, which
+// must never run feed checks.
+let privateUpdateChecker: ReturnType<typeof startPrivateUpdateChecker> | null = null;
 
 function broadcastPrivateUpdateStatus(status: unknown): void {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -786,6 +784,16 @@ if (headlessMode?.mode === "__service") {
   }
 
   void app.whenReady().then(async () => {
+    // GUI path: start the private update checker here (never in the headless
+    // __service/__run branches above — those re-exec this binary and must
+    // stay free of feed traffic).
+    privateUpdateChecker = serverOriginConfig.isOfficial()
+      ? null
+      : startPrivateUpdateChecker({
+        origin: serverOriginConfig.current(),
+        appVersion: APP_VERSION,
+        openExternal: (url) => shell.openExternal(url),
+      });
     // In dev (unpacked), macOS shows the default Electron dock icon — the real
     // brand mark only ships inside the packaged .app (build/icon.icns). Set it
     // explicitly so `pnpm start` also shows the Raft icon. Packaged builds get
@@ -817,9 +825,10 @@ if (headlessMode?.mode === "__service") {
         // Private origins: the detect-only checker owns manual checks too
         // (the official updater feed is disabled there); the dialog mirrors
         // the official manual-check UX.
-        if (privateUpdateChecker) {
-          void privateUpdateChecker.check().then(() => {
-            const status = privateUpdateChecker.status();
+        const checker = privateUpdateChecker;
+        if (checker) {
+          void checker.check().then(() => {
+            const status = checker.status();
             if (status.state === "available") {
               void dialog.showMessageBox({
                 type: "info",
@@ -828,7 +837,7 @@ if (headlessMode?.mode === "__service") {
                 buttons: ["Download now", "Later"],
                 defaultId: 0,
               }).then((choice) => {
-                if (choice.response === 0) privateUpdateChecker.openDownload();
+                if (choice.response === 0) checker.openDownload();
               });
             } else {
               void dialog.showMessageBox({

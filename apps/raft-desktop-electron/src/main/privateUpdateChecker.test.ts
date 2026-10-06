@@ -1,56 +1,78 @@
-// Private-deployment update checker (phase 3-2): feed parsing, URL safety
-// (same-origin enforcement — a tampered feed must never steer the user to an
-// external site), version gating, and the detect-only lifecycle.
+// Private-deployment update checker (phase 3-2): feed parsing, artifact
+// selection (dual-arch trees), URL safety (same-origin enforcement — a
+// tampered feed must never steer the user to an external site), version
+// gating, and the detect-only lifecycle. Plus a structural pin that the
+// checker is only started on the GUI path (never in headless __service
+// children that re-exec this binary).
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   isNewerVersion,
   parseLatestMacYml,
   resolvePrivateDownloadUrl,
+  selectDownloadFile,
   startPrivateUpdateChecker,
 } from "./privateUpdateChecker.ts";
 
 const ORIGIN = "https://raft.internal.example:8443";
 
-function yml(fields: { version?: string; path?: string; url?: string; size?: number } = {}): string {
-  const lines: string[] = [];
-  if (fields.version !== undefined) lines.push(`version: ${fields.version}`);
-  if (fields.path !== undefined) lines.push(`path: ${fields.path}`);
-  if (fields.url !== undefined) {
-    lines.push("files:");
-    lines.push(`  - url: ${fields.url}`);
-    if (fields.size !== undefined) lines.push(`    size: ${fields.size}`);
-  }
-  return `${lines.join("\n")}\n`;
-}
+// A realistic dual-arch latest-mac.yml as task #12's tree will publish it:
+// zip (updater artifact) AND dmg (manual install) for both architectures,
+// unordered. PR #171 review: the checker must pick the dmg for THIS arch,
+// never the first entry.
+const DUAL_ARCH_YML = [
+  "version: 0.2.0",
+  "releaseDate: '2026-10-06T13:00:00.000Z'",
+  "path: Raft-Desktop-0.2.0-arm64-mac.zip",
+  "sha512: AAAA",
+  "files:",
+  "  - url: Raft-Desktop-0.2.0-x64-mac.zip",
+  "    sha512: BBBB",
+  "    size: 191000000",
+  "  - url: Raft-Desktop-0.2.0-x64.dmg",
+  "    sha512: CCCC",
+  "    size: 201000000",
+  "  - url: Raft-Desktop-0.2.0-arm64-mac.zip",
+  "    sha512: DDDD",
+  "    size: 193000000",
+  "  - url: Raft-Desktop-0.2.0-arm64.dmg",
+  "    sha512: EEEE",
+  "    size: 210000000",
+].join("\n");
 
-test("parseLatestMacYml reads version, first files url and size", () => {
-  assert.deepEqual(
-    parseLatestMacYml(yml({ version: "0.2.0", url: "Raft-Desktop-0.2.0-arm64.dmg", size: 123 })),
-    { version: "0.2.0", fileUrl: "Raft-Desktop-0.2.0-arm64.dmg", size: 123 },
-  );
-  // electron-builder emits more fields than we consume — extras are ignored.
-  const rich = [
-    "version: 0.2.0",
-    "releaseDate: '2026-10-06T00:00:00.000Z'",
-    "githubArtifactName: irrelevant",
-    "path: Raft-Desktop-0.2.0-arm64-mac.zip",
-    "sha512: AAAA",
-    "files:",
-    "  - url: Raft-Desktop-0.2.0-arm64-mac.zip",
-    "    sha512: AAAA",
-    "    size: 999",
-  ].join("\n");
-  assert.deepEqual(parseLatestMacYml(rich), { version: "0.2.0", fileUrl: "Raft-Desktop-0.2.0-arm64-mac.zip", size: 999 });
+test("parseLatestMacYml reads the version and every files entry", () => {
+  const parsed = parseLatestMacYml(DUAL_ARCH_YML);
+  assert.ok(parsed);
+  assert.equal(parsed.version, "0.2.0");
+  assert.deepEqual(parsed.files.map((f) => f.url), [
+    "Raft-Desktop-0.2.0-x64-mac.zip",
+    "Raft-Desktop-0.2.0-x64.dmg",
+    "Raft-Desktop-0.2.0-arm64-mac.zip",
+    "Raft-Desktop-0.2.0-arm64.dmg",
+  ]);
+  assert.equal(parsed.files.find((f) => f.url.endsWith("arm64.dmg"))?.size, 210000000);
 });
 
 test("parseLatestMacYml rejects missing fields and non-strict versions", () => {
-  assert.equal(parseLatestMacYml(yml({ url: "x.dmg" })), null); // no version
-  assert.equal(parseLatestMacYml(yml({ version: "0.2.0" })), null); // no url/path
-  assert.equal(parseLatestMacYml(yml({ version: "0.2.0-beta.1", url: "x.dmg" })), null); // prerelease is not strict
-  assert.equal(parseLatestMacYml(yml({ version: "latest", url: "x.dmg" })), null);
+  assert.equal(parseLatestMacYml("version: 0.2.0\n"), null); // no files
+  assert.equal(parseLatestMacYml("files:\n  - url: x.dmg\n"), null); // no version
+  assert.equal(parseLatestMacYml("version: 0.2.0-beta.1\nfiles:\n  - url: x.dmg\n"), null);
+  assert.equal(parseLatestMacYml("version: latest\nfiles:\n  - url: x.dmg\n"), null);
   assert.equal(parseLatestMacYml(""), null);
+});
+
+test("selectDownloadFile picks the dmg for THIS arch only", () => {
+  const parsed = parseLatestMacYml(DUAL_ARCH_YML)!;
+  assert.equal(selectDownloadFile(parsed.files, "arm64")?.url, "Raft-Desktop-0.2.0-arm64.dmg");
+  assert.equal(selectDownloadFile(parsed.files, "x64")?.url, "Raft-Desktop-0.2.0-x64.dmg");
+  // Zips only, or no entry for this arch → nothing to offer.
+  const zipsOnly = parsed.files.filter((f) => f.url.endsWith(".zip"));
+  assert.equal(selectDownloadFile(zipsOnly, "arm64"), null);
+  assert.equal(selectDownloadFile(parsed.files.filter((f) => !f.url.includes("x64")), "x64"), null);
 });
 
 test("resolvePrivateDownloadUrl enforces https same-origin exactly", () => {
@@ -85,11 +107,17 @@ test("isNewerVersion is strict-triple only", () => {
   assert.equal(isNewerVersion("v0.2.0", "0.1.8"), false);
 });
 
-function checkerWith(feed: () => Response | Error, opened: string[], currentVersion = "0.1.8") {
+function checkerWith(
+  feed: () => Response | Error,
+  opened: string[],
+  currentVersion = "0.1.8",
+  arch = "arm64",
+) {
   return startPrivateUpdateChecker({
     origin: ORIGIN,
     appVersion: currentVersion,
     openExternal: (url) => { opened.push(url); },
+    arch,
     fetchImpl: (async () => {
       const outcome = feed();
       if (outcome instanceof Error) throw outcome;
@@ -100,23 +128,33 @@ function checkerWith(feed: () => Response | Error, opened: string[], currentVers
   });
 }
 
-test("checker: newer version on the server becomes available and opens the validated URL", async () => {
+test("checker: newer version becomes available and opens THIS arch's dmg", async () => {
   const opened: string[] = [];
-  const checker = checkerWith(() => new Response(yml({ version: "0.2.0", url: "Raft-Desktop-0.2.0-arm64.dmg" })), opened);
+  const checker = checkerWith(() => new Response(DUAL_ARCH_YML), opened);
   await checker.check();
-  assert.deepEqual(checker.status(), { state: "available", version: "0.2.0" });
+  assert.deepEqual(checker.status(), { state: "available", version: "0.2.0", size: 210000000 });
   assert.equal(checker.openDownload(), true);
   assert.deepEqual(opened, [`${ORIGIN}/downloads/desktop/Raft-Desktop-0.2.0-arm64.dmg`]);
 });
 
-test("checker: same/older version, 404, malformed feed, and network failure all stay quiet", async () => {
+test("checker: x64 machine gets the x64 dmg from the same feed", async () => {
   const opened: string[] = [];
+  const checker = checkerWith(() => new Response(DUAL_ARCH_YML), opened, "0.1.8", "x64");
+  await checker.check();
+  assert.deepEqual(checker.status(), { state: "available", version: "0.2.0", size: 201000000 });
+  assert.equal(checker.openDownload(), true);
+  assert.deepEqual(opened, [`${ORIGIN}/downloads/desktop/Raft-Desktop-0.2.0-x64.dmg`]);
+});
+
+test("checker: same/older version, 404, zips-only, tampered feed, and network failure all stay quiet", async () => {
+  const opened: string[] = [];
+  const zipsOnly = DUAL_ARCH_YML.split("\n").filter((line) => !line.includes(".dmg") || line.includes("-mac.zip")).join("\n");
   for (const feed of [
-    () => new Response(yml({ version: "0.1.8", url: "x.dmg" })), // same version
-    () => new Response(yml({ version: "0.1.7", url: "x.dmg" })), // older
+    () => new Response(DUAL_ARCH_YML.replace("version: 0.2.0", "version: 0.1.8")), // same version
+    () => new Response(DUAL_ARCH_YML.replace("version: 0.2.0", "version: 0.1.7")), // older
     () => new Response("not found", { status: 404 }), // no desktop artifacts yet
-    () => new Response(yml({ version: "0.3.0", url: "https://evil.example/x.dmg" })), // tampered feed
-    () => new Response(yml({ version: "0.3.0-rc.1", url: "x.dmg" })), // non-strict version
+    () => new Response(zipsOnly), // no dmg for manual install
+    () => new Response(DUAL_ARCH_YML.replace("Raft-Desktop-0.2.0-arm64.dmg", "https://evil.example/x.dmg")), // tampered
     () => new Error("ENETDOWN"),
   ]) {
     const checker = checkerWith(feed, opened);
@@ -127,12 +165,46 @@ test("checker: same/older version, 404, malformed feed, and network failure all 
   assert.deepEqual(opened, []);
 });
 
+test("checker: a later quiet check invalidates the previous artifact (no stale open)", async () => {
+  const opened: string[] = [];
+  let feed: () => Response | Error = () => new Response(DUAL_ARCH_YML);
+  const checker = checkerWith(() => feed(), opened);
+  await checker.check();
+  assert.equal(checker.status().state, "available");
+  assert.equal(checker.currentInfo()?.version, "0.2.0");
+  // The next daily check finds the feed gone (server dropped the tree).
+  feed = () => new Response("gone", { status: 404 });
+  await checker.check();
+  assert.deepEqual(checker.status(), { state: "none" });
+  assert.equal(checker.currentInfo(), null);
+  assert.equal(checker.openDownload(), false); // stale URL must NOT open
+  assert.deepEqual(opened, []);
+});
+
 test("checker: status stream notifies listeners", async () => {
   const opened: string[] = [];
   const events: string[] = [];
-  const checker = checkerWith(() => new Response(yml({ version: "0.2.0", url: "x.dmg" })), opened);
+  const checker = checkerWith(() => new Response(DUAL_ARCH_YML), opened);
   const unsubscribe = checker.onStatus((status) => events.push(status.state));
   await checker.check();
   unsubscribe();
   assert.deepEqual(events.slice(0, 2), ["checking", "available"]);
+});
+
+test("structural: the checker starts only on the GUI path (never in headless children)", async () => {
+  // src/app/index.ts re-execs this binary as headless __service/__run
+  // Computer children; the checker must be created AFTER the single-instance
+  // lock branch (inside app ready), not at module scope where headless
+  // children would evaluate it too. (PR #171 review.)
+  const appIndex = await readFile(
+    path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "app", "index.ts"),
+    "utf8",
+  );
+  const whenReadyAt = appIndex.indexOf("void app.whenReady().then(async () => {");
+  const createAt = appIndex.indexOf("startPrivateUpdateChecker({");
+  const lockAt = appIndex.indexOf("requestSingleInstanceLock");
+  assert.ok(whenReadyAt > 0 && lockAt > 0, "index.ts must keep its whenReady/lock structure");
+  assert.ok(createAt > whenReadyAt, "startPrivateUpdateChecker must live inside the whenReady (GUI) path");
+  // And no module-scope creation before the lock check.
+  assert.ok(createAt > lockAt, "startPrivateUpdateChecker must come after the single-instance lock branch");
 });

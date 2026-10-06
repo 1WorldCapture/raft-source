@@ -38,6 +38,8 @@ export interface PrivateUpdateDeps {
   appVersion: string;
   /** Opens the download in the system browser (electron shell.openExternal). */
   openExternal: (url: string) => void | Promise<void>;
+  /** This machine's electron arch (process.arch; injected for tests). */
+  arch?: string;
   fetchImpl?: typeof fetch;
   log?: (message: string) => void;
   /** First check delay + re-check interval. */
@@ -70,18 +72,20 @@ export function isNewerVersion(candidate: string, current: string): boolean {
 
 /**
  * Minimal strict parser for the fields we consume from a generic-provider
- * latest-mac.yml: the top-level `version:` and the FIRST `url:` (with an
- * optional `size:`) under `files:` — falling back to the top-level `path:`.
- * Returns null when any consumed field is missing or malformed; unknown
+ * latest-mac.yml: the top-level `version:` and every `url:` (+ its optional
+ * `size:`) under `files:`. Dual-arch trees list zip AND dmg for BOTH
+ * architectures — the artifact for THIS machine is selected by the caller
+ * (`.dmg` ending on the current arch). Returns null when the version is
+ * missing or not a strict triple, or when no file entries exist; unknown
  * extra fields are ignored (the file is authored by electron-builder and
  * carries more than we need).
  */
-export function parseLatestMacYml(text: string): { version: string; fileUrl: string; size?: number } | null {
+export function parseLatestMacYml(text: string): { version: string; files: Array<{ url: string; size?: number }> } | null {
   const lines = text.split(/\r?\n/);
   let version: string | null = null;
-  let fileUrl: string | null = null;
-  let size: number | undefined;
+  const files: Array<{ url: string; size?: number }> = [];
   let inFiles = false;
+  let current: { url: string; size?: number } | null = null;
   for (const rawLine of lines) {
     const line = rawLine.replace(/\t/g, "  ");
     if (/^files:/.test(line)) {
@@ -92,18 +96,34 @@ export function parseLatestMacYml(text: string): { version: string; fileUrl: str
     if (!inFiles) {
       const versionMatch = /^version:\s*(\S+)\s*$/.exec(line);
       if (versionMatch) version = versionMatch[1]!;
-      const pathMatch = /^path:\s*(\S+)\s*$/.exec(line);
-      if (pathMatch && fileUrl === null) fileUrl = pathMatch[1]!;
       continue;
     }
     const urlMatch = /^\s+-\s+url:\s*(\S+)\s*$/.exec(line) || /^\s+url:\s*(\S+)\s*$/.exec(line);
-    if (urlMatch && fileUrl === null) fileUrl = urlMatch[1]!;
+    if (urlMatch) {
+      current = { url: urlMatch[1]! };
+      files.push(current);
+      continue;
+    }
     const sizeMatch = /^\s+size:\s*(\d+)\s*$/.exec(line);
-    if (sizeMatch) size = Number(sizeMatch[1]);
+    if (sizeMatch && current) current.size = Number(sizeMatch[1]);
   }
-  if (!version || !fileUrl) return null;
+  if (!version || files.length === 0) return null;
   if (!strictSemver(version)) return null;
-  return { version, fileUrl, size };
+  return { version, files };
+}
+
+/**
+ * The manual-install artifact for THIS machine: the `.dmg` entry whose name
+ * ends in `-${arch}.dmg` (electron-builder's artifactName is
+ * `Raft-Desktop-${version}-${arch}.${ext}`). Zips (updater artifacts) and
+ * other architectures are ignored; when the tree carries no matching dmg
+ * there is nothing to prompt about.
+ */
+export function selectDownloadFile(
+  files: ReadonlyArray<{ url: string; size?: number }>,
+  arch: string,
+): { url: string; size?: number } | null {
+  return files.find((file) => file.url.endsWith(`-${arch}.dmg`)) ?? null;
 }
 
 /**
@@ -154,6 +174,9 @@ export function startPrivateUpdateChecker(deps: PrivateUpdateDeps): {
 
   const setStatus = (status: PrivateUpdateStatus): void => {
     current = status;
+    // A later check that lands on none/failure invalidates the previous
+    // artifact — openDownload must never outlive the visible state.
+    if (status.state !== "available") info = null;
     for (const listener of listeners) {
       try {
         listener(status);
@@ -197,7 +220,15 @@ export function startPrivateUpdateChecker(deps: PrivateUpdateDeps): {
       setStatus({ state: "none" });
       return;
     }
-    const downloadUrl = resolvePrivateDownloadUrl(deps.origin, parsed.fileUrl, log);
+    const artifact = selectDownloadFile(parsed.files, deps.arch ?? process.arch);
+    if (!artifact) {
+      // Nothing installable for this machine (zips only / other arch):
+      // never steer the user at the wrong package.
+      log(`no ${deps.arch ?? process.arch} dmg in private latest-mac.yml`);
+      setStatus({ state: "none" });
+      return;
+    }
+    const downloadUrl = resolvePrivateDownloadUrl(deps.origin, artifact.url, log);
     if (!downloadUrl) {
       setStatus({ state: "none" });
       return;
@@ -206,8 +237,8 @@ export function startPrivateUpdateChecker(deps: PrivateUpdateDeps): {
       setStatus({ state: "none" });
       return;
     }
-    info = { version: parsed.version, downloadUrl, ...(parsed.size !== undefined ? { size: parsed.size } : {}) };
-    setStatus({ state: "available", version: parsed.version, ...(parsed.size !== undefined ? { size: parsed.size } : {}) });
+    info = { version: parsed.version, downloadUrl, ...(artifact.size !== undefined ? { size: artifact.size } : {}) };
+    setStatus({ state: "available", version: parsed.version, ...(artifact.size !== undefined ? { size: artifact.size } : {}) });
   }
 
   // unref: the schedule must never hold the process open by itself (it is a
