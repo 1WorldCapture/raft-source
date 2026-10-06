@@ -183,9 +183,23 @@ describe("native Desktop runtime environment", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     assert.equal(clears, 1);
     assert.deepEqual(deleted.sort(), ["assets", "auth"]);
-    assert.equal(values.get("raft_desktop_environment_generation"), "4");
+    // Composite marker (PM review, phase 3-1): origin # generation.
+    assert.equal(values.get("raft_desktop_environment_generation"), "https://api.raft.build#4");
     assert.equal(applyDesktopEnvironmentGeneration(production, storage, cacheStorage), false);
     assert.equal(clears, 1);
+  });
+
+  test("legacy bare-generation markers still match preset environments (no logout on upgrade)", () => {
+    const values = new Map<string, string>([["raft_desktop_environment_generation", "4"]]);
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => { values.set(key, value); },
+      clear: () => { values.clear(); },
+    };
+    // A pre-composite Tauri boot stored "4"; the same production generation
+    // must NOT clear, and migrates the marker to composite form.
+    assert.equal(applyDesktopEnvironmentGeneration(production, storage), false);
+    assert.equal(values.get("raft_desktop_environment_generation"), "4");
   });
 
   test("browser mode has no destructive side effect", () => {
@@ -193,6 +207,70 @@ describe("native Desktop runtime environment", () => {
     const storage = { getItem: () => null, setItem: () => {}, clear: () => { clears += 1; } };
     assert.equal(applyDesktopEnvironmentGeneration(null, storage), false);
     assert.equal(clears, 0);
+  });
+
+  // ── composite-marker switch semantics (PM review, phase 3-1) ────────────
+
+  function environmentFor(origin: string, generation = 1) {
+    // Read a real "server" environment through the public parser so the
+    // marker semantics are exercised against validated tuples.
+    return readDesktopRuntimeEnvironment({
+      __RAFT_DESKTOP_ENVIRONMENT__: { apiOrigin: origin, socketOrigin: origin, generation },
+    });
+  }
+
+  function markerStorage(initial?: [string, string]) {
+    const values = new Map<string, string>(initial ? [initial] : []);
+    let clears = 0;
+    return {
+      storage: {
+        getItem: (key: string) => values.get(key) ?? null,
+        setItem: (key: string, value: string) => { values.set(key, value); },
+        clear: () => { clears += 1; values.clear(); },
+      },
+      values,
+      clears: () => clears,
+    };
+  }
+
+  test("private → reset → official clears (no private tokens ride into the official backend)", () => {
+    const env = environmentFor("https://raft.internal.example:8443", 2);
+    assert.ok(env);
+    const { storage, values, clears } = markerStorage();
+    assert.equal(applyDesktopEnvironmentGeneration(env, storage), true); // first private boot
+    values.set("token", "private-secret");
+    // After reset there is no injection at all (official compiled default).
+    assert.equal(applyDesktopEnvironmentGeneration(null, storage), true);
+    assert.equal(clears(), 2);
+    assert.equal(values.has("token"), false);
+    assert.equal(values.has("raft_desktop_environment_generation"), false); // marker removed
+    // And the following official boots stay quiet (marker gone).
+    assert.equal(applyDesktopEnvironmentGeneration(null, storage), false);
+    assert.equal(clears(), 2);
+  });
+
+  test("env A → env B clears even though both inject generation 1", () => {
+    const a = environmentFor("https://raft.a.example");
+    const b = environmentFor("https://raft.b.example");
+    assert.ok(a && b);
+    const { storage, values, clears } = markerStorage();
+    assert.equal(applyDesktopEnvironmentGeneration(a, storage), true);
+    values.set("token", "a-secret");
+    assert.equal(applyDesktopEnvironmentGeneration(b, storage), true);
+    assert.equal(clears(), 2);
+    assert.equal(values.has("token"), false);
+    assert.equal(values.get("raft_desktop_environment_generation"), "https://raft.b.example#1");
+  });
+
+  test("same origin restart does not clear", () => {
+    const env = environmentFor("https://raft.a.example", 1);
+    assert.ok(env);
+    const { storage, values, clears } = markerStorage();
+    assert.equal(applyDesktopEnvironmentGeneration(env, storage), true);
+    values.set("token", "a-secret");
+    assert.equal(applyDesktopEnvironmentGeneration(environmentFor("https://raft.a.example", 1), storage), false);
+    assert.equal(clears(), 1);
+    assert.equal(values.get("token"), "a-secret");
   });
 
   test("Desktop bridge detection is pinned to the native invoke function", () => {
@@ -296,6 +374,108 @@ describe("native Desktop runtime environment", () => {
     assertGuardBeforeSinks("src/utils/server.ts", [
       "RUNTIME_API_ORIGIN.includes(",
     ], 1);
+  });
+
+  // ── environmentId "server" (Electron runtime-configured origin, phase 3-1) ──
+
+  test("accepts the minimal three-key server environment and derives the rest", () => {
+    const env = readDesktopRuntimeEnvironment({
+      __RAFT_DESKTOP_ENVIRONMENT__: {
+        apiOrigin: "https://raft.internal.example:8443",
+        socketOrigin: "https://raft.internal.example:8443",
+        generation: 2,
+      },
+    });
+    assert.deepEqual(env, {
+      environmentId: "server",
+      generation: 2,
+      frontendOrigin: "https://raft.internal.example:8443",
+      apiOrigin: "https://raft.internal.example:8443",
+      socketOrigin: "https://raft.internal.example:8443",
+      updateAuthority: "none",
+    });
+  });
+
+  test("server environment rejects non-https origins, paths, queries and bad generations", () => {
+    const sameOrigin = "https://raft.internal.example:8443";
+    const cases: unknown[] = [
+      // non-https scheme on either slot (http private origins are refused: the
+      // bundled renderer's stock CSP allows only https/wss connect targets)
+      { apiOrigin: "http://raft.internal.example:8443", socketOrigin: sameOrigin, generation: 1 },
+      { apiOrigin: sameOrigin, socketOrigin: "http://raft.internal.example:8443", generation: 1 },
+      // path / query / fragment / credentials
+      { apiOrigin: "https://raft.internal.example/sub", socketOrigin: sameOrigin, generation: 1 },
+      { apiOrigin: "https://raft.internal.example?q=1", socketOrigin: sameOrigin, generation: 1 },
+      { apiOrigin: "https://raft.internal.example#f", socketOrigin: sameOrigin, generation: 1 },
+      { apiOrigin: "https://user:pw@raft.internal.example", socketOrigin: sameOrigin, generation: 1 },
+      // dangerous schemes
+      { apiOrigin: "javascript:alert(1)", socketOrigin: sameOrigin, generation: 1 },
+      { apiOrigin: sameOrigin, socketOrigin: "file:///etc/passwd", generation: 1 },
+      // generation must be a safe positive integer
+      { apiOrigin: sameOrigin, socketOrigin: sameOrigin, generation: 0 },
+      { apiOrigin: sameOrigin, socketOrigin: sameOrigin, generation: 1.5 },
+      { apiOrigin: sameOrigin, socketOrigin: sameOrigin, generation: "2" },
+      // shape: missing slot, or extra keys (the minimal shape is exactly 3)
+      { apiOrigin: sameOrigin, generation: 1 },
+      { apiOrigin: sameOrigin, socketOrigin: sameOrigin, generation: 1, environmentId: "server" },
+      { apiOrigin: sameOrigin, socketOrigin: sameOrigin, generation: 1, frontendOrigin: sameOrigin },
+    ];
+    for (const value of cases) {
+      assert.equal(
+        readDesktopRuntimeEnvironment({ __RAFT_DESKTOP_ENVIRONMENT__: value }),
+        null,
+        `expected rejection: ${JSON.stringify(value)}`,
+      );
+    }
+  });
+
+  test("an invalid injected server tuple falls back to the compiled API origin", () => {
+    // The Electron preload injects values derived from main-process config; a
+    // malformed injection must read as "no environment" so the compiled
+    // VITE_API_URL keeps steering requests — the Electron shell has no Tauri
+    // bridge, so unlike the shell flow this falls back rather than blanking.
+    assert.equal(
+      readDesktopRuntimeEnvironment({
+        __RAFT_DESKTOP_ENVIRONMENT__: { apiOrigin: "http://bad.example", socketOrigin: "http://bad.example", generation: 1 },
+      }),
+      null,
+    );
+    assert.deepEqual(
+      deriveRuntimeEndpoints(null, "https://api.raft.build", "app://raft", false),
+      {
+        apiOrigin: "https://api.raft.build",
+        apiBase: "https://api.raft.build/api",
+        socketOrigin: "https://api.raft.build",
+        desktopRuntimeError: null,
+      },
+    );
+  });
+
+  test("a valid server environment overrides the compiled API origin and clears storage on generation change", () => {
+    const env = readDesktopRuntimeEnvironment({
+      __RAFT_DESKTOP_ENVIRONMENT__: {
+        apiOrigin: "https://raft.internal.example:8443",
+        socketOrigin: "https://raft.internal.example:8443",
+        generation: 3,
+      },
+    });
+    assert.deepEqual(
+      deriveRuntimeEndpoints(env, "https://api.raft.build", "app://raft", false),
+      {
+        apiOrigin: "https://raft.internal.example:8443",
+        apiBase: "https://raft.internal.example:8443/api",
+        socketOrigin: "https://raft.internal.example:8443",
+        desktopRuntimeError: null,
+      },
+    );
+    const events: string[] = [];
+    const storage = {
+      getItem: () => null,
+      setItem: (key: string) => { events.push(key); },
+      clear: () => { events.push("__clear__"); },
+    };
+    assert.equal(applyDesktopEnvironmentGeneration(env, storage, undefined), true);
+    assert.deepEqual(events, ["__clear__", "raft_desktop_environment_generation"]);
   });
 });
 

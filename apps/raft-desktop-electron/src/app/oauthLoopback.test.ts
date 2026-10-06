@@ -80,6 +80,25 @@ test("isAllowedAuthorizationUrl defaults to the official-only allowlist (no conf
   assert.equal(isAllowedAuthorizationUrl("http://api.raft.build/api/auth/google/start"), false);
 });
 
+test("isAllowedAuthorizationUrl admits a runtime-configured https private origin exactly", () => {
+  // Phase 3-1: index.ts passes the runtime server origin here (a stock
+  // official build whose user pointed it at a private deployment). Runtime
+  // origins are https-only, and the exact-origin + host trust rules behave
+  // exactly as for build-time self-hosted origins.
+  const runtime = "https://raft.internal.example:8443";
+  assert.equal(isAllowedAuthorizationUrl("https://raft.internal.example:8443/api/auth/google/start", runtime), true);
+  assert.equal(isAllowedAuthorizationUrl("https://github.com/login/oauth/authorize?client_id=x", runtime), true);
+  for (const bad of [
+    "http://raft.internal.example:8443/api/auth/google/start", // http never trusted for a https runtime origin
+    "https://raft.internal.example.evil.com:8443/x", // look-alike host
+    "https://user:pw@raft.internal.example:8443/x", // userinfo
+  ]) {
+    assert.equal(isAllowedAuthorizationUrl(bad, runtime), false, bad);
+  }
+  // Same host over https on a different port behaves like any allowlisted host.
+  assert.equal(isAllowedAuthorizationUrl("https://raft.internal.example:8444/x", runtime), true);
+});
+
 test("GET /auth/done serves the handoff page", async () => {
   const { port, code } = await armOAuthLoopback(NONCE);
   try {

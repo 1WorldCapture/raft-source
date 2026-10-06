@@ -11,6 +11,52 @@ function subscribe<T>(channel: string, handler: (value: T) => void): () => void 
   return () => ipcRenderer.removeListener(channel, wrapped);
 }
 
+// ── Runtime server-origin environment injection (phase 3-1) ──────────────────
+// The main process resolves the deployment origin once per boot and hands it
+// here through webPreferences.additionalArguments (NOT user-controllable
+// argv — only main writes it). The injected value must exist BEFORE page
+// scripts run, so it rides argv rather than an async invoke.
+//
+// Exposed shape is deliberately MINIMAL (PM review): exactly
+// {apiOrigin, socketOrigin, generation} — the web reader derives the rest
+// (environmentId "server", frontendOrigin, updateAuthority "none"). A
+// private deployment serves API, socket and web from one origin, so the
+// two origin slots are the same value.
+//
+// Validated locally anyway: https root origin, canonical form, positive
+// integer generation. Garbage is never injected into the page world —
+// without a valid tuple the page falls back to the compiled origin
+// (official-build behavior).
+function readServerEnvironmentFromArgv(): { apiOrigin: string; generation: number } | null {
+  let rawOrigin = "";
+  let generation = 0;
+  for (const arg of process.argv) {
+    const originMatch = /^--raft-server-origin=(.*)$/.exec(arg);
+    if (originMatch) rawOrigin = originMatch[1];
+    const generationMatch = /^--raft-environment-generation=(\d+)$/.exec(arg);
+    if (generationMatch) generation = Number(generationMatch[1]);
+  }
+  if (rawOrigin === "" || !Number.isSafeInteger(generation) || generation < 1) return null;
+  try {
+    const url = new URL(rawOrigin);
+    if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash) return null;
+    if (url.pathname !== "/" && url.pathname !== "") return null;
+    if (url.origin !== rawOrigin) return null; // canonical form only
+    return { apiOrigin: url.origin, generation };
+  } catch {
+    return null;
+  }
+}
+
+const serverEnvironment = readServerEnvironmentFromArgv();
+if (serverEnvironment) {
+  contextBridge.exposeInMainWorld("__RAFT_DESKTOP_ENVIRONMENT__", Object.freeze({
+    apiOrigin: serverEnvironment.apiOrigin,
+    socketOrigin: serverEnvironment.apiOrigin,
+    generation: serverEnvironment.generation,
+  }));
+}
+
 // Deep links can arrive before the frontend mounts its listener (cold start,
 // or before login). Buffer them here from preload load and replay on subscribe
 // so none are lost.
@@ -127,6 +173,17 @@ contextBridge.exposeInMainWorld("raftDesktop", {
     // install); "unknown" = not determinable yet.
     getManagement: (): Promise<{ model: "app" | "standalone" | "unknown" }> =>
       ipcRenderer.invoke("computer:management"),
+  },
+
+  // Runtime server-origin configuration (phase 3-1). get reports the
+  // effective origin + pending changes; set/reset re-validate in main and
+  // take effect after relaunch (relaunch triggers it).
+  serverOrigin: {
+    get: (): Promise<unknown> => ipcRenderer.invoke(ELECTRON_IPC_CHANNELS.serverOriginGet),
+    set: (origin: string): Promise<unknown> =>
+      ipcRenderer.invoke(ELECTRON_IPC_CHANNELS.serverOriginSet, origin),
+    reset: (): Promise<unknown> => ipcRenderer.invoke(ELECTRON_IPC_CHANNELS.serverOriginReset),
+    relaunch: (): void => ipcRenderer.send(ELECTRON_IPC_CHANNELS.serverOriginRelaunch),
   },
 
   // App self-update (electron-updater). The app auto-downloads updates silently
