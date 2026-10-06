@@ -79,6 +79,12 @@ test("divergent computer/cli versions stamp their own trees and manifests", asyn
   // No cross-contamination: neither tree appears under the other's version.
   assert.ok(!existsSync(join(outDir, "computer", "0.0.24-zcode.1")));
   assert.ok(!existsSync(join(outDir, "cli", "1.0.28")));
+
+  // Installer scripts ship at the computer-tree root (same commit as the
+  // binaries) so `${origin}/downloads/computer/install.sh` resolves.
+  for (const installer of ["install.sh", "install.ps1"]) {
+    assert.ok(existsSync(join(outDir, "computer", installer)), `${installer} must land in the tree`);
+  }
 });
 
 test("--version shorthand stamps both trees when the products match", async (t) => {

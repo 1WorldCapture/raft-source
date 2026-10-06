@@ -103,12 +103,27 @@ node scripts/build-downloads.mjs --computer-version <v> --cli-version <v> \
 
 manifest 格式与 Computer 的 legacy-cdn 读取器逐字段兼容（platform key =
 `<node-platform>-<arch>`），并带 `commit` 字段记录产物来源 sha——验收时可直接
-与 server 镜像的构建 SHA 比对（同 commit 契约）。换版本=重跑脚本+`docker compose restart server web`。
+与 server 镜像的构建 SHA 比对（同 commit 契约）。安装脚本 `install.sh` /
+`install.ps1` 也由管线拷入 `computer/` 根部，安装命令
+`curl .../downloads/computer/install.sh | sh` 直接可用。
+
+**安全边界（必读）**：manifest 里的 sha256 证明**完整性**（字节与 manifest 一致），
+不证明**来源**——没有 Hands 那样的独立签发方。因此私有部署的 origin 必须走
+HTTPS（或 Tailscale tailnet）。若用 `http://` origin，安装与升级都会给出明确
+警告（install.sh 内置检测）；同一链路上的中间人可以同时替换 manifest 和二进制。
+
+**Computer 升级源指向本服务器（task #5）**：私有安装命令会带
+`RAFT_COMPUTER_INSTALL_BACKEND=server`，安装后持久化到
+`~/.slock/computer/release-backend`（channel 文件同款机制，对 launchd/systemd
+服务上下文同样生效）。此后 `raft-computer upgrade` 与服务端触发的升级检查都从
+`${服务器 origin}/downloads/computer/manifest.json` 解析最新版本；多服务器混接
+（不同 origin）会明确报错而非挑边，可用 `RAFT_COMPUTER_UPGRADE_BASE_URL` 显式指定。
+`RAFT_DEPLOYMENT_MODE=private` 环境变量 + 已连接服务器同样触发（等价开关）。换版本=重跑脚本+`docker compose restart server web`。
 server 侧 `RAFT_DEPLOYMENT_MODE=private`（compose 已设）使「最新版本」查询读本地
 manifest 而非官网——官方部署不受影响（唯一判断入口
 `isPrivateDeploymentMode`，shared）。
 
 ## 已知边界（二期处理）
 
-- web 生成的 Computer 安装命令仍指向官方 CDN——task #5/#6 改为指向本服务器 `/downloads/`（路由与目录本条已就绪）。
+- web 生成的 Computer 安装命令在私有模式下已指向本服务器 `/downloads/`（task #5：`/api/deployment-info` 运行时判定 + `RAFT_COMPUTER_INSTALL_BACKEND=server` 持久化）；**daemon 的 `npx @botiverse/raft-daemon` 连接命令仍走 npm——task #6 处理**（CLI/daemon 从本服务器分发）。
 - 私有模式下「最新版本」已读本地 manifest（本条）；官方部署的外部查询行为不变。

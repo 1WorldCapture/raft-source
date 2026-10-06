@@ -1391,6 +1391,8 @@ export const zhCn: Record<MessageId, string> = {
   "machine.commandGuide.daemonLegacy": "守护进程 / 旧版",
   "machine.commandGuide.daemonLegacyDescription": "保留此选项给已有守护进程设置使用。新的 Windows x64 设置应使用上方的 Raft Computer。",
   "machine.commandGuide.preparing": "准备中…",
+  "machine.commandGuide.computerCommandsLoading": "正在确认部署类型…",
+  "machine.commandGuide.deploymentModeUnknown": "无法确认部署类型，内网环境请联系管理员确认安装命令。",
   "machine.commandGuide.showLegacyDaemonCommand": "显示旧守护进程命令",
   "machine.commandGuide.generateFreshDaemonConnect": "生成新的守护进程连接命令，以使用此旧版选项。",
   "machine.commandGuide.generateLegacyDaemonCommand": "生成旧守护进程命令",

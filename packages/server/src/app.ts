@@ -27,6 +27,7 @@ import { workflowRouter } from "./routes/workflows.js";
 import { reminderRouter } from "./routes/reminders.js";
 import { attachmentRouter, attachmentPublicRouter } from "./routes/attachments.js";
 import downloadsRouter from "./routes/downloads.js";
+import deploymentInfoRouter from "./routes/deploymentInfo.js";
 import { externalAvatarPublicRouter } from "./routes/externalAvatars.js";
 import {
   attachmentUploadRateLimitedResponse,
@@ -500,6 +501,9 @@ export function createApp(options: CreateAppOptions = {}): Express {
   // Self-hosted client artifacts (task #4): public because installers run
   // before credentials exist; the same limiter class as attachment downloads.
   app.use("/downloads", downloadLimiter, downloadsRouter);
+  // Public deployment metadata (task #5): the mode-agnostic web image asks
+  // at runtime which install commands to generate. Unauthenticated, no DB.
+  app.use("/api/deployment-info", deploymentInfoRouter);
   app.use("/api/attachments", requireFlexAuth, requireServerForFlex, downloadLimiter, attachmentPublicRouter);
   // Intentionally unauthenticated static-asset fallback for local dev.
   // Production serves avatars directly from the CDN (`CDN_BASE_URL`) which

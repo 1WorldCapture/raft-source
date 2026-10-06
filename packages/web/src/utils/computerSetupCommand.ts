@@ -23,16 +23,26 @@ function normalizeComputerVersionPin(version?: string | null): string | null {
 export function computerInstallCommand(
   deploymentEnv?: string,
   version?: string | null,
+  privateBase?: string,
 ): string {
-  const base = deploymentEnv === "staging" ? COMPUTER_CDN_BASE_STAGING : COMPUTER_CDN_BASE_PROD;
+  // Private deployments (task #5): bytes AND installer come from the
+  // connected server's /downloads tree; INSTALL_BACKEND=server persists so
+  // later upgrade checks resolve against the same origin.
+  const base = privateBase
+    ?? (deploymentEnv === "staging" ? COMPUTER_CDN_BASE_STAGING : COMPUTER_CDN_BASE_PROD);
   const versionPin = normalizeComputerVersionPin(version);
   const installEnv = [
-    ...(deploymentEnv === "staging"
+    ...(privateBase
       ? [
-          `RAFT_COMPUTER_RELEASE_BASE=${base}`,
-          "RAFT_COMPUTER_INSTALL_CHANNEL=alpha",
+          `RAFT_COMPUTER_RELEASE_BASE=${privateBase}`,
+          "RAFT_COMPUTER_INSTALL_BACKEND=server",
         ]
-      : []),
+      : deploymentEnv === "staging"
+        ? [
+            `RAFT_COMPUTER_RELEASE_BASE=${base}`,
+            "RAFT_COMPUTER_INSTALL_CHANNEL=alpha",
+          ]
+        : []),
     ...(versionPin ? [`RAFT_COMPUTER_VERSION=${versionPin}`] : []),
   ];
   return `curl -fsSL ${base}/install.sh | ${installEnv.length > 0 ? `${installEnv.join(" ")} ` : ""}sh`;
@@ -41,19 +51,26 @@ export function computerInstallCommand(
 export function windowsComputerInstallCommand(
   deploymentEnv?: string,
   version?: string | null,
+  privateBase?: string,
 ): string {
-  const base = deploymentEnv === "staging" ? COMPUTER_CDN_BASE_STAGING : COMPUTER_CDN_BASE_PROD;
+  const base = privateBase
+    ?? (deploymentEnv === "staging" ? COMPUTER_CDN_BASE_STAGING : COMPUTER_CDN_BASE_PROD);
   const versionPin = normalizeComputerVersionPin(version);
   const installEnv = [
-    ...(deploymentEnv === "staging"
+    ...(privateBase
       ? [
-          `$env:RAFT_COMPUTER_RELEASE_BASE = "${base}"`,
-          '$env:RAFT_COMPUTER_INSTALL_CHANNEL = "alpha"',
+          `$env:RAFT_COMPUTER_RELEASE_BASE = "${privateBase}"`,
+          '$env:RAFT_COMPUTER_INSTALL_BACKEND = "server"',
         ]
-      : []),
+      : deploymentEnv === "staging"
+        ? [
+            `$env:RAFT_COMPUTER_RELEASE_BASE = "${base}"`,
+            '$env:RAFT_COMPUTER_INSTALL_CHANNEL = "alpha"',
+          ]
+        : []),
     ...(versionPin ? [`$env:RAFT_COMPUTER_VERSION = "${versionPin}"`] : []),
   ];
-  const installUrl = deploymentEnv === "staging"
+  const installUrl = privateBase || deploymentEnv === "staging"
     ? '"$env:RAFT_COMPUTER_RELEASE_BASE/install.ps1"'
     : `${base}/install.ps1`;
   return `${installEnv.length > 0 ? `${installEnv.join("; ")}; ` : ""}irm ${installUrl} | iex`;
@@ -78,6 +95,14 @@ export interface ComputerSetupCommandOptions {
   // uses the currently published Computer artifact instead of relying on a
   // CDN edge's potentially stale latest manifest.
   version?: string | null;
+  // Runtime deployment mode (GET /api/deployment-info; see
+  // utils/deploymentMode.ts). "private" generates install commands from the
+  // connected server's own /downloads tree instead of the official CDN.
+  // null / "unknown" (not yet resolved, or resolution failed) generate the
+  // standard commands — the CALLER gates rendering: null renders no command
+  // at all, "unknown" renders with a notice (PM review round 1: never
+  // silently show official commands on a private server).
+  deploymentMode?: "private" | "standard" | "unknown" | null;
 }
 
 export interface ComputerCommands {
@@ -138,6 +163,15 @@ export function getComputerCommands(
 
   const platform = options.platform ?? "mac-linux";
 
+  // Private deployments: the install command must fetch the installer AND
+  // the bytes from this server's /downloads tree (task #5). The runtime mode
+  // outranks the baked deployment env — a private server never renders
+  // staging commands, and an absent serverUrl falls back to the official
+  // flow rather than emitting a malformed base.
+  const privateBase = options.deploymentMode === "private" && serverUrl?.trim()
+    ? `${serverUrl.trim().replace(/\/+$/, "")}/downloads/computer`
+    : undefined;
+
   // Unknown deployment envs (self-hosted builds leave VITE_DEPLOYMENT_ENV
   // unset or custom) follow the production rule: carry --server-url whenever
   // the target is not an official default origin, so a self-hosted server
@@ -163,7 +197,7 @@ export function getComputerCommands(
       const environment = `$env:RAFT_HOME = "${home}"; $env:RAFT_COMPUTER_INSTALL_DIR = "$env:RAFT_HOME\\bin";`;
       const binary = `& "$env:RAFT_COMPUTER_INSTALL_DIR\\raft-computer.exe"`;
       return {
-        install: `${environment} ${windowsComputerInstallCommand(deploymentEnv, options.version)}`,
+        install: `${environment} ${windowsComputerInstallCommand(deploymentEnv, options.version, privateBase)}`,
         setup: `${environment} ${binary} setup /${slug}${setupArgs}`,
         status: `${environment} ${binary} status`,
         doctor: `${environment} ${binary} doctor`,
@@ -178,7 +212,7 @@ export function getComputerCommands(
     const environment = `RAFT_HOME="${home}" RAFT_COMPUTER_INSTALL_DIR="${home}/bin"`;
     const binary = `"${home}/bin/raft-computer"`;
     return {
-      install: `${environment} sh -c '${computerInstallCommand(deploymentEnv, options.version)}'`,
+      install: `${environment} sh -c '${computerInstallCommand(deploymentEnv, options.version, privateBase)}'`,
       setup: `${environment} ${binary} setup /${slug}${setupArgs}`,
       status: `${environment} ${binary} status`,
       doctor: `${environment} ${binary} doctor`,
@@ -191,8 +225,8 @@ export function getComputerCommands(
 
   return {
     install: platform === "windows"
-      ? windowsComputerInstallCommand(deploymentEnv, options.version)
-      : computerInstallCommand(deploymentEnv, options.version),
+      ? windowsComputerInstallCommand(deploymentEnv, options.version, privateBase)
+      : computerInstallCommand(deploymentEnv, options.version, privateBase),
     setup: `raft-computer setup /${slug}${setupArgs}`,
     status: "raft-computer status",
     doctor: "raft-computer doctor",
