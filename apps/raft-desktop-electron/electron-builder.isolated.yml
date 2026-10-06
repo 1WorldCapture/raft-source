@@ -1,13 +1,19 @@
 # ISOLATED test build variant (phase 3-1) — never part of a release.
-# Merged ON TOP of electron-builder.yml and only used by the explicit
-# `dist:mac:isolated` script (default-off by construction: no release script
-# references this file). Purpose: real-machine verification of the runtime
-# server-origin feature without touching the owner's installed Raft Desktop —
-# a distinct appId + productName yields a fully separate app identity
-# (own Application Support dir, own single-instance lock, own login items).
-# NOTE: a distinct bundle id does NOT stop macOS LaunchServices from making
-# this build the raft:// deep-link handler once launched; src/app/index.ts
+# EXTENDS the canonical config: every packaging decision (files, resources,
+# targets, output dir) stays identical to the release build, and only the
+# identity is overridden. NOTE: electron-builder does NOT merge multiple
+# --config flags (last one wins) — loading this file alone, without the
+# extends, silently drops directories/files and the default output dir
+# ("dist/") gets excluded from the asar (task #13 acceptance caught this).
+# Used only by the explicit `dist:mac:isolated` script (default-off by
+# construction: no release script references this file). Purpose: real-machine
+# verification without touching the owner's installed Raft Desktop — a
+# distinct appId + productName yields a fully separate app identity (own
+# Application Support dir, own single-instance lock, own login items).
+# A distinct bundle id does NOT stop macOS LaunchServices from making this
+# build the raft:// deep-link handler once launched; src/app/index.ts
 # deliberately skips protocol registration for isolated product names.
+extends: electron-builder.yml
 appId: build.raft.desktop.isolated
 productName: Raft Desktop Isolated
 artifactName: Raft-Desktop-Isolated-${version}-${arch}.${ext}
