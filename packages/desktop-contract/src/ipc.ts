@@ -471,6 +471,14 @@ export const ELECTRON_IPC_CHANNELS = {
   /** renderer → main: relaunch the app to apply a pending server-origin
    * change (same relaunch semantics as the storage doctor). */
   serverOriginRelaunch: "server-origin:relaunch",
+  /** renderer → main (invoke): private-deployment update check status
+   * (phase 3-2): detect-only — { state, version? } for the notify pill. */
+  privateUpdateStatus: "private-update:status",
+  /** renderer → main: run a private update check now (menu / pill retry). */
+  privateUpdateCheck: "private-update:check",
+  /** renderer → main: open the validated download URL in the system
+   * browser. The URL itself never crosses to the renderer. */
+  privateUpdateDownload: "private-update:download",
 } as const;
 
 export type ElectronIpcChannel =

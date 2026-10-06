@@ -92,3 +92,34 @@ feature without touching an installed Raft Desktop. Default-off: no release
 script references the variant, and the isolated build skips `raft://`
 deep-link registration so it cannot steal links from the installed app.
 
+## Private-deployment app updates (phase 3-2)
+
+macOS in-place auto-update requires a SIGNED app — verified on real hardware
+with a minimal unsigned build (electron-updater 6.8.9: check/download/sha512
+all pass, then Squirrel.Mac's ShipIt rejects the swap: "Code signature … did
+not pass validation"; matches the official Electron docs). Private builds
+are unsigned, so when the runtime server origin is private the app runs a
+**detect → notify → manual install** flow instead:
+
+- `main/privateUpdateChecker.ts` fetches
+  `${origin}/downloads/desktop/latest-mac.yml` (start +30s, every 24h, and
+  the menu's Check for Updates), strictly parses `version` + the first
+  `files[].url`, and compares plain semver triples against the running
+  version. The resolved download URL must be **https and exactly the
+  current server origin** — a tampered feed carrying an absolute/external
+  URL is discarded with a warning; the renderer never receives the URL and
+  `shell.openExternal` only ever opens the main-process-validated value.
+- The renderer shows a top-bar pill (「新版 v…」); clicking opens the
+  download in the system browser. Official origins never start the checker
+  — the official electron-updater path is unchanged.
+- **Installing an unsigned download manually (Gatekeeper)**: after
+  downloading, open the .dmg with right-click → **Open** (or allow it under
+  **System Settings → Privacy & Security**), then drag Raft Desktop onto
+  /Applications to replace the installed app. The pill's hover text carries
+  these steps too. Same-Team-signed private builds (like the ones built on a
+  machine with the team certificate) skip the Gatekeeper dance entirely.
+
+The feed format is electron-builder's generic-provider `latest-mac.yml`, so
+a future signed private build can switch to in-place updates against the
+same URLs without server-side changes.
+

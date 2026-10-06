@@ -47,6 +47,7 @@ import { resolveBundledCursorSdkAssets } from "./cursorSdkAssets.js";
 import { installStatusMonitorLifecycle } from "../main/statusMonitorLifecycle.js";
 import { createStatusMonitor } from "../main/statusMonitor.js";
 import { createAppProtocolHandler } from "../main/appProtocol.js";
+import { startPrivateUpdateChecker } from "../main/privateUpdateChecker.js";
 import type { ComputerStatusReport } from "@botiverse/raft-computer/lib";
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
@@ -304,6 +305,17 @@ function registerIpcHandlers(): void {
     app.relaunch();
     app.exit(0);
   });
+  // Private update detection (phase 3-2) — inert unless a private checker
+  // is running (official origins never register live handlers).
+  const checker = privateUpdateChecker;
+  if (checker) {
+    ipcMain.handle(ELECTRON_IPC_CHANNELS.privateUpdateStatus, () => checker.status());
+    ipcMain.on(ELECTRON_IPC_CHANNELS.privateUpdateCheck, () => void checker.check());
+    ipcMain.on(ELECTRON_IPC_CHANNELS.privateUpdateDownload, () => {
+      checker.openDownload();
+    });
+    checker.onStatus(broadcastPrivateUpdateStatus);
+  }
 }
 
 // Computer host IPC — the renderer's window.raftDesktop.computer bridge. All
@@ -414,6 +426,21 @@ function registerComputerIpc(host: ComputerHost): void {
 // App self-update IPC — the renderer's window.raftDesktop.appUpdate bridge. The
 // updater auto-downloads in the background; the renderer renders a non-intrusive
 // "restart to update" affordance from this status stream (no native modal).
+// Private-deployment update detection (phase 3-2): unsigned builds cannot
+// use Squirrel.Mac (verified on real hardware — ShipIt rejects unsigned
+// updates), so private origins get detect → notify → manual install. Never
+// started for official origins — that path stays byte-identical. Created in
+// the GUI path only (single-instance lock held + app ready): this binary
+// also re-execs as headless `__service`/`__run` Computer children, which
+// must never run feed checks.
+let privateUpdateChecker: ReturnType<typeof startPrivateUpdateChecker> | null = null;
+
+function broadcastPrivateUpdateStatus(status: unknown): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) win.webContents.send(ELECTRON_IPC_CHANNELS.privateUpdateStatus, status);
+  }
+}
+
 function broadcastAppUpdateStatus(status: unknown): void {
   for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed()) win.webContents.send("app-update:status-update", status);
@@ -757,6 +784,16 @@ if (headlessMode?.mode === "__service") {
   }
 
   void app.whenReady().then(async () => {
+    // GUI path: start the private update checker here (never in the headless
+    // __service/__run branches above — those re-exec this binary and must
+    // stay free of feed traffic).
+    privateUpdateChecker = serverOriginConfig.isOfficial()
+      ? null
+      : startPrivateUpdateChecker({
+        origin: serverOriginConfig.current(),
+        appVersion: APP_VERSION,
+        openExternal: (url) => shell.openExternal(url),
+      });
     // In dev (unpacked), macOS shows the default Electron dock icon — the real
     // brand mark only ships inside the packaged .app (build/icon.icns). Set it
     // explicitly so `pnpm start` also shows the Raft icon. Packaged builds get
@@ -784,7 +821,36 @@ if (headlessMode?.mode === "__service") {
         });
         app.showAboutPanel();
       },
-      checkForUpdates: () => void checkForUpdatesManually({ markQuitting, updaterAllowed: desktopUpdaterAllowed }),
+      checkForUpdates: () => {
+        // Private origins: the detect-only checker owns manual checks too
+        // (the official updater feed is disabled there); the dialog mirrors
+        // the official manual-check UX.
+        const checker = privateUpdateChecker;
+        if (checker) {
+          void checker.check().then(() => {
+            const status = checker.status();
+            if (status.state === "available") {
+              void dialog.showMessageBox({
+                type: "info",
+                message: "A new version is available",
+                detail: `Raft Desktop ${status.version} is available from your server. Use the download button in the toolbar (or the notification pill) to get it.`,
+                buttons: ["Download now", "Later"],
+                defaultId: 0,
+              }).then((choice) => {
+                if (choice.response === 0) checker.openDownload();
+              });
+            } else {
+              void dialog.showMessageBox({
+                type: "info",
+                message: "You're up to date",
+                detail: `Raft Desktop ${APP_VERSION} is the latest version on your server.`,
+              });
+            }
+          });
+          return;
+        }
+        void checkForUpdatesManually({ markQuitting, updaterAllowed: desktopUpdaterAllowed });
+      },
       reload: () => focusedWindow()?.webContents.reload(),
       zoom,
       focusedServerWindow: () => focusedWindow(),

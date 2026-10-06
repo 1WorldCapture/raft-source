@@ -19,6 +19,7 @@ import { AvatarImageWithFallback } from "@web/components/ui/AvatarSlot";
 import ServerSwitcherMenu from "@web/components/ui/ServerSwitcherMenu";
 import { SKINS, currentSkinId, setSkin, skinById, subscribeSkin } from "./skins";
 import { DesktopUpdatePill } from "./appUpdate";
+import { PrivateUpdatePill } from "./privateUpdate";
 import { ServerOriginDialog, serverOriginSettingsAvailable } from "./ServerOriginDialog";
 
 const MOD_KEY = typeof navigator !== "undefined" && /Mac/i.test(navigator.platform) ? "⌘" : "Ctrl";
@@ -227,6 +228,7 @@ export function DesktopTopBar() {
       {/* Non-intrusive "restart to update" pill — only when an app update is
           downloaded and ready. */}
       <DesktopUpdatePill />
+      <PrivateUpdatePill />
       {serverOriginAvailable ? (
         <button
           type="button"

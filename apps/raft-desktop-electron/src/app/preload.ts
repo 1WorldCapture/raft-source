@@ -186,6 +186,17 @@ contextBridge.exposeInMainWorld("raftDesktop", {
     relaunch: (): void => ipcRenderer.send(ELECTRON_IPC_CHANNELS.serverOriginRelaunch),
   },
 
+  // Private-deployment update detection (phase 3-2). Detect-only: the
+  // download URL stays in main (validated same-origin); the renderer shows
+  // a pill and asks main to open the browser.
+  privateUpdate: {
+    getStatus: (): Promise<unknown> => ipcRenderer.invoke(ELECTRON_IPC_CHANNELS.privateUpdateStatus),
+    onStatus: (handler: (status: unknown) => void): (() => void) =>
+      subscribe<unknown>(ELECTRON_IPC_CHANNELS.privateUpdateStatus, handler),
+    checkNow: (): void => ipcRenderer.send(ELECTRON_IPC_CHANNELS.privateUpdateCheck),
+    openDownload: (): void => ipcRenderer.send(ELECTRON_IPC_CHANNELS.privateUpdateDownload),
+  },
+
   // App self-update (electron-updater). The app auto-downloads updates silently
   // in the background; the renderer surfaces a non-intrusive "restart to update"
   // affordance from this status stream — no native modal. Inert (state
