@@ -4,6 +4,9 @@ import type { AddressInfo } from "node:net";
 import { URL } from "node:url";
 import {
   formatTraceparent,
+  daemonApiInboxTargetCheckBodySchema,
+  TARGET_CHECK_PATH,
+  TARGET_CHECK_SCHEMA,
   noopTracer,
   parseAgentApiAppSourceAckReject,
   parseTraceparent,
@@ -21,7 +24,9 @@ import {
   sortInboxMessagesBySeq,
   type AgentInboxStateMachineEffect,
 } from "./agentInboxStateMachine.js";
-import { projectAgentInboxSnapshot } from "./agentInboxProjection.js";
+import { projectAgentInboxSnapshot, eligibleInboxTargetRefs } from "./agentInboxProjection.js";
+import { prepareTargetCheck, TargetCheckError } from "./agentInboxTargetCheck.js";
+import { formatProxyVisibleMessageTarget } from "./agentVisibleDeliveryLedger.js";
 import type { AgentInboxTargetRow } from "./agentInboxProjection.js";
 import type { AgentAppInboxStore } from "./agentAppInbox.js";
 import { daemonFetch, type DaemonFetchOptions } from "./daemonFetch.js";
@@ -63,6 +68,11 @@ type AppSourceAckAcceptedResponse = {
 };
 
 export type AgentProxyVisibleMessage = {
+  channel_id?: string;
+  parent_channel_id?: string;
+  mentioned?: boolean;
+  non_member_mention?: boolean;
+  third_party_event?: { id?: string; kind?: string } | null;
   seq?: number;
   id?: string;
   message_id?: string;
@@ -95,6 +105,11 @@ export type AgentProxyInboxCoordinator = {
    * not the primary source while the daemon has already accepted delivery.
    */
   getAllPendingMessages?(): AgentProxyVisibleMessage[];
+  /** Exact-ID local consumption plus current-generation mention completion. */
+  consumeTargetMessages?(messages: AgentProxyVisibleMessage[]): void;
+  /** Prevent a still-registered old launch token from following a dynamic Agent lookup. */
+  isCurrentLaunch?(launchId: string | null): boolean;
+  recordAttentionCheck?(input: { scope: "target" | "all"; target?: string; outcome: string; returnedCount?: number }): void;
   recordInboxSnapshot?(input: AgentProxyInboxProjectionTraceInput): void;
   consumeVisibleMessages(input: {
     target?: string;
@@ -510,6 +525,78 @@ async function handleProxyRequest(req: http.IncomingMessage, res: http.ServerRes
     let sideEffectFreshnessContextMode: "inline" | "withheld" | undefined;
     const sideEffectAction = agentApiSideEffectAction(target.pathname);
 
+    // A target string only selects inside THIS token's registration. Every
+    // branch of this endpoint is local; in particular empty/unavailable MUST
+    // NOT fall through to the global /events drain on the server.
+    if (target.pathname === TARGET_CHECK_PATH) {
+      const observe = (outcome: string, returnedCount = 0, checkTarget?: string) => {
+        try { registration.inboxCoordinator?.recordAttentionCheck?.({ scope: "target", target: checkTarget, outcome, returnedCount }); } catch { /* telemetry cannot affect reads */ }
+      };
+      const reply = (status: number, payload: Record<string, unknown>) => {
+        proxySpanStatus = status < 400 ? "ok" : "error";
+        proxySpanEndAttrs = { outcome: status < 400 ? "local_response" : "local_rejection", local_response_kind: "inbox_target_check", http_status: status };
+        res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" });
+        res.end(JSON.stringify(payload));
+      };
+      if (method !== "POST") {
+        observe("method_not_allowed");
+        reply(405, { code: "METHOD_NOT_ALLOWED", error: "Target check requires POST." });
+        return;
+      }
+      let bodyValue: unknown;
+      try { bodyValue = JSON.parse(rawBodyBuffer?.toString("utf8") ?? ""); } catch {
+        observe("invalid_argument");
+        reply(400, { code: "INVALID_ARG", error: "Target check requires a JSON object." });
+        return;
+      }
+      const parsed = daemonApiInboxTargetCheckBodySchema.safeParse(bodyValue);
+      if (!parsed.success) {
+        observe("invalid_argument");
+        reply(400, { code: "INVALID_ARG", error: "Expected a displayed target and an optional integer limit from 1 to 200. Identity fields are not accepted." });
+        return;
+      }
+      const coordinator = registration.inboxCoordinator;
+      if (!coordinator?.getAllPendingMessages || !coordinator.consumeTargetMessages) {
+        observe("unavailable", 0, parsed.data.target);
+        reply(503, { code: "TARGET_CHECK_UNAVAILABLE", error: "This daemon did not expose target-scoped local consumption." });
+        return;
+      }
+      if (registrations.get(token) !== registration || coordinator.isCurrentLaunch?.(registration.launchId) === false) {
+        observe("registration_expired", 0, parsed.data.target);
+        reply(401, { code: "invalid_agent_proxy_token", error: "This proxy registration no longer owns the current launch." });
+        return;
+      }
+      try {
+        // Do not filter notification contribution: notice delivery is NOT body exposure.
+        const pending = coordinator.getAllPendingMessages().filter((message) =>
+          !coordinator.isMessageModelSeen?.({ target: formatProxyVisibleMessageTarget(message), message }));
+        const plan = prepareTargetCheck([...pending], parsed.data);
+        if (registrations.get(token) !== registration || coordinator.isCurrentLaunch?.(registration.launchId) === false || req.aborted || res.destroyed) {
+          observe("registration_expired", 0, parsed.data.target);
+          reply(401, { code: "invalid_agent_proxy_token", error: "The local registration expired before consumption." });
+          return;
+        }
+        // No await between checking ownership, consuming exact members and returning
+        // the already validated serialized result. Transport loss after consumption
+        // retains legacy check semantics; this is not a durable claim protocol.
+        if (plan.consumedMessages.length > 0) coordinator.consumeTargetMessages(plan.consumedMessages);
+        observe(plan.response.returned_count > 0 ? "returned" : "empty", plan.response.returned_count, parsed.data.target);
+        proxySpanStatus = "ok";
+        proxySpanEndAttrs = { outcome: "local_response", local_response_kind: "inbox_target_check", http_status: 200 };
+        res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+        res.end(plan.serialized);
+      } catch (err) {
+        observe(err instanceof TargetCheckError ? err.code : "failed", 0, parsed.data.target);
+        if (res.headersSent) { res.destroy(); return; }
+        if (err instanceof TargetCheckError) {
+          reply(err.status, { code: err.code, error: err.message, ...(err.messageId ? { message_id: err.messageId } : {}) });
+        } else {
+          reply(500, { code: "TARGET_CHECK_FAILED", error: "The local target check failed; it was not retried as a global read." });
+        }
+      }
+      return;
+    }
+
     if (method === "GET" && target.pathname === "/internal/agent-api/runtime-version") {
       if (!registration.daemonVersion) {
         proxySpanEndAttrs = {
@@ -730,6 +817,9 @@ async function handleProxyRequest(req: http.IncomingMessage, res: http.ServerRes
     proxySpanEndAttrs = proxyFailureSpanAttrs(transportError);
     writeProxyFailureResponse(res, failure);
   } finally {
+    if (target?.pathname === "/internal/agent-api/events" && proxySpanStatus === "error") {
+      try { registration.inboxCoordinator?.recordAttentionCheck?.({ scope: "all", outcome: "failed", returnedCount: 0 }); } catch { /* telemetry only */ }
+    }
     proxySpan.end(proxySpanStatus, { attrs: proxySpanEndAttrs });
   }
 }
@@ -1155,7 +1245,8 @@ function localAgentApiInboxResponse(
 ): { status: number; body: Record<string, unknown> } | undefined {
   const coordinator = registration.inboxCoordinator;
   if (!coordinator && !registration.appInbox) return undefined;
-  const pending = coordinator?.getAllPendingMessages?.() ?? [];
+  const pending = (coordinator?.getAllPendingMessages?.() ?? []).filter((message) =>
+    !coordinator?.isMessageModelSeen?.({ target: formatProxyVisibleMessageTarget(message), message }));
   const rows = projectAgentInboxSnapshot(pending);
   const appItems = registration.appInbox?.list() ?? [];
   const acknowledgedAppSources = registration.appInbox?.listAcknowledgedSources() ?? [];
@@ -1179,6 +1270,9 @@ function localAgentApiInboxResponse(
       pending_messages: pending.length,
       pending_app_items: appItems.length,
       acknowledged_app_sources: acknowledgedAppSources,
+      ...(coordinator?.consumeTargetMessages ? {
+        target_check: { schema: TARGET_CHECK_SCHEMA, eligible_targets: [...eligibleInboxTargetRefs(pending)] },
+      } : {}),
     },
   };
 }
@@ -1396,6 +1490,7 @@ async function localAgentApiEventsResponse(
     // high-water; only verified contiguous content consumption may do that.
     coordinator.consumeVisibleMessages({ messages: events, source: "agent_api_events_local" });
   }
+  try { coordinator.recordAttentionCheck?.({ scope: "all", outcome: events.length > 0 ? "returned" : "empty", returnedCount: events.length }); } catch { /* telemetry only */ }
   coordinator.recordDrainOutcome?.({
     source: "daemon_pending",
     sinceCursorKind: parsedQuery.sinceCursorKind,
@@ -1612,6 +1707,7 @@ async function consumeVisibleResponse(
     // contiguous content consumption. Record exact ids for duplicate
     // suppression, but do not advance the model-seen high-water boundary.
     coordinator.consumeVisibleMessages({ messages, source: "agent_api_events_server" });
+    try { coordinator.recordAttentionCheck?.({ scope: "all", outcome: messages.length > 0 ? "returned" : "empty", returnedCount: messages.length }); } catch { /* telemetry only */ }
     coordinator.recordDrainOutcome?.({
       source: "server_events",
       sinceCursorKind: parseAgentApiEventsQuery(targetUrl).sinceCursorKind,

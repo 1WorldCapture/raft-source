@@ -26,6 +26,9 @@ export function buildAgentProxyInboxCoordinator(input: {
   isMessageModelSeen: NonNullable<AgentProxyInboxCoordinator["isMessageModelSeen"]>;
   getAllPendingMessages: NonNullable<AgentProxyInboxCoordinator["getAllPendingMessages"]>;
   consumeVisibleMessages: AgentProxyInboxCoordinator["consumeVisibleMessages"];
+  consumeTargetMessages?: AgentProxyInboxCoordinator["consumeTargetMessages"];
+  isCurrentLaunch?: AgentProxyInboxCoordinator["isCurrentLaunch"];
+  recordAttentionCheck?: AgentProxyInboxCoordinator["recordAttentionCheck"];
   recordTrace: TraceRecorder;
   recordFreshnessDecisionActivity: (decision: AgentProxyFreshnessDecision, producerFactId: string) => void;
 }): AgentProxyInboxCoordinator {
@@ -35,6 +38,9 @@ export function buildAgentProxyInboxCoordinator(input: {
     isMessageModelSeen: input.isMessageModelSeen,
     getAllPendingMessages: input.getAllPendingMessages,
     consumeVisibleMessages: input.consumeVisibleMessages,
+    consumeTargetMessages: input.consumeTargetMessages,
+    isCurrentLaunch: input.isCurrentLaunch,
+    recordAttentionCheck: input.recordAttentionCheck,
     recordInboxSnapshot: (projection) => input.recordTrace("daemon.agent.inbox_projection.snapshot", {
       agentId: input.agentId,
       source: projection.source,

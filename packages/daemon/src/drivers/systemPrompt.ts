@@ -153,7 +153,7 @@ ${startupSteps.join("\n")}`;
 
 ## Messaging
 
-People and agents collaborate asynchronously in Raft. Keep making progress on your current work, and adjust your plan and priorities based on new information you read. Choose when to read pending messages; unread messages do not mean there is no work, and each notice does not require an immediate interruption.
+People and agents collaborate asynchronously in Raft. Keep making progress on your current work, and use Raft's conversation reading recommendation when choosing what to inspect next. If the recommended conversation is unrelated to your current task, finish your current step before switching. Recommendations do not restrict your reading tools or require immediate interruption. A content-free notice is not a read receipt; unread messages do not mean there is no work.
 
 Messages you receive have a single RFC 5424-style structured data header followed by the sender and content:
 

@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { AGENT_INBOX_FLAGS, type AgentInboxFlag } from "./agentInbox.js";
 import { ATTENTION_HINT_SCHEMA } from "./attentionDependencyOracle.js";
+import { agentApiMessageEnvelopeSchema } from "./agentApiMessageContract.js";
 
 export const DAEMON_API_BASE_PATH = "/internal/agent-api";
 
@@ -64,6 +65,8 @@ export const daemonApiInboxTargetRowSchema = passthroughObject({
   latestSenderType: z.enum(["human", "agent", "system", "third_party_app"]).optional(),
   flags: z.array(daemonApiInboxFlagSchema),
   attentionHint: daemonApiAttentionHintSchema.optional(),
+  // Future priorities must not make the entire Inbox unreadable.
+  attentionPriority: z.string().optional(),
 });
 
 const daemonApiInboxPrimaryActionSchema = passthroughObject({
@@ -108,6 +111,32 @@ const daemonApiInboxMessageTargetItemSchema = passthroughObject({
   row: daemonApiInboxTargetRowSchema,
 });
 
+export const TARGET_CHECK_SCHEMA = "daemon-inbox-target-check.v1" as const;
+export const TARGET_CHECK_PATH = "/internal/agent-api/inbox/messages/check";
+export const TARGET_CHECK_DEFAULT_LIMIT = 50;
+export const TARGET_CHECK_MAX_LIMIT = 200;
+export const TARGET_CHECK_MAX_RESPONSE_BYTES = 256 * 1024;
+
+export const daemonApiInboxTargetCheckBodySchema = z.object({
+  // Selection of an already displayed local ref, not arbitrary identity resolution.
+  target: z.string().trim().min(2).max(512)
+    .regex(/^(?:#[^\s\x00-\x1f\x7f]+|dm:@[^\s\x00-\x1f\x7f]+)$/u),
+  limit: z.number().int().positive().max(TARGET_CHECK_MAX_LIMIT).optional(),
+}).strict();
+
+export const daemonApiInboxTargetCheckResponseSchema = passthroughObject({
+  scope: z.literal("daemon_pending_target"),
+  target: z.string().min(1).max(512),
+  messages: z.array(agentApiMessageEnvelopeSchema).max(TARGET_CHECK_MAX_LIMIT),
+  returned_count: z.number().int().nonnegative(),
+  remaining_count: z.number().int().nonnegative(),
+  has_more: z.boolean(),
+}).superRefine((body, ctx) => {
+  if (body.returned_count !== body.messages.length || body.has_more !== (body.remaining_count > 0)) {
+    ctx.addIssue({ code: "custom", message: "Target-check counts must match the returned page", path: ["returned_count"] });
+  }
+});
+
 export const daemonApiInboxCheckResponseSchema = passthroughObject({
   rows: z.array(daemonApiInboxTargetRowSchema).optional(),
   items: z.array(z.union([daemonApiInboxMessageTargetItemSchema, daemonApiInboxAppItemSchema])).optional(),
@@ -115,6 +144,10 @@ export const daemonApiInboxCheckResponseSchema = passthroughObject({
   pending_messages: optionalNonNegativeIntSchema,
   pending_app_items: optionalNonNegativeIntSchema,
   acknowledged_app_sources: z.array(daemonApiInboxAcknowledgedAppSourceSchema).optional(),
+  target_check: passthroughObject({
+    schema: z.literal(TARGET_CHECK_SCHEMA),
+    eligible_targets: z.array(z.string()),
+  }).optional(),
 });
 
 export const daemonApiInboxAckBodySchema = z.object({
@@ -243,6 +276,15 @@ export const daemonApiContract = {
     description: "Read the managed-runner daemon inbox snapshot without draining message content.",
     request: {},
     response: { body: daemonApiInboxCheckResponseSchema },
+  }),
+  inboxTargetCheck: route({
+    key: "inboxTargetCheck",
+    method: "POST",
+    path: "/inbox/messages/check",
+    client: { resource: "inbox", method: "checkTarget" },
+    description: "Consume one bounded page of this managed daemon's pending messages for a displayed target. Never falls back to global events.",
+    request: { body: daemonApiInboxTargetCheckBodySchema },
+    response: { body: daemonApiInboxTargetCheckResponseSchema },
   }),
   inboxAck: route({
     key: "inboxAck",

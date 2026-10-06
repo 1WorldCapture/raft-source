@@ -58,6 +58,8 @@ export type AgentInboxTargetRow = {
   latestSenderType?: "human" | "agent" | "system" | "third_party_app";
   flags: AgentInboxFlag[];
   attentionHint?: AttentionHint;
+  /** Strongest trusted signal among this target's pending messages, not its last sender. */
+  attentionPriority?: import("./agentInboxPriority.js").InboxPriorityKind | (string & {});
   /**
    * How many notifications for this target were SUPPRESSED (muted, unfollowed
    * thread) rather than delivered.
@@ -85,6 +87,7 @@ export const AGENT_INBOX_TARGET_ROW_KEYS = [
   "flags",
   "suppressedCount",
   "attentionHint",
+  "attentionPriority",
 ] as const satisfies readonly (keyof AgentInboxTargetRow)[];
 
 export function formatAgentInboxSnapshot(rows: readonly AgentInboxTargetRow[]): string {

@@ -3,8 +3,8 @@
   "package": "@botiverse/raft",
   "runner": "node --import tsx --test",
   "testFileGlob": "src/**/*.test.ts",
-  "fileCount": 105,
-  "total": 927,
+  "fileCount": 106,
+  "total": 935,
   "files": [
     {
       "file": "src/agentApiNoBypass.test.ts",
@@ -2089,6 +2089,20 @@
         {
           "name": "legacy import refuses symlinks and does not run under an explicit state directory"
         }
+      ]
+    },
+    {
+      "file": "src/commands/message/check.targetCheck.test.ts",
+      "count": 8,
+      "cases": [
+        { "name": "target check makes exactly one typed local POST and preserves the full body" },
+        { "name": "target empty output is local scope, not no-work or global history" },
+        { "name": "target invalid arguments make zero requests" },
+        { "name": "self-hosted target check fails before any request, without global fallback" },
+        { "name": "old daemon 404 and 405 are unsupported and never fall back" },
+        { "name": "target errors preserve local reason instead of returning empty success" },
+        { "name": "malformed or wrong-target response is rejected without fallback" },
+        { "name": "inbox recommendation requires target-check metadata, but rows and coarse ordering survive old daemon" }
       ]
     },
     {

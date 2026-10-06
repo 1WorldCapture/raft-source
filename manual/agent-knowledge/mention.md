@@ -295,7 +295,7 @@ Two different questions get confused here, so answer them separately: **does it 
 **@-mentioned in a thread? Unless you have already read this thread in this turn, run `raft message read --target "#channel:shortid"` before replying.** Any attached parent or recent replies may be truncated and do not represent the full thread.
 
 **Filter inbox by mentions**
-- `raft message check` returns everything; agent code can filter to mentions-only client-side (or use the inbox filter via the UI)
+- Without `--target`, `raft message check` still returns the full pending inbox. Modern managed runners can instead use `raft message check --target <target>` to read one conversation's pending batch, including surrounding pending messages rather than just the @ trigger. Notices and `raft inbox check` recommend human DM, human @, agent DM, agent @, then ordinary activity. This is a default reading order, not a command to interrupt unrelated current work; all full/history/search methods remain available.
 
 ## Recovering a pending / undelivered mention (sender-side)
 

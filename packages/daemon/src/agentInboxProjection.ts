@@ -1,4 +1,4 @@
-import type { AgentInboxFlag, AgentInboxTargetRow, AttentionHint } from "@botiverse/raft-shared";
+import { aggregateInboxPriority, type AgentInboxFlag, type AgentInboxTargetRow, type AttentionHint } from "@botiverse/raft-shared";
 
 export {
   AGENT_INBOX_TARGET_ROW_KEYS,
@@ -10,6 +10,8 @@ export {
 } from "@botiverse/raft-shared";
 
 export type AgentInboxProjectionMessage = {
+  /** Used only to establish targeted-body eligibility; never rendered in the projection. */
+  content?: string;
   seq?: number;
   id?: string;
   message_id?: string;
@@ -130,6 +132,7 @@ function projectBucket(target: string, messages: readonly AgentInboxProjectionMe
     latestSenderType: normalizeSenderType(latest.sender_type ?? latest.senderType),
     flags: [...flags].sort(),
     attentionHint,
+    attentionPriority: aggregateInboxPriority(sorted.filter(isTargetCheckMessage)),
   });
 }
 
@@ -137,7 +140,7 @@ function compareInboxMessages(a: AgentInboxProjectionMessage, b: AgentInboxProje
   return (messageSeq(a) ?? 0) - (messageSeq(b) ?? 0) || (messageId(a) ?? "").localeCompare(messageId(b) ?? "");
 }
 
-function formatInboxMessageTarget(message: AgentInboxProjectionMessage): string | null {
+export function formatInboxMessageTarget(message: AgentInboxProjectionMessage): string | null {
   if (message.channel_type === "thread" && message.parent_channel_name && message.channel_name) {
     const shortId = shortMessageId(String(message.channel_name).startsWith("thread-")
       ? String(message.channel_name).slice("thread-".length)
@@ -148,6 +151,32 @@ function formatInboxMessageTarget(message: AgentInboxProjectionMessage): string 
   if (message.channel_type === "dm" && message.channel_name) return `dm:@${message.channel_name}`;
   if (message.channel_name) return `#${message.channel_name}`;
   return null;
+}
+
+/** Ordinary conversation rows only: synthetic events are not a target-check source. */
+export function isTargetCheckMessage(message: AgentInboxProjectionMessage): boolean {
+  const id = messageId(message);
+  return Boolean(id && message.channel_id && typeof message.content === "string" && !message.third_party_event
+    && !id.startsWith("runtime-profile-migration-")
+    && !id.startsWith("runtime-profile-daemon-release-")
+    && (message.channel_type === "channel" || message.channel_type === "dm" || message.channel_type === "thread")
+    && message.channel_name
+    && (message.channel_type !== "thread" || (message.parent_channel_name
+      && (message.parent_channel_type === "channel" || message.parent_channel_type === "dm"))));
+}
+
+/** Use the SAME qualification and displayed-ref mapping as the target reader. */
+export function eligibleInboxTargetRefs(messages: readonly AgentInboxProjectionMessage[]): Set<string> {
+  const identities = new Map<string, Set<string>>();
+  for (const message of messages) {
+    if (!isTargetCheckMessage(message)) continue;
+    const target = formatInboxMessageTarget(message);
+    if (!target) continue;
+    const ids = identities.get(target) ?? new Set<string>();
+    ids.add(message.channel_id!);
+    identities.set(target, ids);
+  }
+  return new Set([...identities].filter(([, ids]) => ids.size === 1).map(([target]) => target));
 }
 
 function messageId(message: AgentInboxProjectionMessage | undefined): string | undefined {

@@ -43,7 +43,7 @@ export const inboxCheckCommand = defineCommand(
       `${formatAgentInboxFullSnapshot({
         messageRows: rows,
         appItems,
-        formatMessageRows: formatInboxSnapshot,
+        formatMessageRows: (messageRows) => formatInboxSnapshot(messageRows, response.data?.target_check?.eligible_targets),
       })}\n`,
     ));
   },

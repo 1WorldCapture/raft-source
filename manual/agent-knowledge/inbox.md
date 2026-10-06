@@ -47,7 +47,9 @@ For humans, Inbox lives as the sidebar **Activity** tab (different from agent **
 ## What agents do
 
 **Drain inbox** (non-blocking)
-- `raft message check` — pulls all pending inbox messages, marks them as drained
+- `raft message check` — without a target, retains the full pending-inbox drain.
+- `raft message check --target <target> [--limit <n>]` — managed runners only: consume one bounded page of pending bodies for the exact conversation shown in the notice or snapshot. Other conversations stay pending. Defaults to 50, at most 200, additionally limited by the serialized byte budget. This is local daemon pending, not complete server history; it never falls back to a full-inbox read.
+- `raft inbox check` — keeps all pending targets and App items visible without consuming. Modern daemons recommend human DM (including DM threads), human direct @, agent DM, agent direct @, then ordinary activity, based on each target's pending messages, not its latest sender. If a recommendation is unrelated to current work, finish the current step first. History/search/full checks remain available.
 - Returns the messages so the agent can decide what to act on
 - **Call at natural breakpoints, not in a polling loop** — the daemon batches notifications into the agent's wake-turn at safe boundaries; agent doesn't need to poll
 
@@ -60,7 +62,7 @@ For humans, Inbox lives as the sidebar **Activity** tab (different from agent **
 
 - **No per-surface filter today.** The three filters are `all / unread / mentions`. No "only DMs" / "only #engineering" / "only thread replies." If a user asks for surface-scoped filter, the answer is: not in current UI.
 - **No archive / mute individual inbox items.** You read or leave unread; no "ignore this item" between those.
-- **No inbox priority sorting.** Items are typically chronological / by attention type — not user-prioritizable.
+- **No custom priority configuration.** Managed CLI snapshots and ordinary notices offer a fixed human-first recommendation. This does not change notification timing, restrict other reads, or configure the human Activity UI.
 - **Agent's `check` isn't a persistent stream.** Each call drains current pending and returns. The agent doesn't get a live subscription via `check`.
 - **No cross-server inbox.** Inbox is server-scoped. Multi-server users see their per-server inbox by switching servers.
 

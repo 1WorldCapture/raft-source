@@ -67,6 +67,8 @@ import type {
   PredicateFixtureResult,
 } from "./apmStateMachineTrace.js";
 import { AgentProcessManager } from "./agentProcessManager.js";
+import { prepareTargetCheck } from "./agentInboxTargetCheck.js";
+import type { AgentProxyInboxCoordinator } from "./agentCredentialProxy.js";
 import { installDaemonFetchMockForTests } from "./daemonFetch.js";
 import type { RuntimeDriver, SpawnContext, SpawnResult, ParsedEvent } from "./drivers/index.js";
 import type { RuntimeLaunchVersionPolicy } from "./drivers/types.js";
@@ -302,6 +304,31 @@ function assertPendingInputInvariant(
     `${label}: pending_input > admitted_input must have a scheduled or running turn`,
   );
 }
+
+test("Claude attention: mixed busy notice recommends human DM, targeted bodies consume only that conversation", async () => {
+  const sink = new MemoryTraceSink();
+  const tracer = new BasicTracer({ sink });
+  await withManager(async ({ driver, manager }) => {
+    await manager.startAgent("agent-1", makeConfig({ sessionId: "session-1" }));
+    manager.deliverMessage("agent-1", makeMessage("ordinary-body", { message_id: "ordinary-id", seq: 1 }));
+    manager.deliverMessage("agent-1", makeMessage("dm-first-body", { message_id: "dm-id-1", seq: 2, channel_id: "dm-1", channel_type: "dm", channel_name: "richard" }));
+    manager.deliverMessage("agent-1", makeMessage("dm-second-body", { message_id: "dm-id-2", seq: 3, channel_id: "dm-1", channel_type: "dm", channel_name: "richard" }));
+    (manager as any).sendStdinNotification("agent-1");
+    const prompt = driver.encodedCalls.at(-1)?.text ?? "";
+    assert.match(prompt, /Suggested first among these updates: "dm:@richard"/);
+    assert.doesNotMatch(prompt, /dm-first-body|ordinary-body/);
+    const coordinator: AgentProxyInboxCoordinator = (manager as any).createAgentProxyInboxCoordinator("agent-1");
+    const plan = prepareTargetCheck(coordinator.getAllPendingMessages!(), { target: "dm:@richard" });
+    assert.deepEqual(plan.response.messages.map((m) => m.content), ["dm-first-body", "dm-second-body"]);
+    coordinator.consumeTargetMessages!(plan.consumedMessages);
+    coordinator.recordAttentionCheck!({ scope: "target", target: "dm:@richard", outcome: "returned", returnedCount: 2 });
+    assert.deepEqual(coordinator.getAllPendingMessages!().map((m) => m.message_id), ["ordinary-id"]);
+    assert.equal(prepareTargetCheck(coordinator.getAllPendingMessages!(), { target: "dm:@richard" }).response.returned_count, 0);
+    const read = sink.getAllSpans().find((span) => span.attrs?.["attention.first_check"] === true);
+    assert.equal(read?.attrs?.["attention.followed_recommendation"], true);
+    assert.equal(read?.attrs?.["attention.recommended_target"], "dm:@richard");
+  }, { tracer });
+});
 
 test("Claude creation-time version gate blocks known-bad CLI before deferred-empty return and spawn", async () => {
   await withManager(async ({ driver, manager, sent }) => {

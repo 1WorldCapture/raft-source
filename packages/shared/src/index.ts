@@ -228,6 +228,7 @@ export * from "./clock.js";
 export * from "./daemonApiRawClient.js";
 export * from "./daemonApiClient.js";
 export * from "./agentInbox.js";
+export * from "./agentInboxPriority.js";
 export * from "./agentInboxApp.js";
 export * from "./attentionDependencyOracle.js";
 export * from "./runtimeProviderDisplay.js";

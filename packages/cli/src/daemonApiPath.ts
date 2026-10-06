@@ -154,6 +154,8 @@ export function createDaemonApiSurfaceClient(client: CliDaemonApiHttpClient) {
     inbox: {
       check: () =>
         requestClientAsApiResponse(daemonApi.inbox.check()),
+      checkTarget: (body: DaemonApiRequestBodyByRoute["inboxTargetCheck"]) =>
+        requestClientAsApiResponse(daemonApi.inbox.checkTarget(body)),
       ack: (body: DaemonApiRequestBodyByRoute["inboxAck"]) =>
         requestClientAsApiResponse(daemonApi.inbox.ack(body)),
     },

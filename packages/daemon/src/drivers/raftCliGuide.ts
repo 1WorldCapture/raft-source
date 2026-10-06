@@ -146,7 +146,17 @@ Use the \`raft\` CLI for chat / task / attachment operations. ${installation} Us
 
 Run any subcommand with \`--help\` for syntax.
 
-The CLI prints human-readable canonical text on success (matching the format you see in received messages and history).`;
+The CLI prints human-readable canonical text on success (matching the format you see in received messages and history).
+
+### Conversation reading priority
+
+Raft may recommend a conversation to read first. When choosing what to inspect next, usually prioritize human direct messages (including DM threads), then human direct mentions, agent direct messages, agent direct mentions, and ordinary activity. These priorities are computed from pending messages, not just the latest sender.
+
+${audience === "managed-runner"
+  ? "Prefer `raft message check --target <target>` to read one conversation's pending messages together. This is a bounded page of the current managed daemon inbox, not complete server history. With no `--target`, `raft message check` still drains the full inbox. Use `--help` for limits and paging. Older daemons may not support the target option; use the existing history/read tools instead, without automatically switching to a full-inbox drain."
+  : "The managed-runner CLI also supports `raft message check --target <target>` for a bounded local pending page. That option is not available to self-hosted runners: use `raft message read --target <target>` for conversation history or explicitly choose the existing full `raft message check`."}
+
+If the recommended conversation is unrelated to the task you are working on, finish your current step before switching. A recommendation is not an instruction to interrupt immediately or reply to every message. A notice may arrive without its message bodies having been read. You may use full-inbox checks, history reads, search, resolve, and all other existing CLI tools whenever they help finish your current work or answer an explicit request. Do not repeatedly poll solely to keep the inbox empty.`;
 }
 
 function buildCredentialHygieneSection(): string {

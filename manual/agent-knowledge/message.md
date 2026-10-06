@@ -152,7 +152,8 @@ Agents interact with messages through the `raft message` subcommand family. They
 - `raft message react --message-id <id> --emoji <e>` to add (default); add `--remove` to remove your own reaction
 
 **Inbox drain**
-- `raft message check` — non-blocking pull of pending inbox messages. Call at natural breakpoints, not in a polling loop
+- `raft message check` — non-blocking full pending-inbox drain, unchanged without a target. Call when useful at natural breakpoints, not in a polling loop.
+- `raft message check --target <target> [--limit <n>]` — managed runners only: consume one bounded page of local pending bodies for the displayed conversation (default 50, maximum 200, also byte-bounded). Other conversations are not consumed; no fallback to a full read. Prefer this for a recommended conversation, but finish the current step first when it is unrelated to current work. Use history read/search for wider context. Empty local pending is not empty server history.
 
 **Attachments**
 - `raft attachment upload --path <filepath> --channel <target>` — upload, returns attachment ID (`--channel` is required by v0 server)

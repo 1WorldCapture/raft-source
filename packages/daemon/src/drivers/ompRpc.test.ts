@@ -172,6 +172,40 @@ async function processAlive(pid: number): Promise<boolean> {
   }
 }
 
+test("omp attention RPC preserves recommendation and leaves notice-only bodies for targeted check", async () => {
+  const { formatInboxUpdateRuntimeInput } = await import("../agentRuntimeInput.js");
+  const { prepareTargetCheck } = await import("../agentInboxTargetCheck.js");
+  const { AgentVisibleDeliveryLedger } = await import("../agentVisibleDeliveryLedger.js");
+  const fake = await startFakeOmp("echo");
+  try {
+    await fake.waitReadyNegotiated();
+    fake.driver.parseLine(JSON.stringify({ type: "agent_start" }));
+    fake.driver.parseLine(JSON.stringify({ type: "turn_start" }));
+    const messages: Parameters<typeof formatInboxUpdateRuntimeInput>[0] = [
+      { channel_id: "channel-a", channel_name: "a", channel_type: "channel", sender_id: "u1", sender_type: "human", sender_name: "owner", timestamp: "2026-10-06T00:00:00Z", message_id: "ordinary", seq: 1, content: "ordinary body" },
+      { channel_id: "dm-1", channel_name: "owner", channel_type: "dm", sender_id: "u1", sender_type: "human", sender_name: "owner", timestamp: "2026-10-06T00:00:01Z", message_id: "dm-1", seq: 2, content: "DM body" },
+    ];
+    const notice = formatInboxUpdateRuntimeInput(messages, fake.driver);
+    const encoded = fake.driver.encodeStdinMessage(notice, null, { mode: "busy" });
+    assert.ok(encoded);
+    const frame = JSON.parse(encoded);
+    assert.equal(frame.type, "steer");
+    assert.match(frame.message, /Suggested first among these updates: "dm:@owner"/);
+    assert.match(frame.message, /finish your current step/);
+    assert.doesNotMatch(frame.message, /ordinary body|DM body/);
+    fake.proc.stdin!.write(`${encoded}\n`);
+    const plan = prepareTargetCheck(messages, { target: "dm:@owner" });
+    assert.equal(plan.response.messages[0]?.content, "DM body", "steered notice is not a body read");
+    const ledger = new AgentVisibleDeliveryLedger();
+    const consumed = ledger.recordConsumed("agent-omp", { messages: plan.consumedMessages, source: "agent_api_events_local" })!;
+    const remaining = messages.filter((message) => !consumed.shouldSuppress(message));
+    assert.deepEqual(remaining.map((message) => message.message_id), ["ordinary"]);
+    assert.equal(prepareTargetCheck(remaining, { target: "dm:@owner" }).response.returned_count, 0);
+  } finally {
+    fake.driver.stop({ sigtermGraceMs: 100 });
+  }
+});
+
 test("ready frame arms the driver and a supported v2 is negotiated", async () => {
   const fake = await startFakeOmp("echo");
   try {

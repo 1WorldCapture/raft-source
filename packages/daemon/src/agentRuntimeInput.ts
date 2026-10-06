@@ -1,6 +1,9 @@
 import { EXAMPLE_T, exampleMessage, exampleRestartDriver, exampleStdinDriver, exampleUnreadSummary } from "./axExampleFixtures.js";
 import {
   formatUtcTimestamp,
+  rankInboxTargets,
+  recommendInboxTarget,
+  formatInboxPriorityRecommendation,
   formatProducerFactLineageBracket,
   renderThirdPartyInertJson,
   asAxSurfaceText,
@@ -12,6 +15,7 @@ import {
   formatAgentInboxDelta,
   formatAgentReplyAffordanceSuffix,
   projectAgentInboxSnapshot,
+  eligibleInboxTargetRefs,
   type AgentInboxTargetRow,
 } from "./agentInboxProjection.js";
 import { formatAttachmentSuffix, type AttachmentDownloadHintStyle } from "./attachmentFormatting.js";
@@ -195,6 +199,11 @@ export const formatConcreteMessagesRuntimeInput = axSurface(
   },
 );
 
+/** The renderer and the successful-push trace use this same pure recommendation. */
+export function inboxPriorityRecommendation(messages: readonly AgentMessage[]) {
+  return recommendInboxTarget(rankInboxTargets(projectAgentInboxSnapshot(messages)), eligibleInboxTargetRefs(messages));
+}
+
 export const formatInboxUpdateRuntimeInput = axSurface(
   "Content-free [Raft inbox notice: ...] batched into a busy turn or delivered as a wake.",
   (
@@ -202,13 +211,15 @@ export const formatInboxUpdateRuntimeInput = axSurface(
   _driver: RuntimeDriver,
   totalPendingMessages: number = messages.length,
 ): string => {
-  const rows = projectAgentInboxSnapshot(messages);
+  const rows = rankInboxTargets(projectAgentInboxSnapshot(messages));
+  const recommendation = recommendInboxTarget(rows, eligibleInboxTargetRefs(messages));
   return ([
     "[Raft inbox notice:",
     formatAgentInboxDelta(rows, { totalPendingMessages }),
     "]",
-    "These messages have not been read. Choose when to read them with `raft message check` or `raft message read --target <target>`; deferring them does not establish that there is no work.",
-  ].join("\n"));
+    formatInboxPriorityRecommendation(recommendation, "updates"),
+    "These messages have not been read. Prefer `raft message check --target <target>` for one conversation's local pending messages. Full `raft message check`, `raft message read --target <target>` and search remain available for wider context; deferring them does not establish that there is no work.",
+  ].filter(Boolean).join("\n"));
 },
   {
     // Rows cover all four target shapes (@xxchan 8/31): channel, channel

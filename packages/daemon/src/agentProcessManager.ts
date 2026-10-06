@@ -99,6 +99,7 @@ import {
   type LaunchActivationTransitionState,
 } from "./launchPhaseTransition.js";
 import { AgentVisibleDeliveryLedger, formatAgentMessageVisibleTarget } from "./agentVisibleDeliveryLedger.js";
+import { AttentionObservation, type AttentionCheckObservation } from "./attentionObservation.js";
 import {
   NATIVE_STANDING_PROMPT_STARTUP_INPUT,
   RUNTIME_PROFILE_DAEMON_NOTICE_MESSAGE_PREFIX,
@@ -107,6 +108,7 @@ import {
   formatBoundedStartupUnreadSuffix,
   formatConcreteMessagesRuntimeInput,
   formatInboxUpdateRuntimeInput,
+  inboxPriorityRecommendation,
   formatOtherUnreadChannelsSuffix,
   formatResumeEmptyPrompt,
   formatResumeUnreadSummaryPrompt,
@@ -1144,6 +1146,8 @@ interface TrackedMentionDelivery {
 
 export class AgentProcessManager {
   private agents = new Map<string, AgentProcess>();
+  // Weak ownership: observations disappear with the runtime; never restore or schedule work.
+  private readonly attentionObservations = new WeakMap<AgentProcess, AttentionObservation>();
   private readonly lifecycleRecords = new AgentLifecycleRecords<RuntimeErrorDeliveryBackoffState, RuntimeErrorFingerprintFenceState>();
 
   /** Next monotonic `agent:activity` clientSeq for this agent within this daemon instance. */
@@ -2138,6 +2142,10 @@ export class AgentProcessManager {
       isMessageModelSeen: ({ target, message }) => this.isVisibleMessageModelSeen(agentId, target, message),
       getAllPendingMessages: () => this.allPendingVisibleMessages(agentId),
       consumeVisibleMessages: (input) => this.consumeVisibleMessages(agentId, input),
+      consumeTargetMessages: (messages) => this.consumeTargetInboxMessages(agentId, messages),
+      isCurrentLaunch: (launchId) => launchId !== null
+        && this.mentionDeliveryIdentity(agentId, this.agents.get(agentId)).launchId === launchId,
+      recordAttentionCheck: (input) => this.recordAttentionCheck(agentId, input),
       recordTrace: (name, attrs, status) => this.recordDaemonTrace(name, attrs, status),
       recordFreshnessDecisionActivity: (input, producerFactId) => {
         this.recordFreshnessDecisionActivity(agentId, input, producerFactId);
@@ -4312,6 +4320,53 @@ export class AgentProcessManager {
       context.onMentionTransition?.("daemon_drained", "accepted");
     }
     context.onMentionAck?.();
+  }
+
+  private attentionObservation(ap: AgentProcess): AttentionObservation {
+    let observation = this.attentionObservations.get(ap);
+    if (!observation) {
+      observation = new AttentionObservation();
+      this.attentionObservations.set(ap, observation);
+    }
+    return observation;
+  }
+
+  private recordAttentionNotice(agentId: string, ap: AgentProcess, messages: readonly AgentMessage[]): Record<string, unknown> {
+    try {
+      const attrs = this.attentionObservation(ap).present(inboxPriorityRecommendation(messages), ap.sessionId);
+      if (attrs["attention.recommendation_id"]) {
+        this.recordDaemonTrace("daemon.agent.attention.recommended", {
+          agentId, launchId: ap.launchId, sessionId: ap.sessionId, runtime: ap.driver.id, ...attrs,
+        });
+      }
+      return attrs;
+    } catch { return {}; } // Observability must never change delivery correctness.
+  }
+
+  private recordAttentionCheck(agentId: string, input: AttentionCheckObservation): void {
+    try {
+      const ap = this.agents.get(agentId);
+      const observation = ap ? this.attentionObservation(ap) : new AttentionObservation();
+      this.recordDaemonTrace("daemon.agent.drain.outcome", {
+        agentId, launchId: ap?.launchId, sessionId: ap?.sessionId,
+        ...observation.check(input, ap?.sessionId ?? null),
+      });
+    } catch { /* telemetry only */ }
+  }
+
+  /** A target check must not ACK other targets or an occurrence from an old run. */
+  private consumeTargetInboxMessages(agentId: string, messages: AgentProxyVisibleMessage[]): void {
+    const identity = this.mentionDeliveryIdentity(agentId, this.agents.get(agentId));
+    const ids = new Set(messages.map((message) => message.message_id || message.id).filter(Boolean));
+    this.consumeVisibleMessages(agentId, { messages, source: "agent_api_events_local" });
+    for (const tracked of this.trackedMentionDeliveries.values()) {
+      const occurrence = tracked.context.mentionDelivery;
+      if (tracked.agentId !== agentId || tracked.state !== "pending" || !ids.has(tracked.messageId)) continue;
+      if (!identity.launchId || !identity.sessionId || !occurrence
+        || occurrence.messageId !== tracked.messageId
+        || occurrence.launchId !== identity.launchId || occurrence.sessionId !== identity.sessionId) continue;
+      this.completeTrackedMentionDelivery(tracked.context);
+    }
   }
 
   private completePendingTrackedMentions(agentId: string): void {
@@ -8074,7 +8129,9 @@ export class AgentProcessManager {
       ap.deliveryAttempts.recordPendingAttempt(deliveryAttemptId, ap.sessionId, changedMessages);
     }
     if (sendResult.ok) {
+      const attentionAttrs = this.recordAttentionNotice(agentId, ap, changedMessages);
       this.recordDaemonTrace("daemon.agent.inbox_update.pushed", {
+        ...attentionAttrs,
         agentId,
         runtime: ap.config.runtime,
         model: ap.config.model,
@@ -8278,7 +8335,9 @@ export class AgentProcessManager {
         source: "stdin_thread_context_delivery",
       });
     }
+    const attentionAttrs = this.recordAttentionNotice(agentId, ap, pendingNoticeMessages);
     this.recordDaemonTrace("daemon.agent.stdin_delivery", {
+      ...attentionAttrs,
       agentId,
       launchId: ap.launchId || undefined,
       runtime: ap.config.runtime,
