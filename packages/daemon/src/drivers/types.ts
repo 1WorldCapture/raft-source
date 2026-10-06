@@ -522,6 +522,15 @@ export interface RuntimeDriver {
 
   /** Whether this runtime supports a native standing-prompt layer. */
   readonly supportsNativeStandingPrompt?: boolean;
+  /**
+   * Whether the runtime currently has an agent run in progress, as observed
+   * by the driver's own protocol state (task #7). The delivery router
+   * consults this before trusting its process-level busy belief: a
+   * steer-driven turn emits no prompt_result, so a run can end without the
+   * process-level state ever observing a boundary. Absent = the runtime has
+   * no such observation and the router decides as before.
+   */
+  isRunInProgress?(): boolean;
 
   /**
    * Driver-owned live busy-delivery gate. APM lifecycle state must never claim
