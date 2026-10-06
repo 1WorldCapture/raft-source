@@ -142,21 +142,47 @@ export function applyDesktopEnvironmentGeneration(
   storage: GenerationStorage | undefined = typeof localStorage === "undefined" ? undefined : localStorage,
   cacheStorage: RuntimeCacheStorage | undefined = typeof caches === "undefined" ? undefined : caches,
 ): boolean {
-  if (!environment || !storage) return false;
-  const generationKey = "raft_desktop_environment_generation";
-  const generation = String(environment.generation);
-  if (storage.getItem(generationKey) !== generation) {
-    // Environment switches are intentionally destructive. Distinct origins
-    // isolate prod/staging; the native generation additionally forces fresh
-    // auth whenever the user returns to a previously used environment.
-    storage.clear();
-    storage.setItem(generationKey, generation);
-    if (cacheStorage) {
-      void cacheStorage.keys().then((keys) => Promise.all(keys.map((key) => cacheStorage.delete(key))));
-    }
-    return true;
+  // Node exposes a HOLLOW localStorage object (no getItem) unless
+  // --experimental-webstorage is on — treat any unusable storage as absent
+  // rather than crashing at module load.
+  if (!storage || typeof storage.getItem !== "function" || typeof storage.setItem !== "function" || typeof storage.clear !== "function") {
+    return false;
   }
-  return false;
+  // The marker keys the session identity to BOTH the API origin and the
+  // native generation (PM review, phase 3-1): generation alone cannot
+  // distinguish two env-configured origins (both inject generation 1), and
+  // origin alone cannot force re-auth when the user returns to a previously
+  // used environment. Legacy values (a bare generation number, written by
+  // pre-composite builds) never contain "#".
+  const generationKey = "raft_desktop_environment_generation";
+  const marker = environment ? `${environment.apiOrigin}#${environment.generation}` : null;
+  const stored = storage.getItem(generationKey);
+
+  const matches =
+    stored === marker ||
+    // Legacy migration: a bare generation number from an older build counts
+    // as a match for preset environments only (their origin never varies;
+    // "server" environments are new and always write composite markers).
+    (environment !== null && environment.environmentId !== "server" && stored !== null && !stored.includes("#") && stored === String(environment.generation));
+
+  if (marker !== null && matches) return false;
+  if (marker === null && stored === null) return false;
+
+  // Environment switches are intentionally destructive. Distinct origins
+  // isolate prod/staging; the composite marker additionally forces fresh
+  // auth whenever the user returns to a previously used environment.
+  //
+  // marker === null (no injected environment — the compiled/official
+  // default): a lingering marker proves a PREVIOUS boot ran under an
+  // injected environment; clear once and leave no marker, so private-server
+  // tokens never ride into the official backend (and vice versa). Builds
+  // that never injected keep `stored === null` and are never touched.
+  storage.clear();
+  if (marker !== null) storage.setItem(generationKey, marker);
+  if (cacheStorage) {
+    void cacheStorage.keys().then((keys) => Promise.all(keys.map((key) => cacheStorage.delete(key))));
+  }
+  return true;
 }
 applyDesktopEnvironmentGeneration(DESKTOP_RUNTIME_ENVIRONMENT);
 

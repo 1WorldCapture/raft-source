@@ -183,9 +183,23 @@ describe("native Desktop runtime environment", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     assert.equal(clears, 1);
     assert.deepEqual(deleted.sort(), ["assets", "auth"]);
-    assert.equal(values.get("raft_desktop_environment_generation"), "4");
+    // Composite marker (PM review, phase 3-1): origin # generation.
+    assert.equal(values.get("raft_desktop_environment_generation"), "https://api.raft.build#4");
     assert.equal(applyDesktopEnvironmentGeneration(production, storage, cacheStorage), false);
     assert.equal(clears, 1);
+  });
+
+  test("legacy bare-generation markers still match preset environments (no logout on upgrade)", () => {
+    const values = new Map<string, string>([["raft_desktop_environment_generation", "4"]]);
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => { values.set(key, value); },
+      clear: () => { values.clear(); },
+    };
+    // A pre-composite Tauri boot stored "4"; the same production generation
+    // must NOT clear, and migrates the marker to composite form.
+    assert.equal(applyDesktopEnvironmentGeneration(production, storage), false);
+    assert.equal(values.get("raft_desktop_environment_generation"), "4");
   });
 
   test("browser mode has no destructive side effect", () => {
@@ -193,6 +207,70 @@ describe("native Desktop runtime environment", () => {
     const storage = { getItem: () => null, setItem: () => {}, clear: () => { clears += 1; } };
     assert.equal(applyDesktopEnvironmentGeneration(null, storage), false);
     assert.equal(clears, 0);
+  });
+
+  // ── composite-marker switch semantics (PM review, phase 3-1) ────────────
+
+  function environmentFor(origin: string, generation = 1) {
+    // Read a real "server" environment through the public parser so the
+    // marker semantics are exercised against validated tuples.
+    return readDesktopRuntimeEnvironment({
+      __RAFT_DESKTOP_ENVIRONMENT__: { apiOrigin: origin, socketOrigin: origin, generation },
+    });
+  }
+
+  function markerStorage(initial?: [string, string]) {
+    const values = new Map<string, string>(initial ? [initial] : []);
+    let clears = 0;
+    return {
+      storage: {
+        getItem: (key: string) => values.get(key) ?? null,
+        setItem: (key: string, value: string) => { values.set(key, value); },
+        clear: () => { clears += 1; values.clear(); },
+      },
+      values,
+      clears: () => clears,
+    };
+  }
+
+  test("private → reset → official clears (no private tokens ride into the official backend)", () => {
+    const env = environmentFor("https://raft.internal.example:8443", 2);
+    assert.ok(env);
+    const { storage, values, clears } = markerStorage();
+    assert.equal(applyDesktopEnvironmentGeneration(env, storage), true); // first private boot
+    values.set("token", "private-secret");
+    // After reset there is no injection at all (official compiled default).
+    assert.equal(applyDesktopEnvironmentGeneration(null, storage), true);
+    assert.equal(clears(), 2);
+    assert.equal(values.has("token"), false);
+    assert.equal(values.has("raft_desktop_environment_generation"), false); // marker removed
+    // And the following official boots stay quiet (marker gone).
+    assert.equal(applyDesktopEnvironmentGeneration(null, storage), false);
+    assert.equal(clears(), 2);
+  });
+
+  test("env A → env B clears even though both inject generation 1", () => {
+    const a = environmentFor("https://raft.a.example");
+    const b = environmentFor("https://raft.b.example");
+    assert.ok(a && b);
+    const { storage, values, clears } = markerStorage();
+    assert.equal(applyDesktopEnvironmentGeneration(a, storage), true);
+    values.set("token", "a-secret");
+    assert.equal(applyDesktopEnvironmentGeneration(b, storage), true);
+    assert.equal(clears(), 2);
+    assert.equal(values.has("token"), false);
+    assert.equal(values.get("raft_desktop_environment_generation"), "https://raft.b.example#1");
+  });
+
+  test("same origin restart does not clear", () => {
+    const env = environmentFor("https://raft.a.example", 1);
+    assert.ok(env);
+    const { storage, values, clears } = markerStorage();
+    assert.equal(applyDesktopEnvironmentGeneration(env, storage), true);
+    values.set("token", "a-secret");
+    assert.equal(applyDesktopEnvironmentGeneration(environmentFor("https://raft.a.example", 1), storage), false);
+    assert.equal(clears(), 1);
+    assert.equal(values.get("token"), "a-secret");
   });
 
   test("Desktop bridge detection is pinned to the native invoke function", () => {
