@@ -1,5 +1,5 @@
 import { spawn as childSpawn, type ChildProcess } from "node:child_process";
-import { mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdtempSync, openSync, readSync, rmSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -156,6 +156,101 @@ export function ompCandidatePaths(deps: ProbeDeps = {}): string[] {
  */
 export function resolveOmpCommand(deps: ProbeDeps = {}): string | null {
   return resolveCommandOnPath(OMP_BINARY, deps) ?? firstExistingPath(ompCandidatePaths(deps), deps);
+}
+
+// ── bun-installed omp launch support (task #12) ─────────────────────────
+// A bun global install puts a symlink at ~/.bun/bin/omp whose shebang is
+// `#!/usr/bin/env bun`. Desktop/launchd daemons run with a minimal PATH
+// (/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin), so the kernel's `env bun`
+// lookup fails: --version dies with 127 and agent spawn fails to exec —
+// while the file-based resolution above still FINDS the symlink, which used
+// to surface as "available without a version". The launch plan below makes
+// the child independent of the daemon's PATH instead.
+
+/**
+ * Interpreter name from an `#!/usr/bin/env <name>` shebang, or null for
+ * anything else — self-contained omp binaries (omp.sh, Mach-O) carry no env
+ * shebang and must keep launching exactly as before.
+ */
+export function envShebangInterpreter(command: string, deps: ProbeDeps = {}): string | null {
+  const existsSyncFn = deps.existsSyncFn ?? existsSync;
+  if (!existsSyncFn(command)) return null;
+  try {
+    const fd = openSync(command, "r");
+    try {
+      const head = Buffer.alloc(128);
+      const read = readSync(fd, head, 0, head.byteLength, 0);
+      const match = head.subarray(0, read).toString("utf8").match(/^#!\s*\/usr\/bin\/env\s+([A-Za-z0-9_.-]+)/);
+      return match ? match[1] : null;
+    } finally {
+      closeSync(fd);
+    }
+  } catch {
+    return null;
+  }
+}
+
+/** Where a fallback interpreter may live besides the omp command's own dir. */
+export function interpreterFallbackPaths(name: string, deps: ProbeDeps = {}): string[] {
+  const homeDir = deps.homeDir ?? deps.env?.HOME ?? process.env.HOME ?? "";
+  return [
+    path.join(homeDir, ".bun", "bin", name),
+    path.join("/opt", "homebrew", "bin", name),
+    path.join("/usr", "local", "bin", name),
+  ];
+}
+
+function withPathPrepended(dir: string, base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const current = base.PATH ?? "";
+  if (current.split(path.delimiter)[0] === dir) return base;
+  return { ...base, PATH: current ? `${dir}${path.delimiter}${current}` : dir };
+}
+
+export interface OmpLaunchPlan {
+  /**
+   * Executable plus argument prefix: the omp command itself, or the fallback
+   * interpreter followed by the omp script. Empty only when diagnostic is set.
+   */
+  argv: string[];
+  /** Child env with the omp (and interpreter) bin dirs leading PATH. */
+  env: NodeJS.ProcessEnv;
+  /** Non-null when the script's interpreter is missing entirely — exec would fail. */
+  diagnostic: string | null;
+}
+
+/**
+ * Build the exec plan for the resolved omp command (task #12). The command's
+ * own directory leads the child PATH (a bun symlink's dir also holds bun); an
+ * env-shebang script whose interpreter is still unresolvable falls back to
+ * the well-known interpreter install dirs with an explicit interpreter argv;
+ * a missing interpreter degrades to a readable diagnostic instead of a
+ * silent exec failure. The returned env is a fresh object — callers pass it
+ * ONLY to omp child processes, never back into process.env.
+ */
+export function resolveOmpLaunch(
+  command: string,
+  args: string[],
+  base: NodeJS.ProcessEnv,
+  deps: ProbeDeps = {},
+): OmpLaunchPlan {
+  let env = withPathPrepended(path.dirname(command), base);
+  const interpreter = envShebangInterpreter(command, deps);
+  if (!interpreter) {
+    return { argv: [command, ...args], env, diagnostic: null };
+  }
+  if (resolveCommandOnPath(interpreter, { ...deps, env })) {
+    return { argv: [command, ...args], env, diagnostic: null };
+  }
+  const fallback = firstExistingPath(interpreterFallbackPaths(interpreter, deps), deps);
+  if (fallback) {
+    env = withPathPrepended(path.dirname(fallback), env);
+    return { argv: [fallback, command, ...args], env, diagnostic: null };
+  }
+  return {
+    argv: [],
+    env,
+    diagnostic: `OMP at ${command} is an env-shebang script (${interpreter}), but ${interpreter} was not found in the daemon PATH or the well-known install dirs (~/.bun/bin, Homebrew). Install ${interpreter}, or reinstall omp self-contained (curl -fsSL https://omp.sh/install | sh) which needs no interpreter.`,
+  };
 }
 
 function parseSemver(version: string): [number, number, number] | null {
@@ -373,9 +468,16 @@ async function probeOmpModels(deps: { command?: string; args?: string[]; timeout
   const command = deps.command ?? resolveOmpCommand() ?? OMP_BINARY;
   const args = deps.args ?? ["--mode", "rpc", "--no-session", "--session-dir", path.join(workspace, ".omp-sessions")];
   const timeoutMs = deps.timeoutMs ?? 15_000;
+  // Launch through the task #12 plan: the probe process must not depend on
+  // the daemon's PATH (a bun-installed omp dies at the env shebang there).
+  const launch = resolveOmpLaunch(command, args, process.env);
+  if (launch.argv.length === 0) {
+    rmSync(workspace, { recursive: true, force: true });
+    return { kind: "error", message: launch.diagnostic ?? `OMP launcher produced no command for ${command}.` };
+  }
 
   return await new Promise<OmpDetectResult>((resolve) => {
-    const proc = childSpawn(command, args, { cwd: workspace, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
+    const proc = childSpawn(launch.argv[0], launch.argv.slice(1), { cwd: workspace, stdio: ["pipe", "pipe", "pipe"], env: launch.env, windowsHide: true });
     // The catalog can exceed v1's 1 MiB physical frame once negotiated to
     // v2, so decoded frames come through the same framing decoder the
     // driver uses (handles both plain JSONL and rpc_chunk reassembly).
@@ -486,7 +588,10 @@ export async function detectOmpModels(deps: { command?: string; args?: string[];
   }
 
   const probe = probeOmpModels(deps).then((result) => {
-    if (!bypassCache) {
+    // Task #12: launch failures (missing interpreter, exec errors) must stay
+    // retryable — pinning them here would keep omp "broken" for a full TTL
+    // even after the user installs bun. Only successful probes are cached.
+    if (!bypassCache && result.kind !== "error") {
       ompDetectCache = { at: Date.now(), agentDbMtimeMs: ompAgentDbMtimeMs(), result };
     }
     ompDetectInFlight = null;
@@ -763,7 +868,14 @@ export class OmpDriver implements RuntimeDriver {
   probe(deps: OmpProbeDeps = {}): RuntimeProbeResult {
     const command = resolveOmpCommand(deps);
     if (!command) return { available: false };
-    const version = readCommandVersion(command, [], deps);
+    // The launch plan carries the omp bin dir (and, when needed, an explicit
+    // interpreter) in the child env — never written back to process.env.
+    const launch = resolveOmpLaunch(command, [], deps.env ?? process.env, deps);
+    if (launch.diagnostic || launch.argv.length === 0) {
+      return { available: false, diagnostic: launch.diagnostic ?? `OMP launcher produced no command for ${command}.` };
+    }
+    const [versionCommand, ...versionPrefix] = launch.argv;
+    const version = readCommandVersion(versionCommand, versionPrefix, { ...deps, env: launch.env });
     const unsupportedMessage = unsupportedOmpVersionMessage(version);
     if (unsupportedMessage) {
       return {
@@ -772,7 +884,16 @@ export class OmpDriver implements RuntimeDriver {
         diagnostic: unsupportedMessage,
       };
     }
-    return { available: true, version: version ?? undefined };
+    // Task #12: a found file whose --version still fails must NOT read as
+    // "available without a version" — that state is invisible in meta and
+    // turns into a spawn failure later. Report unavailable with the cause.
+    if (!version) {
+      return {
+        available: false,
+        diagnostic: `OMP found at ${command} but --version failed (interpreter or runtime error). Verify it runs standalone: ${command} --version`,
+      };
+    }
+    return { available: true, version };
   }
 
   /**
@@ -1061,10 +1182,26 @@ export class OmpDriver implements RuntimeDriver {
       if (resumeSessionId) args = [...args, "--resume", resumeSessionId];
     }
 
-    const proc = childSpawn(command, args, {
+    // Task #12: real launches go through the launch plan (omp bin dir leads
+    // the child PATH; env-shebang scripts fall back to an explicit bun argv).
+    // Any launchOverrides seam (fake omp driven by node) is left untouched.
+    let execCommand = command;
+    let execArgs = args;
+    let execEnv = spawnEnv;
+    if (!launchOverrides.args && !launchOverrides.command) {
+      const launch = resolveOmpLaunch(command, [], spawnEnv);
+      if (launch.argv.length === 0) {
+        throw new Error(launch.diagnostic ?? `OMP launcher produced no command for ${command}.`);
+      }
+      execCommand = launch.argv[0];
+      execArgs = [...launch.argv.slice(1), ...args];
+      execEnv = launch.env;
+    }
+
+    const proc = childSpawn(execCommand, execArgs, {
       cwd: ctx.workingDirectory,
       stdio: ["pipe", "pipe", "pipe"],
-      env: spawnEnv,
+      env: execEnv,
       // Own process group, so stop() can take down omp plus every bash
       // tool / subagent / kernel descendant it spawned (PM task #2 review).
       detached: process.platform !== "win32",

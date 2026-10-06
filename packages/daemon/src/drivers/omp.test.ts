@@ -148,3 +148,153 @@ test("the driver refuses protocol sends before it is ready", async () => {
   assert.deepEqual(driver.parseLine("{}"), []);
   assert.equal(driver.encodeStdinMessage("hello", null), null);
 });
+
+// ── Task #12: bun-installed omp launches (env-shebang scripts) ──────────
+
+import { resolveOmpLaunch } from "./omp.js";
+import { readFileSync } from "node:fs";
+import { detectOmpModels } from "./omp.js";
+
+interface VersionCall {
+  command: string;
+  args: string[];
+  envPath: string;
+}
+
+/**
+ * A probe deps set whose PATH lookup always misses, and whose --version runs
+ * are recorded (command, args, env.PATH) before answering from `respond`.
+ */
+function recordedVersionDeps(
+  home: string,
+  respond: (call: { command: string; args: string[] }) => string,
+): { deps: ProbeDeps; calls: VersionCall[] } {
+  const calls: VersionCall[] = [];
+  const deps: ProbeDeps = {
+    platform: "darwin",
+    homeDir: home,
+    env: { HOME: home, PATH: "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin" },
+    execFileSyncFn: ((command: string, args: string[], opts?: { env?: Record<string, string> }) => {
+      if (command === "which") throw new Error("not found");
+      calls.push({ command, args: [...args], envPath: opts?.env?.PATH ?? "" });
+      return respond({ command, args: [...args] });
+    }) as unknown as ProbeDeps["execFileSyncFn"],
+  };
+  return { deps, calls };
+}
+
+test("probe runs a bun-installed omp via its own bin dir (bun beside the symlink)", () => {
+  withTempHome((home) => {
+    const ompScript = path.join(home, ".bun", "bin", "omp");
+    const bunScript = path.join(home, ".bun", "bin", "bun");
+    mkdirSync(path.dirname(ompScript), { recursive: true });
+    writeFileSync(ompScript, "#!/usr/bin/env bun\n", { mode: 0o755 });
+    writeFileSync(bunScript, "#!/bin/sh\n", { mode: 0o755 });
+
+    const { deps, calls } = recordedVersionDeps(home, () => "omp/18.6.1\n");
+
+    const result = new OmpDriver().probe(deps);
+    assert.deepEqual(result, { available: true, version: "omp/18.6.1" });
+    // PATH lookup for omp misses, the env-bun interpreter check misses (bun
+    // is NOT on the daemon PATH), then the version read runs through bun with
+    // the omp bin dir leading the child PATH.
+    assert.deepEqual(calls.map((call) => [call.command, call.args]), [
+      [bunScript, [ompScript, "--version"]],
+    ]);
+    assert.ok(calls[0].envPath.startsWith(`${path.dirname(ompScript)}${path.delimiter}`), "omp bin dir must lead the child PATH");
+  });
+});
+
+test("resolveOmpLaunch falls back to an explicit interpreter argv from well-known dirs", () => {
+  withTempHome((home) => {
+    const ompScript = path.join(home, ".local", "bin", "omp");
+    mkdirSync(path.dirname(ompScript), { recursive: true });
+    writeFileSync(ompScript, "#!/usr/bin/env bun\n", { mode: 0o755 });
+    const bunScript = path.join(home, ".bun", "bin", "bun");
+    mkdirSync(path.dirname(bunScript), { recursive: true });
+    writeFileSync(bunScript, "#!/bin/sh\n", { mode: 0o755 });
+
+    const base = { HOME: home, PATH: "/usr/bin:/bin" };
+    const plan = resolveOmpLaunch(ompScript, ["--mode", "rpc"], base, { env: base, homeDir: home });
+    assert.deepEqual(plan.argv, [bunScript, ompScript, "--mode", "rpc"]);
+    assert.ok(plan.env.PATH?.startsWith(`${path.dirname(bunScript)}${path.delimiter}`));
+    assert.ok(plan.env.PATH?.includes(`${path.dirname(ompScript)}${path.delimiter}`));
+    assert.equal(plan.diagnostic, null);
+    // The base env is never mutated — the augmented env belongs to omp children only.
+    assert.equal(base.PATH, "/usr/bin:/bin");
+  });
+});
+
+test("probe keeps the self-contained binary path unchanged (no bun involved)", () => {
+  withTempHome((home) => {
+    const localInstall = path.join(home, ".local", "bin", "omp");
+    mkdirSync(path.dirname(localInstall), { recursive: true });
+    // omp.sh self-contained binary: no env shebang, no interpreter needed.
+    writeFileSync(localInstall, "#!/bin/sh\necho omp/18.6.1\n", { mode: 0o755 });
+
+    const { deps, calls } = recordedVersionDeps(home, () => "omp/18.6.1\n");
+    const result = new OmpDriver().probe(deps);
+    assert.deepEqual(result, { available: true, version: "omp/18.6.1" });
+    // Direct exec of the resolved file — no interpreter lookup on the wire.
+    assert.deepEqual(calls.map((call) => [call.command, call.args]), [
+      [localInstall, ["--version"]],
+    ]);
+  });
+});
+
+test("probe reports a missing interpreter as unavailable with a readable cause", () => {
+  withTempHome((home) => {
+    const ompScript = path.join(home, ".bun", "bin", "omp");
+    mkdirSync(path.dirname(ompScript), { recursive: true });
+    writeFileSync(ompScript, "#!/usr/bin/env bun\n", { mode: 0o755 });
+    // No bun in ~/.bun/bin, no Homebrew bun — the interpreter is gone.
+
+    const { deps } = recordedVersionDeps(home, () => {
+      throw new Error("must not exec");
+    });
+    const result = new OmpDriver().probe(deps);
+    assert.equal(result.available, false);
+    assert.match(result.diagnostic ?? "", /bun/i);
+    assert.match(result.diagnostic ?? "", /omp\.sh\/install/);
+    assert.equal(result.version, undefined);
+  });
+});
+
+test("probe degrades a found-but-failing --version to unavailable, never available-without-version", () => {
+  withTempHome((home) => {
+    const localInstall = path.join(home, ".local", "bin", "omp");
+    mkdirSync(path.dirname(localInstall), { recursive: true });
+    writeFileSync(localInstall, "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+
+    const deps: ProbeDeps = {
+      ...recordedVersionDeps(home, () => {
+        throw new Error("exit 1");
+      }).deps,
+    };
+    const result = new OmpDriver().probe(deps);
+    assert.equal(result.available, false, "a versionless probe must not claim availability");
+    assert.match(result.diagnostic ?? "", /--version failed/);
+  });
+});
+
+test("detect cache stays retryable: launch failures are not pinned for the TTL", async () => {
+  const home = mkdtempSync(path.join(os.tmpdir(), "slock-omp-cache-"));
+  try {
+    const counterFile = path.join(home, "spawn-count");
+    // Each probe spawns this wrapper, which records itself and exits 1 —
+    // modeling a launch failure. Detect must surface the error and NOT cache
+    // it, so a follow-up call probes again instead of replaying the failure
+    // for a full TTL (task #12 review point).
+    const wrapper = path.join(home, "failing-omp.sh");
+    writeFileSync(wrapper, `#!/bin/sh\necho x >> "${counterFile}"\nexit 1\n`, { mode: 0o755 });
+
+    const first = await detectOmpModels({ command: wrapper });
+    const second = await detectOmpModels({ command: wrapper });
+    assert.equal(first.kind, "error");
+    assert.equal(second.kind, "error");
+    const count = readFileSync(counterFile, "utf8").trim().split("\n").filter(Boolean).length;
+    assert.equal(count, 2, "the second detect must re-probe instead of replaying the cached error");
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
