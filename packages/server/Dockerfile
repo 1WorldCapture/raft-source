@@ -35,8 +35,10 @@ ENV SLOCK_RELEASE_BRANCH=$SLOCK_RELEASE_BRANCH
 
 WORKDIR /app
 
-# Copy workspace root files
-COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
+# Copy workspace root files (.npmrc pins the pnpm settings the lockfile was
+# generated with — without it the container's pnpm defaults mismatch and
+# --frozen-lockfile refuses to install).
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml .npmrc ./
 COPY patches/ patches/
 
 # Copy package manifests

@@ -80,6 +80,34 @@ test("Computer setup command omits production server-url when absent", () => {
   );
 });
 
+// Self-hosted builds leave VITE_DEPLOYMENT_ENV unset (or custom): the command
+// must still carry the deployment's own server URL so the Computer never
+// falls back to the official API (phase-1 command bug — unrecognized envs
+// used to drop the argument entirely).
+test("Computer setup command includes self-hosted server-url for an unrecognized deployment env", () => {
+  assert.equal(
+    getComputerSetupCommand("botiverse", "selfhost", "https://raft.internal.example:18443"),
+    productionCommand("botiverse", " --server-url https://raft.internal.example:18443"),
+  );
+  assert.equal(
+    getComputerSetupCommand("botiverse", undefined, "https://raft.internal.example:18443"),
+    productionCommand("botiverse", " --server-url https://raft.internal.example:18443"),
+  );
+});
+
+// The official-build behavior stays intact for unrecognized envs too: when
+// the server URL IS an official default origin, the argument is omitted.
+test("Computer setup command omits server-url for official defaults in an unrecognized deployment env", () => {
+  assert.equal(
+    getComputerSetupCommand("botiverse", "selfhost", DEFAULT_COMPUTER_SERVER_URL),
+    productionCommand("botiverse"),
+  );
+  assert.equal(
+    getComputerSetupCommand("botiverse", undefined, LEGACY_DEFAULT_COMPUTER_SERVER_URL),
+    productionCommand("botiverse"),
+  );
+});
+
 test("Computer setup command isolates the staging command with a per-server home/bin", () => {
   assert.equal(
     getComputerSetupCommand("botiverse", "staging"),

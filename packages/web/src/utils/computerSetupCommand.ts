@@ -138,13 +138,16 @@ export function getComputerCommands(
 
   const platform = options.platform ?? "mac-linux";
 
-  const commandServerUrl = deploymentEnv === "production"
-    ? isDefaultComputerServerUrl(serverUrl) ? null : serverUrl
-    : deploymentEnv === "staging"
+  // Unknown deployment envs (self-hosted builds leave VITE_DEPLOYMENT_ENV
+  // unset or custom) follow the production rule: carry --server-url whenever
+  // the target is not an official default origin, so a self-hosted server
+  // never falls back to the official one (task #1, phase-1 command bug:
+  // previously any unrecognized env dropped the arg entirely).
+  const commandServerUrl = deploymentEnv === "staging"
     ? STAGING_COMPUTER_SERVER_URL
     : deploymentEnv === "slockdev"
       ? serverUrl
-      : null;
+      : isDefaultComputerServerUrl(serverUrl) ? null : serverUrl;
   const serverUrlArg = commandServerUrl ? ` --server-url ${commandServerUrl}` : "";
   const machineArg = options.machineId ? ` --machine ${options.machineId}` : "";
   const setupArgs = `${serverUrlArg}${machineArg}`;
