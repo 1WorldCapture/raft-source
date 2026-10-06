@@ -1,0 +1,10 @@
+services:
+  db:
+    ports: ["15432:5432"]
+    networks: [raft-internal, raft-edge]
+  redis:
+    ports: ["16379:6379"]
+    networks: [raft-internal, raft-edge]
+  server:
+    ports: ["13100:3001"]
+    networks: [raft-internal, raft-edge]

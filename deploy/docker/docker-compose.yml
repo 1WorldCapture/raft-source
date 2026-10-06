@@ -33,6 +33,24 @@ services:
     networks:
       - raft-internal
 
+  # Redis is REQUIRED, not optional: machine (Computer/daemon) connections
+  # commit their replica-ownership generation through Redis
+  # (replicaRouter.commitMachineReplicaGeneration refuses without it and the
+  # daemon gets disconnected with replica_registration_failed). Ephemeral
+  # semantics are correct — ownership rebuilds when daemons reconnect after a
+  # redis restart — so no persistence volume.
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 24
+      start_period: 5s
+    networks:
+      - raft-internal
+
   server:
     # Official image built from packages/server/Dockerfile, tagged with the
     # git SHA it was built from (see README "Build / export").
@@ -44,17 +62,28 @@ services:
       HOST: "0.0.0.0"
       DATABASE_URL: postgres://raft:${POSTGRES_PASSWORD}@db:5432/raft
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
-      # Public origin of the deployment (used for links); no default guess.
-      APP_URL: ${RAFT_PUBLIC_ORIGIN:-}
+      # Public origin of this deployment — REQUIRED. SERVER_URL is what the
+      # server hands to agents/daemons to connect back (agentOrchestrator),
+      # APP_URL drives link generation; both must be the real browser-facing
+      # origin. CORS_ORIGIN matches it (add "app://raft" here in phase 3 when
+      # the desktop runtime origin lands).
+      SERVER_URL: ${RAFT_PUBLIC_ORIGIN:?RAFT_PUBLIC_ORIGIN is required}
+      APP_URL: ${RAFT_PUBLIC_ORIGIN:?RAFT_PUBLIC_ORIGIN is required}
+      CORS_ORIGIN: ${RAFT_PUBLIC_ORIGIN:?RAFT_PUBLIC_ORIGIN is required}
       # Entrypoint runs the guarded migration path before starting the server
       # (see packages/server/entrypoint.sh). Idempotent; safe on every boot.
       RAFT_RUN_MIGRATIONS: "1"
       RAFT_MIGRATION_TIMEOUT_MS: ${RAFT_MIGRATION_TIMEOUT_MS:-60000}
+      REDIS_URL: redis://redis:6379
       # Exactly one proxy hop: the web nginx in front of the server.
+      # NODE_ENV stays unset on purpose (docs/self-hosting/source-deploy.md:
+      # setting it to production flips native-push validation, translations
+      # and Slack Bridge behavior that need separate evaluation).
       TRUST_PROXY: "1"
-      NODE_ENV: production
     depends_on:
       db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     networks:
       - raft-internal
@@ -68,8 +97,10 @@ services:
     environment:
       # Resolved via Docker DNS on raft-internal.
       RAFT_SERVER_UPSTREAM: server:3001
+    volumes:
+      - ./certs:/etc/nginx/certs:ro
     ports:
-      - "${RAFT_HTTP_PORT:-18443}:80"
+      - "${RAFT_HTTP_PORT:-18443}:443"
     depends_on:
       - server
     networks:
