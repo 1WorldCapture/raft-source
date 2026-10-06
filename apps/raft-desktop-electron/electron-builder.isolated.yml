@@ -16,4 +16,13 @@
 extends: electron-builder.yml
 appId: build.raft.desktop.isolated
 productName: Raft Desktop Isolated
+# CRITICAL (task #13 acceptance): electron derives userData (~/Library/
+# Application Support/<name>) and the single-instance lock from package.json
+# "name", NOT from appId/productName. Without this override the isolated
+# build shares the OWNER app's userData dir — the running owner instance
+# then wins the singleton lock and the isolated app exits 0 silently (and
+# with the owner app NOT running, the isolated build would have written
+# into the owner's data dir instead).
+extraMetadata:
+  name: Raft Desktop Isolated
 artifactName: Raft-Desktop-Isolated-${version}-${arch}.${ext}
