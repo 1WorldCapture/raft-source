@@ -152,6 +152,15 @@ export async function connectExistingCursorSdkOwner(input: { slockHome: string; 
   return { ...result, email: null };
 }
 
+/**
+ * Authorization failures a fresh owner sign-in recovers: no usable login,
+ * expired login, explicit disconnect, another account selected, or an invalid
+ * connection record. Everything else (store permissions, native host, network,
+ * Cursor service) is environmental — a sign-in button cannot fix it, so the
+ * detector keeps reporting a plain retriable error for those.
+ */
+const CURSOR_SIGNIN_RECOVERABLE_CODE = /CURSOR_SDK_(LOGIN_MISSING|LOGIN_EXPIRED|DISCONNECTED|IDENTITY_MISMATCH|BINDING_INVALID|LOGIN_INVALID)$/;
+
 export async function detectCursorSdkModels(input: { slockHome?: string; signal?: AbortSignal } = {}, deps: NativeBrokerDeps = {}): Promise<RuntimeModelSourceOutcome> {
   try {
     const lease = await resolveCursorCredentialLease({ slockHome: input.slockHome ?? resolveRaftHome(), signal: input.signal }, deps);
@@ -164,6 +173,9 @@ export async function detectCursorSdkModels(input: { slockHome?: string; signal?
     });
     return models.length ? { kind: "live", value: { models, default: models.find((m) => m.id === "default")?.id ?? models[0].id } } : { kind: "error", retryable: true };
   } catch (error) {
+    if (error instanceof CursorAuthorizationError && CURSOR_SIGNIN_RECOVERABLE_CODE.test(error.code)) {
+      return { kind: "missing_config", recovery: "cursor_login" };
+    }
     return { kind: "error", retryable: !(error instanceof CursorAuthorizationError && /LOGIN|IDENTITY|DISCONNECTED|BINDING/.test(error.code)) };
   }
 }

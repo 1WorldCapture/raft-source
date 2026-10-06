@@ -937,6 +937,15 @@ export const en = {
     "{runtimeName} is signed in, but this Computer reported no available models.",
   "agent.runtimeModels.missingConfig":
     "{runtimeName} needs configuration on this Computer before its models can be loaded.",
+  "agent.runtimeModels.cursorLoginRequired":
+    "This Computer is not signed in to Cursor. Sign in to load the model list.",
+  "agent.runtimeModels.cursorLoginButton": "Sign in to Cursor",
+  "agent.runtimeModels.cursorLoginWaiting": "Waiting for browser authorization…",
+  "agent.runtimeModels.cursorLoginFailed": "Cursor sign-in could not start. Try again shortly.",
+  "agent.runtimeModels.cursorLoginTimeout":
+    "Timed out waiting for authorization. Click \"Sign in to Cursor\" again.",
+  "agent.runtimeModels.cursorReplaceConfirm":
+    "This Computer is already bound to a Cursor account. Signing in again will replace the current binding. Continue?",
   "agent.runtimeModels.noModels":
     "{runtimeName} is configured, but this Computer reported no available models.",
   "agent.runtimeModels.defaultModel":

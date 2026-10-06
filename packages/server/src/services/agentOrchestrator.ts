@@ -10722,6 +10722,47 @@ export class AgentOrchestrator extends EventEmitter {
     });
   }
 
+  /**
+   * Start (or re-report) a web-triggered Cursor SDK owner sign-in on this
+   * machine. The daemon replies as soon as the validated authorization URL is
+   * known; browser completion is observed via getMachineCursorSdkStatus.
+   * Owner-only upstream — the REST route enforces machine ownership before
+   * calling this.
+   */
+  async loginMachineCursorSdk(machineId: string): Promise<{
+    ok: boolean; loginUrl?: string; reused?: boolean; errorCode?: string; message?: string;
+  }> {
+    const requestId = crypto.randomUUID();
+    const response = await this.getMachineResponseRelay().request({
+      requestId, machineId, type: "machine:cursor_sdk:login_result",
+    }, 45_000, () => this.sendRequiredToMachine(machineId, {
+      type: "machine:cursor_sdk:login", requestId,
+    }), (event, attrs) => this.recordMachineResponseRelay(event, attrs));
+    if (response.type !== "machine:cursor_sdk:login_result") throw new Error("Unexpected cursor-sdk login response");
+    return {
+      ok: response.ok === true,
+      loginUrl: response.loginUrl,
+      reused: response.reused,
+      errorCode: response.errorCode,
+      message: response.message,
+    };
+  }
+
+  /** Sanitized Cursor SDK binding status (status + source only, by contract). */
+  async getMachineCursorSdkStatus(machineId: string): Promise<{
+    status: "unbound" | "bound" | "bound_stale_key" | "disconnected" | "error";
+    source: "cursor_sdk_store" | "raft_owned" | "owner_environment";
+  }> {
+    const requestId = crypto.randomUUID();
+    const response = await this.getMachineResponseRelay().request({
+      requestId, machineId, type: "machine:cursor_sdk:status_result",
+    }, 10_000, () => this.sendRequiredToMachine(machineId, {
+      type: "machine:cursor_sdk:status", requestId,
+    }), (event, attrs) => this.recordMachineResponseRelay(event, attrs));
+    if (response.type !== "machine:cursor_sdk:status_result") throw new Error("Unexpected cursor-sdk status response");
+    return { status: response.status, source: response.source };
+  }
+
   async detectMachineRuntimeModels(machineId: string, runtime: string): Promise<RuntimeModelSourceOutcome> {
     // Plain model discovery does not consume connection-generation authority.
     // Built-in admission continues to use the local, fenced WithAuthority path.

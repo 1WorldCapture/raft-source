@@ -931,6 +931,15 @@ export const zhCn: Record<MessageId, string> = {
     "{runtimeName} 已登录，但此 Computer 未报告任何可用模型。",
   "agent.runtimeModels.missingConfig":
     "需要先在此 Computer 上配置 {runtimeName}，才能加载其模型。",
+  "agent.runtimeModels.cursorLoginRequired":
+    "此 Computer 尚未登录 Cursor。登录后即可加载模型列表。",
+  "agent.runtimeModels.cursorLoginButton": "登录 Cursor",
+  "agent.runtimeModels.cursorLoginWaiting": "等待浏览器授权…",
+  "agent.runtimeModels.cursorLoginFailed": "Cursor 登录未能启动，请稍后重试。",
+  "agent.runtimeModels.cursorLoginTimeout":
+    "等待授权超时。请重新点击“登录 Cursor”。",
+  "agent.runtimeModels.cursorReplaceConfirm":
+    "此 Computer 已绑定一个 Cursor 账号。继续登录将替换当前绑定，是否继续？",
   "agent.runtimeModels.noModels":
     "{runtimeName} 已配置，但此 Computer 未报告任何可用模型。",
   "agent.runtimeModels.defaultModel":

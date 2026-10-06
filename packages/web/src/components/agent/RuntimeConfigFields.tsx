@@ -26,6 +26,7 @@ import {
   SelectValue,
 } from "raft-ui";
 import StableField from "./StableField";
+import CursorSdkLoginButton from "./CursorSdkLoginButton";
 import { KeyValueAddButton, KeyValueInputRow } from "../ui/KeyValueInput";
 import Tooltip from "../ui/Tooltip";
 import { reasoningEffortOptionsForModel } from "../../utils/reasoningEffortOptions";
@@ -307,7 +308,9 @@ function runtimeModelSourceStatus(
     case "loading":
       return intl.formatMessage({ id: "agent.runtimeModels.loading" });
     case "missing_config":
-      return source.recovery === "kimi_login"
+      return source.recovery === "cursor_login"
+        ? intl.formatMessage({ id: "agent.runtimeModels.cursorLoginRequired" })
+        : source.recovery === "kimi_login"
         ? intl.formatMessage(
           { id: "agent.runtimeModels.kimiLoginRequired" },
           {
@@ -415,6 +418,19 @@ interface RuntimeConfigFieldsProps {
     loading: boolean;
     rescan: () => void;
   };
+  /**
+   * Enables the Cursor SDK web sign-in entry: when the model source reports
+   * `missing_config` with recovery `cursor_login`, a "Sign in to Cursor"
+   * button is rendered next to the status sentence. `onBound` fires once the
+   * binding is observed as bound — pass `runtimeModels.rescan` so the list
+   * refreshes automatically. Omit (or pass null) on surfaces without a
+   * machine target.
+   */
+  cursorSdkLoginTarget?: {
+    serverId: string;
+    machineId: string;
+    onBound: () => void;
+  } | null;
   rescanDisabled?: boolean;
   providerMode: RuntimeProviderMode;
   onProviderModeChange: (mode: RuntimeProviderMode) => void;
@@ -880,6 +896,7 @@ export default function RuntimeConfigFields({
   modelOptions,
   runtimeModels,
   rescanDisabled,
+  cursorSdkLoginTarget = null,
   providerMode,
   onProviderModeChange,
   providerApiUrl,
@@ -1033,6 +1050,19 @@ export default function RuntimeConfigFields({
       {intl.formatMessage({ id: "agent.runtimeModels.retry" })}
     </FieldAction>
   ) : null;
+  // Cursor SDK web sign-in entry: shown only for the owner-triggered
+  // recovery path, and only when the dialog knows which machine to target.
+  const cursorLoginAction = cursorSdkLoginTarget
+    && modelSource.kind === "missing_config"
+    && modelSource.recovery === "cursor_login"
+    ? (
+      <CursorSdkLoginButton
+        serverId={cursorSdkLoginTarget.serverId}
+        machineId={cursorSdkLoginTarget.machineId}
+        onBound={cursorSdkLoginTarget.onBound}
+      />
+    )
+    : null;
   const envVarsField = envVarsMode === "hidden" ? null : (
     <RuntimeEnvVarsField
       entries={envVarEntries}
@@ -1454,6 +1484,7 @@ export default function RuntimeConfigFields({
               <p>
                 {modelSourceStatusContent}
                 {retryAction ? <>{" "}{retryAction}</> : null}
+                {cursorLoginAction ? <>{" "}{cursorLoginAction}</> : null}
               </p>
             </div>
           )}

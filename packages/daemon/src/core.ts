@@ -45,6 +45,7 @@ import {
   APP_SOURCE_TRACE_IDENTITY_KEYS,
 } from "@botiverse/raft-shared/src/appRuntimeTrace.js";
 import { AgentProcessManager, classifySpawnFailure } from "./agentProcessManager.js";
+import { CursorSdkLoginCoordinator, cursorSdkStatusSummary } from "./runtimeAuth/cursor/cursorSdkLoginCoordinator.js";
 import { getDriver } from "./drivers/index.js";
 import { readCommandVersion, resolveCommandOnPath } from "./drivers/probe.js";
 import {
@@ -525,6 +526,14 @@ export const DAEMON_CORE_TRACE_ATTR_CONTRACTS = {
       "daemon.pi.models.result": ["available_models_count", "returned_models_count", "diagnostics_count", "diagnostic_info_count", "diagnostic_warning_count", "outcome"],
     },
     endAttrs: ["outcome", "models_count", "default_model_present", "verified_as", "error_class"],
+  },
+  "daemon.cursor_sdk.login": {
+    spanAttrs: ["requestId"],
+    endAttrs: ["outcome", "error_class"],
+  },
+  "daemon.cursor_sdk.status": {
+    spanAttrs: ["requestId"],
+    endAttrs: ["outcome", "status", "error_class"],
   },
   // task #510: per-prompt span. `prompts_in_flight` is the cross-agent concurrency
   // observable — under the old process-env-patch lock it could never exceed 1
@@ -1451,6 +1460,10 @@ function summarizeIncomingMessage(msg: ServerToMachineMessage): string {
       return `(directory=${msg.directoryName})`;
     case "machine:runtime_models:detect":
       return `(runtime=${msg.runtime}, req=${msg.requestId})`;
+    case "machine:cursor_sdk:login":
+      return `(req=${msg.requestId})`;
+    case "machine:cursor_sdk:status":
+      return `(req=${msg.requestId})`;
     case "machine:runtime_account_usage:refresh":
       return `(provider=${msg.provider}, reason=${msg.reason}, req=${msg.requestId})`;
     case "machine:runtimes:rescan":
@@ -1515,6 +1528,8 @@ export class DaemonCore {
   // self-healing form on the first connect of this daemon process (a SEA
   // computer switch / daemon upgrade restarts the daemon → triggers this).
   private opencliWrappersRegenerated = false;
+  // Web-triggered Cursor SDK owner sign-ins: one in-flight session per daemon.
+  private readonly cursorSdkLogins = new CursorSdkLoginCoordinator();
   private readonly runtimeDetector: () => RuntimeDetection;
   private readonly agentManager: AgentProcessManager;
   private readonly connection: DaemonConnection;
@@ -4028,6 +4043,69 @@ export class DaemonCore {
             });
           },
         );
+        break;
+      }
+
+      case "machine:cursor_sdk:login": {
+        // Owner-only upstream (server enforces machine ownership); the reply
+        // carries only the validated login URL or a failure reason — the
+        // browser wait is observed via status polling, never held open here.
+        const span = this.tracer.startSpan("daemon.cursor_sdk.login", {
+          surface: "daemon",
+          kind: "internal",
+          attrs: { requestId: msg.requestId },
+        });
+        this.cursorSdkLogins.begin({ slockHome: this.slockHome })
+          .then((start) => {
+            this.connection.send({
+              type: "machine:cursor_sdk:login_result",
+              requestId: msg.requestId,
+              ...(start.ok
+                ? { ok: true, loginUrl: start.loginUrl, reused: start.reused }
+                : { ok: false, errorCode: start.errorCode, message: start.message }),
+            });
+            span.end("ok", {
+              attrs: { outcome: start.ok ? (start.reused ? "url_reused" : "url_returned") : `not_started:${start.errorCode}` },
+            });
+          })
+          .catch((err: unknown) => {
+            this.connection.send({
+              type: "machine:cursor_sdk:login_result",
+              requestId: msg.requestId,
+              ok: false,
+              errorCode: "daemon_error",
+              message: err instanceof Error ? err.message : String(err),
+            });
+            span.end("error", { attrs: { error_class: err instanceof Error ? err.name : typeof err } });
+          });
+        break;
+      }
+
+      case "machine:cursor_sdk:status": {
+        const span = this.tracer.startSpan("daemon.cursor_sdk.status", {
+          surface: "daemon",
+          kind: "internal",
+          attrs: { requestId: msg.requestId },
+        });
+        cursorSdkStatusSummary({ slockHome: this.slockHome })
+          .then((summary) => {
+            this.connection.send({
+              type: "machine:cursor_sdk:status_result",
+              requestId: msg.requestId,
+              status: summary.status,
+              source: summary.source,
+            });
+            span.end("ok", { attrs: { outcome: "reported", status: summary.status } });
+          })
+          .catch((err: unknown) => {
+            this.connection.send({
+              type: "machine:cursor_sdk:status_result",
+              requestId: msg.requestId,
+              status: "error",
+              source: "cursor_sdk_store",
+            });
+            span.end("error", { attrs: { error_class: err instanceof Error ? err.name : typeof err } });
+          });
         break;
       }
 
