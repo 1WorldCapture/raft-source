@@ -12,8 +12,8 @@ interface ComputerCommandGuideProps {
   windowsComputerCommand?: string | null;
   windowsComputerInstallCommand?: string | null;
   className?: string;
-  macLinuxDaemonCommand: string;
-  windowsDaemonCommand: string;
+  macLinuxDaemonCommand: string | null;
+  windowsDaemonCommand: string | null;
   onPlatformChange?: (platform: ComputerCommandPlatform) => void;
   onRequestWindowsDaemonCommand?: () => void;
   windowsDaemonCommandPending?: boolean;
@@ -208,7 +208,10 @@ export default function ComputerCommandGuide({
     }]
     : selectedComputerSteps;
   const selectedDaemonCommand = platform === "windows" ? windowsDaemonCommand : macLinuxDaemonCommand;
-  const displayDaemonCommand = selectedDaemonCommand.replace(
+  // Null while the deployment mode resolves / a private server lacks the
+  // daemon artifact — the render branches below already hold the command
+  // back in that case (task #6).
+  const displayDaemonCommand = (selectedDaemonCommand ?? "").replace(
     /--api-key\s+(sk_machine_\S+)/,
     (_, key: string) => `--api-key ${key.slice(0, 14)}••••${key.slice(-4)}`,
   );
@@ -227,7 +230,7 @@ export default function ComputerCommandGuide({
   const selectedDaemonStep: CommandStep = {
     target: daemonCopyTarget,
     command: displayDaemonCommand,
-    copyCommand: selectedDaemonCommand,
+    copyCommand: selectedDaemonCommand ?? undefined,
     copyAriaLabel: platform === "windows"
       ? formatMessage({ id: "machine.commandGuide.copyWindowsDaemonCommand" })
       : formatMessage({ id: "machine.commandGuide.copyDaemonCommand" }),

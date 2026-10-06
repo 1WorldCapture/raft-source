@@ -1,10 +1,12 @@
-// Deployment mode for install-command generation (task #5, private
+// Deployment mode for install-command generation (task #5/#6, private
 // deployment phase 2).
 //
 // The web image is mode-agnostic — one image serves the official cloud and
 // any self-hosted deployment — so "which install commands do we show" needs
 // the server's RUNTIME answer, not a build-time bake. GET /api/deployment-info
-// is that answer (it reads the canonical RAFT_DEPLOYMENT_MODE switch).
+// is that answer (it reads the canonical RAFT_DEPLOYMENT_MODE switch and,
+// when private, carries the server-rendered download URLs — built from
+// SERVER_URL only, never request headers).
 //
 // Deliberately NOT an artifacts probe: checking whether /downloads/computer/
 // manifest.json exists would be inference; the switch is the source of truth.
@@ -27,24 +29,56 @@ import { RUNTIME_API_BASE } from "../desktopRuntimeEnvironment";
 export type DeploymentMode = "private" | "standard";
 export type DeploymentModeResolution = DeploymentMode | "unknown";
 
-let cached: DeploymentModeResolution | null = null;
-let inflight: Promise<DeploymentModeResolution> | null = null;
+/** The server-rendered download URLs for a private deployment (task #6).
+ *  Absent when not private, or when the server lacks a trusted origin or
+ *  the artifact manifests — callers treat absence per-surface (notice /
+ *  hidden command), never a guessed URL. */
+export interface DeploymentDownloads {
+  computerBase: string;
+  cli?: string;
+  daemon?: string;
+}
+
+export interface DeploymentInfo {
+  deploymentMode: DeploymentMode;
+  downloads?: DeploymentDownloads;
+}
+
+let cached: DeploymentInfo | "unknown" | null = null;
+let inflight: Promise<DeploymentInfo | "unknown"> | null = null;
 const listeners = new Set<() => void>();
 
 function notify(): void {
   for (const listener of listeners) listener();
 }
 
-async function fetchDeploymentModeOnce(): Promise<DeploymentMode | null> {
+function parseDeploymentInfo(body: unknown): DeploymentInfo | null {
+  if (typeof body !== "object" || body === null) return null;
+  const mode = (body as { deploymentMode?: unknown }).deploymentMode;
+  if (mode !== "private" && mode !== "standard") return null;
+  const info: DeploymentInfo = { deploymentMode: mode };
+  if (mode === "private") {
+    const downloads = (body as { downloads?: unknown }).downloads;
+    if (typeof downloads === "object" && downloads !== null) {
+      const { computerBase, cli, daemon } = downloads as Record<string, unknown>;
+      if (typeof computerBase === "string" && computerBase) {
+        const parsed: DeploymentDownloads = { computerBase };
+        if (typeof cli === "string" && cli) parsed.cli = cli;
+        if (typeof daemon === "string" && daemon) parsed.daemon = daemon;
+        info.downloads = parsed;
+      }
+    }
+  }
+  return info;
+}
+
+async function fetchDeploymentModeOnce(): Promise<DeploymentInfo | null> {
   try {
     const res = await fetch(`${RUNTIME_API_BASE}/deployment-info`, {
       headers: { accept: "application/json" },
     });
     if (res.ok) {
-      const body = (await res.json()) as { deploymentMode?: unknown };
-      if (body.deploymentMode === "private" || body.deploymentMode === "standard") {
-        return body.deploymentMode;
-      }
+      return parseDeploymentInfo(await res.json());
     }
   } catch {
     /* handled by the caller's retry policy */
@@ -53,9 +87,9 @@ async function fetchDeploymentModeOnce(): Promise<DeploymentMode | null> {
 }
 
 /** Kick off (once) and await the mode resolution, retrying a failure once. */
-export function ensureDeploymentMode(): Promise<DeploymentModeResolution> {
+export function ensureDeploymentMode(): Promise<DeploymentInfo | "unknown"> {
   if (cached) return Promise.resolve(cached);
-  inflight ??= (async (): Promise<DeploymentModeResolution> => {
+  inflight ??= (async (): Promise<DeploymentInfo | "unknown"> => {
     // One retry: a transient blip on the very first page load should not
     // downgrade a private deployment to "unknown" for the whole session.
     const resolved = (await fetchDeploymentModeOnce()) ?? (await fetchDeploymentModeOnce());
@@ -67,7 +101,7 @@ export function ensureDeploymentMode(): Promise<DeploymentModeResolution> {
   return inflight;
 }
 
-/** Test seams: control the page-lifetime cache between scenarios. */
+/** Test seam: clear the page-lifetime cache between scenarios. */
 export function __resetDeploymentModeForTests(): void {
   cached = null;
   inflight = null;
@@ -76,9 +110,11 @@ export function __resetDeploymentModeForTests(): void {
 /** Test seam: pin the cache synchronously (no fetch) — the shared DOM test
  *  harness presets "standard" so legacy behavioral tests keep seeing install
  *  commands on first render; deployment-mode-specific tests reset or pin
- *  their own values. */
-export function __setDeploymentModeForTests(mode: DeploymentModeResolution): void {
-  cached = mode;
+ *  their own values. Accepts a bare mode or a full info object. */
+export function __setDeploymentModeForTests(mode: DeploymentModeResolution | DeploymentInfo): void {
+  cached = mode === "unknown" || typeof mode === "object"
+    ? mode
+    : { deploymentMode: mode };
   inflight = null;
   notify();
 }
@@ -91,8 +127,17 @@ function subscribe(listener: () => void): () => void {
   return () => listeners.delete(listener);
 }
 
-function getSnapshot(): DeploymentModeResolution | null {
+function getInfoSnapshot(): DeploymentInfo | "unknown" | null {
   return cached;
+}
+
+function getModeSnapshot(): DeploymentModeResolution | null {
+  if (cached === null || cached === "unknown") return cached;
+  return cached.deploymentMode;
+}
+
+function getDownloadsSnapshot(): DeploymentDownloads | null {
+  return cached && cached !== "unknown" ? cached.downloads ?? null : null;
 }
 
 /**
@@ -101,7 +146,15 @@ function getSnapshot(): DeploymentModeResolution | null {
  * Callers render NO install command for `null` and a notice for "unknown".
  */
 export function useDeploymentMode(): DeploymentModeResolution | null {
-  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  return useSyncExternalStore(subscribe, getModeSnapshot, getModeSnapshot);
+}
+
+/**
+ * The server-rendered download URLs (private deployments only); null when
+ * absent (standard / unknown / private without trusted URLs).
+ */
+export function useDeploymentDownloads(): DeploymentDownloads | null {
+  return useSyncExternalStore(subscribe, getDownloadsSnapshot, getDownloadsSnapshot);
 }
 
 /** Map a resolution to the ComputerCommandGuide display status. An absent

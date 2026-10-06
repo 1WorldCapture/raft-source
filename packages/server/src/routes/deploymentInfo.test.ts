@@ -1,16 +1,31 @@
-// Task #5 (phase 2): /api/deployment-info — the runtime private-mode answer
-// for the mode-agnostic web image. Hermetic: standalone router + env flip.
+// Task #5/#6 (phase 2): /api/deployment-info — the runtime private-mode
+// answer for the mode-agnostic web image, plus (private mode) the trusted
+// download URLs. Security guard (PM review): URLs derive ONLY from the
+// configured SERVER_URL — a forged Host/X-Forwarded-Host must not move them.
 import assert from "node:assert/strict";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { afterAll, beforeAll, describe, test } from "vitest";
 import express from "express";
 import deploymentInfoRouter from "./deploymentInfo.js";
 
+let dir: string;
 let app: express.Express;
 let baseUrl: string;
 let server: import("node:http").Server;
 const prevMode = process.env.RAFT_DEPLOYMENT_MODE;
+const prevServerUrl = process.env.SERVER_URL;
+const prevDownloadsDir = process.env.RAFT_DOWNLOADS_DIR;
 
 beforeAll(async () => {
+  dir = await mkdtemp(path.join(tmpdir(), "deployment-info-"));
+  await mkdir(path.join(dir, "cli"), { recursive: true });
+  await mkdir(path.join(dir, "daemon"), { recursive: true });
+  await writeFile(path.join(dir, "cli", "manifest.json"), JSON.stringify({ version: "0.0.24-zcode.1" }));
+  await writeFile(path.join(dir, "daemon", "manifest.json"), JSON.stringify({ version: "1.0.25" }));
+  process.env.RAFT_DOWNLOADS_DIR = dir;
+
   app = express();
   app.use("/api/deployment-info", deploymentInfoRouter);
   await new Promise<void>((resolve) => {
@@ -24,19 +39,57 @@ beforeAll(async () => {
 afterAll(async () => {
   if (prevMode === undefined) delete process.env.RAFT_DEPLOYMENT_MODE;
   else process.env.RAFT_DEPLOYMENT_MODE = prevMode;
+  if (prevServerUrl === undefined) delete process.env.SERVER_URL;
+  else process.env.SERVER_URL = prevServerUrl;
+  if (prevDownloadsDir === undefined) delete process.env.RAFT_DOWNLOADS_DIR;
+  else process.env.RAFT_DOWNLOADS_DIR = prevDownloadsDir;
   await new Promise<void>((resolve) => server.close(() => resolve()));
+  await rm(dir, { recursive: true, force: true });
 });
 
 describe("GET /api/deployment-info", () => {
   test("reports standard by default and private under the canonical switch", async () => {
     delete process.env.RAFT_DEPLOYMENT_MODE;
+    delete process.env.SERVER_URL;
     let res = await fetch(`${baseUrl}/api/deployment-info`);
     assert.equal(res.status, 200);
     assert.deepEqual(await res.json(), { deploymentMode: "standard" });
 
     process.env.RAFT_DEPLOYMENT_MODE = "private";
     res = await fetch(`${baseUrl}/api/deployment-info`);
-    assert.equal(res.status, 200);
+    assert.equal((await res.json()).deploymentMode, "private");
+  });
+
+  test("private mode carries download URLs built from the manifest versions", async () => {
+    process.env.RAFT_DEPLOYMENT_MODE = "private";
+    process.env.SERVER_URL = "https://raft.internal.example:18443/";
+    const res = await fetch(`${baseUrl}/api/deployment-info`);
+    assert.deepEqual(await res.json(), {
+      deploymentMode: "private",
+      downloads: {
+        computerBase: "https://raft.internal.example:18443/downloads/computer",
+        cli: "https://raft.internal.example:18443/downloads/cli/raft-0.0.24-zcode.1.tgz",
+        daemon: "https://raft.internal.example:18443/downloads/daemon/raft-daemon-1.0.25.tgz",
+      },
+    });
+  });
+
+  test("forged Host / X-Forwarded-Host never move the download URLs (host-header injection)", async () => {
+    process.env.RAFT_DEPLOYMENT_MODE = "private";
+    process.env.SERVER_URL = "https://raft.internal.example:18443";
+    const res = await fetch(`${baseUrl}/api/deployment-info`, {
+      headers: { Host: "evil.example", "X-Forwarded-Host": "evil.example" },
+    });
+    const body = (await res.json()) as { downloads?: { cli?: string; daemon?: string; computerBase?: string } };
+    assert.equal(body.downloads?.computerBase, "https://raft.internal.example:18443/downloads/computer");
+    assert.equal(body.downloads?.cli?.startsWith("https://raft.internal.example:18443/"), true);
+    assert.equal(JSON.stringify(body).includes("evil.example"), false);
+  });
+
+  test("private without SERVER_URL omits downloads rather than guessing an origin", async () => {
+    process.env.RAFT_DEPLOYMENT_MODE = "private";
+    delete process.env.SERVER_URL;
+    const res = await fetch(`${baseUrl}/api/deployment-info`);
     assert.deepEqual(await res.json(), { deploymentMode: "private" });
   });
 });

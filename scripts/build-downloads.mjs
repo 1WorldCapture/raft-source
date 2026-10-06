@@ -23,10 +23,13 @@
 //     --cli-version 0.0.24 --out deploy/docker/downloads \
 //     --computer-darwin-arm64 path/to/raft-computer-darwin-arm64 \
 //     --computer-darwin-x64  path/...      [--computer-linux-x64 ...] [--computer-linux-arm64 ...] \
-//     --cli path/to/raft-<cli-version>.tgz [--commit <sha>] [--daemon-version <v>]
-// At least one --computer-* target and --cli are required. --commit stamps
-// the source sha into every manifest so "same commit" is verifiable on the
-// artifacts themselves. Re-running for the same version is idempotent
+//     --cli path/to/raft-<cli-version>.tgz [--daemon path/to/raft-daemon-<v>.tgz] \
+//     [--commit <sha>] [--daemon-version <v>]
+// At least one --computer-* target and --cli are required; --daemon adds the
+// daemon tarball tree (same shape as cli) for private deployments where
+// `npx @botiverse/raft-daemon` cannot reach the public registry. --commit
+// stamps the source sha into every manifest so "same commit" is verifiable
+// on the artifacts themselves. Re-running for the same version is idempotent
 // (files are copied over, manifests rewritten).
 
 import { createHash } from "node:crypto";
@@ -129,6 +132,33 @@ async function main() {
     path.join(outDir, "cli", "manifest.json"),
     JSON.stringify({ version: cliVersion, ...(commit ? { commit } : {}) }, null, 2) + "\n",
   );
+
+  // Daemon tarball (task #6): private deployments install the daemon with
+  // `npm i -g <origin>/downloads/daemon/raft-daemon-<v>.tgz` because
+  // `npx @botiverse/raft-daemon` cannot reach the public registry offline.
+  // `daemonVersion` was declared above (the computer latest-pointer stamp);
+  // the daemon tarball tree reuses the same version flag.
+  const daemonFile = args.daemon;
+  if (daemonFile && !daemonVersion) throw new Error("--daemon requires --daemon-version <semver>");
+  if (daemonFile) {
+    const daemonName = `raft-daemon-${daemonVersion}.tgz`;
+    const daemonDir = path.join(outDir, "daemon", daemonVersion);
+    await mkdir(daemonDir, { recursive: true });
+    await copyFile(daemonFile, path.join(daemonDir, daemonName));
+    const daemonInfo = await stat(path.join(daemonDir, daemonName));
+    await writeFile(
+      path.join(daemonDir, "manifest.json"),
+      JSON.stringify({
+        version: daemonVersion,
+        ...(commit ? { commit } : {}),
+        targets: { npm: { file: daemonName, sha256: await sha256(path.join(daemonDir, daemonName)), size: daemonInfo.size } },
+      }, null, 2) + "\n",
+    );
+    await writeFile(
+      path.join(outDir, "daemon", "manifest.json"),
+      JSON.stringify({ version: daemonVersion, ...(commit ? { commit } : {}) }, null, 2) + "\n",
+    );
+  }
 
   console.log(`[build-downloads] computer ${computerVersion} [${Object.keys(targets).join(", ")}] + cli ${cliVersion} + installers -> ${outDir}${commit ? ` (commit ${commit.slice(0, 8)})` : ""}`);
 }

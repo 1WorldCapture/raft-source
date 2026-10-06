@@ -387,6 +387,33 @@ test("Windows daemon connect command uses npx.cmd and no shell comment", () => {
   );
 });
 
+// Private deployments (task #6): the daemon connect command becomes a
+// two-step server-tarball install + run — the public-registry npx form
+// cannot work offline. The global install intentionally overrides any
+// official @botiverse/raft-daemon copy (documented behavior).
+test("daemon connect command installs from the server tarball when installUrl is set", () => {
+  const installUrl = "https://raft.internal.example:18443/downloads/daemon/raft-daemon-1.0.25.tgz";
+  assert.equal(
+    getDaemonConnectCommand({
+      apiKey: "sk_machine_test",
+      platform: "mac-linux",
+      serverName: "botiverse",
+      serverUrl: "https://raft.internal.example:18443",
+      installUrl,
+    }),
+    `npm i -g ${installUrl} && raft-daemon --server-url https://raft.internal.example:18443 --api-key sk_machine_test # botiverse`,
+  );
+  assert.equal(
+    getDaemonConnectCommand({
+      apiKey: "sk_machine_test",
+      platform: "windows",
+      serverUrl: "https://raft.internal.example:18443",
+      installUrl,
+    }),
+    `npm i -g ${installUrl}; raft-daemon --server-url https://raft.internal.example:18443 --api-key sk_machine_test`,
+  );
+});
+
 // Private deployments (task #5, phase 2): install commands fetch the
 // installer AND the bytes from the server's own /downloads tree, and persist
 // the server release backend so later upgrade checks resolve against the

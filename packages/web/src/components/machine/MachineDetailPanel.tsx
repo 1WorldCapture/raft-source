@@ -19,7 +19,7 @@ import { useServerPermissions } from "../../hooks/useServerPermissions";
 import { getServerUrl } from "../../utils/server";
 import { formatRelativeTime } from "../../utils/relativeTime";
 import { getComputerCommands, getDaemonConnectCommand } from "../../utils/computerSetupCommand";
-import { useDeploymentMode } from "../../utils/deploymentMode";
+import { useDeploymentMode, useDeploymentDownloads } from "../../utils/deploymentMode";
 import { canViewMachineRuntimeAccountUsage } from "../../utils/machineRuntimeUsageVisibility";
 import { isAppManagedComputer } from "../../utils/computerUpgradeIndicator";
 import ConfirmDialog from "../ConfirmDialog";
@@ -724,11 +724,16 @@ export default function MachineDetailPanel({
   if (savedKey && !isKeyValid) {
     localStorage.removeItem(`slock_machine_apikey_${machine.id}`);
   }
-  const macLinuxConnectCommand = isKeyValid
-    ? getDaemonConnectCommand({ apiKey: savedKey, platform: "mac-linux", serverName, serverUrl })
+  // Daemon connect commands (task #6): hidden while the deployment mode
+  // resolves; private deployments use the two-step server-tarball install
+  // (no command when the server ships no daemon artifact).
+  const deploymentDownloads = useDeploymentDownloads();
+  const daemonInstallUrl = deploymentMode === "private" ? deploymentDownloads?.daemon ?? null : null;
+  const macLinuxConnectCommand = isKeyValid && deploymentMode !== null
+    ? getDaemonConnectCommand({ apiKey: savedKey, platform: "mac-linux", serverName, serverUrl, installUrl: daemonInstallUrl })
     : null;
-  const windowsConnectCommand = isKeyValid
-    ? getDaemonConnectCommand({ apiKey: savedKey, platform: "windows", serverName, serverUrl })
+  const windowsConnectCommand = isKeyValid && deploymentMode !== null
+    ? getDaemonConnectCommand({ apiKey: savedKey, platform: "windows", serverName, serverUrl, installUrl: daemonInstallUrl })
     : null;
   const setupMachineId = machine.isComputer ? null : machine.id;
   // "unknown" (resolution failed after retry) generates standard commands —
