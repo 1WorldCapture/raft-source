@@ -2,6 +2,9 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
+    // Isolate from the host's managed-runtime env and real Raft/Slock homes
+    // before any test runs (see src/test-env-guardrail.ts).
+    setupFiles: ["./src/test-env-guardrail.ts"],
     environment: "node",
     include: ["src/**/*.test.ts"],
     pool: "forks",

@@ -331,7 +331,9 @@ test("John carrier CLI emits only the closed preview receipt and fixed stderr co
   );
   const env = { ...process.env };
   delete env.DATABASE_URL;
-  const child = spawnSync(process.execPath, ["--import", "tsx", scriptPath], {
+  // --disable-warning=DEP0205: tsx's module.register() emits a deprecation
+  // warning on recent Node; the assertion below matches stderr exactly.
+  const child = spawnSync(process.execPath, ["--disable-warning=DEP0205", "--import", "tsx", scriptPath], {
     cwd: packageRoot,
     env,
     encoding: "utf8",

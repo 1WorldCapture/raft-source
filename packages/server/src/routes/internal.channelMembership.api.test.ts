@@ -202,11 +202,11 @@ async function runSlockCli(
     ...env,
   };
   if (input === undefined) {
-    return execFileAsync(process.execPath, ["--import", "tsx", cliEntry, ...args], { env: childEnv });
+    return execFileAsync(process.execPath, ["--disable-warning=DEP0205", "--import", "tsx", cliEntry, ...args], { env: childEnv });
   }
 
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, ["--import", "tsx", cliEntry, ...args], {
+    const child = spawn(process.execPath, ["--disable-warning=DEP0205", "--import", "tsx", cliEntry, ...args], {
       env: childEnv,
       stdio: ["pipe", "pipe", "pipe"],
     });
