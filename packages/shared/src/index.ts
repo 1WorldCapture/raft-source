@@ -562,6 +562,14 @@ export type ServerToMachineMessage =
    */
   | { type: "agent:start:wiki"; agentId: string; config: AgentConfig; wikiWorkspacePack: WikiWorkspacePack; wakeMessage?: AgentMessage; wakeMessageTransient?: boolean; resumeMessages?: AgentMessage[]; unreadSummary?: Record<string, number>; resumePrompt?: string; launchId?: string; startDispatchId?: string; traceparent?: string }
   | { type: "agent:stop"; agentId: string }
+  /**
+   * The agent was deleted on the server: stop it if needed and move its
+   * per-agent local directories into the daemon's quarantine (trash). The
+   * daemon advertises the `agent:purge` ready capability; daemons without it
+   * ignore this unknown message (today's behavior). Answered with
+   * `agent:purge:result`.
+   */
+  | { type: "agent:purge"; agentId: string }
   // Remote control of a managed Computer (web → server → machine WS → the
   // Computer's own service IPC). `computer:restart` → restart-service;
   // `computer:upgrade` → upgrade-start (§12 self-update). Additive: raw
@@ -860,6 +868,7 @@ export type MachineToServerMessage =
   | { type: "agent:diagnostic:feedback_transcript_result"; agentId: string; feedbackReportId: string; requestId: string; traceBundleId?: string; reachable: boolean; fallbackReason?: string; error?: string; transcriptWindow?: FeedbackTranscriptWindow }
   | { type: "machine:workspace:scan_result"; directories: WorkspaceDirectoryInfo[] }
   | { type: "machine:workspace:delete_result"; directoryName: string; success: boolean }
+  | { type: "agent:purge:result"; agentId: string; outcome: AgentPurgeOutcome }
   | {
       type: "machine:migration:source_workspace_archive_result";
       requestId: string;
@@ -1864,6 +1873,12 @@ export type {
   InMemoryFailpointRegistryOptions,
   MaybePromise,
 } from "./testing/failpoints.js";
+
+/** Ready capability advertised by daemons that understand `agent:purge`. */
+export const AGENT_PURGE_CAPABILITY = "agent:purge";
+
+/** Result of a daemon-side `agent:purge`. `refused_running`/`error` leave the server's pending purge in place. */
+export type AgentPurgeOutcome = "purged" | "nothing_to_purge" | "refused_running" | "invalid_agent_id" | "error";
 
 // ── Runtime Models ──
 

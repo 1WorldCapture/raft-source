@@ -37,6 +37,7 @@ import {
   type Tracer,
   setClockTimeout,
   clearClockTimeout,
+  type AgentPurgeOutcome,
 } from "@botiverse/raft-shared";
 import { appInboxItemTraceAttrs } from "@botiverse/raft-shared/src/appRuntimeTrace.js";
 import {
@@ -63,6 +64,7 @@ import {
 import { logger } from "./logger.js";
 import { reapOrphanProcesses } from "./daemonOrphanReaper.js";
 import { deleteWorkspaceDirectory, initializeAgentWorkspace, scanWorkspaceDirectories } from "./workspaces.js";
+import { agentPurgeTargets, cursorHostDirectory, isCursorHostLockHeld, isPurgeableAgentId, moveAgentDirectoriesToTrash } from "./agentPurge.js";
 import { buildCindyMemoryMd, buildCindySeedFiles } from "./cindy.js";
 import { AgentStartCoordinator, type AgentStartQueueItem, type PendingStartRebind } from "./agentStartCoordinator.js";
 import { AgentStartDispatchProjection, type AgentStartAcceptance } from "./agentStartDispatchProjection.js";
@@ -5416,6 +5418,43 @@ export class AgentProcessManager {
 
   async scanAllWorkspaces(): Promise<WorkspaceDirectoryInfo[]> {
     return scanWorkspaceDirectories(this.dataDir);
+  }
+
+  /**
+   * Local cleanup for a deleted agent: stop it, make sure no runtime child is
+   * still alive, then move its per-agent directories into the trash. Order
+   * matters — nothing is moved while any process of the agent may still be
+   * writing there.
+   */
+  async purgeAgentLocalState(agentId: string): Promise<AgentPurgeOutcome> {
+    if (!isPurgeableAgentId(agentId)) return "invalid_agent_id";
+    const running = this.agents.get(agentId);
+    await this.stopAgent(agentId, { wait: true });
+    // stopAgent resolves after the runtime was asked to stop (SIGTERM, SIGKILL
+    // fallback); verify the child is really gone and nothing restarted it.
+    if (this.agents.has(agentId) || running?.runtime.isAlive?.() === true) {
+      logger.warn(`[Agent ${agentId}] Purge refused: runtime process still alive after stop`);
+      return "refused_running";
+    }
+    try {
+      // An orphaned Cursor SDK host can outlive its runtime session; its
+      // exclusive writer lock names the owner pid. Never move a directory a live
+      // writer still holds.
+      if (await isCursorHostLockHeld(cursorHostDirectory(this.slockHome, agentId))) {
+        logger.warn(`[Agent ${agentId}] Purge refused: Cursor SDK host writer lock is still held by a live process`);
+        return "refused_running";
+      }
+      const outcome = await moveAgentDirectoriesToTrash({
+        agentId,
+        slockHome: this.slockHome,
+        targets: agentPurgeTargets(this.slockHome, this.dataDir),
+      });
+      logger.info(`[Agent ${agentId}] Purge: ${outcome}`);
+      return outcome;
+    } catch (err) {
+      logger.error(`[Agent ${agentId}] Purge failed`, err);
+      return "error";
+    }
   }
 
   async deleteWorkspaceDirectory(directoryName: string): Promise<boolean> {
