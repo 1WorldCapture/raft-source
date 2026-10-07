@@ -43,10 +43,13 @@ test("the message doc keeps the UNKNOWN / no-blind-resend guidance", async () =>
   );
 });
 
-test("BINDING: no client-side idempotency key on the send path", async () => {
-  // This is the expiry mechanism. The guidance above is only correct while the
-  // client sends no key. If someone adds one, this goes red and the doc must be
-  // revisited — rather than the guidance silently outliving the gap it describes.
+test("BINDING: the send key stays strictly opt-in — the CLI never generates one", async () => {
+  // This is the revised expiry mechanism (faf57c3 shipped the opt-in key and
+  // the Manual's UNKNOWN guidance now applies only to the no-key path). The
+  // binding pins the new contract:
+  //   1. the key is validated and forwarded only when the caller passes it;
+  //   2. the client NEVER generates a key by itself — a key that changes per
+  //      retry would silently reintroduce the double-post the doc warns about.
   const source = await readFile(CLI_SEND_PATH, "utf8");
 
   // Positive control: an absence claim against a file I failed to read would
@@ -54,9 +57,19 @@ test("BINDING: no client-side idempotency key on the send path", async () => {
   assert.ok(source.length > 500, "send.ts must actually have been read");
   assert.match(source, /message/i, "send.ts must be the message-send source");
 
+  assert.match(
+    source,
+    /--idempotency-key must be 1-256 characters/,
+    "the opt-in key validation must stay",
+  );
+  assert.match(
+    source,
+    /body\.idempotencyKey = opts\.idempotencyKey/,
+    "the key must reach the request body only from the caller's option",
+  );
   assert.doesNotMatch(
     source,
-    /idempotencyKey|agentSendKey/i,
-    "send path gained an idempotency key — revisit the Manual's UNKNOWN guidance and its stated expiry",
+    /randomUUID|randomBytes|nanoid|generateId/i,
+    "send.ts gained client-side key generation — a per-retry key is a silent double-post; revisit the Manual's no-key UNKNOWN guidance",
   );
 });
