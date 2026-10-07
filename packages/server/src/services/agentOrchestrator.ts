@@ -8136,6 +8136,8 @@ export class AgentOrchestrator extends EventEmitter {
       case "machine:workspace:delete_result":
       case "machine:migration:source_workspace_archive_result":
       case "machine:runtime_models:result":
+      case "machine:cursor_sdk:login_result":
+      case "machine:cursor_sdk:status_result":
       case "agent:diagnostic:session_transcript_result":
       case "agent:diagnostic:feedback_transcript_result":
         // These are responses to workspace/machine/diagnostic requests — emit events for pending promises

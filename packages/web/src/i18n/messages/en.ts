@@ -940,7 +940,10 @@ export const en = {
   "agent.runtimeModels.cursorLoginRequired":
     "This Computer is not signed in to Cursor. Sign in to load the model list.",
   "agent.runtimeModels.cursorLoginButton": "Sign in to Cursor",
+  "agent.runtimeModels.cursorLoginStarting": "Starting sign-in…",
   "agent.runtimeModels.cursorLoginWaiting": "Waiting for browser authorization…",
+  "agent.runtimeModels.cursorLoginOpenLink": "Open authorization link",
+  "agent.runtimeModels.cursorLoginCopy": "Copy link",
   "agent.runtimeModels.cursorLoginFailed": "Cursor sign-in could not start. Try again shortly.",
   "agent.runtimeModels.cursorLoginTimeout":
     "Timed out waiting for authorization. Click \"Sign in to Cursor\" again.",

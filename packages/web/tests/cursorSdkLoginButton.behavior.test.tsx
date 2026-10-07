@@ -121,3 +121,35 @@ test("a non-cursor.com loginUrl is rejected and never opened", async (t) => {
   }, { timeout: 2_000 });
   assert.ok(opened.length === 0, "untrusted URL must not be opened");
 });
+
+test("a login failure shows the error and a retryable button, never a stuck waiting state", async (t) => {
+  const opened: string[] = [];
+  const restore = stubBrowser(opened, false);
+  t.after(restore);
+
+  t.mock.method(api, "get", async (url: string) => String(url).endsWith("/cursor-sdk/status")
+    ? { data: { status: "unbound", source: "cursor_sdk_store" } }
+    : { data: {} });
+  t.mock.method(api, "post", async () => {
+    // Server-side failure (e.g. the relay/timeout bug): HTTP 500 with an
+    // error body — the button must surface it and return to idle.
+    const err = new Error("Request failed with status code 500") as Error & {
+      response?: { data?: { error?: string } };
+      isAxiosError?: boolean;
+    };
+    err.response = { data: { error: "Failed to start Cursor sign-in" } };
+    throw err;
+  });
+
+  render(
+    <CursorSdkLoginButton serverId="srv-1" machineId="mach-1" pollIntervalMs={10} onBound={() => {}} />,
+  );
+  fireEvent.click(screen.getByTestId("cursor-sdk-login-button"));
+
+  await waitFor(() => {
+    const text = screen.getByTestId("cursor-sdk-login-button").textContent ?? "";
+    assert.match(text, /登录 Cursor|Sign in to Cursor/, "button must return to its idle, retryable label");
+    assert.doesNotMatch(text, /等待浏览器授权|Waiting for browser authorization/, "must not be stuck on waiting");
+  }, { timeout: 2_000 });
+  assert.match(document.body.textContent ?? "", /Failed to start Cursor sign-in/, "the server error is visible");
+});

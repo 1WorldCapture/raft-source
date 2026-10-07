@@ -46,6 +46,7 @@ export default function CursorSdkLoginButton({ serverId, machineId, onBound, pol
   const intl = useIntl();
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState<string | null>(null);
+  const [loginUrl, setLoginUrl] = useState<string | null>(null);
   const pollTimerRef = useRef<number | null>(null);
   const cancelledRef = useRef(false);
 
@@ -64,6 +65,7 @@ export default function CursorSdkLoginButton({ serverId, machineId, onBound, pol
   const beginLogin = useCallback(async () => {
     if (phase !== "idle") return;
     setError(null);
+    setLoginUrl(null);
     setPhase("starting");
     try {
       // Signing in again rebinds this machine — an already-bound Computer must
@@ -83,6 +85,12 @@ export default function CursorSdkLoginButton({ serverId, machineId, onBound, pol
         setPhase("idle");
         return;
       }
+      setLoginUrl(data.loginUrl);
+      // A window.open issued AFTER awaits may be treated as a non-user-gesture
+      // popup and swallowed before it ever reaches the desktop shell — so the
+      // authorization link is ALSO rendered below as a clickable/copyable
+      // fallback (see loginUrl state). Attempt the automatic open as a
+      // convenience only.
       window.open(data.loginUrl, "_blank", "noopener,noreferrer");
       setPhase("awaiting_browser");
       const startedAtMs = Date.now();
@@ -130,10 +138,35 @@ export default function CursorSdkLoginButton({ serverId, machineId, onBound, pol
         disabled={busy}
         data-testid="cursor-sdk-login-button"
       >
-        {busy
-          ? intl.formatMessage({ id: "agent.runtimeModels.cursorLoginWaiting" })
-          : intl.formatMessage({ id: "agent.runtimeModels.cursorLoginButton" })}
+        {phase === "starting"
+          ? intl.formatMessage({ id: "agent.runtimeModels.cursorLoginStarting" })
+          : phase === "awaiting_browser"
+            ? intl.formatMessage({ id: "agent.runtimeModels.cursorLoginWaiting" })
+            : intl.formatMessage({ id: "agent.runtimeModels.cursorLoginButton" })}
       </Button>
+      {loginUrl && phase === "awaiting_browser" ? (
+        <span className="ml-1 break-all">
+          {" "}
+          <a
+            href={loginUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline underline-offset-2"
+            data-testid="cursor-sdk-login-link"
+          >
+            {intl.formatMessage({ id: "agent.runtimeModels.cursorLoginOpenLink" })}
+          </a>
+          {" "}
+          <button
+            type="button"
+            className="underline underline-offset-2"
+            onClick={() => { void navigator.clipboard?.writeText(loginUrl); }}
+            data-testid="cursor-sdk-login-copy"
+          >
+            {intl.formatMessage({ id: "agent.runtimeModels.cursorLoginCopy" })}
+          </button>
+        </span>
+      ) : null}
       {error ? <span className="text-red-600">{" "}{error}</span> : null}
     </>
   );
