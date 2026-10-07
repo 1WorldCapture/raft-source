@@ -14,8 +14,8 @@
 | Computer | 1.0.29 | linux-x64、darwin-arm64、darwin-x64 单文件；darwin 为 ad-hoc 签名 |
 | CLI | 0.0.24-zcode.1 | tgz |
 | daemon | 1.0.26 | tgz |
-| downloads 树 | — | `computer/ cli/ daemon/ desktop/` + 各 manifest + `install.sh/ps1` |
-| Desktop | **0.1.0** | arm64/x64 的 dmg、zip、`latest-mac.yml`、manifest（未签名） |
+| downloads 树 | — | `computer/ cli/ daemon/` + 各 manifest（`desktop/` 按客户单独提供） + `install.sh/ps1` |
+| Desktop | **0.1.0** | **不在通用发行包中，按客户单独提供**（arm64/x64 的 dmg、zip、`latest-mac.yml`、manifest，未签名；见 §6） |
 
 完整的文件路径、大小、sha256 见《产物清单》（SHA256SUMS）。
 
