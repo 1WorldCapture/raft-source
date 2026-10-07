@@ -48,7 +48,7 @@ const PI_SURFACED_PROVIDER_ENVS = {
   "qwen-token-plan-cn": { apiKeyEnvKey: "QWEN_TOKEN_PLAN_CN_API_KEY" },
   openrouter: { apiKeyEnvKey: "OPENROUTER_API_KEY" },
   openai: { apiKeyEnvKey: "OPENAI_API_KEY" },
-  anthropic: { apiKeyEnvKey: "ANTHROPIC_API_KEY", blockedHostEnvKeys: ["ANTHROPIC_OAUTH_TOKEN", "ANTHROPIC_API_KEY"] },
+  anthropic: { apiKeyEnvKey: "ANTHROPIC_API_KEY", blockedHostEnvKeys: ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_OAUTH_TOKEN", "ANTHROPIC_API_KEY"] },
   google: { apiKeyEnvKey: "GEMINI_API_KEY" },
   xai: { apiKeyEnvKey: "XAI_API_KEY" },
   xiaomi: { apiKeyEnvKey: "XIAOMI_API_KEY" },

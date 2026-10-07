@@ -47,7 +47,7 @@ export const PI_BUILTIN_PROVIDER_BLOCKED_HOST_ENV_KEYS_GENERATED = {
   "qwen-token-plan-cn": ["QWEN_TOKEN_PLAN_CN_API_KEY"],
   "openrouter": ["OPENROUTER_API_KEY"],
   "openai": ["OPENAI_API_KEY"],
-  "anthropic": ["ANTHROPIC_OAUTH_TOKEN", "ANTHROPIC_API_KEY"],
+  "anthropic": ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_OAUTH_TOKEN", "ANTHROPIC_API_KEY"],
   "google": ["GEMINI_API_KEY"],
   "xai": ["XAI_API_KEY"],
   "xiaomi": ["XIAOMI_API_KEY"],
