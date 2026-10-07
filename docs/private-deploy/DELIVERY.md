@@ -80,3 +80,32 @@ Desktop 安装包在构建时写入服务器地址，因此**每个客户的 Des
 - 发行包按 docker compose 部署；Desktop 的 pm2 源码栈分发路径不在本次范围。
 - Managed MCP 内网放行名单修改 `.env` 后需 `docker compose up -d` 重建容器，`restart` 不会重读环境变量。
 - 含数据库迁移的升级的回滚（先恢复备份）流程未演练（§5）。
+
+## 8. 从源码部署（pm2 + 反向代理）迁移到 Docker
+
+适用于已有的源码部署（pm2 起 server、Caddy/nginx 做入口、独立 PostgreSQL）想改用本发行包的 Docker Compose 形态并**保留数据**。本流程在测试环境完整实测过一次：停机 **2 分 15 秒**，12 个用户、11 个 server 的数据、存量密码登录、Computer 重新上线、3 个附件均验证无误。原环境保持不动，随时可回滚。
+
+**前提与准备**
+- 准备好发行包（镜像 tar、基础镜像 tar、`downloads/`），按 §3 在**新目录**里放好 compose、`.env`、证书、`downloads/`。`RAFT_PUBLIC_ORIGIN` 设为现有环境的对外地址。
+- **把旧环境的 `JWT_SECRET` 拷到新 `.env`**，已登录的会话才不会失效；`SCOPE_ATTESTATION_SECRET` 若旧环境设置过也一并拷贝（可选，见 §3）。`POSTGRES_PASSWORD` 用新生成的值。
+- `downloads/` 里要包含 `desktop/` 子树（容易漏拷）。
+- 旧环境其他配置（OAuth、SMTP 等）按变量名逐项对照后再带到新 `.env`；Redis 里只有可重建的临时状态（序号、心跳、运行时标记），**不需要迁移**。
+- 旧环境的上传目录（`UPLOADS_DIR`）要迁移，见下面第 6 步。
+
+**步骤**
+1. **冒烟（不停机）**：先用临时端口（`RAFT_HTTP_PORT` 改成空闲端口）起一个空栈，检查镜像、证书、`.env`、`downloads/`、迁移链和 `/api/version`；通过后 `docker compose down -v` 清掉冒烟栈的卷。
+2. **通知**：提前几分钟告知用户即将停机。
+3. **停旧栈**：停 pm2 的 server 进程和旧入口（Caddy/nginx；若入口是 `tailscale serve` 等端口转发，一并撤掉，让出端口）。**从此刻起停机**。
+4. **导出旧库**：`pg_dump -Fc <旧库名> > dump.custom`（执行前确认库名；只读，不改旧库）。记录文件大小和 sha256。
+5. **起新栈的数据库并导入**：`.env` 的 `RAFT_HTTP_PORT` 改成正式端口，先只启动 db：`docker compose up -d db`；然后用 `docker compose exec -T db pg_restore --no-owner -U raft -d raft < dump.custom` 导入。**务必通过容器内导入**：宿主机上的 `127.0.0.1:5432` 可能是旧库，直连会连错库（密码错误，或更糟——误写旧库）。
+6. **迁移上传文件**：把旧上传目录的文件拷进 `raft-uploads` 卷（例如 `docker cp <旧目录>/. <server 容器>:/app/uploads/`，或在 server 启动前用临时容器挂载该卷拷入），并核对文件数量。
+7. **启动全栈**：`docker compose up -d`。server 启动时自动跑迁移；日志应出现 `[MIGRATION_PREFLIGHT_OK]`（旧库版本与目标一致时为 NOOP，否则会顺序执行迁移）。
+8. **验证**：`/api/version` 回显目标 commit、`deploymentMode=private`；用一个旧账号密码登录；旧的 server/agent/Computer 数据都在；打开一条带老附件的消息；在隔离的 home 里用网页给出的「添加 Computer」命令装一个 Computer，确认上线后清理；`/downloads/`（含 `desktop/latest-mac.yml`）可访问；同机其他服务不受影响。
+
+**回滚**（新栈有问题时）：`docker compose down`（保留卷），重新启动 pm2 server 和原入口、恢复端口转发。旧库在整个过程中**只导出、没有写入**，所以旧环境原样可用，约 2 分钟内恢复。
+
+**常见陷阱**
+- `downloads/` 漏拷 `desktop/` 子树（Desktop 下载和更新检测会 404）。
+- 宿主机与容器的 PostgreSQL 端口冲突（见第 5 步）。
+- 写迁移脚本时 `set -e` 与 `diff`（有差异时返回非零）组合会让脚本提前结束；比对结果请显式判断。
+- 切换后以新 compose 为准做后续升级（§5），不要再回到旧的拉源码 + pm2 方式。
