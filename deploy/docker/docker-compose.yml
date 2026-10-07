@@ -80,6 +80,17 @@ services:
       # read the local manifest; artifacts are served from the shared dir.
       RAFT_DEPLOYMENT_MODE: private
       RAFT_DOWNLOADS_DIR: /app/downloads
+      # User uploads (attachments, avatars) live on local disk. Without a
+      # persistent volume they sit in the container's writable layer and are
+      # LOST whenever the container is recreated (every image upgrade). The
+      # named volume raft-uploads below keeps them; back it up with the DB.
+      UPLOADS_DIR: /app/uploads
+      # HMAC key for short-lived scope attestations (feedback-report / trace
+      # upload capabilities, 2-10 min TTL). There is NO random fallback: when
+      # unset those endpoints return an error. Optional in private mode (no
+      # external workers); set it only if you run such a worker, and keep the
+      # value stable across restarts so in-flight tokens stay valid.
+      SCOPE_ATTESTATION_SECRET: ${SCOPE_ATTESTATION_SECRET:-}
       # Managed-MCP internal allowlist (task #9/D5): compose does variable
       # interpolation only, so every RAFT_MANAGED_MCP_* knob must be passed
       # through explicitly. Empty defaults keep behavior identical when the
@@ -96,6 +107,7 @@ services:
     volumes:
       # Same host directory the web container serves /downloads from.
       - ./downloads:/app/downloads:ro
+      - raft-uploads:/app/uploads
     depends_on:
       db:
         condition: service_healthy
@@ -132,3 +144,4 @@ networks:
 
 volumes:
   raft-pgdata:
+  raft-uploads:
