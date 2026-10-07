@@ -360,6 +360,13 @@ function sendGrokRuntimeDisabled(res: Response): void {
   });
 }
 
+function sendOmpRuntimeDisabled(res: Response): void {
+  res.status(403).json({
+    error: "OMP is not enabled on this server",
+    code: "omp_runtime_disabled",
+  });
+}
+
 function sendRuntimeCapabilityUnavailable(res: Response, runtime: string): void {
   res.status(409).json({
     error: `${runtime === "grok" ? "Grok Build" : runtime} is not available on this computer`,
@@ -1462,6 +1469,16 @@ agentRouter.post("/", async (req, res) => {
       sendGrokRuntimeDisabled(res);
       return;
     }
+    if (
+      normalizedConfig.launch.runtime === "omp"
+      && !(await resolveRuntimeAdmissionPolicy({
+        userId: req.userId!,
+        serverId: req.serverId!,
+      })).ompRuntimeEnabled
+    ) {
+      sendOmpRuntimeDisabled(res);
+      return;
+    }
 
     let agentOrchestrator = req.app.get("agentOrchestrator") as AgentOrchestrator;
     if (normalizedConfig.runtimeConfig.runtime === "kimi-sdk") {
@@ -2161,6 +2178,17 @@ agentRouter.patch("/:id", async (req, res) => {
       })).grokRuntimeEnabled
     ) {
       sendGrokRuntimeDisabled(res);
+      return;
+    }
+    if (
+      normalizedLaunch?.runtime === "omp"
+      && existing.runtime !== "omp"
+      && !(await resolveRuntimeAdmissionPolicy({
+        userId: req.userId!,
+        serverId: req.serverId!,
+      })).ompRuntimeEnabled
+    ) {
+      sendOmpRuntimeDisabled(res);
       return;
     }
     if (normalizedLaunch?.runtime === "grok") {

@@ -3,7 +3,7 @@ import type Redis from "ioredis";
 import { RouteFailureError } from "./tracing/routeFailure.js";
 
 export type RelayedMachineResponse = Extract<MachineToServerMessage, {
-  type: "machine:runtime_models:result" | "machine:migration:source_workspace_archive_result";
+  type: "machine:runtime_models:result" | "machine:migration:source_workspace_archive_result" | "machine:cursor_sdk:login_result" | "machine:cursor_sdk:status_result";
 }>;
 export type MachineReplyRequestId = string & { readonly __machineReplyRequestId: unique symbol };
 export type MachineReplyReplicaId = string & { readonly __machineReplyReplicaId: unique symbol };

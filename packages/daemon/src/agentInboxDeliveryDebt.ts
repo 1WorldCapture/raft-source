@@ -17,7 +17,11 @@ export interface PendingInboxDeliveryProcess {
   sessionId: string | null;
   sessionReadyForDelivery: boolean;
   launchId: string | null;
-  driver: { supportsStdinNotification: boolean; liveSessionReadyAt?: "session_init" | "turn_end" };
+  driver: { supportsStdinNotification: boolean; liveSessionReadyAt?: "session_init" | "turn_end"; consumesSpawnPrompt?: boolean };
+  /** Launch activation bookkeeping: "delivered" means the spawn prompt
+   *  carried this launch's startup input (real only when the driver declares
+   *  consumesSpawnPrompt). */
+  activation: { kind: "idle" | "open" | "delivered" | "closed" };
   notifications: RuntimeNotificationState;
   sessionReadyDeliveryRetry: SessionReadyDeliveryRetryState;
 }
@@ -75,6 +79,14 @@ export function prepareSessionInitDeliveryDebtRetry(
     ap.sessionReadyForDelivery = true;
   }
   if (ap.inbox.length === 0) return null;
+  // Startup input whose activation the launch booked as delivered via the
+  // spawn prompt has already been handed to the runtime — but only for
+  // drivers that actually forward ctx.prompt (capability flag). Other
+  // runtimes keep the session_init fallback as their delivery path
+  // (omp resume regression: a resume launch presets the session id, so the
+  // "session changed" trigger never fires and undelivered startup input
+  // strands in the inbox without this path).
+  if (ap.activation.kind === "delivered" && ap.driver.consumesSpawnPrompt) return null;
   if (ap.sessionReadyForDelivery && (!wasReady || previousSessionId !== ap.sessionId)) {
     return "session_init_ready_with_pending_delivery";
   }

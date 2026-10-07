@@ -22,8 +22,20 @@ test("residentCoreIdentity returns the exact managed DaemonCore identity", () =>
       },
       daemonVersion: BUNDLED_DAEMON_VERSION,
       computerVersion: COMPUTER_VERSION,
+      computerHostKind: "standalone",
     },
   );
+});
+
+test("residentCoreIdentity reports the embedding host kind when the adapter sets one", () => {
+  const identity = residentCoreIdentity({
+    serverId: "server-a",
+    serverMachineId: "machine-a",
+    apiKey: "test-api-key",
+    serverUrl: "https://example.invalid",
+    hostKind: "desktop_app",
+  });
+  assert.equal(identity.computerHostKind, "desktop_app");
 });
 
 test("defaultCoreFactory passes residentCoreIdentity into DaemonCore", () => {

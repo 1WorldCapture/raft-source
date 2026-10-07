@@ -6,7 +6,7 @@ import {
   type Upgrader,
 } from "@botiverse/k-carrier";
 
-import { createComputerUpgrader } from "./kUpgrader.js";
+import { createResolvedComputerUpgrader } from "./kUpgrader.js";
 import { kStateDir } from "./kPaths.js";
 
 export type KUpgradeTrigger = "cli" | "web" | "tray";
@@ -38,13 +38,16 @@ export type KUpgradeCoordinatorRequest =
 
 export interface KUpgradeCoordinatorDeps {
   bootstrapStableFn?: typeof bootstrapStable;
+  // May return a promise: the default construction resolves the release
+  // source for this home first (task #5 — server backend under private
+  // deployments), which reads attachment state asynchronously.
   createUpgraderFn?: (
     slockHome: string,
     opts: {
       onProgress: NonNullable<CreateUpgraderOptions["onProgress"]>;
       notificationSink: (event: NotificationEvent) => Promise<void>;
     },
-  ) => Upgrader;
+  ) => Upgrader | Promise<Upgrader>;
 }
 
 export type KUpgradeCoordinatorResult =
@@ -82,7 +85,8 @@ export async function runKUpgradeCoordinator(
     artifactPath: request.currentBinaryPath,
   });
 
-  const upgrader = (deps.createUpgraderFn ?? ((home, opts) => createComputerUpgrader(home, opts)))(
+  const upgrader = await (deps.createUpgraderFn
+    ?? ((home, opts) => createResolvedComputerUpgrader(home, opts)))(
     slockHome,
     { onProgress: () => {}, notificationSink: async () => {} },
   );

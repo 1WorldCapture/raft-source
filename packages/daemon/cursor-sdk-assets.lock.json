@@ -1,0 +1,99 @@
+{
+  "lockVersion": 1,
+  "sdkVersion": "1.0.36",
+  "nodeVersion": "24.15.0",
+  "purpose": "Pins the exact external Cursor SDK runtime assets staged by scripts/build-cursor-sdk-assets.mjs. The @cursor/sdk package must NEVER be a production dependency or be bundled into Electron/SEA: the daemon spawns the staged Node binary against host/*.mjs with the SDK resolved from the staged node_modules closure. Integrity values are the official registry/dist checksums recorded at pin time; the builder re-verifies every artifact against them (and, for Node, against the freshly fetched SHASUMS256.txt) before staging.",
+  "sdk": {
+    "packages": {
+      "@cursor/sdk": {
+        "version": "1.0.36",
+        "integrity": "sha512-1Fpd644iTGNEoH5nEp5oYVlWgxSObL0VZfTZcCXhOB5MSJLc34vIvP6yx1udqSnpN+Rbpejvmxd9yoyjxhFVuw==",
+        "url": "https://registry.npmjs.org/@cursor/sdk/-/sdk-1.0.36.tgz"
+      },
+      "@bufbuild/protobuf": {
+        "version": "1.10.0",
+        "integrity": "sha512-QDdVFLoN93Zjg36NoQPZfsVH9tZew7wKDKyV5qRdj8ntT4wQCOradQjRaTdwMhWUYsgKsvCINKKm87FdEk96Ag==",
+        "url": "https://registry.npmjs.org/@bufbuild/protobuf/-/protobuf-1.10.0.tgz"
+      },
+      "@connectrpc/connect": {
+        "version": "1.7.0",
+        "integrity": "sha512-iNKdJRi69YP3mq6AePRT8F/HrxWCewrhxnLMNm0vpqXAR8biwzRtO6Hjx80C6UvtKJ5sFmffQT7I4Baecz389w==",
+        "url": "https://registry.npmjs.org/@connectrpc/connect/-/connect-1.7.0.tgz"
+      },
+      "@connectrpc/connect-web": {
+        "version": "1.7.0",
+        "integrity": "sha512-qyP0YOnUPRWwCc/VfsoydMJvkb7EyUPr2q9sHgBuJzbADjiqck1gKH5V5ZPzPhTLBvmz5UvG+wiZ5sMRQHU1MQ==",
+        "url": "https://registry.npmjs.org/@connectrpc/connect-web/-/connect-web-1.7.0.tgz"
+      },
+      "@statsig/js-client": {
+        "version": "3.31.0",
+        "integrity": "sha512-LFa5E0LjT6sTfZv3sNGoyRLSZ1078+agdgOA+Vm1ecjG+KbSOfBLTW7hMwimrJ29slRwbYDzbtKaPJo/R37N2g==",
+        "url": "https://registry.npmjs.org/@statsig/js-client/-/js-client-3.31.0.tgz"
+      },
+      "@statsig/client-core": {
+        "version": "3.31.0",
+        "integrity": "sha512-SuxQD6TmVszPG7FoMKwTk/uyBuVFk7XnxI3T/E0uyb7PL7GNjONtfsoh+NqBBVUJVse0CUeSFfgJPoZy1ZOslQ==",
+        "url": "https://registry.npmjs.org/@statsig/client-core/-/client-core-3.31.0.tgz"
+      },
+      "zod": {
+        "version": "3.25.76",
+        "integrity": "sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==",
+        "url": "https://registry.npmjs.org/zod/-/zod-3.25.76.tgz"
+      }
+    },
+    "platformPackages": {
+      "darwin-arm64": {
+        "name": "@cursor/sdk-darwin-arm64",
+        "version": "1.0.36",
+        "integrity": "sha512-FSnhsTMfVJWzdrQt1ekc+J4Gz5hsCQSXPuVAXP/GxeP+2rsD1D4eRAC5c1xDsk2G5uQbJjXjk9x7ASLCdzj6AA==",
+        "url": "https://registry.npmjs.org/@cursor/sdk-darwin-arm64/-/sdk-darwin-arm64-1.0.36.tgz"
+      },
+      "darwin-x64": {
+        "name": "@cursor/sdk-darwin-x64",
+        "version": "1.0.36",
+        "integrity": "sha512-zvxDtioR9MJbU+CT7he4qHSyv7mezuaWocfsROt0dc1TNCKU9AS6nCsI0MJzWgdJ7zU7mPHOfwYGXUVc4m/AKg==",
+        "url": "https://registry.npmjs.org/@cursor/sdk-darwin-x64/-/sdk-darwin-x64-1.0.36.tgz"
+      },
+      "linux-arm64": {
+        "name": "@cursor/sdk-linux-arm64",
+        "version": "1.0.36",
+        "integrity": "sha512-WKIkKx2WtlAlpCIE0sB3P9nk9+2Zf1NjU8Z7p7bE3oA7u555JAEvlVvUcbIUU444g0pz8cL/r3Uh53txFfmzLQ==",
+        "url": "https://registry.npmjs.org/@cursor/sdk-linux-arm64/-/sdk-linux-arm64-1.0.36.tgz"
+      },
+      "linux-x64": {
+        "name": "@cursor/sdk-linux-x64",
+        "version": "1.0.36",
+        "integrity": "sha512-gP2tkJmphlprMp1gAjIiw817aQ1gbOZTcGfDdtnHtf6WNwOeG8ZyAHbpOnPrYK6KDl+xbH1Ygs7m6LSIbfC3XA==",
+        "url": "https://registry.npmjs.org/@cursor/sdk-linux-x64/-/sdk-linux-x64-1.0.36.tgz"
+      },
+      "win32-x64": {
+        "name": "@cursor/sdk-win32-x64",
+        "version": "1.0.36",
+        "integrity": "sha512-dG5w+jbHwwfr18eSWG9W4MMfbvzhlY8BFFrWyymYFf8hUZEoReOxJgRuuVBXpkeQrGT4PH1QKpKsggGwfpXilw==",
+        "url": "https://registry.npmjs.org/@cursor/sdk-win32-x64/-/sdk-win32-x64-1.0.36.tgz"
+      }
+    }
+  },
+  "node": {
+    "base": "https://nodejs.org/dist/v24.15.0",
+    "shasumsUrl": "https://nodejs.org/dist/v24.15.0/SHASUMS256.txt",
+    "archives": {
+      "darwin-arm64": {
+        "file": "node-v24.15.0-darwin-arm64.tar.gz",
+        "sha256": "372331b969779ab5d15b949884fc6eaf88d5afe87bde8ba881d6400b9100ffc4"
+      },
+      "darwin-x64": {
+        "file": "node-v24.15.0-darwin-x64.tar.gz",
+        "sha256": "ffd5ee293467927f3ee731a553eb88fd1f48cf74eebc2d74a6babe4af228673b"
+      },
+      "linux-arm64": {
+        "file": "node-v24.15.0-linux-arm64.tar.xz",
+        "sha256": "f3d5a797b5d210ce8e2cb265544c8e482eaedcb8aa409a8b46da7e8595d0dda0"
+      },
+      "linux-x64": {
+        "file": "node-v24.15.0-linux-x64.tar.xz",
+        "sha256": "472655581fb851559730c48763e0c9d3bc25975c59d518003fc0849d3e4ba0f6"
+      }
+    }
+  }
+}

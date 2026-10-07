@@ -377,7 +377,9 @@ if (headless?.mode === "__service") {
   }
   void (async () => {
     try {
-      await runResident(serverId);
+      // App-embedded: this Computer ships with the app and can't be upgraded
+      // on its own, so tell the server not to offer standalone upgrades.
+      await runResident(serverId, { hostKind: "desktop_app" });
       // No process.exit(0): runResident's `core.start()` returns immediately
       // (it initiates the WS connection, doesn't block until stop). The open
       // socket keeps the process alive; SIGTERM/SIGINT handlers inside

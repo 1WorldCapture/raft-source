@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { fileURLToPath } from "node:url";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
@@ -10,7 +11,8 @@ import {
   shouldShowPwaInstallPrompt,
 } from "../src/utils/pwaInstall.ts";
 
-const repoRoot = resolve(new URL("..", import.meta.url).pathname);
+// fileURLToPath (not .pathname): checkout paths may contain spaces.
+const repoRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 
 test("PWA install platform detection separates iOS Safari from non-Safari iOS", () => {
   assert.equal(

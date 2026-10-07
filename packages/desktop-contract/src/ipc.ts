@@ -434,3 +434,52 @@ export interface DeepLinkEvent {
 // ── Reserved for future phases ────────────────────
 // window.navigate, notification.subscribe, notification.click,
 // window.lifecycle, cancel, session.getOpaqueHandle
+
+// ── Electron shell event channels ─────────────────
+// The Electron app (apps/raft-desktop-electron) layers a small
+// ipcRenderer/ipcMain event surface on top of the typed invoke requests
+// above. Channel names live here so the preload, the main process and the
+// renderer share one source of truth instead of bare string literals that
+// can drift.
+export const ELECTRON_IPC_CHANNELS = {
+  /** renderer → main: set the macOS dock badge (0 clears it). */
+  setBadge: "app:set-badge",
+  /** renderer → main (invoke): is the shell window focused right now. */
+  isFocused: "app:is-focused",
+  /** main → renderer: focus/blur push for notification gating. */
+  focusState: "app:focus-state",
+  /** renderer → main: bring the window to front (OS notification click). */
+  focusWindow: "app:focus-window",
+  /** renderer → main: wipe Local Storage at next boot (corruption loop) and
+   *  relaunch the app. See storageDoctor in the Electron shell. */
+  storageResetRequest: "app:storage-reset-request",
+  /** renderer → main (invoke): did this boot consume a pending storage wipe? */
+  storageWipeStatus: "app:storage-wipe-status",
+  /** renderer → main (invoke): read the runtime server-origin state
+   * (phase 3-1): effective origin, the persisted override, the baked build
+   * default, whether the effective origin is official, and the generation
+   * counter (bumped on every override change; drives renderer session
+   * clearing through __RAFT_DESKTOP_ENVIRONMENT__). */
+  serverOriginGet: "server-origin:get",
+  /** renderer → main (invoke): validate and persist a server-origin override.
+   * The value is re-validated in main (never trusted from the renderer);
+   * a change bumps the generation and takes effect after relaunch. */
+  serverOriginSet: "server-origin:set",
+  /** renderer → main (invoke): remove the persisted override (back to the
+   * env/build default). Bumps the generation when an override existed. */
+  serverOriginReset: "server-origin:reset",
+  /** renderer → main: relaunch the app to apply a pending server-origin
+   * change (same relaunch semantics as the storage doctor). */
+  serverOriginRelaunch: "server-origin:relaunch",
+  /** renderer → main (invoke): private-deployment update check status
+   * (phase 3-2): detect-only — { state, version? } for the notify pill. */
+  privateUpdateStatus: "private-update:status",
+  /** renderer → main: run a private update check now (menu / pill retry). */
+  privateUpdateCheck: "private-update:check",
+  /** renderer → main: open the validated download URL in the system
+   * browser. The URL itself never crosses to the renderer. */
+  privateUpdateDownload: "private-update:download",
+} as const;
+
+export type ElectronIpcChannel =
+  (typeof ELECTRON_IPC_CHANNELS)[keyof typeof ELECTRON_IPC_CHANNELS];

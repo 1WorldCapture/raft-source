@@ -45,6 +45,16 @@ import {
 } from "../paths.js";
 import { resolveServerUrl, resolveServerUrlEnv } from "../serverUrl.js";
 import { login as loginService, type LoginResult } from "../services/login.js";
+import {
+  cursorRuntimeAuthLogin,
+  cursorRuntimeAuthConnectExisting,
+  cursorRuntimeAuthLogout,
+  cursorRuntimeAuthStatus,
+  type CursorRuntimeAuthLoginResult,
+  type CursorRuntimeAuthLogoutResult,
+  type CursorRuntimeAuthStatusResult,
+  type CursorRuntimeAuthDeps,
+} from "../services/runtimeAuth.js";
 import { attach as attachService, type AttachResult } from "../services/attach.js";
 import { start as startService, type StartResult, type StartDeps } from "../services/start.js";
 import { stop as stopService, type StopResult, type StopDeps, type StopStatus } from "../services/stop.js";
@@ -180,9 +190,26 @@ export interface ComputerApi {
    * the device-code flow; the presenter-supplied `onEvent` sink prints the
    * verification URL/code + waiting lines. The api itself never prints.
    */
-  login(opts: { serverUrl?: string }, onEvent?: (event: ComputerApiEvent) => void): Promise<LoginResult>;
+  login(opts: { serverUrl?: string }, onEvent?: (event: ComputerApiEvent) => void, options?: { signal?: AbortSignal }): Promise<LoginResult>;
   /** Clear the saved user session (idempotent). Pure: returns a result. */
   logout(onEvent?: (event: ComputerApiEvent) => void, deps?: StopDeps): Promise<LogoutResult>;
+
+  /**
+   * Cursor SDK runtime auth (owner controls). `cursorSdkLogin` drives the
+   * official browser login through the private auth host — the login URL is
+   * emitted as a `cursor-sdk.login-url` event for the presenter to show.
+   * `cursorSdkLogout` clears ONLY the local binding; the borrowed official
+   * SDK login (`~/.cursor/sdk/auth.json`) is never deleted or revoked.
+   */
+  cursorSdkConnect(options?: { signal?: AbortSignal; deps?: CursorRuntimeAuthDeps }): Promise<CursorRuntimeAuthLoginResult>;
+  cursorSdkLogin(
+    onEvent?: (event: ComputerApiEvent) => void,
+    options?: { signal?: AbortSignal; deps?: CursorRuntimeAuthDeps },
+  ): Promise<CursorRuntimeAuthLoginResult>;
+  /** Offline status of the cursor-sdk credential binding (read-only). */
+  cursorSdkStatus(deps?: CursorRuntimeAuthDeps): Promise<CursorRuntimeAuthStatusResult>;
+  /** Clear the local cursor-sdk binding; the SDK login itself is preserved. */
+  cursorSdkLogout(deps?: CursorRuntimeAuthDeps): Promise<CursorRuntimeAuthLogoutResult>;
   /**
    * Attach this Computer to one server (add-not-replace). `onEvent` prints
    * the attach progress lines presenter-side.
@@ -374,9 +401,9 @@ export function createComputerApi(slockHome: string, opts?: CreateComputerApiOpt
       );
     },
 
-    login(opts, onEvent): Promise<LoginResult> {
+    login(opts, onEvent, options): Promise<LoginResult> {
       return viaService(() =>
-        loginService({ serverUrl: opts.serverUrl, slockHome }, onEvent ? { onEvent } : {}),
+        loginService({ serverUrl: opts.serverUrl, slockHome }, { ...options, ...(onEvent ? { onEvent } : {}) }),
       );
     },
 
@@ -415,6 +442,28 @@ export function createComputerApi(slockHome: string, opts?: CreateComputerApiOpt
         }
         throw err;
       }
+    },
+
+    cursorSdkConnect(options): Promise<CursorRuntimeAuthLoginResult> {
+      return viaService(() => cursorRuntimeAuthConnectExisting({ slockHome }, { signal: options?.signal }, options?.deps));
+    },
+
+    cursorSdkLogin(onEvent, options): Promise<CursorRuntimeAuthLoginResult> {
+      return viaService(() =>
+        cursorRuntimeAuthLogin(
+          { slockHome },
+          { signal: options?.signal, ...(onEvent ? { onEvent } : {}) },
+          options?.deps,
+        ),
+      );
+    },
+
+    cursorSdkStatus(deps): Promise<CursorRuntimeAuthStatusResult> {
+      return viaService(() => cursorRuntimeAuthStatus({ slockHome }, deps));
+    },
+
+    cursorSdkLogout(deps): Promise<CursorRuntimeAuthLogoutResult> {
+      return viaService(() => cursorRuntimeAuthLogout({ slockHome }, deps));
     },
 
     attach(opts, onEvent): Promise<AttachResult> {

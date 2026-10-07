@@ -12,14 +12,31 @@
 import { useEffect, useState } from "react";
 import { useIntl } from "react-intl";
 import { useServerStore } from "@web/store/serverStore";
+import { useServerUnreadSummaryStore } from "@web/store/serverUnreadSummaryStore";
 import { useAuthStore } from "@web/store/authStore";
 import { useAppNavigate } from "@web/hooks/useAppNavigate";
 import { AvatarImageWithFallback } from "@web/components/ui/AvatarSlot";
 import ServerSwitcherMenu from "@web/components/ui/ServerSwitcherMenu";
 import { SKINS, currentSkinId, setSkin, skinById, subscribeSkin } from "./skins";
 import { DesktopUpdatePill } from "./appUpdate";
+import { PrivateUpdatePill } from "./privateUpdate";
+import { ServerOriginDialog, serverOriginSettingsAvailable } from "./ServerOriginDialog";
 
 const MOD_KEY = typeof navigator !== "undefined" && /Mac/i.test(navigator.platform) ? "⌘" : "Ctrl";
+
+// Deployment server-address entry (inline icon, same no-icon-library rule as
+// SearchIcon above).
+function ServerOriginIcon({ size = 15 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <rect x="3" y="4" width="18" height="6" rx="1" />
+      <rect x="3" y="14" width="18" height="6" rx="1" />
+      <line x1="7" y1="7" x2="7" y2="7.01" />
+      <line x1="7" y1="17" x2="7" y2="17.01" />
+    </svg>
+  );
+}
 
 // Shared chrome-control style for the bar's interactive items (personal avatar,
 // skin switcher, workspace). One fixed height (h-8) matches the center search
@@ -143,8 +160,16 @@ export function DesktopTopBar() {
   const { formatMessage } = useIntl();
   const server = useServerStore((s) => s.current);
   const user = useAuthStore((s) => s.user);
+  // Real cross-server unread for the switcher (was hardcoded empty — the
+  // desktop top-bar switcher never showed badges). Shared store, same data as
+  // the web sidebar's switcher (#unread-badges task #5/#7).
+  const serverUnreadCounts = useServerUnreadSummaryStore((s) => s.byServer);
   const nav = useAppNavigate();
   const [serverMenuOpen, setServerMenuOpen] = useState(false);
+  // Deployment server-address settings (phase 3-1). Rendered only when the
+  // native bridge exposes the serverOrigin API — old preloads hide it.
+  const [serverOriginOpen, setServerOriginOpen] = useState(false);
+  const serverOriginAvailable = serverOriginSettingsAvailable();
 
   const serverName = server?.name ?? "";
   const serverInitial = serverName.slice(0, 1).toUpperCase() || "R";
@@ -203,6 +228,19 @@ export function DesktopTopBar() {
       {/* Non-intrusive "restart to update" pill — only when an app update is
           downloaded and ready. */}
       <DesktopUpdatePill />
+      <PrivateUpdatePill />
+      {serverOriginAvailable ? (
+        <button
+          type="button"
+          onClick={() => setServerOriginOpen(true)}
+          aria-label={formatMessage({ id: "desktop.serverOrigin.settingsAria" })}
+          title={formatMessage({ id: "desktop.serverOrigin.title" })}
+          className={`${CHROME_CONTROL} size-8 justify-center`}
+        >
+          <ServerOriginIcon />
+        </button>
+      ) : null}
+      {serverOriginOpen ? <ServerOriginDialog onClose={() => setServerOriginOpen(false)} /> : null}
       <SkinSwitcher />
       <div className="relative w-fit">
         <button
@@ -223,7 +261,7 @@ export function DesktopTopBar() {
         <ServerSwitcherMenu
           open={serverMenuOpen}
           onClose={() => setServerMenuOpen(false)}
-          serverUnreadCounts={{}}
+          serverUnreadCounts={serverUnreadCounts}
           className="absolute right-0 top-full mt-2 w-64 max-h-[calc(100dvh-16px)]"
         />
       </div>

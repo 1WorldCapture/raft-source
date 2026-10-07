@@ -369,6 +369,16 @@ export function channelPath(slockHome: string): string {
   return path.join(computerDir(slockHome), "channel");
 }
 
+// Release-backend STATE (private deployment, phase 2 task #5): which release
+// authority upgrades resolve through — `hands` | `legacy-cdn` | `server`.
+// Persisted by install.sh (`RAFT_COMPUTER_INSTALL_BACKEND`) so the choice
+// survives into the launchd/systemd service context where installer shell
+// env does not. Mirrors the channel-file contract: written only by the
+// installer, read leniently at upgrade-check time.
+export function releaseBackendPath(slockHome: string): string {
+  return path.join(computerDir(slockHome), "release-backend");
+}
+
 // --- v8.3 upgrade lifecycle paths (RFC v0.8 §4.4 contract) ---
 //
 // Adopted as canonical paths.ts accessors per v8.3 §4.4 (10): all

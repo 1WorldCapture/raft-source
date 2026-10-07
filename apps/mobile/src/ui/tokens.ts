@@ -1,0 +1,107 @@
+/** Values from `packages/web/src/index.css` `@theme` (lines 123–185) and the phase-2 size notes. */
+
+export const color = {
+  yellow: "#FFD440",
+  pink: "#FE7DA8",
+  cyan: "#27CCF3",
+  lavender: "#BBAFE6",
+  ink: "#141111",
+  page: "#FFFFFF",
+  white: "#FFFFFF",
+  border: "#000000",
+  orange: "#F8A16F",
+  lime: "#A9D877",
+  red: "#F97264",
+  stone: "#C0B9B1",
+  codeSurface: "#07111f",
+  codeForeground: "#f5f7ff",
+  link: "#1447E6",
+  muted: "rgba(0, 0, 0, 0.45)",
+  mutedStrong: "rgba(0, 0, 0, 0.5)",
+  /** Read activity body: web `text-black/55`. */
+  inkSoft: "rgba(0, 0, 0, 0.55)",
+  /** Activity sender label and task description: web `text-black/70`. */
+  inkLabel: "rgba(0, 0, 0, 0.7)",
+  /** Task card channel name: web `text-black/60`. */
+  inkMid: "rgba(0, 0, 0, 0.6)",
+  /** Task number: web `text-black/35`. */
+  inkFaint: "rgba(0, 0, 0, 0.35)",
+  /** Unselected filter chip: web `border-black/20`. */
+  borderFaint: "rgba(0, 0, 0, 0.2)",
+  /** Resting activity card: web `border-black/30`. */
+  borderSoft: "rgba(0, 0, 0, 0.3)",
+  /** Web `bg-black/[0.05]`: inline code and empty media frames. */
+  mutedFill: "rgba(0, 0, 0, 0.05)",
+  /** Opaque pink-20 on white, for disabled pink buttons (a translucent fill would show the hard shadow through). */
+  pinkPale: "#FFE5EE",
+  pinkSoft: "rgba(254, 125, 168, 0.2)",
+  pinkChip: "rgba(254, 125, 168, 0.3)",
+  cyanSoft: "rgba(39, 204, 243, 0.3)",
+  /** Web jump highlight: `bg-brutal-cyan/25`. */
+  cyanHighlight: "rgba(39, 204, 243, 0.25)",
+  yellowSoft: "rgba(255, 212, 64, 0.4)",
+  /** Opaque yellow-25 on white: unread conversation card (a translucent fill would show the hard shadow through). */
+  yellowPale: "#FFF4CF",
+  orangeSoft: "rgba(248, 161, 111, 0.15)",
+  inlineCode: "rgba(0, 0, 0, 0.05)",
+  quoteBorder: "rgba(0, 0, 0, 0.4)",
+  previewSurface: "rgba(0, 0, 0, 0.03)",
+  /** Web text preview canvas: `bg-brutal-cream/45` on white. */
+  previewCream: "rgba(255, 250, 239, 0.45)",
+  scrim: "rgba(0, 0, 0, 0.9)",
+  /** Full-screen image viewer: opaque black stage and translucent page chip. */
+  viewerBlack: "#000000",
+  viewerChip: "rgba(0, 0, 0, 0.55)",
+} as const;
+
+export const fontSize = {
+  bodySm: { fontSize: 12, lineHeight: 16 },
+  bodyMd: { fontSize: 14, lineHeight: 20 },
+  bodyLg: { fontSize: 16, lineHeight: 24 },
+  /** Sidebar row: `text-sm font-medium` (14/20, weight 500), `py-2` + `border-2` = 40px, `mb-1` = 4px. */
+  list: { fontSize: 14, lineHeight: 20 },
+  sender: { fontSize: 14, lineHeight: 18 },
+  time: { fontSize: 12, lineHeight: 16 },
+  panelTitle: { fontSize: 16, lineHeight: 20 },
+  group: { fontSize: 12, lineHeight: 16 },
+  date: { fontSize: 10, lineHeight: 14 },
+  input: { fontSize: 16, lineHeight: 22 },
+  badge: { fontSize: 10, lineHeight: 12 },
+} as const;
+
+export type BodyFontSize = "sm" | "md" | "lg";
+
+export function bodyFont(preferred: string | null | undefined): { fontSize: number; lineHeight: number } {
+  if (preferred === "sm") return fontSize.bodySm;
+  if (preferred === "lg") return fontSize.bodyLg;
+  return fontSize.bodyMd;
+}
+
+export const radius = {
+  none: 0,
+  chip: 4,
+  badge: 4,
+  status: 999,
+} as const;
+
+export const border = {
+  hairline: 1,
+  strong: 2,
+} as const;
+
+export const shadowOffset = {
+  sm: 2,
+  md: 4,
+  lg: 6,
+  pressed: 1,
+} as const;
+
+export const size = {
+  header: 62,
+  headerCompact: 48,
+  iconButton: 36,
+  avatar: 36,
+  mentionMark: 16,
+} as const;
+
+export const pressShift = 2;

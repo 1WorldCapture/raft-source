@@ -2,7 +2,7 @@ import path from "node:path";
 import os from "node:os";
 import { createHash, randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
-import { accessSync, createReadStream, createWriteStream } from "node:fs";
+import { accessSync, createReadStream, createWriteStream, readFileSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { Readable } from "node:stream";
@@ -22,6 +22,7 @@ import {
   RUNTIMES,
   WIKI_WORKSPACE_PACK_CAPABILITY,
   type AgentConfig,
+  type ComputerHostKind,
   type ComputerLifecycleExecutionAck,
   type AgentMigrationTransportLeaseMessage,
   type AgentMigrationTransferSummary,
@@ -36,6 +37,7 @@ import {
   type TraceSpanAttrContracts,
   type TraceStatus,
   type Tracer,
+  isPrivateDeploymentMode,
 } from "@botiverse/raft-shared";
 import {
   APP_CONFIG_TRACE_IDENTITY_KEYS,
@@ -43,6 +45,7 @@ import {
   APP_SOURCE_TRACE_IDENTITY_KEYS,
 } from "@botiverse/raft-shared/src/appRuntimeTrace.js";
 import { AgentProcessManager, classifySpawnFailure } from "./agentProcessManager.js";
+import { CursorSdkLoginCoordinator, cursorSdkStatusSummary } from "./runtimeAuth/cursor/cursorSdkLoginCoordinator.js";
 import { getDriver } from "./drivers/index.js";
 import { readCommandVersion, resolveCommandOnPath } from "./drivers/probe.js";
 import {
@@ -125,6 +128,11 @@ export * from "./agentMigrationObjectStoreBundle.js";
 export * from "./agentMigrationResumableBundle.js";
 export * from "./agentMigrationImport.js";
 export * from "./legacySupervisor.js";
+// Cursor SDK runtime-auth broker (AUTH worker): credential leases, live
+// model detection, and the owner login/status/logout controls the Computer
+// surface drives. The auth host entry itself (cursorSdk/authHost.ts) is a
+// standalone process source, not an in-daemon API.
+export * from "./runtimeAuth/cursor/nativeCredentialBroker.js";
 import { readSecretFileSync } from "./secretFile.js";
 import {
   createRuntimeAccountUsageCollector,
@@ -144,6 +152,38 @@ import {
  * set `DISABLED=1`; those that want their own worker set the URL explicitly.
  */
 const DEFAULT_TRACE_UPLOAD_URL = "https://slock-trace-upload.botiverse.dev";
+
+/**
+ * Private deployment context (task #7, telemetry red line): the canonical
+ * env switch, or the installer-persisted server release backend under this
+ * home (same two triggers as the Computer's upgrade backend). In private
+ * contexts trace upload defaults OFF — the only way back on is an explicit
+ * SLOCK_DAEMON_TRACE_UPLOAD_URL.
+ */
+function isPrivateDaemonContext(slockHome: string): boolean {
+  if (isPrivateDeploymentMode()) return true;
+  try {
+    return readFileSync(path.join(slockHome, "computer", "release-backend"), "utf8").trim() === "server";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Resolve the trace-upload worker URL under the four-layer policy:
+ *   1. SLOCK_DAEMON_TRACE_UPLOAD_DISABLED=1 → off (unchanged, highest)
+ *   2. SLOCK_DAEMON_TRACE_UPLOAD_URL set → that URL (the explicit opt-in,
+ *      including a private context deliberately pointing somewhere)
+ *   3. private context → off (never fall back to the official default)
+ *   4. official default (unchanged for official deployments)
+ */
+export function resolveTraceUploadWorkerUrl(slockHome: string): string | undefined {
+  if (process.env.SLOCK_DAEMON_TRACE_UPLOAD_DISABLED === "1") return undefined;
+  const explicit = process.env.SLOCK_DAEMON_TRACE_UPLOAD_URL || undefined;
+  if (explicit) return explicit;
+  if (isPrivateDaemonContext(slockHome)) return undefined;
+  return DEFAULT_TRACE_UPLOAD_URL;
+}
 const RUNNER_CREDENTIAL_SCOPES = ["send", "read", "mentions", "tasks", "reactions", "server", "channels", "knowledge", "mcp"] as const;
 const RUNNER_CREDENTIAL_MINT_MAX_ATTEMPTS = 3;
 const RUNNER_CREDENTIAL_MINT_RETRY_DELAY_MS = 250;
@@ -486,6 +526,14 @@ export const DAEMON_CORE_TRACE_ATTR_CONTRACTS = {
       "daemon.pi.models.result": ["available_models_count", "returned_models_count", "diagnostics_count", "diagnostic_info_count", "diagnostic_warning_count", "outcome"],
     },
     endAttrs: ["outcome", "models_count", "default_model_present", "verified_as", "error_class"],
+  },
+  "daemon.cursor_sdk.login": {
+    spanAttrs: ["requestId"],
+    endAttrs: ["outcome", "error_class"],
+  },
+  "daemon.cursor_sdk.status": {
+    spanAttrs: ["requestId"],
+    endAttrs: ["outcome", "status", "error_class"],
   },
   // task #510: per-prompt span. `prompts_in_flight` is the cross-agent concurrency
   // observable — under the old process-env-patch lock it could never exceed 1
@@ -980,6 +1028,8 @@ export interface DaemonCoreOptions {
   apiKey: string;
   daemonVersion?: string;
   computerVersion?: string | null;
+  /** Where the managed Computer runs; reported in `ready` alongside computerVersion. */
+  computerHostKind?: ComputerHostKind;
   slockCliPath?: string;
   dataDir?: string;
   /** Test/embedded override; production resolves the canonical Raft home. */
@@ -1410,6 +1460,10 @@ function summarizeIncomingMessage(msg: ServerToMachineMessage): string {
       return `(directory=${msg.directoryName})`;
     case "machine:runtime_models:detect":
       return `(runtime=${msg.runtime}, req=${msg.requestId})`;
+    case "machine:cursor_sdk:login":
+      return `(req=${msg.requestId})`;
+    case "machine:cursor_sdk:status":
+      return `(req=${msg.requestId})`;
     case "machine:runtime_account_usage:refresh":
       return `(provider=${msg.provider}, reason=${msg.reason}, req=${msg.requestId})`;
     case "machine:runtimes:rescan":
@@ -1474,6 +1528,8 @@ export class DaemonCore {
   // self-healing form on the first connect of this daemon process (a SEA
   // computer switch / daemon upgrade restarts the daemon → triggers this).
   private opencliWrappersRegenerated = false;
+  // Web-triggered Cursor SDK owner sign-ins: one in-flight session per daemon.
+  private readonly cursorSdkLogins = new CursorSdkLoginCoordinator();
   private readonly runtimeDetector: () => RuntimeDetection;
   private readonly agentManager: AgentProcessManager;
   private readonly connection: DaemonConnection;
@@ -1540,7 +1596,7 @@ export class DaemonCore {
     let connection!: DaemonConnection;
 
     this.agentsDataDir = options.dataDir ?? resolveRaftHomePath("agents", this.slockHome);
-    const traceUploadDisabled = process.env.SLOCK_DAEMON_TRACE_UPLOAD_DISABLED === "1";
+    const traceUploadWorkerUrl = resolveTraceUploadWorkerUrl(this.slockHome);
     const agentManagerOptions = {
       dataDir: this.agentsDataDir,
       serverUrl: options.serverUrl,
@@ -1551,7 +1607,7 @@ export class DaemonCore {
       daemonVersion: this.daemonVersion,
       daemonInstanceId: this.daemonInstanceId,
       computerVersion: this.computerVersion,
-      workerUrl: traceUploadDisabled ? undefined : (process.env.SLOCK_DAEMON_TRACE_UPLOAD_URL || DEFAULT_TRACE_UPLOAD_URL),
+      workerUrl: traceUploadWorkerUrl,
       serverConnected: () => connection?.connected ?? false,
       appInboxForAgent: (agentId: string) => this.getAgentAppInbox(agentId),
     };
@@ -1676,13 +1732,11 @@ export class DaemonCore {
     if (!this.shouldEnableLocalTrace()) return;
     if (this.traceBundleUploader) return;
 
-    // Highest priority off-switch: SLOCK_DAEMON_TRACE_UPLOAD_DISABLED=1
-    if (process.env.SLOCK_DAEMON_TRACE_UPLOAD_DISABLED === "1") return;
-
-    // Explicit URL override wins; otherwise fall back to the baked default.
-    // Self-host / local / staging etc. must use DISABLED=1 to opt out or
-    // set their own SLOCK_DAEMON_TRACE_UPLOAD_URL to redirect.
-    const workerUrl = process.env.SLOCK_DAEMON_TRACE_UPLOAD_URL || DEFAULT_TRACE_UPLOAD_URL;
+    // Highest priority off-switch + four-layer policy (see
+    // resolveTraceUploadWorkerUrl): private contexts default OFF, an
+    // explicit SLOCK_DAEMON_TRACE_UPLOAD_URL is the only opt-in.
+    const workerUrl = resolveTraceUploadWorkerUrl(this.slockHome);
+    if (!workerUrl) return;
     this.traceBundleUploader = new DaemonTraceBundleUploader({
       machineDir,
       serverUrl: this.options.serverUrl,
@@ -3992,6 +4046,69 @@ export class DaemonCore {
         break;
       }
 
+      case "machine:cursor_sdk:login": {
+        // Owner-only upstream (server enforces machine ownership); the reply
+        // carries only the validated login URL or a failure reason — the
+        // browser wait is observed via status polling, never held open here.
+        const span = this.tracer.startSpan("daemon.cursor_sdk.login", {
+          surface: "daemon",
+          kind: "internal",
+          attrs: { requestId: msg.requestId },
+        });
+        this.cursorSdkLogins.begin({ slockHome: this.slockHome })
+          .then((start) => {
+            this.connection.send({
+              type: "machine:cursor_sdk:login_result",
+              requestId: msg.requestId,
+              ...(start.ok
+                ? { ok: true, loginUrl: start.loginUrl, reused: start.reused }
+                : { ok: false, errorCode: start.errorCode, message: start.message }),
+            });
+            span.end("ok", {
+              attrs: { outcome: start.ok ? (start.reused ? "url_reused" : "url_returned") : `not_started:${start.errorCode}` },
+            });
+          })
+          .catch((err: unknown) => {
+            this.connection.send({
+              type: "machine:cursor_sdk:login_result",
+              requestId: msg.requestId,
+              ok: false,
+              errorCode: "daemon_error",
+              message: err instanceof Error ? err.message : String(err),
+            });
+            span.end("error", { attrs: { error_class: err instanceof Error ? err.name : typeof err } });
+          });
+        break;
+      }
+
+      case "machine:cursor_sdk:status": {
+        const span = this.tracer.startSpan("daemon.cursor_sdk.status", {
+          surface: "daemon",
+          kind: "internal",
+          attrs: { requestId: msg.requestId },
+        });
+        cursorSdkStatusSummary({ slockHome: this.slockHome })
+          .then((summary) => {
+            this.connection.send({
+              type: "machine:cursor_sdk:status_result",
+              requestId: msg.requestId,
+              status: summary.status,
+              source: summary.source,
+            });
+            span.end("ok", { attrs: { outcome: "reported", status: summary.status } });
+          })
+          .catch((err: unknown) => {
+            this.connection.send({
+              type: "machine:cursor_sdk:status_result",
+              requestId: msg.requestId,
+              status: "error",
+              source: "cursor_sdk_store",
+            });
+            span.end("error", { attrs: { error_class: err instanceof Error ? err.name : typeof err } });
+          });
+        break;
+      }
+
       case "machine:runtime_models:detect": {
         const driver = getDriver(msg.runtime);
         const staticSource = driver
@@ -4235,6 +4352,9 @@ export class DaemonCore {
       os: this.options.osDescription ?? `${os.platform()} ${os.arch()}`,
       daemonVersion: this.daemonVersion,
       ...(this.computerVersion ? { computerVersion: this.computerVersion } : {}),
+      ...(this.computerVersion && this.options.computerHostKind
+        ? { hostKind: this.options.computerHostKind }
+        : {}),
       migrationTransport: this.getMigrationTransportReady(),
       ...((this.options.getComputerLifecycleAcks || this.options.getComputerLifecycleReadyAcks)
         ? { lifecycleAcks }

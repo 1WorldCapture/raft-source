@@ -6,6 +6,7 @@ import { useComputerConnectionWatch } from "../../hooks/useComputerConnectionWat
 import { useServerStore } from "../../store/serverStore";
 import { useAppNavigate } from "../../hooks/useAppNavigate";
 import { getServerUrl } from "../../utils/server";
+import { useDeploymentMode, useDeploymentDownloads } from "../../utils/deploymentMode";
 // The baseline/resolver import staging still carries is gone here: this dialog's
 // connect state machine lives in useComputerConnectionWatch now, shared with onboarding.
 import { getComputerCommands, getDaemonConnectCommand } from "../../utils/computerSetupCommand";
@@ -172,27 +173,49 @@ export default function AddMachineDialog({ onClose }: { onClose: () => void }) {
   };
 
   const deploymentEnv = import.meta.env?.VITE_DEPLOYMENT_ENV;
+  const deploymentMode = useDeploymentMode();
+  const deploymentDownloads = useDeploymentDownloads();
   const daemonDistTag = deploymentEnv === "staging" ? "staging" : "latest";
-  const macLinuxDaemonCommand = getDaemonConnectCommand({
-    apiKey,
-    distTag: daemonDistTag,
-    platform: "mac-linux",
-    serverName,
-    serverUrl,
-  });
-  const windowsDaemonCommand = getDaemonConnectCommand({
-    apiKey,
-    distTag: daemonDistTag,
-    platform: "windows",
-    serverName,
-    serverUrl,
-  });
+  // Daemon command gating (task #6): while the mode resolves the command
+  // stays hidden (never flash the official npx form); private deployments
+  // use the two-step server-tarball install, or no command when the server
+  // has no daemon artifact.
+  const daemonInstallUrl = deploymentMode === "private" ? deploymentDownloads?.daemon ?? null : null;
+  const daemonCommandResolved = deploymentMode !== null;
+  const macLinuxDaemonCommand = daemonCommandResolved
+    ? getDaemonConnectCommand({
+        apiKey,
+        distTag: daemonDistTag,
+        platform: "mac-linux",
+        serverName,
+        serverUrl,
+        installUrl: daemonInstallUrl,
+      })
+    : null;
+  const windowsDaemonCommand = daemonCommandResolved
+    ? getDaemonConnectCommand({
+        apiKey,
+        distTag: daemonDistTag,
+        platform: "windows",
+        serverName,
+        serverUrl,
+        installUrl: daemonInstallUrl,
+      })
+    : null;
+  // "unknown" (resolution failed after retry) generates standard commands —
+  // ComputerCommandGuide pairs them with the contact-admin notice. null
+  // (still resolving) also generates them, but the guide renders NO command
+  // until the mode lands (PM review round 1: a private server must never
+  // flash official CDN commands).
+  const commandDeploymentMode = deploymentMode === "unknown" ? null : deploymentMode;
   const computerCommands = getComputerCommands(serverSlug, deploymentEnv, serverUrl, {
     legacyApiKey: apiKey,
+    deploymentMode: commandDeploymentMode,
   });
   const windowsComputerCommands = getComputerCommands(serverSlug, deploymentEnv, serverUrl, {
     legacyApiKey: apiKey,
     platform: "windows",
+    deploymentMode: commandDeploymentMode,
   });
   const computerSetupCommand = computerCommands?.setup ?? null;
   const computerInstall = computerCommands?.install ?? null;
@@ -323,6 +346,7 @@ export default function AddMachineDialog({ onClose }: { onClose: () => void }) {
               windowsComputerInstallCommand={windowsComputerInstall}
               macLinuxDaemonCommand={macLinuxDaemonCommand}
               windowsDaemonCommand={windowsDaemonCommand}
+              deploymentMode={deploymentMode}
             />
 
             {/* Waiting indicator */}

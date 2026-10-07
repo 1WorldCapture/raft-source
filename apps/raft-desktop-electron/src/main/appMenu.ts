@@ -2,7 +2,8 @@
 // Edit/View/Window roles and app-level shortcuts; without it even Cmd+C in a
 // web input can be unreliable and the app "feels like a webpage".
 
-import { Menu, app, shell } from "electron";
+import { Menu, shell } from "electron";
+import { PRODUCT_NAME } from "./productName.js";
 import type { BrowserWindow, MenuItemConstructorOptions } from "electron";
 
 export interface AppMenuActions {
@@ -11,10 +12,16 @@ export interface AppMenuActions {
   reload(): void;
   zoom(direction: "in" | "out" | "reset"): void;
   focusedServerWindow(): BrowserWindow | null;
+  cursorSdk?: {
+    status(): void;
+    login(): void;
+    cancelLogin(): void;
+    disconnect(): void;
+  };
 }
 
 export function installApplicationMenu(actions: AppMenuActions): void {
-  const appName = app.getName();
+  const appName = PRODUCT_NAME;
 
   const template: MenuItemConstructorOptions[] = [
     {
@@ -79,6 +86,16 @@ export function installApplicationMenu(actions: AppMenuActions): void {
         },
       ],
     },
+    ...(actions.cursorSdk ? [{
+      label: "Cursor SDK",
+      submenu: [
+        { label: "Connection Status…", click: () => actions.cursorSdk!.status() },
+        { label: "Connect / Sign In…", click: () => actions.cursorSdk!.login() },
+        { label: "Cancel Sign In", click: () => actions.cursorSdk!.cancelLogin() },
+        { type: "separator" as const },
+        { label: "Disconnect from Raft…", click: () => actions.cursorSdk!.disconnect() },
+      ],
+    }] : []),
     {
       label: "Window",
       role: "windowMenu",

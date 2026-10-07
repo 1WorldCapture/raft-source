@@ -290,8 +290,14 @@ test("createComputerApi(tempHome).doctor honors the bound slockHome (regression 
     // service still reads ambient instead of the bound argument, the test
     // will see the wrong home in the doctor report.
     const previousAmbient = process.env.SLOCK_HOME;
+    const previousAmbientRaft = process.env.RAFT_HOME;
     await withHome(async (ambientHome) => {
+      // Sentinel: point the AMBIENT home at a different temp root. RAFT_HOME
+      // must be removed for this block so the ambient-SLOCK_HOME resolution
+      // path is what a stray reader would take (resolveRaftHome prefers
+      // RAFT_HOME; both values stay inside hermetic temp roots either way).
       process.env.SLOCK_HOME = ambientHome;
+      delete process.env.RAFT_HOME;
       try {
         const api = createComputerApi(tempHome);
         const report = await api.doctor({});
@@ -311,6 +317,8 @@ test("createComputerApi(tempHome).doctor honors the bound slockHome (regression 
       } finally {
         if (previousAmbient === undefined) delete process.env.SLOCK_HOME;
         else process.env.SLOCK_HOME = previousAmbient;
+        if (previousAmbientRaft === undefined) delete process.env.RAFT_HOME;
+        else process.env.RAFT_HOME = previousAmbientRaft;
       }
     });
   });

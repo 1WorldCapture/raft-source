@@ -1,0 +1,147 @@
+# Raft self-hosted deployment (phase 1: server + web + Postgres).
+#
+# Topology (per #private-deploy review):
+#   raft-internal  internal:true — server + db only; nothing on it can reach
+#                  the outside, and neither service publishes a port.
+#   raft-edge      normal bridge — only `web` is attached (it must publish
+#                  RAFT_HTTP_PORT). `web` proxies /api and /socket.io to the
+#                  server over raft-internal, so the whole stack is reachable
+#                  through one same-origin entry point.
+# Offline use: build (or `docker load`) both images, then `docker compose up`
+# with no network access required.
+#
+# Required variables: see .env.example (POSTGRES_PASSWORD, JWT_SECRET).
+
+name: raft-selfhost
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: raft
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: raft
+    volumes:
+      - raft-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U raft -d raft"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 10s
+    networks:
+      - raft-internal
+
+  # Redis is REQUIRED, not optional: machine (Computer/daemon) connections
+  # commit their replica-ownership generation through Redis
+  # (replicaRouter.commitMachineReplicaGeneration refuses without it and the
+  # daemon gets disconnected with replica_registration_failed). Ephemeral
+  # semantics are correct — ownership rebuilds when daemons reconnect after a
+  # redis restart — so no persistence volume.
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 24
+      start_period: 5s
+    networks:
+      - raft-internal
+
+  server:
+    # Official image built from packages/server/Dockerfile, tagged with the
+    # git SHA it was built from (see README "Build / export").
+    image: ${RAFT_SERVER_IMAGE:-raft-source-server:local}
+    restart: unless-stopped
+    environment:
+      PORT: "3001"
+      # Bind all interfaces inside the container; only raft-internal sees it.
+      HOST: "0.0.0.0"
+      DATABASE_URL: postgres://raft:${POSTGRES_PASSWORD}@db:5432/raft
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      # Public origin of this deployment — REQUIRED. SERVER_URL is what the
+      # server hands to agents/daemons to connect back (agentOrchestrator),
+      # APP_URL drives link generation; both must be the real browser-facing
+      # origin. CORS_ORIGIN matches it (add "app://raft" here in phase 3 when
+      # the desktop runtime origin lands).
+      SERVER_URL: ${RAFT_PUBLIC_ORIGIN:?RAFT_PUBLIC_ORIGIN is required}
+      APP_URL: ${RAFT_PUBLIC_ORIGIN:?RAFT_PUBLIC_ORIGIN is required}
+      CORS_ORIGIN: ${RAFT_PUBLIC_ORIGIN:?RAFT_PUBLIC_ORIGIN is required}
+      # Entrypoint runs the guarded migration path before starting the server
+      # (see packages/server/entrypoint.sh). Idempotent; safe on every boot.
+      RAFT_RUN_MIGRATIONS: "1"
+      RAFT_MIGRATION_TIMEOUT_MS: ${RAFT_MIGRATION_TIMEOUT_MS:-60000}
+      REDIS_URL: redis://redis:6379
+      # Private deployment: this server is the only release authority for its
+      # clients (shared predicate isPrivateDeploymentMode). Version lookups
+      # read the local manifest; artifacts are served from the shared dir.
+      RAFT_DEPLOYMENT_MODE: private
+      RAFT_DOWNLOADS_DIR: /app/downloads
+      # User uploads (attachments, avatars) live on local disk. Without a
+      # persistent volume they sit in the container's writable layer and are
+      # LOST whenever the container is recreated (every image upgrade). The
+      # named volume raft-uploads below keeps them; back it up with the DB.
+      UPLOADS_DIR: /app/uploads
+      # HMAC key for short-lived scope attestations (feedback-report / trace
+      # upload capabilities, 2-10 min TTL). There is NO random fallback: when
+      # unset those endpoints return an error. Optional in private mode (no
+      # external workers); set it only if you run such a worker, and keep the
+      # value stable across restarts so in-flight tokens stay valid.
+      SCOPE_ATTESTATION_SECRET: ${SCOPE_ATTESTATION_SECRET:-}
+      # Managed-MCP internal allowlist (task #9/D5): compose does variable
+      # interpolation only, so every RAFT_MANAGED_MCP_* knob must be passed
+      # through explicitly. Empty defaults keep behavior identical when the
+      # operator leaves them unset in .env. Changing .env requires
+      # `docker compose up -d` (container recreate) — `restart` re-reads
+      # nothing (check-compose-env-coverage guards future additions).
+      RAFT_MANAGED_MCP_ALLOWED_NETWORKS: ${RAFT_MANAGED_MCP_ALLOWED_NETWORKS:-}
+      RAFT_MANAGED_MCP_ALLOWED_HOSTS: ${RAFT_MANAGED_MCP_ALLOWED_HOSTS:-}
+      # Exactly one proxy hop: the web nginx in front of the server.
+      # NODE_ENV stays unset on purpose (docs/self-hosting/source-deploy.md:
+      # setting it to production flips native-push validation, translations
+      # and Slack Bridge behavior that need separate evaluation).
+      TRUST_PROXY: "1"
+    volumes:
+      # Same host directory the web container serves /downloads from.
+      - ./downloads:/app/downloads:ro
+      - raft-uploads:/app/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - raft-internal
+
+  web:
+    # Self-host variant of the web image (same Dockerfile, SELFHOST=1):
+    # VITE_API_URL is NOT baked, so the app uses window.location.origin;
+    # nginx proxies /api and /socket.io to RAFT_SERVER_UPSTREAM.
+    image: ${RAFT_WEB_IMAGE:-raft-source-web-selfhost:local}
+    restart: unless-stopped
+    environment:
+      # Resolved via Docker DNS on raft-internal.
+      RAFT_SERVER_UPSTREAM: server:3001
+    volumes:
+      - ./certs:/etc/nginx/certs:ro
+      # Serves /downloads/ directly (alias) so artifact bytes bypass Node.
+      - ./downloads:/usr/share/nginx/downloads:ro
+    ports:
+      - "${RAFT_HTTP_PORT:-18443}:443"
+    depends_on:
+      - server
+    networks:
+      - raft-internal
+      - raft-edge
+
+networks:
+  raft-internal:
+    internal: true
+  raft-edge:
+
+volumes:
+  raft-pgdata:
+  raft-uploads:

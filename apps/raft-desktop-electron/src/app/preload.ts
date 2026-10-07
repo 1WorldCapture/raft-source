@@ -3,11 +3,58 @@
 // (no capability gating needed — it's not untrusted remote content).
 
 import { contextBridge, ipcRenderer } from "electron";
+import { ELECTRON_IPC_CHANNELS } from "@raft/desktop-contract";
 
 function subscribe<T>(channel: string, handler: (value: T) => void): () => void {
   const wrapped = (_event: unknown, value: T) => handler(value);
   ipcRenderer.on(channel, wrapped);
   return () => ipcRenderer.removeListener(channel, wrapped);
+}
+
+// ── Runtime server-origin environment injection (phase 3-1) ──────────────────
+// The main process resolves the deployment origin once per boot and hands it
+// here through webPreferences.additionalArguments (NOT user-controllable
+// argv — only main writes it). The injected value must exist BEFORE page
+// scripts run, so it rides argv rather than an async invoke.
+//
+// Exposed shape is deliberately MINIMAL (PM review): exactly
+// {apiOrigin, socketOrigin, generation} — the web reader derives the rest
+// (environmentId "server", frontendOrigin, updateAuthority "none"). A
+// private deployment serves API, socket and web from one origin, so the
+// two origin slots are the same value.
+//
+// Validated locally anyway: https root origin, canonical form, positive
+// integer generation. Garbage is never injected into the page world —
+// without a valid tuple the page falls back to the compiled origin
+// (official-build behavior).
+function readServerEnvironmentFromArgv(): { apiOrigin: string; generation: number } | null {
+  let rawOrigin = "";
+  let generation = 0;
+  for (const arg of process.argv) {
+    const originMatch = /^--raft-server-origin=(.*)$/.exec(arg);
+    if (originMatch) rawOrigin = originMatch[1];
+    const generationMatch = /^--raft-environment-generation=(\d+)$/.exec(arg);
+    if (generationMatch) generation = Number(generationMatch[1]);
+  }
+  if (rawOrigin === "" || !Number.isSafeInteger(generation) || generation < 1) return null;
+  try {
+    const url = new URL(rawOrigin);
+    if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash) return null;
+    if (url.pathname !== "/" && url.pathname !== "") return null;
+    if (url.origin !== rawOrigin) return null; // canonical form only
+    return { apiOrigin: url.origin, generation };
+  } catch {
+    return null;
+  }
+}
+
+const serverEnvironment = readServerEnvironmentFromArgv();
+if (serverEnvironment) {
+  contextBridge.exposeInMainWorld("__RAFT_DESKTOP_ENVIRONMENT__", Object.freeze({
+    apiOrigin: serverEnvironment.apiOrigin,
+    socketOrigin: serverEnvironment.apiOrigin,
+    generation: serverEnvironment.generation,
+  }));
 }
 
 // Deep links can arrive before the frontend mounts its listener (cold start,
@@ -37,15 +84,25 @@ contextBridge.exposeInMainWorld("raftDesktop", {
   },
 
   // Native focus state (reliable substitute for document.hasFocus()).
-  isFocused: (): Promise<boolean> => ipcRenderer.invoke("app:is-focused"),
+  isFocused: (): Promise<boolean> => ipcRenderer.invoke(ELECTRON_IPC_CHANNELS.isFocused),
   onFocusChange: (handler: (focused: boolean) => void) =>
-    subscribe<boolean>("app:focus-state", handler),
+    subscribe<boolean>(ELECTRON_IPC_CHANNELS.focusState, handler),
 
   // Dock unread badge (0 clears it).
-  setBadgeCount: (count: number) => ipcRenderer.send("app:set-badge", count),
+  setBadgeCount: (count: number) => ipcRenderer.send(ELECTRON_IPC_CHANNELS.setBadge, count),
 
   // Bring the window forward (e.g. when an OS notification is clicked).
-  focusWindow: () => ipcRenderer.send("app:focus-window"),
+  focusWindow: () => ipcRenderer.send(ELECTRON_IPC_CHANNELS.focusWindow),
+
+  // Storage doctor (task #12): the renderer's boot health check calls these
+  // when localStorage looks corrupted while the IndexedDB cache has data.
+  // resetAndRelaunch schedules a wipe of the Local Storage directory for the
+  // next boot and relaunches the app; justWiped reports that this boot
+  // already consumed a wipe (skip the heuristic, start a fresh canary).
+  storage: {
+    justWiped: (): Promise<boolean> => ipcRenderer.invoke(ELECTRON_IPC_CHANNELS.storageWipeStatus),
+    resetAndRelaunch: (): void => ipcRenderer.send(ELECTRON_IPC_CHANNELS.storageResetRequest),
+  },
 
   // Desktop OAuth (native half). The renderer owns PKCE + the /start & /complete
   // HTTPS calls; this bridges the loopback + system browser only.
@@ -93,6 +150,13 @@ contextBridge.exposeInMainWorld("raftDesktop", {
     start: (): Promise<void> => ipcRenderer.invoke("computer:start"),
     stop: (): Promise<void> => ipcRenderer.invoke("computer:stop"),
     restart: (): Promise<void> => ipcRenderer.invoke("computer:restart"),
+    // Real stop→start recycle for a version-skewed resident. Disruptive (all
+    // agents on this machine briefly go offline) — the renderer confirms
+    // with the user before invoking this.
+    recycle: (): Promise<void> => ipcRenderer.invoke("computer:recycle"),
+    // Re-run the startup host converge (generic failure retry path).
+    connectCurrentDeployment: (userId?: string): Promise<void> => ipcRenderer.invoke("computer:connect-deployment", userId),
+    retryConverge: (): Promise<void> => ipcRenderer.invoke("computer:retry-converge"),
     // The latest Computer version on the CDN — the renderer compares it to the
     // running service version to decide whether to offer a local update.
     getUpgradeInfo: (): Promise<{ latestVersion: string | null }> => ipcRenderer.invoke("computer:upgrade-info"),
@@ -109,6 +173,28 @@ contextBridge.exposeInMainWorld("raftDesktop", {
     // install); "unknown" = not determinable yet.
     getManagement: (): Promise<{ model: "app" | "standalone" | "unknown" }> =>
       ipcRenderer.invoke("computer:management"),
+  },
+
+  // Runtime server-origin configuration (phase 3-1). get reports the
+  // effective origin + pending changes; set/reset re-validate in main and
+  // take effect after relaunch (relaunch triggers it).
+  serverOrigin: {
+    get: (): Promise<unknown> => ipcRenderer.invoke(ELECTRON_IPC_CHANNELS.serverOriginGet),
+    set: (origin: string): Promise<unknown> =>
+      ipcRenderer.invoke(ELECTRON_IPC_CHANNELS.serverOriginSet, origin),
+    reset: (): Promise<unknown> => ipcRenderer.invoke(ELECTRON_IPC_CHANNELS.serverOriginReset),
+    relaunch: (): void => ipcRenderer.send(ELECTRON_IPC_CHANNELS.serverOriginRelaunch),
+  },
+
+  // Private-deployment update detection (phase 3-2). Detect-only: the
+  // download URL stays in main (validated same-origin); the renderer shows
+  // a pill and asks main to open the browser.
+  privateUpdate: {
+    getStatus: (): Promise<unknown> => ipcRenderer.invoke(ELECTRON_IPC_CHANNELS.privateUpdateStatus),
+    onStatus: (handler: (status: unknown) => void): (() => void) =>
+      subscribe<unknown>(ELECTRON_IPC_CHANNELS.privateUpdateStatus, handler),
+    checkNow: (): void => ipcRenderer.send(ELECTRON_IPC_CHANNELS.privateUpdateCheck),
+    openDownload: (): void => ipcRenderer.send(ELECTRON_IPC_CHANNELS.privateUpdateDownload),
   },
 
   // App self-update (electron-updater). The app auto-downloads updates silently

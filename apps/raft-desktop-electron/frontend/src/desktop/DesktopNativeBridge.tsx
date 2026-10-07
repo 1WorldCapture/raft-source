@@ -17,6 +17,7 @@ import { useChannelStore } from "@web/store/channelStore";
 import { useThreadStore } from "@web/store/threadStore";
 import { useAuthStore } from "@web/store/authStore";
 import { useAppNavigate } from "@web/hooks/useAppNavigate";
+import { chatAttentionUnreadTotal, selectChatAttentionChannelIds } from "@web/utils/chatAttentionUnread";
 import { decideNotification } from "./notificationDecision";
 
 type RaftDesktopBridge = {
@@ -45,10 +46,18 @@ function bridge(): RaftDesktopBridge | undefined {
   return (globalThis as { raftDesktop?: RaftDesktopBridge }).raftDesktop;
 }
 
-function totalUnread(counts: Record<string, number>): number {
-  let sum = 0;
-  for (const n of Object.values(counts)) sum += n;
-  return sum;
+/**
+ * Dock badge number = the same channels the in-app Chat attention dot counts
+ * (DMs + joined channels), so the number in the Dock matches what the window
+ * shows. Unjoined discovery channels and unfollowed thread channels never
+ * inflate it.
+ */
+function attentionUnread(): number {
+  const cs = useChannelStore.getState();
+  return chatAttentionUnreadTotal(
+    selectChatAttentionChannelIds(cs.channels, cs.dmChannels),
+    useMessageStore.getState().unreadCounts,
+  );
 }
 
 function previewOf(content: string): string {
@@ -94,7 +103,7 @@ export function DesktopNativeBridge(): null {
     // with old content (or notifying the same message twice).
     const seenMessageId: Record<string, string | undefined> = {};
     for (const channelId of Object.keys(prevCounts)) seenMessageId[channelId] = lastMessageId(channelId);
-    b.setBadgeCount?.(totalUnread(prevCounts));
+    b.setBadgeCount?.(attentionUnread());
 
     const notifyFor = (
       channelId: string,
@@ -134,21 +143,18 @@ export function DesktopNativeBridge(): null {
       }
     };
 
-    // Only the unreadCounts slice drives the badge and notifications, but zustand
-    // fires this subscription on EVERY message-store change — every incoming
-    // message, optimistic send, edit, reaction, read-cursor move. Bail on a cheap
-    // reference check unless the unread map actually changed, so the badge sum +
-    // the per-channel notification loop don't run on the hot path for unrelated
-    // updates. The store replaces unreadCounts immutably, so a new reference is a
-    // real change (and the badge + the "is this a new unread?" trigger both
-    // depend on nothing else).
+    // Only the unreadCounts slice drives the notifications, and the badge
+    // additionally depends on the channel roster (joined/unjoined decides the
+    // attention set). zustand fires these subscriptions on EVERY store change,
+    // so both bail on cheap reference checks. The stores replace their slices
+    // immutably, so a new reference is a real change.
     let prevUnreadRef = useMessageStore.getState().unreadCounts;
     const unsubscribe = useMessageStore.subscribe(() => {
       const state = useMessageStore.getState();
       const counts = state.unreadCounts;
       if (counts === prevUnreadRef) return;
       prevUnreadRef = counts;
-      b.setBadgeCount?.(totalUnread(counts));
+      b.setBadgeCount?.(attentionUnread());
 
       const canNotify = !focused && Date.now() >= readyAt;
       const openChannelId = state.currentChannelId;
@@ -177,8 +183,22 @@ export function DesktopNativeBridge(): null {
       prevCounts = { ...counts };
     });
 
+    // Joining/leaving a channel changes the attention set without moving
+    // unreadCounts — the badge must follow the roster too.
+    let prevRosterRef = {
+      channels: useChannelStore.getState().channels,
+      dmChannels: useChannelStore.getState().dmChannels,
+    };
+    const unsubscribeChannels = useChannelStore.subscribe(() => {
+      const cs = useChannelStore.getState();
+      if (cs.channels === prevRosterRef.channels && cs.dmChannels === prevRosterRef.dmChannels) return;
+      prevRosterRef = { channels: cs.channels, dmChannels: cs.dmChannels };
+      b.setBadgeCount?.(attentionUnread());
+    });
+
     return () => {
       unsubscribe();
+      unsubscribeChannels();
       offFocus?.();
       // Clear the dock badge when this bridge tears down (logout / server
       // switch re-init) so a stale count doesn't linger.

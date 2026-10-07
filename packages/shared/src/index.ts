@@ -597,6 +597,17 @@ export type ServerToMachineMessage =
   | { type: "machine:workspace:delete"; directoryName: string }
   | { type: "machine:runtime_models:detect"; requestId: string; runtime: string }
   /**
+   * Ask the owning Computer to start a Cursor SDK owner sign-in for the web
+   * login button. The daemon answers with `machine:cursor_sdk:login_result`
+   * carrying the (strictly validated) authorization URL as soon as the native
+   * host hands it over; browser completion is observed by polling
+   * `machine:cursor_sdk:status`. Owner-only upstream; introduced with the
+   * cursor-sdk web login entry (task: Cursor SDK 修复-1).
+   */
+  | { type: "machine:cursor_sdk:login"; requestId: string }
+  /** Sanitized Cursor SDK binding status for the same web entry. Owner-only upstream. */
+  | { type: "machine:cursor_sdk:status"; requestId: string }
+  /**
    * Ask the owning Computer to refresh one provider's sanitized account-usage
    * snapshot. This is never sent by a cache-read endpoint without the
    * owner/gate/cooldown checks. Older daemons ignore the additive message.
@@ -868,6 +879,27 @@ export type MachineToServerMessage =
       default?: string;
       error?: string;
     }
+  /**
+   * Result of a web-triggered Cursor SDK sign-in start. Minimal by contract:
+   * only the validated login URL / failure reason — never credential
+   * metadata. `loginUrl` is absent when busy or failed.
+   */
+  | {
+      type: "machine:cursor_sdk:login_result";
+      requestId: string;
+      loginUrl?: string;
+      reused?: boolean;
+      ok?: boolean;
+      errorCode?: string;
+      message?: string;
+    }
+  /** Sanitized Cursor SDK binding status; no principal/connection/fingerprint fields. */
+  | {
+      type: "machine:cursor_sdk:status_result";
+      requestId: string;
+      status: "unbound" | "bound" | "bound_stale_key" | "disconnected" | "error";
+      source: "cursor_sdk_store" | "raft_owned" | "owner_environment";
+    }
   /** Closed, sanitized payload; provider credentials/raw responses never cross this boundary. */
   | {
       type: "machine:runtime_account_usage:snapshot";
@@ -944,10 +976,12 @@ export type RuntimeId =
   | "kimi-sdk"
   | "kimi"
   | "copilot"
+  | "cursor-sdk"
   | "cursor"
   | "gemini"
   | "opencode"
   | "pi"
+  | "omp"
   | "external";
 
 /**
@@ -1731,6 +1765,9 @@ export const RUNTIMES: RuntimeInfo[] = [
   { id: "kimi-sdk", displayName: "Kimi Code", abbreviation: "KC", binary: "", supported: true },
   { id: "kimi", displayName: "Kimi CLI", abbreviation: "KL", binary: "kimi", supported: true, deprecated: true },
   { id: "copilot", displayName: "Copilot CLI", abbreviation: "CP", binary: "copilot", supported: true },
+  // SDK assets are shipped by Computer, not discovered as a user-installed CLI.
+  // Keep legacy Cursor CLI independently addressable for existing sessions.
+  { id: "cursor-sdk", displayName: "Cursor SDK", abbreviation: "CS", binary: "", supported: true },
   { id: "cursor", displayName: "Cursor CLI", abbreviation: "CU", binary: "cursor-agent", supported: true },
   // Gemini CLI: deprecated — no longer maintained upstream, replaced by
   // Antigravity CLI (`antigravity` → "Antigravity CLI"). Kept for backward
@@ -1738,6 +1775,10 @@ export const RUNTIMES: RuntimeInfo[] = [
   { id: "gemini", displayName: "Gemini CLI", abbreviation: "GM", binary: "gemini", supported: true, deprecated: true },
   { id: "opencode", displayName: "OpenCode", abbreviation: "OC", binary: "opencode", supported: true },
   { id: "pi", displayName: "Pi", abbreviation: "PI", binary: "pi", supported: true },
+  // OMP (oh-my-pi): Bun-only SDK upstream, so the daemon drives it as a
+  // `omp --mode rpc` child process (see the daemon omp driver). Ships after
+  // pi in this list; ordering is display-only.
+  { id: "omp", displayName: "OMP", abbreviation: "OM", binary: "omp", supported: true },
 ];
 
 /**
@@ -1856,7 +1897,7 @@ export const CURSOR_MODEL_PROBE_TIMEOUT_MS = 20_000;
 
 /** Leave transport time for a Cursor probe to finish before the Server gives up. */
 export function getRuntimeModelDetectionTimeoutMs(runtime: string): number {
-  return runtime === "cursor" ? CURSOR_MODEL_PROBE_TIMEOUT_MS + 5_000 : 5_000;
+  return runtime === "cursor" || runtime === "cursor-sdk" ? CURSOR_MODEL_PROBE_TIMEOUT_MS + 5_000 : 5_000;
 }
 
 /**
@@ -2020,6 +2061,11 @@ export const RUNTIME_MODELS: Record<string, RuntimeModelInfo[]> = {
     { id: "claude-4-sonnet", label: "Claude 4 Sonnet" },
     { id: "claude-4.5-sonnet", label: "Claude 4.5 Sonnet" },
   ],
+  // Default-seeding metadata only: the selectable SDK catalog must come from
+  // the user's bound, verified Cursor connection, never this static fallback.
+  "cursor-sdk": [
+    { id: "default", label: "Cursor configured default", verified: "suggestion_only" },
+  ],
   cursor: [
     { id: "composer-2-fast", label: "Composer 2 Fast" },
     { id: "composer-2", label: "Composer 2" },
@@ -2059,6 +2105,13 @@ export const RUNTIME_MODELS: Record<string, RuntimeModelInfo[]> = {
   // getDefaultModel("kimi-sdk") from falling through to Claude's "sonnet".
   "kimi-sdk": [
     { id: "kimi-code/kimi-for-coding", label: "Kimi for Coding (default)", verified: "launchable" },
+  ],
+  // OMP resolves models from each user's own `omp login` state (multi-provider),
+  // so the built-in entry only seeds the default-model lookup. Live catalogs
+  // come from the daemon reading the local `omp models` output; a missing or
+  // unreadable catalog stays a non-live source and must never widen this entry.
+  omp: [
+    { id: "default", label: "Configured Default / Auto" },
   ],
 };
 
@@ -2176,6 +2229,15 @@ const CONTROLLED_RUNTIME_ENV_KEYS: Record<string, readonly string[]> = {
   // directly, including defensive aliases such as ANTHROPIC_OAUTH_TOKEN.
   builtin: BUILTIN_RUNTIME_HOST_PROVIDER_ENV_SCRUB_KEYS,
   claude: ["ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY", "ANTHROPIC_CUSTOM_MODEL_OPTION"],
+  // Cursor SDK identity/backend/asset selection belongs to the local owner
+  // control plane. Remote agent config must not override a bound connection.
+  "cursor-sdk": [
+    "CURSOR_API_KEY", "CURSOR_AUTH_TOKEN", "CURSOR_BACKEND_URL",
+    "CURSOR_API_BASE_URL", "CURSOR_WEBSITE_URL", "RAFT_CURSOR_SDK_ASSETS",
+    // The SDK host receives a private credential lease; remote configuration
+    // cannot install Node preload hooks or disable its TLS verification.
+    "NODE_OPTIONS", "NODE_PATH", "NODE_TLS_REJECT_UNAUTHORIZED",
+  ],
   // Pi-runtime builtin-provider env vars (e.g. DEEPSEEK_API_KEY). Owned by
   // PiRuntimeProviderConfig.pi-builtin → buildLaunchPlan, not by
   // user-supplied envVars: reading from PI_BUILTIN_PROVIDER_ENV_KEYS keeps
@@ -2901,7 +2963,7 @@ export function isReasoningEffortAllowedForModel(runtime: string, modelId: strin
 }
 
 /** Runtimes that support configurable reasoning effort. */
-export const REASONING_EFFORT_RUNTIMES = new Set(["builtin", "claude", "codex", "grok", "copilot", "pi", "kimi-sdk"]);
+export const REASONING_EFFORT_RUNTIMES = new Set(["builtin", "claude", "codex", "grok", "copilot", "pi", "kimi-sdk", "omp"]);
 
 /** Runtimes that support the shared fast-mode launch variant. */
 export const RUNTIME_FAST_MODE_RUNTIMES = new Set(["claude", "codex"]);
@@ -3810,6 +3872,29 @@ export const PROFILE_SETUP_PLACEHOLDER_PREFIX = "pending_";
 
 export function hasPlaceholderHandle(name: string | null | undefined): boolean {
   return !!name && name.toLowerCase().startsWith(PROFILE_SETUP_PLACEHOLDER_PREFIX);
+}
+
+/**
+ * The ONE canonical private-deployment predicate for the whole repo
+ * (server / web / computer). Private mode means: this Raft server is the
+ * only release authority for its clients — version lookups read the local
+ * /downloads manifest instead of the official CDN/npm (task #4), telemetry
+ * stays off and official links are neutralized (task #7). Every feature
+ * that needs "are we self-hosted/private?" must branch on THIS helper, not
+ * on its own env sniff — one entry point, one switch.
+ */
+export function isPrivateDeploymentMode(
+  raw: string | undefined = readProcessEnv().RAFT_DEPLOYMENT_MODE,
+): boolean {
+  return raw === "private";
+}
+
+// Node-free `process.env` read: shared code is compiled by the web build too
+// (no Node type definitions there). In a browser this is simply undefined —
+// web surfaces learn the mode from server-provided config, never from env.
+function readProcessEnv(): Record<string, string | undefined> {
+  const proc = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process;
+  return proc?.env ?? {};
 }
 
 export function accountNeedsIdentitySetup(user: {

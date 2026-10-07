@@ -135,7 +135,17 @@ import {
 } from "./runtimeErrorDiagnostics.js";
 import { materializeProviderConnectionForSpawn } from "./providerConnectionLaunch.js";
 import { RuntimeProgressState } from "./runtimeProgressState.js";
-import { computeInboxNoticeFingerprint, RuntimeNotificationState } from "./runtimeNotificationState.js";
+import {
+  computeInboxNoticeFingerprint,
+  inboxNoticeMessageIdentity,
+  RuntimeNotificationState,
+} from "./runtimeNotificationState.js";
+import {
+  createRuntimeDeliveryAttemptLedger,
+  type RuntimeDeliveryAttemptContribution,
+  RuntimeDeliveryAttemptLedger,
+  type RuntimeDeliveryAttemptOutcome,
+} from "./runtimeDeliveryAttemptLedger.js";
 import {
   clearSessionReadyDeliveryRetry,
   createSessionReadyDeliveryRetryState,
@@ -578,6 +588,12 @@ interface AgentProcess {
   runtimeProfileTurnControl: RuntimeProfileTurnControl | null;
   pendingTrajectory: PendingTrajectoryState | null;
   gatedSteering: ApmGatedSteeringDecisionState;
+  /**
+   * Delivery-outcome attempt ledger for runtimes opted into the attempt
+   * protocol (cursor-sdk). Inert for every other driver: no attemptIds are
+   * allocated and no delivery_outcome event is ever applied.
+   */
+  deliveryAttempts: RuntimeDeliveryAttemptLedger;
 }
 
 export type ActivityHeartbeatTimerState =
@@ -3218,6 +3234,7 @@ export class AgentProcessManager {
         : null,
       pendingTrajectory: null,
       gatedSteering: createGatedSteeringState(),
+      deliveryAttempts: createRuntimeDeliveryAttemptLedger(),
     };
     this.startingInboxes.drainOnSpawn(agentId);
     this.agents.set(agentId, agentProcess);
@@ -4565,7 +4582,11 @@ export class AgentProcessManager {
     }
 
     this.busyDelivery.reconcile(agentId, ap, "delivery_route");
-    const isIdle = this.isApmIdle(ap);
+    // The driver's own protocol state outranks the process-level busy
+    // belief (task #7): a steer-driven omp turn emits no prompt_result, so
+    // the process-level state can stay busy long after the run ended —
+    // trusting it here would queue every later mention forever.
+    const isIdle = this.isApmIdle(ap) || ap.driver.isRunInProgress?.() === false;
 
     if (trackedBegin === "accepted" && !isIdle) {
       if (!ap.driver.supportsStdinNotification || !ap.sessionId || !this.canDeliverToRuntimeSession(ap)) {
@@ -6472,6 +6493,185 @@ export class AgentProcessManager {
     }, "error");
   }
 
+  private runtimeDeliveryOutcomeAttemptsEnabled(ap: AgentProcess): boolean {
+    return ap.driver.deliveryOutcomeAttempts === true;
+  }
+
+  /**
+   * Allocate a delivery-attempt id for a follow-up send. Returns null for
+   * drivers not in the attempt protocol, so their sends stay byte-identical to
+   * the pre-protocol behavior (no attemptId input, no ledger state).
+   */
+  private allocateRuntimeDeliveryAttemptId(ap: AgentProcess): string | null {
+    if (!this.runtimeDeliveryOutcomeAttemptsEnabled(ap)) return null;
+    return ap.deliveryAttempts.allocateAttemptId();
+  }
+
+  /**
+   * Settle one runtime delivery_outcome event. Exactly the applied path may
+   * mutate delivery state; duplicate / stale / unallocated results are
+   * discarded with a trace. A normal revert is NEVER treated as a runtime
+   * error: no error broadcast, no compaction interrupt, no backoff — only the
+   * relevant still-unread delivery debt is restored.
+   */
+  private applyRuntimeDeliveryOutcome(
+    agentId: string,
+    ap: AgentProcess,
+    event: Extract<ParsedEvent, { kind: "delivery_outcome" }>,
+  ): void {
+    if (!this.runtimeDeliveryOutcomeAttemptsEnabled(ap)) {
+      this.recordDaemonTrace("daemon.agent.delivery_outcome.discarded", {
+        agentId,
+        launchId: ap.launchId || undefined,
+        runtime: ap.config.runtime,
+        model: ap.config.model,
+        source: event.source,
+        attempt_id: event.attemptId,
+        outcome: event.outcome,
+        reason: "driver_not_in_attempt_protocol",
+      });
+      return;
+    }
+    const disposition = ap.deliveryAttempts.settle(event.attemptId, event.outcome, ap.sessionId);
+    if (disposition.status !== "applied") {
+      this.recordDaemonTrace("daemon.agent.delivery_outcome.discarded", {
+        agentId,
+        launchId: ap.launchId || undefined,
+        runtime: ap.config.runtime,
+        model: ap.config.model,
+        source: event.source,
+        attempt_id: event.attemptId,
+        outcome: event.outcome,
+        reason: disposition.status,
+        previous_outcome: disposition.status === "duplicate" ? disposition.previousOutcome : undefined,
+        pending_attempt_count: ap.deliveryAttempts.pendingCount,
+      });
+      return;
+    }
+    if (disposition.outcome === "deferred_to_idle") {
+      const restoredCount = this.restoreAttemptDeliveryDebt(agentId, ap, disposition.attempt, "deferred_to_idle");
+      this.recordRuntimeTraceEvent(agentId, ap, "runtime.delivery_outcome.settled", {
+        attempt_id: event.attemptId,
+        attempt_id_present: true,
+        outcome: event.outcome,
+        source: event.source,
+        restored_delivery_debt_count: restoredCount,
+        busy_delivery_suppressed_until_idle: ap.deliveryAttempts.shouldSuppressBusyDelivery(),
+        pending_attempt_count: ap.deliveryAttempts.pendingCount,
+        inbox_count: ap.inbox.length,
+      });
+      this.recordDaemonTrace("daemon.agent.delivery_outcome.settled", {
+        agentId,
+        launchId: ap.launchId || undefined,
+        runtime: ap.config.runtime,
+        model: ap.config.model,
+        source: event.source,
+        attempt_id: event.attemptId,
+        outcome: event.outcome,
+        restored_delivery_debt_count: restoredCount,
+        busy_delivery_suppressed_until_idle: ap.deliveryAttempts.shouldSuppressBusyDelivery(),
+        inbox_count: ap.inbox.length,
+        pending_notification_count: ap.notifications.pendingCount,
+      });
+      return;
+    }
+    const retainedUnknown = disposition.outcome === "unknown";
+    this.recordRuntimeTraceEvent(agentId, ap, "runtime.delivery_outcome.settled", {
+      attempt_id: event.attemptId,
+      attempt_id_present: true,
+      outcome: event.outcome,
+      source: event.source,
+      retained_unknown: retainedUnknown,
+      retained_unknown_count: ap.deliveryAttempts.retainedUnknownCount,
+      pending_attempt_count: ap.deliveryAttempts.pendingCount,
+    });
+    this.recordDaemonTrace("daemon.agent.delivery_outcome.settled", {
+      agentId,
+      launchId: ap.launchId || undefined,
+      runtime: ap.config.runtime,
+      model: ap.config.model,
+      source: event.source,
+      attempt_id: event.attemptId,
+      outcome: event.outcome,
+      retained_unknown: retainedUnknown,
+      retained_unknown_count: ap.deliveryAttempts.retainedUnknownCount,
+      inbox_count: ap.inbox.length,
+      pending_notification_count: ap.notifications.pendingCount,
+    });
+  }
+
+  /**
+   * Restore ONLY this attempt's delivery debt: messages that are still unread
+   * (still in the inbox) and contributed to the reverted/unknown attempt are
+   * un-marked in the contribution memo and re-armed as pending notification
+   * debt. Previously delivered messages from other notices keep their
+   * contribution marks — no wholesale memo wipe, no re-notify storm.
+   */
+  private restoreAttemptDeliveryDebt(
+    agentId: string,
+    ap: AgentProcess,
+    attempt: RuntimeDeliveryAttemptContribution,
+    cause: RuntimeDeliveryAttemptOutcome | "terminal_boundary",
+  ): number {
+    const stillUnread = ap.inbox.filter((message) => {
+      const identity = inboxNoticeMessageIdentity(message);
+      return identity.length > 0 && attempt.identities.has(identity);
+    });
+    const restoredNotificationCount = ap.driver.supportsStdinNotification && ap.sessionId && stillUnread.length > 0
+      ? ap.notifications.uncontributeMessages(stillUnread, ap.sessionId)
+      : 0;
+    if (restoredNotificationCount > 0) {
+      ap.notifications.add(restoredNotificationCount);
+    }
+    this.recordDaemonTrace("daemon.agent.delivery_outcome.debt_restored", {
+      agentId,
+      launchId: ap.launchId || undefined,
+      runtime: ap.config.runtime,
+      model: ap.config.model,
+      cause,
+      attempt_id: attempt.attemptId,
+      attempt_session_id_present: Boolean(attempt.sessionId),
+      attempt_identity_count: attempt.identities.size,
+      still_unread_count: stillUnread.length,
+      restored_notification_count: restoredNotificationCount,
+      inbox_count: ap.inbox.length,
+      pending_notification_count: ap.notifications.pendingCount,
+      session_id_present: Boolean(ap.sessionId),
+      supports_stdin_notification: ap.driver.supportsStdinNotification,
+    });
+    return restoredNotificationCount;
+  }
+
+  /**
+   * Terminal boundary (turn_end = true idle): release the post-revert busy
+   * hold and resolve retained-unknown attempts. Retained unknowns restore
+   * their still-unread debt now — fail toward re-delivery — because at a true
+   * turn boundary a re-notify is cheap and message loss is not. The APM is the
+   * sole follow-up owner: nothing here asks the runtime to follow up.
+   */
+  private resolveDeliveryAttemptsAtTurnBoundary(agentId: string, ap: AgentProcess): void {
+    if (!this.runtimeDeliveryOutcomeAttemptsEnabled(ap)) return;
+    const suppressCleared = ap.deliveryAttempts.clearBusySuppression();
+    const retained = ap.deliveryAttempts.takeRetainedUnknown(ap.sessionId);
+    let restoredUnknownCount = 0;
+    for (const attempt of retained) {
+      restoredUnknownCount += this.restoreAttemptDeliveryDebt(agentId, ap, attempt, "terminal_boundary");
+    }
+    if (!suppressCleared && retained.length === 0) return;
+    this.recordDaemonTrace("daemon.agent.delivery_outcome.terminal_resolved", {
+      agentId,
+      launchId: ap.launchId || undefined,
+      runtime: ap.config.runtime,
+      model: ap.config.model,
+      boundary: "turn_end",
+      busy_suppression_cleared: suppressCleared,
+      retained_unknown_resolved_count: retained.length,
+      restored_notification_count: restoredUnknownCount,
+      inbox_count: ap.inbox.length,
+      pending_notification_count: ap.notifications.pendingCount,
+    });
+  }
+
   private noteRuntimeProgress(ap: AgentProcess, eventKind?: ParsedEvent["kind"]) {
     ap.runtimeProgress.noteRuntimeEvent(eventKind);
     this.invalidateRecoveryErrorView(ap);
@@ -7115,6 +7315,21 @@ export class AgentProcessManager {
       }
       return;
     }
+    if (event.kind === "delivery_outcome") {
+      if (ap) {
+        this.applyRuntimeDeliveryOutcome(agentId, ap, event);
+      } else {
+        this.recordDaemonTrace("daemon.agent.delivery_outcome.received_without_process", {
+          agentId,
+          event_kind: event.kind,
+          runtime: driver.id,
+          source: event.source,
+          attempt_id: event.attemptId,
+          outcome: event.outcome,
+        });
+      }
+      return;
+    }
     if (event.kind === "delivery_error") {
       if (ap) {
         this.restoreRuntimeDeliveryAfterAsyncRejection(agentId, ap, event);
@@ -7384,6 +7599,7 @@ export class AgentProcessManager {
           }
           this.markSessionReadyForDelivery(ap, "turn_end");
           clearSessionReadyDeliveryRetry(ap);
+          this.resolveDeliveryAttemptsAtTurnBoundary(agentId, ap);
           const stickyTerminalFailure = classifyStickyTerminalFailure(ap);
           if (!stickyTerminalFailure && ap.runtimeErrorDeliveryBackoff.reason === "runtime_error") {
             this.clearRuntimeErrorDeliveryBackoffWithTrace(agentId, ap, "turn_end_unclassified_runtime_error");
@@ -7695,6 +7911,24 @@ export class AgentProcessManager {
       ap.notifications.add(count);
       return false;
     }
+    // Post-revert hold (delivery_outcome deferred_to_idle): the runtime
+    // reverted a busy submission and keeps running its current turn. Further
+    // busy steering waits for true idle; the debt stays queued here.
+    if (ap.deliveryAttempts.shouldSuppressBusyDelivery()) {
+      ap.notifications.add(count);
+      this.recordDaemonTrace("daemon.agent.stdin_notification", {
+        agentId,
+        runtime: ap.config.runtime,
+        model: ap.config.model,
+        launchId: ap.launchId || undefined,
+        outcome: "suppressed_busy_delivery_after_revert",
+        mode: "busy",
+        pending_notification_count: count,
+        inbox_count: ap.inbox.length,
+        session_id_present: true,
+      });
+      return false;
+    }
     if (!this.canDeliverToRuntimeSession(ap)) {
       ap.notifications.add(count);
       this.recordDaemonTrace("daemon.agent.stdin_notification", {
@@ -7829,12 +8063,16 @@ export class AgentProcessManager {
     });
     logger.info(`[Agent ${agentId}] Sending stdin inbox update: ${inboxRows.length} changed target(s), ${inboxCount} pending message(s)`);
 
+    const deliveryAttemptId = this.allocateRuntimeDeliveryAttemptId(ap);
     const sendResult = this.runtimeProcessBindingFence.send(
       agentId,
       ap,
-      { mode: "busy", text: notification, sessionId: ap.sessionId },
+      { mode: "busy", text: notification, sessionId: ap.sessionId, attemptId: deliveryAttemptId ?? undefined },
       "busy_stdin_notification",
     );
+    if (deliveryAttemptId !== null && sendResult.ok) {
+      ap.deliveryAttempts.recordPendingAttempt(deliveryAttemptId, ap.sessionId, changedMessages);
+    }
     if (sendResult.ok) {
       this.recordDaemonTrace("daemon.agent.inbox_update.pushed", {
         agentId,
@@ -7932,6 +8170,20 @@ export class AgentProcessManager {
     source: string,
   ): boolean {
     if (messages.length === 0) return true;
+    if (mode === "busy" && ap.deliveryAttempts.shouldSuppressBusyDelivery()) {
+      this.recordDaemonTrace("daemon.agent.stdin_delivery", {
+        agentId,
+        launchId: ap.launchId || undefined,
+        runtime: ap.config.runtime,
+        model: ap.config.model,
+        mode,
+        messages_count: messages.length,
+        session_id_present: Boolean(ap.sessionId),
+        inbox_count: ap.inbox.length,
+        outcome: "suppressed_busy_delivery_after_revert",
+      });
+      return false;
+    }
     const runtimeProjection = this.projectThreadJoinContextsForRuntimeInput(agentId, messages);
     const renderedContextMessageSet = new Set(runtimeProjection.renderedContextMessages);
     const pendingNoticeMessages = messages.filter((message) => !renderedContextMessageSet.has(message));
@@ -7955,12 +8207,16 @@ export class AgentProcessManager {
     });
     this.recordRuntimeTraceEvent(agentId, ap, "runtime.input.prepared", inputTraceAttrs);
 
+    const deliveryAttemptId = this.allocateRuntimeDeliveryAttemptId(ap);
     const sendResult = this.runtimeProcessBindingFence.send(
       agentId,
       ap,
-      { mode, text: prompt, sessionId: ap.sessionId },
+      { mode, text: prompt, sessionId: ap.sessionId, attemptId: deliveryAttemptId ?? undefined },
       source,
     );
+    if (deliveryAttemptId !== null && sendResult.ok) {
+      ap.deliveryAttempts.recordPendingAttempt(deliveryAttemptId, ap.sessionId, messages);
+    }
     if (!sendResult.ok) {
       const retryNotificationCount = mode === "idle" && ap.driver.supportsStdinNotification && ap.sessionId
         ? messages.length

@@ -31,17 +31,44 @@ function countCalls(node: ts.Node, receiver: string, method: string): number {
 }
 
 function findServerListenCallback(): ts.ArrowFunction | ts.FunctionExpression | undefined {
+  // server.ts passes the startup callback by reference (const onListening =
+  // () => {...}; server.listen(PORT, onListening)), so an Identifier argument
+  // must be resolved back to its variable declaration's initializer.
+  const listenCallbackName = (): string | undefined => {
+    let name: string | undefined;
+    const visit = (node: ts.Node) => {
+      if (
+        ts.isCallExpression(node)
+        && ts.isPropertyAccessExpression(node.expression)
+        && ts.isIdentifier(node.expression.expression)
+        && node.expression.expression.text === "server"
+        && node.expression.name.text === "listen"
+      ) {
+        // The startup callback is the LAST argument (earlier identifiers are
+        // things like the PORT constant — server.listen(PORT, listenHost,
+        // onListening) must resolve onListening, not PORT).
+        const last = node.arguments[node.arguments.length - 1];
+        name = ts.isIdentifier(last) ? last.text : undefined;
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sourceFile);
+    return name;
+  };
+
+  const callbackName = listenCallbackName();
+  if (callbackName === undefined) return undefined;
+
   let callback: ts.ArrowFunction | ts.FunctionExpression | undefined;
   const visit = (node: ts.Node) => {
     if (
-      ts.isCallExpression(node)
-      && ts.isPropertyAccessExpression(node.expression)
-      && ts.isIdentifier(node.expression.expression)
-      && node.expression.expression.text === "server"
-      && node.expression.name.text === "listen"
+      ts.isVariableDeclaration(node)
+      && ts.isIdentifier(node.name)
+      && node.name.text === callbackName
+      && node.initializer
+      && (ts.isArrowFunction(node.initializer) || ts.isFunctionExpression(node.initializer))
     ) {
-      callback = node.arguments.find((argument): argument is ts.ArrowFunction | ts.FunctionExpression =>
-        ts.isArrowFunction(argument) || ts.isFunctionExpression(argument));
+      callback = node.initializer;
     }
     ts.forEachChild(node, visit);
   };

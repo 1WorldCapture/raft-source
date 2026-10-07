@@ -43,3 +43,42 @@ export function saveZoomLevel(zoom: number): void {
     // best effort
   }
 }
+
+// Quit-confirmation preference (task #7): set from the quit dialog's
+// "Don't ask again" checkbox. Stored next to the zoom level in the same
+// view-prefs.json document.
+
+let cachedQuitNoConfirm: boolean | null = null;
+
+export function loadQuitNoConfirm(): boolean {
+  if (cachedQuitNoConfirm !== null) return cachedQuitNoConfirm;
+  let quitNoConfirm = false;
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(storePath(), "utf8"));
+    if (typeof parsed === "object" && parsed !== null) {
+      const value = (parsed as Record<string, unknown>).quitNoConfirm;
+      if (typeof value === "boolean") quitNoConfirm = value;
+    }
+  } catch {
+    // First run or unreadable store — default false.
+  }
+  cachedQuitNoConfirm = quitNoConfirm;
+  return quitNoConfirm;
+}
+
+export function saveQuitNoConfirm(quitNoConfirm: boolean): void {
+  cachedQuitNoConfirm = quitNoConfirm;
+  const current: Record<string, unknown> = loadZoomLevel() === 0 ? {} : { zoom: loadZoomLevel() };
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(storePath(), "utf8"));
+    if (typeof parsed === "object" && parsed !== null) Object.assign(current, parsed);
+  } catch {
+    // Fresh store.
+  }
+  current.quitNoConfirm = quitNoConfirm;
+  try {
+    writeFileSync(storePath(), `${JSON.stringify(current, null, 2)}\n`);
+  } catch {
+    // Preferences are best-effort; never block quit on them.
+  }
+}

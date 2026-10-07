@@ -164,6 +164,8 @@ export class RuntimeProcessBindingFence {
       mode: "idle" | "busy";
       text: string;
       sessionId?: string | null;
+      /** APM-owned delivery-attempt id; advisory, passed through verbatim. */
+      attemptId?: string;
     },
     source: string,
   ): RuntimeSendResult {

@@ -28,6 +28,7 @@ import StatusDot from "@web/components/ui/StatusDot";
 import { MachineRunLabel } from "@web/components/machine/MachineRunLabel";
 import { getComputerBridge, useSelfMachine } from "./useSelfComputer";
 import {
+  deriveConvergeNotice,
   deriveControls,
   freshInstallCommand,
   routeUpdateAction,
@@ -35,7 +36,7 @@ import {
   type ManagementModel,
 } from "./thisComputerLogic";
 
-type Operation = "start" | "stop" | "restart" | "upgrade" | "enable";
+type Operation = "start" | "stop" | "restart" | "upgrade" | "enable" | "recycle" | "retry";
 
 /** Turn a raw error (incl. Electron IPC strings) into one short, human line. */
 function friendlyError(raw: string): string {
@@ -50,12 +51,17 @@ function friendlyError(raw: string): string {
 export default function ThisComputerCard() {
   const bridge = getComputerBridge();
   const currentServer = useServerStore((s) => s.current);
+  const userId = useAuthStore((s) => s.user?.id);
   const selfMachine = useSelfMachine();
   const nav = useAppNavigate();
   const [status, setStatus] = useState<ComputerStatusReport | null>(null);
   const [latestVersion, setLatestVersion] = useState<string | null>(null);
   const [management, setManagement] = useState<ManagementModel>("unknown");
   const [confirmFresh, setConfirmFresh] = useState(false);
+  // Recycle confirmation mirrors confirmFresh: recycling the local Computer
+  // service offlines every agent on this machine, so it never fires on the
+  // first click.
+  const [confirmRecycle, setConfirmRecycle] = useState(false);
   const [manualCmd, setManualCmd] = useState<string | null>(null);
   const [busy, setBusy] = useState<Operation | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -139,7 +145,13 @@ export default function ThisComputerCard() {
   // ComputerRow (clickable → detail), with a "This device" badge and hover-in
   // local controls.
   if (selfMachine) {
-    const dotTone = getComputerRowDotTone(getComputerRowDotStatus(selfMachine));
+    // App-embedded: never show the upgrade dot, even if the server row (e.g. an
+    // older server) still claims an upgrade.
+    const dotTone = getComputerRowDotTone(
+      management === "app"
+        ? selfMachine.status === "online" ? "online" : "offline"
+        : getComputerRowDotStatus(selfMachine),
+    );
     // All the control-visibility decisions (running/upgrading/updateAvailable),
     // incl. the local-version compare, the "Updating…" staleness bound, and the
     // rolled-back-version guard, live in the pure `deriveControls` (ablation-tested).
@@ -148,6 +160,7 @@ export default function ThisComputerCard() {
       upgrade: status?.upgrade,
       latestVersion,
       serverVersion: selfMachine.computerVersion ?? null,
+      managementModel: management,
     });
     const openDetail = () => nav.toComputer(selfMachine.id);
 
@@ -172,7 +185,7 @@ export default function ThisComputerCard() {
         try {
           await bridge.upgradeViaFreshInstall!(freshTarget);
         } catch (e) {
-          setManualCmd(freshInstallCommand(freshTarget));
+          setManualCmd(status?.controlHome ? freshInstallCommand(freshTarget, undefined, status.controlHome) : null);
           throw e;
         }
       });
@@ -216,6 +229,59 @@ export default function ThisComputerCard() {
           {error ? (
             <div className="mb-1 text-[11px] font-medium text-brutal-orange">{friendlyError(error)}</div>
           ) : null}
+          {(() => {
+            // Why isn't this app hosting the local Computer? (e.g. a
+            // version-skewed resident it refuses to adopt — invisible before
+            // this surfaced.) One recovery action, per deriveConvergeNotice.
+            const notice = deriveConvergeNotice(status?.converge);
+            if (!notice) return null;
+            return (
+              <div className="mb-1 text-[11px] font-medium text-brutal-orange">
+                <div>{notice.message}</div>
+                {notice.action === "recycle" && bridge.recycle ? (
+                  confirmRecycle ? (
+                    <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                      <span className="text-black/60">Agents on this Mac will briefly go offline.</span>
+                      <Button
+                        tone="orange"
+                        size="xs"
+                        disabled={busy != null}
+                        title="Stop the current local service and start it from this app"
+                        onClick={() => {
+                          setConfirmRecycle(false);
+                          runAction("recycle", () => bridge.recycle!());
+                        }}
+                      >
+                        {actionLabel("recycle", "Replace old service")}
+                      </Button>
+                      <Button size="xs" disabled={busy != null} onClick={() => setConfirmRecycle(false)}>
+                        Cancel
+                      </Button>
+                    </div>
+                  ) : (
+                    <Button tone="orange" size="xs" disabled={busy != null} className="mt-1" onClick={() => setConfirmRecycle(true)}>
+                      {actionLabel("recycle", "Replace old service")}
+                    </Button>
+                  )
+                ) : notice.action === "start" ? (
+                  <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                    <span className="text-black/60">The old service is already stopped.</span>
+                    <Button size="xs" disabled={busy != null} onClick={() => runAction("start", () => bridge.start())}>
+                      {actionLabel("start", "Start")}
+                    </Button>
+                  </div>
+                ) : notice.action === "connect-deployment" && bridge.connectCurrentDeployment ? (
+                  <Button size="xs" disabled={busy != null} className="mt-1" onClick={() => runAction("retry", () => bridge.connectCurrentDeployment!(userId))}>
+                    连接当前部署
+                  </Button>
+                ) : notice.action === "retry-converge" && bridge.retryConverge ? (
+                  <Button size="xs" disabled={busy != null} className="mt-1" onClick={() => runAction("retry", () => bridge.retryConverge!())}>
+                    {actionLabel("retry", "Retry")}
+                  </Button>
+                ) : null}
+              </div>
+            );
+          })()}
           {upgrading ? (
             <div className="text-[11px] font-medium text-brutal-orange">
               Updating… {upgrading.phase}
@@ -223,6 +289,11 @@ export default function ThisComputerCard() {
             </div>
           ) : (
             <div className="flex flex-wrap items-center gap-1.5">
+              {management === "app" ? (
+                <span className="text-[11px] text-black/50" data-testid="this-computer-updates-with-app">
+                  Updates with the desktop app
+                </span>
+              ) : null}
               {updateAction === "remote" && bridge.upgrade ? (
                 <Button
                   tone="orange"
@@ -293,6 +364,8 @@ export default function ThisComputerCard() {
 
   // STATE 2/3 — not attached to the active server: a lightweight enable row.
   const hasInstall = (status?.servers?.length ?? 0) > 0 || !!status?.service?.running;
+  const notice = deriveConvergeNotice(status?.converge);
+  const needsConnection = notice?.action === "connect-deployment" && !!bridge.connectCurrentDeployment;
   return (
     <div
       className="mb-1.5 flex w-full items-center gap-2.5 border-2 border-transparent px-2.5 py-2"
@@ -303,8 +376,8 @@ export default function ThisComputerCard() {
       </div>
       <div className="min-w-0 flex-1">
         <div className="truncate text-sm font-bold text-black">{deviceName}</div>
-        <div className="mt-0.5 truncate text-[11px] text-black/50">
-          {error ? friendlyError(error) : hasInstall ? `Not connected to ${currentServer.name}` : "Not enabled"}
+        <div className="mt-0.5 text-[11px] text-black/50">
+          {notice?.message ?? (error ? friendlyError(error) : hasInstall ? `Not connected to ${currentServer.name}` : "Not enabled")}
         </div>
       </div>
       <Button
@@ -312,10 +385,10 @@ export default function ThisComputerCard() {
         emphasis="high"
         size="xs"
         disabled={busy != null}
-        onClick={onEnable}
+        onClick={needsConnection ? () => runAction("retry", () => bridge.connectCurrentDeployment!(userId)) : onEnable}
         className="shrink-0"
       >
-        {busy === "enable" ? "Enabling…" : "Enable"}
+        {busy != null ? "处理中…" : needsConnection ? "连接当前部署" : "Enable"}
       </Button>
     </div>
   );

@@ -1,3 +1,5 @@
+import { useDeploymentLinks } from "../../utils/deploymentMode";
+import { effectiveLegalUrls } from "../../utils/legalLinks";
 import { CURRENT_LEGAL_ACCEPTANCE } from "@botiverse/raft-shared";
 import { useIntl } from "react-intl";
 import type { ReactNode } from "react";
@@ -14,6 +16,7 @@ export default function LegalAcceptanceCheckbox({
   disabled?: boolean;
 }) {
   const { formatMessage } = useIntl();
+  const legalUrls = effectiveLegalUrls(useDeploymentLinks());
   return (
     <label className="flex items-start gap-2.5 text-sm">
       <Checkbox
@@ -30,7 +33,7 @@ export default function LegalAcceptanceCheckbox({
             terms: (c: ReactNode) => (
               <a
                 key="terms"
-                href={CURRENT_LEGAL_ACCEPTANCE.termsUrl}
+                href={legalUrls.termsUrl}
                 target="_blank"
                 rel="noreferrer"
                 className="font-bold text-black underline hover:text-brutal-pink"
@@ -41,7 +44,7 @@ export default function LegalAcceptanceCheckbox({
             privacy: (c: ReactNode) => (
               <a
                 key="privacy"
-                href={CURRENT_LEGAL_ACCEPTANCE.privacyUrl}
+                href={legalUrls.privacyUrl}
                 target="_blank"
                 rel="noreferrer"
                 className="font-bold text-black underline hover:text-brutal-pink"

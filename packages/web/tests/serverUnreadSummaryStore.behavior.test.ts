@@ -112,7 +112,7 @@ test("noteReadActivity debounces a burst of read actions into one reload", async
 test("a failed load clears the snapshot instead of keeping stale >0 counts", async () => {
   stubWindow();
   const { useServerUnreadSummaryStore } = await import("../src/store/serverUnreadSummaryStore");
-  const urls = captureSummaryGets("ok", [{ serverId: "s1", unreadCount: 3, activityUnreadCount: 4 }]);
+  captureSummaryGets("ok", [{ serverId: "s1", unreadCount: 3, activityUnreadCount: 4 }]);
   useServerUnreadSummaryStore.getState().retain();
   await sleep(20);
   assert.equal(useServerUnreadSummaryStore.getState().byServer.s1?.activityUnreadCount, 4);
@@ -180,7 +180,7 @@ test("release() to zero stops the lifecycle; a later retain() resumes loading", 
 
 test("markAllRead success refetches the shared summary (the rail dot must follow the read)", async () => {
   stubWindow();
-  const { useServerUnreadSummaryStore } = await import("../src/store/serverUnreadSummaryStore");
+  await import("../src/store/serverUnreadSummaryStore");
   const { useInboxStore } = await import("../src/store/inboxStore");
   const urls: string[] = [];
   const posts: string[] = [];

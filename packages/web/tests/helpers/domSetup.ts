@@ -99,3 +99,10 @@ if (typeof globalThis.localStorage?.getItem !== "function") {
     value: storage,
   });
 }
+
+// Deployment-mode default for behavioral tests (task #5): preset "standard"
+// SYNCHRONOUSLY so legacy component tests see install commands on first
+// render. Private-mode gating has its own dedicated tests that reset or pin
+// this cache.
+import { __setDeploymentModeForTests } from "../../src/utils/deploymentMode";
+__setDeploymentModeForTests("standard");

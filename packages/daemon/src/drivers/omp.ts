@@ -1,0 +1,1863 @@
+import { spawn as childSpawn, type ChildProcess } from "node:child_process";
+import { closeSync, existsSync, mkdtempSync, openSync, readSync, rmSync, statSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+import type { ManagedMcpRuntimeTool } from "@botiverse/raft-shared";
+import {
+  getRuntimeProviderDisplayName,
+  humanizeRuntimeProviderSegment,
+  hydrateRuntimeConfig,
+  runtimeConfigToLaunchFields,
+  runtimeModelSourceOutcomeFromSet,
+} from "@botiverse/raft-shared";
+import type {
+  RuntimeModelInfo,
+  RuntimeModelSet,
+  RuntimeModelSourceOutcome,
+} from "@botiverse/raft-shared";
+
+import { buildCliTransportSystemPrompt, prepareCliTransport } from "./cliTransport.js";
+import {
+  callManagedMcpTool,
+  fetchManagedMcpToolSnapshot,
+  managedMcpHttpErrorDetail,
+  type ManagedMcpEndpoint,
+} from "./managedMcpTools.js";
+import { logger } from "../logger.js";
+import {
+  closeOmpTurnOnProcessExit,
+  createOmpEventMappingState,
+  mapOmpRpcFrameToParsedEvents,
+  type OmpEventMappingState,
+} from "./ompEventNormalizer.js";
+import {
+  MAX_OMP_RPC_FRAME_BYTES,
+  MAX_OMP_RPC_REASSEMBLED_BYTES,
+  OmpRpcFrameDecoder,
+  OmpRpcFrameError,
+  encodeOmpRpcFrame,
+} from "./ompRpcFrame.js";
+import { firstExistingPath, readCommandVersion, resolveCommandOnPath, type ProbeDeps } from "./probe.js";
+import type { AgentConfig, AxSurfaceText } from "@botiverse/raft-shared";
+import type { ParsedEvent, RuntimeDriver, RuntimeModelDetectionContext, RuntimeProbeResult, SpawnContext, SpawnResult } from "./types.js";
+
+// OMP (oh-my-pi) ships a Bun-only SDK, so the daemon drives it as a
+// `omp --mode rpc` child process over stdio NDJSON. Task #2 owns the transport
+// (framing, ready/negotiation, request correlation, lifecycle); event mapping
+// lands with task #3, session control with #4, Raft integration (system
+// prompt, CLI env, managed MCP host tools) with #5.
+export const MIN_SUPPORTED_OMP_VERSION = "18.6.0";
+
+const OMP_BINARY = "omp";
+
+/** Launch-file names written into the per-agent CLI transport dir (0600). */
+const OMP_SYSTEM_PROMPT_FILE = "omp-system-prompt.md";
+const OMP_CONFIG_OVERLAY_FILE = "omp-config-overlay.yml";
+
+/**
+ * Project-level context files disabled for managed agents (task #5, PM
+ * ruling). `--system-prompt` only replaces the instruction block — omp's
+ * generated `<project-context>` footer would still render every discovered
+ * context file, so a workspace AGENTS.md would silently stack under the
+ * Raft standing prompt. `context-file:project:<basename>` ids hit every
+ * provider and every directory depth at PROJECT level only, keeping the
+ * provider's user-level context (the owner ruled user-level preferences
+ * stay, matching the Cursor SDK decision) and everything else the provider
+ * contributes (MCP servers, skills, rules, …). System-prompt REPLACEMENT
+ * files (SYSTEM.md/SYSTEM_TEMPLATE.md) need no entry: the explicit
+ * --system-prompt flag outranks them by documented CLI precedence.
+ * Authentication / the user's subscription live outside the provider system
+ * and are unaffected (task #5 spec: use ~/.omp, never modify it).
+ */
+const OMP_DISABLED_PROJECT_CONTEXT_FILES = [
+  "AGENTS.md",
+  "CLAUDE.md",
+  "GEMINI.md",
+  "copilot-instructions.md",
+];
+
+/** Bound for the ready frame and each RPC request, mirroring the bundled clients. */
+const OMP_RPC_READY_TIMEOUT_MS = 30_000;
+const OMP_RPC_REQUEST_TIMEOUT_MS = 30_000;
+
+/**
+ * Long-running commands that answer only when the work finishes; they get no
+ * request timeout — liveness is judged by the process staying up and the event
+ * stream, never by the wall clock (PM task #2 review).
+ */
+const OMP_RPC_NO_TIMEOUT_COMMANDS = new Set(["bash", "compact", "live_start", "btw", "handoff", "export_html"]);
+
+/** Grace between the SIGTERM and SIGKILL passes when stopping the process tree. */
+const OMP_STOP_SIGTERM_GRACE_MS = 3000;
+
+/** Head start given to a best-effort abort command before the tree kill. */
+const OMP_STOP_ABORT_HEAD_START_MS = 100;
+
+/**
+
+
+
+ */
+
+
+function killPosixProcessTree(pid: number, signal: "SIGTERM" | "SIGKILL"): void {
+  try {
+    // The child spawns detached, so -pid addresses its whole process group.
+    process.kill(-pid, signal);
+  } catch {
+    try {
+      process.kill(pid, signal);
+    } catch {
+      // The process already exited.
+    }
+  }
+}
+
+function killWindowsProcessTree(pid: number): void {
+  const killer = childSpawn("taskkill.exe", ["/F", "/T", "/PID", String(pid)], {
+    detached: true,
+    stdio: "ignore",
+    windowsHide: true,
+  });
+  killer.unref();
+}
+
+function killProcessTree(pid: number, signal: "SIGTERM" | "SIGKILL"): void {
+  if (process.platform === "win32") {
+    // taskkill /T walks the tree directly; it has no signal distinction.
+    killWindowsProcessTree(pid);
+    return;
+  }
+  killPosixProcessTree(pid, signal);
+}
+
+/**
+ * Fallback lookup paths for non-interactive daemon environments whose PATH
+ * misses the user install locations. Order matters: PATH wins (it may carry a
+ * deliberately pinned install), then omp.sh's default install dir
+ * ($HOME/.local/bin, PI_INSTALL_DIR-relocatable), then the bun installer's
+ * $HOME/.bun/bin, then the Homebrew prefixes.
+ */
+export function ompCandidatePaths(deps: ProbeDeps = {}): string[] {
+  const homeDir = deps.homeDir ?? deps.env?.HOME ?? process.env.HOME ?? "";
+  return [
+    path.join(homeDir, ".local", "bin", OMP_BINARY),
+    path.join(homeDir, ".bun", "bin", OMP_BINARY),
+    path.join("/opt", "homebrew", "bin", OMP_BINARY),
+    path.join("/usr", "local", "bin", OMP_BINARY),
+  ];
+}
+
+/**
+ * Resolve the omp executable to an absolute path. Callers launch with this
+ * resolved path (never a bare "omp") so the child does not depend on the
+ * daemon's PATH.
+ */
+export function resolveOmpCommand(deps: ProbeDeps = {}): string | null {
+  return resolveCommandOnPath(OMP_BINARY, deps) ?? firstExistingPath(ompCandidatePaths(deps), deps);
+}
+
+// ── bun-installed omp launch support (task #12) ─────────────────────────
+// A bun global install puts a symlink at ~/.bun/bin/omp whose shebang is
+// `#!/usr/bin/env bun`. Desktop/launchd daemons run with a minimal PATH
+// (/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin), so the kernel's `env bun`
+// lookup fails: --version dies with 127 and agent spawn fails to exec —
+// while the file-based resolution above still FINDS the symlink, which used
+// to surface as "available without a version". The launch plan below makes
+// the child independent of the daemon's PATH instead.
+
+/**
+ * Interpreter name from an `#!/usr/bin/env <name>` shebang, or null for
+ * anything else — self-contained omp binaries (omp.sh, Mach-O) carry no env
+ * shebang and must keep launching exactly as before.
+ */
+export function envShebangInterpreter(command: string, deps: ProbeDeps = {}): string | null {
+  const existsSyncFn = deps.existsSyncFn ?? existsSync;
+  if (!existsSyncFn(command)) return null;
+  try {
+    const fd = openSync(command, "r");
+    try {
+      const head = Buffer.alloc(128);
+      const read = readSync(fd, head, 0, head.byteLength, 0);
+      const match = head.subarray(0, read).toString("utf8").match(/^#!\s*\/usr\/bin\/env\s+([A-Za-z0-9_.-]+)/);
+      return match ? match[1] : null;
+    } finally {
+      closeSync(fd);
+    }
+  } catch {
+    return null;
+  }
+}
+
+/** Where a fallback interpreter may live besides the omp command's own dir. */
+export function interpreterFallbackPaths(name: string, deps: ProbeDeps = {}): string[] {
+  const homeDir = deps.homeDir ?? deps.env?.HOME ?? process.env.HOME ?? "";
+  return [
+    path.join(homeDir, ".bun", "bin", name),
+    path.join("/opt", "homebrew", "bin", name),
+    path.join("/usr", "local", "bin", name),
+  ];
+}
+
+function withPathPrepended(dir: string, base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const current = base.PATH ?? "";
+  if (current.split(path.delimiter)[0] === dir) return base;
+  return { ...base, PATH: current ? `${dir}${path.delimiter}${current}` : dir };
+}
+
+export interface OmpLaunchPlan {
+  /**
+   * Executable plus argument prefix: the omp command itself, or the fallback
+   * interpreter followed by the omp script. Empty only when diagnostic is set.
+   */
+  argv: string[];
+  /** Child env with the omp (and interpreter) bin dirs leading PATH. */
+  env: NodeJS.ProcessEnv;
+  /** Non-null when the script's interpreter is missing entirely — exec would fail. */
+  diagnostic: string | null;
+}
+
+/**
+ * Build the exec plan for the resolved omp command (task #12). The command's
+ * own directory leads the child PATH (a bun symlink's dir also holds bun); an
+ * env-shebang script whose interpreter is still unresolvable falls back to
+ * the well-known interpreter install dirs with an explicit interpreter argv;
+ * a missing interpreter degrades to a readable diagnostic instead of a
+ * silent exec failure. The returned env is a fresh object — callers pass it
+ * ONLY to omp child processes, never back into process.env.
+ */
+export function resolveOmpLaunch(
+  command: string,
+  args: string[],
+  base: NodeJS.ProcessEnv,
+  deps: ProbeDeps = {},
+): OmpLaunchPlan {
+  let env = withPathPrepended(path.dirname(command), base);
+  const interpreter = envShebangInterpreter(command, deps);
+  if (!interpreter) {
+    return { argv: [command, ...args], env, diagnostic: null };
+  }
+  if (resolveCommandOnPath(interpreter, { ...deps, env })) {
+    return { argv: [command, ...args], env, diagnostic: null };
+  }
+  const fallback = firstExistingPath(interpreterFallbackPaths(interpreter, deps), deps);
+  if (fallback) {
+    env = withPathPrepended(path.dirname(fallback), env);
+    return { argv: [fallback, command, ...args], env, diagnostic: null };
+  }
+  return {
+    argv: [],
+    env,
+    diagnostic: `OMP at ${command} is an env-shebang script (${interpreter}), but ${interpreter} was not found in the daemon PATH or the well-known install dirs (~/.bun/bin, Homebrew). Install ${interpreter}, or reinstall omp self-contained (curl -fsSL https://omp.sh/install | sh) which needs no interpreter.`,
+  };
+}
+
+function parseSemver(version: string): [number, number, number] | null {
+  const match = version.match(/(\d+)\.(\d+)\.(\d+)/);
+  if (!match) return null;
+  return [Number(match[1]), Number(match[2]), Number(match[3])];
+}
+
+export function isSupportedOmpVersion(version: string | null | undefined): boolean {
+  if (!version) return true;
+  const actual = parseSemver(version);
+  const minimum = parseSemver(MIN_SUPPORTED_OMP_VERSION);
+  if (!actual || !minimum) return true;
+  for (let i = 0; i < 3; i += 1) {
+    if (actual[i] > minimum[i]) return true;
+    if (actual[i] < minimum[i]) return false;
+  }
+  return true;
+}
+
+export function unsupportedOmpVersionMessage(version: string | null | undefined): string | null {
+  if (!version || isSupportedOmpVersion(version)) return null;
+  return `OMP ${version} is unsupported; requires OMP >= ${MIN_SUPPORTED_OMP_VERSION}. Upgrade omp (curl -fsSL https://omp.sh/install | sh, or brew install can1357/tap/omp) before starting this runtime.`;
+}
+
+export interface OmpProbeDeps extends ProbeDeps {}
+
+// ── RPC wire types (oh-my-pi docs/rpc.md) ──
+
+export interface OmpRpcReadyFrame {
+  protocolVersion: number;
+  supportedProtocolVersions: number[];
+  maxFrameBytes?: number;
+  maxReassembledFrameBytes?: number;
+}
+
+export interface OmpRpcResponseFrame {
+  id?: string;
+  type: "response";
+  command: string;
+  success: boolean;
+  data?: unknown;
+  error?: string;
+  code?: string;
+}
+
+/** Outbound (docs/rpc.md "Host Tool Sub-Protocol"): registers host-owned tools. */
+interface OmpHostToolDefinition {
+  name: string;
+  label?: string;
+  description: string;
+  parameters: Record<string, unknown>;
+}
+
+/** Inbound: the agent wants the host to execute one registered tool. */
+interface OmpHostToolCallFrame {
+  type: "host_tool_call";
+  id: string;
+  toolCallId: string;
+  toolName: string;
+  arguments: Record<string, unknown>;
+}
+
+/** Inbound: a pending host tool call must be aborted. */
+interface OmpHostToolCancelFrame {
+  type: "host_tool_cancel";
+  id: string;
+  targetId: string;
+}
+
+/**
+ * Managed-agent discovery isolation overlay (task #5). Loaded with
+ * `--config` so the launch never touches the user's global omp config.
+ */
+function buildOmpConfigOverlay(): string {
+  return [
+    "# Written by the Raft daemon (task #5): managed agents get the Raft",
+    "# standing prompt as their sole instruction source — PROJECT-level",
+    "# context files (workspace AGENTS.md/CLAUDE.md/…) must not stack",
+    "# underneath it, while the user's own user-level context stays loaded.",
+    "disabledExtensions:",
+    ...OMP_DISABLED_PROJECT_CONTEXT_FILES.map((name) => `  - context-file:project:${name}`),
+    "",
+  ].join("\n");
+}
+
+// ── Model detection (task #6) ──────────────────────────────────────────────
+
+interface OmpLoginProviderFrame {
+  providers?: Array<{ id?: unknown; available?: unknown; authenticated?: unknown }>;
+}
+
+interface OmpCatalogModelFrame {
+  id?: unknown;
+  provider?: unknown;
+  name?: unknown;
+  reasoning?: unknown;
+  thinking?: { efforts?: unknown } | null;
+}
+
+/** omp reasoning-effort vocabulary, from the ThinkingLevel constant (18.6.x). */
+const OMP_THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
+
+/** Map a Raft reasoning effort onto omp's --thinking vocabulary (task #6). */
+export function mapOmpThinkingLevel(effort: string): string | null {
+  if (effort === "ultra") return "max";
+  return OMP_THINKING_LEVELS.has(effort) ? effort : null;
+}
+
+type OmpDetectResult =
+  | { kind: "live"; set: RuntimeModelSet }
+  | { kind: "missing_config" }
+  | { kind: "no_models" }
+  | { kind: "error"; message: string };
+
+interface OmpDetectCache {
+  at: number;
+  agentDbMtimeMs: number | null;
+  result: OmpDetectResult;
+}
+
+/**
+ * Probe results are cached: every detection spawns an omp process (0.8–1.6s
+ * measured), and the web model picker calls this on every open. The cache
+ * invalidates on the auth store's mtime (agent.db changes when `omp login`
+ * writes credentials) or after a hard TTL — a short-TTL-only cache would
+ * still re-probe on every picker open after a minute, while mtime alone
+ * would miss upstream storage moves.
+ */
+const OMP_DETECT_CACHE_TTL_MS = 10 * 60_000;
+/**
+ * Task #13 fallback: how long a prompt_result-held turn (sessionSettled=false)
+ * may wait for `session_settled` before the driver confirms idleness via
+ * get_state and closes the turn itself. omp's own settled predicate backs
+ * `isSettled`, so a confirmed-idle force close cannot race a real run.
+ */
+let OMP_TURN_HOLD_TIMEOUT_MS = 120_000;
+
+/** Test seam: shrink the held-turn watchdog delay (task #13). */
+export function setTurnHoldTimeoutForTesting(ms: number | null): void {
+  OMP_TURN_HOLD_TIMEOUT_MS = ms ?? 120_000;
+}
+let ompDetectCache: OmpDetectCache | null = null;
+let ompDetectInFlight: Promise<OmpDetectResult> | null = null;
+
+/**
+ * Resolve omp's agent directory the way omp itself does (PM task #6 review
+ * follow-up): PI_CODING_AGENT_DIR relocates it outright, a named profile
+ * (OMP_PROFILE / PI_PROFILE) moves it under ~/.omp/profiles/<name>/agent,
+ * and the default is ~/.omp/agent. The daemon's env is authoritative here
+ * because the probe and the spawned omp inherit exactly that env.
+ */
+function ompAgentDir(): string {
+  const explicit = process.env.PI_CODING_AGENT_DIR?.trim();
+  if (explicit) return explicit;
+  const profile = process.env.OMP_PROFILE?.trim() || process.env.PI_PROFILE?.trim();
+  if (profile) return path.join(os.homedir(), ".omp", "profiles", profile, "agent");
+  return path.join(os.homedir(), ".omp", "agent");
+}
+
+function ompAgentDbMtimeMs(): number | null {
+  try {
+    return statSync(path.join(ompAgentDir(), "agent.db")).mtimeMs;
+  } catch {
+    return null;
+  }
+}
+
+function ompModelLabel(model: OmpCatalogModelFrame): string {
+  const provider = typeof model.provider === "string" ? model.provider : "unknown";
+  const name = typeof model.name === "string" && model.name.trim() ? model.name : humanizeRuntimeProviderSegment(typeof model.id === "string" ? model.id : provider);
+  return `${name} · ${getRuntimeProviderDisplayName(provider)}`;
+}
+
+function ompModelEfforts(model: OmpCatalogModelFrame): string[] | undefined {
+  const efforts = model.thinking?.efforts;
+  if (Array.isArray(efforts)) {
+    const levels = efforts.filter((level): level is string => typeof level === "string" && OMP_THINKING_LEVELS.has(level) && level !== "off" && level !== "inherit" && level !== "minimal");
+    if (levels.length > 0) return levels;
+  }
+  return undefined;
+}
+
+function buildOmpDetectResult(
+  loginProviders: OmpLoginProviderFrame["providers"],
+  catalog: OmpCatalogModelFrame[],
+): OmpDetectResult {
+  const authenticated = new Set(
+    (loginProviders ?? [])
+      .filter((provider) => provider.authenticated === true)
+      .map((provider) => (typeof provider.id === "string" ? provider.id : ""))
+      .filter((id) => id),
+  );
+  if (authenticated.size === 0) {
+    return { kind: "missing_config" };
+  }
+  const models: RuntimeModelInfo[] = [];
+  const seen = new Set<string>();
+  for (const model of catalog) {
+    const provider = typeof model.provider === "string" ? model.provider : "";
+    const id = typeof model.id === "string" ? model.id : "";
+    if (!provider || !id || !authenticated.has(provider)) continue;
+    const modelId = `${provider}/${id}`;
+    if (seen.has(modelId)) continue;
+    seen.add(modelId);
+    models.push({
+      id: modelId,
+      label: ompModelLabel(model),
+      verified: "launchable",
+      supportedReasoningEfforts: ompModelEfforts(model),
+    });
+  }
+  if (models.length === 0) {
+    return { kind: "no_models" };
+  }
+  return { kind: "live", set: { models } };
+}
+
+/**
+ * One-shot `omp --mode rpc` probe for the model catalog (task #6). The probe
+ * runs with --no-session in a throwaway cwd, is bounded by a watchdog, and
+ * is torn down by process-tree kill + temp-dir removal — the caller never
+ * waits on omp longer than OMP_DETECT_TIMEOUT_MS.
+ */
+async function probeOmpModels(deps: { command?: string; args?: string[]; timeoutMs?: number } = {}): Promise<OmpDetectResult> {
+  const workspace = mkdtempSync(path.join(os.tmpdir(), "slock-omp-detect-"));
+  const command = deps.command ?? resolveOmpCommand() ?? OMP_BINARY;
+  const args = deps.args ?? ["--mode", "rpc", "--no-session", "--session-dir", path.join(workspace, ".omp-sessions")];
+  const timeoutMs = deps.timeoutMs ?? 15_000;
+  // Launch through the task #12 plan: the probe process must not depend on
+  // the daemon's PATH (a bun-installed omp dies at the env shebang there).
+  const launch = resolveOmpLaunch(command, args, process.env);
+  if (launch.argv.length === 0) {
+    rmSync(workspace, { recursive: true, force: true });
+    return { kind: "error", message: launch.diagnostic ?? `OMP launcher produced no command for ${command}.` };
+  }
+
+  return await new Promise<OmpDetectResult>((resolve) => {
+    const proc = childSpawn(launch.argv[0], launch.argv.slice(1), { cwd: workspace, stdio: ["pipe", "pipe", "pipe"], env: launch.env, windowsHide: true });
+    // The catalog can exceed v1's 1 MiB physical frame once negotiated to
+    // v2, so decoded frames come through the same framing decoder the
+    // driver uses (handles both plain JSONL and rpc_chunk reassembly).
+    const decoder = new OmpRpcFrameDecoder();
+    let stdoutBuffer = Buffer.alloc(0);
+    let negotiateSent = false;
+    let loginResponse: OmpLoginProviderFrame["providers"] | null = null;
+    let catalogResponse: OmpCatalogModelFrame[] | null = null;
+    let settled = false;
+
+    const finish = (result: OmpDetectResult): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(watchdog);
+      proc.stdout?.off("data", onStdout);
+      proc.removeAllListeners("exit");
+      try {
+        proc.stdin?.end();
+      } catch {
+        // Already gone.
+      }
+      try {
+        if (proc.pid) killProcessTree(proc.pid, "SIGKILL");
+      } catch {
+        // Already gone.
+      }
+      rmSync(workspace, { recursive: true, force: true });
+      resolve(result);
+    };
+
+    const send = (frame: Record<string, unknown>): void => {
+      try {
+        proc.stdin?.write(`${JSON.stringify(frame)}\n`);
+      } catch {
+        // Stdin died; the watchdog or exit handles the outcome.
+      }
+    };
+
+    const onFrame = (frame: Record<string, unknown>): void => {
+      if (frame.type === "ready" && !negotiateSent) {
+        negotiateSent = true;
+        send({ id: "d1", type: "negotiate_protocol", protocolVersion: 2 });
+        return;
+      }
+      if (frame.type === "response") {
+        const data = frame.data as Record<string, unknown> | undefined;
+        if (frame.command === "get_login_providers") {
+          loginResponse = (data?.providers ?? []) as OmpLoginProviderFrame["providers"];
+        } else if (frame.command === "get_available_models") {
+          catalogResponse = (data?.models ?? []) as OmpCatalogModelFrame[];
+        }
+        if (loginResponse && catalogResponse) {
+          finish(buildOmpDetectResult(loginResponse, catalogResponse));
+        }
+      }
+    };
+
+    const onStdout = (chunk: Buffer): void => {
+      stdoutBuffer = Buffer.concat([stdoutBuffer, chunk]);
+      let index: number;
+      while ((index = stdoutBuffer.indexOf(0x0a)) >= 0) {
+        const lineBytes = stdoutBuffer.subarray(0, index);
+        stdoutBuffer = stdoutBuffer.subarray(index + 1);
+        if (!lineBytes.toString("utf8").trim()) continue;
+        let frame: Record<string, unknown> | null;
+        try {
+          frame = decoder.pushLine(lineBytes.toString("utf8")) as Record<string, unknown> | null;
+        } catch {
+          continue;
+        }
+        if (frame) onFrame(frame);
+      }
+    };
+
+    const watchdog = setTimeout(() => {
+      finish({ kind: "error", message: `OMP model probe timed out after ${timeoutMs}ms` });
+    }, timeoutMs);
+    watchdog.unref?.();
+
+    proc.stdout?.on("data", onStdout);
+    proc.on("error", (error) => {
+      finish({ kind: "error", message: error.message });
+    });
+    proc.on("exit", (code, signal) => {
+      finish({ kind: "error", message: `OMP model probe exited early (${code ?? signal ?? "unknown"})` });
+    });
+
+    send({ id: "d0", type: "get_login_providers" });
+    send({ id: "d2", type: "get_available_models" });
+  });
+}
+
+/**
+ * Cached omp model detection (task #6): TTL + auth-store mtime invalidation
+ * on top of a single-flight probe, so picker opens and retries stay cheap
+ * and a fresh `omp login` is visible within one cache generation.
+ */
+export async function detectOmpModels(deps: { command?: string; args?: string[]; timeoutMs?: number } = {}): Promise<RuntimeModelSourceOutcome> {
+  const bypassCache = deps.args !== undefined;
+  if (!bypassCache) {
+    if (ompDetectInFlight) return toOmpDetectOutcome(await ompDetectInFlight);
+    const mtime = ompAgentDbMtimeMs();
+    if (ompDetectCache) {
+      const fresh = Date.now() - ompDetectCache.at < OMP_DETECT_CACHE_TTL_MS;
+      const sameAuth = ompDetectCache.agentDbMtimeMs === mtime;
+      if (fresh && sameAuth) return toOmpDetectOutcome(ompDetectCache.result);
+    }
+  }
+
+  const probe = probeOmpModels(deps).then((result) => {
+    // Task #12: launch failures (missing interpreter, exec errors) must stay
+    // retryable — pinning them here would keep omp "broken" for a full TTL
+    // even after the user installs bun. Only successful probes are cached.
+    if (!bypassCache && result.kind !== "error") {
+      ompDetectCache = { at: Date.now(), agentDbMtimeMs: ompAgentDbMtimeMs(), result };
+    }
+    ompDetectInFlight = null;
+    return result;
+  }).catch((error: unknown) => {
+    ompDetectInFlight = null;
+    return { kind: "error", message: error instanceof Error ? error.message : String(error) } satisfies OmpDetectResult;
+  });
+  if (!bypassCache) ompDetectInFlight = probe;
+  return toOmpDetectOutcome(await probe);
+}
+
+function toOmpDetectOutcome(result: OmpDetectResult): RuntimeModelSourceOutcome {
+  switch (result.kind) {
+    case "live":
+      return runtimeModelSourceOutcomeFromSet(result.set);
+    case "missing_config":
+      // Never silent: the recovery string drives the web copy telling the
+      // user to run `omp login <provider>` on this machine (task #6 spec).
+      return { kind: "missing_config", recovery: "omp_login" };
+    case "no_models":
+      return { kind: "no_models", recovery: "omp_login" };
+    case "error":
+      logger.warn(`[omp] model detection failed: ${result.message}`);
+      return { kind: "error", retryable: true };
+  }
+}
+
+export class OmpRpcProcessExitedError extends Error {
+  readonly code: number | null;
+  readonly signal: string | null;
+  readonly stderrTail: string;
+
+  constructor(code: number | null, signal: string | null, stderrTail: string) {
+    const exit = code === null ? `signal ${signal ?? "unknown"}` : `code ${code}`;
+    const stderr = stderrTail.trim();
+    super(`OMP RPC process exited (${exit})${stderr ? `: ${stderr}` : ""}`);
+    this.name = "OmpRpcProcessExitedError";
+    this.code = code;
+    this.signal = signal;
+    this.stderrTail = stderrTail;
+  }
+}
+
+export class OmpRpcRequestTimeoutError extends Error {
+  readonly command: string;
+  readonly id: string;
+
+  constructor(command: string, id: string, timeoutMs: number) {
+    super(`OMP RPC request timed out after ${timeoutMs}ms: ${command} (id ${id})`);
+    this.name = "OmpRpcRequestTimeoutError";
+    this.command = command;
+    this.id = id;
+  }
+}
+
+export class OmpRpcProtocolError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "OmpRpcProtocolError";
+  }
+}
+
+interface PendingOmpRpcRequest {
+  command: string;
+  resolve: (response: OmpRpcResponseFrame) => void;
+  reject: (error: Error) => void;
+  /** Null for commands that run without a wall-clock bound. */
+  timer: NodeJS.Timeout | null;
+}
+
+export interface OmpRpcLaunchOverrides {
+  /** Test seam: launch this command instead of the resolved omp binary. */
+  command?: string;
+  /** Test seam: replace the omp argument list entirely (no session args). */
+  args?: string[];
+  /** Test seam: append to the built argument list (keeps session args). */
+  extraArgs?: string[];
+  /** Test seam: bound the ready-frame wait instead of the 30s default. */
+  readyTimeoutMs?: number;
+}
+
+const STDERR_TAIL_LIMIT = 4000;
+
+/** Phase-1 log-only frame categories: never mapped, never dropped silently. */
+const OMP_LOG_ONLY_FRAME_TYPES = new Set([
+  "advisor_cost_changed",
+  "advisor_yielded",
+  "subagent_lifecycle",
+  "subagent_progress",
+  "subagent_event",
+  "btw_delta",
+  "btw_record",
+  "live_phase",
+  "live_levels",
+  "live_transcript",
+  "live_end",
+  "command_output",
+  "available_commands_update",
+  "extension_error",
+  "extension_ui_request",
+  "session_info_update",
+  "config_update",
+  "queue_update",
+  "model_changed",
+  "thinking_level_changed",
+  "config_warnings_changed",
+  "goal_updated",
+  "agent_start",
+  "turn_start",
+  "turn_end",
+]);
+
+export class OmpDriver implements RuntimeDriver {
+  readonly id = "omp";
+  // Phase-1 target contract: `omp --mode rpc` is a long-lived stdio process
+  // that accepts prompt/steer/abort, like the codex app-server shape. Tasks
+  // #2/#3 own the transport and event mapping and confirm these constants.
+  readonly lifecycle = {
+    kind: "persistent",
+    stdin: "direct",
+    inFlightWake: "steer",
+  } as const;
+  readonly communication = {
+    chat: "slock_cli",
+    runtimeControl: "none",
+  } as const;
+  readonly stdoutChannel = "structured_protocol";
+  readonly session = {
+    recovery: "resume_or_fresh",
+  } as const;
+  readonly model = {
+    detectedModelsVerifiedAs: "launchable" as const,
+  };
+
+  /**
+   * Live model catalog from the local omp login state (task #6): one-shot
+   * RPC probe, cached with TTL + auth-store mtime invalidation, mapped onto
+   * the closed source-outcome contract (missing_config/omp_login when
+   * nothing is logged in — never a silent empty list).
+   */
+  async detectModels(_ctx?: RuntimeModelDetectionContext): Promise<RuntimeModelSourceOutcome> {
+    return detectOmpModels();
+  }
+  readonly supportsStdinNotification = true;
+  readonly busyDeliveryMode = "direct" as const;
+  readonly supportsNativeStandingPrompt = true;
+  /** This driver forwards ctx.prompt itself (deliverStartupPrompt, post-
+   *  handshake), so the APM's launch activation booking (spawn_prompt) is a
+   *  real carrier for omp — the session_init delivery fallback must not
+   *  re-inject the same startup input. */
+  readonly consumesSpawnPrompt = true;
+
+  /**
+   * omp's real run state, from the turn machine (task #7): turn frames
+   * observed and no boundary since = a run is live; anything else (nothing
+   * observed yet, or a boundary closed the turn) = no run in progress, so
+   * deliveries must reach omp as prompts to carry their own boundary.
+   */
+  isRunInProgress(): boolean {
+    return this.turnFramesObserved && !this.eventState.turnClosed;
+  }
+
+  private process: ChildProcess | null = null;
+  private decoder = new OmpRpcFrameDecoder();
+  private requestCounter = 0;
+  private pending = new Map<string, PendingOmpRpcRequest>();
+  private readyTimer: NodeJS.Timeout | null = null;
+  private turnHoldTimer: NodeJS.Timeout | null = null;
+  private stderrTail = "";
+  private readyDeferred: { promise: Promise<void>; resolve: () => void; reject: (error: Error) => void } | null = null;
+  private eventState: OmpEventMappingState = createOmpEventMappingState();
+  /** Events produced before the session machinery attaches; drained on the next parseLine. */
+  private queuedEvents: ParsedEvent[] = [];
+
+  // Transport state, exposed for observability and the phase-1 turn work (#3+).
+  private ready = false;
+  private protocolVersion = 0;
+  private negotiatedProtocolVersion: number | null = null;
+  /** Set once negotiation has settled (v2 confirmed, or the peer is v1-only). */
+  private protocolSettled = false;
+  private maxFrameBytes: number = MAX_OMP_RPC_FRAME_BYTES;
+  private maxReassembledFrameBytes: number = MAX_OMP_RPC_REASSEMBLED_BYTES;
+  private frameErrorCount = 0;
+  private lastFrameError: string | null = null;
+  private lastProtocolError: string | null = null;
+
+  // Session state (phase-1 task #4).
+  private sessionId: string | null = null;
+  private sessionDir: string | null = null;
+  private resumeAttempted = false;
+  private resumeFallbackNotice: string | null = null;
+  private launchRetryUsed = false;
+  /** Ids issued by encodeStdinMessage; refusals surface as error events —
+   *  except a refused steer, which falls back to a prompt once (task #7:
+   *  a steer racing omp's turn end must not strand the message). */
+  private deliveryIds = new Map<string, { command: "prompt" | "steer"; fallbackText?: string }>();
+  /** Activation input folded into ctx.prompt by the APM, forwarded once the
+   *  handshake settles (the spawn_prompt carrier — omp has no spawn-time
+   *  prompt flag, so the driver must forward it itself). */
+  private startupPrompt: string | null = null;
+
+  /**
+   * Task #13: outlet for events produced OUTSIDE parseLine's return channel
+   * (the held-turn watchdog's synthetic closure). The session machinery
+   * installs it at attach so async closures reach the APM promptly instead of
+   * waiting for a next wire frame that may never come on an idle session.
+   */
+  private eventSink: ((events: ParsedEvent[]) => void) | null = null;
+
+  /** Install/uninstall the async event outlet (called by the session machinery). */
+  setEventSink(sink: ((events: ParsedEvent[]) => void) | null): void {
+    this.eventSink = sink;
+  }
+
+  // Raft integration (task #5): launch files, managed MCP host tools.
+  private systemPromptPath: string | null = null;
+  private configOverlayPath: string | null = null;
+  private hostToolEndpoint: ManagedMcpEndpoint | null = null;
+  private hostTools: ManagedMcpRuntimeTool[] = [];
+  /** In-flight host_tool_call executions keyed by the omp frame id. */
+  private hostToolCalls = new Map<string, { controller: AbortController }>();
+  /**
+   * Whether any turn-lifecycle frame has been observed since spawn (task #7).
+   * Until one arrives the run state is UNKNOWN: the delivery encoder must
+   * prefer prompt, because a redundant prompt completes exactly once while a
+   * premature steer can strand the APM's busy belief forever.
+   */
+  private turnFramesObserved = false;
+
+  /** True once the ready frame has been seen (and negotiation dispatched if offered). */
+  get isReady(): boolean {
+    return this.ready;
+  }
+
+  /** Runtime-native session identity observed via get_state after startup. */
+  get currentSessionId(): string | null {
+    return this.sessionId;
+  }
+
+  /** True when the handshake fully settled: sends are safe. */
+  get isProtocolSettled(): boolean {
+    return this.protocolSettled;
+  }
+
+  /** Non-null when a --resume attempt fell back to a fresh session. */
+  get resumeFallback(): string | null {
+    return this.resumeFallbackNotice;
+  }
+
+  private createReadyDeferred(): { promise: Promise<void>; resolve: () => void; reject: (error: Error) => void } {
+    let resolve!: () => void;
+    let reject!: (error: Error) => void;
+    const promise = new Promise<void>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    // The deferred may be discarded without a consumer (never-ready tests,
+    // stop() races); mark it handled so abandonment is never an unhandled
+    // rejection. Real consumers via whenReady() still receive the rejection.
+    promise.catch(() => {});
+    return { promise, resolve, reject };
+  }
+
+  /**
+   * Resolves once the transport is usable: the ready frame has been seen AND
+   * protocol negotiation has settled (confirmed v2, or a v1-only peer, or a
+   * failed negotiation — which rejects). Task #4's turn sends should await
+   * this instead of racing the handshake.
+   */
+  whenReady(): Promise<void> {
+    return this.readyDeferred?.promise ?? Promise.reject(new OmpRpcProtocolError("OMP RPC process is not running"));
+  }
+
+  /** Protocol version after negotiation: 1, 2, or 0 before the ready frame. */
+  get activeProtocolVersion(): number {
+    return this.negotiatedProtocolVersion ?? this.protocolVersion;
+  }
+
+  get frameErrors(): { count: number; last: string | null } {
+    return { count: this.frameErrorCount, last: this.lastFrameError };
+  }
+
+  get protocolError(): string | null {
+    return this.lastProtocolError;
+  }
+
+  probe(deps: OmpProbeDeps = {}): RuntimeProbeResult {
+    const command = resolveOmpCommand(deps);
+    if (!command) return { available: false };
+    // The launch plan carries the omp bin dir (and, when needed, an explicit
+    // interpreter) in the child env — never written back to process.env.
+    const launch = resolveOmpLaunch(command, [], deps.env ?? process.env, deps);
+    if (launch.diagnostic || launch.argv.length === 0) {
+      return { available: false, diagnostic: launch.diagnostic ?? `OMP launcher produced no command for ${command}.` };
+    }
+    const [versionCommand, ...versionPrefix] = launch.argv;
+    const version = readCommandVersion(versionCommand, versionPrefix, { ...deps, env: launch.env });
+    const unsupportedMessage = unsupportedOmpVersionMessage(version);
+    if (unsupportedMessage) {
+      return {
+        available: false,
+        version: `${version ?? "unknown"} (requires >= ${MIN_SUPPORTED_OMP_VERSION})`,
+        diagnostic: unsupportedMessage,
+      };
+    }
+    // Task #12: a found file whose --version still fails must NOT read as
+    // "available without a version" — that state is invisible in meta and
+    // turns into a spawn failure later. Report unavailable with the cause.
+    if (!version) {
+      return {
+        available: false,
+        diagnostic: `OMP found at ${command} but --version failed (interpreter or runtime error). Verify it runs standalone: ${command} --version`,
+      };
+    }
+    return { available: true, version };
+  }
+
+  /**
+   * Bind the pending startup prompt to the CURRENT handshake deferred. The
+   * resume fallback replaces that deferred after a failed first attempt, so
+   * the carrier re-mounts against the fresh launch (the failed attempt's
+   * rejection is deliberately ignored — a terminal failure surfaces through
+   * the exit/protocol paths instead).
+   */
+  private mountStartupPromptCarrier(): void {
+    if (!this.startupPrompt || !this.readyDeferred) return;
+    void this.readyDeferred.promise.then(() => {
+      const text = this.startupPrompt;
+      this.startupPrompt = null;
+      if (text) this.deliverStartupPrompt(text);
+    }, () => {
+      // Handshake failed; see mountStartupPromptCarrier's doc.
+    });
+  }
+
+  /**
+   * Forward the launch's activation input (wake message / resume catch-up
+   * folded into ctx.prompt by the APM) as the session's first prompt. Sends
+   * only after whenReady settles, so host tools register before the first
+   * model call (task #5 contract), and rides the same encode path — and the
+   * prompt_result exactly-once turn accounting (task #7) — as any idle
+   * delivery: the turn frames it produces mark the run in progress, so later
+   * deliveries encode as steer until the boundary closes it.
+   */
+  private deliverStartupPrompt(text: string): void {
+    const proc = this.process;
+    if (!proc || !proc.stdin?.writable) return;
+    const encoded = this.encodeStdinMessage(text, null, { mode: "idle" });
+    if (!encoded) return;
+    try {
+      proc.stdin.write(`${encoded}\n`);
+    } catch {
+      // A dead child turns this into a stdin error; the exit path already
+      // fails pending requests and surfaces diagnostics.
+    }
+  }
+
+  async spawn(ctx: SpawnContext, launchOverrides: OmpRpcLaunchOverrides = {}): Promise<SpawnResult> {    const { spawnEnv, slockDir } = await prepareCliTransport(ctx, { NO_COLOR: "1" });
+
+    // Managed-agent launch files live in the per-agent CLI transport dir —
+    // 0600, outside the workspace, rewritten every spawn (task #5). The
+    // prompt travels as a file because omp treats a multi-line flag VALUE as
+    // a literal, while a single-line path is read as a file
+    // (docs/system-prompt-customization.md). The appended content opens with
+    // an explicit precedence declaration (task #7 ruling): omp's default
+    // harness template stays in place, and where the two could conflict the
+    // Raft guidance wins.
+    this.systemPromptPath = this.writeLaunchFile(
+      slockDir,
+      OMP_SYSTEM_PROMPT_FILE,
+      `以下 Raft 指引优先于 omp 默认模板中的相关指引。\n\n${ctx.standingPrompt}`,
+    );
+    this.configOverlayPath = this.writeLaunchFile(slockDir, OMP_CONFIG_OVERLAY_FILE, buildOmpConfigOverlay());
+
+    // Managed MCP tools (task #5): membership is the server's decision, made
+    // against the agent credential. Fetching is best-effort — a failure means
+    // the agent runs without managed tools this launch, never a dead session.
+    this.hostTools = [];
+    this.hostToolEndpoint = ctx.config.agentCredentialKey
+      ? { serverUrl: ctx.config.serverUrl, agentCredentialKey: ctx.config.agentCredentialKey }
+      : null;
+    if (this.hostToolEndpoint) {
+      try {
+        this.hostTools = await fetchManagedMcpToolSnapshot(this.hostToolEndpoint);
+      } catch (error) {
+        logger.warn(`[omp] managed MCP tools unavailable: ${managedMcpHttpErrorDetail(error)}`);
+        this.hostToolEndpoint = null;
+      }
+    }
+
+    this.process = null;
+    this.decoder = new OmpRpcFrameDecoder();
+    this.requestCounter = 0;
+    this.pending.clear();
+    this.clearReadyTimer();
+    this.clearTurnHoldWatch();
+    this.stderrTail = "";
+    this.ready = false;
+    this.protocolVersion = 0;
+    this.negotiatedProtocolVersion = null;
+    this.protocolSettled = false;
+    this.maxFrameBytes = MAX_OMP_RPC_FRAME_BYTES;
+    this.maxReassembledFrameBytes = MAX_OMP_RPC_REASSEMBLED_BYTES;
+    this.frameErrorCount = 0;
+    this.lastFrameError = null;
+    this.lastProtocolError = null;
+    this.eventState = createOmpEventMappingState();
+    this.readyDeferred = this.createReadyDeferred();
+    this.deliveryIds.clear();
+    this.hostToolCalls.clear();
+    this.turnFramesObserved = false;
+    this.sessionId = null;
+    this.resumeFallbackNotice = null;
+    this.launchRetryUsed = false;
+    this.deliveryIds.clear();
+
+    // The APM folds the launch's activation input (wake message, resume
+    // catch-up) into ctx.prompt and books it as delivered(spawn_prompt).
+    // argv-style runtimes carry that text at exec; omp has no spawn-time
+    // prompt flag, so the carrier is real only if this driver forwards it
+    // after the handshake settles.
+    this.startupPrompt = typeof ctx.prompt === "string" && ctx.prompt.trim().length > 0 ? ctx.prompt : null;
+    this.mountStartupPromptCarrier();
+
+    // Per-workspace session isolation (PM task #4): never mix with the
+    // user's own omp sessions in ~/.omp.
+    this.sessionDir = launchOverrides.args ? null : path.join(ctx.workingDirectory, ".omp-sessions");
+
+    const resumeSessionId = typeof ctx.config.sessionId === "string" && ctx.config.sessionId.trim()
+      ? ctx.config.sessionId
+      : null;
+
+    const firstAttempt = await this.launchChild(ctx, spawnEnv, launchOverrides, resumeSessionId);
+
+    // Resume fallback (PM task #4 r2): the condition is "exited before the
+    // ready frame" — wait for ready or exit, whichever comes first, capped by
+    // the ready timeout. Measured on a real omp 18.6.1 (owner's Mac, temp
+    // session dir): a nonexistent session id exits pre-ready at ~1.6s
+    // (extension discovery + session load take longer than any fixed window),
+    // while a session whose saved model is unavailable still reaches ready at
+    // ~0.8s and surfaces model problems per-turn. The scanner buffers raw
+    // lines without parsing; on ready it hands the buffered lines to
+    // parseLine so the driver settles (negotiation sent) before the session
+    // machinery attaches. An omp that cannot resume may just as well be a
+    // broken binary or a logged-out machine, so the fallback diagnostic
+    // carries the first exit's stderr summary; a fallback launch failing
+    // pre-ready is the REAL startup error and is not retried again.
+    if (resumeSessionId !== null && !launchOverrides.args) {
+      const firstOutcome = await this.awaitResumeHandshake(firstAttempt.process, launchOverrides.readyTimeoutMs ?? OMP_RPC_READY_TIMEOUT_MS);
+      if (firstOutcome.outcome === "timeout") {
+        const timeoutError = new OmpRpcProtocolError(
+          `OMP RPC process did not send a ready frame within ${launchOverrides.readyTimeoutMs ?? OMP_RPC_READY_TIMEOUT_MS}ms. stderr: ${this.stderrTail.trim()}`,
+        );
+        this.recordProtocolError(timeoutError.message);
+        this.killProcess();
+        throw timeoutError;
+      }
+      if (firstOutcome.outcome === "exit") {
+        this.launchRetryUsed = true;
+        const firstExitSummary = this.stderrTail.trim().slice(-600) || firstOutcome.summary;
+        this.resumeFallbackNotice = `OMP could not resume session ${resumeSessionId}; started a fresh session. First exit: ${firstExitSummary}`;
+        logger.info(`[omp] ${this.resumeFallbackNotice}`);
+        // Reset per-generation state for the fresh launch. The first
+        // attempt's readyDeferred was rejected by its exit handler; silence
+        // the abandoned promise before replacing it.
+        this.readyDeferred?.promise.catch(() => {});
+        this.decoder = new OmpRpcFrameDecoder();
+        this.pending.clear();
+        this.clearReadyTimer();
+        this.stderrTail = "";
+        this.ready = false;
+        this.protocolSettled = false;
+        this.readyDeferred = this.createReadyDeferred();
+        this.hostToolCalls.clear();
+        this.turnFramesObserved = false;
+        // The startup prompt never reached the failed first attempt; re-mount
+        // the carrier on the fresh launch's handshake deferred.
+        this.mountStartupPromptCarrier();
+        return this.launchChild(ctx, spawnEnv, launchOverrides, null);
+      }
+      // Ready: settle the driver from the buffered lines (ready → negotiate →
+      // …). Event-producing frames among them (a tool call sharing the ready
+      // chunk, an early session_init) are queued and drained into the
+      // machinery's first parseLine call, in wire order.
+      for (const line of firstOutcome.bufferedLines) {
+        this.queuedEvents.push(...this.parseLine(line));
+      }
+    }
+
+    return firstAttempt;
+  }
+
+  /**
+   * Watch a resume attempt until the ready frame or an exit, whichever comes
+   * first, capped by the ready timeout. Raw line scanning only — parsed
+   * processing happens in spawn's handoff (bufferedLines) so parseLine is
+   * never called twice per line.
+   *
+   * Data safety (PM task #4 r3): at handoff the stream is PAUSED (removing a
+   * data listener does not stop a flowing stream) and any bytes after the
+   * ready line are pushed back with unshift, so the session machinery's
+   * reader — attaching right after spawn returns — replays every byte, even
+   * a partial line sharing the ready chunk.
+   */
+  private awaitResumeHandshake(
+    proc: ChildProcess,
+    readyTimeoutMs: number,
+  ): Promise<{ outcome: "ready"; bufferedLines: string[] } | { outcome: "exit"; summary: string } | { outcome: "timeout" }> {
+    return new Promise((resolve) => {
+      let buffer = Buffer.alloc(0);
+      let settled = false;
+      const finish = (result: { outcome: "ready"; bufferedLines: string[] } | { outcome: "exit"; summary: string } | { outcome: "timeout" }): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        proc.stdout?.off("data", onStdout);
+        proc.off("exit", onExit);
+        resolve(result);
+      };
+      const completeLines: string[] = [];
+      const onStdout = (chunk: Buffer): void => {
+        buffer = Buffer.concat([buffer, chunk]);
+        let index: number;
+        while ((index = buffer.indexOf(0x0a)) >= 0) {
+          const lineBytes = buffer.subarray(0, index);
+          buffer = buffer.subarray(index + 1);
+          const line = lineBytes.toString("utf8");
+          if (!line.trim()) continue;
+          let frameType: unknown = null;
+          try {
+            const value: unknown = JSON.parse(line);
+            if (typeof value === "object" && value !== null) frameType = (value as { type?: unknown }).type;
+          } catch {
+            // Unparseable lines stay buffered like any other line.
+          }
+          completeLines.push(line);
+          if (frameType === "ready") {
+            // Stop the stream before nobody owns it, and return every byte
+            // after the ready line to the front of the queue. The explicit
+            // pause is half of the handover contract: the session machinery
+            // resumes the stream after attaching its reader (runtimeSession
+            // attachProcess) — a plain data listener does not clear an
+            // explicit pause (verified on Node 26).
+            proc.stdout?.pause();
+            if (buffer.byteLength > 0) proc.stdout?.unshift(buffer);
+            buffer = Buffer.alloc(0);
+            finish({ outcome: "ready", bufferedLines: completeLines });
+            return;
+          }
+        }
+      };
+      const onExit = (code: number | null, signal: NodeJS.Signals | null): void => {
+        finish({ outcome: "exit", summary: `exit ${code ?? signal ?? "unknown"}` });
+      };
+      const timer = setTimeout(() => finish({ outcome: "timeout" }), readyTimeoutMs);
+      timer.unref?.();
+      proc.stdout?.on("data", onStdout);
+      proc.on("exit", onExit);
+    });
+  }
+
+  private async launchChild(
+    ctx: SpawnContext,
+    spawnEnv: NodeJS.ProcessEnv,
+    launchOverrides: OmpRpcLaunchOverrides,
+    resumeSessionId: string | null,
+  ): Promise<SpawnResult> {
+    const resuming = resumeSessionId !== null && !launchOverrides.args;
+    this.resumeAttempted = resuming;
+    const command = launchOverrides.command ?? resolveOmpCommand() ?? OMP_BINARY;
+    let args: string[];
+    if (launchOverrides.args) {
+      args = launchOverrides.args;
+    } else {
+      // extraArgs leads the list so a script seam (command: node, extraArgs:
+      // [script, mode]) sees its own argv first; omp itself treats flags
+      // order-independently. The standing prompt rides --append-system-prompt
+      // on BOTH fresh and resumed launches (task #5, changed per the task #7
+      // ruling): --system-prompt (full replacement) combined with --resume
+      // breaks tool availability in the resumed session — the model sees no
+      // usable tools (reproduced standalone on omp 18.6.1; minimal repro in
+      // the task #7 PR). --append-system-prompt keeps omp's default harness
+      // template (its tool policy teaches correct tool use) and appends the
+      // Raft standing prompt with an explicit precedence declaration, so the
+      // effective instructions are identical across fresh and resumed
+      // launches. The --config overlay (below) still blocks project context
+      // files from stacking underneath. Model and thinking level come from
+      // the agent's runtime config (task #6); a bad --model id exits
+      // pre-ready with a "Model not found" stderr, which the exit handler
+      // surfaces verbatim.
+      const launchFields = runtimeConfigToLaunchFields(hydrateRuntimeConfig(ctx.config));
+      const thinkingLevel = launchFields.reasoningEffort ? mapOmpThinkingLevel(launchFields.reasoningEffort) : null;
+      args = [
+        ...(launchOverrides.extraArgs ?? []),
+        "--mode", "rpc",
+        "--session-dir", this.sessionDir!,
+        ...(this.systemPromptPath ? ["--append-system-prompt", this.systemPromptPath] : []),
+        ...(this.configOverlayPath ? ["--config", this.configOverlayPath] : []),
+        ...(launchFields.model && launchFields.model !== "default" ? ["--model", launchFields.model] : []),
+        ...(thinkingLevel ? ["--thinking", thinkingLevel] : []),
+      ];
+      if (resumeSessionId) args = [...args, "--resume", resumeSessionId];
+    }
+
+    // Task #12: real launches go through the launch plan (omp bin dir leads
+    // the child PATH; env-shebang scripts fall back to an explicit bun argv).
+    // Any launchOverrides seam (fake omp driven by node) is left untouched.
+    let execCommand = command;
+    let execArgs = args;
+    let execEnv = spawnEnv;
+    if (!launchOverrides.args && !launchOverrides.command) {
+      const launch = resolveOmpLaunch(command, [], spawnEnv);
+      if (launch.argv.length === 0) {
+        throw new Error(launch.diagnostic ?? `OMP launcher produced no command for ${command}.`);
+      }
+      execCommand = launch.argv[0];
+      execArgs = [...launch.argv.slice(1), ...args];
+      execEnv = launch.env;
+    }
+
+    const proc = childSpawn(execCommand, execArgs, {
+      cwd: ctx.workingDirectory,
+      stdio: ["pipe", "pipe", "pipe"],
+      env: execEnv,
+      // Own process group, so stop() can take down omp plus every bash
+      // tool / subagent / kernel descendant it spawned (PM task #2 review).
+      detached: process.platform !== "win32",
+      windowsHide: true,
+    });
+    this.process = proc;
+
+    // Every handler closes over its own proc and checks it against the
+    // driver's current process: a late exit/error from a PREVIOUS generation
+    // (stop() then spawn() again — the resume flow of task #4) must never
+    // clear the new session's state or reject its pending requests.
+    proc.stderr?.on("data", (chunk: Buffer) => {
+      if (this.process !== proc) return;
+      this.stderrTail = (this.stderrTail + chunk.toString("utf8")).slice(-STDERR_TAIL_LIMIT);
+    });
+
+    proc.stdin?.on("error", (error) => {
+      // A dead child turns stdin writes into async EPIPE errors; they must
+      // become typed request rejections, never an uncaught daemon crash.
+      if (this.process !== proc) return;
+      this.failAllPending(new OmpRpcProcessExitedError(null, null, `stdin error: ${error.message}\n${this.stderrTail}`));
+    });
+
+    proc.on("error", (error) => {
+      // Spawn failures (ENOENT etc.); the exit handler covers real exits.
+      if (this.process !== proc) return;
+      this.failAllPending(new OmpRpcProcessExitedError(null, null, `${error.message}\n${this.stderrTail}`));
+    });
+
+    proc.on("exit", (code, signal) => {
+      // Sweep lingering group members (a crashed omp can leave bash tools /
+      // subagents alive) even when the event is from a stale generation.
+      if (proc.pid) killProcessTree(proc.pid, "SIGKILL");
+      if (this.process !== proc) return;
+      this.clearReadyTimer();
+
+      // Map the closing turn exactly once before the failure path (PM task
+      // #3: an interrupted turn ends with an error and a turn_end, never
+      // hangs). The turn layer consumes the closure from #5 on; here it is
+      // logged so the exactly-once behavior is observable in the field.
+      const turnClosure = closeOmpTurnOnProcessExit(this.eventState, `process exited (${code ?? signal ?? "unknown"})`);
+      if (turnClosure.length > 0) {
+        logger.info(`[omp] turn closed by process exit: ${turnClosure.map((event) => event.kind).join("+")}`);
+      }
+
+      this.process = null;
+      this.readyDeferred?.reject(new OmpRpcProcessExitedError(code, signal, this.stderrTail));
+      this.readyDeferred = null;
+      this.abortHostToolCalls();
+      this.failAllPending(new OmpRpcProcessExitedError(code, signal, this.stderrTail));
+    });
+
+    // The ready frame must arrive on its own; nothing the daemon sends can
+    // prompt it. A launch that never becomes ready is killed here instead of
+    // leaving a silent child behind for the session watchdog. Resume first
+    // attempts are watched by spawn's outcome watcher instead (its timeout
+    // decides the fallback), so the two timers never race on one process.
+    if (!resumeSessionId) {
+      this.readyTimer = setTimeout(() => {
+        this.readyTimer = null;
+        const timeoutError = new OmpRpcProtocolError(
+          `OMP RPC process did not send a ready frame within ${launchOverrides.readyTimeoutMs ?? OMP_RPC_READY_TIMEOUT_MS}ms. stderr: ${this.stderrTail.trim()}`,
+        );
+        this.recordProtocolError(timeoutError.message);
+        this.readyDeferred?.reject(timeoutError);
+        this.readyDeferred = null;
+        this.killProcess();
+        this.failAllPending(timeoutError);
+      }, launchOverrides.readyTimeoutMs ?? OMP_RPC_READY_TIMEOUT_MS);
+      this.readyTimer.unref?.();
+    }
+
+    return { process: proc };
+  }
+
+  parseLine(line: string): ParsedEvent[] {
+    const events = this.parseLineInner(line);
+    this.syncTurnHoldWatch();
+    return events;
+  }
+
+  /**
+   * Task #13 fallback watchdog: a prompt_result with sessionSettled=false
+   * holds the turn open until `session_settled`. If that frame never comes
+   * (observed in production — the APM stayed "working" for hours), confirm
+   * idleness with get_state (isSettled uses omp's own settled predicate) and
+   * close the turn through the normal session_settled path.
+   */
+  private syncTurnHoldWatch(): void {
+    if (this.eventState.pendingTurnEnd) {
+      if (!this.turnHoldTimer) {
+        const timer = setTimeout(() => {
+          this.turnHoldTimer = null;
+          void this.checkHeldTurnSettled();
+        }, OMP_TURN_HOLD_TIMEOUT_MS);
+        timer.unref?.();
+        this.turnHoldTimer = timer;
+      }
+      return;
+    }
+    if (this.turnHoldTimer) {
+      clearTimeout(this.turnHoldTimer);
+      this.turnHoldTimer = null;
+    }
+  }
+
+  private async checkHeldTurnSettled(): Promise<void> {
+    if (!this.process || !this.eventState.pendingTurnEnd) return;
+    try {
+      const response = await this.request({ type: "get_state" });
+      if (!this.eventState.pendingTurnEnd) return;
+      const data = response.data as { isSettled?: unknown } | undefined;
+      if (response.success && data?.isSettled === true) {
+        // Semantic session_settled: get_state.isSettled is documented as the
+        // same predicate. Flowing it through parseLine keeps the exactly-once
+        // turn accounting and the queued-event ordering intact; the sink
+        // delivers the closure even though no wire frame follows on an idle
+        // session.
+        const events = this.parseLine(JSON.stringify({ type: "session_settled", synthetic: "turn_hold_timeout" }));
+        if (events.length > 0) this.eventSink?.(events);
+        return;
+      }
+    } catch {
+      // The request failed (process likely gone): the exit path closes the turn.
+      return;
+    }
+    // Still busy per omp — keep watching while the hold persists.
+    this.syncTurnHoldWatch();
+  }
+
+  private parseLineInner(line: string): ParsedEvent[] {
+    if (!this.process) return [];
+
+    // Events produced before the machinery attached (the resume handshake's
+    // handoff) lead the first parseLine result, in wire order.
+    let queued = this.queuedEvents;
+    if (queued.length > 0) this.queuedEvents = [];
+
+    let frame: object;
+    try {
+      const decoded = this.decoder.pushLine(line);
+      // An in-progress rpc_chunk sequence has nothing to dispatch yet.
+      if (!decoded) {
+        if (queued.length > 0) return queued;
+        return [];
+      }
+      frame = decoded;
+    } catch (error) {
+      const message = error instanceof OmpRpcFrameError ? error.message : String(error);
+      this.frameErrorCount += 1;
+      this.lastFrameError = message;
+      if (queued.length > 0) return queued;
+      return [];
+    }
+
+    const type = (frame as { type?: unknown }).type;
+    if (type === "agent_start" || type === "turn_start" || type === "turn_end" || type === "prompt_result" || type === "session_settled" || type === "message_start" || type === "message_update") {
+      // Task #7: the delivery encoder keys on whether omp's run state has
+      // been observed at all (see encodeStdinMessage) — any turn-lifecycle
+      // frame counts as an observation. Task #13: message_start/message_update
+      // too — a run streams assistant deltas BEFORE its first turn frame, and
+      // a busy delivery in that window used to encode as a duplicate prompt
+      // (omp refuses concurrent prompts, so the message was lost).
+      this.turnFramesObserved = true;
+    }
+    if (type === "ready") {
+      this.handleReady(frame as unknown as OmpRpcReadyFrame);
+      return queued;
+    }
+    if (type === "response") {
+      const events = this.handleResponse(frame as unknown as OmpRpcResponseFrame);
+      return [...queued, ...events];
+    }
+    if (type === "host_tool_call") {
+      // Host tool executions are daemon business, not agent-visible events:
+      // execute against the managed MCP endpoint and answer over stdin.
+      this.handleHostToolCall(frame as unknown as OmpHostToolCallFrame);
+      return queued;
+    }
+    if (type === "host_tool_cancel") {
+      this.handleHostToolCancel(frame as unknown as OmpHostToolCancelFrame);
+      return queued;
+    }
+    if (typeof type === "string" && OMP_LOG_ONLY_FRAME_TYPES.has(type)) {
+      logger.info(`[omp] ${type} frame observed (phase-1 log-only, not mapped)`);
+      return queued;
+    }
+    const mapped = mapOmpRpcFrameToParsedEvents(frame, this.eventState);
+    return queued.length > 0 ? [...queued, ...mapped] : mapped;
+  }
+
+  /**
+   * Send one RPC command and resolve with its response, matched by id. Command
+   * failures (`success: false`) still resolve — callers inspect the response;
+   * timeouts and process exits reject with typed errors.
+   *
+   * Timeout policy (PM task #2 review): the default bound does not fit every
+   * command — `bash`, `compact`, and friends legitimately answer long after 30s,
+   * so they run without a timer. A timeout means "the host stopped waiting",
+   * not "the work failed": no automatic abort is sent, because that would kill
+   * slow-but-legitimate work; abort remains an explicit turn-layer decision
+   * (phase-1 tasks #3/#4).
+   */
+  request(
+    command: Record<string, unknown> & { type: string },
+    opts: { timeoutMs?: number } = {},
+  ): Promise<OmpRpcResponseFrame> {
+    const proc = this.process;
+    if (!proc || !this.ready) {
+      return Promise.reject(new OmpRpcProtocolError("OMP RPC process is not ready"));
+    }
+    const id = `omp-${++this.requestCounter}`;
+    const timeoutMs = opts.timeoutMs
+      ?? (OMP_RPC_NO_TIMEOUT_COMMANDS.has(command.type) ? Number.POSITIVE_INFINITY : OMP_RPC_REQUEST_TIMEOUT_MS);
+
+    let line: string;
+    try {
+      line = encodeOmpRpcFrame({ id, ...command }, { maxPhysicalFrameBytes: this.maxFrameBytes });
+    } catch (error) {
+      return Promise.reject(error);
+    }
+
+    return new Promise<OmpRpcResponseFrame>((resolve, reject) => {
+      const timer = Number.isFinite(timeoutMs)
+        ? setTimeout(() => {
+          this.pending.delete(id);
+          reject(new OmpRpcRequestTimeoutError(command.type, id, timeoutMs));
+        }, timeoutMs)
+        : null;
+      timer?.unref?.();
+      this.pending.set(id, { command: command.type, resolve, reject, timer });
+      try {
+        proc.stdin?.write(line);
+      } catch (error) {
+        this.pending.delete(id);
+        if (timer) clearTimeout(timer);
+        reject(new OmpRpcProcessExitedError(null, null, `stdin write failed: ${error instanceof Error ? error.message : String(error)}`));
+      }
+    });
+  }
+
+  /**
+   * Stop the runtime: best-effort abort FIRST (written straight to stdin —
+   * request() would refuse because it tears the session down), then take down
+   * the whole process tree (omp spawns bash tools, subagents, kernels) with
+   * SIGTERM, SIGKILL after the grace period. The abort gets a head start so
+   * the child can read it before the SIGTERM lands. The pid-addressed kills
+   * reach the group even after the parent is gone. Idempotent.
+   */
+  stop(opts: { sigtermGraceMs?: number } = {}): void {
+    const proc = this.process;
+    if (!proc) return;
+    const pid = proc.pid;
+
+    if (this.ready && pid && proc.stdin?.writable) {
+      try {
+        const line = encodeOmpRpcFrame(
+          { id: `omp-stop-${++this.requestCounter}`, type: "abort" },
+          { maxPhysicalFrameBytes: this.maxFrameBytes },
+        );
+        proc.stdin.write(line);
+      } catch {
+        // The child is already gone; the tree kill below still runs.
+      }
+    }
+
+    const failPending = () => {
+      this.readyDeferred?.reject(new OmpRpcProtocolError("OMP RPC session stopped"));
+      this.readyDeferred = null;
+      this.failAllPending(new OmpRpcProtocolError("OMP RPC session stopped"));
+    };
+
+    if (!pid) {
+      this.process = null;
+      proc.kill();
+      failPending();
+      return;
+    }
+
+    // Give the abort a real head start: SIGTERM goes out after the write has
+    // had a moment to be read, then SIGKILL after the grace period.
+    const sigtermTimer = setTimeout(() => {
+      killProcessTree(pid, "SIGTERM");
+      const sigkillTimer = setTimeout(() => {
+        killProcessTree(pid, "SIGKILL");
+      }, opts.sigtermGraceMs ?? OMP_STOP_SIGTERM_GRACE_MS);
+      sigkillTimer.unref?.();
+    }, OMP_STOP_ABORT_HEAD_START_MS);
+    sigtermTimer.unref?.();
+
+    this.process = null;
+    this.clearTurnHoldWatch();
+    this.abortHostToolCalls();
+    failPending();
+  }
+
+  private handleReady(frame: OmpRpcReadyFrame): void {
+    this.clearReadyTimer();
+    this.ready = true;
+    this.protocolVersion = typeof frame.protocolVersion === "number" ? frame.protocolVersion : 1;
+    if (typeof frame.maxFrameBytes === "number" && frame.maxFrameBytes > 0) {
+      this.maxFrameBytes = frame.maxFrameBytes;
+    }
+    if (typeof frame.maxReassembledFrameBytes === "number" && frame.maxReassembledFrameBytes > 0) {
+      this.maxReassembledFrameBytes = frame.maxReassembledFrameBytes;
+      this.decoder.setMaxReassembledFrameBytes(frame.maxReassembledFrameBytes);
+    }
+
+    const supported = Array.isArray(frame.supportedProtocolVersions) ? frame.supportedProtocolVersions : [];
+    if (!supported.includes(2)) {
+      // v1-only server: the 1 MiB physical cap stands, nothing to negotiate.
+      this.negotiatedProtocolVersion = null;
+      this.settleProtocol();
+      return;
+    }
+    // The server advertised v2, so a failed handshake is an inconsistent peer,
+    // not a downgrade path — mirror the official client's hard error.
+    void this.request({ type: "negotiate_protocol", protocolVersion: 2 })
+      .then((response) => {
+        if (!response.success || response.command !== "negotiate_protocol") {
+          throw new OmpRpcProtocolError(`OMP RPC protocol v2 negotiation failed: ${response.error ?? "refused"}`);
+        }
+        const data = response.data as { protocolVersion?: unknown } | undefined;
+        if (data?.protocolVersion !== 2) {
+          throw new OmpRpcProtocolError("OMP RPC protocol v2 negotiation failed: server did not confirm v2");
+        }
+        this.negotiatedProtocolVersion = 2;
+        this.settleProtocol();
+      })
+      .catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error);
+        this.recordProtocolError(message);
+        this.readyDeferred?.reject(error instanceof Error ? error : new Error(message));
+        this.readyDeferred = null;
+        this.killProcess();
+        this.failAllPending(error instanceof Error ? error : new Error(message));
+      });
+  }
+
+  /**
+   * The handshake is complete: turn sends are safe, host tools are mounted,
+   * and the session identity can be read (get_state) so the daemon can
+   * persist it for resume. Host tools register BEFORE whenReady resolves, so
+   * the first model call of any launch already sees them (task #5).
+   */
+  private settleProtocol(): void {
+    this.protocolSettled = true;
+    void this.registerHostTools().then(() => {
+      this.readyDeferred?.resolve();
+      this.readyDeferred = null;
+      void this.request({ type: "get_state" }).catch(() => {
+        // get_state is best-effort identity capture; the turn machinery
+        // surfaces real failures. Nothing to clean up.
+      });
+    });
+  }
+
+  /**
+   * Mount the managed MCP snapshot as omp host tools (task #5). omp's
+   * response replaces the previous set, so one send per process is complete.
+   * Registration failure must not wedge the session: the agent continues
+   * without managed tools and a diagnostic explains why.
+   */
+  private async registerHostTools(): Promise<void> {
+    if (this.hostTools.length === 0) return;
+    const tools: OmpHostToolDefinition[] = this.hostTools.map((tool) => ({
+      name: tool.runtimeName,
+      ...(tool.title ? { label: tool.title } : {}),
+      description: tool.description || `Call ${tool.toolName} on the managed MCP server ${tool.serverName}.`,
+      parameters: (tool.inputSchema ?? { type: "object", properties: {} }) as Record<string, unknown>,
+    }));
+    try {
+      await this.request({ type: "set_host_tools", tools });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.warn(`[omp] set_host_tools failed: ${message}`);
+      this.queuedEvents.push({
+        kind: "runtime_diagnostic",
+        severity: "warning",
+        source: "omp_rpc_notification",
+        itemType: "host_tools_registration",
+        message: `OMP managed tools registration failed; the agent runs without managed tools this session: ${message}`,
+      });
+    }
+  }
+
+  /**
+   * Execute one agent-initiated host tool call against the managed MCP
+   * endpoint (task #5). Every accepted call gets EXACTLY ONE completion —
+   * success, tool error, or transport error — because omp holds the turn's
+   * tool call open until the result arrives; a late answer after a cancel is
+   * dropped by the generation guard.
+   */
+  private handleHostToolCall(frame: OmpHostToolCallFrame): void {
+    const tool = this.hostTools.find((candidate) => candidate.runtimeName === frame.toolName);
+    if (!tool) {
+      this.sendHostToolError(frame.id, `Managed MCP tool ${frame.toolName} is not currently available to this Agent`);
+      return;
+    }
+    const endpoint = this.hostToolEndpoint;
+    if (!endpoint) {
+      this.sendHostToolError(frame.id, "Managed MCP endpoint unavailable for this session");
+      return;
+    }
+    const controller = new AbortController();
+    this.hostToolCalls.set(frame.id, { controller });
+    void callManagedMcpTool(endpoint, tool, frame.arguments ?? {}, controller.signal)
+      .then((result) => {
+        if (this.hostToolCalls.get(frame.id)?.controller !== controller) return; // cancelled or process gone
+        this.hostToolCalls.delete(frame.id);
+        this.writeHostToolFrame({
+          type: "host_tool_result",
+          id: frame.id,
+          result: { content: result.content },
+          ...(result.isError ? { isError: true } : {}),
+        });
+      })
+      .catch((error: unknown) => {
+        if (this.hostToolCalls.get(frame.id)?.controller !== controller) return;
+        this.hostToolCalls.delete(frame.id);
+        const message = error instanceof Error ? error.message : String(error);
+        this.sendHostToolError(frame.id, `Managed MCP call failed: ${message}`);
+      });
+  }
+
+  /** Abort a pending host tool call; omp drops the request, so no result is sent. */
+  private handleHostToolCancel(frame: OmpHostToolCancelFrame): void {
+    const pending = this.hostToolCalls.get(frame.targetId);
+    if (!pending) return;
+    this.hostToolCalls.delete(frame.targetId);
+    pending.controller.abort();
+  }
+
+  /** Completion frame with a plain-text error payload (docs/rpc.md: top-level isError). */
+  private sendHostToolError(callId: string, message: string): void {
+    this.writeHostToolFrame({
+      type: "host_tool_result",
+      id: callId,
+      result: { content: [{ type: "text", text: message }] },
+      isError: true,
+    });
+  }
+
+  private writeHostToolFrame(frame: Record<string, unknown>): void {
+    const proc = this.process;
+    if (!proc?.stdin?.writable) return; // process gone mid-call: omp rejects pending calls at stdin close
+    try {
+      proc.stdin.write(encodeOmpRpcFrame(frame, { maxPhysicalFrameBytes: this.maxFrameBytes }));
+    } catch {
+      // Stdin died between the writability check and the write; the tree is
+      // being torn down anyway.
+    }
+  }
+
+  private abortHostToolCalls(): void {
+    for (const pending of this.hostToolCalls.values()) pending.controller.abort();
+    this.hostToolCalls.clear();
+  }
+
+  /** Write a 0600 launch file into the per-agent CLI transport dir. */
+  private writeLaunchFile(dir: string, name: string, content: string): string {
+    const filePath = path.join(dir, name);
+    writeFileSync(filePath, content, { mode: 0o600 });
+    return filePath;
+  }
+
+  private handleResponse(frame: OmpRpcResponseFrame): ParsedEvent[] {
+    if (typeof frame.id !== "string") return [];
+    const events: ParsedEvent[] = [];
+
+    // Fire-and-forget deliveries (encodeStdinMessage lines written by the
+    // session machinery) have no pending entry; a refusal must surface as an
+    // error event instead of vanishing (PM task #4 review).
+    if (this.deliveryIds.has(frame.id)) {
+      const delivery = this.deliveryIds.get(frame.id)!;
+      this.deliveryIds.delete(frame.id);
+      if (frame.success === false && delivery.command === "steer" && delivery.fallbackText !== undefined) {
+        // A steer refused at the run boundary (it raced omp's turn end):
+        // re-send the same message as a prompt once, so the delivery still
+        // lands and produces its own prompt_result boundary (task #7).
+        const retried = this.encodeStdinMessage(delivery.fallbackText, null, { mode: "idle" });
+        if (retried !== null) {
+          try {
+            this.process?.stdin?.write(retried + "\n");
+          } catch {
+            // Stdin died; the exit path fails pending state.
+          }
+          logger.info("[omp] steer refused at the run boundary; re-delivered as prompt");
+          return events;
+        }
+      }
+      if (frame.success === false) {
+        events.push({
+          kind: "error",
+          message: `OMP refused ${delivery.command}: ${frame.error ?? "unknown error"}`,
+        });
+      }
+    }
+
+    // Session identity capture: settleProtocol's get_state announces the
+    // runtime session exactly once, synchronously with the response frame so
+    // the session machinery sees session_init on the parseLine channel.
+    if (!this.sessionId && frame.success && frame.command === "get_state") {
+      const data = frame.data as { sessionId?: unknown } | undefined;
+      if (data && typeof data.sessionId === "string" && data.sessionId) {
+        this.sessionId = data.sessionId;
+        events.push({ kind: "session_init", sessionId: data.sessionId });
+        if (this.resumeFallbackNotice) {
+          events.push({
+            kind: "runtime_diagnostic",
+            severity: "warning",
+            source: "omp_rpc_notification",
+            itemType: "resume_fallback",
+            message: this.resumeFallbackNotice,
+          });
+          this.resumeFallbackNotice = null;
+        }
+      }
+    }
+
+    const pending = this.pending.get(frame.id);
+    if (!pending) return events;
+    this.pending.delete(frame.id);
+    if (pending.timer) clearTimeout(pending.timer);
+    pending.resolve(frame);
+    return events;
+  }
+
+  private recordProtocolError(message: string): void {
+    this.lastProtocolError = message;
+  }
+
+  private failAllPending(error: Error): void {
+    for (const [id, pending] of this.pending) {
+      this.pending.delete(id);
+      if (pending.timer) clearTimeout(pending.timer);
+      pending.reject(error);
+    }
+  }
+
+  /**
+   * Kill the current process tree (SIGTERM, then SIGKILL after the grace
+   * period) — never just the parent: omp's bash tools / subagents must not be
+   * left behind on a ready timeout or a failed negotiation.
+   */
+  private killProcess(): void {
+    const proc = this.process;
+    this.process = null;
+    if (!proc?.pid) {
+      proc?.kill();
+      return;
+    }
+    const pid = proc.pid;
+    killProcessTree(pid, "SIGTERM");
+    const sigkillTimer = setTimeout(() => {
+      killProcessTree(pid, "SIGKILL");
+    }, OMP_STOP_SIGTERM_GRACE_MS);
+    sigkillTimer.unref?.();
+  }
+
+  private clearReadyTimer(): void {
+    if (this.readyTimer) {
+      clearTimeout(this.readyTimer);
+      this.readyTimer = null;
+    }
+  }
+
+  private clearTurnHoldWatch(): void {
+    if (this.turnHoldTimer) {
+      clearTimeout(this.turnHoldTimer);
+      this.turnHoldTimer = null;
+    }
+  }
+
+  /**
+   * Encode a live delivery: `prompt` when idle, `steer` when the agent is
+   * busy (omp queues steering mid-run natively). The returned line carries NO
+   * trailing newline — the session machinery appends one (PM task #4 review:
+   * a doubled newline is an empty frame and a parse error on the wire).
+   *
+   * Early writes are safe: omp claims stdin at startup and parses buffered
+   * lines once it is up (docs/rpc.md "Startup"), so a delivery raced against
+   * the handshake is processed in wire order instead of being dropped —
+   * returning null here would be permanent ("unsupported"), never a retry.
+   * The delivery id is tracked so a refusal (success:false) surfaces as an
+   * error event rather than vanishing.
+   */
+  encodeStdinMessage(
+    text: string,
+    _sessionId: string | null,
+    opts?: { mode?: "idle" | "busy" },
+  ): string | null {
+    const proc = this.process;
+    if (!proc || !this.ready || this.lastProtocolError) return null;
+    // Turn-state-driven encoding (task #7, PM ruling): the APM's idle/busy
+    // belief can diverge from omp's real run state — a steer-driven turn
+    // emits no prompt_result, so a busy belief can outlive the actual run
+    // and a mention queued against it would never flush. Encode by what omp
+    // can actually answer: a run in progress (turn frames observed, no
+    // boundary since) takes a steer and ends with the original prompt's
+    // prompt_result or session_settled; everything else — cold start, after
+    // a boundary, state uncertain — takes a prompt, because every prompt id
+    // completes exactly once and a redundant prompt cannot deadlock.
+    const runInProgress = this.turnFramesObserved && !this.eventState.turnClosed;
+    const commandType: "prompt" | "steer" = opts?.mode === "busy" && runInProgress ? "steer" : "prompt";
+    const id = `omp-${++this.requestCounter}`;
+    let line: string;
+    try {
+      line = encodeOmpRpcFrame(
+        { id, type: commandType, message: text },
+        { maxPhysicalFrameBytes: this.maxFrameBytes },
+      );
+    } catch {
+      return null;
+    }
+    this.deliveryIds.set(id, commandType === "steer" ? { command: commandType, fallbackText: text } : { command: commandType });
+    // Bound the tracking table: unanswered deliveries are rare and the
+    // responses free their slots; overflow sheds the oldest.
+    while (this.deliveryIds.size > 256) {
+      const oldest = this.deliveryIds.keys().next().value;
+      if (oldest === undefined) break;
+      this.deliveryIds.delete(oldest);
+    }
+    return line.replace(/\n$/, "");
+  }
+
+  buildSystemPrompt(config: AgentConfig): AxSurfaceText {
+    return buildCliTransportSystemPrompt(config, {
+      extraCriticalRules: [],
+    });
+  }
+}

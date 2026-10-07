@@ -19,6 +19,7 @@ import { useServerPermissions } from "../../hooks/useServerPermissions";
 import { getServerUrl } from "../../utils/server";
 import { formatRelativeTime } from "../../utils/relativeTime";
 import { getComputerCommands, getDaemonConnectCommand } from "../../utils/computerSetupCommand";
+import { useDeploymentMode, useDeploymentDownloads } from "../../utils/deploymentMode";
 import { canViewMachineRuntimeAccountUsage } from "../../utils/machineRuntimeUsageVisibility";
 import { isAppManagedComputer } from "../../utils/computerUpgradeIndicator";
 import ConfirmDialog from "../ConfirmDialog";
@@ -658,6 +659,9 @@ export default function MachineDetailPanel({
   workspaceEmbedded?: boolean;
   deploymentEnv?: string;
 }) {
+  // Runtime deployment mode (task #5): private deployments generate install
+  // commands from this server's own /downloads tree.
+  const deploymentMode = useDeploymentMode();
   const { formatDate, formatMessage, locale } = useIntl();
   const formatMessageRef = useRef(formatMessage);
   formatMessageRef.current = formatMessage;
@@ -720,13 +724,22 @@ export default function MachineDetailPanel({
   if (savedKey && !isKeyValid) {
     localStorage.removeItem(`slock_machine_apikey_${machine.id}`);
   }
-  const macLinuxConnectCommand = isKeyValid
-    ? getDaemonConnectCommand({ apiKey: savedKey, platform: "mac-linux", serverName, serverUrl })
+  // Daemon connect commands (task #6): hidden while the deployment mode
+  // resolves; private deployments use the two-step server-tarball install
+  // (no command when the server ships no daemon artifact).
+  const deploymentDownloads = useDeploymentDownloads();
+  const daemonInstallUrl = deploymentMode === "private" ? deploymentDownloads?.daemon ?? null : null;
+  const macLinuxConnectCommand = isKeyValid && deploymentMode !== null
+    ? getDaemonConnectCommand({ apiKey: savedKey, platform: "mac-linux", serverName, serverUrl, installUrl: daemonInstallUrl })
     : null;
-  const windowsConnectCommand = isKeyValid
-    ? getDaemonConnectCommand({ apiKey: savedKey, platform: "windows", serverName, serverUrl })
+  const windowsConnectCommand = isKeyValid && deploymentMode !== null
+    ? getDaemonConnectCommand({ apiKey: savedKey, platform: "windows", serverName, serverUrl, installUrl: daemonInstallUrl })
     : null;
   const setupMachineId = machine.isComputer ? null : machine.id;
+  // "unknown" (resolution failed after retry) generates standard commands —
+  // the surfaces that show them pair the command with a contact-admin
+  // notice rather than a silent official fallback.
+  const commandDeploymentMode = deploymentMode === "unknown" ? null : deploymentMode;
   const computerCommands = getComputerCommands(serverSlug, deploymentEnv, serverUrl, {
     legacyApiKey: isKeyValid ? savedKey : null,
     // Identity-carried migration (task #239): this page knows WHICH row the
@@ -734,23 +747,31 @@ export default function MachineDetailPanel({
     // no fingerprint matching, works after key rotation. Legacy rows only;
     // Computer rows keep the plain setup command.
     machineId: setupMachineId,
+    deploymentMode: commandDeploymentMode,
   });
   const windowsMachine = machine.os?.toLowerCase().startsWith("win") ?? false;
   const windowsComputerCommands = getComputerCommands(serverSlug, deploymentEnv, serverUrl, {
     legacyApiKey: isKeyValid ? savedKey : null,
     machineId: setupMachineId,
     platform: "windows",
+    deploymentMode: commandDeploymentMode,
   });
   const computerFreshInstallCommands = getComputerCommands(serverSlug, deploymentEnv, serverUrl, {
     legacyApiKey: isKeyValid ? savedKey : null,
     machineId: setupMachineId,
     platform: windowsMachine ? "windows" : "mac-linux",
     version: latestComputerVersion,
+    deploymentMode: commandDeploymentMode,
   });
   const machineComputerCommands = windowsMachine ? windowsComputerCommands : computerCommands;
   const computerSetupCommand = machineComputerCommands?.setup ?? null;
-  const computerInstall = machineComputerCommands?.install ?? null;
-  const computerFreshInstall = computerFreshInstallCommands?.install ?? null;
+  // Install commands depend on the deployment mode (official CDN vs this
+  // server's /downloads tree); setup/restart commands do not. While the mode
+  // resolves, install commands render nothing rather than flashing official
+  // CDN commands on a private server (PM review round 1).
+  const deploymentResolved = deploymentMode !== null;
+  const computerInstall = deploymentResolved ? machineComputerCommands?.install ?? null : null;
+  const computerFreshInstall = deploymentResolved ? computerFreshInstallCommands?.install ?? null : null;
   const computerInstallRestartCommand = computerFreshInstallCommands?.restartService ?? null;
   // Address recovery to the current server. Restart handles both local
   // failure shapes the server sees as "offline": a stopped service (stop is

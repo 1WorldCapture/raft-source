@@ -22,7 +22,7 @@ import { createRequire } from "node:module";
 import { COMPUTER_VERSION } from "./version.js";
 import { clearResidentConnectedMarker, readResidentConnectedMarker, writeResidentConnectedMarker } from "./residentConnectionMarker.js";
 import { residentCoreIdentity } from "./residentCoreIdentity.js";
-import { mkdir, writeFile, open, stat, unlink } from "node:fs/promises";
+import { mkdir, readFile, writeFile, open, stat, unlink } from "node:fs/promises";
 import { dirname, join as joinPath } from "node:path";
 import {
   resolveRaftHome,
@@ -33,6 +33,7 @@ import {
   serverRunnerLogPath,
   assertValidServerId,
   serverConnectedMarkerPath,
+  serviceVersionPath,
 } from "./paths.js";
 import {
   listManagedServerIds,
@@ -74,10 +75,11 @@ import {
   ServiceClientError,
 } from "./lib/types.js";
 import { resetService, resetRunner } from "./reset.js";
-import { currentDate } from "@botiverse/raft-shared";
+import { currentDate, type ComputerHostKind } from "@botiverse/raft-shared";
 import type { DaemonCoreOptions } from "@botiverse/raft-daemon/core";
 import { enqueueLifecycleOperation } from "./lifecycleOperations.js";
 import { shutdownService } from "./lib/serviceShutdown.js";
+import { parentStillAlive, readParentBindingFromFile, startParentWatchdog } from "./parentWatchdog.js";
 import { createReplacementHandoff, type ReplacementHandoffRequest } from "./lib/replacementHandoff.js";
 import {
   clearPendingRestartMarker,
@@ -165,6 +167,8 @@ export function buildResidentSpawn(
   execArgv: string[] = process.execArgv,
   isSea = isSeaBinary(),
   seaExecutable = process.execPath,
+  electronLayout: "packaged" | "development" | null = process.versions.electron
+    ? ((process as NodeJS.Process & { defaultApp?: boolean }).defaultApp ? "development" : "packaged") : null,
 ): { command: string; args: string[] } {
   // Carry parent execArgv so the dev-mode tsx loader survives re-exec.
   const tail = serverId ? [mode, serverId] : [mode];
@@ -173,6 +177,11 @@ export function buildResidentSpawn(
   // path). Re-exec the binary directly with the mode flag, which the commander
   // `__service`/`__run` commands dispatch. Passing the SEA argv[1] would corrupt
   // the child argv.
+  if (electronLayout === "packaged") {
+    // Electron loads the app bundle itself. argv[1] may already be __service;
+    // treating it as a Node script causes the historical /__service failure.
+    return { command: process.execPath, args: tail };
+  }
   if (isSea) {
     return { command: seaExecutable, args: [...execArgv, ...tail] };
   }
@@ -222,6 +231,7 @@ export function buildDetachedServiceEnv(
   // A detached Computer replacement is never owned by a legacy OS manager,
   // even when the incumbent was originally launched by one.
   delete env[OS_SUPERVISOR_KIND_ENV_VAR];
+  if (process.versions.electron) delete env.ELECTRON_RUN_AS_NODE;
   return env;
 }
 
@@ -280,7 +290,7 @@ export async function spawnDetachedService(
     detached: true,
     stdio: ["ignore", supLogFd.fd, supLogFd.fd],
     windowsHide: true,
-    env: buildDetachedServiceEnv(process.env, opts),
+    env: { ...buildDetachedServiceEnv(process.env, opts), RAFT_HOME: slockHome, SLOCK_HOME: slockHome },
   });
   child.on("error", (err) => {
     process.stderr.write(formatHumanError("SUPERVISOR_SPAWN_FAILED", err.message));
@@ -325,6 +335,7 @@ export type ResidentCoreFactory = (creds: {
   serverMachineId: string;
   apiKey: string;
   serverUrl: string;
+  hostKind?: ComputerHostKind;
 }) => ResidentCore | Promise<ResidentCore>;
 
 /**
@@ -716,7 +727,11 @@ export async function handleRunnerExitForSupervisor({
  */
 export async function runResident(
   serverId: string,
-  deps: { coreFactory?: ResidentCoreFactory } = {},
+  deps: {
+    coreFactory?: ResidentCoreFactory;
+    /** The desktop app passes "desktop_app"; the CLI leaves it unset (standalone). */
+    hostKind?: ComputerHostKind;
+  } = {},
 ): Promise<void> {
   assertValidServerId(serverId);
   const slockHome = resolveRaftHome();
@@ -732,6 +747,7 @@ export async function runResident(
     serverMachineId: a.serverMachineId,
     apiKey: a.apiKey,
     serverUrl: a.serverUrl,
+    ...(deps.hostKind ? { hostKind: deps.hostKind } : {}),
   });
   let stopping = false;
   const shutdown = async () => {
@@ -745,6 +761,15 @@ export async function runResident(
   };
   process.on("SIGTERM", () => void shutdown());
   process.on("SIGINT", () => void shutdown());
+  // Anti-orphan watchdog (task #7): when the desktop GUI that owns this tree
+  // dies, exit through the same graceful path as SIGTERM. Disarmed on legacy
+  // evidence without a parent binding.
+  const watchdog = startParentWatchdog({
+    readBinding: async () => readParentBindingFromFile(slockHome),
+    isAlive: parentStillAlive,
+    onParentLost: () => void shutdown(),
+  });
+  void watchdog;
   await core.start();
   // A contender that loses the core.start() machine lock cannot overwrite the owner's evidence.
   await writeRunnerVersionEvidence(slockHome, serverId);
@@ -886,6 +911,7 @@ export async function runService(deps: RunServiceDeps = {}): Promise<void> {
   // shouldn't observe it. Defensive even though `runResident` doesn't
   // currently read this var. See Dayu nit (msg=29336624).
   const childEnv = buildRunnerChildEnv(process.env);
+  if (process.versions.electron) delete childEnv.ELECTRON_RUN_AS_NODE;
 
   const emitTransition = (
     serverId: string,
@@ -948,7 +974,12 @@ export async function runService(deps: RunServiceDeps = {}): Promise<void> {
     const child = spawn(command, args, {
       stdio: ["ignore", logFd.fd, logFd.fd],
       windowsHide: true,
-      env: childEnv,
+      // Pin the state root explicitly: supervisor-managed processes must be
+      // attributable to THIS root from the outside (ps eww) — the desktop
+      // quit-ladder and any future root-isolation check key off
+      // RAFT_HOME/SLOCK_HOME, and an inherited-but-unset env (GUI-launched
+      // app) would leave a runner indistinguishable from another root's.
+      env: { ...childEnv, RAFT_HOME: slockHome, SLOCK_HOME: slockHome },
     });
     await logFd.close();
     if (!child.pid) {
@@ -1018,6 +1049,25 @@ export async function runService(deps: RunServiceDeps = {}): Promise<void> {
       }
     }
   };
+
+  // Anti-orphan watchdog (task #7): when the desktop GUI that owns this tree
+  // dies (crash, force-quit), stop every runner through the normal SIGTERM
+  // path and then exit — the supervisor must never outlive its GUI. Disarmed
+  // while the evidence file carries no parent binding (legacy trees).
+  const parentLossShutdown = (): void => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    for (const rec of runners.values()) killChild(rec);
+    // Grace window for the daemons' own shutdown, then go regardless.
+    const exitTimer = setTimeout(() => process.exit(0), 5_000);
+    exitTimer.unref?.();
+  };
+  const watchdog = startParentWatchdog({
+    readBinding: () => readParentBindingFromFile(slockHome),
+    isAlive: parentStillAlive,
+    onParentLost: parentLossShutdown,
+  });
+  void watchdog;
 
   const reconcile = async (): Promise<void> => {
     if (shuttingDown) return;

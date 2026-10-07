@@ -3,8 +3,8 @@
   "package": "@botiverse/raft",
   "runner": "node --import tsx --test",
   "testFileGlob": "src/**/*.test.ts",
-  "fileCount": 104,
-  "total": 926,
+  "fileCount": 105,
+  "total": 928,
   "files": [
     {
       "file": "src/agentApiNoBypass.test.ts",
@@ -29,7 +29,7 @@
     },
     {
       "file": "src/agentApiPath.test.ts",
-      "count": 13,
+      "count": 14,
       "cases": [
         {
           "name": "contract path helpers encode typed query objects through route schemas"
@@ -69,6 +69,9 @@
         },
         {
           "name": "requestContractAgentRoute preserves a typed known-response proxy failure"
+        },
+        {
+          "name": "transportUnavailableHint: ECONNREFUSED (any depth) explains daemon availability, other codes stay silent"
         }
       ]
     },
@@ -264,6 +267,15 @@
       "cases": [
         {
           "name": "tsup config inlines runtime deps for the Computer app sidecar CLI"
+        }
+      ]
+    },
+    {
+      "file": "src/bundleSelfContained.test.ts",
+      "count": 1,
+      "cases": [
+        {
+          "name": "built bundle leaves no runtime dependency external (skips without a build)"
         }
       ]
     },

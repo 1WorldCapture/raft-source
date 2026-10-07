@@ -21,7 +21,9 @@
 //   4. inject    — copy the official node → output binary, then postject the
 //                  blob into it (macho segment on darwin). On darwin the node
 //                  signature is removed before inject and re-applied after.
-//   5. sign      — darwin only: ad-hoc `codesign --sign -` so the matrix can
+//   5. sign      — darwin only: ad-hoc `codesign --sign -` (on a non-macOS
+//                  host: `rcodesign`, opt-in via RAFT_CODESIGN_TOOL=rcodesign,
+//                  binary path in RAFT_RCODESIGN) so the matrix can
 //                  smoke-run the injected arm64 carrier. The formal tag
 //                  workflow treats this as an intermediate, replaces it with
 //                  a hardened-runtime Developer ID signature, notarizes the
@@ -294,11 +296,49 @@ async function makeBlob({ bundlePath, workDir, nodeVersion }) {
   return blobPath;
 }
 
+// Darwin signing backend. On macOS the Apple `codesign` is used, unchanged.
+// A non-macOS host (Linux release box) has no codesign, so it must opt in to
+// rcodesign explicitly — a missing opt-in fails loudly instead of silently
+// producing an unsigned darwin binary (Apple Silicon refuses to exec those).
+function darwinSigner() {
+  if (process.platform === "darwin") {
+    return {
+      // Remove node's own signature first — postject mutating a signed mach-O
+      // invalidates it and macOS then refuses to exec.
+      removeSignature: (bin) => run("codesign", ["--remove-signature", bin]),
+      signAdhoc: (bin) => run("codesign", ["--sign", "-", bin]),
+      verify: (bin) => run("codesign", ["--verify", "--verbose", bin]),
+    };
+  }
+  if (process.env.RAFT_CODESIGN_TOOL !== "rcodesign") {
+    throw new Error(
+      "darwin target on a non-macOS host needs a signing tool: set RAFT_CODESIGN_TOOL=rcodesign " +
+        "(and RAFT_RCODESIGN=/path/to/rcodesign if it is not on PATH). See docs for the pinned version.",
+    );
+  }
+  const rcodesign = process.env.RAFT_RCODESIGN || "rcodesign";
+  return {
+    // rcodesign replaces any existing signature when it signs, so there is
+    // nothing to strip before postject (checked on the official node binary).
+    removeSignature: () => {},
+    signAdhoc: (bin) => run(rcodesign, ["sign", bin]),
+    // `rcodesign verify` is documented as unreliable for ad-hoc signatures,
+    // so check the signature structure instead: ad-hoc flag present.
+    verify: (bin) => {
+      const r = spawnSync(rcodesign, ["print-signature-info", bin], { encoding: "utf8" });
+      if (r.status !== 0 || !/CodeSignatureFlags\(ADHOC\)/.test(r.stdout)) {
+        throw new Error(`rcodesign: no ad-hoc signature found on ${bin}: ${r.stderr || r.stdout}`);
+      }
+    },
+  };
+}
+
 async function injectAndSign({ officialNode, blobPath, platform, outBinary }) {
   await copyFile(officialNode, outBinary);
   // copyFile/codesign can leave the file read-only; postject must rewrite it.
   await chmod(outBinary, 0o755);
 
+  const signer = platform === "darwin" ? darwinSigner() : null;
   const postjectArgs = [
     outBinary,
     "NODE_SEA_BLOB",
@@ -308,9 +348,7 @@ async function injectAndSign({ officialNode, blobPath, platform, outBinary }) {
   ];
   if (platform === "darwin") {
     postjectArgs.push("--macho-segment-name", "NODE_SEA");
-    // Remove node's own signature first — postject mutating a signed mach-O
-    // invalidates it and macOS then refuses to exec.
-    run("codesign", ["--remove-signature", outBinary]);
+    signer.removeSignature(outBinary);
   } else if (platform === "win32") {
     // Official Node Windows carriers are Authenticode-signed. Injecting the
     // SEA resource invalidates that signature, so remove it when signtool is
@@ -324,8 +362,8 @@ async function injectAndSign({ officialNode, blobPath, platform, outBinary }) {
   if (platform === "darwin") {
     // Ad-hoc re-sign for same-runner smoke. The formal release workflow must
     // replace this signature before any darwin artifact is published.
-    run("codesign", ["--sign", "-", outBinary]);
-    run("codesign", ["--verify", "--verbose", outBinary]);
+    signer.signAdhoc(outBinary);
+    signer.verify(outBinary);
   }
   await chmod(outBinary, 0o755);
 }

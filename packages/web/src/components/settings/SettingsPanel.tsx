@@ -37,6 +37,7 @@ import {
   Hash,
 } from "lucide-react";
 import MobileDownloadQr from "./MobileDownloadQr";
+import { DesktopDownloadSection } from "./DesktopDownloadSection";
 import { MOBILE_DOWNLOAD_CHOOSER_PATH, mobileDownloadUrl } from "../../utils/mobileDownloadUrl";
 import { getApiErrorResponse } from "../../utils/apiErrorResponse";
 import {
@@ -7673,6 +7674,10 @@ export function AboutSection({ appVersion = WEB_APP_VERSION }: { appVersion?: st
                 code serves both platforms. */}
             <MobileDownloadQr url={mobileDownloadQrUrl} />
           </div>
+          {/* Private deployments: desktop installers from THIS server
+              (task #12). Renders nothing in standard mode or inside the
+              desktop app itself (the in-app update pill owns that flow). */}
+          <DesktopDownloadSection />
         </SurfaceListItem>
       </section>
 

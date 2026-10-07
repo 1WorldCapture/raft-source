@@ -26,7 +26,10 @@ function repositoryCliEnv(parentEnv: NodeJS.ProcessEnv = process.env): NodeJS.Pr
 }
 
 function runCli(args: string[], parentEnv: NodeJS.ProcessEnv = process.env): CliRunResult {
-  const result = spawnSync(process.execPath, ["--import", "tsx", "src/index.ts", ...args], {
+  // --disable-warning=DEP0205: tsx registers ESM hooks via module.register(),
+  // which Node >= 22.15 reports as a deprecation on the child's stderr — the
+  // exact-stderr assertions below must see CLI output only.
+  const result = spawnSync(process.execPath, ["--disable-warning=DEP0205", "--import", "tsx", "src/index.ts", ...args], {
     cwd: process.cwd(),
     encoding: "utf8",
     env: repositoryCliEnv(parentEnv),

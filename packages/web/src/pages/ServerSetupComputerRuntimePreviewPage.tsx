@@ -4,6 +4,9 @@ import ServerCreatePreview from "../components/auth/ServerCreatePreview";
 import ServerSetupComputerRuntimeStep from "../components/onboarding/ServerSetupComputerRuntimeStep";
 import { useMachineStore } from "../store/machineStore";
 import { readServerSetupPreviewView, serverSetupPreviewFixture } from "../dev/serverSetupPreviewFixtures";
+import { computerInstallCommand, getDaemonConnectCommand } from "../utils/computerSetupCommand";
+import { useDeploymentDownloads, useDeploymentMode } from "../utils/deploymentMode";
+import { getServerUrl } from "../utils/server";
 
 const PREVIEW_MACHINE_TIMESTAMP = "2026-07-11T00:00:00.000Z";
 
@@ -41,6 +44,33 @@ export default function ServerSetupComputerRuntimePreviewPage() {
   });
   const fixture = serverSetupPreviewFixture(view);
   const showCreateAgent = view === "create-agent";
+  // Generated, not hardcoded (task #5): a private deployment renders the
+  // install command from its own /downloads tree; the official default
+  // renders the same string this page used to hardcode. While the mode
+  // resolves the command stays hidden — no official-command flash on a
+  // private server (PM review round 1).
+  const deploymentMode = useDeploymentMode();
+  const installBase = deploymentMode === "private"
+    ? `${getServerUrl().replace(/\/+$/, "")}/downloads/computer`
+    : deploymentMode === null
+      ? null
+      : undefined;
+  // Daemon sample commands (task #6): generated too — private deployments
+  // show the two-step server-tarball form instead of the official npx one.
+  const daemonUrl = useDeploymentDownloads()?.daemon ?? null;
+  const daemonInstallUrl = deploymentMode === "private" ? daemonUrl : null;
+  const previewDaemonCommand = getDaemonConnectCommand({
+    apiKey: "sk_machine_preview0000000000000000",
+    platform: "mac-linux",
+    serverUrl: getServerUrl(),
+    installUrl: daemonInstallUrl,
+  });
+  const previewWindowsDaemonCommand = getDaemonConnectCommand({
+    apiKey: "sk_machine_preview0000000000000000",
+    platform: "windows",
+    serverUrl: getServerUrl(),
+    installUrl: daemonInstallUrl,
+  });
 
   return (
     <div className="relative min-h-0 flex-1 overflow-hidden bg-brutal-cream font-display">
@@ -69,9 +99,11 @@ export default function ServerSetupComputerRuntimePreviewPage() {
             offlineComputers={fixture.offlineComputers}
             serverSlug="launch"
             setupCommand="raft-computer setup /cindys-pricing-team"
-            computerInstallCommand="curl -fsSL https://cdn.raft.build/computer/install.sh | sh"
-            macLinuxDaemonCommand="npx @botiverse/raft-daemon@latest --server-url https://api.raft.build --api-key sk_machine_preview0000000000000000"
-            windowsDaemonCommand="npx.cmd @botiverse/raft-daemon@latest --server-url https://api.raft.build --api-key sk_machine_preview0000000000000000"
+            computerInstallCommand={installBase === null
+              ? null
+              : computerInstallCommand(undefined, null, installBase ?? undefined)}
+            macLinuxDaemonCommand={previewDaemonCommand}
+            windowsDaemonCommand={previewWindowsDaemonCommand}
             onCopyInstallCommand={() => undefined}
             onOpenApiKeySettings={() => undefined}
             onNext={() => {

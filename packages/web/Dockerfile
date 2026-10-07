@@ -5,8 +5,10 @@ RUN corepack enable
 
 WORKDIR /app
 
-# Copy workspace root files
-COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
+# Copy workspace root files (.npmrc pins the pnpm settings the lockfile was
+# generated with — without it the container's pnpm defaults mismatch and
+# --frozen-lockfile refuses to install).
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml .npmrc ./
 COPY patches/ patches/
 
 # Copy package manifests
@@ -51,8 +53,23 @@ RUN test -f /usr/share/nginx/html/desktop-manifest.json \
     && printf 'add_header ETag "\\"sha256-%s\\"" always;\n' "$manifest_sha" \
       > /etc/nginx/desktop-manifest-etag.conf
 
-# Copy nginx config
-COPY packages/web/nginx.conf /etc/nginx/conf.d/default.conf
+# Copy nginx config. SELFHOST=1 selects the self-hosted same-origin variant:
+# the API origin is NOT baked into the bundle (VITE_API_URL stays unset, the
+# app falls back to window.location.origin) and nginx proxies /api and
+# /socket.io to the raft server via the envsubst template (the deployment
+# provides RAFT_SERVER_UPSTREAM, e.g. docker compose). SELFHOST=0 (official
+# builds) keeps the exact previous behavior.
+ARG SELFHOST=0
+COPY packages/web/nginx.conf /tmp/nginx-official.conf
+COPY packages/web/nginx-selfhost.conf.template /tmp/nginx-selfhost.conf.template
+RUN if [ "$SELFHOST" = "1" ]; then \
+      mkdir -p /etc/nginx/templates \
+      && cp /tmp/nginx-selfhost.conf.template /etc/nginx/templates/default.conf.template \
+      && rm -f /etc/nginx/conf.d/default.conf; \
+    else \
+      cp /tmp/nginx-official.conf /etc/nginx/conf.d/default.conf; \
+    fi \
+    && rm -f /tmp/nginx-official.conf /tmp/nginx-selfhost.conf.template
 
 EXPOSE 80
 

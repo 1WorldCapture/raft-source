@@ -35,10 +35,13 @@ import type {
 } from "@botiverse/k-carrier";
 import { ComputerServiceError } from "./services/errors.js";
 import { readChannel, type Channel } from "./lib/channelState.js";
+import { RELEASE_BACKEND_ENV, type ReleaseBackend } from "./lib/releaseBackendState.js";
 import { resolveRaftHome } from "./paths.js";
 import { HANDS_API_ORIGIN, HANDS_COMPUTER_APP_SLUG } from "./releaseAuthority.js";
 
 export { HANDS_API_ORIGIN, HANDS_COMPUTER_APP_SLUG } from "./releaseAuthority.js";
+// Re-exported for existing importers; the canonical home is the state module.
+export { RELEASE_BACKEND_ENV } from "./lib/releaseBackendState.js";
 
 export type KReleaseContext = ReleaseContext;
 export type KRelease = Release;
@@ -50,8 +53,10 @@ export interface KReleaseSourceDeps {
   fetchFn?: typeof fetch;
   /** Per-request deadline; the release authority answers in ms or is broken. */
   timeoutMs?: number;
-  /** Legacy CDN is opt-in; Hands is the production default. */
-  backend?: "hands" | "legacy-cdn";
+  /** Release authority: `hands` (default), `legacy-cdn`, or `server` (the
+   *  manifest-tree reader with the base derived from the connected server —
+   *  private deployments, phase 2 task #5). */
+  backend?: ReleaseBackend;
   handsApiOrigin?: string;
   handsAppSlug?: string;
   channelProvider?: () => Channel | Promise<Channel>;
@@ -59,14 +64,14 @@ export interface KReleaseSourceDeps {
   getHandsDeviceIdFn?: typeof getHandsDeviceId;
 }
 
-export const RELEASE_BACKEND_ENV = "RAFT_COMPUTER_RELEASE_BACKEND";
-
-function resolveBackend(deps: KReleaseSourceDeps): "hands" | "legacy-cdn" {
+function resolveBackend(deps: KReleaseSourceDeps): ReleaseBackend {
   const configured = deps.backend ?? process.env[RELEASE_BACKEND_ENV] ?? "hands";
-  if (configured === "hands" || configured === "legacy-cdn") return configured;
+  if (configured === "hands" || configured === "legacy-cdn" || configured === "server") {
+    return configured;
+  }
   throw new ComputerServiceError(
     "K_SOURCE_BACKEND_INVALID",
-    `K_SOURCE_BACKEND_INVALID: ${RELEASE_BACKEND_ENV} must be "hands" or "legacy-cdn"`,
+    `K_SOURCE_BACKEND_INVALID: ${RELEASE_BACKEND_ENV} must be "hands", "legacy-cdn" or "server"`,
   );
 }
 
@@ -441,7 +446,11 @@ export function createComputerReleaseSource(
   baseUrl: string,
   deps: KReleaseSourceDeps = {},
 ): KReleaseSource {
-  if (resolveBackend(deps) === "legacy-cdn") {
+  // `server` serves the same manifest-tree format as legacy-cdn — the ONLY
+  // difference is where baseUrl came from (the connected server's origin,
+  // resolved by resolveUpgradeSourceForHome), so the identical reader, byte
+  // contract and fail-closed checks apply.
+  if (resolveBackend(deps) !== "hands") {
     return createLegacyComputerReleaseSource(baseUrl, deps);
   }
   return createHandsComputerReleaseSource({

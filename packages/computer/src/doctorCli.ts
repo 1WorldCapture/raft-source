@@ -18,6 +18,7 @@ import { formatRaftHomeForDisplay, resolveRaftHome } from "./paths.js";
 import { info, present } from "./output.js";
 import { createComputerApi } from "./lib/api.js";
 import { resolveServerUrl, resolveServerUrlEnv } from "./serverUrl.js";
+import { isPrivateClientContext, resolveAttachmentWebOrigin } from "./computerRelease.js";
 import { redactSecrets } from "./doctor.js";
 
 export async function runDoctor(opts: {
@@ -213,12 +214,19 @@ export async function runDoctorMigrationDetails(opts: { serverLabel?: string }):
     const attached = normalizedLabel !== null && (await listServerAttachments(slockHome)).some(
       (attachment) => attachment.serverSlug?.replace(/^\//, "") === normalizedLabel,
     );
+    // Private deployments (task #7): the slug's own attachment origin.
+    const privateContext = await isPrivateClientContext(slockHome);
+    const privateWebOrigin = privateContext && normalizedLabel !== null
+      ? await resolveAttachmentWebOrigin(slockHome, label)
+      : null;
     for (const line of renderMigrationDetailsBody({
       label,
       evidence,
       machines,
       slockHomeDisplay: formatRaftHomeForDisplay(slockHome),
       attached,
+      privateContext,
+      privateWebOrigin,
     })) {
       info(line);
     }
@@ -249,6 +257,11 @@ export function renderMigrationDetailsBody(input: {
   machines: ServerMachineEntry[] | null;
   slockHomeDisplay: string;
   attached?: boolean;
+  /** Private deployments (task #7): the slug attachment's own web origin —
+   *  dashboard links point there instead of app.raft.build. privateContext
+   *  is true even when the origin is unknown (no attachment for the slug). */
+  privateContext?: boolean;
+  privateWebOrigin?: string | null;
 }): string[] {
   const { label, evidence, machines } = input;
   const noServer = label === "(server not specified)";
@@ -288,7 +301,10 @@ export function renderMigrationDetailsBody(input: {
       `      if the current runner is unhealthy, follow \`raft-computer doctor ${label}\`; recovery must be driven by the failing current attachment, not by hostname alone`,
     );
   } else {
-    const computersUrl = `https://app.raft.build/s/${encodeURIComponent(label.replace(/^\//, ""))}/computers`;
+    const slug = label.replace(/^\//, "");
+    const computersUrl = input.privateWebOrigin
+      ? `${input.privateWebOrigin}/s/${encodeURIComponent(slug)}/computers`
+      : `https://app.raft.build/s/${encodeURIComponent(slug)}/computers`;
     lines.push(
       `Next: one of these should be this computer → find the legacy row by hostname at ${computersUrl}, then use its “Migrate to Computer” setup command (\`raft-computer setup ${label} --machine <machineId>\`)`,
     );
@@ -304,6 +320,8 @@ export function renderMigrationDetailsBody(input: {
     }
     lines.push(`      none of them → raft-computer setup ${label} --fresh`);
   }
-  lines.push("Help: https://app.raft.build/s/community/");
+  // Official community link only in official contexts (task #7); private
+  // deployments omit the line entirely.
+  if (!input.privateContext) lines.push("Help: https://app.raft.build/s/community/");
   return lines;
 }

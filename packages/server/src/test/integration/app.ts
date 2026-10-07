@@ -56,6 +56,14 @@ type StubAgentOrchestrator = {
     kind: "missing_config";
     recovery: "kimi_login";
   }>;
+  /** Cursor SDK 修复-1: web sign-in entry (owner-only routes under test). */
+  loginMachineCursorSdk: (machineId: string) => Promise<{
+    ok: boolean; loginUrl?: string; reused?: boolean; errorCode?: string; message?: string;
+  }>;
+  getMachineCursorSdkStatus: (machineId: string) => Promise<{
+    status: "unbound" | "bound" | "bound_stale_key" | "disconnected" | "error";
+    source: "cursor_sdk_store" | "raft_owned" | "owner_environment";
+  }>;
 };
 
 function ensureTestEnv() {
@@ -68,6 +76,8 @@ function ensureTestEnv() {
 function createAgentOrchestratorStub(): StubAgentOrchestrator {
   return {
     detectMachineRuntimeModels: async () => ({ kind: "missing_config", recovery: "kimi_login" }),
+    loginMachineCursorSdk: async () => ({ ok: true, loginUrl: "https://cursor.com/loginDeepControl?state=fixture", reused: false }),
+    getMachineCursorSdkStatus: async () => ({ status: "unbound", source: "cursor_sdk_store" }),
     pushAppConfigUpsert: async () => false,
     deliverMessage: async () => { },
     receiveMessages: async () => [],

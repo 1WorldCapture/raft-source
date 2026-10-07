@@ -79,7 +79,10 @@ test("joint channel invites are accepted from email links, not notification cent
   assert.doesNotMatch(notifications, /joint-invites/);
   assert.doesNotMatch(notifications, /Joint channel invite/);
   assert.match(app, /jointInvite/);
-  assert.match(app, /\/channels\/joint-invites\/\$\{encodeURIComponent\(jointInviteId\)\}\/accept/);
+  // 8c199b1 (#125): the accept call moved from App.tsx into the
+  // jointChannelInvites util (parameter renamed to inviteId).
+  const invitesUtil = readFileSync(new URL("../src/utils/jointChannelInvites.ts", import.meta.url), "utf8");
+  assert.match(invitesUtil, /\/channels\/joint-invites\/\$\{encodeURIComponent\(inviteId\)\}\/accept/);
 });
 
 test("rail Help and Notification use raft-ui hover triggers", () => {

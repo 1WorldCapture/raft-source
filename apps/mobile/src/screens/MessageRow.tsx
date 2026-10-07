@@ -1,0 +1,431 @@
+import { memo, useEffect, useRef, useState, type ReactNode } from "react";
+import { Animated, Pressable, StyleSheet, View } from "react-native";
+import { Image } from "expo-image";
+import type { MessageAttachment, RaftMessage, ThreadReplyPreview } from "../model/messages";
+import { senderLabel } from "../model/messages";
+import { canRenderSvgNatively } from "../attachments/svgRender";
+import { Avatar } from "../ui/Avatar";
+import { useRaftStore } from "../state/store";
+import { AppText } from "../ui/text";
+import { RichText } from "../ui/richText";
+import { HardShadow } from "../ui/shadow";
+import { color, fontSize, radius, shadowOffset } from "../ui/tokens";
+import type { MessageGroupState } from "./messageGrouping";
+import { agentHasRead, type PeerRead } from "./readReceipt";
+
+export interface LinkedTaskChip {
+  taskNumber: number;
+  taskId?: string;
+  claimedByName?: string | null;
+  status?: string;
+}
+
+const COLLAPSE_AT = 320;
+
+/** Shared message row. Task #14 adds press and long-press on top of this layout. */
+export const MessageRow = memo(function MessageRow({
+  message,
+  group,
+  timeLabel,
+  dayLabel,
+  bodyFontSize,
+  bodyLineHeight,
+  currentUserId,
+  peers,
+  collapseLong,
+  systemCount,
+  systemOpen,
+  systemSummary,
+  saved,
+  linkedTask,
+  threadCountLabel,
+  threadReplies,
+  showDmRead,
+  subtitle,
+  sendingLabel,
+  resendLabel,
+  deleteLabel,
+  downloadingAttachmentId,
+  downloadingLabel,
+  showMoreLabel,
+  collapseLabel,
+  savedLabel,
+  readLabel,
+  onOpenThread,
+  onResend,
+  onDelete,
+  onToggleSystem,
+  onOpenAttachment,
+  onOpenImage,
+  resolveImageUrl,
+  onPressMessage,
+  onLongPressMessage,
+  onPressSender,
+  onLongPressSender,
+  onToggleReaction,
+  onShowReactors,
+  onAddReaction,
+  replyTime,
+  highlighted,
+}: {
+  message: RaftMessage;
+  group: MessageGroupState;
+  timeLabel: string;
+  dayLabel: string;
+  bodyFontSize: number;
+  bodyLineHeight: number;
+  currentUserId?: string;
+  peers: readonly PeerRead[];
+  collapseLong: boolean;
+  systemCount?: number;
+  systemOpen?: boolean;
+  systemSummary?: string;
+  saved?: boolean;
+  linkedTask?: LinkedTaskChip | null;
+  threadCountLabel?: string;
+  threadReplies?: ThreadReplyPreview[];
+  showDmRead?: boolean;
+  subtitle?: string | null;
+  sendingLabel: string;
+  resendLabel: string;
+  deleteLabel: string;
+  downloadingAttachmentId?: string | null;
+  downloadingLabel?: string;
+  showMoreLabel: string;
+  collapseLabel: string;
+  savedLabel: string;
+  readLabel: string;
+  onOpenThread?: (messageId: string) => void;
+  onResend?: (messageId: string) => void;
+  onDelete?: (messageId: string) => void;
+  onToggleSystem?: (messageId: string) => void;
+  onOpenAttachment?: (attachment: MessageAttachment) => void;
+  /** Opens the image viewer with every image of the message and the tapped index. */
+  onOpenImage?: (images: MessageAttachment[], index: number) => void;
+  /** Signed inline URL for image attachments that have no CDN thumbnail. */
+  resolveImageUrl?: (attachment: MessageAttachment, options?: { refresh?: boolean }) => Promise<string | null>;
+  onPressMessage?: (messageId: string) => void;
+  onLongPressMessage?: (messageId: string, x: number, y: number) => void;
+  onPressSender?: (messageId: string) => void;
+  onLongPressSender?: (messageId: string) => void;
+  onToggleReaction?: (messageId: string, emoji: string) => void;
+  onShowReactors?: (messageId: string, emoji: string) => void;
+  onAddReaction?: (messageId: string, x: number, y: number) => void;
+  replyTime?: (createdAt: string) => string;
+  highlighted?: boolean;
+}) {
+  const [tall, setTall] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const system = message.messageType === "system";
+  const images = (message.attachments ?? []).filter(isImage);
+  const files = (message.attachments ?? []).filter((attachment) => !isImage(attachment));
+  const collapsed = collapseLong && tall && !expanded;
+  const ownMessage = Boolean(currentUserId && message.senderId === currentUserId && message.senderType === "user");
+  return (
+    <JumpHighlight active={highlighted === true}>
+    <View>
+      {group.showDayDivider && dayLabel ? (
+        <View style={styles.divider}>
+          <AppText style={styles.dividerLabel}>{dayLabel}</AppText>
+        </View>
+      ) : null}
+      {system ? (
+        systemCount && systemCount > 1 && !systemOpen ? (
+          <Pressable onPress={() => onToggleSystem?.(message.id)}>
+            <AppText style={styles.system}>{systemSummary ?? `${systemCount}`}</AppText>
+          </Pressable>
+        ) : (
+          <AppText style={styles.system}>{timeLabel ? `${timeLabel} ${message.content}` : message.content}</AppText>
+        )
+      ) : (
+        <View style={[styles.row, message.pending === "failed" ? styles.failed : null]}>
+          <View style={styles.avatar}>
+            {group.showAvatar ? (
+              <Pressable
+                delayLongPress={500}
+                onLongPress={() => onLongPressSender?.(message.id)}
+                onPress={() => onPressSender?.(message.id)}
+              >
+                <SenderAvatar message={message} />
+              </Pressable>
+            ) : null}
+          </View>
+          <Pressable
+            delayLongPress={500}
+            onLongPress={(event) => onLongPressMessage?.(message.id, event.nativeEvent.pageX, event.nativeEvent.pageY)}
+            onPress={() => onPressMessage?.(message.id)}
+            style={styles.body}
+          >
+            {group.showAvatar ? (
+              <View>
+                <View style={styles.head}>
+                  <Pressable
+                    delayLongPress={500}
+                    onLongPress={() => onLongPressSender?.(message.id)}
+                    onPress={() => onPressSender?.(message.id)}
+                  >
+                    <AppText style={styles.name}>{senderLabel(message)}</AppText>
+                  </Pressable>
+                  {timeLabel ? <AppText style={styles.time}>{timeLabel}</AppText> : null}
+                </View>
+                {subtitle ? <AppText style={styles.subtitle}>{subtitle}</AppText> : null}
+              </View>
+            ) : null}
+            <View
+              onLayout={(event) => {
+                if (event.nativeEvent.layout.height > COLLAPSE_AT) setTall(true);
+              }}
+              style={collapsed ? styles.clipped : undefined}
+            >
+              <RichText
+                agentRead={(agentId) => ownMessage ? agentHasRead(peers, agentId, message.seq) : null}
+                content={message.content}
+                currentUserId={currentUserId}
+                fontSize={bodyFontSize}
+                lineHeight={bodyLineHeight}
+                mentions={message.mentions}
+              />
+            </View>
+            {tall && collapseLong ? (
+              <Pressable onPress={() => setExpanded((open) => !open)}>
+                <AppText style={styles.more}>{expanded ? collapseLabel : showMoreLabel}</AppText>
+              </Pressable>
+            ) : null}
+            {images.length > 0 ? (
+              <View style={styles.grid}>
+                {images.map((attachment, index) => (
+                  <Pressable key={attachment.id ?? attachment.filename} onPress={() => onOpenImage?.(images, index)}>
+                    <AttachmentImage attachment={attachment} count={images.length} resolve={resolveImageUrl} />
+                  </Pressable>
+                ))}
+              </View>
+            ) : null}
+            {files.map((attachment) => {
+              const downloading = Boolean(attachment.id && downloadingAttachmentId === attachment.id);
+              return (
+                <Pressable
+                  key={attachment.id ?? attachment.filename}
+                  disabled={downloading}
+                  onPress={() => onOpenAttachment?.(attachment)}
+                  style={styles.fileCard}
+                >
+                  <AppText style={styles.file}>{attachment.filename}</AppText>
+                  {downloading ? (
+                    <AppText style={styles.fileMeta}>{downloadingLabel}</AppText>
+                  ) : attachment.sizeBytes ? (
+                    <AppText style={styles.fileMeta}>{formatFileSize(attachment.sizeBytes)}</AppText>
+                  ) : null}
+                </Pressable>
+              );
+            })}
+            <View style={styles.footer}>
+              {linkedTask ? (
+                <View style={[styles.capsule, styles.taskChip]}>
+                  <AppText style={styles.capsuleText}>{linkedTask.claimedByName ? `task #${linkedTask.taskNumber} @${linkedTask.claimedByName}` : `task #${linkedTask.taskNumber}`}</AppText>
+                </View>
+              ) : null}
+              {saved ? (
+                <View style={[styles.capsule, styles.saved]}>
+                  <AppText style={styles.capsuleText}>{savedLabel}</AppText>
+                </View>
+              ) : null}
+              {message.reactions?.map((reaction) => {
+                const mine = reaction.reactedByMe || Boolean(currentUserId && reaction.userIds?.includes(currentUserId));
+                return (
+                  <Pressable
+                    delayLongPress={500}
+                    key={reaction.emoji}
+                    onLongPress={() => onShowReactors?.(message.id, reaction.emoji)}
+                    onPress={() => onToggleReaction?.(message.id, reaction.emoji)}
+                    style={[styles.capsule, mine ? styles.mine : styles.reaction]}
+                  >
+                    <AppText style={styles.capsuleText}>{`${reaction.emoji} ${reaction.count}`}</AppText>
+                  </Pressable>
+                );
+              })}
+              {(message.reactions?.length ?? 0) > 0 ? (
+                <Pressable onPress={(event) => onAddReaction?.(message.id, event.nativeEvent.pageX, event.nativeEvent.pageY)} style={[styles.capsule, styles.reaction]}>
+                  <AppText style={styles.capsuleText}>+</AppText>
+                </Pressable>
+              ) : null}
+              {showDmRead ? <AppText style={styles.read}>{readLabel}</AppText> : null}
+            </View>
+            {onOpenThread && threadCountLabel ? (
+              <Pressable onPress={() => onOpenThread?.(message.id)} style={styles.preview}>
+                <AppText style={styles.previewCount}>{threadCountLabel}</AppText>
+                {threadReplies?.map((reply) => (
+                  <View key={reply.messageId} style={styles.previewRow}>
+                    <Avatar
+                      avatarUrl={reply.senderAvatarUrl}
+                      kind={reply.senderType === "agent" ? "agent" : "human"}
+                      name={reply.senderDisplayName || reply.senderName}
+                      size={16}
+                    />
+                    <AppText numberOfLines={1} style={styles.previewName}>{reply.senderDisplayName || reply.senderName}</AppText>
+                    <AppText numberOfLines={1} style={styles.previewBody}>{reply.preview}</AppText>
+                    {reply.createdAt && replyTime ? <AppText style={styles.previewTime}>{replyTime(reply.createdAt)}</AppText> : null}
+                  </View>
+                ))}
+              </Pressable>
+            ) : null}
+            {message.pending === "sending" ? <AppText style={styles.pending}>{sendingLabel}</AppText> : null}
+            {message.pending === "failed" ? (
+              <View style={styles.retryRow}>
+                <Pressable onPress={() => onResend?.(message.id)}><AppText style={styles.retry}>{resendLabel}</AppText></Pressable>
+                <Pressable onPress={() => onDelete?.(message.id)}><AppText style={styles.retry}>{deleteLabel}</AppText></Pressable>
+              </View>
+            ) : null}
+          </Pressable>
+        </View>
+      )}
+    </View>
+    </JumpHighlight>
+  );
+});
+
+function JumpHighlight({ active, children }: { active: boolean; children: ReactNode }) {
+  const opacity = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    if (!active) {
+      opacity.setValue(0);
+      return;
+    }
+    opacity.setValue(1);
+    const timer = setTimeout(() => {
+      Animated.timing(opacity, { toValue: 0, duration: 400, useNativeDriver: true }).start();
+    }, 3000);
+    return () => clearTimeout(timer);
+  }, [active, opacity]);
+  return (
+    <View>
+      {active ? (
+        <Animated.View pointerEvents="none" style={[styles.highlight, { opacity }]}>
+          <HardShadow offset={shadowOffset.md} style={styles.highlightShadow}>
+            <View style={styles.highlightFace} />
+          </HardShadow>
+        </Animated.View>
+      ) : null}
+      {children}
+    </View>
+  );
+}
+
+function isImage(attachment: MessageAttachment): boolean {
+  const mimeType = attachment.mimeType?.toLowerCase();
+  // SVG only takes a grid cell when a raster preview exists or it fits the
+  // native render cap; oversize SVGs stay file cards ("cannot preview").
+  if (mimeType === "image/svg+xml") {
+    return Boolean(attachment.rasterPreviewUrl || attachment.thumbnailUrl) || canRenderSvgNatively(attachment);
+  }
+  if (mimeType?.startsWith("image/")) return true;
+  return !attachment.mimeType && Boolean(attachment.thumbnailUrl);
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 102.4) / 10} KB`;
+  return `${Math.round(bytes / (1024 * 102.4)) / 10} MB`;
+}
+
+function AttachmentImage({
+  attachment,
+  count,
+  resolve,
+}: {
+  attachment: MessageAttachment;
+  count: number;
+  resolve?: (attachment: MessageAttachment, options?: { refresh?: boolean }) => Promise<string | null>;
+}) {
+  const [uri, setUri] = useState<string | null>(attachment.thumbnailUrl ?? null);
+  const [attempt, setAttempt] = useState(0);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    if (attempt === 0 && attachment.thumbnailUrl) return;
+    if (!resolve) return;
+    let cancelled = false;
+    void resolve(attachment, { refresh: attempt > 0 }).then((url) => {
+      if (!cancelled) setUri(url);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [attachment, attempt, resolve]);
+  // Web caps gallery images at min(22rem, 100vw - 7rem); two or more share the row.
+  const width = count > 1 ? 132 : 240;
+  const ratio = attachment.width && attachment.height ? attachment.height / attachment.width : 0.75;
+  const height = Math.min(Math.round(width * ratio), 320);
+  if (!uri || failed) {
+    return <View style={[styles.imageFrame, styles.imagePlaceholder, { width, height }]}><AppText numberOfLines={2} style={styles.file}>{attachment.filename}</AppText></View>;
+  }
+  return (
+    <View style={[styles.imageFrame, { width, height }]}>
+      <Image
+        contentFit="cover"
+        onError={() => {
+          if (attempt >= 1) {
+            setFailed(true);
+            return;
+          }
+          setUri(null);
+          setAttempt(1);
+        }}
+        source={{ uri }}
+        style={{ width: "100%", height: "100%" }}
+      />
+    </View>
+  );
+}
+
+function SenderAvatar({ message }: { message: RaftMessage }) {
+  const known = useRaftStore((state) => (message.senderId ? state.senderAvatars[message.senderId] : undefined));
+  return (
+    <Avatar
+      name={senderLabel(message)}
+      kind={message.senderType === "agent" ? "agent" : "human"}
+      avatarUrl={message.senderAvatarUrl ?? known ?? null}
+    />
+  );
+}
+
+const styles = StyleSheet.create({
+  divider: { borderBottomColor: color.stone, borderBottomWidth: 2, marginBottom: 8, marginTop: 12 },
+  dividerLabel: { ...fontSize.date, color: color.mutedStrong, fontWeight: "700", letterSpacing: 0.8, textAlign: "center", textTransform: "uppercase" },
+  system: { ...fontSize.time, color: color.muted, fontFamily: "mono", paddingVertical: 6, textAlign: "center" },
+  row: { flexDirection: "row", gap: 12, paddingHorizontal: 8, paddingVertical: 4 },
+  highlight: { bottom: 0, left: 0, position: "absolute", right: 0, top: 0 },
+  highlightShadow: { flex: 1 },
+  highlightFace: { backgroundColor: color.cyanHighlight, borderColor: color.border, borderWidth: 2, flex: 1 },
+  failed: { borderColor: color.red, borderWidth: 2 },
+  avatar: { width: 36 },
+  body: { flex: 1, minWidth: 0 },
+  head: { alignItems: "baseline", flexDirection: "row", gap: 8 },
+  name: { ...fontSize.sender, color: color.ink, fontWeight: "700" },
+  subtitle: { color: color.muted, fontSize: 12, marginBottom: 2 },
+  time: { ...fontSize.time, color: color.muted, fontFamily: "mono" },
+  clipped: { maxHeight: COLLAPSE_AT, overflow: "hidden" },
+  more: { color: color.link, fontSize: 13, fontWeight: "700", marginTop: 4 },
+  grid: { flexDirection: "row", flexWrap: "wrap", gap: 4, marginTop: 6 },
+  thumb: { height: 120, width: 120 },
+  imageFrame: { borderColor: color.border, borderWidth: 2, marginTop: 6, overflow: "hidden" },
+  imagePlaceholder: { alignItems: "center", backgroundColor: color.mutedFill, justifyContent: "center", padding: 8 },
+  fileCard: { borderColor: color.border, borderWidth: 2, marginTop: 6, paddingHorizontal: 8, paddingVertical: 6 },
+  file: { color: color.ink, fontSize: 13, fontWeight: "700" },
+  fileMeta: { color: color.muted, fontSize: 12 },
+  footer: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 6 },
+  capsule: { alignItems: "center", borderRadius: radius.chip, height: 20, justifyContent: "center", paddingHorizontal: 6 },
+  capsuleText: { color: color.ink, fontSize: 12, fontWeight: "700" },
+  taskChip: { backgroundColor: color.yellowSoft, borderColor: color.border, borderWidth: 1 },
+  saved: { backgroundColor: color.orangeSoft, borderColor: color.border, borderWidth: 1 },
+  reaction: { backgroundColor: color.previewSurface },
+  mine: { backgroundColor: color.pinkSoft },
+  read: { ...fontSize.badge, color: color.muted, fontWeight: "700", marginLeft: "auto" },
+  preview: { backgroundColor: color.previewSurface, marginTop: 6, paddingHorizontal: 10, paddingVertical: 8 },
+  previewCount: { color: color.mutedStrong, fontSize: 12.5, fontWeight: "700" },
+  previewRow: { alignItems: "center", flexDirection: "row", gap: 6, marginTop: 4 },
+  previewName: { color: color.mutedStrong, flexShrink: 1, fontSize: 12.5, fontWeight: "700", maxWidth: 96 },
+  previewBody: { color: color.muted, flex: 1, fontSize: 12.5 },
+  previewTime: { color: color.muted, fontSize: 11.5 },
+  pending: { color: color.muted, fontSize: 12, marginTop: 4 },
+  retryRow: { flexDirection: "row", gap: 12, marginTop: 4 },
+  retry: { color: color.red, fontWeight: "700" },
+});
