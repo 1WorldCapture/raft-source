@@ -5777,6 +5777,10 @@ export const mentionDeliveryOccurrences = pgTable("mention_delivery_occurrences"
 }, (t) => [
   uniqueIndex("idx_mention_delivery_occurrences_message_agent").on(t.messageId, t.agentId),
   index("idx_mention_delivery_occurrences_machine_state").on(t.machineIdSnapshot, t.state),
+  // deleteAgent purges by agent_id inside its transaction; without an
+  // agent-leading index every per-agent purge full-scans this table and the
+  // composite (message_id, agent_id) index cannot serve the lookup.
+  index("idx_mention_delivery_occurrences_agent").on(t.agentId),
   // The right-hand side is an AND over TWO columns, and that AND is the hole (@Hipp, PR #6700
   // comment 5359756944, measured on pglite): "right side is false" has two causes — neither column
   // set, or exactly one set — and a biconditional cannot separate them. So a row with
