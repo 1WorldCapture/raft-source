@@ -39,7 +39,7 @@
 5. 上传文件（附件、头像）保存在命名卷 `raft-uploads`（挂载到容器 `/app/uploads`，由 `UPLOADS_DIR` 指定），容器重建不会丢失；备份时要和数据库一起备份它。
 6. 无 SMTP 时账号激活链接打印在 server 容器日志（见 README「离线首跑」）。
 
-`.env` 里的 `SCOPE_ATTESTATION_SECRET` 是可选项：仅当你运行外部 worker（反馈报告/trace 上传）时才需要，未设置时这些接口会报「Scope attestation is not configured」，不影响登录、会话和已注册的 Computer。
+`.env` 里的 `SCOPE_ATTESTATION_SECRET` 是可选项：仅当你运行外部 worker（反馈报告/trace 上传）时才需要，未设置时这些接口会报「Scope attestation is not configured」，不影响登录、会话和已注册的 Computer。更换该值只会让已签发的 attestation token（有效期数分钟）失效。
 
 私有模式（`RAFT_DEPLOYMENT_MODE=private`，compose 已设）下：版本查询读本地 manifest；遥测默认关；官方链接隐藏或可配置替换。
 
