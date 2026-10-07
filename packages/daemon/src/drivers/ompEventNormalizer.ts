@@ -20,6 +20,15 @@ export const OMP_TOOL_OUTPUT_TEXT_LIMIT = 32_000;
 export interface OmpEventMappingState {
   pendingTurnEnd: boolean;
   turnClosed: boolean;
+  /** A run stretch was observed (agent_start) whose turn_end EVENT has not
+   *  reached the APM yet (task #13: rounds whose prompt_result reports
+   *  agentInvoked=false never closed the turn under the old rules, leaving
+   *  the APM "working" forever). session_settled closes unconditionally. */
+  turnEndEventOwed: boolean;
+  /** Whether any assistant text event was emitted for the in-flight message
+   *  (task #13: several providers emit no text_start/delta/end streaming —
+   *  the reply text lands only in message_end.message.content). */
+  messageHasTextEvent: boolean;
   pendingProviderError: string | null;
   providerErrorOwnedByCompaction: boolean;
   thinkingBuffers: Map<number, string>;
@@ -32,6 +41,8 @@ export function createOmpEventMappingState(): OmpEventMappingState {
   return {
     pendingTurnEnd: false,
     turnClosed: false,
+    turnEndEventOwed: false,
+    messageHasTextEvent: false,
     pendingProviderError: null,
     providerErrorOwnedByCompaction: false,
     thinkingBuffers: new Map(),
@@ -116,6 +127,7 @@ export function mapOmpRpcFrameToParsedEvents(frame: object, state: OmpEventMappi
     case "message_update": {
       const message = (frame as WireFrame).message;
       if (!isRecord(message) || message.role !== "assistant") return events;
+      if (type === "message_start") state.messageHasTextEvent = false;
       const update = (frame as WireFrame).assistantMessageEvent;
       if (!isRecord(update)) return events;
       events.push(...mapAssistantMessageEvent(update, state));
@@ -136,6 +148,22 @@ export function mapOmpRpcFrameToParsedEvents(frame: object, state: OmpEventMappi
           usageKind: "per_turn",
           attrs: usageAttrs,
         });
+      }
+
+      // Task #13: some providers never stream text_start/text_delta/text_end —
+      // the reply text lands only in message_end.message.content. Emit one
+      // text event here when nothing streamed, or the activity feed and
+      // trajectory never see assistant replies at all.
+      if (!state.messageHasTextEvent && Array.isArray(message.content)) {
+        const text = message.content
+          .filter((block): block is Record<string, unknown> => isRecord(block) && block.type === "text")
+          .map((block) => (typeof block.text === "string" ? block.text : ""))
+          .filter((text) => text.length > 0)
+          .join("");
+        if (text.length > 0) {
+          state.messageHasTextEvent = true;
+          events.push({ kind: "text", text });
+        }
       }
 
       if (message.stopReason === "error") {
@@ -240,6 +268,7 @@ export function mapOmpRpcFrameToParsedEvents(frame: object, state: OmpEventMappi
       // agent_start arrives BEFORE that flush — clearing the pending end here
       // would strand the turn.
       state.turnClosed = false;
+      state.turnEndEventOwed = true;
       return events;
     }
     case "prompt_result": {
@@ -253,8 +282,11 @@ export function mapOmpRpcFrameToParsedEvents(frame: object, state: OmpEventMappi
         }
         return events;
       }
-      // Exactly one turn_end per turn: sessionSettled=true closes now, false
-      // holds for session_settled (background work may still wake the run).
+      // An agent-invoked prompt obliges exactly one turn_end event (task #13):
+      // sessionSettled=true closes now, false holds for session_settled
+      // (background work may still wake the run), and when the completion
+      // carries agentInvoked=false the session_settled closer settles the debt.
+      state.turnEndEventOwed = true;
       if (state.turnClosed) return events;
       state.pendingTurnEnd = true;
       const error = (frame as WireFrame).error;
@@ -266,12 +298,24 @@ export function mapOmpRpcFrameToParsedEvents(frame: object, state: OmpEventMappi
       if ((frame as WireFrame).sessionSettled === true) {
         state.pendingTurnEnd = false;
         state.turnClosed = true;
-        events.push({ kind: "turn_end" });
+        if (state.turnEndEventOwed) {
+          state.turnEndEventOwed = false;
+          events.push({ kind: "turn_end" });
+        }
       }
       return events;
     }
     case "session_settled": {
-      if (state.pendingTurnEnd) {
+      // Task #13: close unconditionally whenever a run stretch was observed.
+      // Rounds whose prompt_result reports agentInvoked=false never set
+      // pendingTurnEnd, so the old pendingTurnEnd-only guard starved the APM
+      // of the turn_end event and the status stayed "working" forever.
+      if (state.turnEndEventOwed) {
+        state.turnEndEventOwed = false;
+        state.pendingTurnEnd = false;
+        state.turnClosed = true;
+        events.push({ kind: "turn_end" });
+      } else if (state.pendingTurnEnd) {
         state.pendingTurnEnd = false;
         state.turnClosed = true;
         events.push({ kind: "turn_end" });
@@ -335,6 +379,7 @@ function mapAssistantMessageEvent(update: Record<string, unknown>, state: OmpEve
       const events: ParsedEvent[] = [];
       if (!state.announcedTextIndexes.has(index)) {
         state.announcedTextIndexes.add(index);
+        state.messageHasTextEvent = true;
         events.push({ kind: "text", text: "" });
       }
       return events;
@@ -343,6 +388,7 @@ function mapAssistantMessageEvent(update: Record<string, unknown>, state: OmpEve
       const events: ParsedEvent[] = [];
       if (!state.announcedTextIndexes.has(index)) {
         state.announcedTextIndexes.add(index);
+        state.messageHasTextEvent = true;
         events.push({ kind: "text", text: "" });
       }
       if (typeof update.delta === "string" && update.delta.length > 0) {
@@ -355,6 +401,7 @@ function mapAssistantMessageEvent(update: Record<string, unknown>, state: OmpEve
       const text = typeof update.content === "string" && update.content.length > 0 ? update.content : buffered;
       state.textBuffers.delete(index);
       state.announcedTextIndexes.delete(index);
+      if (text) state.messageHasTextEvent = true;
       return text ? [{ kind: "text", text }] : [];
     }
     case "error": {
@@ -385,7 +432,8 @@ function mapAssistantMessageEvent(update: Record<string, unknown>, state: OmpEve
  * rule is testable against synthetic frames.
  */
 export function closeOmpTurnOnProcessExit(state: OmpEventMappingState, reason: string): ParsedEvent[] {
-  if (state.turnClosed || !state.pendingTurnEnd) return [];
+  if (state.turnClosed || (!state.pendingTurnEnd && !state.turnEndEventOwed)) return [];
+  state.turnEndEventOwed = false;
   state.turnClosed = true;
   state.pendingTurnEnd = false;
   return [

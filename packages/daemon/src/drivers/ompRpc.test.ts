@@ -5,7 +5,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
-import { OmpDriver, OmpRpcProcessExitedError, OmpRpcProtocolError, OmpRpcRequestTimeoutError } from "./omp.js";
+import { OmpDriver, OmpRpcProcessExitedError, OmpRpcProtocolError, OmpRpcRequestTimeoutError, setTurnHoldTimeoutForTesting } from "./omp.js";
 import type { ParsedEvent, SpawnContext } from "./types.js";
 
 const execFileAsync = promisify(execFile);
@@ -498,7 +498,14 @@ process.stdin.on("data", (chunk) => {
     if (frame.type === "negotiate_protocol") {
       send({ id: frame.id, type: "response", command: "negotiate_protocol", success: true, data: { protocolVersion: 2 } });
     } else if (frame.type === "get_state") {
-      send({ id: frame.id, type: "response", command: "get_state", success: true, data: { sessionId, sessionFile: "/tmp/s.jsonl" } });
+      send({ id: frame.id, type: "response", command: "get_state", success: true, data: { sessionId, sessionFile: "/tmp/s.jsonl", ...(mode === "hold-turn" ? { isSettled: true } : {}) } });
+    } else if (mode === "hold-turn" && frame.type === "prompt") {
+      // Task #13: the run completes with a HELD turn — prompt_result reports
+      // sessionSettled=false and session_settled never arrives; the driver's
+      // hold watchdog must confirm idleness via get_state and close.
+      send({ id: frame.id, type: "response", command: "prompt", success: true, data: {} });
+      send({ type: "prompt_result", id: frame.id, agentInvoked: true, status: "completed", sessionSettled: false });
+      return;
     } else if (refused && (frame.type === "prompt" || frame.type === "steer")) {
       send({ id: frame.id, type: "response", command: frame.type, success: false, error: "model not available" });
       refused = false;
@@ -535,10 +542,14 @@ async function startSessionFake(
     extraArgs: [scriptPath, mode],
   });
 
+  const harnessEvents: ParsedEvent[] = [];
+  driver.setEventSink?.((sinked) => {
+    for (const event of sinked) harnessEvents.push(event);
+  });
   const harness: SessionHarness = {
     driver,
     proc,
-    events: [],
+    events: harnessEvents,
     sleep: (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
     waitUntil: async (predicate: () => boolean, ms = 3000) => {
       const started = Date.now();
@@ -1049,6 +1060,9 @@ test("managed tools ride the ready chain: set_host_tools lands before get_state 
   const harness = await startHostToolsFake();
   try {
     await harness.waitUntil(() => harness.driver.isProtocolSettled);
+    // The spawn_prompt carrier fires on whenReady — AFTER isProtocolSettled —
+    // so wait for the prompt frame instead of racing it (#191 timing).
+    await harness.waitUntil(() => existsSync(harness.frameLogPath) && readJsonLines(harness.frameLogPath).some((frame) => frame.type === "prompt"));
     const frames = readJsonLines(harness.frameLogPath);
     const types = frames.map((frame) => frame.type as string);
     const negotiate = types.indexOf("negotiate_protocol");
@@ -1346,4 +1360,48 @@ process.stdin.on("data", () => {});
     },
     "the failure must surface quickly instead of waiting out the ready timer",
   );
+});
+
+
+// ── Task #13: encoder observation set + held-turn watchdog ──────────────
+
+test("assistant streaming frames count as run-in-progress for the encoder (task #13)", async () => {
+  const harness = await startSessionFake("echo", null, { prompt: "" });
+  try {
+    await harness.waitUntil(() => harness.driver.isProtocolSettled);
+    // Only assistant streaming has been observed — no turn-lifecycle frame yet.
+    harness.driver.parseLine(JSON.stringify({ type: "message_start", message: { role: "assistant", content: [] } }));
+    harness.driver.parseLine(JSON.stringify({
+      type: "message_update",
+      message: { role: "assistant" },
+      assistantMessageEvent: { type: "thinking_start", contentIndex: 0 },
+    }));
+    const typeOf = (line: string | null): string => (JSON.parse(line ?? "{}") as { type?: string }).type ?? "?";
+    const busy = harness.driver.encodeStdinMessage("follow-up", null, { mode: "busy" });
+    assert.equal(typeOf(busy), "steer", "a busy delivery during assistant streaming must ride the run as a steer");
+    harness.proc.stdin?.write((busy ?? "") + "\n");
+    await harness.sleep(120);
+  } finally {
+    harness.driver.stop({ sigtermGraceMs: 100 });
+  }
+});
+
+test("a held turn is force-closed after the watchdog confirms idleness (task #13)", async () => {
+  setTurnHoldTimeoutForTesting(300);
+  const harness = await startSessionFake("hold-turn", null, { prompt: "" });
+  try {
+    await harness.waitUntil(() => harness.driver.isProtocolSettled);
+    const encoded = harness.driver.encodeStdinMessage("run once", null, { mode: "idle" });
+    harness.proc.stdin?.write((encoded ?? "") + "\n");
+
+    // The fake holds the turn (sessionSettled=false, no session_settled); the
+    // watchdog must confirm isSettled via get_state and emit turn_end.
+    await harness.waitUntil(() => harness.events.some((event) => event.kind === "turn_end"), 5000);
+    const turnEnds = harness.events.filter((event) => event.kind === "turn_end").length;
+    assert.equal(turnEnds, 1, "exactly one closure for the held turn");
+    assert.ok(harness.driver.isRunInProgress() === false, "the run must read as closed after the watchdog");
+  } finally {
+    setTurnHoldTimeoutForTesting(null);
+    harness.driver.stop({ sigtermGraceMs: 100 });
+  }
 });

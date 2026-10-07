@@ -381,6 +381,18 @@ interface OmpDetectCache {
  * would miss upstream storage moves.
  */
 const OMP_DETECT_CACHE_TTL_MS = 10 * 60_000;
+/**
+ * Task #13 fallback: how long a prompt_result-held turn (sessionSettled=false)
+ * may wait for `session_settled` before the driver confirms idleness via
+ * get_state and closes the turn itself. omp's own settled predicate backs
+ * `isSettled`, so a confirmed-idle force close cannot race a real run.
+ */
+let OMP_TURN_HOLD_TIMEOUT_MS = 120_000;
+
+/** Test seam: shrink the held-turn watchdog delay (task #13). */
+export function setTurnHoldTimeoutForTesting(ms: number | null): void {
+  OMP_TURN_HOLD_TIMEOUT_MS = ms ?? 120_000;
+}
 let ompDetectCache: OmpDetectCache | null = null;
 let ompDetectInFlight: Promise<OmpDetectResult> | null = null;
 
@@ -760,6 +772,7 @@ export class OmpDriver implements RuntimeDriver {
   private requestCounter = 0;
   private pending = new Map<string, PendingOmpRpcRequest>();
   private readyTimer: NodeJS.Timeout | null = null;
+  private turnHoldTimer: NodeJS.Timeout | null = null;
   private stderrTail = "";
   private readyDeferred: { promise: Promise<void>; resolve: () => void; reject: (error: Error) => void } | null = null;
   private eventState: OmpEventMappingState = createOmpEventMappingState();
@@ -792,6 +805,19 @@ export class OmpDriver implements RuntimeDriver {
    *  handshake settles (the spawn_prompt carrier — omp has no spawn-time
    *  prompt flag, so the driver must forward it itself). */
   private startupPrompt: string | null = null;
+
+  /**
+   * Task #13: outlet for events produced OUTSIDE parseLine's return channel
+   * (the held-turn watchdog's synthetic closure). The session machinery
+   * installs it at attach so async closures reach the APM promptly instead of
+   * waiting for a next wire frame that may never come on an idle session.
+   */
+  private eventSink: ((events: ParsedEvent[]) => void) | null = null;
+
+  /** Install/uninstall the async event outlet (called by the session machinery). */
+  setEventSink(sink: ((events: ParsedEvent[]) => void) | null): void {
+    this.eventSink = sink;
+  }
 
   // Raft integration (task #5): launch files, managed MCP host tools.
   private systemPromptPath: string | null = null;
@@ -974,6 +1000,7 @@ export class OmpDriver implements RuntimeDriver {
     this.requestCounter = 0;
     this.pending.clear();
     this.clearReadyTimer();
+    this.clearTurnHoldWatch();
     this.stderrTail = "";
     this.ready = false;
     this.protocolVersion = 0;
@@ -1278,6 +1305,61 @@ export class OmpDriver implements RuntimeDriver {
   }
 
   parseLine(line: string): ParsedEvent[] {
+    const events = this.parseLineInner(line);
+    this.syncTurnHoldWatch();
+    return events;
+  }
+
+  /**
+   * Task #13 fallback watchdog: a prompt_result with sessionSettled=false
+   * holds the turn open until `session_settled`. If that frame never comes
+   * (observed in production — the APM stayed "working" for hours), confirm
+   * idleness with get_state (isSettled uses omp's own settled predicate) and
+   * close the turn through the normal session_settled path.
+   */
+  private syncTurnHoldWatch(): void {
+    if (this.eventState.pendingTurnEnd) {
+      if (!this.turnHoldTimer) {
+        const timer = setTimeout(() => {
+          this.turnHoldTimer = null;
+          void this.checkHeldTurnSettled();
+        }, OMP_TURN_HOLD_TIMEOUT_MS);
+        timer.unref?.();
+        this.turnHoldTimer = timer;
+      }
+      return;
+    }
+    if (this.turnHoldTimer) {
+      clearTimeout(this.turnHoldTimer);
+      this.turnHoldTimer = null;
+    }
+  }
+
+  private async checkHeldTurnSettled(): Promise<void> {
+    if (!this.process || !this.eventState.pendingTurnEnd) return;
+    try {
+      const response = await this.request({ type: "get_state" });
+      if (!this.eventState.pendingTurnEnd) return;
+      const data = response.data as { isSettled?: unknown } | undefined;
+      if (response.success && data?.isSettled === true) {
+        // Semantic session_settled: get_state.isSettled is documented as the
+        // same predicate. Flowing it through parseLine keeps the exactly-once
+        // turn accounting and the queued-event ordering intact; the sink
+        // delivers the closure even though no wire frame follows on an idle
+        // session.
+        const events = this.parseLine(JSON.stringify({ type: "session_settled", synthetic: "turn_hold_timeout" }));
+        if (events.length > 0) this.eventSink?.(events);
+        return;
+      }
+    } catch {
+      // The request failed (process likely gone): the exit path closes the turn.
+      return;
+    }
+    // Still busy per omp — keep watching while the hold persists.
+    this.syncTurnHoldWatch();
+  }
+
+  private parseLineInner(line: string): ParsedEvent[] {
     if (!this.process) return [];
 
     // Events produced before the machinery attached (the resume handshake's
@@ -1303,10 +1385,13 @@ export class OmpDriver implements RuntimeDriver {
     }
 
     const type = (frame as { type?: unknown }).type;
-    if (type === "agent_start" || type === "turn_start" || type === "turn_end" || type === "prompt_result" || type === "session_settled") {
+    if (type === "agent_start" || type === "turn_start" || type === "turn_end" || type === "prompt_result" || type === "session_settled" || type === "message_start" || type === "message_update") {
       // Task #7: the delivery encoder keys on whether omp's run state has
       // been observed at all (see encodeStdinMessage) — any turn-lifecycle
-      // frame counts as an observation.
+      // frame counts as an observation. Task #13: message_start/message_update
+      // too — a run streams assistant deltas BEFORE its first turn frame, and
+      // a busy delivery in that window used to encode as a duplicate prompt
+      // (omp refuses concurrent prompts, so the message was lost).
       this.turnFramesObserved = true;
     }
     if (type === "ready") {
@@ -1435,6 +1520,7 @@ export class OmpDriver implements RuntimeDriver {
     sigtermTimer.unref?.();
 
     this.process = null;
+    this.clearTurnHoldWatch();
     this.abortHostToolCalls();
     failPending();
   }
@@ -1707,6 +1793,13 @@ export class OmpDriver implements RuntimeDriver {
     if (this.readyTimer) {
       clearTimeout(this.readyTimer);
       this.readyTimer = null;
+    }
+  }
+
+  private clearTurnHoldWatch(): void {
+    if (this.turnHoldTimer) {
+      clearTimeout(this.turnHoldTimer);
+      this.turnHoldTimer = null;
     }
   }
 

@@ -489,6 +489,13 @@ export interface RuntimeDriver {
   readonly consumesSpawnPrompt?: boolean;
 
   /**
+   * Install an outlet for events produced outside parseLine's return channel
+   * (async closures such as omp's held-turn watchdog). Optional: drivers
+   * whose events always flow through parseLine need not implement it.
+   */
+  setEventSink?(sink: ((events: ParsedEvent[]) => void) | null): void;
+
+  /**
    * Whether the runtime keeps a live process that can accept follow-up messages
    * over stdin while the daemon keeps it alive.
    */

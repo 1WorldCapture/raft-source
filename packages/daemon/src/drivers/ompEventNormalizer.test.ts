@@ -276,3 +276,66 @@ function ompToolTextLimit(): number {
   // Kept as a function to avoid importing the constant twice in the assert.
   return 32_000;
 }
+
+// ── Task #13: turn closure must reach the APM for every real round ──────
+
+test("task #13: agentInvoked=false round still closes exactly once via session_settled", () => {
+  const state = createOmpEventMappingState();
+  // Production repro: the run opens (agent_start), streams, and the
+  // completion reports agentInvoked=false — the old rules emitted nothing and
+  // the APM stayed "working" forever.
+  mapOmpRpcFrameToParsedEvents({ type: "agent_start" }, state);
+  mapOmpRpcFrameToParsedEvents({ type: "turn_start" }, state);
+  mapOmpRpcFrameToParsedEvents({ type: "turn_end" }, state);
+  const settled = mapOmpRpcFrameToParsedEvents({ type: "session_settled" }, state);
+  assert.deepEqual(settled.map((event) => event.kind), ["turn_end"], "session_settled must close an observed stretch");
+
+  const again = mapOmpRpcFrameToParsedEvents({ type: "session_settled" }, state);
+  assert.deepEqual(again, [], "the closed stretch must not end twice");
+});
+
+test("task #13: session_settled without any observed run emits nothing", () => {
+  const state = createOmpEventMappingState();
+  const settled = mapOmpRpcFrameToParsedEvents({ type: "session_settled" }, state);
+  assert.deepEqual(settled, [], "a cold-start settled frame is not a turn boundary");
+});
+
+test("task #13: message_end fills the text gap when nothing streamed", () => {
+  const state = createOmpEventMappingState();
+  mapOmpRpcFrameToParsedEvents(
+    { type: "message_start", message: { role: "assistant", content: [] } },
+    state,
+  );
+  const end = mapOmpRpcFrameToParsedEvents(
+    {
+      type: "message_end",
+      message: {
+        role: "assistant",
+        stopReason: "stop",
+        content: [{ type: "text", text: "pong" }],
+      },
+    },
+    state,
+  );
+  const texts = end.filter((event) => event.kind === "text").map((event) => (event as { text?: string }).text);
+  assert.deepEqual(texts, ["pong"], "the reply must reach the activity feed even without streaming events");
+
+  // A message whose text already streamed must not produce a duplicate.
+  mapOmpRpcFrameToParsedEvents({ type: "message_start", message: { role: "assistant", content: [] } }, state);
+  mapOmpRpcFrameToParsedEvents(
+    { type: "message_update", message: { role: "assistant" }, assistantMessageEvent: { type: "text_start", contentIndex: 0 } },
+    state,
+  );
+  const end2 = mapOmpRpcFrameToParsedEvents(
+    {
+      type: "message_end",
+      message: {
+        role: "assistant",
+        stopReason: "stop",
+        content: [{ type: "text", text: "streamed" }],
+      },
+    },
+    state,
+  );
+  assert.deepEqual(end2.filter((event) => event.kind === "text"), [], "streamed text must not be duplicated at message_end");
+});
