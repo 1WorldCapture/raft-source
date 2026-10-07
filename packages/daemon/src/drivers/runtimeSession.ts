@@ -132,6 +132,11 @@ export class ChildProcessRuntimeSession implements RuntimeSession {
     const { process } = await this.driver.spawn(launchCtx);
     this.process = process;
     this.attachProcess(process);
+    // Task #13: give the driver an outlet for events produced outside the
+    // parseLine return channel (async held-turn closures).
+    this.driver.setEventSink?.((events) => {
+      for (const event of events) this.events.emit("runtime_event", event);
+    });
     return { ok: true, acceptedAs: "prompt" };
   }
 
