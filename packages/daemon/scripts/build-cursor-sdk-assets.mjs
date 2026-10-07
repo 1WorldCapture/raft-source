@@ -590,12 +590,22 @@ function verifyStaged() {
     }
   }
 
-  const nodeBin = path.join(targetDir, "node", "bin", "node");
-  const version = runCapture(nodeBin, ["--version"]).trim();
-  if (version !== `v${NODE_VERSION}`) fail(`staged node reports ${version}, expected v${NODE_VERSION}`);
+  // The staged node can only be executed on its own platform/arch. A
+  // cross-target verify (e.g. a Linux box checking darwin assets) relies on
+  // the manifest hashes above — the node distribution is sha256-pinned to the
+  // official checksum — and skips the execution probe.
+  let nodeNote;
+  if (flags.target === `${process.platform}-${process.arch}`) {
+    const nodeBin = path.join(targetDir, "node", "bin", "node");
+    const version = runCapture(nodeBin, ["--version"]).trim();
+    if (version !== `v${NODE_VERSION}`) fail(`staged node reports ${version}, expected v${NODE_VERSION}`);
+    nodeNote = `node ${version}`;
+  } else {
+    nodeNote = `node execution probe skipped (cross-target from ${process.platform}-${process.arch})`;
+  }
 
   verifyNoSdkBundled();
-  log(`verified ${Object.keys(pinnedFiles).length} files; node ${version}; target ${flags.target}`);
+  log(`verified ${Object.keys(pinnedFiles).length} files; ${nodeNote}; target ${flags.target}`);
 }
 
 function verifyNoSdkBundled() {
