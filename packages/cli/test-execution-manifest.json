@@ -4,7 +4,7 @@
   "runner": "node --import tsx --test",
   "testFileGlob": "src/**/*.test.ts",
   "fileCount": 105,
-  "total": 927,
+  "total": 928,
   "files": [
     {
       "file": "src/agentApiNoBypass.test.ts",
@@ -29,7 +29,7 @@
     },
     {
       "file": "src/agentApiPath.test.ts",
-      "count": 13,
+      "count": 14,
       "cases": [
         {
           "name": "contract path helpers encode typed query objects through route schemas"
@@ -69,6 +69,9 @@
         },
         {
           "name": "requestContractAgentRoute preserves a typed known-response proxy failure"
+        },
+        {
+          "name": "transportUnavailableHint: ECONNREFUSED (any depth) explains daemon availability, other codes stay silent"
         }
       ]
     },
