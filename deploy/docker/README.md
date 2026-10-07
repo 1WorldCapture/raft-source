@@ -75,7 +75,7 @@ compose 把 `${RAFT_HTTP_PORT:-18443}` 映射到 443。`RAFT_PUBLIC_ORIGIN` 必�
 
 **证书三种来源**：
 1. 企业 CA 签发（内网已有 PKI 时）；
-2. **`tailscale cert <机器名>.ts.net`（推荐）**：owner 已确认 Tailscale 属于可用形态，
+2. **`tailscale cert <机器名>.ts.net`（推荐）**：Tailscale 属于可用形态，
    Let's Encrypt 签发、浏览器与 Node 均信任、90 天有效；
 3. 自签证书（兜底）：浏览器需手动信任，**Computer/CLI 侧要额外配置**
    `NODE_EXTRA_CA_CERTS=/path/to/your-ca.pem` 后再执行添加命令，否则守护进程
