@@ -40,6 +40,16 @@ export function parseComputerProcesses(output: string): ComputerProcess[] {
   });
 }
 
+const PS_FORMAT = "pid=,ppid=,pgid=,lstart=,command=";
+
+/** `ps eww` appends the environment after the command. macOS (BSD ps) takes
+ * the combined `-axo` form; procps on Linux rejects mixing the BSD `eww`
+ * modifiers with a dashed `-x` ("must set personality to get -x option"), so
+ * it needs the BSD flags undashed. The darwin argv stays byte-identical. */
+export function psArgs(platform: NodeJS.Platform = process.platform): string[] {
+  return platform === "darwin" ? ["eww", "-axo", PS_FORMAT] : ["eww", "ax", "-o", PS_FORMAT];
+}
+
 export async function readComputerProcesses(home: string): Promise<ComputerProcessSnapshot> {
   const rootPids: number[] = [];
   const service = await readPidFile({ readFile }, path.join(home, "computer", "run", "service.pid"));
@@ -55,7 +65,7 @@ export async function readComputerProcesses(home: string): Promise<ComputerProce
   }
   // Never turn a failed scan into an empty/all-clear result. The timeout also
   // bounds a stuck ps invocation. Raw environment output never leaves here.
-  const { stdout } = await execFileAsync("ps", ["eww", "-axo", "pid=,ppid=,pgid=,lstart=,command="], {
+  const { stdout } = await execFileAsync("ps", psArgs(), {
     timeout: 2_000, killSignal: "SIGKILL", maxBuffer: 16 * 1024 * 1024,
   });
   const rows = parseComputerProcesses(stdout);

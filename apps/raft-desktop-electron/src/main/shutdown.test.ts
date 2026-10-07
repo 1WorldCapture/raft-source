@@ -234,3 +234,10 @@ test("timeout retry failure and late processes both prevent a successful quit", 
     snapshot: async () => ({ rootPids: [], rows: finished ? [row(102, { agent: true, root: false })] : [] }),
   }), false);
 });
+
+test("ps argv: darwin keeps the combined -axo form, other platforms use undashed BSD flags", async () => {
+  const { psArgs } = await import("./computerProcesses.ts");
+  const fmt = "pid=,ppid=,pgid=,lstart=,command=";
+  assert.deepEqual(psArgs("darwin"), ["eww", "-axo", fmt]);
+  assert.deepEqual(psArgs("linux"), ["eww", "ax", "-o", fmt]);
+});
