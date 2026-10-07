@@ -125,6 +125,10 @@ export interface CursorSdkRunOptions {
   model?: string;
   /** Managed MCP servers re-injected on every submit. */
   mcpServers?: Record<string, { url: string }>;
+  /** Raft catalog reasoning effort from the agent config (host maps it to the model's own value). */
+  reasoningEffort?: string;
+  /** Fast-mode switch from the agent config. */
+  fast?: boolean;
   maxTurns?: number;
   /**
    * Explicit settings-source policy forwarded to the SDK when supported.

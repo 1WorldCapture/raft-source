@@ -624,6 +624,39 @@ test("PATCH /agents/:id preserves host-discovered Codex preset model in runtime 
     assert.equal(updated?.model, "gpt-5.6-sol");
 });
 
+test("PATCH /agents/:id persists Cursor SDK reasoning effort and fast mode, and rejects an unknown effort", async ({ app }) => {
+    const owner = await seedUser("cursor-sdk-tiers-owner@slock.test", "cursor-sdk-tiers-owner");
+    const server = await createServer("Cursor SDK Tiers Server", "cursor-sdk-tiers-server", owner.id);
+    const token = await tokenForHuman(owner.email);
+    const agent = await createAgent(server.id, "cursor-sdk-tiers-agent", { runtime: "cursor-sdk", model: "default" });
+    const patch = (reasoningEffort: string | null, mode: { kind: "default" | "fast" }) => fetch(`${app.baseUrl}/api/agents/${agent.id}`, {
+      method: "PATCH",
+      headers: { ...authHeaders(token, server.id), "Content-Type": "application/json" },
+      body: JSON.stringify({
+        runtime: "cursor-sdk",
+        model: "claude-opus-5-5",
+        runtimeConfig: {
+          version: 1, runtime: "cursor-sdk", model: { kind: "custom", name: "claude-opus-5-5" },
+          mode, reasoningEffort, envVars: null,
+        },
+        reasoningEffort,
+      }),
+    });
+
+    const ok = await patch("xhigh", { kind: "fast" });
+    assert.equal(ok.status, 200);
+    const body = await ok.json() as { reasoningEffort: string | null; runtimeConfig: { mode: { kind: string }; reasoningEffort: string | null } };
+    assert.equal(body.reasoningEffort, "xhigh");
+    assert.deepEqual(body.runtimeConfig.mode, { kind: "fast" });
+    assert.equal(body.runtimeConfig.reasoningEffort, "xhigh");
+    const stored = await getAgent(agent.id);
+    assert.equal(stored?.reasoningEffort, "xhigh");
+
+    // Efforts outside the shared catalog (e.g. the SDK's raw "extra-high") never reach persistence.
+    const bad = await patch("extra-high", { kind: "default" });
+    assert.equal(bad.status, 400);
+});
+
 test("external agent create pins sentinel runtime, avoids machine assignment, and projects external", async ({ app }) => {
     const db = getDb();
     const owner = await seedUser("external-create-owner@slock.test", "external-create-owner");

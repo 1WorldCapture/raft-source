@@ -598,6 +598,8 @@ export class CursorSdkRuntimeSession implements RuntimeSession {
       launchFields.model && launchFields.model !== "default" ? launchFields.model : undefined;
     const runOptions: CursorSdkRunOptions = {
       ...(model ? { model } : {}),
+      ...(launchFields.reasoningEffort ? { reasoningEffort: launchFields.reasoningEffort } : {}),
+      ...(launchFields.mode.kind === "fast" ? { fast: true } : {}),
       ...(managedMcp
         ? { mcpServers: { [managedMcp.name]: { url: managedMcp.url } } }
         : {}),

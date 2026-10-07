@@ -167,9 +167,20 @@ export async function detectCursorSdkModels(input: { slockHome?: string; signal?
     const reply = await (deps.auth ?? callNativeCursorAuth)({ kind: "models", apiKey: lease.apiKey, signal: input.signal });
     if (reply.principalId !== lease.principalId || !Array.isArray(reply.models)) return { kind: "error", retryable: false };
     const models = reply.models.flatMap((v: unknown) => {
-      const row = v as { id?: unknown; label?: unknown };
-      return typeof row?.id === "string" && row.id.length > 0 && row.id.length <= 256
-        ? [{ id: row.id, label: typeof row.label === "string" ? row.label : row.id, verified: "launchable" as const }] : [];
+      const row = v as { id?: unknown; label?: unknown; supportedReasoningEfforts?: unknown; defaultReasoningEffort?: unknown };
+      if (typeof row?.id !== "string" || row.id.length === 0 || row.id.length > 256) return [];
+      // Tier metadata is only trusted when it is a list of short strings; the
+      // default must be one of them (same rule the server applies).
+      const efforts = Array.isArray(row.supportedReasoningEfforts)
+        ? [...new Set(row.supportedReasoningEfforts.filter((e: unknown): e is string => typeof e === "string" && e.length > 0 && e.length <= 64))]
+        : [];
+      const defaultEffort = typeof row.defaultReasoningEffort === "string" && efforts.includes(row.defaultReasoningEffort)
+        ? row.defaultReasoningEffort : undefined;
+      return [{
+        id: row.id, label: typeof row.label === "string" ? row.label : row.id, verified: "launchable" as const,
+        ...(efforts.length > 0 ? { supportedReasoningEfforts: efforts } : {}),
+        ...(defaultEffort ? { defaultReasoningEffort: defaultEffort } : {}),
+      }];
     });
     return models.length ? { kind: "live", value: { models, default: models.find((m) => m.id === "default")?.id ?? models[0].id } } : { kind: "error", retryable: true };
   } catch (error) {

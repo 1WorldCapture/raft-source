@@ -67,6 +67,30 @@ test("binding refuses a changed principal and model lookup uses the bound exact 
   } finally { await f.cleanup(); }
 });
 
+test("model detection passes effort metadata through and drops malformed tier fields", async () => {
+  const f = await fixture();
+  try {
+    const inner = f.deps.auth!;
+    f.deps.auth = async (call) => {
+      const reply = await inner(call);
+      return call.kind === "models" ? { ...reply, models: [
+        { id: "tiered", label: "Tiered", supportedReasoningEfforts: ["low", "high", "high", "", 7], defaultReasoningEffort: "high" },
+        { id: "bad-default", label: "Bad", supportedReasoningEfforts: ["low"], defaultReasoningEffort: "ultra" },
+        { id: "plain", label: "Plain", supportedReasoningEfforts: "low" },
+      ] } as typeof reply : reply;
+    };
+    await resolveCursorCredentialLease({ slockHome: f.slockHome }, f.deps);
+    const outcome = await detectCursorSdkModels({ slockHome: f.slockHome }, f.deps);
+    assert.equal(outcome.kind, "live");
+    if (outcome.kind !== "live") return;
+    assert.deepEqual(outcome.value.models, [
+      { id: "tiered", label: "Tiered", verified: "launchable", supportedReasoningEfforts: ["low", "high"], defaultReasoningEffort: "high" },
+      { id: "bad-default", label: "Bad", verified: "launchable", supportedReasoningEfforts: ["low"] },
+      { id: "plain", label: "Plain", verified: "launchable" },
+    ]);
+  } finally { await f.cleanup(); }
+});
+
 test("disconnect leaves shared login intact and persists no-auto-reconnect intent", async () => {
   const f = await fixture();
   try {

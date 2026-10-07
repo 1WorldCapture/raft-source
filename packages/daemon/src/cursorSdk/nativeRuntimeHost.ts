@@ -11,8 +11,14 @@ import {
   type CursorSdkRunEventPayload,
   type CursorSdkWireError,
 } from "./protocol.js";
+import { buildModelSelection, deriveModelTiers, type ModelSelection, type ModelTiers, type SdkModelListItem } from "./modelTiers.js";
 
-type Vendor = Pick<typeof import("@cursor/sdk"), "Agent" | "JsonlLocalAgentStore">;
+type Vendor = Pick<typeof import("@cursor/sdk"), "Agent" | "JsonlLocalAgentStore"> & {
+  /** Optional so minimal SDK stand-ins (tests) keep working; absent = bare model id. */
+  Cursor?: { models: { list(options: { apiKey: string }): Promise<readonly SdkModelListItem[]> } };
+};
+/** Bound the one models.list lookup so a slow backend cannot stall host init. */
+const MODEL_TIERS_LOOKUP_TIMEOUT_MS = 8_000;
 export interface NativeCursorHostDeps {
   loadSdk?: () => Promise<Vendor>;
   post(message: CursorSdkHostToDriverMessage): void;
@@ -21,6 +27,8 @@ export interface NativeCursorHostDeps {
   steerTimeoutMs?: number;
   env?: NodeJS.ProcessEnv;
   lock?: (root: string) => Promise<() => Promise<void>>;
+  /** Diagnostics for dropped tier requests (default: stderr). */
+  warn?: (message: string) => void;
 }
 
 function errorCode(error: unknown): CursorSdkWireError {
@@ -113,6 +121,7 @@ interface Active {
 export class NativeCursorHost {
   private agent: SDKAgent | null = null;
   private init: CursorSdkInitMessage | null = null;
+  private selection: ModelSelection | null = null;
   private active: Active | null = null;
   private starting = false;
   private stopping = false;
@@ -167,9 +176,11 @@ export class NativeCursorHost {
       // launch; without the project setting source the agent would never
       // load it.
       const settings: SettingSource[] = ["project", "user", "team", "mdm", "plugins"];
+      const selection = await this.resolveModelSelection(vendor, input.auth.apiKey, input.runOptions);
+      this.selection = selection;
       const options: AgentOptions = {
         apiKey: input.auth.apiKey,
-        model: { id: input.runOptions.model || "default" },
+        model: selection,
         local: {
           cwd: input.workspaceRoot,
           store: new vendor.JsonlLocalAgentStore(path.join(input.hostDataDir, "store")),
@@ -193,6 +204,39 @@ export class NativeCursorHost {
     } finally { this.starting = false; }
   }
 
+  /**
+   * ModelSelection for create, resume AND every send: the model id plus the
+   * agent's reasoning effort / fast switch translated to this model's own SDK
+   * parameters (see modelTiers.ts). One models.list lookup per host start; when
+   * it is unavailable or fails the selection is the bare model id, exactly as
+   * before tiers existed.
+   */
+  private async resolveModelSelection(
+    vendor: Vendor,
+    apiKey: string,
+    runOptions: CursorSdkInitMessage["runOptions"],
+  ): Promise<ModelSelection> {
+    const modelId = runOptions.model || "default";
+    const warn = this.deps.warn ?? ((message: string) => { process.stderr.write(`${message}\n`); });
+    let tiers: ModelTiers | null = null;
+    const list = vendor.Cursor?.models?.list;
+    if (list) {
+      let timer: NodeJS.Timeout | undefined;
+      try {
+        const items = await Promise.race([
+          list.call(vendor.Cursor!.models, { apiKey }),
+          new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("timeout")), MODEL_TIERS_LOOKUP_TIMEOUT_MS); }),
+        ]);
+        const item = items.find((candidate) => candidate.id === modelId);
+        if (item) tiers = deriveModelTiers(item);
+        else warn(`cursor-sdk: model "${modelId}" not in the models list; sending it without tiers`);
+      } catch {
+        warn(`cursor-sdk: model tiers lookup failed for "${modelId}"; sending it without tiers`);
+      } finally { if (timer) clearTimeout(timer); }
+    }
+    return buildModelSelection(modelId, tiers, { reasoningEffort: runOptions.reasoningEffort, fast: runOptions.fast }, warn);
+  }
+
   private submit(localId: string, attemptId: string | null, text: string): void {
     if (this.active) {
       this.post({ kind: "attempt_result", attemptId, result: "revert" });
@@ -208,7 +252,7 @@ export class NativeCursorHost {
     let failure: CursorSdkWireError | undefined;
     try {
       const agent = this.agent!;
-      const run = await agent.send(text, { model: { id: this.init!.runOptions.model || "default" }, mcpServers: this.init!.runOptions.mcpServers });
+      const run = await agent.send(text, { model: this.selection ?? { id: this.init!.runOptions.model || "default" }, mcpServers: this.init!.runOptions.mcpServers });
       active.run = run;
       if (this.stopping) { await run.cancel(); return; }
       this.post({ kind: "attempt_result", attemptId, result: "complete_delivered" });

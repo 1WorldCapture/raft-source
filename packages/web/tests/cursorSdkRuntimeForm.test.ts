@@ -12,7 +12,8 @@ import {
 test("Cursor SDK picker keeps the selected live model and local-auth boundary", () => {
   assert.equal(supportsRuntimeApiUrl("cursor-sdk"), false);
   assert.equal(supportsRuntimeCustomModelName("cursor-sdk"), true);
-  assert.equal(supportsRuntimeFastMode("cursor-sdk"), false);
+  // Fast mode is a per-runtime switch now; the host applies it only to models that declare a `fast` parameter.
+  assert.equal(supportsRuntimeFastMode("cursor-sdk"), true);
   assert.equal(runtimeApiUrlUnsupportedCopy("cursor-sdk"), null);
   assert.equal(
     runtimeApiUrlUnsupportedCopyMessageId("cursor-sdk"),
