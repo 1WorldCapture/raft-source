@@ -18,7 +18,7 @@
 //   revision 1. This keeps existing agents (created before this migration)
 //   working without a backfill migration step.
 
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { getDb } from "../db/index.js";
 import { agentScopes, agents } from "../db/schema.js";
 import {
@@ -50,6 +50,18 @@ function completeDefaultScopes(raw: readonly string[] | null | undefined): Agent
  */
 export async function loadAgentScopes(agentId: string): Promise<AgentScopeSet> {
   const db = getDb();
+  // Task #9: a soft-deleted agent must read as "not found" on BOTH paths —
+  // a leftover grant row must not stay authoritative, and the no-row
+  // fallback below synthesizes the full grantable scope set, which a
+  // deleted agent must never receive. Checked up front so neither branch
+  // serves a deleted agent.
+  const agentExists = await db.query.agents.findFirst({
+    where: and(eq(agents.id, agentId), isNull(agents.deletedAt)),
+    columns: { id: true },
+  });
+  if (!agentExists) {
+    throw new AgentScopesNotFoundError(agentId);
+  }
   const row = await db.query.agentScopes.findFirst({
     where: eq(agentScopes.agentId, agentId),
   });
@@ -68,13 +80,6 @@ export async function loadAgentScopes(agentId: string): Promise<AgentScopeSet> {
   // No row yet — synthesize the full grantable set (every scope default-on
   // in v1). Treat it as revision 0 so the first explicit write bumps to
   // revision 1 and triggers the initial cache push.
-  const agentExists = await db.query.agents.findFirst({
-    where: eq(agents.id, agentId),
-    columns: { id: true },
-  });
-  if (!agentExists) {
-    throw new AgentScopesNotFoundError(agentId);
-  }
   return {
     agentId,
     granted: [...AGENT_GRANTABLE_SCOPES],

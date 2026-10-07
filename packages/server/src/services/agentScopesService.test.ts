@@ -2,10 +2,11 @@ import { fixturePasswordHash } from "../test/integration/credentials.js";
 import { createApiTest } from "../test/integration/apiTest.js";
 import assert from "node:assert/strict";
 
+import { eq } from "drizzle-orm";
 import { getDb } from "../db/index.js";
-import { agentScopes, users } from "../db/schema.js";
+import { agentScopes, agents, users } from "../db/schema.js";
 import { createAgent } from "./agentService.js";
-import { loadAgentScopes, resetAgentScopesToDefault, updateAgentScopes } from "./agentScopesService.js";
+import { AgentScopesNotFoundError, loadAgentScopes, resetAgentScopesToDefault, updateAgentScopes } from "./agentScopesService.js";
 import { createServer } from "./serverService.js";
 import { AGENT_GRANTABLE_SCOPES } from "@botiverse/raft-shared";
 
@@ -71,4 +72,24 @@ test("saving scopes marks the profile custom and reset restores default-followin
   assert.equal(reset.mode, "default");
   assert.deepEqual(reset.granted, [...AGENT_GRANTABLE_SCOPES]);
   assert.equal(reset.revision, custom.revision + 1);
+});
+
+test("soft-deleted agent never receives the synthesized default scope set", async ({ app }) => {
+  const db = getDb();
+  const { agent } = await seedScopeAgent("scope-deleted");
+  // A stored grant row exists AND the agent is soft-deleted: both the stored
+  // row and the no-row fallback must read as "not found".
+  await db.insert(agentScopes).values({
+    agentId: agent.id,
+    serverId: agent.serverId,
+    scopes: ["message:read"],
+    mode: "custom",
+  });
+  await db.update(agents).set({ deletedAt: new Date() }).where(eq(agents.id, agent.id));
+
+  await assert.rejects(
+    () => loadAgentScopes(agent.id),
+    AgentScopesNotFoundError,
+    "soft-deleted agent must not load scopes",
+  );
 });

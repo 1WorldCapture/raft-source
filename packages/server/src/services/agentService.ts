@@ -2,7 +2,7 @@ import { createHash } from "crypto";
 import { isDeepStrictEqual } from "node:util";
 import { eq, and, inArray, isNull, sql, asc, ne } from "drizzle-orm";
 import { getDb, withDbTraceAttributes, type DatabaseExecutor, type DatabaseTransaction } from "../db/index.js";
-import { agents, machines, channels, channelAgents, servers, serverMembers, serverAgentMembers, users, agentRuntimeProfiles, messages, tasks, taskEvents, agentProviderConnections } from "../db/schema.js";
+import { agents, machines, channels, channelAgents, servers, serverMembers, serverAgentMembers, users, agentRuntimeProfiles, messages, tasks, taskEvents, agentProviderConnections, agentCredentials, agentScopes, oauthGrants, agentChannelReadCursors, mentionDeliveryOccurrences, agentKnowledgeEvents, managedMcpAssignments, attestedSendPendingDrafts, reminders } from "../db/schema.js";
 import { ALL_CHANNEL_TEAM_THRESHOLD, EXTERNAL_AGENT_RUNTIME_ID, PLAN_CONFIG, currentDate, getEffectiveLimits, type AgentRuntimeErrorState, type AgentStatus, type ServerPlan, type ReasoningEffort, type RuntimeConfig, getDefaultModel, isExternalAgentRuntime, validateAgentName } from "@botiverse/raft-shared";
 import { assertAgentCapacityAvailable, getServerBillingEntitlement, getServerBillingUsage, withAgentCreateLock } from "./planService.js";
 import { untracedDbQuery, type DbQueryTracer } from "../tracing/dbQueryTrace.js";
@@ -1148,6 +1148,54 @@ export async function deleteAgent(agentId: string) {
 
     await tx.delete(channelAgents)
       .where(eq(channelAgents.agentId, agentId));
+
+    // Task #9: purge the per-agent side tables the soft delete used to leave
+    // behind (production audit: 95 rows across 4 tables for two deleted
+    // cursor agents). Credentials are the deliberate exception to "delete":
+    // the credential subsystem's contract is that rows are NEVER deleted —
+    // revocation is the terminal lifecycle and the partial auth index assumes
+    // revoked rows persist (agentCredentialService revocation lookup). So
+    // revoke whatever is still live here; the deletedAt agent check already
+    // rejects any residual token twice over. Provenance ledgers
+    // (agent_activity_events, attested_send_events, agent-authored messages,
+    // task events) are kept by design for traceability.
+    await tx.update(agentCredentials)
+      .set({
+        revokedAt: deletedAt,
+        revokedReason: "agent_deleted",
+      })
+      .where(and(eq(agentCredentials.agentId, agentId), isNull(agentCredentials.revokedAt)));
+    await tx.delete(agentScopes)
+      .where(eq(agentScopes.agentId, agentId));
+    await tx.delete(oauthGrants)
+      .where(eq(oauthGrants.agentId, agentId));
+    await tx.delete(agentChannelReadCursors)
+      .where(eq(agentChannelReadCursors.agentId, agentId));
+    await tx.delete(mentionDeliveryOccurrences)
+      .where(eq(mentionDeliveryOccurrences.agentId, agentId));
+    await tx.delete(agentKnowledgeEvents)
+      .where(eq(agentKnowledgeEvents.agentId, agentId));
+    await tx.delete(managedMcpAssignments)
+      .where(eq(managedMcpAssignments.agentId, agentId));
+    await tx.delete(agentProviderConnections)
+      .where(eq(agentProviderConnections.agentId, agentId));
+    await tx.delete(attestedSendPendingDrafts)
+      .where(eq(attestedSendPendingDrafts.agentId, agentId));
+    // Reminders still scheduled for this agent must never fire again, but
+    // they are canceled rather than deleted: canceled rows are the reminder
+    // subsystem's audit terminal state (wiki.api.test asserts canceled
+    // reminders survive agent replacement), and the fire scanner only picks
+    // up status='scheduled'. Fired rows are history and stay untouched.
+    await tx.update(reminders)
+      .set({
+        status: "canceled",
+        canceledAt: deletedAt,
+        updatedAt: deletedAt,
+      })
+      .where(and(
+        eq(reminders.ownerAgentId, agentId),
+        eq(reminders.status, "scheduled"),
+      ));
   });
 }
 
