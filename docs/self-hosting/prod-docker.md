@@ -48,3 +48,4 @@
 - 构建期磁盘峰值：pnpm install + 双镜像层需 >5G 余量，盘紧会 ENOSPC 失败（先清 journal/悬空层再构建）
 - pipefail 下 `xxx --list | grep -q` 会因 SIGPIPE 假失败——长输出流校验用文件中转
 - 空 crontab 时 `crontab -l | grep -v X` 退出码 1，在 set -e/pipefail 的 subshell 里会静默吞掉后续行——加 `|| true` 护栏
+- **后台启动三件套**：先建好日志目录再重定向、脚本自写 pidfile、启动后 kill -0 验活——只看日志判断进度，不靠 pgrep（自匹配假阳性曾吞掉 25 分钟）
