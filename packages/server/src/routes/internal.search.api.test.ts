@@ -65,7 +65,7 @@ async function runSlockCli(
   args: string[],
   env: Record<string, string>,
 ): Promise<{ stdout: string; stderr: string }> {
-  return execFileAsync(process.execPath, ["--import", "tsx", cliEntry, ...args], {
+  return execFileAsync(process.execPath, ["--disable-warning=DEP0205", "--import", "tsx", cliEntry, ...args], {
     env: {
       ...process.env,
       SLOCK_AGENT_ID: "",

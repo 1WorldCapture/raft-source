@@ -5,7 +5,7 @@ import {
   projectNewAgentRuntimeOptions,
 } from "./runtimeAdmissionService.js";
 
-const policy = { grokRuntimeEnabled: false };
+const policy = { grokRuntimeEnabled: false, ompRuntimeEnabled: false };
 
 test("Cursor SDK is selectable only when the Computer reports its SDK assets", () => {
   const installed = projectNewAgentRuntimeOptions(["cursor-sdk"], policy)
