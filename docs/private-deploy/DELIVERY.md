@@ -1,6 +1,6 @@
 # Raft 私有化发行包 交付文档（草稿，commit 68b6d61）
 
-> 状态：草稿。镜像与 Desktop 的 sha256 待 IT / May 回填；标注「待确认」的内容没有在本次构建中实测，交付前需由 IT 复验确认。
+> 状态：草稿。镜像与 Desktop 的 sha256 待 IT / May 回填；升级与回滚已在测试环境实测（§5）；「恢复数据库备份」操作未演练，文中已标注。
 > 技术细节的权威来源是仓库 `deploy/docker/README.md`（同 commit）。构建流程见内部文档 BUILD-INTERNAL.md，不随客户交付。
 
 ## 1. 发行包内容
@@ -47,11 +47,18 @@
 - **续期**：重跑 `tailscale cert` 覆盖 `./certs/` 后 `docker compose restart web`；compose 不自动续期。
 - 不要使用 `http://` origin：安装/升级会警告，同一链路的中间人可同时替换 manifest 和二进制。
 
-## 5. 升级与回滚（待确认）
+## 5. 升级与回滚
 
-升级：用新发行包（新 commit）换镜像和 `downloads/`，`docker compose up -d`；server 启动前由 entrypoint 跑守卫式、幂等的迁移（README 描述）。换版本的 downloads 部分见 README：重跑脚本 + `docker compose restart server web`。
+**升级**（已实测 dd8c608 → 68b6d61）：
+1. 升级前备份：`pg_dumpall` 逻辑备份 + 停栈后的 `raft-pgdata` 卷快照；记下当前镜像 tag。
+2. `.env` 里切换 `RAFT_SERVER_IMAGE` / `RAFT_WEB_IMAGE` 到新 tag（先 `docker load` 新镜像）；`downloads/` 树按新发行包**整体重建**（不要在旧树上增量覆盖）；`docker compose up -d`（改了 `.env` 必须 `up -d`，`restart` 不会重读环境变量）。
+3. 验证：`/api/version` 回显新 commit；server 日志出现 `[MIGRATION_PREFLIGHT_OK]` 与 `[MIGRATION_DEPLOY_OK]`（server 启动前由 entrypoint 跑守卫式、幂等的迁移）；已有账号和数据完好；`downloads/` 各 manifest 与 `latest-mac.yml` 可访问，旧版本文件返回 404。
 
-回滚：**迁移是否可逆、回滚是否需要先恢复数据库备份，本次没有实测，属待确认项**，需 IT 在复验中给出并写入此节。保守做法：升级前备份 `raft-pgdata` 数据卷，保留上一版镜像 tar 和 `downloads/` 树。
+**回滚**（已实测，dd8c608 ↔ 68b6d61 双向）：把 `.env` 的镜像 tag 改回旧版本，`docker compose up -d`，`/api/version` 回显旧 commit，数据完好，旧代码的迁移检查同样通过。
+
+- 本版本对之间**没有数据库迁移**，所以回滚只需换镜像重启，**不需要恢复数据库备份**。
+- **若某次升级包含数据库迁移**，回滚前必须先恢复升级前的备份（`pg_dumpall` 或卷快照），再换回旧镜像。该「恢复备份」操作本次**没有演练**（本次没有需要恢复的迁移），首次遇到时请先在测试环境验证。
+- 升级前仍建议双备份，并保留上一版镜像 tar 和 `downloads/` 树。
 
 ## 6. Desktop 与客户地址
 
@@ -67,4 +74,4 @@ Desktop 安装包在构建时写入服务器地址，因此**每个客户的 Des
 - 官方 `@botiverse/raft-daemon` 若已全局安装，会被本服务器版本覆盖（预期行为）。
 - 发行包按 docker compose 部署；Desktop 的 pm2 源码栈分发路径不在本次范围。
 - Managed MCP 内网放行名单修改 `.env` 后需 `docker compose up -d` 重建容器，`restart` 不会重读环境变量。
-- 升级与回滚流程的数据库侧细节待 IT 复验确认（§5）。
+- 含数据库迁移的升级的回滚（先恢复备份）流程未演练（§5）。
