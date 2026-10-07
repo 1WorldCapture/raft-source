@@ -18,10 +18,8 @@
 ## 发版流程（唯一路径）
 
 1. 在服务器构建检出（`/opt/raft-pd2/source`）`git fetch && git checkout <deploy 分支头 SHA>`
-2. 构建双镜像（参考 `/root/t11-prod-build.sh`，注意）：
-   - `docker build -f packages/server/Dockerfile --build-arg RAFT_RELEASE_SHA=$SHA --build-arg RAFT_BUILD_AT=… --build-arg RAFT_RELEASE_BRANCH=deploy -t raft-source-server:deploy-$SHA .`
-   - `docker build -f packages/web/Dockerfile --build-arg SELFHOST=1 --build-arg VITE_COMMIT_SHA=$SHA -t raft-source-web-selfhost:deploy-$SHA .`
-   - **分支参数与 tag 用 `deploy`/`deploy-<sha>`**（修正 /api/version 显示 "dev" 的历史遗留）
+2. 构建双镜像（**用入库脚本 `ops/docker/build-release.sh <full-sha> deploy`**）：
+   - 脚本产出 `raft-source-server:deploy-$SHA` 与 `raft-source-web-selfhost:deploy-$SHA`（**分支参数与 tag 用 `deploy`/`deploy-<sha>`**，修正 /api/version 显示 "dev" 的历史遗留）
 3. 同源 downloads：`node scripts/build-release-artifacts.mjs --platforms linux-x64 --out <dir>` → rsync 进 `/opt/raft-prod-docker/downloads/{cli,computer,daemon}`；desktop 子树仅在桌面发版时更新
 4. 改 `.env` 两个镜像 tag → `cd /opt/raft-prod-docker && docker compose -p raft-prod up -d server web`
 5. 验证：`/api/version` 三参数、health 200、登录探针（错误凭据 401）、容器健康
