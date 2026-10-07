@@ -36,7 +36,10 @@
 2. `cd deploy/docker && cp .env.example .env`，填 `POSTGRES_PASSWORD`、`JWT_SECRET`，**把 `RAFT_SERVER_IMAGE`、`RAFT_WEB_IMAGE` 设为第 1 步 load 输出的 tag**（compose 默认找 `:local` tag，不设置时会去 Docker Hub 拉取，离线环境下失败），设置 `RAFT_PUBLIC_ORIGIN=https://<主机名>[:<端口>]`（对外端口由 `.env` 的 `RAFT_HTTP_PORT` 决定，compose 把它映射到 web 容器的 443；默认 18443，生产常用 443 或自定义端口）。
 3. 把发行包 `downloads/` 放到 compose 挂载的 `./downloads/`。
 4. `docker compose up -d`；健康检查 `curl -fsS https://<主机名>[:<端口>]/api/version`，回显 sha 应为 `68b6d61…`。
-5. 无 SMTP 时账号激活链接打印在 server 容器日志（见 README「离线首跑」）。
+5. 上传文件（附件、头像）保存在命名卷 `raft-uploads`（挂载到容器 `/app/uploads`，由 `UPLOADS_DIR` 指定），容器重建不会丢失；备份时要和数据库一起备份它。
+6. 无 SMTP 时账号激活链接打印在 server 容器日志（见 README「离线首跑」）。
+
+`.env` 里的 `SCOPE_ATTESTATION_SECRET` 是可选项：仅当你运行外部 worker（反馈报告/trace 上传）时才需要，未设置时这些接口会报「Scope attestation is not configured」，不影响登录、会话和已注册的 Computer。
 
 私有模式（`RAFT_DEPLOYMENT_MODE=private`，compose 已设）下：版本查询读本地 manifest；遥测默认关；官方链接隐藏或可配置替换。
 
@@ -52,7 +55,7 @@
 ## 5. 升级与回滚
 
 **升级**（已实测 dd8c608 → 68b6d61）：
-1. 升级前备份：`pg_dumpall` 逻辑备份 + 停栈后的 `raft-pgdata` 卷快照；记下当前镜像 tag。
+1. 升级前备份：`pg_dumpall` 逻辑备份 + 停栈后的 `raft-pgdata` 卷快照；**同时备份 `raft-uploads` 卷（用户上传的附件、头像）**；记下当前镜像 tag。
 2. `.env` 里切换 `RAFT_SERVER_IMAGE` / `RAFT_WEB_IMAGE` 到新 tag（先 `docker load` 新镜像）；`downloads/` 树按新发行包**整体重建**（不要在旧树上增量覆盖）；`docker compose up -d`（改了 `.env` 必须 `up -d`，`restart` 不会重读环境变量）。
 3. 验证：`/api/version` 回显新 commit；server 日志出现 `[MIGRATION_PREFLIGHT_OK]` 与 `[MIGRATION_DEPLOY_OK]`（server 启动前由 entrypoint 跑守卫式、幂等的迁移）；已有账号和数据完好；`downloads/` 各 manifest 与 `latest-mac.yml` 可访问，旧版本文件返回 404。
 
@@ -60,7 +63,7 @@
 
 - 本版本对之间**没有数据库迁移**，所以回滚只需换镜像重启，**不需要恢复数据库备份**。
 - **若某次升级包含数据库迁移**，回滚前必须先恢复升级前的备份（`pg_dumpall` 或卷快照），再换回旧镜像。该「恢复备份」操作本次**没有演练**（本次没有需要恢复的迁移），首次遇到时请先在测试环境验证。
-- 升级前仍建议双备份，并保留上一版镜像 tar 和 `downloads/` 树。
+- 升级前仍建议双备份（数据库 + `raft-uploads` 卷），并保留上一版镜像 tar 和 `downloads/` 树。
 
 ## 6. Desktop 与客户地址
 
