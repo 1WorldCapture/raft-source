@@ -3,9 +3,9 @@ import { readFileSync } from "node:fs";
 import { test } from "vitest";
 import { getDriver } from "./index.js";
 
-const runtimeIds = ["builtin", "claude", "codex", "grok", "kimi", "cursor", "cursor-sdk", "gemini", "copilot", "opencode", "pi"] as const;
+const runtimeIds = ["builtin", "claude", "codex", "grok", "kimi", "cursor-sdk", "gemini", "copilot", "opencode", "pi"] as const;
 const stdinSteerablePersistentRuntimeIds = ["claude", "codex", "grok", "kimi"] as const;
-const perTurnRuntimeIds = ["cursor", "gemini", "copilot", "opencode"] as const;
+const perTurnRuntimeIds = ["gemini", "copilot", "opencode"] as const;
 
 const expectedContracts = {
   builtin: {
@@ -56,13 +56,6 @@ const expectedContracts = {
     modelVerifiedAs: "launchable",
     // Standing prompt rides a Cursor project rule mounted on every launch.
     nativeStandingPrompt: true,
-  },
-  cursor: {
-    lifecycle: { kind: "per_turn", start: "immediate", exit: "natural", inFlightWake: "spawn_new" },
-    communication: { chat: "slock_cli", runtimeControl: "none" },
-    stdoutChannel: "diagnostic",
-    session: { recovery: "resume_or_fresh" },
-    modelVerifiedAs: "launchable",
   },
   gemini: {
     lifecycle: { kind: "per_turn", start: "immediate", exit: "natural", inFlightWake: "spawn_new" },

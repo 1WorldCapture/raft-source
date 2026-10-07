@@ -1214,13 +1214,5 @@
     "count": 1,
     "classification": "internal_dev",
     "reason": "PaletteAudit CreateTaskDialog validation-error sample; audit page only."
-  },
-  {
-    "path": "src/utils/runtimeConfigForm.ts",
-    "rule": "raft-i18n/no-literal-return-prose",
-    "source": "\"Cursor CLI does not expose a per-agent API URL flag or env var. Configure provider routing in Cursor itself.\"",
-    "count": 1,
-    "classification": "legacy",
-    "reason": "runtimeApiUrlUnsupportedCopy is referenced only by unit tests; RuntimeConfig UI does not mount this explanation."
   }
 ]

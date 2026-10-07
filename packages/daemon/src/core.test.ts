@@ -1832,8 +1832,9 @@ test("detectRuntimes treats driver probe unavailable as authoritative", async ()
     assert.match(detection.versions.opencode ?? "", /requires >= 1\.14\.30/);
     const span = sink.getTrace(traceId).find((candidate) => candidate.name === "daemon.runtime.detect");
     // RUNTIMES grew by one when omp registered (phase-1 task #1) and by one
-    // more with the packaged cursor-sdk runtime.
-    assert.equal(span?.attrs?.known_runtime_count, 14);
+    // more with the packaged cursor-sdk runtime; the legacy Cursor CLI runtime
+    // was then retired.
+    assert.equal(span?.attrs?.known_runtime_count, 13);
     assert.equal(span?.attrs?.detected_runtime_count, detection.ids.length);
     const opencodeEvent = eventsForSpan(sink, traceId, "daemon.runtime.detect")
       .find((event) => event.attrs?.runtime === "opencode");

@@ -46,21 +46,21 @@ test("hydrates legacy Claude env vars into structured provider config", () => {
   });
 });
 
-test("keeps Cursor as model-only config without provider axis", () => {
+test("keeps Gemini as model-only config without provider axis", () => {
   const config = hydrateRuntimeConfig({
-    runtime: "cursor",
+    runtime: "gemini",
     model: "custom-composer",
-    envVars: { CURSOR_EXPERIMENT: "1" },
+    envVars: { GEMINI_EXPERIMENT: "1" },
   });
 
   assert.equal(config.provider, undefined);
   assert.deepEqual(config.model, { kind: "custom", name: "custom-composer" });
   assert.deepEqual(runtimeConfigToLaunchFields(config), {
-    runtime: "cursor",
+    runtime: "gemini",
     model: "custom-composer",
     mode: { kind: "default" },
     reasoningEffort: null,
-    envVars: { CURSOR_EXPERIMENT: "1" },
+    envVars: { GEMINI_EXPERIMENT: "1" },
   });
 });
 
@@ -190,7 +190,7 @@ test("rejects provider config on runtimes without a provider launch contract", (
   const result = parseRuntimeConfig({
     runtimeConfig: {
       version: 1,
-      runtime: "cursor",
+      runtime: "gemini",
       provider: { kind: "custom", apiUrl: "https://gateway.example.test", apiKey: "sk-ant-test" },
       model: { kind: "custom", name: "custom-composer" },
       mode: { kind: "default" },
@@ -199,7 +199,7 @@ test("rejects provider config on runtimes without a provider launch contract", (
     },
   });
   assert.equal(result.ok, false);
-  assert.equal(result.ok ? null : result.error, "runtimeConfig.provider is not supported for runtime: cursor");
+  assert.equal(result.ok ? null : result.error, "runtimeConfig.provider is not supported for runtime: gemini");
   assert.equal(result.trace.reason, "cross_runtime_provider");
 });
 
@@ -207,7 +207,7 @@ test("rejects custom command on runtimes without a command launch contract", () 
   const result = parseRuntimeConfig({
     runtimeConfig: {
       version: 1,
-      runtime: "cursor",
+      runtime: "gemini",
       command: "cursor-agent-alt",
       model: { kind: "preset", id: "composer-2" },
       mode: { kind: "default" },
@@ -216,7 +216,7 @@ test("rejects custom command on runtimes without a command launch contract", () 
     },
   });
   assert.equal(result.ok, false);
-  assert.equal(result.ok ? null : result.error, "runtimeConfig.command is not supported for runtime: cursor");
+  assert.equal(result.ok ? null : result.error, "runtimeConfig.command is not supported for runtime: gemini");
   assert.equal(result.trace.reason, "unsupported_command");
 });
 
@@ -264,7 +264,7 @@ test("rejects fast mode on runtimes without a launch contract", () => {
   const result = parseRuntimeConfig({
     runtimeConfig: {
       version: 1,
-      runtime: "cursor",
+      runtime: "gemini",
       model: { kind: "preset", id: "composer-2" },
       mode: { kind: "fast" },
       reasoningEffort: null,
@@ -273,7 +273,7 @@ test("rejects fast mode on runtimes without a launch contract", () => {
   });
 
   assert.equal(result.ok, false);
-  assert.equal(result.ok ? null : result.error, "runtimeConfig.mode is not supported for runtime: cursor");
+  assert.equal(result.ok ? null : result.error, "runtimeConfig.mode is not supported for runtime: gemini");
   assert.equal(result.trace.reason, "unsupported_fast_mode");
 });
 
@@ -281,7 +281,7 @@ test("rejects reasoning effort on runtimes without a launch contract", () => {
   const result = parseRuntimeConfig({
     runtimeConfig: {
       version: 1,
-      runtime: "cursor",
+      runtime: "gemini",
       model: { kind: "preset", id: "composer-2" },
       mode: { kind: "default" },
       reasoningEffort: "high",
@@ -290,7 +290,7 @@ test("rejects reasoning effort on runtimes without a launch contract", () => {
   });
 
   assert.equal(result.ok, false);
-  assert.equal(result.ok ? null : result.error, "runtimeConfig.reasoningEffort is not supported for runtime: cursor");
+  assert.equal(result.ok ? null : result.error, "runtimeConfig.reasoningEffort is not supported for runtime: gemini");
   assert.equal(result.trace.reason, "unsupported_reasoning_effort");
 });
 

@@ -977,7 +977,6 @@ export type RuntimeId =
   | "kimi"
   | "copilot"
   | "cursor-sdk"
-  | "cursor"
   | "gemini"
   | "opencode"
   | "pi"
@@ -1766,9 +1765,7 @@ export const RUNTIMES: RuntimeInfo[] = [
   { id: "kimi", displayName: "Kimi CLI", abbreviation: "KL", binary: "kimi", supported: true, deprecated: true },
   { id: "copilot", displayName: "Copilot CLI", abbreviation: "CP", binary: "copilot", supported: true },
   // SDK assets are shipped by Computer, not discovered as a user-installed CLI.
-  // Keep legacy Cursor CLI independently addressable for existing sessions.
   { id: "cursor-sdk", displayName: "Cursor SDK", abbreviation: "CS", binary: "", supported: true },
-  { id: "cursor", displayName: "Cursor CLI", abbreviation: "CU", binary: "cursor-agent", supported: true },
   // Gemini CLI: deprecated — no longer maintained upstream, replaced by
   // Antigravity CLI (`antigravity` → "Antigravity CLI"). Kept for backward
   // compat with existing `runtime=gemini` agents but hidden from selectors.
@@ -1897,7 +1894,7 @@ export const CURSOR_MODEL_PROBE_TIMEOUT_MS = 20_000;
 
 /** Leave transport time for a Cursor probe to finish before the Server gives up. */
 export function getRuntimeModelDetectionTimeoutMs(runtime: string): number {
-  return runtime === "cursor" || runtime === "cursor-sdk" ? CURSOR_MODEL_PROBE_TIMEOUT_MS + 5_000 : 5_000;
+  return runtime === "cursor-sdk" ? CURSOR_MODEL_PROBE_TIMEOUT_MS + 5_000 : 5_000;
 }
 
 /**
@@ -2065,11 +2062,6 @@ export const RUNTIME_MODELS: Record<string, RuntimeModelInfo[]> = {
   // the user's bound, verified Cursor connection, never this static fallback.
   "cursor-sdk": [
     { id: "default", label: "Cursor configured default", verified: "suggestion_only" },
-  ],
-  cursor: [
-    { id: "composer-2-fast", label: "Composer 2 Fast" },
-    { id: "composer-2", label: "Composer 2" },
-    { id: "auto", label: "Auto" },
   ],
   gemini: [
     { id: "default", label: "Configured Default / Auto", verified: "suggestion_only" },

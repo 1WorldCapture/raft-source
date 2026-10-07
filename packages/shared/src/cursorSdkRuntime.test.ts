@@ -16,18 +16,16 @@ import {
   stripControlledRuntimeEnvVars,
 } from "./index.js";
 
-test("Cursor SDK is a Computer-provided runtime, independent of the legacy CLI", () => {
+test("Cursor SDK is a Computer-provided runtime and the legacy Cursor CLI runtime is gone", () => {
   const sdk = RUNTIMES.find((runtime) => runtime.id === "cursor-sdk");
-  const cli = RUNTIMES.find((runtime) => runtime.id === "cursor");
   assert.ok(sdk);
-  assert.ok(cli);
   assert.equal(sdk.binary, "");
-  assert.equal(cli.binary, "cursor-agent");
+  assert.equal(RUNTIMES.some((runtime) => runtime.id === "cursor"), false);
   assert.deepEqual(runtimeAvailabilitySuffix(sdk, []), { kind: "updateComputer" });
   assert.deepEqual(runtimeAvailabilitySuffix(sdk, ["cursor-sdk"]), { kind: "none" });
-  assert.deepEqual(runtimeAvailabilitySuffix(sdk, ["cursor"]), { kind: "updateComputer" });
   assert.ok(getCreatableRuntimeOptions().some((runtime) => runtime.id === "cursor-sdk"));
-  assert.ok(getExistingAgentRuntimeOptions("cursor").some((runtime) => runtime.id === "cursor"));
+  assert.equal(getCreatableRuntimeOptions().some((runtime) => runtime.id === "cursor"), false);
+  assert.equal(getExistingAgentRuntimeOptions("cursor-sdk").some((runtime) => runtime.id === "cursor"), false);
 });
 
 test("Cursor SDK default seeds a model but never supplies a selectable offline catalog", () => {
@@ -36,7 +34,7 @@ test("Cursor SDK default seeds a model but never supplies a selectable offline c
   assert.equal(getStaticRuntimeModelSourceSet("cursor-sdk"), undefined);
 });
 
-test("Cursor SDK preserves host-discovered model ids and does not migrate Cursor CLI", () => {
+test("Cursor SDK preserves host-discovered model ids", () => {
   const raw = {
     version: 1,
     runtime: "cursor-sdk",
@@ -48,8 +46,6 @@ test("Cursor SDK preserves host-discovered model ids and does not migrate Cursor
   const parsed = parseRuntimeConfig({ runtime: "cursor-sdk", runtimeConfig: raw });
   assert.equal(parsed.ok, true);
   assert.equal(runtimeConfigToLaunchFields(parsed.config).model, "account-discovered-model");
-  const old = hydrateRuntimeConfig({ runtime: "cursor", model: "old-model" });
-  assert.equal(old.runtime, "cursor");
 });
 
 test("Cursor SDK remote config cannot select credentials, backend or runtime assets", () => {

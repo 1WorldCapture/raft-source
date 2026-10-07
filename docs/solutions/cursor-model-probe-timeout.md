@@ -1,3 +1,5 @@
+> 历史记录：本文涉及的 `cursor`（Cursor CLI）runtime 已在 task #5 退役并从代码中移除，现仅保留 Cursor SDK（`cursor-sdk`）。以下内容不再对应现有代码。
+
 # Cursor 模型列表探测误超时
 
 ## 现象与证据

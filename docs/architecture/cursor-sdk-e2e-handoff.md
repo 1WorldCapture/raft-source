@@ -31,7 +31,7 @@ f14c91696de349ba49431bebf747ccff464566b36e66b0013c69f450cc0486c6  Raft-Desktop-C
 
 ## 2. 实际接线
 
-新增 `runtime=cursor-sdk`，保留原来的 `cursor` CLI，现有 Agent 不自动迁移。生产链路为：
+新增 `runtime=cursor-sdk`。（后续：旧的 `cursor` CLI runtime 已在 task #5 退役并从代码中移除；下文涉及 CLI 的描述仅为当时的历史记录。）生产链路为：
 
 ```text
 Raft Server → daemon/APM → CursorSdkRuntimeSession
@@ -86,9 +86,9 @@ Cursor SDK → Disconnect from Raft…
 1. 正常退出旧 Raft Desktop（不是仅关闭窗口；它可能继续驻留菜单栏）。新包沿用相同应用身份和既有数据，不能视为完全隔离的新环境。保留旧版本，不清空原应用数据。
 2. 安装 `.2-arm64.dmg` 或把 `.2-arm64.zip` 解压到单独测试目录运行。确认 About 中版本为 `0.1.8-cursor-sdk.2`。
 3. 进入有服务端支持的 Raft，确认本机 Computer 在线。通过原生 Cursor SDK 菜单选择 Use Existing Login，等待 Verified and connected。
-4. 新建测试 Agent，runtime 选择 **Cursor SDK** 而不是 Cursor CLI；使用本机在线发现的模型。`composer-2.5` 是本次 smoke 选择，不是所有用户的强制默认模型。
+4. 新建测试 Agent，runtime 选择 **Cursor SDK**；使用本机在线发现的模型。`composer-2.5` 是本次 smoke 选择，不是所有用户的强制默认模型。
 5. 测试普通对话后继续提问，验证上下文延续。再要求执行安全的耗时工作，运行途中发消息调整目标，观察 steer 后的新要求生效。
-6. 原工作结束后继续发送消息；停止再启动同一 Agent，检查会话恢复。旧 Cursor CLI/Claude/Codex Agent 应继续保持原行为。
+6. 原工作结束后继续发送消息；停止再启动同一 Agent，检查会话恢复。Claude/Codex Agent 应继续保持原行为。
 
 Raft 当前 busy 语义注入的是 inbox 唤醒通知，Agent 再通过现有 CLI 读取业务消息；steer ACK 不等于消息已读或任务完成。不要把完整业务消息绕过 inbox 重复注入。
 
