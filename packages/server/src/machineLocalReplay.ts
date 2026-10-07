@@ -53,6 +53,9 @@ const MACHINE_LOCAL_ROUTE_ALLOWLIST: Array<{ method: string; path: RegExp }> = [
   { method: "POST", path: /^\/api\/servers\/[^/]+\/machines\/[^/]+\/computer-lifecycle-operations$/ },
   { method: "GET", path: /^\/api\/servers\/[^/]+\/machines\/[^/]+\/workspaces$/ },
   { method: "GET", path: /^\/api\/servers\/[^/]+\/machines\/[^/]+\/runtime-models\/[^/]+$/ },
+  // Cursor SDK 修复-1: web sign-in entry (owner-only, see cursorSdkWebLogin tests).
+  { method: "POST", path: /^\/api\/servers\/[^/]+\/machines\/[^/]+\/cursor-sdk\/login$/ },
+  { method: "GET", path: /^\/api\/servers\/[^/]+\/machines\/[^/]+\/cursor-sdk\/status$/ },
   { method: "GET", path: /^\/api\/servers\/[^/]+\/machines\/[^/]+\/runtime-form-definitions\/[^/]+\/option-sources\/[^/]+$/ },
   { method: "GET", path: /^\/api\/servers\/[^/]+\/machines\/[^/]+\/agents\/[^/]+\/diagnostic\/session-transcript$/ },
   { method: "POST", path: /^\/api\/servers\/[^/]+\/machines\/[^/]+\/agents\/[^/]+\/feedback\/[^/]+\/transcript$/ },

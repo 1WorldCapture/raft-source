@@ -4033,6 +4033,82 @@ serverRouter.get("/:id/machines/:machineId/runtime-models/:runtime", async (req,
   }
 });
 
+async function requireMachineOwnerForCursorSdk(
+  req: Request & { params: { id: string; machineId: string } },
+): Promise<{ error?: string; status?: number }> {
+  const callerRole = await getActorServerRoleInServer(req.params.id, "user", req.userId!);
+  if (!callerRole) return { error: "Server not found", status: 404 };
+  const machine = await machineService.getMachine(asMachineId(req.params.machineId));
+  if (!machine || machine.serverId !== req.params.id) return { error: "Machine not found in this server", status: 404 };
+  // Owner-only, deliberately WITHOUT any capability bypass: completing the
+  // browser step binds THIS machine to whoever authorizes, so a member or an
+  // agent must never be able to start a sign-in on someone else's machine.
+  if (machine.userId !== req.userId) return { error: "Only the machine owner can start a Cursor sign-in", status: 403 };
+  return {};
+}
+
+serverRouter.post("/:id/machines/:machineId/cursor-sdk/login", async (req, res) => {
+  try {
+    const denial = await requireMachineOwnerForCursorSdk(req);
+    if (denial.error) {
+      res.status(denial.status ?? 403).json({ error: denial.error });
+      return;
+    }
+    const agentOrchestrator = req.app.get("agentOrchestrator") as AgentOrchestrator;
+    const routing = await handleMachineLocalRouting(
+      req,
+      res,
+      req.params.machineId,
+      () => agentOrchestrator.hasMachineLocally(req.params.machineId),
+    );
+    if (routing === "handled") return;
+    if (routing !== "confirmed_local") {
+      res.status(503).json({ ok: false, errorCode: "machine_offline", message: "The Computer is offline; start it and retry." });
+      return;
+    }
+    const result = await agentOrchestrator.loginMachineCursorSdk(req.params.machineId);
+    res.json(result);
+  } catch (err) {
+    sendJsonServerError(req, res, {
+      error: "Failed to start Cursor sign-in",
+      code: "cursor_sdk_login_failed",
+      logPrefix: "[Servers] Failed to start Cursor SDK sign-in",
+      err,
+    });
+  }
+});
+
+serverRouter.get("/:id/machines/:machineId/cursor-sdk/status", async (req, res) => {
+  try {
+    const denial = await requireMachineOwnerForCursorSdk(req);
+    if (denial.error) {
+      res.status(denial.status ?? 403).json({ error: denial.error });
+      return;
+    }
+    const agentOrchestrator = req.app.get("agentOrchestrator") as AgentOrchestrator;
+    const routing = await handleMachineLocalRouting(
+      req,
+      res,
+      req.params.machineId,
+      () => agentOrchestrator.hasMachineLocally(req.params.machineId),
+    );
+    if (routing === "handled") return;
+    if (routing !== "confirmed_local") {
+      res.status(503).json({ error: "The Computer is offline" });
+      return;
+    }
+    const result = await agentOrchestrator.getMachineCursorSdkStatus(req.params.machineId);
+    res.json(result);
+  } catch (err) {
+    sendJsonServerError(req, res, {
+      error: "Failed to read Cursor sign-in status",
+      code: "cursor_sdk_status_failed",
+      logPrefix: "[Servers] Failed to read Cursor SDK status",
+      err,
+    });
+  }
+});
+
 async function authorizeMentionDeliveryDiagnostic(req: Request) {
   const serverId = req.params.id;
   const machineId = req.params.machineId;

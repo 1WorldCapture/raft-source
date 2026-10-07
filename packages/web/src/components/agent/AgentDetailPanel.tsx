@@ -840,6 +840,11 @@ function AgentProfileInfo({ agent, canManageAgent, canChangeAgentRole, onOpenPro
   const isActive = displayState.isOnline || agent.status === "active";
   const activeRuntime = editingRuntimeConfig ? draftRuntime : currentRuntimeConfig.runtime;
   const runtimeModels = useRuntimeModels(agent.machineId, activeRuntime);
+  // Cursor SDK web sign-in entry for the edit panel (same contract as the
+  // create dialog): onBound rescans the model list once the binding lands.
+  const cursorSdkLoginTarget = currentServer?.id && agent.machineId
+    ? { serverId: currentServer.id, machineId: agent.machineId, onBound: runtimeModels.rescan }
+    : null;
   const currentRuntimeModelPresentation = activeRuntime === currentRuntimeConfig.runtime
     ? projectRuntimeModelLabelPresentation(currentRuntimeConfig.runtime, currentRuntimeModel, runtimeModels)
     : { kind: "resolved" as const, label: getModelLabel(currentRuntimeConfig.runtime, currentRuntimeModel) };
@@ -2390,6 +2395,7 @@ function AgentProfileInfo({ agent, canManageAgent, canChangeAgentRole, onOpenPro
               <RuntimeConfigFields
                 runtime={draftRuntime}
                 runtimeInstallHint={runtimeInstallHintFor(draftRuntime, availableRuntimes)}
+                cursorSdkLoginTarget={cursorSdkLoginTarget}
                 onRuntimeChange={(id) => {
                   setDraftRuntime(id);
                   const nextModel = getDefaultModel(id);

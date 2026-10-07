@@ -597,6 +597,17 @@ export type ServerToMachineMessage =
   | { type: "machine:workspace:delete"; directoryName: string }
   | { type: "machine:runtime_models:detect"; requestId: string; runtime: string }
   /**
+   * Ask the owning Computer to start a Cursor SDK owner sign-in for the web
+   * login button. The daemon answers with `machine:cursor_sdk:login_result`
+   * carrying the (strictly validated) authorization URL as soon as the native
+   * host hands it over; browser completion is observed by polling
+   * `machine:cursor_sdk:status`. Owner-only upstream; introduced with the
+   * cursor-sdk web login entry (task: Cursor SDK 修复-1).
+   */
+  | { type: "machine:cursor_sdk:login"; requestId: string }
+  /** Sanitized Cursor SDK binding status for the same web entry. Owner-only upstream. */
+  | { type: "machine:cursor_sdk:status"; requestId: string }
+  /**
    * Ask the owning Computer to refresh one provider's sanitized account-usage
    * snapshot. This is never sent by a cache-read endpoint without the
    * owner/gate/cooldown checks. Older daemons ignore the additive message.
@@ -867,6 +878,27 @@ export type MachineToServerMessage =
       models?: RuntimeModelInfo[];
       default?: string;
       error?: string;
+    }
+  /**
+   * Result of a web-triggered Cursor SDK sign-in start. Minimal by contract:
+   * only the validated login URL / failure reason — never credential
+   * metadata. `loginUrl` is absent when busy or failed.
+   */
+  | {
+      type: "machine:cursor_sdk:login_result";
+      requestId: string;
+      loginUrl?: string;
+      reused?: boolean;
+      ok?: boolean;
+      errorCode?: string;
+      message?: string;
+    }
+  /** Sanitized Cursor SDK binding status; no principal/connection/fingerprint fields. */
+  | {
+      type: "machine:cursor_sdk:status_result";
+      requestId: string;
+      status: "unbound" | "bound" | "bound_stale_key" | "disconnected" | "error";
+      source: "cursor_sdk_store" | "raft_owned" | "owner_environment";
     }
   /** Closed, sanitized payload; provider credentials/raw responses never cross this boundary. */
   | {
