@@ -5,11 +5,13 @@ import { GrokDriver } from "./grok.js";
 import { AntigravityDriver } from "./antigravity.deprecated.js";
 import { CopilotDriver } from "./copilot.js";
 import { CursorDriver } from "./cursor.js";
+import { CursorSdkDriver } from "./cursor-sdk.js";
 import { GeminiDriver } from "./gemini.js";
 import { KimiDriver } from "./kimi.js";
 import { KimiSdkDriver } from "./kimi-sdk.js";
 import { OpenCodeDriver } from "./opencode.js";
 import { BuiltInDriver, PiDriver } from "./pi.js";
+import { OmpDriver } from "./omp.js";
 
 export type {
   RuntimeDriver,
@@ -50,6 +52,7 @@ const driverFactories: Record<string, () => RuntimeDriver> = {
   antigravity: () => new AntigravityDriver(),
   copilot: () => new CopilotDriver(),
   cursor: () => new CursorDriver(),
+  "cursor-sdk": () => new CursorSdkDriver(),
   gemini: () => new GeminiDriver(),
   // Two separate Kimi runtimes (per #proj-runtime:cc818e65 6/16 consensus):
   //   - `kimi`     = legacy kimi-cli child-process driver. Backward-compat for
@@ -60,6 +63,10 @@ const driverFactories: Record<string, () => RuntimeDriver> = {
   "kimi-sdk": () => new KimiSdkDriver(),
   opencode: () => new OpenCodeDriver(),
   pi: () => new PiDriver(),
+  // OMP (oh-my-pi): registration + probe in phase-1 task #1; the RPC
+  // transport (spawn/parse/stdin) lands with task #2. Server admission keeps
+  // the runtime flag-gated until the phase is accepted end to end.
+  omp: () => new OmpDriver(),
 };
 
 /** Get the driver for a runtime ID. Throws if unknown. */

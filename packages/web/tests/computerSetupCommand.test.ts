@@ -80,6 +80,34 @@ test("Computer setup command omits production server-url when absent", () => {
   );
 });
 
+// Self-hosted builds leave VITE_DEPLOYMENT_ENV unset (or custom): the command
+// must still carry the deployment's own server URL so the Computer never
+// falls back to the official API (phase-1 command bug — unrecognized envs
+// used to drop the argument entirely).
+test("Computer setup command includes self-hosted server-url for an unrecognized deployment env", () => {
+  assert.equal(
+    getComputerSetupCommand("botiverse", "selfhost", "https://raft.internal.example:18443"),
+    productionCommand("botiverse", " --server-url https://raft.internal.example:18443"),
+  );
+  assert.equal(
+    getComputerSetupCommand("botiverse", undefined, "https://raft.internal.example:18443"),
+    productionCommand("botiverse", " --server-url https://raft.internal.example:18443"),
+  );
+});
+
+// The official-build behavior stays intact for unrecognized envs too: when
+// the server URL IS an official default origin, the argument is omitted.
+test("Computer setup command omits server-url for official defaults in an unrecognized deployment env", () => {
+  assert.equal(
+    getComputerSetupCommand("botiverse", "selfhost", DEFAULT_COMPUTER_SERVER_URL),
+    productionCommand("botiverse"),
+  );
+  assert.equal(
+    getComputerSetupCommand("botiverse", undefined, LEGACY_DEFAULT_COMPUTER_SERVER_URL),
+    productionCommand("botiverse"),
+  );
+});
+
 test("Computer setup command isolates the staging command with a per-server home/bin", () => {
   assert.equal(
     getComputerSetupCommand("botiverse", "staging"),
@@ -357,4 +385,87 @@ test("Windows daemon connect command uses npx.cmd and no shell comment", () => {
     }),
     "npx.cmd @botiverse/raft-daemon@latest --server-url https://api.raft.build --api-key sk_machine_test",
   );
+});
+
+// Private deployments (task #6): the daemon connect command becomes a
+// two-step server-tarball install + run — the public-registry npx form
+// cannot work offline. The global install intentionally overrides any
+// official @botiverse/raft-daemon copy (documented behavior).
+test("daemon connect command installs from the server tarball when installUrl is set", () => {
+  const installUrl = "https://raft.internal.example:18443/downloads/daemon/raft-daemon-1.0.25.tgz";
+  assert.equal(
+    getDaemonConnectCommand({
+      apiKey: "sk_machine_test",
+      platform: "mac-linux",
+      serverName: "botiverse",
+      serverUrl: "https://raft.internal.example:18443",
+      installUrl,
+    }),
+    `npm i -g ${installUrl} && raft-daemon --server-url https://raft.internal.example:18443 --api-key sk_machine_test # botiverse`,
+  );
+  assert.equal(
+    getDaemonConnectCommand({
+      apiKey: "sk_machine_test",
+      platform: "windows",
+      serverUrl: "https://raft.internal.example:18443",
+      installUrl,
+    }),
+    `npm i -g ${installUrl}; raft-daemon --server-url https://raft.internal.example:18443 --api-key sk_machine_test`,
+  );
+});
+
+// Private deployments (task #5, phase 2): install commands fetch the
+// installer AND the bytes from the server's own /downloads tree, and persist
+// the server release backend so later upgrade checks resolve against the
+// same origin.
+test("Computer install command targets the server's downloads tree in private mode", () => {
+  const base = "https://raft.internal.example:18443/downloads/computer";
+  assert.equal(
+    computerInstallCommand(undefined, null, base),
+    `curl -fsSL ${base}/install.sh | RAFT_COMPUTER_RELEASE_BASE=${base} RAFT_COMPUTER_INSTALL_BACKEND=server sh`,
+  );
+  // Runtime private mode outranks a baked staging env — a private server
+  // never renders staging commands.
+  assert.equal(
+    computerInstallCommand("staging", null, base),
+    `curl -fsSL ${base}/install.sh | RAFT_COMPUTER_RELEASE_BASE=${base} RAFT_COMPUTER_INSTALL_BACKEND=server sh`,
+  );
+  // Deterministic version pins compose with the private base.
+  assert.equal(
+    computerInstallCommand(undefined, "1.0.28", base),
+    `curl -fsSL ${base}/install.sh | RAFT_COMPUTER_RELEASE_BASE=${base} RAFT_COMPUTER_INSTALL_BACKEND=server RAFT_COMPUTER_VERSION=1.0.28 sh`,
+  );
+});
+
+test("Windows Computer install command targets the server's downloads tree in private mode", () => {
+  const base = "https://raft.internal.example:18443/downloads/computer";
+  assert.equal(
+    windowsComputerInstallCommand(undefined, null, base),
+    `$env:RAFT_COMPUTER_RELEASE_BASE = "${base}"; $env:RAFT_COMPUTER_INSTALL_BACKEND = "server"; irm "$env:RAFT_COMPUTER_RELEASE_BASE/install.ps1" | iex`,
+  );
+});
+
+test("getComputerCommands builds private commands from the connected server URL", () => {
+  const serverUrl = "https://raft.internal.example:18443";
+  const commands = getComputerCommands("acme", undefined, serverUrl, { deploymentMode: "private" });
+  assert.ok(commands);
+  const base = `${serverUrl}/downloads/computer`;
+  assert.equal(
+    commands.install,
+    `curl -fsSL ${base}/install.sh | RAFT_COMPUTER_RELEASE_BASE=${base} RAFT_COMPUTER_INSTALL_BACKEND=server sh`,
+  );
+  // The setup command keeps the phase-1 self-host carry: a non-official
+  // origin always passes --server-url (a trailing-slash input is carried
+  // verbatim — only the derived downloads base strips it).
+  assert.equal(commands.setup, `raft-computer setup /acme --server-url ${serverUrl}`);
+
+  // Unresolved mode (null, fetch still in flight) behaves exactly as
+  // standard — pre-login surfaces render official commands immediately.
+  const unresolved = getComputerCommands("acme", undefined, serverUrl, { deploymentMode: null });
+  assert.equal(unresolved?.install, computerInstallCommand(undefined));
+
+  // Private without a server URL must not emit a malformed base — fall back
+  // to the official flow.
+  const fallback = getComputerCommands("acme", undefined, undefined, { deploymentMode: "private" });
+  assert.equal(fallback?.install, computerInstallCommand(undefined));
 });

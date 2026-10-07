@@ -24,9 +24,40 @@ export interface ServiceState {
 
 // The subset of the local host status the card reads (secret-free).
 export interface ComputerStatusReport {
+  controlHome?: string;
   servers?: { serverId: string; serverSlug: string | null }[];
   service?: ServiceState;
   upgrade?: UpgradeRecord | null;
+  /** Mirror of the main-process ConvergeState (src/app/convergeState.ts). */
+  converge?: { ok: boolean; code?: string; message?: string };
+}
+
+/** What the card should show about a failed host takeover, and the single
+ *  recovery action it offers. Derived purely from the converge state. */
+export interface ConvergeNotice {
+  message: string;
+  action: "recycle" | "start" | "retry-converge" | "connect-deployment" | null;
+}
+
+const VERSION_SKEW_CODES = new Set(["SERVICE_VERSION_SKEW", "SERVICE_VERSION_SKEW_SUSPECT"]);
+
+export function deriveConvergeNotice(converge: ComputerStatusReport["converge"]): ConvergeNotice | null {
+  if (!converge || converge.ok) return null;
+  const code = converge.code ?? "CONVERGE_FAILED";
+  const message = converge.message ?? "Local Computer service takeover failed.";
+  if (code === "SESSION_ORIGIN_MISMATCH") return { message, action: "connect-deployment" };
+  if (VERSION_SKEW_CODES.has(code)) {
+    // A resident from a different install refuses adoption; only a real
+    // stop→start recycle replaces it (the card's Restart clears degraded
+    // state only). The card confirms before recycling — it offlines every
+    // agent on this machine.
+    return { message: `Local service not hosted by this app — ${message}`, action: "recycle" };
+  }
+  if (code === "RECYCLE_START_FAILED") {
+    // The old service is already stopped; retry must be start-only.
+    return { message, action: "start" };
+  }
+  return { message, action: "retry-converge" };
 }
 
 /** Numeric dotted-version compare: is `a` strictly newer than `b`? */
@@ -86,6 +117,9 @@ export interface ControlsInput {
   upgrade?: UpgradeRecord | null;
   latestVersion: string | null;
   serverVersion: string | null;
+  // "app": the Computer ships with this app, so a newer standalone release is
+  // never an update for it.
+  managementModel?: ManagementModel;
 }
 
 export interface AblationFlags {
@@ -141,8 +175,10 @@ export function routeUpdateAction(input: UpdateRouteInput): UpdateAction {
 
 /** The official installer one-liner (shown only as the last-resort manual
  *  fallback if the app-run fresh install fails). Mirrors the web command. */
-export function freshInstallCommand(version: string, baseUrl = "https://cdn.raft.build/computer"): string {
-  return `curl -fsSL ${baseUrl}/install.sh | RAFT_COMPUTER_VERSION=${version} sh`;
+export function freshInstallCommand(version: string, baseUrl = "https://cdn.raft.build/computer", home?: string): string {
+  const quoted = home ? "'" + home.replace(/'/g, "'\"'\"'") + "'" : null;
+  const roots = quoted ? `RAFT_HOME=${quoted} SLOCK_HOME=${quoted} ` : "";
+  return `curl -fsSL ${baseUrl}/install.sh | ${roots}RAFT_COMPUTER_VERSION=${version} sh`;
 }
 
 export function deriveControls(input: ControlsInput, now: number = Date.now(), ablate?: AblationFlags): Controls {
@@ -163,6 +199,7 @@ export function deriveControls(input: ControlsInput, now: number = Date.now(), a
       ? false
       : upgrade?.outcome === "rolled-back" && upgrade.targetVersion === latestVersion;
 
-  const updateAvailable = !upgrading && !rolledBackToLatest && isNewer(latestVersion, localVersion);
+  const appManaged = input.managementModel === "app";
+  const updateAvailable = !appManaged && !upgrading && !rolledBackToLatest && isNewer(latestVersion, localVersion);
   return { running, upgrading, updateAvailable, localVersion };
 }

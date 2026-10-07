@@ -1,0 +1,139 @@
+# Self-hosted web entry point: static SPA + reverse proxy to the raft server.
+# Faithful adaptation of ops/self-host/nginx/raft.conf.tmpl + raft-proxy.conf
+# for the container image (upstream injected via the nginx:alpine envsubst
+# template mechanism; only environment variables like RAFT_SERVER_UPSTREAM
+# are substituted — nginx runtime vars ($uri, $http_upgrade, …) survive).
+#
+# Differences from nginx.conf (the official image config):
+#   - Proxies every server-owned path the official template forwards:
+#     ^/(api|internal|socket\.io|daemon|share|\.well-known)/ plus /health and
+#     /robots.txt — including /daemon/connect, the Computer's WebSocket link
+#     (daemon/src/connection.ts), with the same upgrade map, 3600s timeouts
+#     and streaming (no buffering) semantics.
+#   - VITE_API_URL is NOT baked at build; the app uses window.location.origin.
+
+# Docker's embedded DNS: resolve the server container per request instead of
+# once at nginx startup — a server-container recreate changes its IP and a
+# cached resolution 502s forever (proxy_pass with a VARIABLE re-resolves).
+resolver 127.0.0.11 valid=10s ipv6=off;
+
+map $http_upgrade $connection_upgrade { default upgrade; '' close; }
+
+# Attachments up to 256 MiB (same as RAFT_CLIENT_MAX_BODY in source deploys).
+client_max_body_size 256m;
+
+server {
+    # Repeat at each location: local add_header disables parent inheritance.
+    add_header Content-Security-Policy "base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval' https://challenges.cloudflare.com https://static.cloudflareinsights.com; worker-src 'self' blob:" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "no-referrer" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    # TLS terminates here: certificates are mounted at /etc/nginx/certs
+    # (compose maps ${RAFT_HTTP_PORT:-18443} -> 443). See deploy/docker/README
+    # for the three certificate sources and renewal notes.
+    listen 443 ssl;
+    ssl_certificate /etc/nginx/certs/fullchain.pem;
+    ssl_certificate_key /etc/nginx/certs/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    server_name _;
+
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # ${RAFT_SERVER_UPSTREAM} is substituted at container start; the variable
+    # keeps per-request re-resolution alive for the container's whole life.
+    set $raft_upstream ${RAFT_SERVER_UPSTREAM};
+
+    # Enable gzip compression
+    gzip on;
+    gzip_vary on;
+    gzip_proxied any;
+    gzip_min_length 1000;
+    gzip_types
+        text/plain
+        text/css
+        text/javascript
+        application/javascript
+        application/json
+        application/xml
+        image/svg+xml;
+
+    # Client artifacts are served straight off the shared downloads volume —
+    # binary bytes never cross the Node event loop. Root manifests are the
+    # only mutable files (they flip on a version swap); everything under a
+    # version directory is immutable.
+    location = /downloads/computer/manifest.json { alias /usr/share/nginx/downloads/computer/manifest.json; default_type application/json; add_header Cache-Control "no-cache, must-revalidate" always; }
+    location = /downloads/cli/manifest.json { alias /usr/share/nginx/downloads/cli/manifest.json; default_type application/json; add_header Cache-Control "no-cache, must-revalidate" always; }
+    location ^~ /downloads/ {
+        # No try_files here on purpose: inside an alias location it checks the
+        # full $uri (with the /downloads/ prefix) against the filesystem and
+        # misses (nginx ticket #97); alias alone 404s missing files correctly.
+        alias /usr/share/nginx/downloads/;
+        add_header Cache-Control "public, immutable, max-age=31536000";
+    }
+
+    # Everything the official template forwards, plus server-only public
+    # routes. One shared proxy semantics (raft-proxy.conf): upgrade map,
+    # long timeouts (socket.io, the daemon link and SSE stay open), and
+    # streaming instead of spooling large uploads/downloads to disk.
+    location ~ ^/(api|internal|socket\.io|daemon|share|\.well-known)/ {
+        proxy_pass http://$raft_upstream;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+        proxy_buffering off;
+        proxy_request_buffering off;
+    }
+    location = /health     { proxy_pass http://$raft_upstream; proxy_http_version 1.1; proxy_set_header Host $http_host; proxy_set_header X-Real-IP $remote_addr; proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; proxy_set_header X-Forwarded-Proto $scheme; }
+    location = /robots.txt { proxy_pass http://$raft_upstream; proxy_http_version 1.1; proxy_set_header Host $http_host; }
+
+    # Hashed static assets — cache immutably
+    location /assets/ {
+        add_header Content-Security-Policy "base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval' https://challenges.cloudflare.com https://static.cloudflareinsights.com; worker-src 'self' blob:" always;
+        add_header X-Frame-Options "DENY" always;
+        add_header Referrer-Policy "no-referrer" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Cache-Control "public, immutable, max-age=31536000";
+        try_files $uri =404;
+    }
+
+    # Desktop compatibility is a machine-readable fixed path. Never let a
+    # missing artifact fall through to index.html: Desktop must fail closed.
+    location = /desktop-manifest.json {
+        add_header Content-Security-Policy "base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval' https://challenges.cloudflare.com https://static.cloudflareinsights.com; worker-src 'self' blob:" always;
+        add_header X-Frame-Options "DENY" always;
+        add_header Referrer-Policy "no-referrer" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        default_type application/json;
+        add_header Cache-Control "no-cache, must-revalidate" always;
+        etag off;
+        include /etc/nginx/desktop-manifest-etag.conf;
+        try_files $uri @desktop_manifest_missing;
+    }
+
+    location @desktop_manifest_missing {
+        add_header Content-Security-Policy "base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval' https://challenges.cloudflare.com https://static.cloudflareinsights.com; worker-src 'self' blob:" always;
+        add_header X-Frame-Options "DENY" always;
+        add_header Referrer-Policy "no-referrer" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        default_type application/json;
+        add_header Cache-Control "no-store" always;
+        return 404 '{"error":"desktop_manifest_unavailable"}';
+    }
+
+    # SPA fallback — serve index.html for all non-file routes (no cache)
+    location / {
+        add_header Content-Security-Policy "base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval' https://challenges.cloudflare.com https://static.cloudflareinsights.com; worker-src 'self' blob:" always;
+        add_header X-Frame-Options "DENY" always;
+        add_header Referrer-Policy "no-referrer" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Cache-Control "no-cache";
+        try_files $uri $uri/ /index.html;
+    }
+}

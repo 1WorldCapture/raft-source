@@ -96,7 +96,7 @@ export type ParsedEvent =
   | ({ kind: "thinking"; text: string; runtimeTurn?: RuntimeTurnAttribution } & SubagentLineage)
   | ({ kind: "text"; text: string; runtimeTurn?: RuntimeTurnAttribution } & SubagentLineage)
   | ({ kind: "tool_call"; name: string; input: any } & SubagentLineage)
-  | ({ kind: "tool_output"; name: string } & SubagentLineage)
+  | ({ kind: "tool_output"; name: string; /** Result text when the runtime carries it (truncated by the driver); absent otherwise. */ text?: string; /** True when the runtime marked the tool result as an error. */ isError?: boolean } & SubagentLineage)
   | { kind: "compaction_started" }
   | { kind: "compaction_finished" }
   | {
@@ -132,9 +132,31 @@ export type ParsedEvent =
       kind: "delivery_error";
       message: string;
       requestMethod: "turn/start" | "turn/steer";
-      source: "codex_app_server_response" | "grok_acp_response" | "kimi_sdk_response" | "pi_sdk_response";
+      source:
+        | "codex_app_server_response"
+        | "grok_acp_response"
+        | "kimi_sdk_response"
+        | "pi_sdk_response"
+        | "cursor_sdk_response";
       code?: "turn.agent_busy" | "runtime.delivery_error";
       payloadBytes?: number;
+    }
+  // Delivery-outcome acknowledgment for runtimes in the attempt protocol
+  // (cursor-sdk): answers one follow-up send that carried an APM-owned
+  // `attemptId`. `delivered` = the submission reached the conversation;
+  // `deferred_to_idle` = the runtime reverted the submission — a native
+  // revert, NOT a runtime error (no error UI; the APM restores only the
+  // relevant delivery debt instead); `unknown` = the acknowledgment did not
+  // settle before its deadline (never mapped from revert), retained safely by
+  // the APM until a terminal boundary. Exactly one outcome per attemptId;
+  // outcomes for old epoch/run/attempt identities are discarded by the APM
+  // watermark. This event is daemon control-plane: it must not refresh turn
+  // progress, clear startup state, or drive activity.
+  | {
+      kind: "delivery_outcome";
+      source: "cursor_sdk";
+      attemptId: string;
+      outcome: "delivered" | "deferred_to_idle" | "unknown";
     }
   | {
       kind: "internal_progress";
@@ -170,7 +192,7 @@ export type ParsedEvent =
   | {
       kind: "runtime_diagnostic";
       severity: "warning";
-      source: "codex_app_server_notification" | "grok_acp_notification";
+      source: "codex_app_server_notification" | "grok_acp_notification" | "omp_rpc_notification";
       itemType: string;
       message: string;
       details?: string;
@@ -396,6 +418,13 @@ export interface RuntimeSession {
     mode: "idle" | "busy";
     text: string;
     sessionId?: string | null;
+    /**
+     * APM-owned delivery-attempt identity for drivers participating in the
+     * delivery-outcome protocol. Optional and purely advisory for every other
+     * driver: a synchronous `ok` still only means the input was accepted into
+     * the runtime's bounded local queue, never a native acknowledgment.
+     */
+    attemptId?: string;
   }): RuntimeSendResult | Promise<RuntimeSendResult>;
   stop(opts?: {
     signal?: NodeJS.Signals;
@@ -449,6 +478,24 @@ export interface RuntimeDriver {
   readonly liveSessionReadyAt?: "session_init" | "turn_end";
 
   /**
+   * The driver forwards the spawn context's prompt (the launch's activation
+   * input folded in by the agent process manager) to the runtime itself. For
+   * such drivers the spawn_prompt activation booking is a real carrier, so
+   * the session_init delivery fallback must not re-inject the same startup
+   * input. Drivers that consume ctx.prompt at exec (argv-style) vs. drivers
+   * that ignore it entirely must NOT set this flag — the fallback stays
+   * their delivery path.
+   */
+  readonly consumesSpawnPrompt?: boolean;
+
+  /**
+   * Install an outlet for events produced outside parseLine's return channel
+   * (async closures such as omp's held-turn watchdog). Optional: drivers
+   * whose events always flow through parseLine need not implement it.
+   */
+  setEventSink?(sink: ((events: ParsedEvent[]) => void) | null): void;
+
+  /**
    * Whether the runtime keeps a live process that can accept follow-up messages
    * over stdin while the daemon keeps it alive.
    */
@@ -493,6 +540,15 @@ export interface RuntimeDriver {
 
   /** Whether this runtime supports a native standing-prompt layer. */
   readonly supportsNativeStandingPrompt?: boolean;
+  /**
+   * Whether the runtime currently has an agent run in progress, as observed
+   * by the driver's own protocol state (task #7). The delivery router
+   * consults this before trusting its process-level busy belief: a
+   * steer-driven turn emits no prompt_result, so a run can end without the
+   * process-level state ever observing a boundary. Absent = the runtime has
+   * no such observation and the router decides as before.
+   */
+  isRunInProgress?(): boolean;
 
   /**
    * Driver-owned live busy-delivery gate. APM lifecycle state must never claim
@@ -500,6 +556,17 @@ export interface RuntimeDriver {
    * native turn. Drivers without a narrower native gate may omit this method.
    */
   busyDeliveryReadiness?(): RuntimeBusyDeliveryReadiness;
+
+  /**
+   * Whether this runtime participates in the delivery-outcome attempt
+   * protocol. When true, the APM attaches a monotonic `attemptId` to follow-up
+   * sends and settles exactly one `delivery_outcome` event per attempt:
+   * delivered / deferred_to_idle (native revert — restored as delivery debt,
+   * never surfaced as a runtime error) / unknown (ACK timeout — retained by
+   * the APM until a terminal boundary). Drivers that do not opt in never
+   * receive an attemptId and their behavior is unchanged.
+   */
+  readonly deliveryOutcomeAttempts?: boolean;
 
   /**
    * Best-effort availability probe for this runtime on the current machine.

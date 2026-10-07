@@ -1,0 +1,71 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import {
+  getCreatableRuntimeOptions,
+  getDefaultModel,
+  getExistingAgentRuntimeOptions,
+  getStaticRuntimeModelSourceSet,
+  hasStaticRuntimeModelSource,
+  hydrateRuntimeConfig,
+  parseRuntimeConfig,
+  RUNTIMES,
+  runtimeAvailabilitySuffix,
+  runtimeConfigToLaunchFields,
+  stripControlledRuntimeEnvVars,
+} from "./index.js";
+
+test("Cursor SDK is a Computer-provided runtime, independent of the legacy CLI", () => {
+  const sdk = RUNTIMES.find((runtime) => runtime.id === "cursor-sdk");
+  const cli = RUNTIMES.find((runtime) => runtime.id === "cursor");
+  assert.ok(sdk);
+  assert.ok(cli);
+  assert.equal(sdk.binary, "");
+  assert.equal(cli.binary, "cursor-agent");
+  assert.deepEqual(runtimeAvailabilitySuffix(sdk, []), { kind: "updateComputer" });
+  assert.deepEqual(runtimeAvailabilitySuffix(sdk, ["cursor-sdk"]), { kind: "none" });
+  assert.deepEqual(runtimeAvailabilitySuffix(sdk, ["cursor"]), { kind: "updateComputer" });
+  assert.ok(getCreatableRuntimeOptions().some((runtime) => runtime.id === "cursor-sdk"));
+  assert.ok(getExistingAgentRuntimeOptions("cursor").some((runtime) => runtime.id === "cursor"));
+});
+
+test("Cursor SDK default seeds a model but never supplies a selectable offline catalog", () => {
+  assert.equal(getDefaultModel("cursor-sdk"), "default");
+  assert.equal(hasStaticRuntimeModelSource("cursor-sdk"), false);
+  assert.equal(getStaticRuntimeModelSourceSet("cursor-sdk"), undefined);
+});
+
+test("Cursor SDK preserves host-discovered model ids and does not migrate Cursor CLI", () => {
+  const raw = {
+    version: 1,
+    runtime: "cursor-sdk",
+    model: { kind: "preset", id: "account-discovered-model" },
+    mode: { kind: "default" },
+    reasoningEffort: null,
+    envVars: null,
+  };
+  const parsed = parseRuntimeConfig({ runtime: "cursor-sdk", runtimeConfig: raw });
+  assert.equal(parsed.ok, true);
+  assert.equal(runtimeConfigToLaunchFields(parsed.config).model, "account-discovered-model");
+  const old = hydrateRuntimeConfig({ runtime: "cursor", model: "old-model" });
+  assert.equal(old.runtime, "cursor");
+});
+
+test("Cursor SDK remote config cannot select credentials, backend or runtime assets", () => {
+  const envVars = {
+    CURSOR_API_KEY: "fixture-only",
+    CURSOR_AUTH_TOKEN: "fixture-only",
+    CURSOR_BACKEND_URL: "https://untrusted.invalid",
+    CURSOR_API_BASE_URL: "https://untrusted.invalid",
+    CURSOR_WEBSITE_URL: "https://untrusted.invalid",
+    RAFT_CURSOR_SDK_ASSETS: "/untrusted/host",
+    NODE_OPTIONS: "--require /untrusted/preload.cjs",
+    NODE_PATH: "/untrusted/modules",
+    NODE_TLS_REJECT_UNAUTHORIZED: "0",
+    TEAM_FLAG: "enabled",
+  };
+  assert.deepEqual(stripControlledRuntimeEnvVars("cursor-sdk", envVars), { TEAM_FLAG: "enabled" });
+  assert.equal(envVars.CURSOR_API_KEY, "fixture-only", "caller-owned env object is not mutated");
+  assert.deepEqual(stripControlledRuntimeEnvVars("cursor", envVars), envVars, "legacy runtime remains unchanged");
+  const hydrated = hydrateRuntimeConfig({ runtime: "cursor-sdk", model: "default", envVars });
+  assert.deepEqual(runtimeConfigToLaunchFields(hydrated).envVars, { TEAM_FLAG: "enabled" });
+});

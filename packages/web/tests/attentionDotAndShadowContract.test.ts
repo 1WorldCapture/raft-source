@@ -47,7 +47,7 @@ test("no `size=\"md\"` AttentionDot consumers remain (md was removed in PR #1709
   let hits = "";
   try {
     hits = execSync(
-      `grep -RnE '<AttentionDot[^/>]*size="md"' ${componentsDir}`,
+      `grep -RnE '<AttentionDot[^/>]*size="md"' "${componentsDir}"`,
       { encoding: "utf8" },
     );
   } catch (err: any) {
@@ -96,7 +96,7 @@ test("no inline shadow-[rgba(...)] arbitrary values in components/", () => {
   const componentsDir = resolve(repoRoot, "src/components");
   let hits = "";
   try {
-    hits = execSync(`grep -RnE 'shadow-\\[[^]]*rgba' ${componentsDir}`, { encoding: "utf8" });
+    hits = execSync(`grep -RnE 'shadow-\\[[^]]*rgba' "${componentsDir}"`, { encoding: "utf8" });
   } catch (err: any) {
     // grep exits 1 when there are no matches — that's the success case.
     if (err.status === 1) hits = "";

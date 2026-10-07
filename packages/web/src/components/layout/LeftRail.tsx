@@ -2,6 +2,7 @@ import { forwardRef, useEffect, useLayoutEffect, useMemo, useRef, useState } fro
 import { isHostShell } from "../../embed";
 import { createPortal } from "react-dom";
 import { useIntl } from "react-intl";
+import { useDeploymentLinks, useDeploymentMode } from "../../utils/deploymentMode";
 import { useNavigate } from "react-router-dom";
 import {
   Activity,
@@ -720,9 +721,18 @@ function HelpMenu({
     },
   });
 
+  // Task #7 link neutralization: private deployments open the operator-
+  // configured docs URL, or hide the entry entirely (no official link);
+  // official deployments keep the official docs URL.
+  const deploymentMode = useDeploymentMode();
+  const deploymentLinks = useDeploymentLinks();
+  const documentationUrl = deploymentMode === "private"
+    ? (deploymentLinks?.docsUrl ?? null)
+    : "https://docs.raft.build";
   const openDocumentation = () => {
+    if (!documentationUrl) return;
     onCloseRef.current();
-    window.open("https://docs.raft.build", "_blank", "noopener,noreferrer");
+    window.open(documentationUrl, "_blank", "noopener,noreferrer");
   };
 
   const openFeedback = () => {
@@ -772,6 +782,7 @@ function HelpMenu({
               {formatMessage({ id: "layout.leftRail.helpMenuTitle" })}
             </SectionEyebrow>
           </div>
+          {documentationUrl ? (
           <MenuItem
             icon={<BookOpenText size={14} className="shrink-0" />}
             trailing={<ArrowUpRight size={14} className="shrink-0" />}
@@ -779,6 +790,7 @@ function HelpMenu({
           >
             {formatMessage({ id: "layout.leftRail.helpDocumentation" })}
           </MenuItem>
+          ) : null}
           {/* Signpost only — the content lives in Settings so there is one host
               to keep current, not two that can drift (@huxijin, #wg-download-mobile). */}
           {serverSlug ? (

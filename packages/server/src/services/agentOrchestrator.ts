@@ -8136,6 +8136,8 @@ export class AgentOrchestrator extends EventEmitter {
       case "machine:workspace:delete_result":
       case "machine:migration:source_workspace_archive_result":
       case "machine:runtime_models:result":
+      case "machine:cursor_sdk:login_result":
+      case "machine:cursor_sdk:status_result":
       case "agent:diagnostic:session_transcript_result":
       case "agent:diagnostic:feedback_transcript_result":
         // These are responses to workspace/machine/diagnostic requests — emit events for pending promises
@@ -10720,6 +10722,121 @@ export class AgentOrchestrator extends EventEmitter {
       provider,
       reason,
     });
+  }
+
+  /**
+   * One-shot request/reply to a machine that is connected to THIS replica:
+   * send over the live WebSocket and wait for the matching reply on the local
+   * `machine:response:` event. Same discipline as the detect path, minus the
+   * catalog authority (plain discovery/login does not consume
+   * connection-generation authority).
+   */
+  private async requestMachineReplyLocal<T extends MachineToServerMessage>(
+    machineId: string,
+    send: ServerToMachineMessage,
+    resultType: T["type"],
+    timeoutMs: number,
+    timeoutMessage: string,
+  ): Promise<T> {
+    const connection = this.machineConnections.get(machineId);
+    if (
+      !connection ||
+      !connection.replicaGeneration ||
+      connection.ws.readyState !== 1 ||
+      this.isMachineHeartbeatStale(connection)
+    ) {
+      throw new RouteFailureError(
+        "daemon_offline",
+        "Failed to send request — machine WebSocket not ready",
+      );
+    }
+    const requestId = (send as { requestId: string }).requestId;
+    return new Promise<T>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.removeListener(`machine:response:${machineId}`, handler);
+        reject(new RouteFailureError("daemon_timeout", timeoutMessage));
+      }, timeoutMs);
+      const handler = (msg: MachineToServerMessage) => {
+        if (msg.type === resultType && (msg as { requestId?: string }).requestId === requestId) {
+          clearTimeout(timeout);
+          this.removeListener(`machine:response:${machineId}`, handler);
+          resolve(msg as T);
+        }
+      };
+      this.on(`machine:response:${machineId}`, handler);
+      void this.sendRequiredToMachine(machineId, send).catch((err: unknown) => {
+        clearTimeout(timeout);
+        this.removeListener(`machine:response:${machineId}`, handler);
+        reject(err instanceof Error ? err : new Error(String(err)));
+      });
+    });
+  }
+
+  /**
+   * Start (or re-report) a web-triggered Cursor SDK owner sign-in on this
+   * machine. The daemon replies as soon as the validated authorization URL is
+   * known; browser completion is observed via getMachineCursorSdkStatus.
+   * Owner-only upstream — the REST route enforces machine ownership before
+   * calling this.
+   */
+  async loginMachineCursorSdk(machineId: string): Promise<{
+    ok: boolean; loginUrl?: string; reused?: boolean; errorCode?: string; message?: string;
+  }> {
+    const requestId = crypto.randomUUID();
+    if (this.machineConnections.has(machineId)) {
+      const response = await this.requestMachineReplyLocal<Extract<MachineToServerMessage, { type: "machine:cursor_sdk:login_result" }>>(
+        machineId,
+        { type: "machine:cursor_sdk:login", requestId },
+        "machine:cursor_sdk:login_result",
+        45_000,
+        "Cursor sign-in request timed out",
+      );
+      return {
+        ok: response.ok === true,
+        loginUrl: response.loginUrl,
+        reused: response.reused,
+        errorCode: response.errorCode,
+        message: response.message,
+      };
+    }
+    const response = await this.getMachineResponseRelay().request({
+      requestId, machineId, type: "machine:cursor_sdk:login_result",
+    }, 45_000, () => this.sendRequiredToMachine(machineId, {
+      type: "machine:cursor_sdk:login", requestId,
+    }), (event, attrs) => this.recordMachineResponseRelay(event, attrs));
+    if (response.type !== "machine:cursor_sdk:login_result") throw new Error("Unexpected cursor-sdk login response");
+    return {
+      ok: response.ok === true,
+      loginUrl: response.loginUrl,
+      reused: response.reused,
+      errorCode: response.errorCode,
+      message: response.message,
+    };
+  }
+
+  /** Sanitized Cursor SDK binding status (status + source only, by contract). */
+  async getMachineCursorSdkStatus(machineId: string): Promise<{
+    status: "unbound" | "bound" | "bound_stale_key" | "disconnected" | "error";
+    source: "cursor_sdk_store" | "raft_owned" | "owner_environment";
+  }> {
+    const requestId = crypto.randomUUID();
+    if (this.machineConnections.has(machineId)) {
+      const response = await this.requestMachineReplyLocal<Extract<MachineToServerMessage, { type: "machine:cursor_sdk:status_result" }>>(
+        machineId,
+        { type: "machine:cursor_sdk:status", requestId },
+        "machine:cursor_sdk:status_result",
+        10_000,
+        "Cursor status request timed out",
+      );
+      return { status: response.status, source: response.source };
+    }
+    const response = await this.getMachineResponseRelay().request({
+      requestId, machineId, type: "machine:cursor_sdk:status_result",
+    }, 10_000, () => this.sendRequiredToMachine(machineId, {
+      type: "machine:cursor_sdk:status", requestId,
+    }), (event, attrs) => this.recordMachineResponseRelay(event, attrs));
+    if (response.type !== "machine:cursor_sdk:status_result") throw new Error("Unexpected cursor-sdk status response");
+    return { status: response.status, source: response.source };
   }
 
   async detectMachineRuntimeModels(machineId: string, runtime: string): Promise<RuntimeModelSourceOutcome> {

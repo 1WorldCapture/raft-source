@@ -50,6 +50,7 @@ import { randomUUID } from "node:crypto";
 import { Command } from "commander";
 
 import { runLogin, runLogout } from "./login.js";
+import { runCursorSdkLogin, runCursorSdkLogout, runCursorSdkStatus } from "./cursorSdkAuth.js";
 import { runAttach } from "./attach.js";
 import { runSetup } from "./setup.js";
 import { formatStatusReport } from "./status.js";
@@ -68,7 +69,7 @@ import { withMutationLock } from "./concurrency.js";
 import { runChannelShow, runChannelSet, runChannelVersions } from "./channel.js";
 import { parseChannel, readChannel, SEMVER_RE } from "./lib/channelState.js";
 import {
-  resolveUpgradeBaseUrl,
+  resolveUpgradeSourceForHome,
 } from "./computerRelease.js";
 import { resolveComputerUpgradeTargetVersion } from "./kReleaseSource.js";
 import { ComputerServiceError } from "./services/errors.js";
@@ -322,6 +323,22 @@ program
   .action(withCliExit(async () => {
     await runLogout();
   }));
+
+// Canonical provider-auth command tree (runtime auth <verb> cursor).
+const runtimeAuthCommand = program.command("runtime").description("Manage local agent runtimes.")
+  .command("auth").description("Manage local runtime account connections.");
+function requireCursorProvider(provider: string): void {
+  if (provider !== "cursor") throw new Error("Only the cursor provider is supported by this preview.");
+}
+runtimeAuthCommand.command("status").argument("<provider>")
+  .action(withCliExit(async (provider: string) => { requireCursorProvider(provider); await runCursorSdkStatus(); }));
+runtimeAuthCommand.command("login").argument("<provider>")
+  .option("--browser", "Use official browser login instead of the saved SDK connection")
+  .action(withCliExit(async (provider: string, options: { browser?: boolean }) => {
+    requireCursorProvider(provider); await runCursorSdkLogin({ reuseExisting: !options.browser });
+  }));
+runtimeAuthCommand.command("logout").argument("<provider>")
+  .action(withCliExit(async (provider: string) => { requireCursorProvider(provider); await runCursorSdkLogout(); }));
 
 // --- attach <serverSlug> (add-not-replace) ---
 program
@@ -640,12 +657,15 @@ program
               `Invalid --channel "${opts.channel}". Accepted: latest | alpha | pinned:<semver>.`,
             );
           }
-          const baseUrl = resolveUpgradeBaseUrl();
+          // Task #5: resolve the release source for THIS home (override > env
+          // > persisted backend > private default > hands) — private
+          // deployments resolve against the connected server's manifest.
+          const upgradeSource = await resolveUpgradeSourceForHome(slockHome);
           try {
             kTargetVersion = await resolveComputerUpgradeTargetVersion(channel!, {
               currentVersion: COMPUTER_VERSION,
               platformKey: `${process.platform}-${process.arch}`,
-            }, baseUrl);
+            }, upgradeSource.baseUrl, { backend: upgradeSource.backend });
           } catch (error) {
             if (error instanceof ComputerServiceError) presentUpgradeTargetResolutionFailure(error);
             throw error;

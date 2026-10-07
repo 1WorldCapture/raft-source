@@ -132,6 +132,11 @@ export class ChildProcessRuntimeSession implements RuntimeSession {
     const { process } = await this.driver.spawn(launchCtx);
     this.process = process;
     this.attachProcess(process);
+    // Task #13: give the driver an outlet for events produced outside the
+    // parseLine return channel (async held-turn closures).
+    this.driver.setEventSink?.((events) => {
+      for (const event of events) this.events.emit("runtime_event", event);
+    });
     return { ok: true, acceptedAs: "prompt" };
   }
 
@@ -183,6 +188,13 @@ export class ChildProcessRuntimeSession implements RuntimeSession {
         }
       }
     });
+    // A driver may hand the stream over explicitly paused (the OMP resume
+    // handshake pauses stdout so pre-ready frames are never double-fed;
+    // PM task #4 r3). Attaching a data listener does not clear an explicit
+    // pause, so resuming here is part of the attach contract — a no-op for
+    // drivers that never paused, and optional-call because test doubles of
+    // ChildProcess stdout predate this contract (same idiom as unref?.()).
+    process.stdout?.resume?.();
 
     process.stderr?.on("data", (chunk: Buffer) => {
       const text = chunk.toString().trim();

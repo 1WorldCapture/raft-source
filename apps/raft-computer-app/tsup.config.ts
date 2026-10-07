@@ -1,6 +1,7 @@
 import { defineConfig } from "tsup";
 import { copyFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { embeddedComputerVersionDefines } from "../../packages/computer/scripts/embeddedVersionDefines.mjs";
 
 // Main + preload: both run in Electron's Node context (main process / preload
 // sandbox bridge). The renderer runs in the Chromium web context — no Node
@@ -22,6 +23,9 @@ export default defineConfig([
     outDir: "dist",
     external: ["electron"],
     noExternal: ["@botiverse/raft-computer", "@botiverse/raft-shared", "@botiverse/raft-trace-client"],
+    // The inlined Computer must report its own version, not this app's
+    // package.json version (see embeddedVersionDefines.mjs).
+    define: embeddedComputerVersionDefines(),
     shims: true,
     banner: {
       js:

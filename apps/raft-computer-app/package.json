@@ -11,7 +11,7 @@
     "build:main": "tsup --config tsup.config.ts",
     "build": "pnpm run build:deps && pnpm run build:main",
     "start": "pnpm run build && node scripts/dev-start.mjs",
-    "test:unit": "node --import tsx --test src/menuModel.test.ts src/actionRunner.test.ts src/bundleSelfContained.test.ts src/crossSurfaceVersionDrift.test.ts src/serviceDispatcher.test.ts src/trayMenuReveal.test.ts src/onboardingWindow.test.ts src/onboarding/workspaceStep.test.ts src/onboarding/Recovery.test.tsx src/onboarding/recoveryDiagnostics.test.ts src/onboardingRecoveryContract.test.ts src/onboardingMigration.test.ts src/macosReleaseWorkflow.contract.test.ts scripts/dev-start.test.mjs",
+    "test:unit": "node --import tsx --test src/menuModel.test.ts src/embeddedComputerVersion.test.ts src/actionRunner.test.ts src/bundleSelfContained.test.ts src/crossSurfaceVersionDrift.test.ts src/serviceDispatcher.test.ts src/trayMenuReveal.test.ts src/onboardingWindow.test.ts src/onboarding/workspaceStep.test.ts src/onboarding/Recovery.test.tsx src/onboarding/recoveryDiagnostics.test.ts src/onboardingRecoveryContract.test.ts src/onboardingMigration.test.ts src/macosReleaseWorkflow.contract.test.ts scripts/dev-start.test.mjs",
     "dist": "pnpm run build && electron-builder --config electron-builder.yml",
     "dist:mac": "pnpm run build && electron-builder --mac --config electron-builder.yml",
     "dist:mac:release": "pnpm run build && electron-builder --mac --config electron-builder.release.yml --publish never",

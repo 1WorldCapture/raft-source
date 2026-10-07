@@ -142,7 +142,7 @@ test("message ack rejects an invalid token without a request", async () => {
   const { io } = memoryIo("garbage!!\n");
   const requests: Array<{ method: string; path: string; body: unknown }> = [];
   const ctx = contextWith(io, () => { throw new Error("unexpected request"); }, requests);
-  await assert.rejects(() => messageAckCommand.handler(ctx, undefined), /Invalid Claim-Ack token/);
+  await assert.rejects(Promise.resolve().then(() => messageAckCommand.handler(ctx, undefined)), /Invalid Claim-Ack token/);
   assert.equal(requests.length, 0);
 });
 

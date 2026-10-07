@@ -170,14 +170,24 @@ export function supportsRuntimeApiUrl(runtime: string): boolean {
 }
 
 export function runtimeApiUrlUnsupportedCopy(runtime: string): string | null {
+  // "cursor" prose is a legacy audited literal (i18nLegacyLiteralBoundaries
+  // family 3 + i18n-literal-baseline.json); new copy goes through the catalog.
   if (runtime === "cursor") {
     return "Cursor CLI does not expose a per-agent API URL flag or env var. Configure provider routing in Cursor itself.";
   }
   return null;
 }
 
+/** Catalog message id for the cursor-sdk API-URL explanation (en + zh-cn). */
+export function runtimeApiUrlUnsupportedCopyMessageId(runtime: string): "agent.runtimeConfig.cursorSdkApiUrlUnsupported" | null {
+  if (runtime === "cursor-sdk") {
+    return "agent.runtimeConfig.cursorSdkApiUrlUnsupported";
+  }
+  return null;
+}
+
 export function supportsRuntimeCustomModelName(runtime: string): boolean {
-  return runtime === "builtin" || runtime === "claude" || runtime === "codex" || runtime === "cursor" || runtime === "copilot" || runtime === "pi";
+  return runtime === "builtin" || runtime === "claude" || runtime === "codex" || runtime === "cursor" || runtime === "cursor-sdk" || runtime === "copilot" || runtime === "pi";
 }
 
 /** Antigravity owns model selection internally; its Web model field is ignored. */

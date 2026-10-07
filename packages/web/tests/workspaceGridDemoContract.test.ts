@@ -165,9 +165,11 @@ test("workspace collapsed rail and stable composers preserve the editor surface"
   assert.match(leftRailSource, /current\?\.targetSide === \(target\?\.side \?\? null\)[\s\S]*?current\.targetIndex === \(target\?\.index \?\? null\)\) return;/);
   assert.match(mainLayoutSource, /!workspaceSidebars\.right\.collapsed && workspaceSidebars\.right\.activeItem !== null/);
   assert.match(mainLayoutSource, /workspaceSidebars\.left\.collapsed \|\| workspaceSidebars\.left\.activeItem === null/);
-  assert.match(mainLayoutSource, /workspaceEnabled && !isWikiRoute \? <LeftRail side="right" hidden=\{mobileShowSidebarInline\} \/> : null/);
+  // d5e52b2 (#110): showMembersOffice routes first and the workspace branch
+  // renders inside a Suspense block.
+  assert.match(mainLayoutSource, /\{showMembersOffice \? \([\s\S]*?\) : workspaceEnabled && !isWikiRoute \? \([\s\S]*?<LeftRail side="right" hidden=\{mobileShowSidebarInline\} \/>/);
   assert.match(mainLayoutSource, /workspaceEnabled && !isWikiRoute \? \([\s\S]*?<WorkspaceGridDemo initialPanel=\{workspaceInitialPanel\} \/>/);
-  assert.match(mainLayoutSource, /workspaceEnabled && !isWikiRoute && !workspaceSidebars\.right\.collapsed/);
+  assert.match(mainLayoutSource, /workspaceEnabled && !isWikiRoute && !showMembersOffice && !workspaceSidebars\.right\.collapsed/);
   assert.match(mainLayoutSource, /workspace-left-sidebar-resize-handle/);
   assert.match(mainLayoutSource, /workspace-right-sidebar-resize-handle/);
   assert.match(mainLayoutSource, /workspace-settings-modal/);

@@ -3,12 +3,14 @@
 //
 // Companion: ../login.test.ts asserts the CLI adapter still emits the
 // pre-extraction info()/fail() lines byte-identically.
+import { assertStateRootHermetic } from "../test/hermeticAssertions.js";
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "vitest";
+import { userSessionPath } from "../paths.js";
 
 import { ComputerServiceError } from "./errors.js";
 import { login } from "./login.js";
@@ -16,13 +18,18 @@ import type { ComputerApiEvent } from "../lib/events.js";
 
 async function withHome<T>(fn: (home: string) => Promise<T>): Promise<T> {
   const home = await mkdtemp(join(tmpdir(), "raft-computer-login-svc-"));
-  const old = process.env.SLOCK_HOME;
+  const oldSlock = process.env.SLOCK_HOME;
+  const oldRaft = process.env.RAFT_HOME;
   process.env.SLOCK_HOME = home;
+  process.env.RAFT_HOME = home;
   try {
+    assertStateRootHermetic(home, "withHome");
     return await fn(home);
   } finally {
-    if (old === undefined) delete process.env.SLOCK_HOME;
-    else process.env.SLOCK_HOME = old;
+    if (oldSlock === undefined) delete process.env.SLOCK_HOME;
+    else process.env.SLOCK_HOME = oldSlock;
+    if (oldRaft === undefined) delete process.env.RAFT_HOME;
+    else process.env.RAFT_HOME = oldRaft;
     await rm(home, { recursive: true, force: true });
   }
 }
@@ -64,6 +71,7 @@ interface DeviceServerOptions {
   /** GET /api/auth/me response for the login-time identity enrichment (#112). */
   meStatus?: number;
   meBody?: unknown;
+  hang?: { phase: "authorize" | "token" | "me"; body: boolean; reached(): void };
 }
 
 async function startDeviceServer(opts: DeviceServerOptions): Promise<{ server: Server; baseUrl: string; tokenCalls: () => number }> {
@@ -71,6 +79,15 @@ async function startDeviceServer(opts: DeviceServerOptions): Promise<{ server: S
   const server = await new Promise<Server>((resolve) => {
     const s = createServer((req, res) => {
       res.setHeader("content-type", "application/json");
+      const phasePath = opts.hang?.phase === "me" ? "/api/auth/me" : `/api/auth/device/${opts.hang?.phase}`;
+      if (opts.hang && req.url === phasePath) {
+        if (opts.hang.body) {
+          res.statusCode = opts.hang.phase === "authorize" ? 201 : 200;
+          res.write("{"); // headers received, JSON body deliberately unfinished
+        }
+        opts.hang.reached();
+        return;
+      }
       if (req.url === "/api/auth/device/authorize") {
         const a = opts.authorize ?? {
           status: 201,
@@ -199,25 +216,34 @@ test("login service: device-authorize transport failure throws DEVICE_AUTHORIZE_
 });
 
 test("login service: device-authorize honors HTTP_PROXY instead of going direct", async () => {
-  await withProxyEnv({ HTTP_PROXY: "http://127.0.0.1:1" }, async () => {
-    await withHome(async (home) => {
-      const ctx = await startDeviceServer({});
-      try {
-        await assert.rejects(
-          () => login({ serverUrl: ctx.baseUrl, slockHome: home }),
-          (err: unknown) => {
-            assert.ok(err instanceof ComputerServiceError);
-            assert.equal((err as ComputerServiceError).code, "DEVICE_AUTHORIZE_FAILED");
-            assert.match((err as ComputerServiceError).message, /Could not start device login at/);
-            assert.equal(ctx.tokenCalls(), 0, "authorize never reached the direct origin");
-            return true;
-          },
-        );
-      } finally {
-        await stop(ctx.server);
-      }
+  // Own a proxy fixture that rejects tunnels instead of contacting an
+  // arbitrary unallocated localhost port.
+  const proxy = createServer((_req, response) => { response.writeHead(502); response.end(); });
+  proxy.on("connect", (_req, socket) => socket.destroy());
+  await new Promise<void>((resolve) => proxy.listen(0, "127.0.0.1", resolve));
+  const proxyAddress = proxy.address();
+  assert.ok(proxyAddress && typeof proxyAddress === "object");
+  try {
+    await withProxyEnv({ HTTP_PROXY: `http://127.0.0.1:${proxyAddress.port}` }, async () => {
+      await withHome(async (home) => {
+        const ctx = await startDeviceServer({});
+        try {
+          await assert.rejects(
+            () => login({ serverUrl: ctx.baseUrl, slockHome: home }, { requestTimeoutMs: 200 }),
+            (err: unknown) => {
+              assert.ok(err instanceof ComputerServiceError);
+              assert.equal((err as ComputerServiceError).code, "DEVICE_AUTHORIZE_FAILED");
+              assert.match((err as ComputerServiceError).message, /Could not start device login at/);
+              assert.equal(ctx.tokenCalls(), 0, "authorize never reached the direct origin");
+              return true;
+            },
+          );
+        } finally {
+          await stop(ctx.server);
+        }
+      });
     });
-  });
+  } finally { proxy.closeAllConnections(); await stop(proxy); }
 });
 
 test("login service: device-authorize honors NO_PROXY bypass for local server", async () => {
@@ -326,3 +352,84 @@ test("login service: AbortSignal aborts the polling loop without throwing Comput
     }
   });
 });
+
+test("device authorization cancelled during token response never writes a session", async () => {
+  await withHome(async (home) => {
+    const ctx = await startDeviceServer({});
+    const abort = new AbortController();
+    try {
+      await assert.rejects(login({ serverUrl: ctx.baseUrl, slockHome: home }, {
+        signal: abort.signal,
+        onEvent: (event) => { if (event.kind === "login.polling") abort.abort(); },
+      }));
+      await assert.rejects(readFile(userSessionPath(home), "utf8"), (error: NodeJS.ErrnoException) => error.code === "ENOENT");
+    } finally { await stop(ctx.server); }
+  });
+});
+
+
+async function bounded<T>(promise: Promise<T>, timeoutMs = 2_000): Promise<T> {
+  let timer!: ReturnType<typeof setTimeout>;
+  try {
+    return await Promise.race([promise, new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error("request did not settle within watchdog")), timeoutMs);
+    })]);
+  } finally { clearTimeout(timer); }
+}
+
+for (const phase of ["authorize", "token", "me"] as const) {
+  for (const body of [false, true]) {
+    test(`login cancellation interrupts ${phase} ${body ? "response body" : "request"} without any session write`, async () => {
+      await withHome(async (home) => {
+        let reached!: () => void;
+        const seen = new Promise<void>((resolve) => { reached = resolve; });
+        const ctx = await startDeviceServer({ hang: { phase, body, reached } });
+        const abort = new AbortController();
+        const pending = login({ serverUrl: ctx.baseUrl, slockHome: home }, { signal: abort.signal })
+          .then(() => null, (error: unknown) => error);
+        try {
+          await bounded(seen);
+          abort.abort();
+          const error = await bounded(pending);
+          assert.ok(error instanceof Error);
+          assert.equal(error.name, "AbortError");
+          await assert.rejects(readFile(userSessionPath(home)), (error: NodeJS.ErrnoException) => error.code === "ENOENT");
+        } finally {
+          abort.abort();
+          ctx.server.closeAllConnections();
+          await stop(ctx.server);
+          await pending;
+        }
+      });
+    });
+
+    test(`login deadline bounds ${phase} ${body ? "response body" : "request"}`, async () => {
+      await withHome(async (home) => {
+        const ctx = await startDeviceServer({ hang: { phase, body, reached: () => {} } });
+        const abort = new AbortController();
+        try {
+          const pending = login({ serverUrl: ctx.baseUrl, slockHome: home }, {
+            signal: abort.signal, requestTimeoutMs: 100,
+          });
+          if (phase === "me") {
+            const result = await bounded(pending);
+            // Identity enrichment stays best-effort after successful approval.
+            const session = JSON.parse(await readFile(result.sessionPath, "utf8"));
+            assert.equal(session.displayName, undefined);
+          } else {
+            await assert.rejects(bounded(pending), (error: unknown) => {
+              assert.ok(error instanceof Error);
+              assert.ok(phase === "authorize" ? error instanceof ComputerServiceError : error.name === "TimeoutError");
+              return true;
+            });
+            await assert.rejects(readFile(userSessionPath(home)), (error: NodeJS.ErrnoException) => error.code === "ENOENT");
+          }
+        } finally {
+          abort.abort();
+          ctx.server.closeAllConnections();
+          await stop(ctx.server);
+        }
+      });
+    });
+  }
+}

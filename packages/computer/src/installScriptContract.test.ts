@@ -2202,3 +2202,35 @@ test("pinned installer requires Hands identity and rejects CDN drift", async (t)
     } finally { await hands.close(); await rm(root, { recursive: true, force: true }); }
   }
 });
+
+// Task #5 (private deployment, phase 2): the server backend resolves the
+// latest version from the release tree's own manifest.json pointer (Hands is
+// never contacted — the hermetic network guard enforces that) and persists
+// the backend so later upgrade checks resolve against the same authority.
+test("install.sh server backend resolves the latest pointer from the release tree and persists the backend", async (t) => {
+  if (!posixInstallerHostSupported(t)) return;
+
+  const root = await mkdtemp(resolve(tmpdir(), "raft-computer-install-server-"));
+  const version = "0.0.1-test";
+  const target = `${process.platform}-${process.arch}`;
+  await writePosixReleaseFixture(root, version, target);
+  await writeFile(resolve(root, "release", "manifest.json"), `${JSON.stringify({ version })}\n`);
+  try {
+    const env = await handsSelectionEnv(root, target, {});
+    delete env.RAFT_COMPUTER_RELEASE_BACKEND;
+    env.RAFT_COMPUTER_INSTALL_BACKEND = "server";
+    await execFileAsync("sh", [installScriptPath], { env });
+
+    assert.ok(
+      existsSync(resolve(root, "user-home", ".local", "bin", "raft-computer")),
+      "server-backend install must install the binary from the release tree",
+    );
+    assert.equal(
+      await readFile(resolve(root, "home", "computer", "release-backend"), "utf8"),
+      "server\n",
+      "the installer must persist the server backend for later upgrade checks",
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

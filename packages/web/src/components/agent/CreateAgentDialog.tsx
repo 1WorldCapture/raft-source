@@ -31,6 +31,8 @@ import { formatAgentNameValidationError } from "../../i18n/nameValidation";
 import { formatRuntimeConfigBuildError } from "../../utils/runtimeConfigBuildErrorPresentation";
 import type { ResolvedAgentCreateFormDefinition, RuntimeConfig, RuntimeReasoningEffort, RuntimeFormDefinitionRef, RuntimeModelInfo, RuntimeSelectionOption, ServerPlan } from "@botiverse/raft-shared";
 import { formatRuntimeAvailabilitySuffix, formatRuntimeLabelWithStatus } from "../../utils/runtimeAvailabilityLabel";
+import { runtimeInstallHintFor } from "../../utils/runtimeInstallHints";
+import type { RuntimeInstallHint } from "../../utils/runtimeInstallHints";
 import { runtimeModelSelectionIsRunnable, useRuntimeModels } from "../../hooks/useRuntimeModels";
 import type { RuntimeModelSourceState } from "../../hooks/useRuntimeModels";
 
@@ -161,12 +163,14 @@ function OnboardingCreateCindyRuntimePanel({
   runtime,
   onRuntimeChange,
   runtimeOptions,
+  runtimeInstallHint,
   model,
   onModelChange,
   customModelMode,
   onCustomModelModeChange,
   modelOptions,
   runtimeModels,
+  cursorSdkLoginTarget = null,
   providerMode,
   onProviderModeChange,
   providerApiUrl,
@@ -207,12 +211,15 @@ function OnboardingCreateCindyRuntimePanel({
   runtime: string;
   onRuntimeChange: (runtime: string) => void;
   runtimeOptions: SelectOption[];
+  runtimeInstallHint: RuntimeInstallHint | null;
   model: string;
   onModelChange: (model: string) => void;
   customModelMode: boolean;
   onCustomModelModeChange: (enabled: boolean) => void;
   modelOptions: SelectOption[];
   runtimeModels: { source: RuntimeModelSourceState; models: RuntimeModelInfo[]; loading: boolean; rescan: () => void };
+  /** Enables the Cursor SDK sign-in button for cursor-sdk's login recovery state. */
+  cursorSdkLoginTarget?: { serverId: string; machineId: string; onBound: () => void } | null;
   providerMode: RuntimeProviderMode;
   onProviderModeChange: (mode: RuntimeProviderMode) => void;
   providerApiUrl: string;
@@ -276,6 +283,7 @@ function OnboardingCreateCindyRuntimePanel({
         onCustomModelModeChange={onCustomModelModeChange}
         modelOptions={modelOptions}
         runtimeModels={runtimeModels}
+        cursorSdkLoginTarget={cursorSdkLoginTarget}
         providerMode={providerMode}
         onProviderModeChange={onProviderModeChange}
         providerApiUrl={providerApiUrl}
@@ -304,6 +312,7 @@ function OnboardingCreateCindyRuntimePanel({
         onEnvVarEntriesChange={() => undefined}
         runtimeLabel={formatMessage({ id: "agent.runtimeConfig.runtime" })}
         runtimeHint={formatMessage({ id: "agent.create.runtimeHint" })}
+        runtimeInstallHint={runtimeInstallHint}
         onRescanRuntimes={onRescanRuntimes}
         runtimesRescanning={runtimesRescanning}
         envVarsMode="hidden"
@@ -679,6 +688,12 @@ export default function CreateAgentDialog({
   // runtimes never receive this provisional source.
   const runtimeModelSourceRuntime = runtime || (machineRuntimeIds.includes("claude") ? "claude" : "");
   const runtimeModels = useRuntimeModels(selectedMachineId, runtimeModelSourceRuntime);
+  // Owner sign-in entry for Cursor SDK: the create dialog knows the target
+  // machine, so the login button appears whenever the model source reports
+  // the cursor_login recovery state. onBound rescans the (now live) models.
+  const cursorSdkLoginTarget = currentServer?.id && selectedMachineId
+    ? { serverId: currentServer.id, machineId: selectedMachineId, onBound: runtimeModels.rescan }
+    : null;
   const selectedModelInfo = customModelMode ? null : runtimeModels.models.find((m) => m.id === model);
   const selectedModelSuggestionOnly = selectedModelInfo?.verified === "suggestion_only";
   const apiUrlSupported = supportsRuntimeApiUrl(runtime);
@@ -1376,6 +1391,8 @@ export default function CreateAgentDialog({
               <OnboardingCreateCindyRuntimePanel
                 showValidationErrors={validationAttempted}
                 runtime={runtime}
+                runtimeInstallHint={runtimeInstallHintFor(runtime, machineRuntimeIds)}
+                cursorSdkLoginTarget={cursorSdkLoginTarget}
                 onRuntimeChange={(val) => {
                   setRuntime(val);
                   setModel(getDefaultModel(val) || "");
@@ -1905,6 +1922,7 @@ export default function CreateAgentDialog({
               onCustomModelModeChange={setCustomModelMode}
               modelOptions={modelOptions}
               runtimeModels={runtimeModels}
+              cursorSdkLoginTarget={cursorSdkLoginTarget}
               rescanDisabled={!selectedMachineId}
               providerMode={providerMode}
               onProviderModeChange={setProviderMode}

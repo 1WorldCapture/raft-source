@@ -16,12 +16,31 @@ directories:
 files:
   - dist/**
   - package.json
+  # Tray template icon (16px + @2x) for menubar residency — must ship inside
+  # the asar so the packaged app can load it via app.getAppPath().
+  - build/tray-icon.png
+  - build/tray-icon@2x.png
   - "!**/*.map"
+  # SDK assets are shipped once, as verified extraResources. Workspace package
+  # links must not copy the staging cache or additional SDK copies into ASAR.
+  - "!**/runtime-assets{,/**}"
 # The bundled `raft` CLI the detached __run daemon child hands to each agent
 # runtime as slockCliPath (RAFT_COMPUTER_CLI_PATH → <resources>/cli/index.js).
 extraResources:
   - from: ../../packages/cli/dist/index.js
     to: cli/index.js
+  # Cursor SDK runtime assets (runtime id `cursor-sdk`): staged by
+  # `pnpm --filter @botiverse/raft-daemon build:cursor-assets` (pinned by
+  # packages/daemon/cursor-sdk-assets.lock.json). The daemon NEVER imports
+  # @cursor/sdk in-process; it spawns the staged Node binary
+  # (node/bin/node) on host/runtimeHost.mjs + host/authHost.mjs with the SDK
+  # resolved from the staged node_modules closure. src/app/index.ts points
+  # RAFT_CURSOR_SDK_ASSETS at <resources>/cursor-sdk. The version segment is
+  # the pinned SDK version — bumping the lock means updating this path (the
+  # daemon resolver validates manifest versions anyway). ${arch} is expanded
+  # per packaging pass, so a dual-arch build embeds each arch's own assets.
+  - from: ../../packages/daemon/runtime-assets/cursor/1.0.36/darwin-${arch}
+    to: cursor-sdk
 protocols:
   - name: Raft
     schemes:

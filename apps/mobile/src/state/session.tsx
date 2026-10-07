@@ -1,0 +1,599 @@
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { AppState } from "react-native";
+import * as SecureStore from "expo-secure-store";
+import { ApiError, createApiClient, shouldLogoutAfterRefresh, type ApiClient, type TokenPair } from "../api/client";
+import { createInstallationId } from "../api/ids";
+import { syncSince } from "../api/sync";
+import { isRecord, parseChannelUnread, parseUser, type RaftUser } from "../model/messages";
+import { useActivityStore } from "../activity/store";
+import { useTaskStore } from "../tasks/store";
+import { useBoardStore } from "../tasks/boardStore";
+import {
+  markCacheSocketDisconnected,
+  noteLiveMessage,
+  noteMessageUpdated,
+  noteReadState,
+  noteTaskDeleted,
+  noteTaskEvent,
+  runCacheGapSync,
+} from "../cache/cacheSyncRuntime";
+import { createRealtime, type Realtime } from "../realtime/socket";
+import { BUNDLED_SERVER_ORIGIN } from "../session/origin";
+import { shouldApplyServerResponse, shouldCommitTokens, shouldMarkVisibleRead, catchUpPlan, releaseFocus } from "./sessionPolicy";
+import { useRaftStore } from "./store";
+import { useServerRailStore } from "../home/serverRailStore";
+import { getCacheRuntime, initCacheRuntime } from "../cache/runtime";
+import { cancelCacheSync, refreshOverlayIntoStore } from "../cache/cacheSyncRuntime";
+import { useOfflineStore } from "../cache/cacheCleanup";
+import { openExpoSqliteDb } from "../cache/portExpo";
+
+// Cache runtime is initialized once per process. The lazy flag keeps tests
+// (which never mount this provider) from touching sqlite.
+let cacheRuntimeReady = false;
+function ensureCacheRuntime() {
+  if (!cacheRuntimeReady) {
+    initCacheRuntime({ openDb: () => openExpoSqliteDb("raft-cache.sqlite") });
+    cacheRuntimeReady = true;
+  }
+}
+
+const ORIGIN = "raft_mobile_origin";
+const ACCESS = "raft_mobile_access";
+const REFRESH = "raft_mobile_refresh";
+const USER = "raft_mobile_user";
+const SERVER = "raft_mobile_server";
+const INSTALLATION = "raft_mobile_installation";
+const BACKGROUND_DISCONNECT_MS = 30_000;
+/** Coalesce a burst of live events into one unread-summary refetch. */
+const BADGE_REFRESH_DEBOUNCE_MS = 2_000;
+
+interface Snapshot {
+  ready: boolean;
+  origin: string | null;
+  accessToken: string | null;
+  refreshToken: string | null;
+  installationId: string | null;
+  user: RaftUser | null;
+  serverId: string | null;
+}
+
+interface LoginResult {
+  user: RaftUser;
+  accessToken: string;
+  refreshToken: string;
+}
+
+export interface SessionApi {
+  ready: boolean;
+  origin: string | null;
+  user: RaftUser | null;
+  serverId: string | null;
+  signedIn: boolean;
+  client: ApiClient;
+  setOrigin: (origin: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<void>;
+  logout: () => Promise<void>;
+  selectServer: (serverId: string) => Promise<void>;
+  updateProfile: (fields: { displayLanguage?: string; preferredMessageBodyFontSize?: "sm" | "md" | "lg" }) => Promise<void>;
+  resendVerification: () => Promise<void>;
+  markRead: (channelId: string, seq: number) => Promise<void>;
+  joinThread: (threadChannelId: string) => void;
+  leaveThread: (threadChannelId: string) => void;
+  setFocusedChannelId: (channelId: string | null) => void;
+  clearFocusedChannelId: (channelId: string) => void;
+}
+
+const SessionContext = createContext<SessionApi | null>(null);
+
+function classifyNotice(error: ApiError) {
+  if (error.status !== 403) return;
+  if (error.code === "PROFILE_SETUP_REQUIRED") {
+    useRaftStore.getState().setNotice("profile-setup");
+    return;
+  }
+  if (error.error === "Email verification required" || error.code === "EMAIL_VERIFICATION_REQUIRED") {
+    useRaftStore.getState().setNotice("verify-email");
+  }
+}
+
+export function SessionProvider({ children }: { children: ReactNode }) {
+  const snapshotRef = useRef<Snapshot>({
+    ready: false,
+    origin: null,
+    accessToken: null,
+    refreshToken: null,
+    installationId: null,
+    user: null,
+    serverId: null,
+  });
+  const [snapshot, setSnapshotState] = useState(snapshotRef.current);
+  const focusedRef = useRef<string | null>(null);
+  const backgroundAt = useRef<number | null>(null);
+  const pendingReads = useRef(new Map<string, number>());
+  const realtimeRef = useRef<Realtime | null>(null);
+  const authEpoch = useRef(0);
+  const serverEpoch = useRef(0);
+  const markReadRef = useRef<(channelId: string, seq: number) => Promise<void>>(async () => {});
+
+  function apply(patch: Partial<Snapshot>) {
+    snapshotRef.current = { ...snapshotRef.current, ...patch };
+    setSnapshotState(snapshotRef.current);
+  }
+
+  async function persistTokens(tokens: TokenPair | null, user?: RaftUser | null) {
+    if (!tokens) {
+      await Promise.all([
+        SecureStore.deleteItemAsync(ACCESS),
+        SecureStore.deleteItemAsync(REFRESH),
+        SecureStore.deleteItemAsync(USER),
+      ]);
+      return;
+    }
+    await Promise.all([
+      SecureStore.setItemAsync(ACCESS, tokens.accessToken),
+      SecureStore.setItemAsync(REFRESH, tokens.refreshToken),
+      user ? SecureStore.setItemAsync(USER, JSON.stringify({
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        displayName: user.displayName,
+        displayLanguage: user.displayLanguage,
+        preferredMessageBodyFontSize: user.preferredMessageBodyFontSize,
+        preferredTimeFormat: user.preferredTimeFormat,
+        preferredTimezone: user.preferredTimezone,
+      })) : Promise.resolve(),
+    ]);
+  }
+
+  function bumpServerEpoch() {
+    serverEpoch.current += 1;
+    pendingReads.current.clear();
+  }
+
+  function clearAuth() {
+    authEpoch.current += 1;
+    bumpServerEpoch();
+    apply({ accessToken: null, refreshToken: null, user: null, serverId: null });
+    useRaftStore.getState().clearServerData();
+    useServerRailStore.getState().reset();
+    useRaftStore.getState().setNotice(null);
+    void persistTokens(null);
+    void SecureStore.deleteItemAsync(SERVER);
+    realtimeRef.current?.reset();
+  }
+
+  const client = useMemo(() => createApiClient({
+    getOrigin: () => snapshotRef.current.origin,
+    getAccessToken: () => snapshotRef.current.accessToken,
+    getRefreshToken: () => snapshotRef.current.refreshToken,
+    getServerId: () => snapshotRef.current.serverId,
+    getInstallationId: () => snapshotRef.current.installationId,
+    getAuthEpoch: () => authEpoch.current,
+    getServerEpoch: () => serverEpoch.current,
+    setTokens: async (tokens, startedAuthEpoch) => {
+      const started = startedAuthEpoch ?? authEpoch.current;
+      if (!shouldCommitTokens(started, authEpoch.current)) return;
+      await persistTokens(tokens);
+      if (!shouldCommitTokens(started, authEpoch.current)) {
+        await persistTokens(null);
+        return;
+      }
+      apply({ accessToken: tokens.accessToken, refreshToken: tokens.refreshToken });
+      realtimeRef.current?.syncAuth();
+    },
+    onSessionExpired: () => {
+      clearAuth();
+    },
+    onApiError: classifyNotice,
+  }), []);
+
+  // Live messages and thread events move the server unread summary; coalesce
+  // a burst into one badge refetch instead of one per event. Also driven by
+  // the server's unread_summary:changed push (when shipped).
+  const badgeRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleBadgeRefresh = useCallback(() => {
+    if (badgeRefreshTimer.current !== null) clearTimeout(badgeRefreshTimer.current);
+    badgeRefreshTimer.current = setTimeout(() => {
+      badgeRefreshTimer.current = null;
+      void useServerRailStore.getState().refreshBadges(client);
+    }, BADGE_REFRESH_DEBOUNCE_MS);
+  }, [client]);
+
+  const realtime = useMemo(() => createRealtime({
+    getOrigin: () => snapshotRef.current.origin,
+    getAccessToken: () => snapshotRef.current.accessToken,
+    getServerId: () => snapshotRef.current.serverId,
+    getLastSeq: () => useRaftStore.getState().lastSeq,
+    refreshTokens: () => client.refreshTokens(),
+    onSessionExpired: () => clearAuth(),
+    onMessage: (message) => {
+      noteLiveMessage(client, message);
+      useRaftStore.getState().upsertMessages([message]);
+      useRaftStore.getState().applyLiveToConversations(message);
+      useActivityStore.getState().scheduleRefresh(client);
+      scheduleBadgeRefresh();
+      if (shouldMarkVisibleRead(focusedRef.current, message.channelId)) {
+        useRaftStore.getState().clearLiveUnread(message.channelId);
+        if (typeof message.seq === "number") void markReadRef.current(message.channelId, message.seq);
+        return;
+      }
+      useRaftStore.getState().bumpLiveUnread(message.channelId);
+    },
+    onCatchUp: (messages, hasMore) => {
+      const epoch = serverEpoch.current;
+      useRaftStore.getState().upsertMessages(messages);
+      const plan = catchUpPlan(hasMore);
+      if (plan.refreshDirectory) useRaftStore.getState().bumpDirectory();
+      if (plan.refreshUnread) {
+        void client.get<unknown>("/channels/unread?summary=1").then((unreadData) => {
+          if (!shouldApplyServerResponse(epoch, serverEpoch.current)) return;
+          useRaftStore.getState().setChannelUnread(parseChannelUnread(unreadData));
+        }).catch(() => {});
+      }
+      if (!hasMore) return;
+      const channelId = focusedRef.current;
+      const since = useRaftStore.getState().lastSeq;
+      if (!channelId || since <= 0) return;
+      void syncSince(client, since, channelId).then((page) => {
+        if (!shouldApplyServerResponse(epoch, serverEpoch.current)) return;
+        useRaftStore.getState().upsertMessages(page);
+      }).catch(() => {});
+    },
+    onMessageUpdated: (message) => {
+      noteMessageUpdated(client, message);
+      useRaftStore.getState().upsertMessages([message]);
+    },
+    onThreadUpdated: (summary) => {
+      // Socket summaries carry no unreadCount — merge over the stored one so
+      // the inline "N new replies" label survives exactly when a new reply
+      // lands, instead of being wiped by the whole-key replacement.
+      const existing = useRaftStore.getState().threadSummaries[summary.parentMessageId];
+      useRaftStore.getState().setThreadSummaries({
+        [summary.parentMessageId]: existing ? { ...existing, ...summary } : summary,
+      });
+      useActivityStore.getState().scheduleRefresh(client);
+      scheduleBadgeRefresh();
+      const viewerId = snapshotRef.current.user?.id;
+      useBoardStore.getState().noteThreadActivity(
+        client,
+        { threadChannelId: summary.threadChannelId, parentMessageId: summary.parentMessageId, latestReply: summary.latestReply },
+        viewerId ? { type: "user", id: viewerId } : null,
+      );
+    },
+    onReadState: (state) => {
+      if (state.serverId === null || state.serverId === snapshotRef.current.serverId) {
+        noteReadState(client, [state]);
+      }
+      const channelId = state.channelId;
+      useRaftStore.getState().clearChannelUnread(channelId);
+      useRaftStore.getState().clearLiveUnread(channelId);
+      useActivityStore.getState().applyReadStates([channelId]);
+    },
+    onUnreadSummaryChanged: () => {
+      scheduleBadgeRefresh();
+    },
+    onReadStateBulk: (states) => {
+      noteReadState(
+        client,
+        states.filter((state) => state.serverId === null || state.serverId === snapshotRef.current.serverId),
+      );
+      for (const state of states) {
+        const scopeId = state.channelId;
+        useRaftStore.getState().clearChannelUnread(scopeId);
+        useRaftStore.getState().clearLiveUnread(scopeId);
+      }
+      useActivityStore.getState().applyReadStates(states.map((state) => state.channelId));
+    },
+    onDirectoryChanged: () => {
+      useRaftStore.getState().bumpDirectory();
+    },
+    onRoomsJoined: () => {
+      useRaftStore.getState().bumpDirectory();
+      void useActivityStore.getState().refresh(client);
+    },
+    onServerOrderUpdated: (serverIds) => {
+      useServerRailStore.getState().applyServerOrder(serverIds);
+    },
+    onConnect: () => {
+      useOfflineStore.getState().setOffline(false);
+      void runCacheGapSync(client);
+      // A channel opened while offline left its overlay refresh failed (and
+      // the once-per-boot marker unwritten) — re-run it for the focused
+      // channel now that the network is back, landing fresh dynamic data in
+      // the store in place (#6 acceptance follow-up).
+      const focus = focusedRef.current;
+      if (focus) void refreshOverlayIntoStore(client, focus, null, null);
+      void useTaskStore.getState().catchUp(client);
+      // Events emitted while disconnected were lost — the board cannot be
+      // fixed up incrementally, so reload it from page 1.
+      const board = useBoardStore.getState();
+      if (board.loaded) void board.load(client);
+    },
+    onDisconnect: () => {
+      markCacheSocketDisconnected();
+      // Offline banner feed (#client-data-cache task #4 → #5's UI): the
+      // socket is the connectivity truth; "network" vs "server" cannot be
+      // told apart from a bare disconnect, so default the cause.
+      useOfflineStore.getState().setOffline(true, "network");
+      useTaskStore.getState().markStale();
+    },
+    onConnectError: () => {
+      // A cold start in airplane mode never connects, so no disconnect fires.
+      useOfflineStore.getState().setOffline(true, "network");
+    },
+    onTaskCreated: (payload) => {
+      noteTaskEvent(client, payload);
+      useTaskStore.getState().applyCreated(payload);
+      const board = useBoardStore.getState();
+      if (board.loaded) for (const id of taskIdsFromEvent(payload)) board.noteTaskActivity(client, id);
+    },
+    onTaskUpdated: (payload) => {
+      noteTaskEvent(client, payload);
+      useTaskStore.getState().applyUpdated(payload);
+      const board = useBoardStore.getState();
+      if (board.loaded) for (const id of taskIdsFromEvent(payload)) board.noteTaskActivity(client, id);
+    },
+    onTaskDeleted: (payload) => {
+      noteTaskDeleted(client, payload);
+      useTaskStore.getState().applyDeleted(payload);
+      const board = useBoardStore.getState();
+      if (board.loaded) for (const id of taskIdsFromEvent(payload)) board.noteTaskActivity(client, id);
+    },
+  }), [client]);
+  realtimeRef.current = realtime;
+
+  useEffect(() => {
+    let cancelled = false;
+    // SecureStore calls in this effect's first turn never settle on Android
+    // release builds. A state update, then a read on the next turn, does.
+    apply({ ready: false });
+    const timer = setTimeout(() => {
+      void (async () => {
+        try {
+          const storedOrigin = await SecureStore.getItemAsync(ORIGIN);
+          const origin = BUNDLED_SERVER_ORIGIN;
+          if (!origin) {
+            if (!cancelled) apply({ origin: null, ready: true });
+            return;
+          }
+          let accessToken = await SecureStore.getItemAsync(ACCESS);
+          let refreshToken = await SecureStore.getItemAsync(REFRESH);
+          let userJson = await SecureStore.getItemAsync(USER);
+          let serverId = await SecureStore.getItemAsync(SERVER);
+          if (storedOrigin !== origin) {
+            void SecureStore.setItemAsync(ORIGIN, origin);
+            if (storedOrigin) {
+              accessToken = null;
+              refreshToken = null;
+              userJson = null;
+              serverId = null;
+              void persistTokens(null);
+              void SecureStore.deleteItemAsync(SERVER);
+            }
+          }
+          const storedInstallation = await SecureStore.getItemAsync(INSTALLATION);
+          let installationId = storedInstallation && /^ari_[0-9a-f]{32}$/.test(storedInstallation)
+            ? storedInstallation
+            : createInstallationId();
+          if (cancelled) return;
+          apply({
+            origin,
+            accessToken,
+            refreshToken,
+            installationId,
+            user: userJson ? parseUser(JSON.parse(userJson) as unknown) : null,
+            serverId,
+            ready: true,
+          });
+          if (installationId !== storedInstallation) {
+            void SecureStore.setItemAsync(INSTALLATION, installationId);
+          }
+          if (!accessToken) return;
+          try {
+            const me = parseUser(await client.get("/auth/me"));
+            if (me) apply({ user: me });
+          } catch (error) {
+            if (error instanceof ApiError && error.status === 401 && snapshotRef.current.refreshToken) {
+              try {
+                await client.refreshTokens();
+                const me = parseUser(await client.get("/auth/me"));
+                if (me) apply({ user: me });
+              } catch (refreshError) {
+                if (shouldLogoutAfterRefresh(refreshError)) clearAuth();
+              }
+            }
+          }
+        } catch {
+          if (!cancelled) apply({ origin: BUNDLED_SERVER_ORIGIN, ready: true });
+        }
+      })();
+    }, 0);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [client]);
+
+  useEffect(() => {
+    if (!snapshot.ready || !snapshot.accessToken || !snapshot.serverId || !snapshot.origin) {
+      realtime.reset();
+      return;
+    }
+    realtime.connect();
+  }, [realtime, snapshot.accessToken, snapshot.origin, snapshot.ready, snapshot.serverId]);
+
+  // Local cache scope follows the session (#client-data-cache task #2):
+  // attach is a synchronous idempotent bootstrap write, so cold-start first
+  // paint (home seeding) can read the scope before any await boundary.
+  // Server switches re-attach without wiping; logout/origin-change wipe in
+  // their own handlers.
+  useEffect(() => {
+    if (!snapshot.ready || !snapshot.user || !snapshot.serverId || !snapshot.origin) return;
+    try {
+      ensureCacheRuntime();
+      getCacheRuntime().attach(snapshot.origin, snapshot.user.id, snapshot.serverId);
+    } catch {
+      // Cache unavailable (e.g. storage failure) — the app works without it.
+    }
+  }, [snapshot.ready, snapshot.user, snapshot.serverId, snapshot.origin]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "background" || state === "inactive") {
+        backgroundAt.current = Date.now();
+        return;
+      }
+      if (state !== "active") return;
+      const away = backgroundAt.current ? Date.now() - backgroundAt.current : 0;
+      backgroundAt.current = null;
+      if (away > BACKGROUND_DISCONNECT_MS) realtime.reset();
+      realtime.connect();
+      // Same foreground-return reasoning for the cache: onConnect can miss
+      // it, and events may have been lost in the background — run the gap
+      // sync loop regardless (it is cheap when already converged).
+      void runCacheGapSync(client);
+      // The socket may have stayed up in the background, so onConnect can miss
+      // the foreground return — reload the board the same way (load dedupes).
+      const board = useBoardStore.getState();
+      if (board.loaded) void board.load(client);
+      // Cross-server rail dots cannot arrive over the (single, active-server)
+      // socket; refresh them when the app returns to the foreground.
+      void useServerRailStore.getState().refreshBadges(client);
+      void flushReads();
+    });
+    return () => subscription.remove();
+  }, [realtime, client]);
+
+  async function flushReads() {
+    for (const [channelId, seq] of pendingReads.current) {
+      try {
+        await client.post(`/channels/${channelId}/read`, { seq });
+        pendingReads.current.delete(channelId);
+      } catch {
+        // Keep the cursor queued for the next foreground or channel open.
+      }
+    }
+  }
+
+  const api = useMemo<SessionApi>(() => ({
+    ready: snapshot.ready,
+    origin: snapshot.origin,
+    user: snapshot.user,
+    serverId: snapshot.serverId,
+    signedIn: Boolean(snapshot.accessToken && snapshot.refreshToken),
+    client,
+    setOrigin: async (origin: string) => {
+      const changed = origin !== snapshotRef.current.origin;
+      await SecureStore.setItemAsync(ORIGIN, origin);
+      if (changed) {
+        clearAuth();
+        // Cancel in-flight cache work, then drop the whole DB (#1 decision).
+        cancelCacheSync();
+        try {
+          ensureCacheRuntime();
+          void getCacheRuntime().resetAll();
+        } catch {
+          // Non-fatal.
+        }
+      }
+      apply({ origin });
+    },
+    login: async (email: string, password: string) => {
+      const data = await client.post<LoginResult>("/auth/login", { email, password }, { auth: false, server: false });
+      const user = parseUser(data.user);
+      if (!user || !data.accessToken || !data.refreshToken) throw new Error("Login did not return a session");
+      await persistTokens({ accessToken: data.accessToken, refreshToken: data.refreshToken }, user);
+      apply({ accessToken: data.accessToken, refreshToken: data.refreshToken, user });
+      useRaftStore.getState().setNotice(null);
+    },
+    logout: async () => {
+      const refreshToken = snapshotRef.current.refreshToken;
+      clearAuth();
+      // Cancel in-flight cache sync/write-through FIRST (review fix #3), then
+      // wipe EVERYTHING: the requirement is "退出登录时全部清空" — all servers
+      // of this account, not just the attached scope (review fix #2).
+      cancelCacheSync();
+      try {
+        ensureCacheRuntime();
+        await getCacheRuntime().resetAll();
+      } catch {
+        // Cache wipe failure is non-fatal.
+      }
+      if (!refreshToken) return;
+      try {
+        await client.post("/auth/logout", { refreshToken }, { auth: false, server: false });
+      } catch {
+        // Local sign-out already happened.
+      }
+    },
+    updateProfile: async (fields) => {
+      const data = await client.request<unknown>("/auth/me", { method: "PATCH", body: fields });
+      const user = parseUser(data);
+      if (!user) throw new Error("Profile update did not return a user");
+      const tokens = snapshotRef.current.accessToken && snapshotRef.current.refreshToken
+        ? { accessToken: snapshotRef.current.accessToken, refreshToken: snapshotRef.current.refreshToken }
+        : null;
+      if (tokens) await persistTokens(tokens, user);
+      apply({ user });
+    },
+    selectServer: async (serverId: string) => {
+      if (snapshotRef.current.serverId !== serverId) {
+        bumpServerEpoch();
+        useRaftStore.getState().clearServerData();
+      }
+      apply({ serverId });
+      // Android release builds can leave this write pending. The home load
+      // must not wait on it; the in-memory server id is already applied.
+      void SecureStore.setItemAsync(SERVER, serverId).catch(() => {});
+      realtime.reset();
+      realtime.connect();
+    },
+    resendVerification: async () => {
+      await client.post("/auth/resend-verification", {});
+    },
+    markRead: async (channelId: string, seq: number) => {
+      if (seq <= 0) return;
+      const queued = Math.max(pendingReads.current.get(channelId) ?? 0, seq);
+      pendingReads.current.set(channelId, queued);
+      try {
+        await client.post(`/channels/${channelId}/read`, { seq: queued });
+        pendingReads.current.delete(channelId);
+        useRaftStore.getState().clearChannelUnread(channelId);
+        // A read thread channel also clears its task board row's unread lift
+        // (TaskDetail embeds the thread pane) — no refetch needed.
+        useBoardStore.getState().noteThreadRead(channelId);
+      } catch {
+        // Queued for flushReads.
+      }
+    },
+    joinThread: (threadChannelId: string) => realtime.joinChannel(threadChannelId),
+    leaveThread: (threadChannelId: string) => realtime.leaveChannel(threadChannelId),
+    setFocusedChannelId: (channelId: string | null) => {
+      focusedRef.current = channelId;
+      if (channelId) useRaftStore.getState().clearLiveUnread(channelId);
+    },
+    clearFocusedChannelId: (channelId: string) => {
+      focusedRef.current = releaseFocus(focusedRef.current, channelId);
+    },
+  }), [client, realtime, snapshot]);
+  markReadRef.current = api.markRead;
+
+  return <SessionContext.Provider value={api}>{children}</SessionContext.Provider>;
+}
+
+export function useSession(): SessionApi {
+  const value = useContext(SessionContext);
+  if (!value) throw new Error("useSession must be used inside SessionProvider");
+  return value;
+}
+
+/** Task ids from a task:created/updated/deleted payload, for board recalibration. */
+function taskIdsFromEvent(payload: unknown): string[] {
+  if (!isRecord(payload)) return [];
+  if (typeof payload.taskId === "string") return [payload.taskId];
+  if (isRecord(payload.task) && typeof payload.task.id === "string") return [payload.task.id];
+  if (Array.isArray(payload.tasks)) {
+    return payload.tasks.flatMap((task) => (isRecord(task) && typeof task.id === "string" ? [task.id] : []));
+  }
+  return [];
+}

@@ -8,7 +8,9 @@
 // managed Computer row's `computerUpgradeAvailable` value from this authority
 // so web surfaces consume a readback-backed comparison instead of guessing.
 
-import { bothComputerVersionsKnown, isComputerOutdated } from "@botiverse/raft-shared";
+import { bothComputerVersionsKnown, isComputerOutdated, isPrivateDeploymentMode } from "@botiverse/raft-shared";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 
 let cachedLatestComputerVersion: string | null = null;
 let lastFetchTime = 0;
@@ -35,7 +37,25 @@ async function refreshLatestComputerVersion(): Promise<void> {
   return refreshPromise;
 }
 
+function readLocalLatestVersion(manifestRel: string): string | null {
+  try {
+    const dir = process.env.RAFT_DOWNLOADS_DIR?.trim() || "/app/downloads";
+    const parsed = JSON.parse(readFileSync(path.join(dir, manifestRel), "utf8")) as { version?: unknown };
+    return typeof parsed.version === "string" && parsed.version ? parsed.version : null;
+  } catch {
+    return null; // Missing/unreadable local manifest degrades exactly like the offline external lookup.
+  }
+}
+
 async function fetchLatestComputerVersion(): Promise<void> {
+  if (isPrivateDeploymentMode()) {
+    const local = readLocalLatestVersion("computer/manifest.json");
+    if (local) {
+      cachedLatestComputerVersion = local;
+      lastFetchTime = Date.now();
+    }
+    return;
+  }
   try {
     const res = await fetch(COMPUTER_LATEST_MANIFEST_URL);
     if (res.ok) {

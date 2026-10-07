@@ -94,7 +94,7 @@ export type ServerSetupRuntimeCatalogEntry = RuntimeInfo & {
 
 export type ServerSetupComputerRuntimeStepProps = {
   computer: ServerSetupComputer | null;
-  computerInstallCommand?: string;
+  computerInstallCommand?: string | null;
   /**
    * The server's verdict, from `ServerSetupProjection`. Not derived in the browser — and
    * NOT a boolean: "we have not been told yet" (`checking`/`unknown`) is a different thing
@@ -197,7 +197,7 @@ export default function ServerSetupComputerRuntimeStep({
   loading = false,
   error = "",
   setupCommand = null,
-  computerInstallCommand = "",
+  computerInstallCommand = null,
   macLinuxDaemonCommand = "",
   windowsComputerInstallCommand = "",
   windowsComputerSetupCommand = null,

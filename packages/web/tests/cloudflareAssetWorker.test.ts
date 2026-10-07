@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { resolve } from "node:path";
-import { pathToFileURL } from "node:url";
 import { describe, test } from "node:test";
 
 type AssetBinding = {
@@ -12,8 +11,9 @@ type AssetWorker = {
   fetch(request: Request, env: { ASSETS: AssetBinding }): Promise<Response>;
 };
 
-const workerUrl = pathToFileURL(resolve(import.meta.dirname, "../public/_worker.js")).href;
-const { default: worker } = await import(workerUrl) as { default: AssetWorker };
+// A plain relative specifier (not a file URL): vite-node fails to load a
+// file-URL whose path contains percent-encoded spaces.
+const { default: worker } = await import("../public/_worker.js") as { default: AssetWorker };
 
 async function runWorker(requestPath: string, assetResponse: Response): Promise<Response> {
   let seenRequest: Request | undefined;

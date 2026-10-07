@@ -104,6 +104,13 @@ export function createDesktopHandshakeRequest(
   if (!environment) {
     throw new Error("desktop bridge did not expose a valid native environment");
   }
+  // Only preset environments negotiate the native handshake. The
+  // runtime-configured "server" environment is an Electron-shell injection —
+  // a Tauri renderer must never handshake with one (fail closed rather than
+  // widening the contract to accept it).
+  if (environment.environmentId === "server") {
+    throw new Error("desktop handshake is not available for runtime-configured server environments");
+  }
   const request: DesktopHandshakeRequest = {
     method: "desktop.handshake",
     version: 1,

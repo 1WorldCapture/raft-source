@@ -77,7 +77,7 @@ async function runSlockCli(
     cleanupProfile = () => rmSync(profileDir, { recursive: true, force: true });
   }
   try {
-    return await execFileAsync(process.execPath, ["--import", "tsx", cliEntry, ...args], {
+    return await execFileAsync(process.execPath, ["--disable-warning=DEP0205", "--import", "tsx", cliEntry, ...args], {
       env: {
         ...process.env,
         SLOCK_AGENT_TOKEN_FILE: "",

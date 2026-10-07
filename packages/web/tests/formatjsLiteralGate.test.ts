@@ -2332,17 +2332,23 @@ test("real corpus: structural, catalog-id, and template-glue filters remove audi
   // the environment and signed-in identity became separate rows, reducing
   // this audited structural total by two. DegradedRestoreStatus
   // (#desktop-session-restore task #1) adds one more cataloged formatMessage
-  // id (auth.bootstrap.errorHttp takes {status} values).
-  assert.equal(filteredKeys, 74, `audited structural key count; got ${filteredKeys}`);
+  // id (auth.bootstrap.errorHttp takes {status} values). The cursor-sdk
+  // API-URL explanation moved from return-prose (unaudited rise) to the
+  // cataloged message id agent.runtimeConfig.cursorSdkApiUrlUnsupported
+  // (runtimeConfigForm.ts), adding one structural entry: 73 -> 74 -> 75.
+  assert.equal(filteredKeys, 75, `audited structural key count; got ${filteredKeys}`);
   assert.ok(filteredHits > 100, `hits must exceed prior 100; got ${filteredHits}`);
+  // 5021cf0 (packaged Cursor SDK runtime) added the CreateAgentDialog
+  // computer dropdown whose ` (${machine.hostname})` suffix is the same
+  // audited dynamic-glue shape: 16 -> 17 -> 18 entries, each once.
   assert.equal(
     glueFilteredOut.length,
-    17,
+    18,
     `audited dynamic/translated template-glue key count; got ${JSON.stringify(glueFilteredOut)}`,
   );
   assert.equal(
     glueFilteredOut.reduce((n, e) => n + e.count, 0),
-    17,
+    18,
     "each audited glue key currently occurs once",
   );
   // Structural drops 73 (including the two compatibility source paths);

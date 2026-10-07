@@ -274,6 +274,15 @@ export { COMPUTER_VERSION } from "../version.js";
 // "no update info" silently.
 export { DEFAULT_UPGRADE_BASE_URL, fetchCdnLatestVersion } from "../computerRelease.js";
 
+// Server-attachment state readers (phase 3-1: the Electron host archives
+// foreign-origin attachments before attaching a new deployment, keeping the
+// "one home = one origin" invariant that the upgrade source resolution
+// fails closed on). Additive lib surface.
+export { listServerAttachments } from "../serverState.js";
+export type { ServerAttachment } from "../serverState.js";
+export { serversDir } from "../paths.js";
+export { canonicalizeServerUrl } from "../serverUrl.js";
+
 // Resident service entry points — the same `runService` / `runResident` the
 // CLI's `__service` / `__run` hidden commands dispatch to. Exposed so any
 // adapter that owns the process entry (Electron menu-bar, daemon harness,
@@ -284,3 +293,10 @@ export { DEFAULT_UPGRADE_BASE_URL, fetchCdnLatestVersion } from "../computerRele
 // silently re-launch the GUI instead of starting the supervisor.
 // (#wg-raft-computer:f2a02081 BUG 5.)
 export { runService, runResident } from "../service.js";
+
+// Parent-binding maintenance for desktop-hosted trees (task #7 anti-orphan):
+// the GUI host rebinds the adopted tree to its own pid + start time right
+// after converge, and the tree's watchdog (wired inside runService/runResident)
+// exits gracefully when that binding stops matching — so a crashed or
+// force-quit GUI can never leave the background processes orphaned.
+export { rebindParentEvidence, readProcessStartTime } from "../parentWatchdog.js";

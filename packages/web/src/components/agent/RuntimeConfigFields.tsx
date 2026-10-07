@@ -15,6 +15,8 @@ import {
   Input,
   Select,
   SelectContent,
+  SelectGroup,
+  SelectGroupLabel,
   SelectIcon,
   SelectItem,
   SelectItemIndicator,
@@ -24,9 +26,11 @@ import {
   SelectValue,
 } from "raft-ui";
 import StableField from "./StableField";
+import CursorSdkLoginButton from "./CursorSdkLoginButton";
 import { KeyValueAddButton, KeyValueInputRow } from "../ui/KeyValueInput";
 import Tooltip from "../ui/Tooltip";
 import { reasoningEffortOptionsForModel } from "../../utils/reasoningEffortOptions";
+import type { RuntimeInstallHint } from "../../utils/runtimeInstallHints";
 import {
   builtInCatalogCapabilityIsLive,
   projectBuiltInPresetModelOptions,
@@ -193,10 +197,19 @@ function renderSelectItems(options: readonly RuntimeOption[]) {
  *  so the end of that chain needs asserting somewhere. */
 export { RuntimeSelectControl as RuntimeSelectControlForTest };
 
+/** Optional rendered grouping for large catalogs (task #6: omp's 100+
+ * model list groups by provider). Options stay flat for value validation;
+ * groups only change how the popup is laid out. */
+interface RuntimeOptionGroup {
+  label: string;
+  options: readonly RuntimeOption[];
+}
+
 function RuntimeSelectControl({
   value,
   onValueChange,
   options,
+  groups,
   placeholder,
   portalContainer,
   testId,
@@ -206,6 +219,7 @@ function RuntimeSelectControl({
   value: string;
   onValueChange: (value: string) => void;
   options: readonly RuntimeOption[];
+  groups?: readonly RuntimeOptionGroup[];
   placeholder: string;
   portalContainer?: RefObject<HTMLElement | null>;
   testId?: string;
@@ -243,7 +257,16 @@ function RuntimeSelectControl({
       <SelectContent
         portalProps={portalContainer ? { container: portalContainer } : undefined}
       >
-        <SelectList>{renderSelectItems(options)}</SelectList>
+        <SelectList>
+          {groups
+            ? groups.map((group) => (
+              <SelectGroup key={group.label}>
+                <SelectGroupLabel>{`${group.label} · ${group.options.length}`}</SelectGroupLabel>
+                {renderSelectItems(group.options)}
+              </SelectGroup>
+            ))
+            : renderSelectItems(options)}
+        </SelectList>
       </SelectContent>
     </Select>
   );
@@ -252,6 +275,25 @@ function RuntimeSelectControl({
 export interface EnvVarEntry {
   key: string;
   value: string;
+}
+
+/** Group `provider/model` option ids by provider for the omp picker (task #6);
+ * ids without a provider segment fall into one trailing group. */
+function groupRuntimeOptionsByProvider(options: readonly RuntimeOption[]): Array<{ label: string; options: RuntimeOption[] }> {
+  const groups = new Map<string, RuntimeOption[]>();
+  for (const option of options) {
+    const separator = option.value.indexOf("/");
+    const provider = separator > 0 ? option.value.slice(0, separator) : "other";
+    const bucket = groups.get(provider);
+    if (bucket) bucket.push(option);
+    else groups.set(provider, [option]);
+  }
+  return [...groups.entries()]
+    .map(([provider, groupOptions]) => ({
+      label: getRuntimeProviderDisplayName(provider),
+      options: groupOptions,
+    }))
+    .sort((a, b) => b.options.length - a.options.length);
 }
 
 function runtimeModelSourceStatus(
@@ -266,7 +308,9 @@ function runtimeModelSourceStatus(
     case "loading":
       return intl.formatMessage({ id: "agent.runtimeModels.loading" });
     case "missing_config":
-      return source.recovery === "kimi_login"
+      return source.recovery === "cursor_login"
+        ? intl.formatMessage({ id: "agent.runtimeModels.cursorLoginRequired" })
+        : source.recovery === "kimi_login"
         ? intl.formatMessage(
           { id: "agent.runtimeModels.kimiLoginRequired" },
           {
@@ -275,15 +319,26 @@ function runtimeModelSourceStatus(
             ),
           },
         )
+        : source.recovery === "omp_login"
+          ? intl.formatMessage(
+            { id: "agent.runtimeModels.ompLoginRequired" },
+            {
+              command: (chunks) => (
+                <code key="command" className="font-mono font-bold">{chunks}</code>
+              ),
+            },
+          )
+          : intl.formatMessage(
+            { id: "agent.runtimeModels.missingConfig" },
+            { runtimeName },
+          );
+    case "no_models":
+      return source.recovery === "omp_login"
+        ? intl.formatMessage({ id: "agent.runtimeModels.ompNoModels" }, { runtimeName })
         : intl.formatMessage(
-          { id: "agent.runtimeModels.missingConfig" },
+          { id: "agent.runtimeModels.noModels" },
           { runtimeName },
         );
-    case "no_models":
-      return intl.formatMessage(
-        { id: "agent.runtimeModels.noModels" },
-        { runtimeName },
-      );
     case "unsupported":
       return runtimeIgnoresModel(runtime)
         ? intl.formatMessage(
@@ -363,6 +418,19 @@ interface RuntimeConfigFieldsProps {
     loading: boolean;
     rescan: () => void;
   };
+  /**
+   * Enables the Cursor SDK web sign-in entry: when the model source reports
+   * `missing_config` with recovery `cursor_login`, a "Sign in to Cursor"
+   * button is rendered next to the status sentence. `onBound` fires once the
+   * binding is observed as bound — pass `runtimeModels.rescan` so the list
+   * refreshes automatically. Omit (or pass null) on surfaces without a
+   * machine target.
+   */
+  cursorSdkLoginTarget?: {
+    serverId: string;
+    machineId: string;
+    onBound: () => void;
+  } | null;
   rescanDisabled?: boolean;
   providerMode: RuntimeProviderMode;
   onProviderModeChange: (mode: RuntimeProviderMode) => void;
@@ -394,6 +462,8 @@ interface RuntimeConfigFieldsProps {
   runtimeLabel?: string;
   /** Optional explainer under the runtime select — onboarding users have no idea what a "runtime" is. */
   runtimeHint?: string;
+  /** Inline install guidance shown when the selected runtime's binary is missing. */
+  runtimeInstallHint?: RuntimeInstallHint | null;
   /** Re-ask the computer which runtimes are installed. Omit to hide the control. */
   onRescanRuntimes?: () => void;
   runtimesRescanning?: boolean;
@@ -707,6 +777,7 @@ function SchemaDrivenRuntimeFields({
             value={model}
             onValueChange={onModelChange}
             options={modelOptions}
+            groups={definition.runtimeId === "omp" ? groupRuntimeOptionsByProvider(modelOptions) : undefined}
             placeholder={labels.model?.placeholder ?? formatMessage({ id: "agent.runtimeConfig.model" })}
             portalContainer={portalContainer}
             testId="schema-runtime-model-select"
@@ -825,6 +896,7 @@ export default function RuntimeConfigFields({
   modelOptions,
   runtimeModels,
   rescanDisabled,
+  cursorSdkLoginTarget = null,
   providerMode,
   onProviderModeChange,
   providerApiUrl,
@@ -854,6 +926,7 @@ export default function RuntimeConfigFields({
   showRuntimeField = true,
   runtimeLabel,
   runtimeHint,
+  runtimeInstallHint = null,
   onRescanRuntimes,
   runtimesRescanning = false,
   envVarsMode = "inline",
@@ -977,6 +1050,19 @@ export default function RuntimeConfigFields({
       {intl.formatMessage({ id: "agent.runtimeModels.retry" })}
     </FieldAction>
   ) : null;
+  // Cursor SDK web sign-in entry: shown only for the owner-triggered
+  // recovery path, and only when the dialog knows which machine to target.
+  const cursorLoginAction = cursorSdkLoginTarget
+    && modelSource.kind === "missing_config"
+    && modelSource.recovery === "cursor_login"
+    ? (
+      <CursorSdkLoginButton
+        serverId={cursorSdkLoginTarget.serverId}
+        machineId={cursorSdkLoginTarget.machineId}
+        onBound={cursorSdkLoginTarget.onBound}
+      />
+    )
+    : null;
   const envVarsField = envVarsMode === "hidden" ? null : (
     <RuntimeEnvVarsField
       entries={envVarEntries}
@@ -1173,6 +1259,14 @@ export default function RuntimeConfigFields({
             placeholder={formatMessage({ id: "common.select.placeholder" })}
             portalContainer={selectPortalContainer}
           />
+          {runtimeInstallHint && (
+            <div className="mt-2 border-l-2 border-black/20 pl-2 text-xs text-black/60">
+              <p>{formatMessage({ id: runtimeInstallHint.introId })}</p>
+              {runtimeInstallHint.commands.map((command) => (
+                <code key={command} className="mt-1 block font-mono text-[11px] text-black/80">{command}</code>
+              ))}
+            </div>
+          )}
         </Field>
       )}
 
@@ -1390,6 +1484,7 @@ export default function RuntimeConfigFields({
               <p>
                 {modelSourceStatusContent}
                 {retryAction ? <>{" "}{retryAction}</> : null}
+                {cursorLoginAction ? <>{" "}{cursorLoginAction}</> : null}
               </p>
             </div>
           )}

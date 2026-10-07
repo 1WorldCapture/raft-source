@@ -1,0 +1,49 @@
+{
+  "expo": {
+    "name": "Raft",
+    "slug": "raft-mobile",
+    "scheme": "raft",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#FFD440"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "build.raft.mobile"
+    },
+    "android": {
+      "package": "build.raft.mobile",
+      "predictiveBackGestureEnabled": false,
+      "usesCleartextTraffic": false,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/icon.png",
+        "backgroundColor": "#FFD440"
+      }
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Raft uses your photos so you can attach them to a message.",
+          "cameraPermission": "Raft uses the camera so you can attach a photo to a message."
+        }
+      ],
+      "./plugins/withCleartext",
+      "expo-font",
+      "expo-splash-screen",
+      "expo-localization",
+      "expo-sharing",
+      "expo-image"
+    ],
+    "experiments": {
+      "typedRoutes": false
+    }
+  }
+}

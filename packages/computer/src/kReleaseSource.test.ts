@@ -649,3 +649,42 @@ test("Hands rejects wrong target and malformed artifact identity before K handof
     });
   }
 });
+
+// Task #5 (private deployment, phase 2): the `server` backend routes to the
+// SAME manifest-tree reader as legacy-cdn — the only difference is where the
+// base came from (the connected server's /downloads tree, resolved upstream
+// by resolveUpgradeSourceForHome). No new byte path, no Hands contact.
+test("server backend reads the manifest tree exactly like legacy-cdn (task #5)", async () => {
+  const source = createReleaseSource("https://raft.internal.example:18443/downloads/computer", {
+    backend: "server",
+    fetchFn: fakeFetch({
+      "/downloads/computer/manifest.json": { version: "1.0.17" },
+      "/downloads/computer/1.0.17/manifest.json": targetsFor(),
+    }),
+  });
+  const release = await source.checkForUpdate(CTX);
+  assert.deepEqual(release, {
+    version: "1.0.17",
+    url: "https://raft.internal.example:18443/downloads/computer/1.0.17/raft-computer-linux-x64",
+    sha256: "ab".repeat(32),
+    size: 1234,
+  });
+  // The fail-closed contract is shared: a missing latest pointer throws, it
+  // is never read as "nothing to do".
+  const broken = createReleaseSource("https://raft.internal.example:18443/downloads/computer", {
+    backend: "server",
+    fetchFn: fakeFetch({}),
+  });
+  await assert.rejects(broken.checkForUpdate(CTX), (error: unknown) =>
+    error instanceof ComputerServiceError && error.message.includes("K_SOURCE_UNAVAILABLE"));
+});
+
+test("server backend is a valid RAFT_COMPUTER_RELEASE_BACKEND value; unknown ones still fail typed", async () => {
+  assert.doesNotThrow(() =>
+    createReleaseSource("https://x.example", { backend: "server", fetchFn: fakeFetch({}) }));
+  assert.throws(
+    () => createReleaseSource("https://x.example", { backend: "npm" as "server", fetchFn: fakeFetch({}) }),
+    (error: unknown) =>
+      error instanceof ComputerServiceError && error.message.includes("K_SOURCE_BACKEND_INVALID"),
+  );
+});

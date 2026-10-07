@@ -40,6 +40,8 @@ export interface LoginResult {
 export interface LoginOptions {
   signal?: AbortSignal;
   onEvent?: (event: ComputerApiEvent) => void;
+  /** Per-request deadline, including response-body reads. */
+  requestTimeoutMs?: number;
 }
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
@@ -84,10 +86,12 @@ export async function login(input: LoginInput, options: LoginOptions = {}): Prom
   options.signal?.throwIfAborted?.();
 
   const client = new DeviceAuthClient(baseUrl);
+  const request = { signal: options.signal, timeoutMs: options.requestTimeoutMs };
   let grant;
   try {
-    grant = await client.authorize("raft-computer");
+    grant = await client.authorize("raft-computer", request);
   } catch (err) {
+    options.signal?.throwIfAborted();
     const reason = err instanceof Error ? err.message : String(err);
     throw new ComputerServiceError(
       "DEVICE_AUTHORIZE_FAILED",
@@ -113,7 +117,9 @@ export async function login(input: LoginInput, options: LoginOptions = {}): Prom
     options.signal?.throwIfAborted?.();
     await sleep(intervalMs, options.signal);
     emit(options, { kind: "login.polling" });
-    const r = await client.token(grant.deviceCode);
+    const r = await client.token(grant.deviceCode, {
+      ...request, timeoutMs: Math.max(1, Math.min(options.requestTimeoutMs ?? 15_000, deadline - Date.now())),
+    });
     if (r.status === "pending") continue;
     if (r.status === "denied") {
       throw new ComputerServiceError("LOGIN_DENIED", "Login was denied in the approval page.");
@@ -138,7 +144,7 @@ export async function login(input: LoginInput, options: LoginOptions = {}): Prom
     // display fields and the presenter falls back to the id.
     let identity: { email?: string; name?: string; displayName?: string | null } = {};
     try {
-      const me = await new AuthClient(baseUrl, r.accessToken).me();
+      const me = await new AuthClient(baseUrl, r.accessToken).me({ ...request, timeoutMs: options.requestTimeoutMs ?? 5_000 });
       if (me.status === "success") {
         identity = { email: me.user.email, name: me.user.name, displayName: me.user.displayName };
       }
@@ -146,8 +152,10 @@ export async function login(input: LoginInput, options: LoginOptions = {}): Prom
       // best-effort; leave identity empty
     }
 
+    options.signal?.throwIfAborted?.();
     const file = userSessionPath(input.slockHome);
     await mkdir(dirname(file), { recursive: true });
+    options.signal?.throwIfAborted();
     await writeFile(
       file,
       JSON.stringify(

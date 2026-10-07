@@ -944,3 +944,21 @@ test("requestContractAgentRoute preserves a typed known-response proxy failure",
     },
   );
 });
+
+test("transportUnavailableHint: ECONNREFUSED (any depth) explains daemon availability, other codes stay silent", async () => {
+  const { transportUnavailableHint } = await import("./agentApiPath.js");
+  const refused = Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:61537"), { code: "ECONNREFUSED" });
+  assert.match(
+    transportUnavailableHint(refused),
+    /daemon is likely down or restarting/,
+    "refused proxy must read as availability, not credentials",
+  );
+  assert.match(
+    transportUnavailableHint(new Error("wrapped", { cause: refused })),
+    /not a credential problem/,
+    "hint must survive a one-level cause chain",
+  );
+  assert.equal(transportUnavailableHint(Object.assign(new Error("x"), { code: "ETIMEDOUT" })), "");
+  assert.equal(transportUnavailableHint(new Error("plain")), "");
+  assert.equal(transportUnavailableHint(undefined), "");
+});

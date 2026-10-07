@@ -19,8 +19,11 @@
  */
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const ROOT = resolve(new URL(".", import.meta.url).pathname, "..");
+// fileURLToPath (not .pathname): checkout paths may contain spaces, which an
+// undecoded pathname keeps percent-encoded and readdirSync then fails on.
+const ROOT = resolve(fileURLToPath(new URL(".", import.meta.url)), "..");
 const SRC = resolve(ROOT, "src");
 const LAYOUT_OWNERS = [
   "components/layout",

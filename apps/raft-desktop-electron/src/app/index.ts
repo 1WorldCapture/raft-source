@@ -15,9 +15,12 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
-import { BrowserWindow, app, ipcMain, nativeImage, protocol, session, shell } from "electron";
-import { runResident, runService } from "@botiverse/raft-computer/lib";
+import { BrowserWindow, app, dialog, ipcMain, nativeImage, protocol, session, shell } from "electron";
+import { ELECTRON_IPC_CHANNELS } from "@raft/desktop-contract";
+import { createComputerApi, runResident, runService } from "@botiverse/raft-computer/lib";
 import { installApplicationMenu } from "../main/appMenu.js";
+import { createCursorSdkControls } from "./cursorSdkControls.js";
+import { isCursorSdkE2eBuild } from "../main/cursorSdkE2eBuild.js";
 import {
   applyDownloadedUpdate,
   checkForUpdatesManually,
@@ -28,14 +31,23 @@ import {
 } from "../main/autoUpdater.js";
 import { INITIAL_LIFECYCLE_STATE, reduceLifecycle } from "../main/lifecycle.js";
 import type { LifecycleEvent } from "../main/lifecycle.js";
-import { loadZoomLevel, saveZoomLevel } from "../main/viewPrefs.js";
+import { loadQuitNoConfirm, loadZoomLevel, saveQuitNoConfirm, saveZoomLevel } from "../main/viewPrefs.js";
+import { createQuitController, runQuitFlow } from "../main/quitFlow.js";
+import { runShutdownTree } from "../main/shutdown.js";
 import { loadWindowState, trackWindowState } from "../main/windowState.js";
+import { MenubarResident, shouldHideOnClose } from "../main/menubarResident.js";
+import { isHiddenLaunch } from "../main/loginItem.js";
 import { armOAuthLoopback, cancelOAuthLoopback, isAllowedAuthorizationUrl } from "./oauthLoopback.js";
+import { buildApiOrigins } from "./configuredApiOrigin.js";
+import { ServerOriginConfig } from "./serverOriginConfig.js";
+import { requestStorageWipeAndRelaunch, resolvePendingStorageWipe } from "./storageDoctor.js";
 import { createOAuthCoordinator } from "./oauthCoordinator.js";
 import { ComputerHost } from "./computerHost.js";
+import { resolveBundledCursorSdkAssets } from "./cursorSdkAssets.js";
 import { installStatusMonitorLifecycle } from "../main/statusMonitorLifecycle.js";
 import { createStatusMonitor } from "../main/statusMonitor.js";
 import { createAppProtocolHandler } from "../main/appProtocol.js";
+import { startPrivateUpdateChecker } from "../main/privateUpdateChecker.js";
 import type { ComputerStatusReport } from "@botiverse/raft-computer/lib";
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
@@ -56,7 +68,28 @@ const ZOOM_MAX = 4;
 const TRAFFIC_LIGHT_INSET_X = 16;
 const TRAFFIC_LIGHT_INSET_Y = 16;
 
+// Dev-only: point this instance at its own userData directory. The
+// single-instance lock, login session and window state all key off userData,
+// so a second instance with its own dir runs fully isolated — local
+// verification of a dev build without disturbing the installed app (whose
+// window would otherwise pop to the foreground on single-instance activation).
+// Never active in packaged builds: the installed app must always share the
+// one canonical data dir.
+const userDataOverride = !app.isPackaged ? process.env.RAFT_DESKTOP_USER_DATA?.trim() : undefined;
+if (userDataOverride) app.setPath("userData", userDataOverride);
+
+// Runtime server origin (phase 3-1): userData/server-origin.json >
+// RAFT_DESKTOP_API_ORIGIN env > the baked CONFIGURED_API_ORIGIN. Resolved
+// ONCE per boot — a change is persisted and applied at relaunch. This is
+// the "current deployment" concept; isOfficialApiBuild() stays the
+// build-identity concept.
+const serverOriginConfig = new ServerOriginConfig({ userDataDir: app.getPath("userData"), env: process.env });
+
 const APP_VERSION = app.getVersion();
+// Official-app updates only when THIS boot talks to an official backend —
+// a runtime-configured private origin must not pull official app builds
+// over the user's deployment (mirrors the baked self-hosted rule).
+const desktopUpdaterAllowed = serverOriginConfig.isOfficial() && !isCursorSdkE2eBuild(APP_VERSION);
 
 // ─── Computer host (raft-computer) argv dispatch ──────────────────────────────
 // The detached Computer service re-execs THIS binary with a hidden `__service` /
@@ -96,9 +129,40 @@ if (!process.env.RAFT_COMPUTER_CLI_PATH) {
   }
 }
 
+// Cursor SDK runtime assets (cursor-sdk runtime id): the daemon refuses to
+// import @cursor/sdk in-process; it spawns the STAGED Node binary against the
+// staged host entries instead. Packaged builds ship the asset root under
+// <resources>/cursor-sdk (electron-builder extraResources) and we publish its
+// exact location via RAFT_CURSOR_SDK_ASSETS BEFORE any daemon import — the
+// detached __service/__run children inherit it, so every daemon this app
+// spawns resolves the same root. Dev (unpackaged) builds leave it unset: the
+// daemon then discovers packages/daemon/runtime-assets/cursor/<version>/<target>
+// built by `pnpm --filter @botiverse/raft-daemon build:cursor-assets`.
+const bundledCursorSdkAssets = resolveBundledCursorSdkAssets({
+  isPackaged: app.isPackaged,
+  resourcesPath: process.resourcesPath,
+});
+if (bundledCursorSdkAssets.root) {
+  process.env.RAFT_CURSOR_SDK_ASSETS = bundledCursorSdkAssets.root;
+} else if (bundledCursorSdkAssets.missing && !process.env.RAFT_CURSOR_SDK_ASSETS) {
+  // Fail loud but non-fatal: the cursor-sdk runtime reports unavailable with
+  // an actionable diagnostic; every other runtime is unaffected.
+  console.warn(
+    `[raft-desktop] packaged build is missing cursor-sdk assets under ${process.resourcesPath}; the cursor-sdk runtime will be unavailable until the app is rebuilt with build:cursor-assets.`,
+  );
+}
+
 const headlessMode = findHeadlessMode(process.argv);
 
+// Storage doctor (task #12): set once this process holds the single-instance
+// lock and has consumed any pending wipe (see the lock-held branch below).
+let storageWipedThisBoot = false;
 let computerHost: ComputerHost | null = null;
+const cursorSdkControls = createCursorSdkControls(() => {
+  if (!computerHost) throw new Error("Local Computer is not ready.");
+  return computerHost.slockHome;
+});
+let menubarResident: MenubarResident | null = null;
 let mainWindow: BrowserWindow | null = null;
 let lifecycle = INITIAL_LIFECYCLE_STATE;
 let appReady = false;
@@ -133,10 +197,12 @@ function flushDeepLinks(): void {
 // own backend, inject permissive CORS headers onto the API's responses so the
 // browser accepts them (this is the standard Electron approach for a bundled
 // first-party client; it does not weaken the API itself).
-const API_ORIGINS = new Set([
-  "https://api.raft.build",
-  "https://api-aws-staging.botiverse.dev",
-]);
+// Self-hosted builds (VITE_API_URL configured to a non-official origin) and
+// runtime-configured private origins (phase 3-1) bridge exactly that one
+// extra origin — never bare http:, and look-alike hosts stay rejected by the
+// parsed-origin matching below (see configuredApiOrigin.ts). The origin is
+// boot-stable (changes apply at relaunch), so a const set is still correct.
+const API_ORIGINS = buildApiOrigins(serverOriginConfig.current());
 
 function installApiCorsBridge(): void {
   session.defaultSession.webRequest.onHeadersReceived({ urls: [...API_ORIGINS].map((origin) => `${origin}/*`) }, (details, callback) => {
@@ -191,7 +257,9 @@ const oauthCoordinator = createOAuthCoordinator({
   arm: armOAuthLoopback,
   cancel: cancelOAuthLoopback,
   openExternal: (url) => shell.openExternal(url),
-  isAllowedUrl: isAllowedAuthorizationUrl,
+  // The authorization-URL allowlist follows the RUNTIME origin (a private
+  // deployment's authorize pages are served from it), not just the baked one.
+  isAllowedUrl: (url) => isAllowedAuthorizationUrl(url, serverOriginConfig.current()),
   randomToken: randomUUID,
 });
 
@@ -207,18 +275,47 @@ function registerIpcHandlers(): void {
     else w.maximize();
   });
   ipcMain.on("window:close", (e) => BrowserWindow.fromWebContents(e.sender)?.close());
-  ipcMain.handle("app:is-focused", (e) => BrowserWindow.fromWebContents(e.sender)?.isFocused() ?? false);
-  ipcMain.on("app:set-badge", (_e, count: unknown) => {
+  ipcMain.handle(ELECTRON_IPC_CHANNELS.isFocused, (e) => BrowserWindow.fromWebContents(e.sender)?.isFocused() ?? false);
+  ipcMain.on(ELECTRON_IPC_CHANNELS.setBadge, (_e, count: unknown) => {
     const n = typeof count === "number" && Number.isFinite(count) ? Math.max(0, Math.round(count)) : 0;
     app.setBadgeCount(n);
   });
-  ipcMain.on("app:focus-window", (e) => {
+  ipcMain.on(ELECTRON_IPC_CHANNELS.focusWindow, (e) => {
     const w = BrowserWindow.fromWebContents(e.sender);
     if (!w) return;
     if (w.isMinimized()) w.restore();
     w.show();
     w.focus();
   });
+  ipcMain.handle(ELECTRON_IPC_CHANNELS.storageWipeStatus, () => storageWipedThisBoot);
+  ipcMain.on(ELECTRON_IPC_CHANNELS.storageResetRequest, () => {
+    // Renderer-side corruption heuristic fired (canary lost while the
+    // IndexedDB cache clearly has data): schedule the wipe marker and
+    // relaunch so the next boot starts from a clean Local Storage.
+    requestStorageWipeAndRelaunch(app.getPath("userData"), () => app.relaunch(), (code) => app.exit(code));
+  });
+  // Server-origin configuration (phase 3-1). set/reset re-validate in THIS
+  // process — the renderer's value is never trusted. A persisted change is
+  // pending until relaunch (the renderer drives the confirm + relaunch UX).
+  ipcMain.handle(ELECTRON_IPC_CHANNELS.serverOriginGet, () => serverOriginConfig.status());
+  ipcMain.handle(ELECTRON_IPC_CHANNELS.serverOriginSet, (_e, raw: unknown) =>
+    typeof raw === "string" ? serverOriginConfig.set(raw) : Promise.resolve({ ok: false, error: "invalid_server_origin" }));
+  ipcMain.handle(ELECTRON_IPC_CHANNELS.serverOriginReset, () => serverOriginConfig.reset());
+  ipcMain.on(ELECTRON_IPC_CHANNELS.serverOriginRelaunch, () => {
+    app.relaunch();
+    app.exit(0);
+  });
+  // Private update detection (phase 3-2) — inert unless a private checker
+  // is running (official origins never register live handlers).
+  const checker = privateUpdateChecker;
+  if (checker) {
+    ipcMain.handle(ELECTRON_IPC_CHANNELS.privateUpdateStatus, () => checker.status());
+    ipcMain.on(ELECTRON_IPC_CHANNELS.privateUpdateCheck, () => void checker.check());
+    ipcMain.on(ELECTRON_IPC_CHANNELS.privateUpdateDownload, () => {
+      checker.openDownload();
+    });
+    checker.onStatus(broadcastPrivateUpdateStatus);
+  }
 }
 
 // Computer host IPC — the renderer's window.raftDesktop.computer bridge. All
@@ -229,6 +326,8 @@ const COMPUTER_STATUS_POLL_MS = 5_000;
 let computerStatusMonitor: ReturnType<typeof createStatusMonitor<ComputerStatusReport>> | null = null;
 
 function broadcastComputerStatus(status: ComputerStatusReport): void {
+  // The tray's "N agents running" row rides the same 5s poll — no extra IPC.
+  menubarResident?.setStatusReport(status);
   for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed()) win.webContents.send("computer:status-update", status);
   }
@@ -251,6 +350,71 @@ function registerComputerIpc(host: ComputerHost): void {
   ipcMain.handle("computer:start", () => monitor.afterOperation(() => host.start()));
   ipcMain.handle("computer:stop", () => monitor.afterOperation(() => host.stop()));
   ipcMain.handle("computer:restart", () => monitor.afterOperation(() => host.restart()));
+  // Real stop→start recycle for a version-skewed resident (see computerHost).
+  // The renderer confirms with the user first: it briefly offlines every agent
+  // on this machine.
+  ipcMain.handle("computer:recycle", () => monitor.afterOperation(() => host.recycleService()));
+  ipcMain.handle("computer:retry-converge", () => monitor.afterOperation(() => host.retryConverge()));
+  ipcMain.handle("computer:connect-deployment", (_event, userId: unknown) => monitor.afterOperation(async () => {
+    const abort = new AbortController();
+    const cancelOnQuit = () => abort.abort();
+    app.once("before-quit", cancelOnQuit);
+    try {
+      await host.connectCurrentDeployment({
+        signal: abort.signal,
+        targetUserId: typeof userId === "string" && userId.length <= 256 ? userId : undefined,
+        confirm: async (plan) => {
+          const choice = await dialog.showMessageBox({
+            type: "warning", buttons: ["连接当前部署", "取消"], defaultId: 1, cancelId: 1,
+            signal: abort.signal,
+            message: "连接当前部署？",
+            detail: `当前部署：${plan.currentOrigin}\n目标部署：${plan.targetOrigin}\n当前状态目录：${plan.currentHome}\n新状态目录将在 ${plan.storageDirectory} 下创建。\n旧连接（${plan.connections.length}）：${plan.connections.join("、") || "无"}\n旧会话、数据和连接会保留，原 Computer 不会被停止。你需要独立认证并重新添加有权限的连接。`,
+          });
+          return choice.response === 0;
+        },
+        authenticate: async (home, origin) => {
+          const dialogAbort = new AbortController();
+          const closeOnAbort = () => dialogAbort.abort();
+          abort.signal.addEventListener("abort", closeOnAbort, { once: true });
+          try {
+            await createComputerApi(home).login({ serverUrl: origin }, (event) => {
+              if (event.kind !== "login.device-code") return;
+              // A deployment can serve approval on a separate web origin. Show
+              // that destination for explicit consent before opening the browser.
+              void (async () => {
+                const url = new URL(event.verifyUrl);
+                if (!["https:", "http:"].includes(url.protocol) || url.username || url.password) {
+                  abort.abort();
+                  return;
+                }
+                const approval = await dialog.showMessageBox({
+                  type: "info", message: "打开 Computer 授权页面？",
+                  detail: `部署：${origin}\n授权页面：${url.href}\n授权码：${event.userCode}\n请核对页面地址，并使用当前桌面账号登录。`,
+                  buttons: ["打开授权页面", "取消连接"], defaultId: 1, cancelId: 1,
+                  signal: dialogAbort.signal,
+                });
+                if (dialogAbort.signal.aborted || abort.signal.aborted) return;
+                if (approval.response !== 0) { abort.abort(); return; }
+                await shell.openExternal(url.href);
+                if (dialogAbort.signal.aborted || abort.signal.aborted) return;
+                const waiting = await dialog.showMessageBox({
+                  type: "info", message: "请在浏览器确认 Computer 登录",
+                  detail: `部署：${origin}\n授权码：${event.userCode}`,
+                  buttons: ["等待浏览器授权", "取消连接"], cancelId: 1,
+                  signal: dialogAbort.signal,
+                });
+                if (!dialogAbort.signal.aborted && waiting.response === 1) abort.abort();
+              })().catch(() => { if (!dialogAbort.signal.aborted) abort.abort(); });
+            }, { signal: abort.signal });
+          } finally {
+            dialogAbort.abort();
+            abort.signal.removeEventListener("abort", closeOnAbort);
+          }
+        },
+      });
+    } finally { app.removeListener("before-quit", cancelOnQuit); }
+  }));
+
   ipcMain.handle("computer:upgrade-info", () => host.getUpgradeInfo());
   ipcMain.handle("computer:upgrade", () => monitor.afterOperation(() => host.upgrade()));
   ipcMain.handle("computer:upgrade-fresh-install", (_e, version: unknown) =>
@@ -262,13 +426,28 @@ function registerComputerIpc(host: ComputerHost): void {
 // App self-update IPC — the renderer's window.raftDesktop.appUpdate bridge. The
 // updater auto-downloads in the background; the renderer renders a non-intrusive
 // "restart to update" affordance from this status stream (no native modal).
+// Private-deployment update detection (phase 3-2): unsigned builds cannot
+// use Squirrel.Mac (verified on real hardware — ShipIt rejects unsigned
+// updates), so private origins get detect → notify → manual install. Never
+// started for official origins — that path stays byte-identical. Created in
+// the GUI path only (single-instance lock held + app ready): this binary
+// also re-execs as headless `__service`/`__run` Computer children, which
+// must never run feed checks.
+let privateUpdateChecker: ReturnType<typeof startPrivateUpdateChecker> | null = null;
+
+function broadcastPrivateUpdateStatus(status: unknown): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) win.webContents.send(ELECTRON_IPC_CHANNELS.privateUpdateStatus, status);
+  }
+}
+
 function broadcastAppUpdateStatus(status: unknown): void {
   for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed()) win.webContents.send("app-update:status-update", status);
   }
 }
 
-function registerAppUpdateIpc(deps: { markQuitting(): void }): void {
+function registerAppUpdateIpc(deps: { markQuitting(): void; updaterAllowed?: boolean }): void {
   ipcMain.handle("app-update:status", () => getUpdateStatus());
   ipcMain.on("app-update:check", () => void triggerBackgroundCheck(deps));
   ipcMain.on("app-update:restart", () => applyDownloadedUpdate(deps));
@@ -319,6 +498,19 @@ function createMainWindow(): BrowserWindow {
       spellcheck: true,
       // Our own realtime UI relies on the socket firing while backgrounded.
       backgroundThrottling: false,
+      // Runtime server-origin environment (phase 3-1): hand the boot's
+      // resolved origin + generation to the sandboxed preload BEFORE page
+      // scripts run (it injects __RAFT_DESKTOP_ENVIRONMENT__ from these).
+      // Absent for stock official boots with no override — the renderer
+      // then follows the compiled origin exactly as before.
+      ...(serverOriginConfig.hasOverride()
+        ? {
+          additionalArguments: [
+            `--raft-server-origin=${serverOriginConfig.current()}`,
+            `--raft-environment-generation=${serverOriginConfig.injectionGeneration()}`,
+          ],
+        }
+        : {}),
     },
   });
   mainWindow = window;
@@ -367,8 +559,20 @@ function createMainWindow(): BrowserWindow {
   });
 
   // Native focus state → renderer (reliable substitute for document.hasFocus).
-  window.on("focus", () => window.webContents.send("app:focus-state", true));
-  window.on("blur", () => window.webContents.send("app:focus-state", false));
+  window.on("focus", () => window.webContents.send(ELECTRON_IPC_CHANNELS.focusState, true));
+  window.on("blur", () => window.webContents.send(ELECTRON_IPC_CHANNELS.focusState, false));
+
+  // Menubar residency: closing the window (red button / Cmd+W) hides it and
+  // the Dock icon instead of quitting — the Tray icon is the remaining
+  // presence, and every re-open path funnels through revealMainWindow().
+  // A real quit (Cmd+Q / Quit menu) runs with lifecycle.quitting=true and
+  // must close for real, or the app could never exit.
+  window.on("close", (event) => {
+    if (!shouldHideOnClose({ quitting: lifecycle.quitting, platform: process.platform })) return;
+    event.preventDefault();
+    window.hide();
+    app.dock?.hide();
+  });
 
   // Flush any deep links buffered before this window was ready. Wired per
   // window (not just the first) so a raft:// link that arrives while the app is
@@ -388,6 +592,44 @@ function createMainWindow(): BrowserWindow {
 
 function focusedWindow(): BrowserWindow | null {
   return mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+}
+
+// One funnel for every "show me the window" path: tray click / tray menu,
+// second-instance (Dock / Spotlight / `open -a`), and activate. Brings the
+// Dock icon back, then restores the existing window (maximized/fullscreen
+// state survives hide) or recreates it from persisted state.
+function revealMainWindow(): void {
+  if (process.platform === "darwin") app.dock?.show();
+  const window = focusedWindow();
+  if (window) {
+    if (window.isMinimized()) window.restore();
+    window.show();
+    window.focus();
+  } else {
+    createMainWindow();
+  }
+}
+
+// The same root/identity registry guards takeover and real app quit.
+async function orchestrateQuitShutdown(systemShutdown: boolean): Promise<void> {
+  const host = computerHost;
+  if (!host || !(await host.canShutdown())) return;
+  const abort = new AbortController();
+  try {
+    const complete = await runShutdownTree({
+      scope: host.processScope,
+      snapshot: host.readProcesses,
+      requestStop: () => host.stop(abort.signal),
+      now: () => Date.now(),
+      sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+      signal: (pid, signal) => process.kill(pid, signal),
+      logFile: path.join(host.slockHome, "computer", "run", "shutdown.log"),
+      systemShutdown,
+    });
+    if (!complete) throw new Error("这台计算机的退出清理未完成，进程或停止收尾仍需处理，请重试。无法确认归属的进程未被终止。");
+  } finally {
+    abort.abort();
+  }
 }
 
 function zoom(direction: "in" | "out" | "reset"): void {
@@ -415,14 +657,26 @@ function applyLifecycle(event: LifecycleEvent): void {
 }
 
 function markQuitting(): void {
+  cursorSdkControls.cancelLogin();
   computerStatusMonitor?.setActive(false);
   applyLifecycle({ type: "before-quit" });
 }
 
 if (headlessMode) {
-  // A headless service/runner child re-launched this bundle. It has no GUI, so
-  // keep it off the Dock (it would otherwise show a spurious second icon).
-  if (process.platform === "darwin") app.dock?.hide();
+  // A headless service/runner child re-launched this bundle. It shares the
+  // GUI's executable and bundle id, so macOS LaunchServices would otherwise
+  // treat it as just another instance of the app — and once the GUI quits,
+  // the headless child becomes the bundle's activation target: clicking the
+  // Dock icon then "activates" a process with no window (the no-window
+  // hijack). dock.hide() only hides the icon; it does not make the process
+  // un-activatable. "prohibited" does: the child can never become the
+  // foreground representative, so activation always routes to (or spawns) a
+  // real GUI. macOS-only API; set before app-ready AND re-set once ready,
+  // because Electron may restore the default policy on launch completion.
+  if (process.platform === "darwin") {
+    app.setActivationPolicy("prohibited");
+    void app.whenReady().then(() => app.setActivationPolicy("prohibited"));
+  }
 }
 if (headlessMode?.mode === "__service") {
   // Detached supervisor process — run the service, then exit. No GUI, no lock.
@@ -440,7 +694,9 @@ if (headlessMode?.mode === "__service") {
     process.stderr.write("[raft-desktop] __run requires a serverId\n");
     process.exit(2);
   } else {
-    void runResident(serverId).catch((error: unknown) => {
+    // This Computer ships with the desktop app; tell the server so it never
+    // offers a standalone upgrade for it.
+    void runResident(serverId, { hostKind: "desktop_app" }).catch((error: unknown) => {
       process.stderr.write(`[raft-desktop] __run failed: ${String(error)}\n`);
       process.exit(1);
     });
@@ -448,7 +704,18 @@ if (headlessMode?.mode === "__service") {
 } else if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
-  if (app.isPackaged) app.setAsDefaultProtocolClient(DEEP_LINK_SCHEME);
+  // Storage doctor (task #12): consume a pending wipe only once this process
+  // holds the single-instance lock — a second instance must never delete
+  // Local Storage while the first still has it open. Still module scope,
+  // ahead of app ready and any window/session, so nothing has opened storage.
+  storageWipedThisBoot = resolvePendingStorageWipe(app.getPath("userData"));
+
+  // Isolated test builds (electron-builder.isolated.yml) skip raft://
+  // registration: LaunchServices would otherwise make the test build the
+  // deep-link handler and steal links meant for the installed app.
+  if (app.isPackaged && !app.getName().includes("Isolated")) {
+    app.setAsDefaultProtocolClient(DEEP_LINK_SCHEME);
+  }
 
   // macOS deep links arrive via open-url (may fire before ready).
   app.on("open-url", (event, url) => {
@@ -460,29 +727,73 @@ if (headlessMode?.mode === "__service") {
   if (coldStartLink) pendingDeepLinks.push(coldStartLink);
 
   app.on("second-instance", (_event, commandLine) => {
-    const window = focusedWindow();
-    if (window) {
-      if (window.isMinimized()) window.restore();
-      window.show();
-      window.focus();
-    }
+    // Defense in depth: a forwarded activation must never silently no-op —
+    // revealMainWindow restores the window or recreates it, so "click the
+    // Dock icon" always yields a window.
+    revealMainWindow();
     const link = commandLine.find((a) => a.startsWith(`${DEEP_LINK_SCHEME}://`));
     if (link) deliverDeepLink(link);
   });
 
-  app.on("before-quit", () => {
-    computerStatusMonitor?.setActive(false);
-    applyLifecycle({ type: "before-quit" });
+  const quitController = createQuitController({
+    attempt: async () => {
+      const host = computerHost;
+      const attempt = () => runQuitFlow({
+        anythingRunning: async () => {
+          const host = computerHost;
+          if (!host) return false;
+          await host.waitForConnection();
+          if (!(await host.canShutdown())) return false;
+          const snapshot = await host.readProcesses();
+          host.processScope.assertRoots(snapshot);
+          return host.processScope.observe(snapshot).length > 0;
+        },
+        agentCount: async () => {
+          const host = computerHost;
+          if (!host) return null;
+          const owned = host.processScope.observe(await host.readProcesses());
+          return owned.filter((row) => row.agent).length;
+        },
+        prefs: () => ({ quitNoConfirm: loadQuitNoConfirm() }),
+        savePrefs: (prefs) => saveQuitNoConfirm(prefs.quitNoConfirm),
+        orchestrateShutdown: orchestrateQuitShutdown,
+        quit: () => app.quit(),
+      });
+      return host ? host.runQuitAttempt(attempt) : attempt();
+    },
+    complete: () => {
+      menubarResident?.destroy();
+      computerStatusMonitor?.setActive(false);
+      applyLifecycle({ type: "before-quit" });
+      app.quit();
+    },
+    failed: (error) => {
+      const detail = error instanceof Error ? error.message : "请重试退出。";
+      void dialog.showMessageBox({ type: "error", message: "退出尚未完成", detail, buttons: ["知道了"] });
+    },
   });
+  app.on("before-quit", (event) => quitController.beforeQuit(event));
   app.on("window-all-closed", () => applyLifecycle({ type: "window-all-closed" }));
-  app.on("activate", () =>
-    applyLifecycle({ type: "activate", hasServerWindows: mainWindow !== null }),
-  );
+  // activate (Dock icon / app re-focus) reveals the window. This replaces the
+  // reducer's old activate→reboot wiring: with hide-to-menubar the window is
+  // usually alive-but-hidden, and revealMainWindow covers both that case and
+  // the recreate case in one place.
+  app.on("activate", () => revealMainWindow());
   for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
     process.on(signal, () => app.quit());
   }
 
-  void app.whenReady().then(() => {
+  void app.whenReady().then(async () => {
+    // GUI path: start the private update checker here (never in the headless
+    // __service/__run branches above — those re-exec this binary and must
+    // stay free of feed traffic).
+    privateUpdateChecker = serverOriginConfig.isOfficial()
+      ? null
+      : startPrivateUpdateChecker({
+        origin: serverOriginConfig.current(),
+        appVersion: APP_VERSION,
+        openExternal: (url) => shell.openExternal(url),
+      });
     // In dev (unpacked), macOS shows the default Electron dock icon — the real
     // brand mark only ships inside the packaged .app (build/icon.icns). Set it
     // explicitly so `pnpm start` also shows the Raft icon. Packaged builds get
@@ -495,6 +806,12 @@ if (headlessMode?.mode === "__service") {
     installApiCorsBridge();
     registerIpcHandlers();
     installApplicationMenu({
+      cursorSdk: {
+        status: () => { void cursorSdkControls.showStatus(); },
+        login: () => { void cursorSdkControls.connect(); },
+        cancelLogin: () => { cursorSdkControls.cancelLogin(); },
+        disconnect: () => { void cursorSdkControls.disconnect(); },
+      },
       openAbout: () => {
         // A native About panel; the app's own UI can add a richer one later.
         app.setAboutPanelOptions({
@@ -504,14 +821,46 @@ if (headlessMode?.mode === "__service") {
         });
         app.showAboutPanel();
       },
-      checkForUpdates: () => void checkForUpdatesManually({ markQuitting }),
+      checkForUpdates: () => {
+        // Private origins: the detect-only checker owns manual checks too
+        // (the official updater feed is disabled there); the dialog mirrors
+        // the official manual-check UX.
+        const checker = privateUpdateChecker;
+        if (checker) {
+          void checker.check().then(() => {
+            const status = checker.status();
+            if (status.state === "available") {
+              void dialog.showMessageBox({
+                type: "info",
+                message: "A new version is available",
+                detail: `Raft Desktop ${status.version} is available from your server. Use the download button in the toolbar (or the notification pill) to get it.`,
+                buttons: ["Download now", "Later"],
+                defaultId: 0,
+              }).then((choice) => {
+                if (choice.response === 0) checker.openDownload();
+              });
+            } else {
+              void dialog.showMessageBox({
+                type: "info",
+                message: "You're up to date",
+                detail: `Raft Desktop ${APP_VERSION} is the latest version on your server.`,
+              });
+            }
+          });
+          return;
+        }
+        void checkForUpdatesManually({ markQuitting, updaterAllowed: desktopUpdaterAllowed });
+      },
       reload: () => focusedWindow()?.webContents.reload(),
       zoom,
       focusedServerWindow: () => focusedWindow(),
     });
 
-    initializeAutoUpdater({ markQuitting });
-    registerAppUpdateIpc({ markQuitting });
+    // Self-hosted builds (VITE_API_URL → non-official origin) must not pull
+    // official updates over a self-hosted install (see autoUpdater.ts).
+    const updaterDeps = { markQuitting, updaterAllowed: desktopUpdaterAllowed };
+    initializeAutoUpdater(updaterDeps);
+    registerAppUpdateIpc(updaterDeps);
 
     // Become the OS-supervised host of the local Computer service. The heavy
     // __service/__run tree stays detached and login-item supervised, so quitting
@@ -520,7 +869,8 @@ if (headlessMode?.mode === "__service") {
     // (no lifecycle mutation, no service spawn) — for dev/CI smoke boots on a
     // machine that already runs a Computer service. Default is enabled.
     if (process.env.RAFT_DESKTOP_DISABLE_COMPUTER_HOST !== "1") {
-      computerHost = new ComputerHost();
+      computerHost = new ComputerHost({ configuredOrigin: serverOriginConfig.current() });
+      await computerHost.restoreSelection();
       registerComputerIpc(computerHost);
       // Read-only mode observes + surfaces an already-installed Computer (the
       // "adopt" path) but does NOT converge host lifecycle — no launch-at-login
@@ -533,8 +883,21 @@ if (headlessMode?.mode === "__service") {
       }
     }
 
+    // Task #7 login start: the LaunchAgent opens the app with --hidden — the
+    // tray is installed (always) but the window is not; every reveal path
+    // (tray click, Dock, open -a, activate) creates it on demand.
+    const hiddenStart = isHiddenLaunch(process.argv);
     appReady = true;
+    // Menubar presence first: the window may be hidden on purpose (user closed
+    // it earlier this session / login-item starts hidden in a later task), and
+    // the tray icon must exist before anything can hide the window.
+    menubarResident = new MenubarResident({
+      iconPath: path.join(app.getAppPath(), "build", "tray-icon.png"),
+      reveal: revealMainWindow,
+    });
+    menubarResident.install();
     // createMainWindow wires its own per-window did-finish-load → flushDeepLinks.
-    createMainWindow();
+    if (!hiddenStart) createMainWindow();
+    else console.log("[raft-desktop] login start: hidden to menu bar (--hidden)");
   });
 }

@@ -3,6 +3,7 @@ import type { ButtonHTMLAttributes, HTMLAttributes, ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useIntl } from "react-intl";
+import { useDeploymentLinks, useDeploymentMode } from "../../utils/deploymentMode";
 import type { MessageId } from "../../i18n/messages";
 import { Archive, Plus, Trash2, ChevronRight, ChevronDown, ChevronLeft, User, MessageSquare, MessageSquareCheck, MessageSquareDot, Monitor, Bot, X, Pencil, Bookmark, FileText, BookOpenText, Network, Search, Pin, PinOff, Square, RotateCcw, Play, Bell, BellOff, AtSign, Building2, Activity, ArrowUpDown, Languages, GitBranch, Type, CreditCard, Shield, Link2, BadgeInfo, Blocks, Check, FlaskConical, KeyRound, FolderInput, FolderPlus } from "lucide-react";
 import {
@@ -1115,6 +1116,14 @@ export default function Sidebar({ mobileInline, bottomSlot, workspaceRailMode }:
   const openUserDM = useChannelStore((s) => s.openUserDM);
   const openDM = useChannelStore((s) => s.openDM);
   const allAgents = useAgentStore((s) => s.agents);
+  // Task #7 link neutralization: private deployments swap or hide the
+  // official docs entry (operator-configured URL wins).
+  const deploymentModeForDocs = useDeploymentMode();
+  const deploymentLinksForDocs = useDeploymentLinks();
+  const documentationHref = deploymentModeForDocs === "private"
+    ? (deploymentLinksForDocs?.docsUrl ?? null)
+    : "https://docs.raft.build";
+
   const agents = useMemo(() => allAgents.filter((a) => !a.deletedAt), [allAgents]);
   // Loading flags so the agents / computers lists show a skeleton WHILE loading
   // instead of flashing "No agents/computers yet" then the real rows (闪回 fix).
@@ -2105,7 +2114,9 @@ export default function Sidebar({ mobileInline, bottomSlot, workspaceRailMode }:
           items: [
             // @AngLee 2026-08-04: About→关于, Documentation→文档 (DOM-sweep residue).
             { id: "about", label: formatMessage({ id: "layout.sidebar.settingsAbout" }), icon: <BadgeInfo size={14} className="shrink-0" />, onClick: () => navigate(`${pathBase}/settings/about`) },
-            { id: "documentation", label: formatMessage({ id: "layout.sidebar.settingsDocumentation" }), icon: <BookOpenText size={14} className="shrink-0" />, href: "https://docs.raft.build" },
+            ...(documentationHref
+              ? [{ id: "documentation", label: formatMessage({ id: "layout.sidebar.settingsDocumentation" }), icon: <BookOpenText size={14} className="shrink-0" />, href: documentationHref }]
+              : []),
             { id: "feedback", label: formatMessage({ id: "settings.about.feedbackTitle" }), icon: <MessageSquare size={14} className="shrink-0" />, onClick: () => navigate(`${pathBase}/settings/feedback`) },
             { id: "release-notes", label: formatMessage({ id: "layout.sidebar.settingsReleaseNotes" }), icon: <FileText size={14} className="shrink-0" />, onClick: () => navigate(`${pathBase}/release-notes`) },
           ],

@@ -7,6 +7,8 @@ shim-dist/
 !.claude/skills/
 *.db
 release/
+# Local Cursor SDK E2E installers are build output, never source commits.
+release-cursor-sdk/
 .env
 .env.scopedb
 .dev-env-*.json
@@ -37,3 +39,34 @@ scripts/app-name-ratchet-baseline.txt.mutating
 # Self-hosting: machine-specific ops config (see docs/self-hosting/source-deploy.md)
 ops/self-host/env.local
 .DS_Store
+
+# Local self-host test artifacts (never commit: keys and per-machine overrides)
+deploy/docker/certs/
+deploy/docker/docker-compose.override.yml
+deploy/docker/.env
+
+# Cursor SDK runtime assets staged by packages/daemon/scripts/build-cursor-sdk-assets.mjs
+# (download cache + per-target staging output; the pin lives in
+# packages/daemon/cursor-sdk-assets.lock.json, which IS committed).
+packages/daemon/runtime-assets/
+
+⚠ 1 unresolved conflict detected
+- ours = Updated upstream
+- theirs = Stashed changes
+NOTICE: Inspect a block by reading `conflict://<N>` (add `/ours` / `/theirs` / `/base` to render a single side). Resolve with `write({ path: "conflict://<N>", content })`, or bulk-resolve every registered conflict with `write({ path: "conflict://*", content })`. Writes replace ONLY the marker block (markers + all sides) — never repeat the lines before/after it; they stay in place.
+`content` shorthand: a line that is exactly `@ours` / `@theirs` / `@base` / `@both` expands to that recorded section. `@both` is ours-then-theirs with no separator — only for additive conflicts where each side adds something different; NEVER for competing edits of the same lines (pick a side or write the combined text). Lines that are not a token pass through verbatim, so `"// keep both\n@ours\n@theirs"` literally writes the comment, then ours, then theirs.
+Per-id bulk: `write({ path: "conflict://*", content: "1: @ours\n2: @theirs\n…" })` resolves each listed id with that side in ONE call — the cheapest way through many pick-one conflicts; unlisted ids stay registered.
+Resolve each block faithfully: keep one side (`@ours`/`@theirs`), or combine them when both intents apply — never invent content beyond the recorded sides, and never stack both sides of competing edits. Resolve several conflicts in a single turn by issuing multiple `write` calls at once; ids stay valid as earlier blocks are resolved.
+
+──── #1  L43-53 ────
+<<< ours
+# Local self-host test artifacts (never commit: keys and per-machine overrides)
+>>> theirs
+# Cursor SDK runtime assets staged by packages/daemon/scripts/build-cursor-sdk-assets.mjs
+# (download cache + per-target staging output; the pin lives in
+# packages/daemon/cursor-sdk-assets.lock.json, which IS committed).
+deploy/docker/downloads/
+# SEA build outputs (scripts/build-release-artifacts.mjs working dir)
+packages/computer/dist-native/
+# Self-host bundle build output (scripts/pack-selfhost-tarball.mjs source dir)
+packages/daemon/dist-selfhost/

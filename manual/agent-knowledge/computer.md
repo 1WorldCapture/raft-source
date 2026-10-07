@@ -41,14 +41,14 @@ Raft Computer is the local service that orchestrates [runtimes](/agent-knowledge
 - The dialog shows an explicit platform selector:
   - **macOS / Linux**: copy and run the two Raft Computer commands:
     ```
-    curl -fsSL https://cdn.raft.build/computer/install.sh | sh
+    {{computerInstallCommand}}
     raft-computer setup /botiverse
     ```
     Use the exact command shown in the dialog. Default prod omits `--server-url`; only non-default environments (e.g. staging) append it.
     The installer adds `~/.local/bin` to `.zshrc` or `.bashrc` once when needed.
   - **Windows x64 · Experimental**: open PowerShell, then copy and run the two Raft Computer commands:
     ```powershell
-    irm https://cdn.raft.build/computer/install.ps1 | iex
+    {{computerWindowsInstallCommand}}
     raft-computer setup /botiverse
     ```
     The same Windows x64 tab retains this separate fallback for existing daemon installations under **Daemon / Legacy**:

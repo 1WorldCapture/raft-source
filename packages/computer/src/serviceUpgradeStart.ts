@@ -1,6 +1,6 @@
 import { type ChildProcess } from "node:child_process";
 
-import { resolveUpgradeBaseUrl } from "./computerRelease.js";
+import { resolveUpgradeSourceForHome } from "./computerRelease.js";
 import { resolveComputerUpgradeTargetVersion } from "./kReleaseSource.js";
 import {
   inspectKUpgradeStart,
@@ -137,15 +137,21 @@ async function startUpgrade(
   const { scope, requestId: upgradeId, originServerId, trigger, owner } = context;
   try {
     const channel = await (options.readChannelFn ?? readChannel)(options.slockHome);
-    const baseUrl = resolveUpgradeBaseUrl();
+    // Task #5: resolve the release source for THIS home (override > env >
+    // persisted backend > private default > hands) so a private deployment
+    // resolves its target version against the connected server's manifest.
+    const upgradeSource = await resolveUpgradeSourceForHome(options.slockHome);
     let resolved = context.explicit;
     if (!resolved) {
-      const resolveTarget = options.resolveUpgradeTargetVersionFn
-        ?? resolveComputerUpgradeTargetVersion;
-      resolved = await resolveTarget(channel, {
+      const targetContext = {
         currentVersion: COMPUTER_VERSION,
         platformKey: `${process.platform}-${process.arch}`,
-      }, baseUrl);
+      };
+      resolved = options.resolveUpgradeTargetVersionFn
+        ? await options.resolveUpgradeTargetVersionFn(channel, targetContext, upgradeSource.baseUrl)
+        : await resolveComputerUpgradeTargetVersion(channel, targetContext, upgradeSource.baseUrl, {
+          backend: upgradeSource.backend,
+        });
     }
     context.setInFlightUpgrade({ upgradeId, targetVersion: resolved });
     const commonRequest = {
