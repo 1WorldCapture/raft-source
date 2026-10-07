@@ -20,7 +20,6 @@ import {
   runtimeConfigProviderMode,
   runtimeConfigProviderConnectionId,
   runtimeIgnoresModel,
-  runtimeApiUrlUnsupportedCopy,
   supportsRuntimeFastMode,
   supportsRuntimeApiUrl,
   supportsRuntimeCustomModelName,
@@ -328,29 +327,6 @@ test("buildRuntimeConfig forces Built-in gateway providers to custom model confi
   });
 });
 
-test("Cursor supports custom model name but not per-agent API URL", () => {
-  const config = buildRuntimeConfig({
-    runtime: "cursor",
-    model: "gpt-5.3-codex",
-    customModelMode: true,
-    customModelName: "my-cursor-model",
-    providerApiUrl: "https://ignored.example.test",
-    envVars: null,
-  });
-
-  assert.equal(supportsRuntimeCustomModelName("cursor"), true);
-  assert.equal(supportsRuntimeApiUrl("cursor"), false);
-  assert.match(runtimeApiUrlUnsupportedCopy("cursor") ?? "", /does not expose a per-agent API URL/);
-  assert.deepEqual(config, {
-    version: 1,
-    runtime: "cursor",
-    model: { kind: "custom", name: "my-cursor-model" },
-    mode: { kind: "default" },
-    reasoningEffort: null,
-    envVars: null,
-  });
-});
-
 test("Codex supports custom model name and no per-agent API URL", () => {
   const config = buildRuntimeConfig({
     runtime: "codex",
@@ -374,11 +350,11 @@ test("Codex supports custom model name and no per-agent API URL", () => {
 });
 
 test("runtime config form exposes only supported per-runtime axes", () => {
-  const runtimes = ["builtin", "claude", "codex", "grok", "antigravity", "kimi", "copilot", "cursor", "gemini", "opencode", "pi", "omp"];
+  const runtimes = ["builtin", "claude", "codex", "grok", "antigravity", "kimi", "copilot", "gemini", "opencode", "pi", "omp"];
 
   assert.deepEqual(runtimes.filter(supportsRuntimeApiUrl), ["claude"]);
   assert.deepEqual(runtimes.filter(supportsRuntimeFastMode), ["claude", "codex"]);
-  assert.deepEqual(runtimes.filter(supportsRuntimeCustomModelName), ["builtin", "claude", "codex", "copilot", "cursor", "pi"]);
+  assert.deepEqual(runtimes.filter(supportsRuntimeCustomModelName), ["builtin", "claude", "codex", "copilot", "pi"]);
   assert.deepEqual(runtimes.filter(runtimeIgnoresModel), ["antigravity"]);
   assert.deepEqual(runtimes.filter((runtime) => REASONING_EFFORT_RUNTIMES.has(runtime)), ["builtin", "claude", "codex", "grok", "copilot", "pi", "omp"]);
 });

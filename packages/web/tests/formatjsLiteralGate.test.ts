@@ -2368,10 +2368,10 @@ test("real corpus: structural, catalog-id, and template-glue filters remove audi
   // sign flipped. Treat any upward edit here as a red flag and demand the literal it
   // corresponds to. (Raised by @Bugen: the pins catch drift, not someone editing the
   // pin to make red go away.)
-  assert.equal(current.length, 153, `corpus keys after ellipsis/trim widen; got ${current.length}`);
+  assert.equal(current.length, 152, `corpus keys after ellipsis/trim widen; got ${current.length}`);
   assert.equal(
     current.reduce((n, e) => n + e.count, 0),
-    182,
+    181,
     "corpus hits after ellipsis/trim widen",
   );
 
@@ -2498,8 +2498,9 @@ test("PaletteAuditPage keeps exactly nine reviewed technical literals with reaso
  * Recovery layer 3 completes messaging core, agent/onboarding, and workspace
  * localization. Flag-off compatibility adds two source-path instances of
  * already-reviewed protocol literals (99+ and #channel); debt/brand stay zero.
- * total = 153 keys / 182 hits (retired TaskItem/lightbox literals and Dev tools copy were removed;
- * 2026-09-08: InviteHumanDialog's email placeholder left with its move to raft-ui <Input>).
+ * total = 152 keys / 181 hits (retired TaskItem/lightbox literals and Dev tools copy were removed;
+ * 2026-09-08: InviteHumanDialog's email placeholder left with its move to raft-ui <Input>;
+ * 2026-10-07: the Cursor CLI API-URL explanation left with the Cursor CLI runtime, task #5).
  */
 test("baseline disposition counts match reviewed exception decisions", () => {
   const baseline = JSON.parse(
@@ -2527,7 +2528,7 @@ test("baseline disposition counts match reviewed exception decisions", () => {
     code_example: { keys: 9, hits: 9 },
     user_data_example: { keys: 4, hits: 4 },
     internal_dev: { keys: 29, hits: 29 },
-    legacy: { keys: 22, hits: 34 },
+    legacy: { keys: 21, hits: 33 },
     technical: { keys: 9, hits: 9 },
     owner_managed: { keys: 8, hits: 8 },
   };
@@ -2558,10 +2559,10 @@ test("baseline disposition counts match reviewed exception decisions", () => {
   // sign flipped. Treat any upward edit here as a red flag and demand the literal it
   // corresponds to. (Raised by @Bugen: the pins catch drift, not someone editing the
   // pin to make red go away.)
-  assert.equal(baseline.length, 153, "baseline key total");
+  assert.equal(baseline.length, 152, "baseline key total");
   assert.equal(
     baseline.reduce((n, e) => n + e.count, 0),
-    182,
+    181,
     "baseline hit total",
   );
   assert.equal(keysBy.get("debt") ?? 0, 0, "debt keys must be zero");
@@ -2619,7 +2620,7 @@ test("baseline disposition counts match reviewed exception decisions", () => {
 
   // Legacy retention is protected by the named boundary test (not mere baseline).
   const legacy = baseline.filter((e) => e.classification === "legacy");
-  assert.equal(legacy.length, 22, "legacy key count");
+  assert.equal(legacy.length, 21, "legacy key count");
   const legacyBoundaryPath = resolve(WEB_ROOT, "tests/i18nLegacyLiteralBoundaries.test.ts");
   const legacyBoundarySrc = readFileSync(legacyBoundaryPath, "utf8");
   assert.match(

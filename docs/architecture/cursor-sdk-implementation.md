@@ -4,7 +4,7 @@ Date: 2026-10-05. User-approved design: raft-cursor-sdk-design-v2.md from this C
 
 ## Scope
 
-Implement runtime id `cursor-sdk` while preserving `cursor` CLI. A persistent separate Node host owns one SDKAgent and sequential Runs. Existing SDK browser login at ~/.cursor/sdk/auth.json is the already-validated main path. No billing investigation. CLI session -> key bootstrap is NOT a release dependency and remains disabled; never treat access tokens as API keys.
+Implement runtime id `cursor-sdk` (the legacy `cursor` CLI runtime was originally preserved and has since been retired and removed, task #5). A persistent separate Node host owns one SDKAgent and sequential Runs. Existing SDK browser login at ~/.cursor/sdk/auth.json is the already-validated main path. No billing investigation. CLI session -> key bootstrap is NOT a release dependency and remains disabled; never treat access tokens as API keys.
 
 SDK MUST be exact @cursor/sdk@1.0.36, external original package with full lazy chunks. Node MUST be staged official v24.15.0 with checksum validation, NOT Electron process.execPath and NOT ambient PATH Node in release. Bundled SDK entry is known broken on Node: do not use or patch it. Runtime assets include node, run host, auth host, SDK production closure + platform helpers and an integrity manifest. User data outside assets. Explicit alpha is trusted-host execution, not a security sandbox.
 

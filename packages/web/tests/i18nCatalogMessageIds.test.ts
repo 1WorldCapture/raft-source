@@ -385,10 +385,12 @@ test("real corpus: catalog MessageId filter drops exact 24 keys/33 hits (billing
   // became a raft-ui <Input> for per-row invite roles, so its audited
   // `name@company.com` placeholder stopped being reported — the same intrinsic-only
   // effect recorded above for RuntimeConfigFields, ratcheting DOWN again.
-  assert.equal(current.length, 153, `final disposition baseline keys; got ${current.length}`);
+  // 153 -> 152 keys / 182 -> 181 hits (2026-10-07): the Cursor CLI API-URL explanation
+  // left with the retired Cursor CLI runtime (task #5).
+  assert.equal(current.length, 152, `final disposition baseline keys; got ${current.length}`);
   assert.equal(
     current.reduce((n, e) => n + e.count, 0),
-    182,
+    181,
     "final disposition baseline hits",
   );
   assert.equal(
@@ -407,7 +409,7 @@ test("real corpus: catalog MessageId filter drops exact 24 keys/33 hits (billing
     }),
   );
 
-  assert.equal(baseline.length, 153);
+  assert.equal(baseline.length, 152);
   assert.equal(
     baseline.filter((e) => e.path === "src/components/agent/AgentScopesPanel.tsx").length,
     0,

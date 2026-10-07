@@ -26,7 +26,7 @@ test("only declared closed catalogs are static model sources", () => {
   for (const runtime of STATIC_RUNTIME_MODEL_SOURCE_IDS) {
     assert.equal(hasStaticRuntimeModelSource(runtime), true);
   }
-  for (const runtime of ["codex", "cursor", "kimi", "kimi-sdk", "opencode", "pi", "antigravity"]) {
+  for (const runtime of ["codex", "kimi", "kimi-sdk", "opencode", "pi", "antigravity"]) {
     assert.equal(hasStaticRuntimeModelSource(runtime), false, `${runtime} must not gain a static fallback`);
   }
 });

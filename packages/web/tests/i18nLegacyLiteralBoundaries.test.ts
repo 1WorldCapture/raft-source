@@ -10,7 +10,6 @@ import test from "node:test";
  * Families:
  * 1. SETTINGS_LABEL_BY_ID / SETTINGS_TABS English labels
  * 2. reaction sprite `.label` strings
- * 3. runtimeApiUrlUnsupportedCopy
  */
 
 const repoRoot = resolve(import.meta.dirname, "..");
@@ -18,7 +17,6 @@ const srcRoot = resolve(repoRoot, "src");
 
 const SETTINGS_NAV = "src/components/settings/settingsNavigation.ts";
 const REACTION_MANIFEST = "src/generated/reactionSpriteManifest.ts";
-const RUNTIME_CONFIG_FORM = "src/utils/runtimeConfigForm.ts";
 
 type SourceMap = Map<string, string>;
 
@@ -131,12 +129,6 @@ test("reaction sprite labels remain present on generated items", () => {
   assert.match(source, /label: "Heart"/);
 });
 
-test("runtimeApiUrlUnsupportedCopy remains exported", () => {
-  const source = readFileSync(resolve(repoRoot, RUNTIME_CONFIG_FORM), "utf8");
-  assert.match(source, /export function runtimeApiUrlUnsupportedCopy\b/);
-  assert.match(source, /Cursor CLI does not expose a per-agent API URL/);
-});
-
 // ── Non-consumption boundaries ──────────────────────────────────────────────
 
 test("no production source reads SETTINGS_LABEL_BY_ID", () => {
@@ -173,19 +165,6 @@ test("production reaction renderers do not read .label", () => {
     readers,
     [],
     `reaction sprite .label must stay unconsumed; new readers:\n${readers.join("\n")}`,
-  );
-});
-
-test("no production source imports or calls runtimeApiUrlUnsupportedCopy", () => {
-  const consumers = findSymbolConsumers(
-    loadProductionSources(),
-    "runtimeApiUrlUnsupportedCopy",
-    RUNTIME_CONFIG_FORM,
-  );
-  assert.deepEqual(
-    consumers,
-    [],
-    `runtimeApiUrlUnsupportedCopy must stay unconsumed; new readers:\n${consumers.join("\n")}`,
   );
 });
 
@@ -260,16 +239,3 @@ test("findReactionSpriteLabelReaders reports .label, [\"label\"], and { label } 
   );
 });
 
-test("findSymbolConsumers reports a synthetic runtimeApiUrlUnsupportedCopy caller", () => {
-  const sources: SourceMap = new Map([
-    [RUNTIME_CONFIG_FORM, "export function runtimeApiUrlUnsupportedCopy() { return null; }\n"],
-    [
-      "src/components/agent/EvilRuntimeForm.tsx",
-      'import { runtimeApiUrlUnsupportedCopy } from "../../utils/runtimeConfigForm";\nexport const copy = runtimeApiUrlUnsupportedCopy("cursor");\n',
-    ],
-  ]);
-  assert.deepEqual(
-    findSymbolConsumers(sources, "runtimeApiUrlUnsupportedCopy", RUNTIME_CONFIG_FORM),
-    ["src/components/agent/EvilRuntimeForm.tsx"],
-  );
-});

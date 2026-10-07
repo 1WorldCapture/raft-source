@@ -46,7 +46,7 @@ import {
 } from "@botiverse/raft-shared/src/appRuntimeTrace.js";
 import { AgentProcessManager, classifySpawnFailure } from "./agentProcessManager.js";
 import { CursorSdkLoginCoordinator, cursorSdkStatusSummary } from "./runtimeAuth/cursor/cursorSdkLoginCoordinator.js";
-import { getDriver } from "./drivers/index.js";
+import { getDriver, RetiredRuntimeError } from "./drivers/index.js";
 import { readCommandVersion, resolveCommandOnPath } from "./drivers/probe.js";
 import {
   DaemonConnection,
@@ -4110,7 +4110,21 @@ export class DaemonCore {
       }
 
       case "machine:runtime_models:detect": {
-        const driver = getDriver(msg.runtime);
+        let driver: ReturnType<typeof getDriver>;
+        try {
+          driver = getDriver(msg.runtime);
+        } catch (err) {
+          // A retired runtime (e.g. the old Cursor CLI) gets a clear, final answer
+          // instead of an unhandled "Unknown runtime" throw.
+          if (!(err instanceof RetiredRuntimeError)) throw err;
+          this.connection.send({
+            type: "machine:runtime_models:result",
+            requestId: msg.requestId,
+            outcome: { kind: "unsupported" },
+            error: err.message,
+          });
+          break;
+        }
         const staticSource = driver
           ? getStaticRuntimeModelSourceSet(msg.runtime)
           : undefined;
