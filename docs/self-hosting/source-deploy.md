@@ -1,5 +1,7 @@
 # 从源码部署 Raft（自托管指南）
 
+> **状态注记（2026-10-07）**：我们自己的生产已从 pm2 源码栈切换为 Docker 私有栈，本文的部署/发版流程不再用于该环境——生产运维见 `docs/self-hosting/prod-docker.md`。本文与 `ops/self-host/` 脚本仍适用于源码栈自托管场景。
+
 本文说明如何在一台 Linux 机器上从源码部署一套完整可用的 Raft：服务端、Web、反向代理、本机 Computer（daemon），以及之后的升级和回滚。文中的做法和脚本都在真实环境里按步骤演练过，包括全新空库的初始化、升级、手动回滚和失败后的自动回滚。
 
 > 约定：文中出现的 `raft.example.internal`、`/opt/raft/...`、`raft` 用户等都是**占位值**，请换成你自己的。本文和 `ops/self-host/` 里不包含任何真实的密钥、IP 或内部域名；这些值只放在不入库的文件里（`packages/server/.env`、`ops/self-host/env.local`、daemon 密钥文件）。
