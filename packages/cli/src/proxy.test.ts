@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import dns from "node:dns";
 import http from "node:http";
 import net, { type Socket } from "node:net";
 import test from "node:test";
@@ -61,6 +62,14 @@ test("canonical fetch reaches a proxy-only target and preserves a direct no-prox
   });
   const proxyPort = await listen(proxy);
 
+  // Whether "proxy-only.invalid" fails to resolve is resolver-dependent:
+  // fake-IP/sinkhole DNS (TUN VPNs) answers every name, so the fetch then
+  // fails at the TCP layer instead. Probe once and only assert the dns
+  // cause class when the hostname genuinely fails to resolve.
+  const proxyOnlyHostResolves = await new Promise<boolean>((resolveProbe) => {
+    dns.lookup("proxy-only.invalid", (err) => resolveProbe(err === null));
+  });
+
   const proxyOnlyUrl = `http://proxy-only.invalid:${originPort}/manifest`;
   const directUrl = `http://127.0.0.1:${originPort}/manifest`;
   try {
@@ -68,7 +77,9 @@ test("canonical fetch reaches a proxy-only target and preserves a direct no-prox
       () => fetchWithCanonicalProxy(proxyOnlyUrl, {}, {}),
       (error: unknown) => {
         assert.ok(error instanceof CanonicalFetchTransportError);
-        assert.equal(error.diagnostics.causeClass, "dns");
+        if (!proxyOnlyHostResolves) {
+          assert.equal(error.diagnostics.causeClass, "dns");
+        }
         assert.equal(error.diagnostics.proxyUsed, false);
         assert.equal(error.diagnostics.url, proxyOnlyUrl);
         return true;

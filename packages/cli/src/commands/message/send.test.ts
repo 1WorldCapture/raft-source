@@ -569,7 +569,7 @@ test("message send forwards --idempotency-key and keeps the success line", async
 test("message send rejects an out-of-range --idempotency-key before any request", async () => {
   const { ctx, bodies } = sendHarness();
   await assert.rejects(
-    () => messageSendCommand.handler(ctx, [], { target: "#quiet", idempotencyKey: "x".repeat(257) }),
+    Promise.resolve().then(() => messageSendCommand.handler(ctx, [], { target: "#quiet", idempotencyKey: "x".repeat(257) })),
     /--idempotency-key must be 1-256 characters/,
   );
   assert.equal(bodies.length, 0);
