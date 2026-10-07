@@ -75,7 +75,7 @@ compose 把 `${RAFT_HTTP_PORT:-18443}` 映射到 443。`RAFT_PUBLIC_ORIGIN` 必�
 
 **证书三种来源**：
 1. 企业 CA 签发（内网已有 PKI 时）；
-2. **`tailscale cert <机器名>.ts.net`（推荐）**：owner 已确认 Tailscale 属于可用形态，
+2. **`tailscale cert <机器名>.ts.net`（推荐）**：Tailscale 属于可用形态，
    Let's Encrypt 签发、浏览器与 Node 均信任、90 天有效；
 3. 自签证书（兜底）：浏览器需手动信任，**Computer/CLI 侧要额外配置**
    `NODE_EXTRA_CA_CERTS=/path/to/your-ca.pem` 后再执行添加命令，否则守护进程
@@ -185,34 +185,6 @@ manifest 而非官网——官方部署不受影响（唯一判断入口
 - web 的 Computer 安装命令（task #5）与 CLI/daemon 安装命令（task #6）在私有模式下均已指向本服务器 `/downloads/`；agent 详情页的 `claude plugin marketplace add botiverse/…`（GitHub 公网）仍在——task #7 链接中性化处理。
 - 私有模式下「最新版本」已读本地 manifest（本条）；官方部署的外部查询行为不变。
 
-## 在 Linux 上构建发行产物（含 darwin Computer）
+## 内部构建流程
 
-`scripts/build-release-artifacts.mjs` 可在 Linux 上产出除 **Desktop dmg/zip**（依赖 macOS 的 `hdiutil`，必须在 Mac 上打）以外的全部产物。darwin Computer（SEA）需要 ad-hoc 签名，Linux 没有 Apple `codesign`，改用 `rcodesign`，**显式开启**（否则构建直接报错，不会静默产出未签名二进制）：
-
-```sh
-# 官方 release 预编译二进制，校验 sha256 后放在仓库外的工作目录；不需要 sudo / 系统包
-gh release download apple-codesign/0.29.0 -R indygreg/apple-platform-rs \
-  -p 'apple-codesign-0.29.0-x86_64-unknown-linux-musl.tar.gz*'
-echo "$(cat apple-codesign-0.29.0-x86_64-unknown-linux-musl.tar.gz.sha256)  apple-codesign-0.29.0-x86_64-unknown-linux-musl.tar.gz" | sha256sum -c
-tar xzf apple-codesign-0.29.0-x86_64-unknown-linux-musl.tar.gz
-
-export RAFT_CODESIGN_TOOL=rcodesign
-export RAFT_RCODESIGN=$PWD/apple-codesign-0.29.0-x86_64-unknown-linux-musl/rcodesign
-node scripts/build-release-artifacts.mjs --out <dir>      # darwin-arm64,darwin-x64,linux-x64
-```
-
-- 已验证版本：rcodesign **0.29.0**。签名只做 ad-hoc（和 Mac 上流程一致，不含 Apple 签名/公证）。
-- `rcodesign verify` 对 ad-hoc 签名不可靠（官方自述），脚本改为检查签名结构（`print-signature-info` 含 `ADHOC`）。
-- 构建需要 Node >= 24；`corepack` 无法写系统目录时设置 `COREPACK_HOME` 指向工作区。
-- cursor-sdk 的 darwin 资产可在 Linux 上 stage（`build-cursor-sdk-assets.mjs --target darwin-arm64|darwin-x64`）；跨架构 `--verify` 跳过 node 执行探测，只校验 manifest 哈希。
-
-### 按客户打包（Desktop 单步重打）
-
-Desktop 安装包在构建时写入服务器地址，换客户需要单独重打 Desktop，其余产物复用。在 macOS 上、同一 commit 下：
-
-```sh
-node scripts/build-release-artifacts.mjs --out <发行包 downloads 目录> --only desktop \
-  --desktop-origin https://<客户 SERVER_URL>
-```
-
-`--only desktop` 跳过 Computer/CLI/daemon 的构建，只重打 `<out>/desktop/`（dmg/zip、latest-mac.yml、manifest）；manifest 的 commit 不变。验收：desktop manifest 的 `origin` 等于客户地址。
+内部构建流程（Linux/Mac 分工、darwin 签名、Desktop 按客户重打）见 `docs/private-deploy/BUILD-INTERNAL.md`（不随客户交付）。
