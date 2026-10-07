@@ -73,6 +73,7 @@ Desktop 安装包在构建时写入服务器地址，因此**每个客户的 Des
 - Computer 的数据目录路径过长（大约超过 70 个字符）时会静默启动失败；默认路径不受影响，自定义很深的目录时请注意（已知问题 D1，暂缓修复）。
 - Desktop 未签名、未公证：macOS Gatekeeper 首次打开需要手动放行；应用内更新是**检测+手动下载**，不自动安装。
 - darwin Computer 为 ad-hoc 签名，非 Apple Developer ID 签名、未公证。
+- **上传文件（附件、头像等）默认存放在 server 容器内部，未挂载持久卷**：容器被重建（例如升级时 `docker compose up -d` 换镜像）后这些文件会丢失，数据库里的记录仍在但文件打不开。需要保留时，在 compose 里为 server 加持久化挂载并设置 `UPLOADS_DIR`：在 `server` 服务下增加环境变量 `UPLOADS_DIR: /app/uploads` 和挂载 `./uploads:/app/uploads`（先创建该目录并保证容器内用户可写）。升级前同样备份这个目录。后续版本会评估把它做进默认 compose。
 - 官方 `@botiverse/raft-daemon` 若已全局安装，会被本服务器版本覆盖（预期行为）。
 - 发行包按 docker compose 部署；Desktop 的 pm2 源码栈分发路径不在本次范围。
 - Managed MCP 内网放行名单修改 `.env` 后需 `docker compose up -d` 重建容器，`restart` 不会重读环境变量。
