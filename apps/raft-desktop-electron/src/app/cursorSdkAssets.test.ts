@@ -63,3 +63,16 @@ test("electron-builder ships the staged cursor assets at the expected subpath", 
     if (!mapping) assert.match(release, /extends:\s*\.\/electron-builder\.yml/);
   }
 });
+
+test("linux electron-builder config ships the linux cursor assets at the same subpath and SDK version", () => {
+  const here = new URL(".", import.meta.url);
+  const pick = (yml: string) => /from:\s*(\S*cursor[^\s]*)\s*\n\s*to:\s*(\S*cursor-sdk\S*)/.exec(yml);
+  const mac = pick(readFileSync(new URL("../../electron-builder.yml", here), "utf8"));
+  const linux = pick(readFileSync(new URL("../../electron-builder.linux.yml", here), "utf8"));
+  assert.ok(mac && linux, "cursor-sdk extraResources mapping missing");
+  assert.match(linux[1], /runtime-assets\/cursor\/\d+\.\d+\.\d+\/linux-\$\{arch\}/);
+  assert.equal(linux[2], "cursor-sdk");
+  // The pinned SDK version segment must not drift between the mac and linux configs.
+  const version = (p: string) => /cursor\/(\d+\.\d+\.\d+)\//.exec(p)?.[1];
+  assert.equal(version(linux[1]), version(mac[1]));
+});
