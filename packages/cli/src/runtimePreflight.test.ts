@@ -86,7 +86,9 @@ test("bootstrap reports a main-module load failure and exits nonzero", () => {
     writeFileSync(entry, source);
     writeFileSync(join(dir, "failing-main.mjs"), 'throw new Error("synthetic main load failure");\n');
 
-    const result = spawnSync(process.execPath, ["--import", "tsx", entry], {
+    // See parserOutput.test.ts: tsx's module.register() emits DEP0205 on the
+    // child's stderr on recent Node; the assertion below matches stderr exactly.
+    const result = spawnSync(process.execPath, ["--disable-warning=DEP0205", "--import", "tsx", entry], {
       encoding: "utf8",
       env: process.env,
     });
