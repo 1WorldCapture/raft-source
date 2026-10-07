@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   buildRuntimeConfig,
   runtimeApiUrlUnsupportedCopy,
+  runtimeApiUrlUnsupportedCopyMessageId,
   supportsRuntimeApiUrl,
   supportsRuntimeCustomModelName,
   supportsRuntimeFastMode,
@@ -12,7 +13,11 @@ test("Cursor SDK picker keeps the selected live model and local-auth boundary", 
   assert.equal(supportsRuntimeApiUrl("cursor-sdk"), false);
   assert.equal(supportsRuntimeCustomModelName("cursor-sdk"), true);
   assert.equal(supportsRuntimeFastMode("cursor-sdk"), false);
-  assert.match(runtimeApiUrlUnsupportedCopy("cursor-sdk") ?? "", /connected on this computer/);
+  assert.equal(runtimeApiUrlUnsupportedCopy("cursor-sdk"), null);
+  assert.equal(
+    runtimeApiUrlUnsupportedCopyMessageId("cursor-sdk"),
+    "agent.runtimeConfig.cursorSdkApiUrlUnsupported",
+  );
   const config = buildRuntimeConfig({
     runtime: "cursor-sdk",
     model: "account-live-model",

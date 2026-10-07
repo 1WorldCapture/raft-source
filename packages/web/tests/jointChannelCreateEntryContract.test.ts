@@ -125,7 +125,9 @@ test("ordinary channel edit can convert the channel to a joint channel", () => {
   assert.match(editDialog, /const plan = useServerStore\(\(s\) => s\.current\?\.plan\) \|\| "free"/);
   assert.match(editDialog, /const canShowConvertToJointEntry = useServerStore\(\(s\) => s\.current\?\.slug === "botiverse"\)/);
   assert.match(editDialog, /const canUseJointChannels = plan !== "free"/);
-  assert.match(editDialog, /const showConvertAction = showManageActions &&\s*canShowConvertToJointEntry &&\s*canUseJointChannels &&\s*!isAllChannel &&\s*!isJointChannel/);
+  // 0df7c2a (#119): announcement channels became "identity-locked" instead
+  // of special-casing #all; the capability gate is spelled out explicitly.
+  assert.match(editDialog, /const showConvertAction = showManageActions &&\s*canShowConvertToJointEntry &&\s*canUseJointChannels &&\s*!identityLocked &&\s*!isJointChannel &&\s*Boolean\(effectiveCapabilities\.federateChannels\)/);
   assert.match(editDialog, /convertChannelToJoint/);
   const convertMsgs = readSource("i18n/messages/en.ts");
   assert.match(editDialog, /id: "channel\.edit\.convertToJoint"/);
@@ -142,7 +144,7 @@ test("joint channels can edit shared metadata but cannot change visibility", () 
   const editDialog = readSource("components/channel/EditChannelDialog.tsx");
 
   assert.match(editDialog, /const isJointChannel = channel\?\.type === "joint"/);
-  assert.match(editDialog, /disabled=\{isAllChannel \|\| isArchived\}/);
+  assert.match(editDialog, /disabled=\{identityLocked \|\| isArchived\}/);
   assert.match(editDialog, /disabled=\{isArchived\}/);
   assert.match(editDialog, /disabled=\{saving \|\| isArchived\}/);
   const jointMsgs = readSource("i18n/messages/en.ts");

@@ -200,7 +200,8 @@ test("archived channels expose restore only across both settings and member entr
   }
   for (const source of [members, legacyMembers]) assert.match(source, /showAddSection && canAddChannelMembers/);
   for (const source of [currentSettings, legacySettings]) {
-    assert.match(source, /const showLeaveAction = !!onLeaveChannel && !isAllChannel && !isArchived;/);
+    // 0df7c2a (#119): !isAllChannel became !identityLocked.
+  assert.match(source, /const showLeaveAction = !!onLeaveChannel && !identityLocked && !isArchived;/);
     assert.match(source, /const showManageActions = canEditChannel && !isArchived;/);
     assert.match(source, /isArchived && effectiveCapabilities\.archiveChannels/);
   }

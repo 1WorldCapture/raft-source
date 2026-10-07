@@ -1020,6 +1020,7 @@ export const en = {
   "agent.runtimeConfig.provider": "Provider",
   "agent.runtimeConfig.apiKeyForProvider": "{provider} API Key",
   "agent.runtimeConfig.apiKeyRequired": "API Key is required.",
+  "agent.runtimeConfig.cursorSdkApiUrlUnsupported": "Cursor SDK uses the Cursor account connected on this computer. Manage its login from the desktop Cursor SDK menu, not a per-agent API URL.",
   "agent.runtimeConfig.baseUrl": "Base URL",
   "agent.runtimeConfig.baseUrlInvalid": "Base URL must start with http:// or https://.",
   "agent.runtimeConfig.imageInput": "Image input",

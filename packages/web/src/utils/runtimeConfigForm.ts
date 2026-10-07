@@ -170,11 +170,18 @@ export function supportsRuntimeApiUrl(runtime: string): boolean {
 }
 
 export function runtimeApiUrlUnsupportedCopy(runtime: string): string | null {
-  if (runtime === "cursor-sdk") {
-    return "Cursor SDK uses the Cursor account connected on this computer. Manage its login from the desktop Cursor SDK menu, not a per-agent API URL.";
-  }
+  // "cursor" prose is a legacy audited literal (i18nLegacyLiteralBoundaries
+  // family 3 + i18n-literal-baseline.json); new copy goes through the catalog.
   if (runtime === "cursor") {
     return "Cursor CLI does not expose a per-agent API URL flag or env var. Configure provider routing in Cursor itself.";
+  }
+  return null;
+}
+
+/** Catalog message id for the cursor-sdk API-URL explanation (en + zh-cn). */
+export function runtimeApiUrlUnsupportedCopyMessageId(runtime: string): "agent.runtimeConfig.cursorSdkApiUrlUnsupported" | null {
+  if (runtime === "cursor-sdk") {
+    return "agent.runtimeConfig.cursorSdkApiUrlUnsupported";
   }
   return null;
 }
