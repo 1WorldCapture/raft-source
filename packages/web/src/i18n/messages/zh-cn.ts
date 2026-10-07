@@ -1010,6 +1010,7 @@ export const zhCn: Record<MessageId, string> = {
   "agent.runtimeConfig.provider": "提供方",
   "agent.runtimeConfig.apiKeyForProvider": "{provider} API 密钥",
   "agent.runtimeConfig.apiKeyRequired": "需要填写 API 密钥。",
+  "agent.runtimeConfig.cursorSdkApiUrlUnsupported": "Cursor SDK 使用此电脑上已连接的 Cursor 账号。请在桌面端的 Cursor SDK 菜单管理登录，而不是设置每-agent API URL。",
   "agent.runtimeConfig.baseUrl": "Base URL",
   "agent.runtimeConfig.baseUrlInvalid": "Base URL 必须以 http:// 或 https:// 开头。",
   "agent.runtimeConfig.imageInput": "图片输入",

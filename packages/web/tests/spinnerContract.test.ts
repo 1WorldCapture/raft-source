@@ -77,7 +77,7 @@ test("no inline ring-style `rounded-full ... animate-spin` div outside Spinner.t
   let hits = "";
   try {
     hits = execSync(
-      `grep -RnE '<(div|span)[^>]*rounded-full[^>]*animate-spin' ${componentsDir}`,
+      `grep -RnE '<(div|span)[^>]*rounded-full[^>]*animate-spin' "${componentsDir}"`,
       { encoding: "utf8" },
     );
   } catch (err: any) {

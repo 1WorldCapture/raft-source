@@ -350,8 +350,11 @@ test("login page follows the modern auth layout and hides social buttons unless 
   // The English literal would now match nothing, so left as-is this assertion
   // would have passed VACUOUSLY while the legal notice disappeared entirely.
   assert.match(source, /id: "pages\.login\.legalAgreement"/);
-  assert.match(source, /href=\{CURRENT_LEGAL_ACCEPTANCE\.termsUrl\}/);
-  assert.match(source, /href=\{CURRENT_LEGAL_ACCEPTANCE\.privacyUrl\}/);
+  // e2183da (#161): links go through effectiveLegalUrls() (private-mode
+  // neutral links); without deployment overrides it still falls back to
+  // CURRENT_LEGAL_ACCEPTANCE, so the rendered hrefs are unchanged.
+  assert.match(source, /href=\{legalUrls\.termsUrl\}/);
+  assert.match(source, /href=\{legalUrls\.privacyUrl\}/);
   assert.match(source, /className="mt-4 text-center text-xs leading-5 text-black\/60"/);
   assert.doesNotMatch(source, /SOCIAL_AUTH_PREVIEW_PROVIDERS/);
 });
