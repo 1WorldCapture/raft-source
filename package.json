@@ -29,7 +29,7 @@
     "perf:boot-profile": "node scripts/perf/boot-profile.cjs",
     "test:raftdev": "node --import tsx --test scripts/dev/raftdev-*.test.ts",
     "test:source-available": "node --test scripts/source-available/export-snapshot.test.mjs scripts/source-available/release.test.mjs",
-    "test:downloads": "node --test scripts/build-downloads.test.mjs",
+    "test:downloads": "node --test scripts/build-downloads.test.mjs scripts/build-release-artifacts.test.mjs",
     "typecheck:raftdev": "tsc -p tsconfig.raftdev.json",
     "test:web": "node packages/web/scripts/run-vitest-tests.mjs",
     "test:web:dom": "node packages/web/scripts/run-vitest-tests.mjs --dom",

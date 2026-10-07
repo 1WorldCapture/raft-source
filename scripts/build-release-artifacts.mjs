@@ -14,7 +14,10 @@
 // everything below is served offline from ./downloads):
 //   node scripts/build-release-artifacts.mjs --out deploy/docker/downloads \
 //     [--platforms darwin-arm64,darwin-x64,linux-x64] [--force] \
-//     [--desktop-origin https://raft.internal.example:18443]
+//     [--desktop-origin https://raft.internal.example:18443] [--only desktop]
+// --only desktop re-runs ONLY the desktop step (per-customer re-bake of the
+// origin): it skips the Computer/CLI/daemon builds and leaves the existing
+// downloads tree untouched except for <out>/desktop. Needs a macOS host.
 // --desktop-origin is REQUIRED on macOS (the desktop step only runs there):
 // it is baked into the app as VITE_API_URL and must equal the SERVER_URL of
 // the deployment that will serve this tree.
@@ -46,6 +49,17 @@ function run(cmd, args, opts = {}) {
   execFileSync(cmd, args, { stdio: "inherit", ...opts });
 }
 
+const ONLY_STEPS = ["desktop"];
+
+/** Returns the single step selected by --only, or null for the full run. */
+function parseOnly(raw) {
+  if (raw === undefined) return null;
+  if (!ONLY_STEPS.includes(raw)) {
+    throw new Error(`--only must be one of: ${ONLY_STEPS.join(", ")} (got: ${raw})`);
+  }
+  return raw;
+}
+
 const DEFAULT_PLATFORMS = ["darwin-arm64", "darwin-x64", "linux-x64"];
 
 /**
@@ -72,7 +86,12 @@ async function main() {
   const outDir = args.out;
   if (!outDir) throw new Error("--out <dir> is required (e.g. deploy/docker/downloads)");
   const platforms = (args.platforms ?? DEFAULT_PLATFORMS.join(",")).split(",").map((p) => p.trim()).filter(Boolean);
+  const only = parseOnly(args.only);
+  const onlyDesktop = only === "desktop";
   const repoRoot = path.resolve(import.meta.dirname, "..");
+  if (onlyDesktop && process.platform !== "darwin") {
+    throw new Error("--only desktop needs a macOS host: electron-builder mac targets cannot be built elsewhere.");
+  }
 
   // Fail FAST, before any build step spends minutes: on a Mac the desktop
   // step REQUIRES the origin to bake (VITE_API_URL). A missing parameter
@@ -102,77 +121,83 @@ async function main() {
   console.log(`[release] building artifacts for ${sha}`);
 
   run("pnpm", ["--filter", "@botiverse/raft-computer", "build:deps"], { cwd: repoRoot });
-  const seaDir = path.join(repoRoot, "packages/computer/dist-native");
-  await rm(seaDir, { recursive: true, force: true });
-  const seaFiles = [];
-  for (const platform of platforms) {
-    const [os, arch] = platform.split("-");
-    run("node", ["scripts/native/build.mjs", "--platform", os, "--arch", arch], {
-      cwd: path.join(repoRoot, "packages/computer"),
-    });
-    seaFiles.push([platform, path.join(seaDir, `raft-computer-${platform}`)]);
-  }
-
-  // CLI tarball (self-host variant, acceptance D3): the tsup bundle is
-  // self-contained, so the variant package.json drops dependency
-  // declarations — offline `npm i -g <tgz>` succeeds with zero registry.
-  run("pnpm", ["--filter", "@botiverse/raft", "build"], { cwd: repoRoot });
-  const cliPackage = JSON.parse(await readFile(path.join(repoRoot, "packages/cli/package.json"), "utf8"));
-  const cliVersion = cliPackage.version;
-  run("node", [
-    path.join(repoRoot, "scripts/pack-selfhost-tarball.mjs"),
-    "--package-dir", "packages/cli", "--dist-dir", "dist",
-    "--out", "packages/computer/dist-native", "--name", "raft",
-  ], { cwd: repoRoot });
-  const cliDest = path.join(seaDir, `raft-${cliVersion}.tgz`);
-
-  // Independent product versions: the SEA tree carries the Computer package
-  // version, the CLI tree the CLI package version, the daemon tree/pointer
-  // the daemon package version. Never pass one package's version for another.
+  // Product versions are read up front: the final summary needs them even
+  // when --only desktop skips the builds below.
   const computerPackage = JSON.parse(await readFile(path.join(repoRoot, "packages/computer/package.json"), "utf8"));
+  const cliPackage = JSON.parse(await readFile(path.join(repoRoot, "packages/cli/package.json"), "utf8"));
   const daemonPackage = JSON.parse(await readFile(path.join(repoRoot, "packages/daemon/package.json"), "utf8"));
+  const cliVersion = cliPackage.version;
 
-  // Daemon tarball (acceptance D3): SELF-HOST build target only —
-  // noExternal bundle (every runtime dependency inlined) emitted to
-  // dist-selfhost, plus the CLI dist the runner transport injects, plus
-  // bin wrappers; packed as a dependency-free variant. The official daemon
-  // `build` and its npm publish path stay byte-identical.
-  const daemonSelfhostDir = path.join(repoRoot, "packages/daemon", "dist-selfhost");
-  await rm(daemonSelfhostDir, { recursive: true, force: true });
-  run("pnpm", ["--filter", "@botiverse/raft-daemon", "exec", "tsup", "--config", "tsup.selfhost.config.ts"], { cwd: repoRoot });
-  const { cp } = await import("node:fs/promises");
-  await cp(path.join(repoRoot, "packages/cli/dist"), path.join(daemonSelfhostDir, "cli"), { recursive: true });
-  run("node", ["scripts/write-dist-bins.mjs", "--dist", "dist-selfhost"], {
-    cwd: path.join(repoRoot, "packages/daemon"),
-  });
-  run("node", [
-    path.join(repoRoot, "scripts/pack-selfhost-tarball.mjs"),
-    "--package-dir", "packages/daemon", "--dist-dir", "dist-selfhost",
-    "--out", "packages/computer/dist-native", "--name", "raft-daemon",
-  ], { cwd: repoRoot });
-  const daemonDest = path.join(seaDir, `raft-daemon-${daemonPackage.version}.tgz`);
+  if (!onlyDesktop) {
+    const seaDir = path.join(repoRoot, "packages/computer/dist-native");
+    await rm(seaDir, { recursive: true, force: true });
+    const seaFiles = [];
+    for (const platform of platforms) {
+      const [os, arch] = platform.split("-");
+      run("node", ["scripts/native/build.mjs", "--platform", os, "--arch", arch], {
+        cwd: path.join(repoRoot, "packages/computer"),
+      });
+      seaFiles.push([platform, path.join(seaDir, `raft-computer-${platform}`)]);
+    }
 
-  const buildDownloadsArgs = [
-    path.join(repoRoot, "scripts/build-downloads.mjs"),
-    "--computer-version", computerPackage.version,
-    "--cli-version", cliVersion,
-    "--daemon-version", daemonPackage.version,
-    "--daemon", daemonDest,
-    "--commit", sha,
-    "--out", outDir,
-    "--cli", cliDest,
-    "--computer-wasm", path.join(seaDir, "photon_rs_bg.wasm"),
-    ...seaFiles.flatMap(([platform, file]) => [`--computer-${platform}`, file]),
-  ];
-  run("node", buildDownloadsArgs, { cwd: repoRoot });
-  // Acceptance D3 verification baked into the pipeline: the tarballs must
-  // install with ZERO registry access and the daemon must complete a real
-  // connection handshake from the installed bundle.
-  run("node", [
-    path.join(repoRoot, "scripts/verify-selfhost-tarball.mjs"),
-    "--cli", cliDest,
-    "--daemon", daemonDest,
-  ], { cwd: repoRoot });
+    // CLI tarball (self-host variant, acceptance D3): the tsup bundle is
+    // self-contained, so the variant package.json drops dependency
+    // declarations — offline `npm i -g <tgz>` succeeds with zero registry.
+    run("pnpm", ["--filter", "@botiverse/raft", "build"], { cwd: repoRoot });
+    run("node", [
+      path.join(repoRoot, "scripts/pack-selfhost-tarball.mjs"),
+      "--package-dir", "packages/cli", "--dist-dir", "dist",
+      "--out", "packages/computer/dist-native", "--name", "raft",
+    ], { cwd: repoRoot });
+    const cliDest = path.join(seaDir, `raft-${cliVersion}.tgz`);
+
+    // Independent product versions: the SEA tree carries the Computer package
+    // version, the CLI tree the CLI package version, the daemon tree/pointer
+    // the daemon package version. Never pass one package's version for another.
+
+    // Daemon tarball (acceptance D3): SELF-HOST build target only —
+    // noExternal bundle (every runtime dependency inlined) emitted to
+    // dist-selfhost, plus the CLI dist the runner transport injects, plus
+    // bin wrappers; packed as a dependency-free variant. The official daemon
+    // `build` and its npm publish path stay byte-identical.
+    const daemonSelfhostDir = path.join(repoRoot, "packages/daemon", "dist-selfhost");
+    await rm(daemonSelfhostDir, { recursive: true, force: true });
+    run("pnpm", ["--filter", "@botiverse/raft-daemon", "exec", "tsup", "--config", "tsup.selfhost.config.ts"], { cwd: repoRoot });
+    const { cp } = await import("node:fs/promises");
+    await cp(path.join(repoRoot, "packages/cli/dist"), path.join(daemonSelfhostDir, "cli"), { recursive: true });
+    run("node", ["scripts/write-dist-bins.mjs", "--dist", "dist-selfhost"], {
+      cwd: path.join(repoRoot, "packages/daemon"),
+    });
+    run("node", [
+      path.join(repoRoot, "scripts/pack-selfhost-tarball.mjs"),
+      "--package-dir", "packages/daemon", "--dist-dir", "dist-selfhost",
+      "--out", "packages/computer/dist-native", "--name", "raft-daemon",
+    ], { cwd: repoRoot });
+    const daemonDest = path.join(seaDir, `raft-daemon-${daemonPackage.version}.tgz`);
+
+    const buildDownloadsArgs = [
+      path.join(repoRoot, "scripts/build-downloads.mjs"),
+      "--computer-version", computerPackage.version,
+      "--cli-version", cliVersion,
+      "--daemon-version", daemonPackage.version,
+      "--daemon", daemonDest,
+      "--commit", sha,
+      "--out", outDir,
+      "--cli", cliDest,
+      "--computer-wasm", path.join(seaDir, "photon_rs_bg.wasm"),
+      ...seaFiles.flatMap(([platform, file]) => [`--computer-${platform}`, file]),
+    ];
+    run("node", buildDownloadsArgs, { cwd: repoRoot });
+    // Acceptance D3 verification baked into the pipeline: the tarballs must
+    // install with ZERO registry access and the daemon must complete a real
+    // connection handshake from the installed bundle.
+    run("node", [
+      path.join(repoRoot, "scripts/verify-selfhost-tarball.mjs"),
+      "--cli", cliDest,
+      "--daemon", daemonDest,
+    ], { cwd: repoRoot });
+
+  }
 
   // Desktop artifacts (task #12, phase 3-3): macOS-only — electron-builder
   // mac dmg targets require a Mac build host. Non-macOS hosts skip with an
@@ -218,7 +243,7 @@ async function main() {
       "--out", path.join(outDir, "desktop"),
     ], { cwd: repoRoot });
   }
-  console.log(`[release] done: ${outDir} (computer ${computerPackage.version} / cli ${cliVersion} / daemon ${daemonPackage.version}, ${platforms.length} platforms, sha ${sha.slice(0, 8)})`);
+  console.log(`[release] done: ${outDir} (computer ${computerPackage.version} / cli ${cliVersion} / daemon ${daemonPackage.version}, ${onlyDesktop ? "desktop only" : `${platforms.length} platforms`}, sha ${sha.slice(0, 8)})`);
 }
 
 main().catch((err) => {
