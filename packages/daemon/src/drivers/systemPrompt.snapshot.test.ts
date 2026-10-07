@@ -26,7 +26,7 @@ test("shared standing instructions", async () => {
 });
 
 test.each([
-  "claude", "codex", "grok", "copilot", "cursor",
+  "claude", "codex", "grok", "copilot",
   "gemini", "kimi", "kimi-sdk", "opencode", "pi", "builtin",
 ])("%s standing prompt (POSIX)", async (runtime) => {
   const platform = Object.getOwnPropertyDescriptor(process, "platform")!;

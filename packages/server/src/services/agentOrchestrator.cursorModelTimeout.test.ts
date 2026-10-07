@@ -41,7 +41,7 @@ function setupLocalDetection() {
 test("local Cursor discovery accepts a result after the old five-second deadline", async () => {
   vi.useFakeTimers();
   const { orchestrator, reply } = setupLocalDetection();
-  const detection = orchestrator.detectMachineRuntimeModels("machine-1", "cursor");
+  const detection = orchestrator.detectMachineRuntimeModels("machine-1", "cursor-sdk");
   const result = assert.doesNotReject(async () => {
     assert.deepEqual(await detection, {
       kind: "live", value: { models: [{ id: "auto", label: "Auto" }] },
@@ -58,7 +58,7 @@ test("Cursor discovery still times out and removes its response listener", async
   vi.useFakeTimers();
   const { orchestrator, reply } = setupLocalDetection();
   const result = assert.rejects(
-    orchestrator.detectMachineRuntimeModels("machine-1", "cursor"),
+    orchestrator.detectMachineRuntimeModels("machine-1", "cursor-sdk"),
     /Runtime model detect request timed out/,
   );
   await vi.advanceTimersByTimeAsync(25_000);
@@ -72,7 +72,7 @@ test("slower Cursor discovery still fences results from a replaced connection", 
   vi.useFakeTimers();
   const { orchestrator, connection, reply } = setupLocalDetection();
   const result = assert.rejects(
-    orchestrator.detectMachineRuntimeModelsWithAuthority("machine-1", "cursor"),
+    orchestrator.detectMachineRuntimeModelsWithAuthority("machine-1", "cursor-sdk"),
     /connection changed/i,
   );
   await vi.advanceTimersByTimeAsync(6_000);
@@ -114,7 +114,7 @@ test("relayed Cursor discovery accepts a model catalog after six seconds", async
     }),
   });
   const result = assert.doesNotReject(async () => {
-    const outcome = await orchestrator.detectMachineRuntimeModels("remote-machine", "cursor");
+    const outcome = await orchestrator.detectMachineRuntimeModels("remote-machine", "cursor-sdk");
     assert.equal(outcome.kind, "live");
   });
   await vi.advanceTimersByTimeAsync(6_000);
@@ -129,7 +129,7 @@ test("a failed detection send cancels the wait and releases timers and listeners
     sendRequiredToMachine: () => Promise<void>;
   }).sendRequiredToMachine = async () => { throw new Error("connection closed"); };
   await assert.rejects(
-    orchestrator.detectMachineRuntimeModels("machine-1", "cursor"),
+    orchestrator.detectMachineRuntimeModels("machine-1", "cursor-sdk"),
     /WebSocket not ready/,
   );
   assert.equal(orchestrator.listenerCount("machine:response:machine-1"), 0);

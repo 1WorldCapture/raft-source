@@ -4,7 +4,6 @@ import { CodexDriver } from "./codex.js";
 import { GrokDriver } from "./grok.js";
 import { AntigravityDriver } from "./antigravity.deprecated.js";
 import { CopilotDriver } from "./copilot.js";
-import { CursorDriver } from "./cursor.js";
 import { CursorSdkDriver } from "./cursor-sdk.js";
 import { GeminiDriver } from "./gemini.js";
 import { KimiDriver } from "./kimi.js";
@@ -51,7 +50,6 @@ const driverFactories: Record<string, () => RuntimeDriver> = {
   // and server admission prohibit creating agents or switching into this runtime.
   antigravity: () => new AntigravityDriver(),
   copilot: () => new CopilotDriver(),
-  cursor: () => new CursorDriver(),
   "cursor-sdk": () => new CursorSdkDriver(),
   gemini: () => new GeminiDriver(),
   // Two separate Kimi runtimes (per #proj-runtime:cc818e65 6/16 consensus):
@@ -69,8 +67,28 @@ const driverFactories: Record<string, () => RuntimeDriver> = {
   omp: () => new OmpDriver(),
 };
 
-/** Get the driver for a runtime ID. Throws if unknown. */
+/** Runtime ids that existed once and are intentionally gone (not "unknown"). */
+const RETIRED_RUNTIMES: Readonly<Record<string, string>> = {
+  cursor: "the Cursor CLI runtime has been retired; use the Cursor SDK runtime (runtime id \"cursor-sdk\") instead",
+};
+
+/** Thrown for a runtime that was retired, so callers can report a clear reason instead of "Unknown runtime". */
+export class RetiredRuntimeError extends Error {
+  readonly runtimeId: string;
+  constructor(runtimeId: string) {
+    super(`Runtime "${runtimeId}" is no longer available: ${RETIRED_RUNTIMES[runtimeId]}.`);
+    this.name = "RetiredRuntimeError";
+    this.runtimeId = runtimeId;
+  }
+}
+
+export function isRetiredRuntime(runtimeId: string): boolean {
+  return Object.prototype.hasOwnProperty.call(RETIRED_RUNTIMES, runtimeId);
+}
+
+/** Get the driver for a runtime ID. Throws RetiredRuntimeError for a retired runtime and Error if unknown. */
 export function getDriver(runtimeId: string): RuntimeDriver {
+  if (isRetiredRuntime(runtimeId)) throw new RetiredRuntimeError(runtimeId);
   const createDriver = driverFactories[runtimeId];
   const driver = createDriver?.();
   if (!driver) {

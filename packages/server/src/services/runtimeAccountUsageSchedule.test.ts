@@ -12,7 +12,7 @@ test("scheduled usage collection selects only installed supported providers and 
     runtimeAccountUsageProvidersForRuntimes(["claude", "codex", "kimi", "kimi-sdk", "pi", "claude", "grok"]),
     ["claude", "codex", "kimi", "grok"],
   );
-  assert.deepEqual(runtimeAccountUsageProvidersForRuntimes(["pi", "cursor"]), []);
+  assert.deepEqual(runtimeAccountUsageProvidersForRuntimes(["pi", "cursor-sdk"]), []);
 });
 
 test("scheduled usage collection fails closed while the server gate is off", () => {

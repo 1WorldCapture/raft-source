@@ -2440,16 +2440,16 @@ test("POST /agents rejects provider config for Cursor because current Cursor CLI
         name: "cursor-provider-agent",
         runtimeConfig: {
           version: 1,
-          runtime: "cursor",
+          runtime: "gemini",
           provider: { kind: "custom", apiUrl: "https://gateway.example.test/v1", apiKey: "sk-ant-test" },
-          model: { kind: "custom", name: "custom-cursor-model" },
+          model: { kind: "custom", name: "custom-gemini-model" },
         },
       }),
     });
 
     assert.equal(res.status, 400);
     const body = await res.json() as { error: string };
-    assert.equal(body.error, "runtimeConfig.provider is not supported for runtime: cursor");
+    assert.equal(body.error, "runtimeConfig.provider is not supported for runtime: gemini");
 });
 
 test("POST /agents rejects malformed structured runtimeConfig", async ({ app }) => {
@@ -3976,9 +3976,9 @@ test("POST /agents rejects unsupported runtimeConfig launch axes", async ({ app 
     const server = await createServer("Runtime Config Unsupported", "runtime-config-unsupported", owner.id);
   const ownerToken = await tokenForHuman(owner.email);
 
-    const providerUnsupportedRuntimes = ["codex", "grok", "antigravity", "kimi", "copilot", "cursor", "gemini", "opencode"];
-    const fastUnsupportedRuntimes = ["grok", "antigravity", "kimi", "copilot", "cursor", "gemini", "opencode"];
-    const reasoningUnsupportedRuntimes = ["antigravity", "kimi", "cursor", "gemini", "opencode"];
+    const providerUnsupportedRuntimes = ["codex", "grok", "antigravity", "kimi", "copilot", "gemini", "opencode"];
+    const fastUnsupportedRuntimes = ["grok", "antigravity", "kimi", "copilot", "gemini", "opencode"];
+    const reasoningUnsupportedRuntimes = ["antigravity", "kimi", "gemini", "opencode"];
 
     const cases = [
       ...providerUnsupportedRuntimes.map((runtime) => ({

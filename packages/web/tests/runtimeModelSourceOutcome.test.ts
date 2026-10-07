@@ -273,29 +273,29 @@ test("only live membership, explicit provider catalogs, or allowed custom overri
   assert.equal(runtimeModelSelectionIsRunnable({ source: { kind: "unsupported" }, model: "default", modelIgnored: true, customMode: false, customAllowed: false }), true);
 });
 
-test("Cursor bundled Auto cannot become create or edit authority while its probe is non-live", () => {
+test("Cursor SDK bundled default cannot become create or edit authority while its probe is non-live", () => {
   for (const source of [
     { kind: "no_models" } as const,
     { kind: "error", retryable: true } as const,
   ]) {
-    assert.deepEqual(projectRuntimeModelSourcePresentation("cursor", source).models, []);
+    assert.deepEqual(projectRuntimeModelSourcePresentation("cursor-sdk", source).models, []);
     assert.equal(
-      projectBundledRuntimeModelSuggestions("cursor")
-        .find((model) => model.id === "auto")?.verified,
+      projectBundledRuntimeModelSuggestions("cursor-sdk")
+        .find((model) => model.id === "default")?.verified,
       "suggestion_only",
     );
     assert.equal(runtimeModelSelectionIsRunnable({
       source,
-      model: "auto",
+      model: "default",
       customMode: false,
       customAllowed: true,
     }), false, `${source.kind}: create`);
     assert.equal(runtimeModelSelectionIsRunnable({
       source,
-      model: "auto",
+      model: "default",
       customMode: false,
       customAllowed: true,
-      persistedModel: "auto",
+      persistedModel: "default",
     }), false, `${source.kind}: edit`);
   }
 
@@ -304,9 +304,9 @@ test("Cursor bundled Auto cannot become create or edit authority while its probe
       kind: "live",
       value: { models: [{ id: "auto", label: "Auto" }], default: "auto" },
     },
-    model: "auto",
+    model: "default",
     customMode: false,
     customAllowed: true,
-    persistedModel: "auto",
+    persistedModel: "default",
   }), true);
 });
