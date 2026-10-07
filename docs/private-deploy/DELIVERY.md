@@ -1,7 +1,7 @@
 # Raft 私有化发行包 交付文档（私有版 0.1.0，commit 68b6d61）
 
 > 状态：私有版 0.1.0，commit 68b6d61，已验收（升级、回滚、断网全新安装均已在测试环境实测）。全部产物的路径、大小和 sha256 见 `INVENTORY-68b6d61.txt`。「恢复数据库备份」操作未演练，文中已标注（§5）。
-> 技术细节的权威来源是仓库 `deploy/docker/README.md`（同 commit）。构建流程见内部文档 BUILD-INTERNAL.md，不随客户交付。
+> 技术细节的权威来源是发行包内的 `deploy/README.md`。构建流程见内部文档 BUILD-INTERNAL.md，不随客户交付。
 
 ## 1. 发行包内容
 
@@ -11,6 +11,7 @@
 |---|---|---|
 | server 镜像 | 同 commit | docker save tar（private 模式） |
 | web 镜像（selfhost） | 同 commit | docker save tar（与 server 镜像同一个 tar） |
+| 部署文件 | commit 63b2eaa | `deploy/docker-compose.yml`、`deploy/.env.example`、`deploy/README.md`（含上传文件持久卷和 `SCOPE_ATTESTATION_SECRET` 透传；**请使用包内这份，不要使用 68b6d61 源码树里的旧 compose**） |
 | 基础镜像 | postgres:17-alpine、redis:7-alpine | docker save tar（`images/raft-base-images.tar`，按 digest 固定） |
 | Computer | 1.0.29 | linux-x64、darwin-arm64、darwin-x64 单文件；darwin 为 ad-hoc 签名 |
 | CLI | 0.0.24-zcode.1 | tgz |
@@ -33,8 +34,8 @@
 
 1. 载入镜像：`docker load -i <images tar>`（先 `sha256sum` 核对）。记下 `docker load` 输出的两个镜像 tag（本版为 `raft-source-server:dev-68b6d61ff019dddbcf81f4785d9806df3f49603f` 和 `raft-source-web-selfhost:dev-68b6d61ff019dddbcf81f4785d9806df3f49603f`，以 `docker load` 实际输出为准）。
    同样载入基础镜像：`docker load -i images/raft-base-images.tar`（含 compose 使用的 `postgres:17-alpine` 和 `redis:7-alpine`，发行包自带，离线环境无需联网拉取）。
-2. `cd deploy/docker && cp .env.example .env`，填 `POSTGRES_PASSWORD`、`JWT_SECRET`，**把 `RAFT_SERVER_IMAGE`、`RAFT_WEB_IMAGE` 设为第 1 步 load 输出的 tag**（compose 默认找 `:local` tag，不设置时会去 Docker Hub 拉取，离线环境下失败），设置 `RAFT_PUBLIC_ORIGIN=https://<主机名>[:<端口>]`（对外端口由 `.env` 的 `RAFT_HTTP_PORT` 决定，compose 把它映射到 web 容器的 443；默认 18443，生产常用 443 或自定义端口）。
-3. 把发行包 `downloads/` 放到 compose 挂载的 `./downloads/`。
+2. 进入发行包内的 `deploy/` 目录（部署文件，取自 63b2eaa，镜像本身构建自 68b6d61），`cp .env.example .env`，填 `POSTGRES_PASSWORD`、`JWT_SECRET`，**把 `RAFT_SERVER_IMAGE`、`RAFT_WEB_IMAGE` 设为第 1 步 load 输出的 tag**（compose 默认找 `:local` tag，不设置时会去 Docker Hub 拉取，离线环境下失败），设置 `RAFT_PUBLIC_ORIGIN=https://<主机名>[:<端口>]`（对外端口由 `.env` 的 `RAFT_HTTP_PORT` 决定，compose 把它映射到 web 容器的 443；默认 18443，生产常用 443 或自定义端口）。
+3. 把发行包 `downloads/` 放到 compose 旁边的 `./downloads/`。
 4. `docker compose up -d`；健康检查 `curl -fsS https://<主机名>[:<端口>]/api/version`，回显 sha 应为 `68b6d61…`。
 5. 上传文件（附件、头像）保存在命名卷 `raft-uploads`（挂载到容器 `/app/uploads`，由 `UPLOADS_DIR` 指定），容器重建不会丢失；备份时要和数据库一起备份它。
 6. 无 SMTP 时账号激活链接打印在 server 容器日志（见 README「离线首跑」）。
