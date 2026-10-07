@@ -31,7 +31,7 @@
 ## 3. 安装（离线）
 
 1. 载入镜像：`docker load -i <images tar>`（先 `sha256sum` 核对）。记下 `docker load` 输出的两个镜像 tag（形如 `raft-source-server:dev-<sha>` 和 `raft-source-web-selfhost:dev-<sha>`）。
-   另外 compose 还使用 `postgres:17-alpine` 和 `redis:7-alpine`：离线环境需要提前在目标机器上准备好这两个镜像（见下方说明）。
+   另外 compose 还使用 `postgres:17-alpine` 和 `redis:7-alpine`：离线环境需要提前在目标机器上准备好这两个镜像。
 2. `cd deploy/docker && cp .env.example .env`，填 `POSTGRES_PASSWORD`、`JWT_SECRET`，**把 `RAFT_SERVER_IMAGE`、`RAFT_WEB_IMAGE` 设为第 1 步 load 输出的 tag**（compose 默认找 `:local` tag，不设置会尝试联网拉取而失败），设置 `RAFT_PUBLIC_ORIGIN=https://<主机名>[:<端口>]`（对外端口由 `.env` 的 `RAFT_HTTP_PORT` 决定，compose 把它映射到 web 容器的 443；默认 18443，生产常用 443 或自定义端口）。
 3. 把发行包 `downloads/` 放到 compose 挂载的 `./downloads/`。
 4. `docker compose up -d`；健康检查 `curl -fsS https://<主机名>[:<端口>]/api/version`，回显 sha 应为 `68b6d61…`。
