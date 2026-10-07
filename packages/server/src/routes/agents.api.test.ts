@@ -40,6 +40,7 @@ import {
   updateAgentStatus,
 } from "../services/agentService.js";
 import { createMessage } from "../services/messageService.js";
+import { applyAgentPurgeResult, isPurgePending, listRetryablePendingPurges, MAX_AGENT_PURGE_ATTEMPTS } from "../services/agentPurgeService.js";
 import { addAgent, addHuman, createChannel, findOrCreateAgentDM, findOrCreateDM } from "../services/channelService.js";
 import { mintAgentCredential, recordAgentCredentialUse } from "../services/agentCredentialService.js";
 import {
@@ -2263,6 +2264,123 @@ test("DELETE /api/agents/:id soft-deletes even if runtime stop hangs", async () 
     } else {
       process.env.SLOCK_AGENT_DELETE_STOP_TIMEOUT_MS = previousTimeout;
     }
+    await app.close();
+  }
+});
+
+async function seedPurgeMachine(userId: string, serverId: string, name: string) {
+  const [machine] = await getDb().insert(machines).values({
+    serverId, userId, name, apiKeyHash: `${name}-hash`, runtimes: ["claude"],
+  }).returning();
+  return machine;
+}
+
+test("DELETE /api/agents/:id records a durable agent:purge for the machine and asks it right away", async () => {
+  const app = await openTestApp("pglite://", 0, { humanActivityMuteFlagDefaultEnabled: true, onboardingOpenerFlagDefaultEnabled: false });
+  try {
+    const owner = await seedUser("purge-delete-owner@slock.test", "purge-delete-owner");
+    const server = await createServer("Purge Delete", "purge-delete", owner.id);
+    const machine = await seedPurgeMachine(owner.id, server.id, "purge-delete-machine");
+    const agent = await createAgent(server.id, "purge-delete-agent", { runtime: "claude", machineId: machine.id });
+    const loner = await createAgent(server.id, "purge-delete-no-machine", { runtime: "claude" });
+    // createAgent may auto-assign the server's machine; this agent must have none.
+    await getDb().update(agents).set({ machineId: null }).where(eq(agents.id, loner.id));
+    const ownerToken = await tokenForHuman(owner.email);
+
+    const requests: Array<[string, string]> = [];
+    const originalOrchestrator = app.app.get("agentOrchestrator") as Record<string, unknown>;
+    app.app.set("agentOrchestrator", {
+      ...originalOrchestrator,
+      stopAgent: async () => {},
+      evictCache: () => {},
+      requestAgentPurge: async (machineId: string, agentId: string) => { requests.push([machineId, agentId]); },
+    });
+
+    const del = (id: string) => fetch(`${app.baseUrl}/api/agents/${id}`, { method: "DELETE", headers: authHeaders(ownerToken, server.id) });
+    assert.equal((await del(agent.id)).status, 200);
+    assert.equal((await del(loner.id)).status, 200);
+
+    // agent.machineId was cleared by deleteAgent, yet the purge intent kept the machine.
+    assert.equal((await getAgent(agent.id, true))?.machineId ?? null, null);
+    assert.deepEqual(await listRetryablePendingPurges(machine.id), [{ agentId: agent.id, attempts: 0 }]);
+    assert.deepEqual(requests, [[machine.id, agent.id]]);
+    assert.equal(await isPurgePending(machine.id, loner.id), false, "an agent that never had a machine owes no purge");
+  } finally {
+    await app.close();
+  }
+});
+
+test("purge intents: terminal outcomes clear, refusals are counted and stop being retried at the cap", async () => {
+  const app = await openTestApp("pglite://", 0, { humanActivityMuteFlagDefaultEnabled: true, onboardingOpenerFlagDefaultEnabled: false });
+  try {
+    const owner = await seedUser("purge-cap-owner@slock.test", "purge-cap-owner");
+    const server = await createServer("Purge Cap", "purge-cap", owner.id);
+    const machine = await seedPurgeMachine(owner.id, server.id, "purge-cap-machine");
+    const a = await createAgent(server.id, "purge-cap-a", { runtime: "claude", machineId: machine.id });
+    const b = await createAgent(server.id, "purge-cap-b", { runtime: "claude", machineId: machine.id });
+    await deleteAgent(a.id, { purgeMachineId: machine.id });
+    await deleteAgent(b.id, { purgeMachineId: machine.id });
+    // re-recording the same intent is idempotent
+    await deleteAgent(b.id, { purgeMachineId: machine.id });
+    assert.equal((await listRetryablePendingPurges(machine.id)).length, 2);
+
+    assert.equal(await applyAgentPurgeResult(machine.id, a.id, "purged"), "cleared");
+    assert.equal(await isPurgePending(machine.id, a.id), false);
+    assert.equal(await applyAgentPurgeResult(machine.id, a.id, "purged"), "unknown");
+
+    for (let i = 1; i < MAX_AGENT_PURGE_ATTEMPTS; i += 1) {
+      assert.equal(await applyAgentPurgeResult(machine.id, b.id, "refused_running"), "kept");
+    }
+    assert.deepEqual(await listRetryablePendingPurges(machine.id), [{ agentId: b.id, attempts: MAX_AGENT_PURGE_ATTEMPTS - 1 }]);
+    assert.equal(await applyAgentPurgeResult(machine.id, b.id, "refused_running"), "gave_up");
+    assert.deepEqual(await listRetryablePendingPurges(machine.id), [], "no automatic retry past the cap");
+    assert.equal(await isPurgePending(machine.id, b.id), true, "the row stays for operators");
+  } finally {
+    await app.close();
+  }
+});
+
+test("orchestrator: purge is sent only to daemons with the capability, replayed on ready, and results update the intent", async () => {
+  const app = await openTestApp("pglite://", 0, { humanActivityMuteFlagDefaultEnabled: true, onboardingOpenerFlagDefaultEnabled: false });
+  try {
+    const owner = await seedUser("purge-orch-owner@slock.test", "purge-orch-owner");
+    const server = await createServer("Purge Orch", "purge-orch", owner.id);
+    const machine = await seedPurgeMachine(owner.id, server.id, "purge-orch-machine");
+    const agent = await createAgent(server.id, "purge-orch-agent", { runtime: "claude", machineId: machine.id });
+    await deleteAgent(agent.id, { purgeMachineId: machine.id });
+
+    const orchestrator = new AgentOrchestrator();
+    const internals = orchestrator as unknown as {
+      machineConnections: Map<string, { capabilities: Set<string> }>;
+      sendToMachine: (machineId: string, message: { type: string; agentId?: string }) => Promise<boolean>;
+      handleAgentPurgeResult: (machineId: string, message: { type: "agent:purge:result"; agentId: string; outcome: string }) => Promise<void>;
+    };
+    const sent: Array<{ type: string; agentId?: string }> = [];
+    internals.sendToMachine = async (_id, message) => { sent.push(message); return true; };
+
+    // offline machine: nothing is sent, the intent stays
+    await orchestrator.requestAgentPurge(machine.id, agent.id);
+    await orchestrator.dispatchPendingAgentPurges(machine.id);
+    assert.deepEqual(sent, []);
+    assert.equal(await isPurgePending(machine.id, agent.id), true);
+
+    // old daemon (connected, no capability): still nothing sent, still pending
+    internals.machineConnections.set(machine.id, { capabilities: new Set(["agent:start"]) });
+    await orchestrator.dispatchPendingAgentPurges(machine.id);
+    assert.deepEqual(sent, []);
+
+    // upgraded daemon: the pending purge is replayed on ready
+    internals.machineConnections.set(machine.id, { capabilities: new Set(["agent:purge"]) });
+    await orchestrator.dispatchPendingAgentPurges(machine.id);
+    assert.deepEqual(sent, [{ type: "agent:purge", agentId: agent.id }]);
+
+    // refused: kept; purged: cleared
+    await internals.handleAgentPurgeResult(machine.id, { type: "agent:purge:result", agentId: agent.id, outcome: "refused_running" });
+    assert.equal(await isPurgePending(machine.id, agent.id), true);
+    await internals.handleAgentPurgeResult(machine.id, { type: "agent:purge:result", agentId: agent.id, outcome: "purged" });
+    assert.equal(await isPurgePending(machine.id, agent.id), false);
+    internals.machineConnections.delete(machine.id);
+  } finally {
     await app.close();
   }
 });

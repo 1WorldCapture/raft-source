@@ -1874,6 +1874,9 @@ export type {
   MaybePromise,
 } from "./testing/failpoints.js";
 
+/** Ready capability advertised by daemons that understand `agent:purge`. */
+export const AGENT_PURGE_CAPABILITY = "agent:purge";
+
 /** Result of a daemon-side `agent:purge`. `refused_running`/`error` leave the server's pending purge in place. */
 export type AgentPurgeOutcome = "purged" | "nothing_to_purge" | "refused_running" | "invalid_agent_id" | "error";
 

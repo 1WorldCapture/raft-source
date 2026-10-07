@@ -4203,6 +4203,25 @@ export const agentChannelReadCursors = pgTable("agent_channel_read_cursors", {
   primaryKey({ columns: [t.agentId, t.channelId] }),
 ]);
 
+/**
+ * Pending `agent:purge` commands (task #4). deleteAgent clears agents.machine_id,
+ * so the intent "this machine still holds a deleted agent's local directories" is
+ * recorded here, in the same transaction as the soft delete, and survives the
+ * machine being offline or the server restarting. A row is removed when the
+ * daemon reports `purged` / `nothing_to_purge`; `refused_running` keeps it
+ * (counted in `attempts`, capped by the orchestrator).
+ */
+export const machinePendingAgentPurges = pgTable("machine_pending_agent_purges", {
+  machineId: uuid("machine_id").notNull().references(() => machines.id, { onDelete: "cascade" }),
+  agentId: uuid("agent_id").notNull().references(() => agents.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  attempts: integer("attempts").notNull().default(0),
+  lastAttemptAt: timestamp("last_attempt_at", { withTimezone: true }),
+  lastOutcome: text("last_outcome"),
+}, (t) => [
+  primaryKey({ columns: [t.machineId, t.agentId] }),
+]);
+
 // Email verification tokens
 export const emailVerifications = pgTable("email_verifications", {
   id: uuid("id").primaryKey().$defaultFn(() => randomUUID()),

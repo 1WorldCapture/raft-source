@@ -6,6 +6,7 @@ import { agents, machines, channels, channelAgents, servers, serverMembers, serv
 import { ALL_CHANNEL_TEAM_THRESHOLD, EXTERNAL_AGENT_RUNTIME_ID, PLAN_CONFIG, currentDate, getEffectiveLimits, type AgentRuntimeErrorState, type AgentStatus, type ServerPlan, type ReasoningEffort, type RuntimeConfig, getDefaultModel, isExternalAgentRuntime, validateAgentName } from "@botiverse/raft-shared";
 import { assertAgentCapacityAvailable, getServerBillingEntitlement, getServerBillingUsage, withAgentCreateLock } from "./planService.js";
 import { untracedDbQuery, type DbQueryTracer } from "../tracing/dbQueryTrace.js";
+import { recordPendingAgentPurge } from "./agentPurgeService.js";
 import { assertAgentHandleAvailableInServer, lockServerPrincipalHandles, PrincipalHandleConflictError } from "./principalHandleService.js";
 import { refreshSubscriptionForServerIfStale } from "./billingService.js";
 import { evaluateFeatureFlag } from "./featureFlagService.js";
@@ -1026,7 +1027,12 @@ export async function clearAllChannelIntroSentClaim(agentId: string, claimedAt: 
     ));
 }
 
-export async function deleteAgent(agentId: string) {
+/**
+ * `purgeMachineId`: the machine that held the agent (agents.machine_id is
+ * cleared below, so the caller must read it first). When given, a durable
+ * `agent:purge` intent for that machine is committed in the same transaction.
+ */
+export async function deleteAgent(agentId: string, options: { purgeMachineId?: string | null } = {}) {
   const db = getDb();
   const deletedAt = new Date();
 
@@ -1041,6 +1047,10 @@ export async function deleteAgent(agentId: string) {
         updatedAt: deletedAt,
       })
       .where(and(eq(agents.id, agentId), isNull(agents.deletedAt)));
+
+    if (options.purgeMachineId) {
+      await recordPendingAgentPurge(tx, options.purgeMachineId, agentId);
+    }
 
     await tx.delete(agentRuntimeProfiles)
       .where(eq(agentRuntimeProfiles.agentId, agentId));

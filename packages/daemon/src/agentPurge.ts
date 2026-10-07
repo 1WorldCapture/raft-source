@@ -7,9 +7,11 @@
 // <root>/<uuid>.
 import { cp, lstat, mkdir, readdir, rename, rm } from "node:fs/promises";
 import path from "node:path";
+import { AGENT_PURGE_CAPABILITY } from "@botiverse/raft-shared";
 import { logger } from "./logger.js";
 
-export const AGENT_PURGE_CAPABILITY = "agent:purge";
+export { AGENT_PURGE_CAPABILITY };
+
 export const DEFAULT_AGENT_TRASH_RETENTION_DAYS = 14;
 export const AGENT_TRASH_RETENTION_ENV = "RAFT_AGENT_TRASH_RETENTION_DAYS";
 export const AGENT_TRASH_SWEEP_INTERVAL_MS = 24 * 60 * 60 * 1000;

@@ -1912,6 +1912,13 @@
       "when": 1791371124142,
       "tag": "0273_mention_agent_purge_index",
       "breakpoints": true
+    },
+    {
+      "idx": 274,
+      "version": "7",
+      "when": 1791371125142,
+      "tag": "0274_machine_pending_agent_purges",
+      "breakpoints": true
     }
   ]
 }

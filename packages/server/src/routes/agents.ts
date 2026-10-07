@@ -3160,7 +3160,15 @@ agentRouter.delete("/:id", async (req, res) => {
       await stopAgentBeforeDelete(agentOrchestrator, req.params.id);
     }
     agentOrchestrator.evictCache(req.params.id);
-    await agentService.deleteAgent(req.params.id);
+    // deleteAgent clears agent.machineId; capture it first so the machine can
+    // be told to purge the agent's local directories (durable, offline-safe).
+    const purgeMachineId = isExternalAgentRuntime(agent.runtime) ? null : (agent.machineId ?? null);
+    await agentService.deleteAgent(req.params.id, { purgeMachineId });
+    if (purgeMachineId) {
+      void Promise.resolve()
+        .then(() => agentOrchestrator.requestAgentPurge(purgeMachineId, req.params.id))
+        .catch(() => {});
+    }
 
     // Notify all clients in this server
     const io = req.app.get("io");

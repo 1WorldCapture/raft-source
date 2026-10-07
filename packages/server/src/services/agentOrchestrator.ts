@@ -37,6 +37,7 @@ import {
   type MentionDeliveryIdentitySnapshot,
   type ServerToMachineMessage,
   type MachineToServerMessage,
+  AGENT_PURGE_CAPABILITY,
   type MachineShutdownReason,
   type ComputerLifecycleExecutionAck,
   type AgentConfig,
@@ -87,6 +88,7 @@ import type { AppSnapshotComposition } from "./appSnapshotComposition.js";
 import { boundedErrorClass } from "../tracing/queryTrace.js";
 import { getCurrentTraceContext, runWithTraceSpan } from "../tracing/semanticTrace.js";
 import * as agentService from "./agentService.js";
+import * as agentPurgeService from "./agentPurgeService.js";
 import * as agentMigrationService from "./agentMigrationService.js";
 import * as agentRuntimeProfileService from "./agentRuntimeProfileService.js";
 import * as machineService from "./machineService.js";
@@ -5115,6 +5117,42 @@ export class AgentOrchestrator extends EventEmitter {
     return this.machineConnections.get(machineId)?.daemonVersion ?? null;
   }
 
+  /**
+   * Ask the machine to purge a deleted agent's local directories. The durable
+   * intent (machine_pending_agent_purges) is written by deleteAgent; this is the
+   * immediate best-effort send when the machine is online. Offline machines,
+   * daemons without the capability and refusals are covered by
+   * dispatchPendingAgentPurges on the next `ready`.
+   */
+  async requestAgentPurge(machineId: string, agentId: string): Promise<void> {
+    if (!this.hasMachineCapability(machineId, AGENT_PURGE_CAPABILITY)) return;
+    await this.sendToMachine(machineId, { type: "agent:purge", agentId });
+  }
+
+  /** Replay every purge still owed to this machine (offline-safe delivery). */
+  async dispatchPendingAgentPurges(machineId: string): Promise<void> {
+    if (!this.hasMachineCapability(machineId, AGENT_PURGE_CAPABILITY)) return;
+    const pending = await agentPurgeService.listRetryablePendingPurges(machineId);
+    for (const purge of pending) {
+      await this.sendToMachine(machineId, { type: "agent:purge", agentId: purge.agentId });
+    }
+  }
+
+  private async handleAgentPurgeResult(
+    machineId: string,
+    msg: Extract<MachineToServerMessage, { type: "agent:purge:result" }>,
+  ): Promise<void> {
+    const disposition = await agentPurgeService.applyAgentPurgeResult(machineId, msg.agentId, msg.outcome);
+    if (disposition === "gave_up") {
+      console.warn(
+        `[Machine ${machineId}] agent:purge for ${msg.agentId} still ${msg.outcome} after `
+        + `${agentPurgeService.MAX_AGENT_PURGE_ATTEMPTS} attempts; no more automatic retries (row kept in machine_pending_agent_purges)`,
+      );
+    } else if (disposition === "kept") {
+      console.warn(`[Machine ${machineId}] agent:purge for ${msg.agentId}: ${msg.outcome}; will retry on the next ready`);
+    }
+  }
+
   /** True iff the connected daemon explicitly advertised this capability in `ready`. */
   hasMachineCapability(machineId: string | null | undefined, capability: string): boolean {
     if (!machineId) return false;
@@ -6531,6 +6569,9 @@ export class AgentOrchestrator extends EventEmitter {
             conn.computerHostKind = normalizeComputerHostKind(msg.hostKind);
             conn.migrationTransport = migrationTransport;
             void this.dispatchPendingComputerLifecycleOperations().catch(() => {});
+            void this.dispatchPendingAgentPurges(machineId).catch((err) => {
+              console.warn(`[Machine ${machineId}] pending agent purge dispatch failed: ${err instanceof Error ? err.message : String(err)}`);
+            });
           }
           // Mirror the same fields through the replica state store so REST
           // handlers that land on a non-owner replica can still surface
@@ -8123,6 +8164,12 @@ export class AgentOrchestrator extends EventEmitter {
         });
         break;
       }
+
+      case "agent:purge:result":
+        void this.handleAgentPurgeResult(machineId, msg).catch((err) => {
+          console.warn(`[Machine ${machineId}] agent:purge result handling failed: ${err instanceof Error ? err.message : String(err)}`);
+        });
+        break;
 
       case "agent:skills:list_result":
         this.observeAgentSkillsListResult(machineId, msg);
