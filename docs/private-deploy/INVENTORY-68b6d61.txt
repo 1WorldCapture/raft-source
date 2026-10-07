@@ -1,0 +1,29 @@
+# Release inventory raft-private-68b6d61 — commit 68b6d61ff019dddbcf81f4785d9806df3f49603f (Desktop 0.1.0, Computer 1.0.29, CLI 0.0.24-zcode.1, daemon 1.0.26)
+# Format: sha256  path  [size]. Package root = /root/release-pkg/raft-private-68b6d61 (server). 19 files in package.
+## downloads/ (14, built on xai; IT re-verified on server)
+6fada4632cceaf4a007429fff21e762f4eb98f839a6b19b628b89f37af2f78e5  downloads/cli/0.0.24-zcode.1/manifest.json
+d14928188181e385090fe37b2950a4e55b5ce6cfc87c1ed921b3f001fe20f604  downloads/cli/0.0.24-zcode.1/raft-0.0.24-zcode.1.tgz
+5b16341be782e82137bcb94838b76c39fa8b96b745bd96be806ef8d22e970f1c  downloads/cli/manifest.json
+fdf5e955bd1ceaf73cb442f62ed25a004b25166f4f45fb9da5c61fa99fd3390a  downloads/computer/1.0.29/manifest.json
+10468181565c56004c867f3a4af96f89a0ef5a63a72f2b5fb12c1f1992a3615c  downloads/computer/1.0.29/photon_rs_bg.wasm
+bc9f4968f4a408b0e5686076b91dfed95650d224e3681a33560547e6bf93e26e  downloads/computer/1.0.29/raft-computer-darwin-arm64
+e67a3b04fae179ecb4b955a2d4e3f9ff37fe20224146c674cf9483f3b2395143  downloads/computer/1.0.29/raft-computer-darwin-x64
+91353b13669b3fdc006e7d326a4604248f98cb61925692c2757f6c469a0e21e9  downloads/computer/1.0.29/raft-computer-linux-x64
+c8298aa6fa27470aec10d02fb76f465e83732adc49fc78a7509fd0fad6060f51  downloads/computer/install.ps1
+b6e594b8c14f1a8e581a3df4010fe7ffc18698e9cf78bbf6dcb891387c5df038  downloads/computer/install.sh
+6ddc2c9c2d5c34f6fb9c364a6fec9caff7f4a1247d9286194dfde600bfa3464e  downloads/computer/manifest.json
+a8d568f5519f53629626aff29e8cbde319fe8d3ac06f170d6ab9327532017753  downloads/daemon/1.0.26/manifest.json
+1e7a92615e61f5ff7aef6ba867ee22f3719a31256dc7739d1c0ae52f366e1231  downloads/daemon/1.0.26/raft-daemon-1.0.26.tgz
+b6fc31039bde0fbf1d5980f95919534decd958c445b5039667d9aa7cef8f0ca2  downloads/daemon/manifest.json
+## desktop/ (3, built on Mac by May; 18443-origin re-check build, NOT customer-deliverable)
+76c0e9111b9628917242b3d442b815231eca4a164ddbf19a857e4505abda7387  desktop/0.1.0/Raft-Desktop-0.1.0-arm64.dmg  211426273
+aa5eef97310a7be2d1955087adbbce936492dd1e5523d649a2a75fc507b12d9c  desktop/latest-mac.yml
+22b91a082e27d3e887ca2c21c1db22ab45aadc9199f00f951a810a06fa12393f  desktop/manifest.json
+## images/ (2, built on server by IT)
+953cb057e6ac87e9521e1954f8620e67fa7aab48c16ab4963821d43f40369d7d  images/raft-images-68b6d61.tar  227484160
+d7e2e8f397b62de6912d6561ba140a27f6fd08935f135f214a9b252f0aee75a1  images/raft-base-images.tar  134633984  (postgres@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24, redis@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499)
+## Built, NOT packaged (build record only)
+## In package for re-check: Raft-Desktop-0.1.0-arm64.dmg, latest-mac.yml, manifest.json. The other 3 are 'built, not packaged' (build record only).
+b5735d0d9e0ae7c0617131f1e9528bfbc1b7a2ecaa995751ce32419b5442d483  desktop/0.1.0/Raft-Desktop-0.1.0-arm64.zip [built, not packaged] 204034374
+677a93b3a6fb23a0876e0dffefbd368e105b36b1427897f1ed242e3daed45119  desktop/0.1.0/Raft-Desktop-0.1.0-x64.dmg [built, not packaged]   217813403
+5dbea6385eb6c7df26ef865467b88685b353eada019c95a3dbae5861e0e02d7c  desktop/0.1.0/Raft-Desktop-0.1.0-x64.zip [built, not packaged]   210358059
