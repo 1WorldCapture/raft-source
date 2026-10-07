@@ -21,7 +21,7 @@ function makeProcess(overrides: {
       message_id: `m-${index}`,
       content: `pending ${index}`,
     })) as PendingInboxDeliveryProcess["inbox"],
-    config: { runtime: "omp", model: null },
+    config: { runtime: "omp", model: "kimi" },
     sessionId,
     sessionReadyForDelivery: overrides.sessionReadyForDelivery ?? false,
     launchId: null,

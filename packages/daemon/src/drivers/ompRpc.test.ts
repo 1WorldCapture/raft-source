@@ -848,7 +848,8 @@ test("a failed resume re-mounts the carrier so the startup input is not lost", a
   let harness: SessionHarness | null = null;
   try {
     harness = await startSessionFake("resume-crash", "lost-session-7");
-    await harness.waitUntil(() => harness.driver.currentSessionId === "fresh-session-1", 5000);
+    const mounted = harness;
+    await mounted.waitUntil(() => mounted.driver.currentSessionId === "fresh-session-1", 5000);
     await harness.waitUntil(() => existsSync(frameLogPath) && readJsonLines(frameLogPath).some((frame) => frame.type === "prompt" && frame.message === "hello"));
     const prompts = readJsonLines(frameLogPath).filter((frame) => frame.type === "prompt");
     assert.equal(prompts.length, 1, "the carrier must re-mount on the fallback launch and deliver once");
@@ -865,7 +866,8 @@ test("no ctx.prompt — the carrier sends no startup prompt", async () => {
   let harness: SessionHarness | null = null;
   try {
     harness = await startSessionFake("echo", null, { prompt: "" });
-    await harness.waitUntil(() => harness.driver.isProtocolSettled);
+    const settled = harness;
+    await settled.waitUntil(() => settled.driver.isProtocolSettled);
     await harness.sleep(300);
     const prompts = existsSync(frameLogPath) ? readJsonLines(frameLogPath).filter((frame) => frame.type === "prompt") : [];
     assert.equal(prompts.length, 0, "an empty ctx.prompt must not produce a startup prompt");

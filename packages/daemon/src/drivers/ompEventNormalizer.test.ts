@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { expect, test } from "vitest";
 import {
   closeOmpTurnOnProcessExit,
@@ -8,7 +9,9 @@ import {
   ompToolResultText,
 } from "./ompEventNormalizer.js";
 
-const FIXTURE_PATH = new URL("../testdata/omp-rpc-session.jsonl", import.meta.url).pathname;
+// fileURLToPath (not .pathname): the checkout path contains spaces, and an
+// undecoded pathname (%20) breaks readFileSync.
+const FIXTURE_PATH = fileURLToPath(new URL("../testdata/omp-rpc-session.jsonl", import.meta.url));
 
 function readFixtureFrames(): object[] {
   return readFileSync(FIXTURE_PATH, "utf8")
