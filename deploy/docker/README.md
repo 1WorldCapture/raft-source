@@ -6,7 +6,8 @@
 
 | 服务 | 说明 |
 |---|---|
-| `db` | postgres:16-alpine，数据卷 `raft-pgdata`，仅内网 |
+| `db` | postgres:17-alpine，数据卷 `raft-pgdata`，仅内网 |
+| `redis` | redis:7-alpine，无持久化卷（daemon 重连后归属自动重建），仅内网 |
 | `server` | 官方 server 镜像；启动前由 entrypoint 跑守卫式迁移（幂等） |
 | `web` | selfhost 变体 web 镜像：**不烘焙 API 地址**（同源回退 `window.location.origin`），nginx 将 `/api`、`/socket.io` 反代到 server |
 
