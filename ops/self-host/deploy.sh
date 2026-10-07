@@ -6,21 +6,8 @@
 # code changed) -> health checks. Any failure after the backup restores the previous commit, .env
 # and web release. raft-daemon is NEVER restarted here (see the doc: it hosts local agents).
 set -eu
+source "$(dirname "$0")/deploy-user-guard.sh"
 source "$(dirname "$0")/lib.sh"
-# Guard: this script must run as the deployment user (e.g. raft via runuser).
-# Running as root breaks twice: pm2 resolves the WRONG PM2_HOME domain (root's,
-# where raft-server does not exist), and root-owned node_modules entries poison
-# later raft-user installs with EACCES (measured 2026-10-07, task #7).
-if [ "$(id -u)" = "0" ]; then
-  echo "deploy.sh: refusing to run as root — run it as the deployment user, e.g." >&2
-  echo "  runuser -u raft -- env CI=true bash ops/self-host/deploy.sh <ref>" >&2
-  exit 1
-fi
-# Non-interactive pnpm: when the lockfile delta is large, pnpm asks for a TTY
-# confirmation to purge node_modules and aborts without one
-# (ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY). CI=true is pnpm's documented
-# non-interactive switch; it does not change any script logic.
-export CI="${CI:-true}"
 REF=$RAFT_DEPLOY_REF; DRY=0
 for a in "$@"; do case $a in --dry-run) DRY=1 ;; *) REF=$a ;; esac; done
 TS=$(date -u +%Y%m%dT%H%M%SZ)
