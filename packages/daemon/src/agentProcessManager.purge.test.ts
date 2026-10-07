@@ -67,3 +67,19 @@ test("invalid ids and absent directories", async () => {
   expect(stop).not.toHaveBeenCalled();
   expect(await manager.purgeAgentLocalState(AGENT)).toBe("nothing_to_purge");
 });
+
+test("orphaned Cursor SDK host still holding its writer lock: refused_running, nothing moved", async () => {
+  await seedAgentDirs();
+  const hostDir = path.join(home, "cursor-sdk-host", AGENT);
+  await mkdir(hostDir, { recursive: true });
+  await writeFile(path.join(hostDir, "host.lock"), JSON.stringify({ pid: process.pid, token: "orphan" }));
+  vi.spyOn(manager, "stopAgent").mockResolvedValue(undefined); // the session is gone, the host is not
+  expect(await manager.purgeAgentLocalState(AGENT)).toBe("refused_running");
+  expect(await exists(path.join(home, "agents", AGENT, "MEMORY.md"))).toBe(true);
+  expect(await exists(hostDir)).toBe(true);
+  expect(await exists(path.join(home, "trash"))).toBe(false);
+  // once the host exits and releases its lock, the purge goes through (cursor-sdk-host moves too)
+  await rm(path.join(hostDir, "host.lock"));
+  expect(await manager.purgeAgentLocalState(AGENT)).toBe("purged");
+  expect(await exists(hostDir)).toBe(false);
+});

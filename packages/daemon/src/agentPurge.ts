@@ -5,7 +5,7 @@
 // a sweeper removes quarantined entries after a retention period. Nothing here
 // ever follows a symlink or touches a path that is not exactly
 // <root>/<uuid>.
-import { cp, lstat, mkdir, readdir, rename, rm } from "node:fs/promises";
+import { cp, lstat, mkdir, readdir, readFile, rename, rm } from "node:fs/promises";
 import path from "node:path";
 import { AGENT_PURGE_CAPABILITY } from "@botiverse/raft-shared";
 import { logger } from "./logger.js";
@@ -206,4 +206,48 @@ export function startAgentTrashSweeper(slockHome: string): () => void {
   const timer = setInterval(run, AGENT_TRASH_SWEEP_INTERVAL_MS);
   timer.unref?.();
   return () => clearInterval(timer);
+}
+
+/** The Cursor SDK host's per-agent state directory (see drivers/cursor-sdk.ts). */
+export function cursorHostDirectory(slockHome: string, agentId: string): string {
+  return path.join(slockHome, "cursor-sdk-host", agentId);
+}
+
+const DAMAGED_LOCK_GRACE_MS = 60_000;
+
+function pidIsAlive(pid: number): boolean {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return true; // cannot prove dead
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== "ESRCH";
+  }
+}
+
+/**
+ * Is the Cursor SDK host's exclusive writer lock (`<hostDir>/host.lock`, written
+ * by NativeCursorHost with the owner pid) still held by a live process? An
+ * orphaned host that outlived its runtime session keeps writing there, so the
+ * directory must not be moved while this is true. A lock that cannot be read is
+ * treated as held for a short grace window (it may be mid-write) and as stale
+ * afterwards.
+ */
+export async function isCursorHostLockHeld(hostDir: string, now: number = Date.now()): Promise<boolean> {
+  const file = path.join(hostDir, "host.lock");
+  let info;
+  try {
+    info = await lstat(file);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
+  if (!info.isFile() || info.isSymbolicLink() || info.size > 4096) return true;
+  try {
+    const owner = JSON.parse(await readFile(file, "utf8")) as { pid?: unknown };
+    if (typeof owner.pid !== "number") throw new Error("no pid");
+    return pidIsAlive(owner.pid);
+  } catch {
+    return now - info.mtimeMs < DAMAGED_LOCK_GRACE_MS;
+  }
 }

@@ -64,7 +64,7 @@ import {
 import { logger } from "./logger.js";
 import { reapOrphanProcesses } from "./daemonOrphanReaper.js";
 import { deleteWorkspaceDirectory, initializeAgentWorkspace, scanWorkspaceDirectories } from "./workspaces.js";
-import { agentPurgeTargets, isPurgeableAgentId, moveAgentDirectoriesToTrash } from "./agentPurge.js";
+import { agentPurgeTargets, cursorHostDirectory, isCursorHostLockHeld, isPurgeableAgentId, moveAgentDirectoriesToTrash } from "./agentPurge.js";
 import { buildCindyMemoryMd, buildCindySeedFiles } from "./cindy.js";
 import { AgentStartCoordinator, type AgentStartQueueItem, type PendingStartRebind } from "./agentStartCoordinator.js";
 import { AgentStartDispatchProjection, type AgentStartAcceptance } from "./agentStartDispatchProjection.js";
@@ -5437,6 +5437,13 @@ export class AgentProcessManager {
       return "refused_running";
     }
     try {
+      // An orphaned Cursor SDK host can outlive its runtime session; its
+      // exclusive writer lock names the owner pid. Never move a directory a live
+      // writer still holds.
+      if (await isCursorHostLockHeld(cursorHostDirectory(this.slockHome, agentId))) {
+        logger.warn(`[Agent ${agentId}] Purge refused: Cursor SDK host writer lock is still held by a live process`);
+        return "refused_running";
+      }
       const outcome = await moveAgentDirectoriesToTrash({
         agentId,
         slockHome: this.slockHome,

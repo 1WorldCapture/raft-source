@@ -1,9 +1,10 @@
+import { spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import {
-  agentPurgeTargets, agentTrashRetentionMs, isPurgeableAgentId, moveAgentDirectoriesToTrash, sweepAgentTrash,
+  agentPurgeTargets, agentTrashRetentionMs, isCursorHostLockHeld, isPurgeableAgentId, moveAgentDirectoriesToTrash, sweepAgentTrash,
 } from "./agentPurge.js";
 
 const AGENT = "8d44e2f2-4752-4ddf-b4b4-1226da8cf3aa";
@@ -98,4 +99,35 @@ test("the sweeper removes only entries older than the retention, ignores foreign
 
 test("sweeping with no trash directory is a no-op", async () => {
   expect(await sweepAgentTrash({ slockHome: home })).toEqual({ removed: 0, remaining: 0, remainingBytes: 0 });
+});
+
+
+async function writeLock(dir: string, body: string, ageMs = 0) {
+  await mkdir(dir, { recursive: true });
+  const file = path.join(dir, "host.lock");
+  await writeFile(file, body);
+  if (ageMs > 0) {
+    const when = new Date(Date.now() - ageMs);
+    await utimes(file, when, when);
+  }
+}
+
+test("Cursor host lock: live owner pid = held; dead pid or no lock = free", async () => {
+  const dir = path.join(home, "cursor-sdk-host", AGENT);
+  expect(await isCursorHostLockHeld(dir)).toBe(false); // no directory, no lock
+  await writeLock(dir, JSON.stringify({ pid: process.pid, token: "t" }));
+  expect(await isCursorHostLockHeld(dir)).toBe(true);
+  const dead = spawnSync(process.execPath, ["-e", "0"]);
+  await writeLock(dir, JSON.stringify({ pid: dead.pid, token: "t" }));
+  expect(await isCursorHostLockHeld(dir)).toBe(false);
+});
+
+test("Cursor host lock: an unreadable lock counts as held only inside the short grace window", async () => {
+  const dir = path.join(home, "cursor-sdk-host", AGENT);
+  await writeLock(dir, "{not json");
+  expect(await isCursorHostLockHeld(dir)).toBe(true);
+  await writeLock(dir, "{not json", 5 * 60_000);
+  expect(await isCursorHostLockHeld(dir)).toBe(false);
+  await writeLock(dir, JSON.stringify({ token: "no-pid" }), 5 * 60_000);
+  expect(await isCursorHostLockHeld(dir)).toBe(false);
 });
