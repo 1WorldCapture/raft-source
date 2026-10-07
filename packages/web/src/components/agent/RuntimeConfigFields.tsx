@@ -29,7 +29,7 @@ import StableField from "./StableField";
 import CursorSdkLoginButton from "./CursorSdkLoginButton";
 import { KeyValueAddButton, KeyValueInputRow } from "../ui/KeyValueInput";
 import Tooltip from "../ui/Tooltip";
-import { reasoningEffortOptionsForModel } from "../../utils/reasoningEffortOptions";
+import { modelHasReasoningControl, reasoningEffortOptionsForModel } from "../../utils/reasoningEffortOptions";
 import type { RuntimeInstallHint } from "../../utils/runtimeInstallHints";
 import {
   builtInCatalogCapabilityIsLive,
@@ -954,7 +954,8 @@ export default function RuntimeConfigFields({
   const customModelSupported = supportsRuntimeCustomModelName(runtime);
   const fastModeSupported = supportsRuntimeFastMode(runtime);
   const reasoningSupported = REASONING_EFFORT_RUNTIMES.has(runtime)
-    && (runtime !== "kimi-sdk" || schemaBacked);
+    && (runtime !== "kimi-sdk" || schemaBacked)
+    && modelHasReasoningControl(runtime, model, runtimeModels.models);
   const providerApiUrlRequired = apiUrlSupported && providerMode === "custom";
   const builtInProviderSupported = supportsRuntimeBuiltInProvider(runtime);
   const piProviderSupported = supportsRuntimePiProvider(runtime);

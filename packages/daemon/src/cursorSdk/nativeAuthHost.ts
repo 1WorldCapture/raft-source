@@ -1,3 +1,4 @@
+import { deriveModelTiers, modelInfoEffortFields } from "./modelTiers.js";
 import { createHash } from "node:crypto";
 import type { Cursor as CursorClass, SdkLoginResult } from "@cursor/sdk";
 
@@ -73,7 +74,10 @@ export class NativeCursorAuthHost {
       if (request.kind === "models") {
         const models = await cursor.models.list({ apiKey: key });
         this.deps.post({ ...base, kind: "models_result", ...identity,
-          models: models.map((model) => ({ id: model.id, label: model.displayName || model.id, isDefault: model.id === "default" })),
+          models: models.map((model) => ({
+            id: model.id, label: model.displayName || model.id, isDefault: model.id === "default",
+            ...modelInfoEffortFields(deriveModelTiers(model)),
+          })),
         });
       } else {
         this.deps.post({ ...base, kind: "verified", ...identity,

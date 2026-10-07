@@ -383,6 +383,13 @@ test("runtime config form exposes only supported per-runtime axes", () => {
   assert.deepEqual(runtimes.filter((runtime) => REASONING_EFFORT_RUNTIMES.has(runtime)), ["builtin", "claude", "codex", "grok", "copilot", "pi", "omp"]);
 });
 
+test("cursor-sdk shows the reasoning-effort dropdown and the fast switch; the legacy cursor runtime does not", () => {
+  assert.equal(supportsRuntimeFastMode("cursor-sdk"), true);
+  assert.equal(supportsRuntimeFastMode("cursor"), false);
+  assert.equal(REASONING_EFFORT_RUNTIMES.has("cursor-sdk"), true);
+  assert.equal(REASONING_EFFORT_RUNTIMES.has("cursor"), false);
+});
+
 test("buildRuntimeConfig maps fast mode only for supported runtimes", () => {
   const codexConfig = buildRuntimeConfig({
     runtime: "codex",

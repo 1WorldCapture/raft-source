@@ -64,3 +64,26 @@ test("service-account identity is an explicit unsupported preview result", async
   await h.host.receive(request("verify", "fixture"));
   assert.equal(h.replies[0].code, "account_unsupported");
 });
+
+test("models_result carries per-model reasoning-effort metadata derived from parameters/variants", async () => {
+  const replies: NativeAuthReply[] = [];
+  const values = (...v: string[]) => v.map((value) => ({ value }));
+  class Vendor {
+    static async me() { return { userId: 17 }; }
+    static models = { list: async () => [
+      { id: "default", displayName: "Auto", variants: [{ params: [], isDefault: true }] },
+      {
+        id: "gpt-5.5", displayName: "GPT-5.5",
+        parameters: [{ id: "reasoning", values: values("none", "low", "high", "extra-high") }],
+        variants: [{ params: [{ id: "reasoning", value: "extra-high" }], isDefault: true }],
+      },
+    ] };
+  }
+  const host = new NativeCursorAuthHost({ cursor: async () => Vendor as unknown as typeof CursorClass, post: (reply) => replies.push(reply) });
+  await host.receive(request("models", "fixture-exact"));
+  const models = (replies.find((r) => r.kind === "models_result") as unknown as { models: unknown[] }).models;
+  assert.deepEqual(models, [
+    { id: "default", label: "Auto", isDefault: true },
+    { id: "gpt-5.5", label: "GPT-5.5", isDefault: false, supportedReasoningEfforts: ["low", "high", "xhigh"], defaultReasoningEffort: "xhigh" },
+  ]);
+});

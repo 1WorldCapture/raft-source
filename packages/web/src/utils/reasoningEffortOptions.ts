@@ -70,6 +70,21 @@ function resolveModelInfo(
 }
 
 /**
+ * Whether the reasoning dropdown applies to this model. Every runtime that has
+ * the control shows it for every model, except Cursor SDK: its models are
+ * heterogeneous, so only a model that declares a reasoning axis (live
+ * `supportedReasoningEfforts`) gets it; the rest run on the model's defaults.
+ */
+export function modelHasReasoningControl(
+  runtime: string,
+  modelId: string,
+  liveModels?: readonly RuntimeModelInfo[],
+): boolean {
+  if (runtime !== "cursor-sdk") return true;
+  return (liveModels?.find((m) => m.id === modelId)?.supportedReasoningEfforts?.length ?? 0) > 0;
+}
+
+/**
  * Ordered reasoning options for a model. When the model declares
  * `supportedReasoningEfforts`, the catalog is filtered to that set (order and
  * labels preserved); otherwise the full catalog is returned.
@@ -109,6 +124,8 @@ export function reconcileReasoningEffort(
 ): ReasoningEffort | null {
   const info = resolveModelInfo(runtime, modelId, liveModels);
   const supported = info?.supportedReasoningEfforts;
+  // Cursor SDK models without a reasoning axis have no effort to carry over.
+  if (runtime === "cursor-sdk" && (!supported || supported.length === 0)) return null;
   if (!supported || supported.length === 0) return current;
   if (current && supported.includes(current)) return current;
   const fallback = info?.defaultReasoningEffort;
