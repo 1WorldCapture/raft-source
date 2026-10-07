@@ -234,7 +234,12 @@ export class NativeCursorHost {
         warn(`cursor-sdk: model tiers lookup failed for "${modelId}"; sending it without tiers`);
       } finally { if (timer) clearTimeout(timer); }
     }
-    return buildModelSelection(modelId, tiers, { reasoningEffort: runOptions.reasoningEffort, fast: runOptions.fast }, warn);
+    const selection = buildModelSelection(modelId, tiers, { reasoningEffort: runOptions.reasoningEffort, fast: runOptions.fast }, warn);
+    // Observable evidence of what is actually sent (model id and tier params only; no secrets).
+    (this.deps.warn ?? ((message: string) => { process.stderr.write(`${message}\n`); }))(
+      `cursor-sdk: model selection ${JSON.stringify(selection)}`,
+    );
+    return selection;
   }
 
   private submit(localId: string, attemptId: string | null, text: string): void {

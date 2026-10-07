@@ -535,6 +535,9 @@ class CursorSdkHost {
    * (nativeRuntimeHost.ts, started via runtimeHostEntry.ts); this class is
    * kept for its helpers and tests only.
    */
+  // NOTE: this non-production helper path passes no tier info, so a configured
+  // reasoning effort / fast mode is intentionally NOT applied here (bare model id).
+  // Production is NativeCursorHost (nativeRuntimeHost.ts), which resolves tiers.
   private buildAgentOptions(): Record<string, unknown> {
     const ro = this.runOptions;
     return {
