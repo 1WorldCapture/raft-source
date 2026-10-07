@@ -2963,10 +2963,10 @@ export function isReasoningEffortAllowedForModel(runtime: string, modelId: strin
 }
 
 /** Runtimes that support configurable reasoning effort. */
-export const REASONING_EFFORT_RUNTIMES = new Set(["builtin", "claude", "codex", "grok", "copilot", "pi", "kimi-sdk", "omp"]);
+export const REASONING_EFFORT_RUNTIMES = new Set(["builtin", "claude", "codex", "grok", "copilot", "pi", "kimi-sdk", "omp", "cursor-sdk"]);
 
 /** Runtimes that support the shared fast-mode launch variant. */
-export const RUNTIME_FAST_MODE_RUNTIMES = new Set(["claude", "codex"]);
+export const RUNTIME_FAST_MODE_RUNTIMES = new Set(["claude", "codex", "cursor-sdk"]);
 
 // ── Task Board ──
 

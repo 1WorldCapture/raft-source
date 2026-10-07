@@ -6,6 +6,7 @@
 # code changed) -> health checks. Any failure after the backup restores the previous commit, .env
 # and web release. raft-daemon is NEVER restarted here (see the doc: it hosts local agents).
 set -eu
+source "$(dirname "$0")/deploy-user-guard.sh"
 source "$(dirname "$0")/lib.sh"
 REF=$RAFT_DEPLOY_REF; DRY=0
 for a in "$@"; do case $a in --dry-run) DRY=1 ;; *) REF=$a ;; esac; done

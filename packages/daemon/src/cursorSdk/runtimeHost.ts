@@ -37,6 +37,7 @@
  *   new run attempted while another is active.
  */
 
+import { buildModelSelection } from "./modelTiers.js";
 import { mkdirSync, openSync, closeSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
 import path from "node:path";
 import {
@@ -534,11 +535,14 @@ class CursorSdkHost {
    * (nativeRuntimeHost.ts, started via runtimeHostEntry.ts); this class is
    * kept for its helpers and tests only.
    */
+  // NOTE: this non-production helper path passes no tier info, so a configured
+  // reasoning effort / fast mode is intentionally NOT applied here (bare model id).
+  // Production is NativeCursorHost (nativeRuntimeHost.ts), which resolves tiers.
   private buildAgentOptions(): Record<string, unknown> {
     const ro = this.runOptions;
     return {
       ...(this.auth?.apiKey ? { apiKey: this.auth.apiKey } : {}),
-      ...(ro.model ? { model: { id: ro.model } } : {}),
+      ...(ro.model ? { model: buildModelSelection(ro.model, null, { reasoningEffort: ro.reasoningEffort, fast: ro.fast }) } : {}),
       ...(ro.mcpServers && Object.keys(ro.mcpServers).length > 0
         ? { mcpServers: ro.mcpServers }
         : {}),
@@ -558,7 +562,7 @@ class CursorSdkHost {
     // fall back to persisted defaults for model or MCP wiring.
     const ro = this.runOptions;
     return {
-      ...(ro.model ? { model: { id: ro.model } } : {}),
+      ...(ro.model ? { model: buildModelSelection(ro.model, null, { reasoningEffort: ro.reasoningEffort, fast: ro.fast }) } : {}),
       ...(ro.mcpServers && Object.keys(ro.mcpServers).length > 0
         ? { mcpServers: ro.mcpServers }
         : {}),

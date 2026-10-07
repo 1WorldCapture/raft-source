@@ -1,0 +1,49 @@
+# Linux packaging target (xai-1). Standalone on purpose: electron-builder does
+# NOT merge multiple --config files, and `extends` on the mac config would drag
+# in its mac/dmg sections and the darwin-only cursor-sdk extraResources path.
+# Same identity, file set and CLI resource as electron-builder.yml; only the
+# platform-specific parts differ. The mac configs are untouched.
+#
+# Targets: `dir` (unpacked, run in place) and `tar.gz` are the primary outputs.
+# AppImage is optional: it needs FUSE at run time, which container hosts often
+# lack, so it is not part of the default script.
+appId: build.raft.desktop
+productName: Raft Desktop
+artifactName: Raft-Desktop-${version}-linux-${arch}.${ext}
+directories:
+  output: release-linux
+  buildResources: build
+files:
+  - dist/**
+  - package.json
+  - build/tray-icon.png
+  - build/tray-icon@2x.png
+  - "!**/*.map"
+  - "!**/runtime-assets{,/**}"
+extraResources:
+  - from: ../../packages/cli/dist/index.js
+    to: cli/index.js
+  # Cursor SDK runtime assets, staged for linux by
+  # `pnpm --filter @botiverse/raft-daemon build:cursor-assets -- --target linux-x64`.
+  # Keep the version segment in step with packages/daemon/cursor-sdk-assets.lock.json.
+  - from: ../../packages/daemon/runtime-assets/cursor/1.0.36/linux-${arch}
+    to: cursor-sdk
+protocols:
+  - name: Raft
+    schemes:
+      - raft
+linux:
+  # Without this the executable is named after the scoped package
+  # ("@botiverseraft-desktop-electron").
+  executableName: raft-desktop
+  category: Network
+  icon: build/icon.png
+  maintainer: Raft
+  synopsis: Raft Desktop
+  target:
+    - target: dir
+      arch:
+        - x64
+    - target: tar.gz
+      arch:
+        - x64

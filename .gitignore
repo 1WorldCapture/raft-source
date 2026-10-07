@@ -9,6 +9,7 @@ shim-dist/
 release/
 # Local Cursor SDK E2E installers are build output, never source commits.
 release-cursor-sdk/
+release-linux/
 .env
 .env.scopedb
 .dev-env-*.json

@@ -2,6 +2,7 @@
 # Restore the state saved by the last deploy (or the backup dir given as $1):
 # previous commit, packages/server/.env, web release; then restart raft-server.
 set -eu
+source "$(dirname "$0")/deploy-user-guard.sh"
 source "$(dirname "$0")/lib.sh"
 B=${1:-$(cat "$STATE/last_backup")}
 [ -f "$B/prev_sha" ] || die "no backup at $B"
