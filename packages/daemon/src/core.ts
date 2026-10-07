@@ -47,6 +47,7 @@ import {
 import { AgentProcessManager, classifySpawnFailure } from "./agentProcessManager.js";
 import { CursorSdkLoginCoordinator, cursorSdkStatusSummary } from "./runtimeAuth/cursor/cursorSdkLoginCoordinator.js";
 import { getDriver, RetiredRuntimeError } from "./drivers/index.js";
+import { AGENT_PURGE_CAPABILITY, startAgentTrashSweeper } from "./agentPurge.js";
 import { readCommandVersion, resolveCommandOnPath } from "./drivers/probe.js";
 import {
   DaemonConnection,
@@ -1432,6 +1433,8 @@ function summarizeIncomingMessage(msg: ServerToMachineMessage): string {
       return `(agent=${msg.agentId}, runtime=${msg.config.runtime}, model=${msg.config.model}, session=${msg.config.sessionId || "new"}, wikiPack=${msg.wikiWorkspacePack.packId.slice(0, 12)}${msg.wakeMessage ? ", wake=true" : ""})`;
     case "agent:stop":
       return `(agent=${msg.agentId})`;
+    case "agent:purge":
+      return `(agent=${msg.agentId})`;
     case "agent:reset-workspace":
       return `(agent=${msg.agentId})`;
     case "agent:deliver":
@@ -1553,6 +1556,7 @@ export class DaemonCore {
   private authenticatedMachineContext: { serverId: string; machineId: string } | null = null;
   private scopedAppStorageFactory: ScopedAppStorageFactory | null = null;
   private scopedAppStorageObserver: ScopedAppStorageObserver | null = null;
+  private agentTrashSweeperStop: (() => void) | null = null;
   private machineContextConflict = false;
   private localTraceSink: LocalRotatingTraceSink | null = null;
   private traceBundleUploader: DaemonTraceBundleUploader | null = null;
@@ -1786,6 +1790,9 @@ export class DaemonCore {
     if (this.migrationTransport) {
       this.startMigrationTransport();
     }
+    if (!this.agentTrashSweeperStop) {
+      this.agentTrashSweeperStop = startAgentTrashSweeper(this.slockHome);
+    }
     try {
       this.connection.connect();
     } catch (err) {
@@ -1810,6 +1817,8 @@ export class DaemonCore {
       },
     });
     this.localScheduleRuntime.stop();
+    this.agentTrashSweeperStop?.();
+    this.agentTrashSweeperStop = null;
     this.invalidateLifecycleOriginReconcile();
     this.scopedAppStorageObserver?.stop();
     this.scopedAppStorageObserver = null;
@@ -3703,6 +3712,16 @@ export class DaemonCore {
         this.agentManager.stopAgent(msg.agentId);
         break;
 
+      case "agent:purge":
+        logger.info(`[Agent ${msg.agentId}] Purge requested (agent deleted on the server)`);
+        void this.agentManager.purgeAgentLocalState(msg.agentId).then((outcome) => {
+          this.connection.send({ type: "agent:purge:result", agentId: msg.agentId, outcome });
+        }).catch((err: unknown) => {
+          logger.error(`[Agent ${msg.agentId}] Purge failed`, err);
+          this.connection.send({ type: "agent:purge:result", agentId: msg.agentId, outcome: "error" });
+        });
+        break;
+
       case "agent:reset-workspace":
         logger.info(`[Agent ${msg.agentId}] Workspace reset requested`);
         this.agentManager.resetWorkspace(msg.agentId);
@@ -4351,6 +4370,7 @@ export class DaemonCore {
       capabilities: [
         "agent:start",
         "agent:stop",
+        AGENT_PURGE_CAPABILITY,
         "agent:deliver",
         "workspace:files",
         WIKI_WORKSPACE_PACK_CAPABILITY,
