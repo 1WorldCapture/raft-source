@@ -16,6 +16,7 @@ OUT=${3:-deploy/docker/downloads}
 PATH=/opt/node-v24/bin:$PATH
 LOGDIR=${LOGDIR:-/root/.build-release-$SHA}
 mkdir -p "$LOGDIR"
+echo $$ > "$LOGDIR/pid"   # callers verify liveness via this pidfile, not pgrep
 log(){ echo "[$(date -u +%H:%M:%S)] $*"; }
 
 git -C . rev-parse --verify "$SHA^{commit}" >/dev/null || { echo "unknown commit $SHA" >&2; exit 1; }
