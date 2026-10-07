@@ -22,9 +22,9 @@ aa5eef97310a7be2d1955087adbbce936492dd1e5523d649a2a75fc507b12d9c  desktop/latest
 ## images/ (2, built on server by IT)
 953cb057e6ac87e9521e1954f8620e67fa7aab48c16ab4963821d43f40369d7d  images/raft-images-68b6d61.tar  227484160
 d7e2e8f397b62de6912d6561ba140a27f6fd08935f135f214a9b252f0aee75a1  images/raft-base-images.tar  134633984  (postgres@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24, redis@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499)
-## deploy/ (3, from commit 63b2eaa8817e2db1a947122b9d37188c827fbc94 = dev after PR #183; images remain from 68b6d61)
-c40e30c0a229ccb72a9913555f8e313cea5871b7a799b930935906b1f52cc085  deploy/.env.example
-cfb9335c566a7befe68235073c2d305544d22528772e10c17cba3bec94ce826a  deploy/README.md
+## deploy/ (3, from commit 3c71feeca3d92dfa2b76279ff726313fec6ffce4 = dev after PR #185; images remain from 68b6d61)
+b74187c4e1b1216b69cd9090f88dd68e9b10cab5927dd5c38acac0564bc2d121  deploy/.env.example
+c889965537ab495f268ec26787ae52f65ef49513edf07a7c31f80a969715d54b  deploy/README.md
 dcedfcd598e9c2243163b4048ce2d231987392771b8cd0401ea1083faf4af615  deploy/docker-compose.yml
 ## Built, NOT packaged (build record only)
 ## In package for re-check: Raft-Desktop-0.1.0-arm64.dmg, latest-mac.yml, manifest.json. The other 3 are 'built, not packaged' (build record only).
