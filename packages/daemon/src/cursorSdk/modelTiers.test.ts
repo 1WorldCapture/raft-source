@@ -120,3 +120,51 @@ test("unknown tiers or unsupported requests fall back to the bare model id and w
   // nothing requested and no tiers: exactly the pre-tiers selection
   assert.deepEqual(buildModelSelection("default", null), { id: "default" });
 });
+
+// Grok 4.7 / 4.6 must support fast (owner request). Real shapes from the sample:
+// both default to fast=true, so "off" must be sent explicitly.
+const grok47: SdkModelListItem = {
+  id: "grok-4.7",
+  parameters: [
+    { id: "context", values: values("256k", "500k") },
+    { id: "reasoning_effort", values: values("low", "medium", "high", "xhigh") },
+    { id: "fast", values: values("false", "true") },
+  ],
+  variants: [{ params: [{ id: "context", value: "500k" }, { id: "reasoning_effort", value: "high" }, { id: "fast", value: "true" }], isDefault: true }],
+};
+const grok46: SdkModelListItem = {
+  id: "grok-4.6",
+  parameters: [
+    { id: "effort", values: values("low", "medium", "high", "xhigh") },
+    { id: "fast", values: values("false", "true") },
+  ],
+  variants: [{ params: [{ id: "effort", value: "high" }, { id: "fast", value: "true" }], isDefault: true }],
+};
+
+test("grok-4.7 (reasoning_effort axis + fast): fast on and off, with and without an effort", () => {
+  const tiers = deriveModelTiers(grok47);
+  assert.equal(tiers.effortAxis, "reasoning_effort");
+  assert.equal(tiers.defaultEffort, "high");
+  assert.equal(tiers.hasFast, true);
+  assert.deepEqual(buildModelSelection("grok-4.7", tiers, { reasoningEffort: "xhigh", fast: true }), {
+    id: "grok-4.7", params: [{ id: "reasoning_effort", value: "xhigh" }, { id: "fast", value: "true" }],
+  });
+  assert.deepEqual(buildModelSelection("grok-4.7", tiers, { reasoningEffort: "low", fast: false }), {
+    id: "grok-4.7", params: [{ id: "reasoning_effort", value: "low" }, { id: "fast", value: "false" }],
+  });
+  // switch off (the default) with no effort chosen: fast=false is still explicit, context is never sent
+  assert.deepEqual(buildModelSelection("grok-4.7", tiers, {}), { id: "grok-4.7", params: [{ id: "fast", value: "false" }] });
+  assert.deepEqual(buildModelSelection("grok-4.7", tiers, { fast: true }), { id: "grok-4.7", params: [{ id: "fast", value: "true" }] });
+});
+
+test("grok-4.6 (effort axis + fast): fast on and off", () => {
+  const tiers = deriveModelTiers(grok46);
+  assert.equal(tiers.effortAxis, "effort");
+  assert.equal(tiers.hasFast, true);
+  assert.deepEqual(buildModelSelection("grok-4.6", tiers, { reasoningEffort: "medium", fast: true }), {
+    id: "grok-4.6", params: [{ id: "effort", value: "medium" }, { id: "fast", value: "true" }],
+  });
+  assert.deepEqual(buildModelSelection("grok-4.6", tiers, { reasoningEffort: "medium" }), {
+    id: "grok-4.6", params: [{ id: "effort", value: "medium" }, { id: "fast", value: "false" }],
+  });
+});
