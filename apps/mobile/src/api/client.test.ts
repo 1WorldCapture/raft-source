@@ -257,3 +257,73 @@ test("a server switch during refresh keeps the new tokens and drops the old requ
   assert.equal(stored?.accessToken, "access-2");
   assert.equal(retried, false);
 });
+
+function hangUntilAbort(init: RequestInit | undefined): Promise<Response> {
+  return new Promise((_resolve, reject) => {
+    const signal = init?.signal;
+    if (!signal) {
+      reject(new Error("missing timeout signal"));
+      return;
+    }
+    const abort = () => {
+      const error = new Error("The operation was aborted");
+      error.name = "AbortError";
+      reject(error);
+    };
+    if (signal.aborted) {
+      abort();
+      return;
+    }
+    signal.addEventListener("abort", abort, { once: true });
+  });
+}
+
+test("a hung JSON request rejects when the timeout fires and does not log out", async () => {
+  let expired = 0;
+  const client = createApiClient({
+    getOrigin: () => "https://raft.example.com",
+    getAccessToken: () => "access-1",
+    getRefreshToken: () => "refresh-1",
+    getServerId: () => "server-1",
+    setTokens: () => {},
+    onSessionExpired: () => {
+      expired += 1;
+    },
+    jsonTimeoutMs: 40,
+    fetchImpl: (_url, init) => hangUntilAbort(init),
+  });
+  const started = Date.now();
+  await assert.rejects(
+    () => client.get("/channels"),
+    (error: unknown) => error instanceof ApiError && error.status === 0 && error.message === "Request timed out",
+  );
+  assert.ok(Date.now() - started < 2_000);
+  assert.equal(expired, 0);
+});
+
+test("a hung token refresh rejects when the timeout fires and does not log out", async () => {
+  let expired = 0;
+  const client = createApiClient({
+    getOrigin: () => "https://raft.example.com",
+    getAccessToken: () => "access-1",
+    getRefreshToken: () => "refresh-1",
+    getServerId: () => "server-1",
+    setTokens: () => {},
+    onSessionExpired: () => {
+      expired += 1;
+    },
+    jsonTimeoutMs: 40,
+    fetchImpl: (url, init) => {
+      const path = new URL(String(url)).pathname;
+      if (path === "/api/auth/refresh") return hangUntilAbort(init);
+      return Promise.resolve(jsonResponse(401, { error: "expired" }));
+    },
+  });
+  const started = Date.now();
+  await assert.rejects(
+    () => client.get("/servers"),
+    (error: unknown) => error instanceof ApiError && error.status === 0 && error.message === "Request timed out",
+  );
+  assert.ok(Date.now() - started < 2_000);
+  assert.equal(expired, 0);
+});

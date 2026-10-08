@@ -41,6 +41,8 @@ export interface ApiClientOptions {
   onSessionExpired: () => void;
   onApiError?: (error: ApiError) => void;
   fetchImpl?: typeof fetch;
+  /** JSON calls and token refresh. Uploads and downloads do not use this. */
+  jsonTimeoutMs?: number;
 }
 
 export interface RequestOptions {
@@ -52,7 +54,12 @@ export interface RequestOptions {
   server?: boolean;
   /** Internal: the 401 retry has already happened. */
   retry?: boolean;
+  /** Overrides the client JSON timeout for this call. */
+  timeoutMs?: number;
 }
+
+/** JSON API and token refresh. Not used for uploads or downloads. */
+export const JSON_REQUEST_TIMEOUT_MS = 15_000;
 
 function errorMessage(body: unknown, fallback: string): string {
   if (body && typeof body === "object" && "error" in body && typeof body.error === "string" && body.error) {
@@ -90,9 +97,33 @@ function defaultRefreshAttemptId(): string {
   return createRefreshAttemptId();
 }
 
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === "AbortError";
+}
+
+function asNetworkError(error: unknown): ApiError {
+  if (error instanceof ApiError) return error;
+  const message = isAbortError(error)
+    ? "Request timed out"
+    : (error instanceof Error && error.message ? error.message : "Network request failed");
+  return new ApiError(message, 0, null);
+}
+
 export function createApiClient(options: ApiClientOptions) {
   const fetchImpl = options.fetchImpl ?? fetch;
   let refreshInFlight: Promise<TokenPair> | null = null;
+
+  function jsonTimeout(override?: number): number {
+    return override ?? options.jsonTimeoutMs ?? JSON_REQUEST_TIMEOUT_MS;
+  }
+
+  async function fetchJson(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+    try {
+      return await fetchImpl(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
+    } catch (error) {
+      throw asNetworkError(error);
+    }
+  }
 
   function apiUrl(path: string): string {
     const origin = options.getOrigin();
@@ -127,11 +158,11 @@ export function createApiClient(options: ApiClientOptions) {
           headers["X-Slock-Auth-Installation-Id"] = installationId;
           headers["X-Slock-Auth-Refresh-Attempt-Id"] = attemptId;
         }
-        const response = await fetchImpl(apiUrl("/auth/refresh"), {
+        const response = await fetchJson(apiUrl("/auth/refresh"), {
           method: "POST",
           headers,
           body: JSON.stringify({ refreshToken }),
-        });
+        }, jsonTimeout());
         const body = await readBody(response);
         if (!response.ok) {
           if (response.status === 401) options.onSessionExpired();
@@ -172,14 +203,13 @@ export function createApiClient(options: ApiClientOptions) {
 
     let response: Response;
     try {
-      response = await fetchImpl(apiUrl(path), {
+      response = await fetchJson(apiUrl(path), {
         method: init.method ?? (init.body === undefined ? "GET" : "POST"),
         headers,
         body: init.body === undefined ? undefined : JSON.stringify(init.body),
-      });
+      }, jsonTimeout(init.timeoutMs));
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Network request failed";
-      throw new ApiError(message, 0, null);
+      throw asNetworkError(error);
     }
 
     const body = await readBody(response);
