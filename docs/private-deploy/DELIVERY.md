@@ -1,11 +1,11 @@
 # Raft 私有化发行包 交付文档（私有版 0.1.3，commit d574ce4）
 
-> 状态：私有版 **0.1.3**，commit **d574ce4667456cd9d02bdf0cc05b4ba5da48865b**（deploy 分支，tag `v0.1.3`）。升级、回滚、断网全新安装、含迁移的发版（0273/0274）均已实测；2026-10-07 另完成一次生产环境从 pm2 源码栈到 Docker 的正式切换（停机 109 秒、数据零丢失），相关经验已并入 §5/§8。产物清单：0.1.0 基线见 `INVENTORY-68b6d61.txt`；**0.1.3 的通用发行包是否重新组装由发行方另行决定**，未重组装时桌面件按 §6 单独交付。
+> 状态：私有版 **0.1.3**，构建 commit **d574ce4667456cd9d02bdf0cc05b4ba5da48865b**。已实测：全新离线安装、升级与回滚（不含迁移的版本对）、断网安装、从既有部署迁移到 Docker（含数据，§8，在真实环境验证，停机约 2 分钟）。**含迁移的升级后回滚（先恢复备份）尚未整段演练**（§5 已给出完整顺序与注意事项）。产物清单：0.1.0 基线见 `INVENTORY-68b6d61.txt`；0.1.3 的通用发行包是否重新组装由发行方另行决定，未重组装时桌面件按 §6 单独交付。
 > 技术细节的权威来源是发行包内的 `deploy/README.md`。构建流程见内部文档 BUILD-INTERNAL.md，不随客户交付。
 
 ## 1. 发行包内容
 
-构建 commit：**`d574ce4667456cd9d02bdf0cc05b4ba5da48865b`**（deploy 分支；所有 manifest 的 `commit` 字段一致，可核对）。**版本标签**：每个发行版在 deploy 分支对应 commit 上打 annotated tag——`v0.1.0`=`e4a40e8`、`v0.1.1`=`b5f7fdd`、`v0.1.2`=`0391e80`、`v0.1.3`=`d574ce4`，可用 `git tag -l v0.1.*` 与 `git rev-parse v0.1.x^{}` 追溯。
+构建 commit：**`d574ce4667456cd9d02bdf0cc05b4ba5da48865b`**（发行版 **0.1.3**；所有 manifest 的 `commit` 字段一致，可核对）。
 
 | 组件 | 版本 | 形态 |
 |---|---|---|
@@ -63,9 +63,14 @@
 **回滚**（已实测，dd8c608 ↔ 68b6d61 双向）：把 `.env` 的镜像 tag 改回旧版本，`docker compose up -d`，`/api/version` 回显旧 commit，数据完好，旧代码的迁移检查同样通过。
 
 - 本版本对之间**没有数据库迁移**，所以回滚只需换镜像重启，**不需要恢复数据库备份**。
-- **若某次升级包含数据库迁移**，回滚前必须先恢复升级前的备份（`pg_dump -Fc` 逻辑备份），再换回旧镜像。恢复的具体路径（`docker compose exec -T db pg_restore --no-owner -U raft -d raft < dump.custom`）已在生产切换中多次实测可靠；「迁移后回滚」的完整顺序（停栈→恢复备份→换旧镜像→起栈）按 §8 的切换脚本模式编排，首次执行前仍建议先在测试环境走一遍。
+- **若某次升级包含数据库迁移**，回滚 = 恢复升级前备份 + 换回旧镜像，完整顺序（**注意：不能对现有库直接 `pg_restore`**——迁移后的库里对象已存在，会报大量 already exists 并留下不一致状态；往全新空库恢复是另一个场景）：
+  1. `docker compose stop server web`（停写入）
+  2. 重建空库（二选一）：`docker compose exec db dropdb -U raft raft && docker compose exec db createdb -U raft raft`，或用 `pg_restore --clean --if-exists` 逐对象清后建（较慢但不停库）
+  3. `docker compose exec -T db pg_restore --no-owner --no-privileges -U raft -d raft < 升级前备份.dump`
+  4. `.env` 镜像 tag 换回旧版本，`docker compose up -d`
+  5. 校验：`/api/version` 回显旧 commit、账号登录、抽查数据与附件
+  该完整顺序**尚未整段演练过**（其组成步骤——停栈、空库恢复、换镜像起栈——均已分别实测），首次执行前请先在测试环境完整走一遍。
 - 升级前仍建议双备份（数据库 + `raft-uploads` 卷），并保留上一版镜像 tar 和 `downloads/` 树。
-- **发版完成后打版本标签**：`git tag -a v0.1.x -m "release v0.1.x" <部署的 commit> && git push origin v0.1.x`（deploy 分支；历史版本已补打，见 §1 映射表）。
 
 ## 6. Desktop 与客户地址
 

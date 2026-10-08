@@ -8,6 +8,7 @@
 
 1. **Linux（xai）**：linux-x64 Computer、CLI、daemon、downloads 树和 manifests；用 rcodesign 构建 darwin-arm64/x64 Computer；cursor-sdk 的 darwin 资产。
 2. **服务器**：private 模式的 server/web 镜像（入库脚本 `ops/docker/build-release.sh <full-sha> <branch>` 一键完成：frozen install→双镜像（tag `<branch>-<sha>`）→linux-x64 downloads 产物，自写 pidfile+分步日志），`docker save` 成 tar，记录 sha256 和大小；**自有生产发版走 deploy 分支并打 `v0.1.x` annotated tag**（客户交付包仍按本手册三路构建）。
+   **版本标签规矩（发版追溯）**：每次生产发版完成后，在 deploy 分支对应的 commit 上打 annotated tag 并推送：`git tag -a v0.1.x -m "release v0.1.x" <sha> && git push origin v0.1.x`。历史映射：`v0.1.0`=`e4a40e8`、`v0.1.1`=`b5f7fdd`、`v0.1.2`=`0391e80`、`v0.1.3`=`d574ce4`。客户交付的 DELIVERY.md 只写「发行版号+构建 commit」这类可核对信息，不出现我们的仓库与分支操作。
 3. **Mac**：`--only desktop`，产出 Desktop 的 arm64/x64 dmg/zip、`latest-mac.yml`、desktop manifest，传走后立即清理（峰值约 10–11GB）。
 4. **汇总**：在服务器组装发行包，整包重算 sha256，与各方清单逐项比对；所有 manifest 的 commit 必须一致。
 5. 全新安装复验：downloads 树整体重建（desktop/ 只留当前版本）、断网安装、完整用户流程、首次检查更新不提示。
