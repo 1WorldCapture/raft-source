@@ -1,5 +1,6 @@
 import { useCallback } from "react";
 import { useFocusEffect } from "expo-router";
+import { closeChoosePm } from "./choosePm";
 import { setCurrentServerRole } from "./serverRole";
 import { useServerRailStore } from "./serverRailStore";
 import { useSession } from "../state/session";
@@ -21,6 +22,9 @@ export function useServerRail() {
   // (home directory, tasks board, members list) reloads on serverId change.
   const switchServer = useCallback((server: RaftServer) => {
     if (server.id === session.serverId) return Promise.resolve();
+    // The picker flag is process-wide. Leaving it open would show the
+    // previous server's agent list after the switch.
+    closeChoosePm();
     setCurrentServerRole(server.role ?? null);
     return session.selectServer(server.id);
   }, [session]);
