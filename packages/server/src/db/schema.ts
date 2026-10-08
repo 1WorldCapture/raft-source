@@ -342,7 +342,11 @@ export const serverMembers = pgTable("server_members", {
   // different browser (stdrc, 2026-07-13).
   setupHandoffAcknowledgedAt: timestamp("setup_handoff_acknowledged_at", { withTimezone: true }),
   serverPushMuted: boolean("server_push_muted").notNull().default(false),
-  serverPushMode: text("server_push_mode", { enum: ["all", "mentions", "none"] }).notNull().default("all"),
+  // "pm_dm_mentions" is the Rethink-UI mobile profile (phase E): push DMs
+  // (including the PM's DM) + channel @mentions; other channel traffic stays
+  // silent. Only a "rethink"-profile push registration flips it from the
+  // factory default; legacy clients never send the marker.
+  serverPushMode: text("server_push_mode", { enum: ["all", "mentions", "none", "pm_dm_mentions"] }).notNull().default("all"),
   notificationPrefsVersion: integer("notification_prefs_version").notNull().default(0),
   onboardingDmSentAt: timestamp("onboarding_dm_sent_at", { withTimezone: true }),
   onboardingDmSentByAgentId: uuid("onboarding_dm_sent_by_agent_id"),
@@ -406,7 +410,7 @@ export const serverMembers = pgTable("server_members", {
   ),
   check(
     "server_members_server_push_mode_valid",
-    sql`${t.serverPushMode} IN ('all', 'mentions', 'none')`,
+    sql`${t.serverPushMode} IN ('all', 'mentions', 'none', 'pm_dm_mentions')`,
   ),
 ]);
 

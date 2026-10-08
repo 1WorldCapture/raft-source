@@ -70,6 +70,11 @@ export interface PushPayload {
   messagePreview?: string;
   mentioned?: boolean;
   alwaysShow?: boolean;
+  // Rethink UI phase E fact: the sender is this server's PM agent AND the
+  // message lands in a DM. Display hint for the rethink mobile profile —
+  // never a push/suppress decision input (PM traffic in shared channels
+  // deliberately does not push).
+  pmDirectMessage?: boolean;
 }
 
 export type PushRegistrationProvider = "apns";

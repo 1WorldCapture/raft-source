@@ -38,5 +38,5 @@
     "../services/slackBridgeProviderRuntime.ts",
     "../services/slackBridgeServerRuntime.ts"
   ],
-  "fingerprint": "da3333a567a5c6f14fb67252f9d44356a745cebb27f348753509fd93ea81516f"
+  "fingerprint": "984ffbe898775fcacb9f1d9bd13787d0d2d945cb2068852ef93858a38b6b5faf"
 }
