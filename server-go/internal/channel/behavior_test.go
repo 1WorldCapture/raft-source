@@ -108,7 +108,10 @@ func TestSchemaIsAdditiveAndPreservesChannels(t *testing.T) {
 	if err := f.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='messages'`).Scan(&messages); err != nil {
 		t.Fatal(err)
 	}
-	if agentsTable != 1 || eventsTable != 1 || messages != 0 {
+	// M4's 0010_messaging_foundation adds the messages fact table additively
+	// (previously this assert required its absence); channel rows above stay
+	// untouched, which is the actual additivity contract under test.
+	if agentsTable != 1 || eventsTable != 1 || messages != 1 {
 		t.Fatalf("schema: agents=%d events=%d messages=%d", agentsTable, eventsTable, messages)
 	}
 

@@ -1,5 +1,12 @@
 // Builds a CGO-free server and exercises it against disposable local SQLite.
 // Node is only a test runner dependency. Never starts Web UI or the TS server.
+//
+// Suite selection: RAFT_GO_TEST_SUITE=all (default) runs every milestone
+// suite, M1 through M4, in one fresh-process-per-suite pass over one
+// disposable database. The M4 process suites fail loudly (never skip) when a
+// backend surface is not wired yet; run them selectively with
+// RAFT_GO_TEST_SUITE=m4-backend | m4-realtime | m4-upgrade (see the Makefile
+// targets of the same names).
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -22,6 +29,12 @@ import { verifyM3Invitations } from './m3-invitations.mjs';
 import { verifyM3Persistence } from './m3-persistence.mjs';
 import { verifyOriginalClients } from './original-clients.mjs';
 import { verifyM3CreationReadModels } from './m3-creation-read-models.mjs';
+import { verifyM4Backend } from './m4-backend.mjs';
+import { verifyM3ToM4Upgrade } from './m3-to-m4-upgrade.mjs';
+// verifyM4Realtime is imported lazily inside its suite branch: that suite
+// drives the repository's locked original socket.io-client from the
+// repo-root pnpm store, and the M1-M3 selections must not depend on the
+// frontend install being present.
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '../..');
@@ -29,8 +42,11 @@ const dir = await mkdtemp(path.join(tmpdir(), 'raft-go-http-'));
 let child;
 let logs = '';
 const selectedSuite = process.env.RAFT_GO_TEST_SUITE ?? 'all';
-if (!['all', 'computer', 'daemon', 'agents', 'channels', 'invitations', 'persistence', 'upgrade', 'original-clients', 'creation-read-models'].includes(selectedSuite)) {
-  throw new Error('Unknown RAFT_GO_TEST_SUITE; use all/computer/daemon/agents/channels/invitations/persistence/upgrade/original-clients/creation-read-models');
+const knownSuites = ['all', 'computer', 'daemon', 'agents', 'channels', 'invitations',
+  'persistence', 'upgrade', 'm4-upgrade', 'original-clients', 'creation-read-models',
+  'm4-backend', 'm4-realtime'];
+if (!knownSuites.includes(selectedSuite)) {
+  throw new Error(`Unknown RAFT_GO_TEST_SUITE; use one of: ${knownSuites.join('/')}`);
 }
 
 // Every subprocess has a deadline and is reaped before temporary data removal.
@@ -141,6 +157,23 @@ try {
     await verifyM3CreationReadModels({ origin, data });
     await stop();
   }
+  // ---- M4 process suites (fresh process each, same disposable DB) --------
+  // These exercise human messaging flows only; they run under the same
+  // environment as the M3 suites above and no assertion depends on the
+  // bootstrap policy either way.
+  if (selectedSuite === 'all' || selectedSuite === 'm4-backend') {
+    await start();
+    await verifyM4Backend({ origin, data, start, stop, capture, executable, env });
+    await stop();
+  }
+  if (selectedSuite === 'all' || selectedSuite === 'm4-realtime') {
+    const { verifyM4Realtime } = await import('./m4-realtime.mjs');
+    // The suite resolves its own Go module and original-client paths, so
+    // standalone and integrated execution share exactly the same harness.
+    await start();
+    await verifyM4Realtime({ origin, data, start, stop, capture, executable, env });
+    await stop();
+  }
   if (selectedSuite === 'all' || selectedSuite === 'original-clients') {
     await start();
     // These are unmodified Computer/Daemon classes in an isolated process,
@@ -158,6 +191,13 @@ try {
   }
   if (selectedSuite === 'all' || selectedSuite === 'upgrade') {
     await verifyM2ToM3Upgrade({ executable, capture });
+  }
+  if (selectedSuite === 'all' || selectedSuite === 'm4-upgrade') {
+    // Both frozen M3 starting points are built from committed source via
+    // `git archive`; the current executable then upgrades that real data in
+    // place, the old binary must refuse the M4 schema, and the cold backup
+    // must restore a working old instance.
+    await verifyM3ToM4Upgrade({ executable, capture });
   }
   if (/[?&](verify|reset)=|Bearer\s+[A-Za-z0-9._-]{20,}|eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\./.test(logs)) {
     throw new Error('Server emitted credential-like material to logs');

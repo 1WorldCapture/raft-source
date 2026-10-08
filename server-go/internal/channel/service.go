@@ -3,7 +3,10 @@
 // row. Every mutation runs inside one IMMEDIATE transaction (SQLite
 // serializes writers, replacing the TS advisory/row locks). Handlers may
 // pre-check for the stable HTTP sentence; the transaction re-reads
-// membership, role, capability, and channel binding before it writes.
+// membership, role, capability, and channel binding before it writes. Every
+// real channel-state or roster transition also records its realtime intent
+// inside that SAME transaction (publications.go); deletion deliberately
+// records none, mirroring the frozen TS server.
 package channel
 
 import (
@@ -41,8 +44,10 @@ func (s *Store) CreateChannel(ctx context.Context, in CreateInput) (*Channel, er
 		if err != nil {
 			return err
 		}
-		// Creator row (admin) — the one add-member bootstrap.
-		if _, err := s.AddHuman(ctx, channel.ID, in.CreatorUserID, ChannelRoleAdmin, tx); err != nil {
+		// Creator row (admin) — the one add-member bootstrap. Initial roster
+		// rows are quiet: the TS create path publishes the channel itself and
+		// emits no per-member members-updated frames.
+		if _, err := s.addHumanRow(ctx, tx, channel.ID, in.CreatorUserID, ChannelRoleAdmin); err != nil {
 			return err
 		}
 		initialUsers := dedupeFilter(in.InitialUserIDs, in.CreatorUserID)
@@ -57,7 +62,7 @@ func (s *Store) CreateChannel(ctx context.Context, in CreateInput) (*Channel, er
 				}
 			}
 			for _, userID := range initialUsers {
-				if _, err := s.AddHuman(ctx, channel.ID, userID, ChannelRoleMember, tx); err != nil {
+				if _, err := s.addHumanRow(ctx, tx, channel.ID, userID, ChannelRoleMember); err != nil {
 					return err
 				}
 			}
@@ -74,10 +79,16 @@ func (s *Store) CreateChannel(ctx context.Context, in CreateInput) (*Channel, er
 				}
 			}
 			for _, agentID := range initialAgents {
-				if _, err := s.AddAgent(ctx, channel.ID, agentID, ChannelRoleMember, tx); err != nil {
+				if _, err := s.addAgentRow(ctx, tx, channel.ID, agentID, ChannelRoleMember); err != nil {
 					return err
 				}
 			}
+		}
+		// The channel's durable appearance: one channel:updated intent for
+		// the whole creation (the TS route publishes the created channel to
+		// the authorized server audience after the response).
+		if err := s.enqueueChannelUpdated(ctx, tx, in.WorkspaceID, channel.ID); err != nil {
+			return err
 		}
 		created = channel
 		return nil
@@ -329,6 +340,12 @@ func (s *Store) UpdateChannel(ctx context.Context, workspaceID, actorUserID, cha
 			}
 			return fmt.Errorf("update channel: %w", err)
 		}
+		// Only a real transition publishes (a no-field/no-change PATCH never
+		// reaches here): the durable channel:updated intent rides the same
+		// transaction as the row it describes.
+		if err := s.enqueueChannelUpdated(ctx, tx, channel.WorkspaceID, channelID); err != nil {
+			return err
+		}
 		// Hiding #all drops the whole derived audience at once: no rows may
 		// survive as explicit membership.
 		if allSystemVisibilityUpdate && updates.Type != nil && *updates.Type == TypePrivate {
@@ -407,6 +424,9 @@ func (s *Store) ArchiveChannel(ctx context.Context, workspaceID, channelID, arch
 			result = unchanged
 			return nil
 		}
+		if err := s.enqueueChannelUpdated(ctx, tx, channel.WorkspaceID, channelID); err != nil {
+			return err
+		}
 		result, err = s.getChannel(ctx, tx, channelID, false)
 		return err
 	})
@@ -445,6 +465,9 @@ func (s *Store) UnarchiveChannel(ctx context.Context, workspaceID, channelID, us
 			return fmt.Errorf("unarchive channel: %w", err)
 		}
 		_ = res
+		if err := s.enqueueChannelUpdated(ctx, tx, channel.WorkspaceID, channelID); err != nil {
+			return err
+		}
 		result, err = s.getChannel(ctx, tx, channelID, false)
 		return err
 	})
@@ -509,6 +532,11 @@ func (s *Store) DeleteChannel(ctx context.Context, workspaceID, channelID, userI
 			s.now().UnixMilli(), channelID, workspaceID); err != nil {
 			return fmt.Errorf("delete channel: %w", err)
 		}
+		// Deliberately NO channel:updated / channel:members-updated intent:
+		// the frozen TS server emits nothing on channel deletion (the joint
+		// disconnect route's bare {channelId} frame is a different mutation),
+		// and revoked visibility is enforced fail-closed by the realtime
+		// authority layers, never by these notifications.
 		return nil
 	})
 }
@@ -735,6 +763,17 @@ func (s *Store) ChangeChannelMembershipRole(ctx context.Context, workspaceID, ch
 			eventID, channelID, workspaceID, requesterUserID, targetType, targetID,
 			previousRole, nextRole, nextRevision, s.now().UnixMilli()); err != nil {
 			return fmt.Errorf("insert role event: %w", err)
+		}
+		// Real role transitions emit the TS members-updated pair; the subject
+		// reference drives the targeted user projection exactly like the TS
+		// role route (agent targets have no targeted frame). No-change PATCH
+		// requests already returned above and record nothing.
+		subjectUserID := ""
+		if targetType == "user" {
+			subjectUserID = targetID
+		}
+		if err := s.enqueueMembersUpdated(ctx, tx, workspaceID, channelID, subjectUserID); err != nil {
+			return err
 		}
 		*result = RoleChangeResult{
 			Changed: true, ChannelID: channelID, TargetType: targetType, TargetID: targetID,

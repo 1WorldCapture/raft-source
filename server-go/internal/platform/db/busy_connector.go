@@ -107,6 +107,24 @@ func (c *busyConn) ExecContext(ctx context.Context, query string, args []driver.
 	attempt := func() (driver.Result, error) {
 		return c.Conn.(driver.ExecerContext).ExecContext(ctx, query, args)
 	}
+	// The read-snapshot helper explicitly starts a DEFERRED transaction on a
+	// pinned connection (the DSN otherwise forces IMMEDIATE). Track these
+	// exact control statements too, so statements/COMMIT inside that snapshot
+	// are never incorrectly treated as retryable autocommit operations.
+	switch strings.ToUpper(strings.TrimSpace(query)) {
+	case "BEGIN DEFERRED":
+		result, err := retrySQLiteBusy(ctx, attempt)
+		if err == nil {
+			c.inTransaction = true
+		}
+		return result, err
+	case "COMMIT", "ROLLBACK":
+		result, err := attempt()
+		if err == nil {
+			c.inTransaction = false
+		}
+		return result, err
+	}
 	// Any semicolon conservatively disables replay, including one inside a
 	// quoted literal. This is not an SQL parser; false negatives are safe.
 	if c.inTransaction || strings.Contains(query, ";") {

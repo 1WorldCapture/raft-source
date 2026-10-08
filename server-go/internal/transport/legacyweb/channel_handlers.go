@@ -12,13 +12,27 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"time"
 
+	"raft.local/server-go/internal/auth"
 	"raft.local/server-go/internal/channel"
+	platformdb "raft.local/server-go/internal/platform/db"
 )
 
 // ChannelHandlers carries the channel store for the whole surface.
+//
+// M4 is the optional viewer-projection seam for the list/detail/create
+// exits. Wired (production M4): the exits read channels, authority and the
+// viewer's read/mute/display/last-message state on ONE pinned read snapshot
+// and emit the real values. Nil (standalone M3 suites): the exits keep the
+// explicit M3 fixture defaults (readState absent, cursor 0, unmuted,
+// collapse-on, null last message) — those defaults stay visible in
+// channel_dto.go rather than becoming silent zeros. Parent wiring in
+// app/m4.go: `channels := &legacyweb.ChannelHandlers{Store: m.channels,
+// M4: m4Projector}` where m4Projector adapts readstate/message projections.
 type ChannelHandlers struct {
 	Store *channel.Store
+	M4    M4ChannelProjector
 }
 
 type ctxChannelServerKeyType struct{}
@@ -126,6 +140,56 @@ func (h *ChannelHandlers) List(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if h.M4 == nil {
+		// Standalone M3 path (fixture defaults, lazy system-channel ensure).
+		h.listM3(w, r, filter)
+		return
+	}
+	// M4: channels, authority and viewer projections share ONE pinned
+	// snapshot; nothing here reads from a second connection.
+	var views []channelView
+	err := platformdb.WithReadSnapshot(r.Context(), h.Store.DB(), func(ex platformdb.Executor) error {
+		if err := auth.ValidateHumanTx(r.Context(), ex, accessClaims(r), time.Now()); err != nil {
+			return err
+		}
+		serverID, actor := channelServerID(r), userID(r)
+		items, err := h.Store.ListChannelsTx(r.Context(), ex, serverID, actor, filter)
+		if err != nil {
+			return err
+		}
+		rows := make([]channel.Channel, 0, len(items))
+		for _, item := range items {
+			rows = append(rows, item.Channel)
+		}
+		projections, err := h.M4(r.Context(), ex, serverID, actor, rows, true)
+		if err != nil {
+			return err
+		}
+		views = make([]channelView, 0, len(items))
+		for _, item := range items {
+			ac, err := h.Store.ResolveChannelActorContextTx(r.Context(), ex, item.Channel.WorkspaceID, item.Channel.ID, "user", actor)
+			if err != nil {
+				return err
+			}
+			views = append(views, channelListItem(item.Channel, item.Joined, ac, m4ProjectionFor(projections, true, item.Channel.ID)))
+		}
+		return nil
+	})
+	if err != nil {
+		if writeHumanTxError(w, err) {
+			return
+		}
+		if !writeChannelDomainError(w, err) {
+			writeError(w, http.StatusInternalServerError, "Failed to list channels")
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, views)
+}
+
+// listM3 is the projector-free list exit: byte-identical to the M3 behavior
+// (separate store reads, lazy system-channel ensure, fixture defaults).
+func (h *ChannelHandlers) listM3(w http.ResponseWriter, r *http.Request, filter string) {
 	items, err := h.Store.ListChannels(r.Context(), channelServerID(r), userID(r), filter)
 	if err != nil {
 		if !writeChannelDomainError(w, err) {
@@ -140,7 +204,7 @@ func (h *ChannelHandlers) List(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "Failed to list channels")
 			return
 		}
-		views = append(views, channelListItem(item.Channel, item.Joined, ac))
+		views = append(views, channelListItem(item.Channel, item.Joined, ac, m4ChannelProjectionRow{}))
 	}
 	writeJSON(w, http.StatusOK, views)
 }
@@ -290,12 +354,43 @@ func (h *ChannelHandlers) Create(w http.ResponseWriter, r *http.Request) {
 		h.writeCreateError(w, r, err)
 		return
 	}
-	ac, err := h.Store.ResolveChannelActorContext(r.Context(), serverID, created.ID, "user", actor)
+	if h.M4 == nil {
+		ac, err := h.Store.ResolveChannelActorContext(r.Context(), serverID, created.ID, "user", actor)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "Failed to create channel")
+			return
+		}
+		writeJSON(w, http.StatusOK, channelCreateView(*created, ac, m4ChannelProjectionRow{}))
+		return
+	}
+	// The channel exists now; its (legitimately empty) viewer state is read
+	// on one snapshot through the same projector as the other exits, so the
+	// response states fresh-scope facts instead of an old scope's defaults.
+	var view *createView
+	err = platformdb.WithReadSnapshot(r.Context(), h.Store.DB(), func(ex platformdb.Executor) error {
+		if err := auth.ValidateHumanTx(r.Context(), ex, accessClaims(r), time.Now()); err != nil {
+			return err
+		}
+		ac, err := h.Store.ResolveChannelActorContextTx(r.Context(), ex, serverID, created.ID, "user", actor)
+		if err != nil {
+			return err
+		}
+		projections, err := h.M4(r.Context(), ex, serverID, actor, []channel.Channel{*created}, false)
+		if err != nil {
+			return err
+		}
+		built := channelCreateView(*created, ac, m4ProjectionFor(projections, true, created.ID))
+		view = &built
+		return nil
+	})
 	if err != nil {
+		if writeHumanTxError(w, err) {
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "Failed to create channel")
 		return
 	}
-	writeJSON(w, http.StatusOK, channelCreateView(*created, ac))
+	writeJSON(w, http.StatusOK, *view)
 }
 
 // writeCreateError maps create failures to the exact TS statuses/bodies.
@@ -337,6 +432,88 @@ func (h *ChannelHandlers) writeCreateError(w http.ResponseWriter, r *http.Reques
 
 // Get handles GET /api/channels/{id}.
 func (h *ChannelHandlers) Get(w http.ResponseWriter, r *http.Request) {
+	if h.M4 == nil {
+		h.getM3(w, r)
+		return
+	}
+	serverID, actor := channelServerID(r), userID(r)
+	var view *channelView
+	err := platformdb.WithReadSnapshot(r.Context(), h.Store.DB(), func(ex platformdb.Executor) error {
+		if err := auth.ValidateHumanTx(r.Context(), ex, accessClaims(r), time.Now()); err != nil {
+			return err
+		}
+		c, err := h.Store.GetChannelTx(r.Context(), ex, r.PathValue("id"))
+		if err != nil {
+			return err
+		}
+		if c == nil || c.WorkspaceID != serverID {
+			return &m4GetChannelNotFound{}
+		}
+		visible, err := h.Store.CanUserAccessChannelTx(r.Context(), ex, serverID, c.ID, actor)
+		if err != nil {
+			return err
+		}
+		if !visible {
+			return &m4GetChannelNotFound{}
+		}
+		joined, err := h.channelJoinedTx(r.Context(), ex, c, actor)
+		if err != nil {
+			return err
+		}
+		ac, err := h.Store.ResolveChannelActorContextTx(r.Context(), ex, c.WorkspaceID, c.ID, "user", actor)
+		if err != nil {
+			return err
+		}
+		projections, err := h.M4(r.Context(), ex, serverID, actor, []channel.Channel{*c}, false)
+		if err != nil {
+			return err
+		}
+		built := channelDetailView(*c, joined, ac, m4ProjectionFor(projections, true, c.ID))
+		view = &built
+		return nil
+	})
+	if err != nil {
+		switch {
+		case writeHumanTxError(w, err):
+			return
+		case errors.As(err, &m4getChannelNotFound):
+			writeError(w, http.StatusNotFound, "Channel not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "Failed to get channel")
+		return
+	}
+	writeJSON(w, http.StatusOK, *view)
+}
+
+type m4GetChannelNotFound struct{}
+
+func (m4GetChannelNotFound) Error() string { return "channel not found or invisible" }
+
+var m4getChannelNotFound = &m4GetChannelNotFound{}
+
+// channelJoinedTx ports the detail exit's joined derivation onto the pinned
+// executor (DM and implicit-membership channels read joined; the hidden #all
+// never does for guests).
+func (h *ChannelHandlers) channelJoinedTx(ctx context.Context, ex channel.Executor, c *channel.Channel, actor string) (bool, error) {
+	if c.Type == channel.TypeDM {
+		return true, nil
+	}
+	serverRole, err := h.Store.HumanServerRoleTx(ctx, ex, c.WorkspaceID, actor)
+	if err != nil {
+		return false, err
+	}
+	if serverRole != channel.RoleGuest && channel.HasImplicitServerMembership(c) {
+		return true, nil
+	}
+	if channel.IsAllSystemChannel(c) && serverRole == channel.RoleGuest {
+		return false, nil
+	}
+	return h.Store.IsChannelHumanTx(ctx, ex, c.ID, actor)
+}
+
+// getM3 is the projector-free detail exit, byte-identical to M3.
+func (h *ChannelHandlers) getM3(w http.ResponseWriter, r *http.Request) {
 	c, ok := h.scopedChannel(w, r)
 	if !ok {
 		return
@@ -370,7 +547,7 @@ func (h *ChannelHandlers) Get(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "Failed to get channel")
 		return
 	}
-	writeJSON(w, http.StatusOK, channelDetailView(*c, joined, ac))
+	writeJSON(w, http.StatusOK, channelDetailView(*c, joined, ac, m4ChannelProjectionRow{}))
 }
 
 // parseRegularVisibility ports parseRegularChannelVisibility for PATCH.

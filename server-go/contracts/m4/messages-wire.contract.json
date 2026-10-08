@@ -1,0 +1,893 @@
+{
+  "area": "messages-wire",
+  "baseline": "bc65213b377a992c381e809c72ba50ca9af367fd",
+  "contract": "raft.m4-reference",
+  "executed": {
+    "constants": {
+      "MAX_MESSAGE_LENGTH": 32000,
+      "MAX_RANDOM_ID_LENGTH": 128,
+      "MAX_REACTION_LENGTH": 16
+    },
+    "parseHumanMessageCreateBody": [
+      {
+        "input": {
+          "channelId": "0b2a6f3e-9c1d-4e7b-8f2a-1c3b5d7e9a01",
+          "content": "hi"
+        },
+        "label": "valid-minimal",
+        "parsed": {
+          "asTask": false,
+          "channelId": "0b2a6f3e-9c1d-4e7b-8f2a-1c3b5d7e9a01",
+          "content": "hi"
+        },
+        "verdict": "valid"
+      },
+      {
+        "input": {
+          "asTask": true,
+          "attachmentIds": [
+            "3f8d1a2b-7c4e-49d6-b0a1-2e5f6a7b8c9d"
+          ],
+          "channelId": "0b2a6f3e-9c1d-4e7b-8f2a-1c3b5d7e9a01",
+          "content": "hi"
+        },
+        "label": "valid-full",
+        "parsed": {
+          "asTask": true,
+          "attachmentIds": [
+            "3f8d1a2b-7c4e-49d6-b0a1-2e5f6a7b8c9d"
+          ],
+          "channelId": "0b2a6f3e-9c1d-4e7b-8f2a-1c3b5d7e9a01",
+          "content": "hi"
+        },
+        "verdict": "valid"
+      },
+      {
+        "input": {
+          "asTask": false,
+          "channelId": "0b2a6f3e-9c1d-4e7b-8f2a-1c3b5d7e9a01",
+          "content": "hi"
+        },
+        "label": "valid-asTask-false-explicit",
+        "parsed": {
+          "asTask": false,
+          "channelId": "0b2a6f3e-9c1d-4e7b-8f2a-1c3b5d7e9a01",
+          "content": "hi"
+        },
+        "verdict": "valid"
+      },
+      {
+        "input": {
+          "channelId": "0B2A6F3E-9C1D-4E7B-8F2A-1C3B5D7E9A01",
+          "content": "x"
+        },
+        "label": "valid-uppercase-uuid",
+        "parsed": {
+          "asTask": false,
+          "channelId": "0B2A6F3E-9C1D-4E7B-8F2A-1C3B5D7E9A01",
+          "content": "x"
+        },
+        "verdict": "valid"
+      },
+      {
+        "input": null,
+        "label": "null-body",
+        "parsed": null,
+        "verdict": "invalid"
+      },
+      {
+        "input": [
+          "0b2a6f3e-9c1d-4e7b-8f2a-1c3b5d7e9a01"
+        ],
+        "label": "array-body",
+        "parsed": null,
+        "verdict": "invalid"
+      },
+      {
+        "input": "x",
+        "label": "string-body",
+        "parsed": null,
+        "verdict": "invalid"
+      },
+      {
+        "input": {
+          "content": "hi"
+        },
+        "label": "channelId-missing",
+        "parsed": null,
+        "verdict": "invalid"
+      },
+      {
+        "input": {
+          "channelId": 42,
+          "content": "hi"
+        },
+        "label": "channelId-non-string",
+        "parsed": null,
+        "verdict": "invalid"
+      },
+      {
+        "input": {
+          "channelId": "not-a-uuid",
+          "content": "hi"
+        },
+        "label": "channelId-non-uuid",
+        "parsed": null,
+        "verdict": "invalid"
+      },
+      {
+        "input": {
+          "attachmentIds": [
+            "0b2a6f3e-9c1d-4e7b-8f2a-1c3b5d7e9a01",
+            "3f8d1a2b-7c4e-49d6-b0a1-2e5f6a7b8c9d"
+          ],
+          "channelId": "0b2a6f3e-9c1d-4e7b-8f2a-1c3b5d7e9a01",
+          "content": "hi"
+        },
+        "label": "attachmentIds-valid",
+        "parsed": {
+          "asTask": false,
+          "attachmentIds": [
+            "0b2a6f3e-9c1d-4e7b-8f2a-1c3b5d7e9a01",
+            "3f8d1a2b-7c4e-49d6-b0a1-2e5f6a7b8c9d"
+          ],
+          "channelId": "0b2a6f3e-9c1d-4e7b-8f2a-1c3b5d7e9a01",
+          "content": "hi"
+        },
+        "verdict": "valid"
+      },
+      {
+        "input": {
+          "attachmentIds": "x",
+          "channelId": "0b2a6f3e-9c1d-4e7b-8f2a-1c3b5d7e9a01",
+          "content": "hi"
+        },
+        "label": "attachmentIds-not-array",
+        "parsed": null,
+        "verdict": "invalid"
+      },
+      {
+        "input": {
+          "attachmentIds": [
+            42
+          ],
+          "channelId": "0b2a6f3e-9c1d-4e7b-8f2a-1c3b5d7e9a01",
+          "content": "hi"
+        },
+        "label": "attachmentIds-non-string-item",
+        "parsed": null,
+        "verdict": "invalid"
+      },
+      {
+        "input": {
+          "attachmentIds": [
+            "nope"
+          ],
+          "channelId": "0b2a6f3e-9c1d-4e7b-8f2a-1c3b5d7e9a01",
+          "content": "hi"
+        },
+        "label": "attachmentIds-non-uuid-item",
+        "parsed": null,
+        "verdict": "invalid"
+      },
+      {
+        "input": {
+          "asTask": "yes",
+          "channelId": "0b2a6f3e-9c1d-4e7b-8f2a-1c3b5d7e9a01",
+          "content": "hi"
+        },
+        "label": "asTask-non-boolean",
+        "parsed": null,
+        "verdict": "invalid"
+      },
+      {
+        "input": {
+          "attachmentIds": [],
+          "channelId": "0b2a6f3e-9c1d-4e7b-8f2a-1c3b5d7e9a01",
+          "content": "hi"
+        },
+        "label": "attachmentIds-empty-array",
+        "parsed": {
+          "asTask": false,
+          "attachmentIds": [],
+          "channelId": "0b2a6f3e-9c1d-4e7b-8f2a-1c3b5d7e9a01",
+          "content": "hi"
+        },
+        "verdict": "valid"
+      }
+    ],
+    "parseMessagePageCursor": [
+      {
+        "input": null,
+        "inputPresent": false,
+        "parsed": null,
+        "verdict": "absent"
+      },
+      {
+        "input": "0",
+        "inputPresent": true,
+        "parsed": 0,
+        "verdict": "valid"
+      },
+      {
+        "input": "42",
+        "inputPresent": true,
+        "parsed": 42,
+        "verdict": "valid"
+      },
+      {
+        "input": "-1",
+        "inputPresent": true,
+        "parsed": null,
+        "verdict": "invalid"
+      },
+      {
+        "input": "abc",
+        "inputPresent": true,
+        "parsed": null,
+        "verdict": "invalid"
+      },
+      {
+        "input": "1.5",
+        "inputPresent": true,
+        "parsed": null,
+        "verdict": "invalid"
+      },
+      {
+        "input": "9007199254740992",
+        "inputPresent": true,
+        "parsed": null,
+        "verdict": "invalid"
+      },
+      {
+        "input": "9007199254740993",
+        "inputPresent": true,
+        "parsed": null,
+        "verdict": "invalid"
+      },
+      {
+        "input": "01",
+        "inputPresent": true,
+        "parsed": 1,
+        "verdict": "valid"
+      },
+      {
+        "input": 42,
+        "inputPresent": true,
+        "parsed": null,
+        "verdict": "invalid"
+      }
+    ],
+    "parseRandomId": [
+      {
+        "input": null,
+        "inputPresent": false,
+        "parsed": null,
+        "verdict": "absent"
+      },
+      {
+        "input": "abc-123",
+        "inputPresent": true,
+        "parsed": "abc-123",
+        "verdict": "valid"
+      },
+      {
+        "input": "",
+        "inputPresent": true,
+        "parsed": null,
+        "verdict": "invalid"
+      },
+      {
+        "input": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "inputPresent": true,
+        "parsed": null,
+        "verdict": "invalid"
+      },
+      {
+        "input": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "inputPresent": true,
+        "parsed": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "verdict": "valid"
+      },
+      {
+        "input": 42,
+        "inputPresent": true,
+        "parsed": null,
+        "verdict": "invalid"
+      },
+      {
+        "input": null,
+        "inputPresent": true,
+        "parsed": null,
+        "verdict": "invalid"
+      },
+      {
+        "input": true,
+        "inputPresent": true,
+        "parsed": null,
+        "verdict": "invalid"
+      }
+    ],
+    "parseReactionActorPageLimit": [
+      {
+        "input": null,
+        "inputPresent": false,
+        "parsed": 50
+      },
+      {
+        "input": "1",
+        "inputPresent": true,
+        "parsed": 1
+      },
+      {
+        "input": "100",
+        "inputPresent": true,
+        "parsed": 100
+      },
+      {
+        "input": "0",
+        "inputPresent": true,
+        "parsed": null
+      },
+      {
+        "input": "101",
+        "inputPresent": true,
+        "parsed": null
+      },
+      {
+        "input": "abc",
+        "inputPresent": true,
+        "parsed": null
+      },
+      {
+        "input": "50",
+        "inputPresent": true,
+        "parsed": 50
+      },
+      {
+        "input": 50,
+        "inputPresent": true,
+        "parsed": null
+      },
+      {
+        "input": "1.5",
+        "inputPresent": true,
+        "parsed": null
+      }
+    ],
+    "parseReactionEmoji": [
+      {
+        "input": "👍",
+        "parsed": "👍"
+      },
+      {
+        "input": " 👍 ",
+        "parsed": "👍"
+      },
+      {
+        "input": "",
+        "parsed": null
+      },
+      {
+        "input": "   ",
+        "parsed": null
+      },
+      {
+        "input": "xxxxxxxxxxxxxxxx",
+        "parsed": "xxxxxxxxxxxxxxxx"
+      },
+      {
+        "input": "xxxxxxxxxxxxxxxxx",
+        "parsed": null
+      },
+      {
+        "input": "a b",
+        "parsed": null
+      },
+      {
+        "input": 42,
+        "parsed": null
+      },
+      {
+        "input": "👍👎",
+        "parsed": "👍👎"
+      }
+    ],
+    "parseStructuredMentions": [
+      {
+        "input": null,
+        "inputPresent": false,
+        "label": "absent",
+        "parsed": [],
+        "verdict": "valid"
+      },
+      {
+        "input": [],
+        "inputPresent": true,
+        "label": "empty-array",
+        "parsed": [],
+        "verdict": "valid"
+      },
+      {
+        "input": [
+          {
+            "id": "0b2a6f3e-9c1d-4e7b-8f2a-1c3b5d7e9a01",
+            "name": "Ada",
+            "type": "user"
+          }
+        ],
+        "inputPresent": true,
+        "label": "user-valid",
+        "parsed": [
+          {
+            "id": "0b2a6f3e-9c1d-4e7b-8f2a-1c3b5d7e9a01",
+            "name": "Ada",
+            "type": "user"
+          }
+        ],
+        "verdict": "valid"
+      },
+      {
+        "input": [
+          {
+            "id": "3f8d1a2b-7c4e-49d6-b0a1-2e5f6a7b8c9d",
+            "name": "  Bot  ",
+            "type": "agent"
+          }
+        ],
+        "inputPresent": true,
+        "label": "agent-valid-name-trimmed",
+        "parsed": [
+          {
+            "id": "3f8d1a2b-7c4e-49d6-b0a1-2e5f6a7b8c9d",
+            "name": "Bot",
+            "type": "agent"
+          }
+        ],
+        "verdict": "valid"
+      },
+      {
+        "input": [
+          {
+            "id": "0b2a6f3e-9c1d-4e7b-8f2a-1c3b5d7e9a01",
+            "name": "Ada",
+            "type": "user"
+          },
+          {
+            "id": "3f8d1a2b-7c4e-49d6-b0a1-2e5f6a7b8c9d",
+            "name": "Bot",
+            "type": "agent"
+          }
+        ],
+        "inputPresent": true,
+        "label": "mixed-valid",
+        "parsed": [
+          {
+            "id": "0b2a6f3e-9c1d-4e7b-8f2a-1c3b5d7e9a01",
+            "name": "Ada",
+            "type": "user"
+          },
+          {
+            "id": "3f8d1a2b-7c4e-49d6-b0a1-2e5f6a7b8c9d",
+            "name": "Bot",
+            "type": "agent"
+          }
+        ],
+        "verdict": "valid"
+      },
+      {
+        "input": [
+          {
+            "id": "0b2a6f3e-9c1d-4e7b-8f2a-1c3b5d7e9a01",
+            "name": "Ada",
+            "type": "user"
+          },
+          {
+            "id": "0b2a6f3e-9c1d-4e7b-8f2a-1c3b5d7e9a01",
+            "name": "Ada",
+            "type": "user"
+          }
+        ],
+        "inputPresent": true,
+        "label": "duplicate-exact-deduped",
+        "parsed": [
+          {
+            "id": "0b2a6f3e-9c1d-4e7b-8f2a-1c3b5d7e9a01",
+            "name": "Ada",
+            "type": "user"
+          }
+        ],
+        "verdict": "valid"
+      },
+      {
+        "input": [
+          {
+            "id": "0b2a6f3e-9c1d-4e7b-8f2a-1c3b5d7e9a01",
+            "name": "A",
+            "type": "user"
+          },
+          {
+            "id": "0b2a6f3e-9c1d-4e7b-8f2a-1c3b5d7e9a01",
+            "name": "A",
+            "type": "agent"
+          }
+        ],
+        "inputPresent": true,
+        "label": "same-id-different-type-kept",
+        "parsed": [
+          {
+            "id": "0b2a6f3e-9c1d-4e7b-8f2a-1c3b5d7e9a01",
+            "name": "A",
+            "type": "user"
+          },
+          {
+            "id": "0b2a6f3e-9c1d-4e7b-8f2a-1c3b5d7e9a01",
+            "name": "A",
+            "type": "agent"
+          }
+        ],
+        "verdict": "valid"
+      },
+      {
+        "input": [
+          {
+            "id": "0b2a6f3e-9c1d-4e7b-8f2a-1c3b5d7e9a01",
+            "name": "A",
+            "type": "user"
+          },
+          {
+            "id": "0b2a6f3e-9c1d-4e7b-8f2a-1c3b5d7e9a01",
+            "name": "B",
+            "type": "user"
+          }
+        ],
+        "inputPresent": true,
+        "label": "same-id-different-name-kept",
+        "parsed": [
+          {
+            "id": "0b2a6f3e-9c1d-4e7b-8f2a-1c3b5d7e9a01",
+            "name": "A",
+            "type": "user"
+          },
+          {
+            "id": "0b2a6f3e-9c1d-4e7b-8f2a-1c3b5d7e9a01",
+            "name": "B",
+            "type": "user"
+          }
+        ],
+        "verdict": "valid"
+      },
+      {
+        "input": [
+          {
+            "id": "0b2a6f3e-9c1d-4e7b-8f2a-1c3b5d7e9a01",
+            "name": " Ada ",
+            "type": "user"
+          },
+          {
+            "id": "0b2a6f3e-9c1d-4e7b-8f2a-1c3b5d7e9a01",
+            "name": "Ada",
+            "type": "user"
+          }
+        ],
+        "inputPresent": true,
+        "label": "trim-collapses-duplicates",
+        "parsed": [
+          {
+            "id": "0b2a6f3e-9c1d-4e7b-8f2a-1c3b5d7e9a01",
+            "name": "Ada",
+            "type": "user"
+          }
+        ],
+        "verdict": "valid"
+      },
+      {
+        "input": [
+          {
+            "id": "0b2a6f3e-9c1d-4e7b-8f2a-1c3b5d7e9a01",
+            "name": "X",
+            "type": "team"
+          }
+        ],
+        "inputPresent": true,
+        "label": "type-team-invalid",
+        "parsed": null,
+        "verdict": "invalid"
+      },
+      {
+        "input": [
+          {
+            "id": "0b2a6f3e-9c1d-4e7b-8f2a-1c3b5d7e9a01",
+            "name": "X"
+          }
+        ],
+        "inputPresent": true,
+        "label": "type-missing-invalid",
+        "parsed": null,
+        "verdict": "invalid"
+      },
+      {
+        "input": [
+          {
+            "id": "abc",
+            "name": "X",
+            "type": "user"
+          }
+        ],
+        "inputPresent": true,
+        "label": "id-non-uuid",
+        "parsed": null,
+        "verdict": "invalid"
+      },
+      {
+        "input": [
+          {
+            "id": 42,
+            "name": "X",
+            "type": "user"
+          }
+        ],
+        "inputPresent": true,
+        "label": "id-non-string",
+        "parsed": null,
+        "verdict": "invalid"
+      },
+      {
+        "input": [
+          {
+            "id": "0b2a6f3e-9c1d-4e7b-8f2a-1c3b5d7e9a01",
+            "name": "",
+            "type": "user"
+          }
+        ],
+        "inputPresent": true,
+        "label": "name-empty",
+        "parsed": null,
+        "verdict": "invalid"
+      },
+      {
+        "input": [
+          {
+            "id": "0b2a6f3e-9c1d-4e7b-8f2a-1c3b5d7e9a01",
+            "name": "   ",
+            "type": "user"
+          }
+        ],
+        "inputPresent": true,
+        "label": "name-whitespace-only",
+        "parsed": null,
+        "verdict": "invalid"
+      },
+      {
+        "input": [
+          {
+            "id": "0b2a6f3e-9c1d-4e7b-8f2a-1c3b5d7e9a01",
+            "name": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            "type": "user"
+          }
+        ],
+        "inputPresent": true,
+        "label": "name-129",
+        "parsed": null,
+        "verdict": "invalid"
+      },
+      {
+        "input": [
+          {
+            "id": "0b2a6f3e-9c1d-4e7b-8f2a-1c3b5d7e9a01",
+            "name": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            "type": "user"
+          }
+        ],
+        "inputPresent": true,
+        "label": "name-128-valid",
+        "parsed": [
+          {
+            "id": "0b2a6f3e-9c1d-4e7b-8f2a-1c3b5d7e9a01",
+            "name": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            "type": "user"
+          }
+        ],
+        "verdict": "valid"
+      },
+      {
+        "input": "nope",
+        "inputPresent": true,
+        "label": "value-not-array",
+        "parsed": null,
+        "verdict": "invalid"
+      },
+      {
+        "input": [
+          null
+        ],
+        "inputPresent": true,
+        "label": "item-null",
+        "parsed": null,
+        "verdict": "invalid"
+      },
+      {
+        "input": [
+          "user"
+        ],
+        "inputPresent": true,
+        "label": "item-string",
+        "parsed": null,
+        "verdict": "invalid"
+      }
+    ]
+  },
+  "generatedBy": "original-execution (parsers/constants) + source-derived literals (route envelope)",
+  "notes": [
+    "v1/v2 body-limit, mentions and randomId verdicts are EXECUTED from pinned messages.ts",
+    "response error literals and envelope shapes are extracted from the same pinned bytes (handlers are express/DB-bound and not executable)"
+  ],
+  "sourceDerived": {
+    "derivation": "source-derived (route handler is express/DB-bound; not executed)",
+    "envelopeV1": {
+      "mentionValidationErrorBody": {
+        "error": "error string only (no code key on v1)"
+      },
+      "randomIdConflict": {
+        "body": {
+          "code": "string",
+          "error": "string"
+        },
+        "status": "from error (409 family)"
+      },
+      "success": "bare enriched message row (the message DTO itself)",
+      "successWithPendingMentionActions": {
+        "message": "enriched message",
+        "pendingMentionActions": "non-empty array"
+      }
+    },
+    "envelopeV2": {
+      "mentionValidationErrorBody": {
+        "code": "present when error carries one",
+        "error": "string"
+      },
+      "success": {
+        "message": "enriched message",
+        "pendingMentionActions": "present only when non-empty",
+        "unresolvedMentionHandles": "present only when non-empty"
+      }
+    },
+    "responseErrorLiterals": {
+      "channelIdContentRequired": {
+        "anchor": "messages.ts:createHumanMessage:24",
+        "value": "Channel ID and content are required"
+      },
+      "contentEmpty": {
+        "anchor": "messages.ts:createHumanMessage:30",
+        "value": "Message content cannot be empty"
+      },
+      "contentTooLong": {
+        "anchor": "messages.ts:createHumanMessage:34",
+        "value": "Message content exceeds maximum length of 32000 characters"
+      },
+      "invalidBody": {
+        "anchor": "messages.ts:createHumanMessage:9",
+        "value": "Invalid message request body"
+      },
+      "invalidMentions": {
+        "anchor": "messages.ts:createHumanMessage:20",
+        "value": "Invalid mentions payload"
+      },
+      "randomIdTooLong": {
+        "anchor": "messages.ts:createHumanMessage:15",
+        "value": "randomId must be a non-empty string with at most 128 characters"
+      }
+    },
+    "sourceAnchor": "packages/server/src/routes/messages.ts (sha256 7a7ca204e4956cfb6bc180ccc7689f419c2197c51aa9e1f64a1e89ee8bd759a7)",
+    "validationOrder": [
+      "parseHumanMessageCreateBody -> 400 invalidBody",
+      "parseRandomId -> 400 randomIdTooLong",
+      "parseStructuredMentions -> 400 invalidMentions",
+      "channelId/content presence -> 400 channelIdContentRequired",
+      "content type/trim -> 400 contentEmpty",
+      "content length -> 400 contentTooLong"
+    ]
+  },
+  "sourcePins": {
+    "activityBehaviorVectors": {
+      "path": "packages/sync-core/contracts/activity-v1/fixtures/activity-sync.behavior.jsonl",
+      "sha256": "ac94f85c23656184724e7b91e4957e278b4a8554878600842c3684b9c7855bd1"
+    },
+    "activityContractVectors": {
+      "path": "packages/sync-core/contracts/activity-v1/fixtures/activity-sync.contract-vectors.jsonl",
+      "sha256": "89ef866cc5e16dd321945c422e5f9ae7919157312d4bafbc68e9241d6ae3bee3"
+    },
+    "activityJsonSchema": {
+      "path": "packages/sync-core/contracts/activity-v1/generated/json-schema/activity-sync.schema.json",
+      "sha256": "58177bc39e9038b65d72b768dcf5ceb9687117b8d362cd7c21eec684e56fc248"
+    },
+    "activityManifest": {
+      "path": "packages/sync-core/contracts/activity-v1/manifest.json",
+      "sha256": "7743a8086e6d443656b7527486a6170439c3a0c8681e9b4f02e74e0165967cf1"
+    },
+    "activityRunner": {
+      "path": "packages/sync-core/contracts/activity-v1/runner/runBehaviorVectors.ts",
+      "sha256": "eb9bb37ccef7c545c9b3ea22638735ece54c9685f5e930a934d40089b22ba984"
+    },
+    "serverChannelsRoute": {
+      "path": "packages/server/src/routes/channels.ts",
+      "sha256": "1014a8e565e4cc2906616af8274eb4b1fd2a63b347839ae8ac5c33b761265109"
+    },
+    "serverMessageRealtimeEvents": {
+      "path": "packages/server/src/services/messageRealtimeEvents.ts",
+      "sha256": "aa8b88ed8ec08cca36f858043be31807e08a97b694ba39e48bb070cce6f7edff"
+    },
+    "serverMessageService": {
+      "path": "packages/server/src/services/messageService.ts",
+      "sha256": "d49aad2a3d25a6d4cef1225f16aacb80c2fbf1188d483782ce4654b3aa38d280"
+    },
+    "serverMessagesRoute": {
+      "path": "packages/server/src/routes/messages.ts",
+      "sha256": "7a7ca204e4956cfb6bc180ccc7689f419c2197c51aa9e1f64a1e89ee8bd759a7"
+    },
+    "serverReadMutationSequencer": {
+      "path": "packages/server/src/services/readMutationSequencer.ts",
+      "sha256": "d7b9c53834fffe3d196aa8340ecbcab29284b0ff3454b6ab32e4934e17f12800"
+    },
+    "serverReadMutationsRoute": {
+      "path": "packages/server/src/routes/readMutations.ts",
+      "sha256": "3c8587881b6dd9dd34cfa37863a40cf05136b4fae107b8d1b24fdd2974f55e0d"
+    },
+    "sharedActivityMute": {
+      "path": "packages/shared/src/activityMute.ts",
+      "sha256": "e356b1341dd626d2bab51b5f86ed61f8436cbc156b8d654bd8d949a4efb7230e"
+    },
+    "sharedCanonicalMessageManifest": {
+      "path": "packages/shared/src/canonicalMessageManifest.ts",
+      "sha256": "f1cecab62c6380b5416f3cdf7a17c6efdd33445609c3c2aae10bbd7d8fed660f"
+    },
+    "sharedIndex": {
+      "path": "packages/shared/src/index.ts",
+      "sha256": "9224fa36c718ec9b4d8a04ab0906c5d3ab597a03adaf2c48a3d3d78c33e750cb"
+    },
+    "syncCoreActivityDomain": {
+      "path": "packages/sync-core/src/domains/activity.ts",
+      "sha256": "f4ef5ac8ff045a6de4c7327d27a32930ba3db70e8d54f7f33f8a6f164ad863f5"
+    },
+    "syncCoreCore": {
+      "path": "packages/sync-core/src/core.ts",
+      "sha256": "b3906ae8dcb80037de36f79630197129febc333b3f171c8d6f2b376181f21104"
+    },
+    "syncCoreUint64": {
+      "path": "packages/sync-core/src/uint64.ts",
+      "sha256": "1551c72973aeecee7422009e931f7abc31d294b4e8779a97aecfd1fce3cc4781"
+    },
+    "syncCoreViolations": {
+      "path": "packages/sync-core/src/violations.ts",
+      "sha256": "148effe9deaf4c5e88ff24cee6dc6a247cd08043f515ecbca1869addce72276c"
+    },
+    "webChannelDomain": {
+      "path": "packages/web/src/store/channelDomain.ts",
+      "sha256": "2337d2458d0c994d51e7cb361483aacea843cbee55185245fc43c08b486a0392"
+    },
+    "webMessageStore": {
+      "path": "packages/web/src/store/messageStore.ts",
+      "sha256": "4304afdeefa98ebe3e0fee858e4067cbb019da5c54a7489a676bcd8426b4760b"
+    },
+    "webMessageSyncDomain": {
+      "path": "packages/web/src/store/messageSyncDomain.ts",
+      "sha256": "17e7f4bdc6bb959aec8be87a9f75e96e567cbaaa17925ed3fd06cc510b015b29"
+    },
+    "webNotificationPrefsSyncDomain": {
+      "path": "packages/web/src/store/notificationPrefsSyncDomain.ts",
+      "sha256": "bd167f42c37e186fb63c0900cc627b5fb6efa1f802a1dbbd73d742c8e3780d0d"
+    },
+    "webReactionReadModels": {
+      "path": "packages/web/src/store/reactionReadModels.ts",
+      "sha256": "d22b8995e15fc8c24405434022ae91bb7beb985819ed50749fdd4767f9440b0b"
+    },
+    "webReadReceiptDomain": {
+      "path": "packages/web/src/store/readReceiptDomain.ts",
+      "sha256": "12aad0e3a6e1b2d69adc3db2a69cff8f3fc7a70bbf2ff7ba52a31a08b343bb24"
+    },
+    "webReadStateSync": {
+      "path": "packages/web/src/store/readStateSync.ts",
+      "sha256": "ef1b5b56a7336b352294c8e32bb0343a8830a5e76edf4807a0cf115cd3928a37"
+    }
+  }
+}

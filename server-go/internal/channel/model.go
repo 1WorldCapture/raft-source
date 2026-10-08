@@ -146,6 +146,16 @@ func scanChannel(scanner interface{ Scan(dest ...any) error }) (*Channel, error)
 		&archivedAt, &archivedByUser, &archivedByAgent, &deletedAt); err != nil {
 		return nil, err
 	}
+	applyChannelNulls(&c, description, systemKind, parentMessage, archivedByUser, archivedByAgent,
+		guestVisible, guestJoinable, createdAt, archivedAt, deletedAt)
+	return &c, nil
+}
+
+// applyChannelNulls copies the scanned nullable channel columns onto the
+// struct. Shared by scanChannel and the M4 projections that append columns
+// after the channel row.
+func applyChannelNulls(c *Channel, description, systemKind, parentMessage, archivedByUser, archivedByAgent sql.NullString,
+	guestVisible, guestJoinable int, createdAt int64, archivedAt, deletedAt sql.NullInt64) {
 	if description.Valid {
 		v := description.String
 		c.Description = &v
@@ -177,5 +187,4 @@ func scanChannel(scanner interface{ Scan(dest ...any) error }) (*Channel, error)
 		t := time.UnixMilli(deletedAt.Int64).UTC()
 		c.DeletedAt = &t
 	}
-	return &c, nil
 }

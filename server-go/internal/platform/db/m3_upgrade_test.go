@@ -90,8 +90,7 @@ var m3DocumentedMigrationBackfills = map[string]map[string]string{
 // rows a migration itself inserts into a BRAND-NEW table while upgrading
 // (backfills). New tables must otherwise come out of the migration empty.
 var m3DocumentedMigrationInserts = map[string]string{
-	// Example shape once needed:
-	// "channel_agents": "docs/m3-channel-contract.md §… auto-joins …",
+	"authority_clock": "docs/m4-authority-contract.md §Migration0012: exactly one internal counter origin (id=1,value=0), not a membership/message/receipt",
 }
 
 // Fixed M2-era identifiers so dumps and assertions stay deterministic.

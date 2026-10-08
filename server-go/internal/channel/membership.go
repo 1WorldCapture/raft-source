@@ -1,6 +1,8 @@
 // Roster membership writes, porting addHuman/addAgent/removeHuman/removeAgent/
 // addGuestHumanIfAllowed plus the empty-private-channel cleanup. Every write
-// accepts an optional Executor so callers can run inside their transaction.
+// accepts an optional Executor so callers can run inside their transaction;
+// real roster transitions also record their channel:members-updated intent on
+// that same transaction (publications.go documents the dispatch contract).
 package channel
 
 import (
@@ -11,8 +13,45 @@ import (
 
 // AddHuman ports addHuman: server membership is required, guests may never be
 // channel admins, system channels are a no-op for non-guests, and the insert
-// is idempotent. Returns whether a row was newly created.
+// is idempotent. Returns whether a row was newly created. A REAL insert
+// records the channel:members-updated intent on the same transaction (the
+// TS add-member emission pair derives from it, see publications.go); an
+// idempotent no-op records nothing. Callers that must build roster rows
+// without a membership event (CreateChannel's initial members, whose TS
+// counterpart only publishes the channel itself) use addHumanRow directly.
 func (s *Store) AddHuman(ctx context.Context, channelID, userID string, role string, ex Executor) (bool, error) {
+	if tx, ok := ex.(*sql.Tx); ok {
+		return s.addHumanWithIntent(ctx, tx, channelID, userID, role)
+	}
+	// A bare handle is wrapped in one write transaction so the roster row and
+	// its intent can never commit apart.
+	var added bool
+	err := s.withTx(ctx, func(tx *sql.Tx) error {
+		var err error
+		added, err = s.addHumanWithIntent(ctx, tx, channelID, userID, role)
+		return err
+	})
+	return added, err
+}
+
+func (s *Store) addHumanWithIntent(ctx context.Context, tx *sql.Tx, channelID, userID, role string) (bool, error) {
+	added, err := s.addHumanRow(ctx, tx, channelID, userID, role)
+	if err != nil || !added {
+		return added, err
+	}
+	channel, err := s.getChannel(ctx, tx, channelID, false)
+	if err != nil {
+		return added, err
+	}
+	if channel == nil {
+		return added, &DomainError{Code: CodeNotFound, Message: "Channel not found"}
+	}
+	return added, s.enqueueMembersUpdated(ctx, tx, channel.WorkspaceID, channelID, userID)
+}
+
+// addHumanRow is the quiet roster write every caller shares: guards plus the
+// idempotent insert, no realtime intent.
+func (s *Store) addHumanRow(ctx context.Context, ex Executor, channelID, userID string, role string) (bool, error) {
 	if role == "" {
 		role = ChannelRoleMember
 	}
@@ -63,8 +102,39 @@ func (s *Store) AddHuman(ctx context.Context, channelID, userID string, role str
 }
 
 // AddAgent ports addAgent: the agent must be live and belong to the channel's
-// workspace; system channels are a no-op. Idempotent insert.
+// workspace; system channels are a no-op. Idempotent insert. A REAL insert
+// records the channel:members-updated intent on the same transaction; agent
+// roster changes carry no subject (the TS emission has no targeted frame).
 func (s *Store) AddAgent(ctx context.Context, channelID, agentID string, role string, ex Executor) (bool, error) {
+	if tx, ok := ex.(*sql.Tx); ok {
+		return s.addAgentWithIntent(ctx, tx, channelID, agentID, role)
+	}
+	var added bool
+	err := s.withTx(ctx, func(tx *sql.Tx) error {
+		var err error
+		added, err = s.addAgentWithIntent(ctx, tx, channelID, agentID, role)
+		return err
+	})
+	return added, err
+}
+
+func (s *Store) addAgentWithIntent(ctx context.Context, tx *sql.Tx, channelID, agentID, role string) (bool, error) {
+	added, err := s.addAgentRow(ctx, tx, channelID, agentID, role)
+	if err != nil || !added {
+		return added, err
+	}
+	channel, err := s.getChannel(ctx, tx, channelID, false)
+	if err != nil {
+		return added, err
+	}
+	if channel == nil {
+		return added, &DomainError{Code: CodeNotFound, Message: "Channel not found"}
+	}
+	return added, s.enqueueMembersUpdated(ctx, tx, channel.WorkspaceID, channelID, "")
+}
+
+// addAgentRow is the quiet roster write: guards plus the idempotent insert.
+func (s *Store) addAgentRow(ctx context.Context, ex Executor, channelID, agentID string, role string) (bool, error) {
 	if role == "" {
 		role = ChannelRoleMember
 	}
@@ -103,48 +173,126 @@ func (s *Store) AddAgent(ctx context.Context, channelID, agentID string, role st
 }
 
 // RemoveHuman ports removeHuman (thread refusal, system-channel refusal, then
-// the row delete plus the empty-private-channel cleanup).
+// the row delete plus the empty-private-channel cleanup). A REAL row removal
+// records the channel:members-updated intent on the same transaction
+// (subject empty: the TS removal emission has no targeted frame); deleting a
+// member who was never on the roster records nothing.
 func (s *Store) RemoveHuman(ctx context.Context, channelID, userID string, ex Executor) error {
-	channel, err := s.getChannel(ctx, ex, channelID, false)
-	if err != nil {
-		return err
+	if tx, ok := ex.(*sql.Tx); ok {
+		return s.removeHumanWithIntent(ctx, tx, channelID, userID)
 	}
-	if channel != nil && channel.Type == TypeThread {
-		return &DomainError{Code: CodeInvalidInput, Message: "Thread membership is managed via follow/unfollow, not channel_humans"}
-	}
-	if channel != nil && IsAllSystemChannel(channel) {
-		return &DomainError{Code: CodeForbidden, Message: "Cannot leave or remove from the #all channel"}
-	}
-	if channel != nil && IsAnnouncementChannel(channel) {
-		return &DomainError{Code: CodeForbidden, Message: "Cannot remove members from, or leave, the #announcement channel"}
-	}
-	if _, err := ex.ExecContext(ctx, `
-		DELETE FROM channel_humans WHERE channel_id = ? AND user_id = ?`, channelID, userID); err != nil {
-		return fmt.Errorf("delete channel_humans: %w", err)
-	}
-	return s.deletePrivateChannelIfEmpty(ctx, channelID, ex)
+	return s.withTx(ctx, func(tx *sql.Tx) error {
+		return s.removeHumanWithIntent(ctx, tx, channelID, userID)
+	})
 }
 
-// RemoveAgent ports removeAgent.
-func (s *Store) RemoveAgent(ctx context.Context, channelID, agentID string, ex Executor) error {
-	channel, err := s.getChannel(ctx, ex, channelID, false)
+func (s *Store) removeHumanWithIntent(ctx context.Context, tx *sql.Tx, channelID, userID string) error {
+	removed, workspaceID, err := s.removeHumanRow(ctx, tx, channelID, userID)
 	if err != nil {
 		return err
 	}
+	if removed {
+		if err := s.enqueueMembersUpdated(ctx, tx, workspaceID, channelID, ""); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// removeHumanRow is the quiet roster write: guards, the row delete, and the
+// empty-private-channel cleanup. It reports whether a row was actually
+// deleted and the workspace the channel belongs to ("" when the channel row
+// is gone, in which case no intent is possible).
+func (s *Store) removeHumanRow(ctx context.Context, ex Executor, channelID, userID string) (bool, string, error) {
+	channel, err := s.getChannel(ctx, ex, channelID, false)
+	if err != nil {
+		return false, "", err
+	}
 	if channel != nil && channel.Type == TypeThread {
-		return &DomainError{Code: CodeInvalidInput, Message: "Thread membership is managed via follow/unfollow, not channel_agents"}
+		return false, "", &DomainError{Code: CodeInvalidInput, Message: "Thread membership is managed via follow/unfollow, not channel_humans"}
 	}
 	if channel != nil && IsAllSystemChannel(channel) {
-		return &DomainError{Code: CodeForbidden, Message: "Cannot remove members from the #all channel"}
+		return false, "", &DomainError{Code: CodeForbidden, Message: "Cannot leave or remove from the #all channel"}
 	}
 	if channel != nil && IsAnnouncementChannel(channel) {
-		return &DomainError{Code: CodeForbidden, Message: "Cannot remove members from the #announcement channel"}
+		return false, "", &DomainError{Code: CodeForbidden, Message: "Cannot remove members from, or leave, the #announcement channel"}
 	}
-	if _, err := ex.ExecContext(ctx, `
-		DELETE FROM channel_agents WHERE channel_id = ? AND agent_id = ?`, channelID, agentID); err != nil {
-		return fmt.Errorf("delete channel_agents: %w", err)
+	res, err := ex.ExecContext(ctx, `
+		DELETE FROM channel_humans WHERE channel_id = ? AND user_id = ?`, channelID, userID)
+	if err != nil {
+		return false, "", fmt.Errorf("delete channel_humans: %w", err)
 	}
-	return s.deletePrivateChannelIfEmpty(ctx, channelID, ex)
+	removed, err := res.RowsAffected()
+	if err != nil {
+		return false, "", err
+	}
+	workspaceID := ""
+	if channel != nil {
+		workspaceID = channel.WorkspaceID
+	}
+	if err := s.deletePrivateChannelIfEmpty(ctx, channelID, ex); err != nil {
+		return false, "", err
+	}
+	return removed > 0, workspaceID, nil
+}
+
+// RemoveAgent ports removeAgent. A REAL row removal records the
+// channel:members-updated intent on the same transaction (subject empty).
+func (s *Store) RemoveAgent(ctx context.Context, channelID, agentID string, ex Executor) error {
+	if tx, ok := ex.(*sql.Tx); ok {
+		return s.removeAgentWithIntent(ctx, tx, channelID, agentID)
+	}
+	return s.withTx(ctx, func(tx *sql.Tx) error {
+		return s.removeAgentWithIntent(ctx, tx, channelID, agentID)
+	})
+}
+
+func (s *Store) removeAgentWithIntent(ctx context.Context, tx *sql.Tx, channelID, agentID string) error {
+	removed, workspaceID, err := s.removeAgentRow(ctx, tx, channelID, agentID)
+	if err != nil {
+		return err
+	}
+	if removed {
+		if err := s.enqueueMembersUpdated(ctx, tx, workspaceID, channelID, ""); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// removeAgentRow is the quiet roster write: guards, the row delete, and the
+// empty-private-channel cleanup.
+func (s *Store) removeAgentRow(ctx context.Context, ex Executor, channelID, agentID string) (bool, string, error) {
+	channel, err := s.getChannel(ctx, ex, channelID, false)
+	if err != nil {
+		return false, "", err
+	}
+	if channel != nil && channel.Type == TypeThread {
+		return false, "", &DomainError{Code: CodeInvalidInput, Message: "Thread membership is managed via follow/unfollow, not channel_agents"}
+	}
+	if channel != nil && IsAllSystemChannel(channel) {
+		return false, "", &DomainError{Code: CodeForbidden, Message: "Cannot remove members from the #all channel"}
+	}
+	if channel != nil && IsAnnouncementChannel(channel) {
+		return false, "", &DomainError{Code: CodeForbidden, Message: "Cannot remove members from the #announcement channel"}
+	}
+	res, err := ex.ExecContext(ctx, `
+		DELETE FROM channel_agents WHERE channel_id = ? AND agent_id = ?`, channelID, agentID)
+	if err != nil {
+		return false, "", fmt.Errorf("delete channel_agents: %w", err)
+	}
+	removed, err := res.RowsAffected()
+	if err != nil {
+		return false, "", err
+	}
+	workspaceID := ""
+	if channel != nil {
+		workspaceID = channel.WorkspaceID
+	}
+	if err := s.deletePrivateChannelIfEmpty(ctx, channelID, ex); err != nil {
+		return false, "", err
+	}
+	return removed > 0, workspaceID, nil
 }
 
 // deletePrivateChannelIfEmpty ports the TS helper: a private channel with no

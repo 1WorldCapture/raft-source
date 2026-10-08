@@ -552,15 +552,7 @@ func (s *Service) SetAvatarURL(ctx context.Context, userID, path string) (*User,
 // ── helpers ──
 
 func (s *Service) withTx(ctx context.Context, fn func(tx *sql.Tx) error) error {
-	tx, err := s.store.DB().BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if err := fn(tx); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return db.WithWriteTx(ctx, s.store.DB(), fn)
 }
 
 func (s *Service) send(ctx context.Context, to, subject, htmlBody, kind, token string) error {

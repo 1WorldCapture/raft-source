@@ -76,15 +76,9 @@ type executor interface {
 }
 
 func (s *Store) withTx(ctx context.Context, fn func(tx *sql.Tx) error) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	if err := fn(tx); err != nil {
-		_ = tx.Rollback()
-		return err
-	}
-	return tx.Commit()
+	// Onboarding may reveal/create channels. Publish those authority changes
+	// under the same M4 admission fence without changing the M3 wire protocol.
+	return db.WithWriteTx(ctx, s.db, fn)
 }
 
 // ---------------------------------------------------------------------------

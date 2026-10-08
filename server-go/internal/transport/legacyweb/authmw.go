@@ -52,6 +52,9 @@ func (g *AuthGate) Require(next http.HandlerFunc) http.HandlerFunc {
 			}
 		}
 		ctx := context.WithValue(r.Context(), ctxUserID, user.ID)
+		// Preserve the verified proof for M4's in-transaction revalidation.
+		// Never reconstruct it from client-supplied sender/family fields.
+		ctx = context.WithValue(ctx, accessClaimsContextKey{}, *claims)
 		if claims.FamilyID != "" {
 			ctx = context.WithValue(ctx, ctxFamilyID, claims.FamilyID)
 		}
@@ -87,6 +90,14 @@ func writeInvalidToken(w http.ResponseWriter) {
 func userID(r *http.Request) string {
 	v, _ := r.Context().Value(ctxUserID).(string)
 	return v
+}
+
+type accessClaimsContextKey struct{}
+
+// A missing proof fails closed in auth.ValidateHumanTx.
+func accessClaims(r *http.Request) auth.AccessTokenClaims {
+	claims, _ := r.Context().Value(accessClaimsContextKey{}).(auth.AccessTokenClaims)
+	return claims
 }
 
 // RequireVerified mirrors the TS function with this name: email verification

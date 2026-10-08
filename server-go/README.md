@@ -1,8 +1,8 @@
-# Raft Go Server — 账号、工作空间与执行接入后端（M1 + M2 + M3）
+# Raft Go Server — 账号、工作空间、执行接入与人类聊天后端（M1–M4）
 
 在 `raft-source/server-go/` 中独立重建的 Go Server。旧 TypeScript Server 仅作为协议与行为参考，不参与运行。
 
-**当前阶段：M3 频道、Agent 身份与生命周期、Computer 接入和 Daemon 协议已接入同一 Go 进程。后端验收及交接记录见 [M3 交接文档](docs/phase-3-backend-handoff.md)。本次不运行或验收 Web UI 端到端测试。** M1/M2 账号与工作空间能力保持兼容；新 owner 仍使用原 `onboarding-setup-v2` 门禁，真实 Agent 创建与官方 Cindy 身份由同一 SQLite 事务保存。聊天消息、Socket.IO 和可靠投递仍属于 M4/M5，不使用假成功绕过。
+**当前工作区已接入 M4 人类聊天、持久历史、Socket.IO、DM/线程、reaction、已读及 human Activity/Inbox。后端收尾与实际验收结果见 [M4 后端交接](docs/phase-4-backend-handoff.md)。UI 由独立协作者验收；在该签收完成前，构建 Stage 保持 `m3`，不把后端测试冒充整体产品发布。** M1–M3 账号、工作空间、Agent/Computer 身份及 Daemon 接入保持兼容；原 `onboarding-setup-v2` 门禁保留。M5 Agent 可靠投递、ACK、任务执行仍未实现，人类消息持久化不代表 Agent 已消费。
 
 - [整体架构与阶段设计](docs/architecture-and-phase-1.md)
 - [M1 后端验收记录及联调交接](docs/backend-handoff.md)
@@ -10,7 +10,8 @@
 - [M2 输入设计（保留原稿）](docs/phase-2-workspaces.md)
 - [M3 实施结果、后端验收、升级与 UI 测试交接](docs/phase-3-backend-handoff.md)
 - [M3 UI 问题修复与最终集成验证（含0009迁移及部署状态）](docs/m3-ui-fix-closeout.md)
-- [M4 消息与实时通信总体设计（待实施）](docs/phase-4-messaging.md)
+- [M4 后端收尾、验收证据与 UI/发布交接](docs/phase-4-backend-handoff.md)
+- [M4 消息与实时通信总体设计（保留输入设计）](docs/phase-4-messaging.md)
 - [M4 HTTP / Socket.IO 兼容合同](docs/m4-compatibility-contract.md)
 - [M4 人类 Activity / Inbox / 已读状态合同](docs/m4-activity-readstate-contract.md)
 - [M4 实施协调、工作包与验收责任](docs/m4-implementation-coordination.md)
@@ -23,22 +24,23 @@
 ```sh
 cd /Users/lyon/workspace/raft-source/server-go
 # 首次试用使用独立目录；不要未经备份直接升级原 var/。
-export RAFT_GO_DATA_DIR="$PWD/var-m3-dev"
+export RAFT_GO_DATA_DIR="$PWD/var-m4-local"
+export RAFT_GO_LISTEN=127.0.0.1:4302  # 独立联调端口，不替换既有 4301 实例
 export RAFT_GO_WEB_ORIGIN=http://127.0.0.1:5175
 go run ./cmd/raft-server
 ```
 
-`RAFT_GO_WEB_ORIGIN` 请换成 UI 协作者实际使用的前端 origin。它用于生成验证/重置邮件链接、设备授权页面链接及 Agent 控制平面地址，**不是启动 Web UI 的开关，也不会配置浏览器 CORS**。后端本身不提供前端页面；同源代理需要一起转发 `/api`、`/internal` 和支持 WebSocket upgrade 的 `/daemon`。
+`RAFT_GO_WEB_ORIGIN` 请换成 UI 协作者实际使用的前端 origin。它用于生成验证/重置邮件链接、设备授权页面链接及 Agent 控制平面地址，并作为 M4 Socket.IO 的 Origin 允许来源；**不是启动 Web UI 的开关，也不为普通 HTTP API 开启任意跨域访问**。未配置允许来源时，携带 Origin 的浏览器 Socket 握手会被拒绝。同源代理需要转发 `/api`、`/internal`，以及支持 WebSocket upgrade 的 `/daemon` 和 `/socket.io/`。M4 Socket.IO 只承诺 websocket-only，不支持 polling。
 
 默认监听 `127.0.0.1:4301`，数据存入当前工作目录的 `var/`。首次启动自动执行嵌入的 SQLite migration，生成并持久化独立签名密钥。Go 语言基线是 1.26；本次实际测试工具链为 `go1.27.1 darwin/arm64`。
 
 ```sh
-curl -i http://127.0.0.1:4301/healthz
-curl -i http://127.0.0.1:4301/readyz
-curl -i http://127.0.0.1:4301/version  # stage=m3；核对实际运行的构建
+curl -i http://127.0.0.1:4302/healthz
+curl -i http://127.0.0.1:4302/readyz
+curl -i http://127.0.0.1:4302/version  # stage=m3（等待独立 UI/发布签收）；核对实际构建
 ```
 
-`/healthz` 表示进程存活；`/readyz` 检查数据库和 migration，不声称 SMTP 可投递或完整聊天系统已经就绪。
+`/healthz` 表示进程存活；`/readyz` 检查数据库、migration 和 publication 积压准入，不声称 SMTP 可投递、浏览器已收到消息或 Agent 已消费。
 
 构建后运行不需要 Go、Node 或 C 动态库：
 
@@ -114,6 +116,12 @@ HTTP 形状：注册/登录返回 `{user, accessToken, refreshToken}`；`GET /ap
 
 未验证邮箱与未完成资料会阻止工作空间表面访问。`/:id` 路径还要求匹配的 `X-Server-Id` 及真实 membership；guest 不能访问对应管理表面。注册不自动验证邮箱，无默认管理员或共享密码。
 
+### M4 人类聊天与恢复
+
+M4 追加原 v2/v1 文本写入、`randomId` 幂等、历史/定位/补同步、人类 DM 与 self-DM、线程创建/回复/关注、reaction 聚合及本人 viewer 状态。已读/标未读/read-all、mute/display 偏好和 human Activity/Inbox/Done 均来自持久事实。实时事件通过与业务事务原子提交的 publication outbox 投影；发送、历史、同步和 live 受众复用当前频道权限，私有父频道失权后残留 follow 不授予内容访问。
+
+原版 Socket.IO 客户端协议验收不需要启动浏览器。`message.seq`、聚合版本、Activity 水位和内部 publication ID 互不替代。断线与重启依靠持久读模型恢复，不把网络写成功称为 delivered/consumed。具体支持矩阵、故障窗口和后端测试证据见 M4 交接文档。
+
 ## 一致性与故障语义
 
 SQLite 使用经启动验证的 WAL、`synchronous=FULL`、每连接外键、8 个连接和短 IMMEDIATE 写事务。锁等待保留每次操作最多约 10 秒的预算，但原生等待切为 50ms，并在 Go 中响应请求取消；只重试事务取得锁之前或单条 autocommit 操作，不重放事务正文或提交。迁移逐项消费 `foreign_key_check` 结果，失败回滚当前迁移。只面向本地磁盘，不用 NFS/共享网络盘充当多机数据库。
@@ -138,7 +146,7 @@ go mod verify
 go mod tidy -diff  # 只检查依赖整理差异，不改 go.mod/go.sum
 ```
 
-HTTP runner 在系统临时目录构建并运行新二进制，使用临时 SQLite/独立密钥/outbox。它保留 M1/M2 验收，并增加 M3 Computer、Daemon、Agent、频道与跨进程持久化；升级测试先构建冻结的、已提交的 M2 程序，生成真实旧数据后交给 M3 升级，并验证旧程序对新 schema 拒绝启动。原版 Computer/Daemon 客户端通过直连及隔离的同源代理访问 Go。所有测试只清理自己的进程与临时目录。另有冻结 TS 原函数的纯投影对照，不代表完整 PostgreSQL/TS HTTP 对照。**不启动 Vite、浏览器、旧 TS Server 或真实 LLM，也不修改已有 UI 测试结果。**
+HTTP runner 在系统临时目录构建并运行新二进制，使用临时 SQLite/独立密钥/outbox。`make check` 运行 M1–M4 全部后端套件，包括 Computer/Daemon/Agent、频道、M4 HTTP 与真实 Socket.IO 客户端恢复；冻结原 TS 合同和实时采集的 Go wire 均参与兼容检查，检查模式不重写 wire 证据。升级矩阵包括真实旧二进制生成的 M2、未打补丁 M3 和邀请修复版 M3 数据，并验证旧程序拒绝新 schema、配套冷备份可恢复。原版 Computer/Daemon 客户端通过直连及隔离的同源代理访问 Go。所有测试只清理自己的进程与临时目录。另有冻结 TS 原函数的纯投影对照，不代表完整 PostgreSQL/TS HTTP 对照。**不启动 Vite、浏览器、旧 TS Server 或真实 LLM，也不修改已有 UI 测试结果。**
 
 ## 备份、升级与恢复
 
@@ -148,11 +156,13 @@ HTTP runner 在系统临时目录构建并运行新二进制，使用临时 SQLi
 
 M3 仅追加 `0006_channel_core.sql`、`0007_computer_admission.sql`、`0008_agent_identity.sql`，不改写 0001–0005。升级证据同时覆盖隔离的 M1 数据库与真实 M2 二进制生成的数据；没有替用户升级现有 `var/`。升级前完整冷备份，回滚使用旧程序与其匹配的旧数据备份，不把旧程序直接指向已升级数据库。
 
+M4 追加 `0010_messaging_foundation.sql`、`0011_readstate_activity.sql`、`0012_authority_epochs.sql`、`0013_activity_mute_epochs.sql`；不改写 0001–0009，也不自动迁移协作者正在使用的 `var-m3-dev/`。原 M3 邀请修复使用 0009。已有消息为空时保持真实空态，不补假欢迎消息。
+
 密钥损坏时恢复原密钥，而不是删除密钥文件重新启动；否则原 access token 和加密刷新收据无法正常恢复。密钥与数据库必须配套备份，备份本身含账号和凭据材料。
 
 ## 交付边界
 
-本阶段交付的是**可独立运行的 M3 后端及客户端协议接入**，不是整套 Raft 上线验收。仅注册实际支持的 `/internal/*` 和 `/daemon/connect`；未知内部路由拒绝访问，未实现的已知产品表面明确返回 404/501。M4 消息/历史/未读/Socket.IO、M5 可靠投递/ACK/任务执行闭环不在本次范围。
+本次交付的是**同一 Go 进程内的 M1–M4 后端及原客户端协议兼容能力**，不是整套 Raft 上线验收。仅注册实际支持的路由；未知内部路由拒绝访问，未实现的已知产品表面明确返回 404/501。M5 可靠投递/ACK/Agent 任务执行、附件、转发、全文搜索、联合频道和 Office 不因 M4 人类聊天可用而自动启用。UI 签收、Stage 晋级和现有实例部署由相应责任人继续处理。
 
 新空间初始仍是 `surface=computer_runtime`、`phase=not_started`、`blocksChat=true`；随后可以接入真实 Computer、创建 Agent 并提交真实 setup checkpoint。创建身份或派发启动命令不等于 LLM 已成功执行，不把缺失后续请求或前端降级显示当作成功证据。
 

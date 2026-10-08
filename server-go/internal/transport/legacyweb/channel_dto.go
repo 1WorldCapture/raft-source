@@ -10,40 +10,40 @@ import (
 	"raft.local/server-go/internal/channel"
 )
 
-// readStateFrontier is the #632 absent-cursor shape ({kind:"absent"}): no
-// read-cursor rows exist in this phase, and absence is a fact, not "all read".
-type readStateFrontier struct {
-	Kind string `json:"kind"`
-}
+// m4ReadStateAbsent is the #632 absent-cursor shape ({kind:"absent"}): the
+// explicit M3 fixture default, and the honest value while no cursor row
+// exists. With an M4 projector wired the exact union JSON arrives verbatim
+// from the readstate slice.
+var m4ReadStateAbsent = json.RawMessage(`{"kind":"absent"}`)
 
 // channelView is the shared list/detail/create projection body.
 type channelView struct {
 	channel.Wire
-	Joined                   bool              `json:"joined"`
-	ChannelRole              *string           `json:"channelRole"`
-	ChannelAdminBasis        *string           `json:"channelAdminBasis"`
-	ChannelCapabilities      map[string]bool   `json:"channelCapabilities"`
-	ChannelAuthorityRevision *int64            `json:"channelAuthorityRevision"`
-	MaxReadSeq               int64             `json:"maxReadSeq"`
-	ReadStateVersion         int64             `json:"readStateVersion"`
-	ReadState                readStateFrontier `json:"readState"`
-	ActivityMuted            *bool             `json:"activityMuted,omitempty"`
-	MuteFromSeq              any               `json:"muteFromSeq,omitempty"`
-	PrefsVersion             *int64            `json:"prefsVersion,omitempty"`
-	ActivityMuteSupported    *bool             `json:"activityMuteSupported,omitempty"`
-	CollapseLongMessages     *bool             `json:"collapseLongMessages,omitempty"`
-	DisplayPrefsVersion      *int64            `json:"displayPrefsVersion,omitempty"`
-	LastMessageAt            any               `json:"lastMessageAt,omitempty"`
-	LastMessagePreview       any               `json:"lastMessagePreview,omitempty"`
-	JointChannelID           any               `json:"jointChannelId"`
-	JointRole                any               `json:"jointRole"`
-	JointPeerServerID        any               `json:"jointPeerServerId"`
-	JointPeerServerName      any               `json:"jointPeerServerName"`
-	JointPeerServerSlug      any               `json:"jointPeerServerSlug"`
-	JointPeerStatus          any               `json:"jointPeerStatus"`
-	JointServers             []any             `json:"jointServers"`
-	JointPendingInvites      []any             `json:"jointPendingInvites"`
-	JointBillingLocked       any               `json:"jointBillingLocked"`
+	Joined                   bool            `json:"joined"`
+	ChannelRole              *string         `json:"channelRole"`
+	ChannelAdminBasis        *string         `json:"channelAdminBasis"`
+	ChannelCapabilities      map[string]bool `json:"channelCapabilities"`
+	ChannelAuthorityRevision *int64          `json:"channelAuthorityRevision"`
+	MaxReadSeq               int64           `json:"maxReadSeq"`
+	ReadStateVersion         int64           `json:"readStateVersion"`
+	ReadState                json.RawMessage `json:"readState"`
+	ActivityMuted            *bool           `json:"activityMuted,omitempty"`
+	MuteFromSeq              any             `json:"muteFromSeq,omitempty"`
+	PrefsVersion             *int64          `json:"prefsVersion,omitempty"`
+	ActivityMuteSupported    *bool           `json:"activityMuteSupported,omitempty"`
+	CollapseLongMessages     *bool           `json:"collapseLongMessages,omitempty"`
+	DisplayPrefsVersion      *int64          `json:"displayPrefsVersion,omitempty"`
+	LastMessageAt            any             `json:"lastMessageAt,omitempty"`
+	LastMessagePreview       any             `json:"lastMessagePreview,omitempty"`
+	JointChannelID           any             `json:"jointChannelId"`
+	JointRole                any             `json:"jointRole"`
+	JointPeerServerID        any             `json:"jointPeerServerId"`
+	JointPeerServerName      any             `json:"jointPeerServerName"`
+	JointPeerServerSlug      any             `json:"jointPeerServerSlug"`
+	JointPeerStatus          any             `json:"jointPeerStatus"`
+	JointServers             []any           `json:"jointServers"`
+	JointPendingInvites      []any           `json:"jointPendingInvites"`
+	JointBillingLocked       any             `json:"jointBillingLocked"`
 }
 
 // addAuthority attaches the viewer's channel authority projection
@@ -118,29 +118,42 @@ func (v *channelView) jointMetadata() {
 	v.JointBillingLocked = nil
 }
 
-// listView builds one GET /api/channels item (lastMessageAt/preview are null:
-// no messages exist).
-func channelListItem(c channel.Channel, joined bool, ac *channel.ActorContext) channelView {
+// listView builds one GET /api/channels item. Without an M4 projector the
+// fixture defaults below stand (no messages/cursors exist in standalone M3);
+// with one, the projector's real read/mute/display/last-message values
+// overlay them on the same pinned snapshot.
+func channelListItem(c channel.Channel, joined bool, ac *channel.ActorContext, m4 m4ChannelProjectionRow) channelView {
 	v := baseChannelView(c, joined)
 	v.addAuthority(ac)
 	v.addMuteState(&c, true)
 	v.addDisplayPrefs()
-	// List is the only exit that attaches last-message fields. With no
-	// messages table the honest values are JSON null, not omitted keys.
+	// List is the only channels exit attaching last-message fields; the
+	// original list never carries a preview (includePreview is DM-list only).
 	v.LastMessageAt = json.RawMessage("null")
 	v.LastMessagePreview = json.RawMessage("null")
+	if m4.wired {
+		// The wired projector owns presence: an unsupplied preview key is
+		// absent (original shape), never a stale fixture null.
+		v.LastMessagePreview = nil
+	}
 	v.jointMetadata()
+	v.applyM4Projection(m4)
 	return v
 }
 
 // detailView builds one GET /api/channels/:id item. TS does not call
-// attachLastMessageAt on this exit, so last-message keys stay absent.
-func channelDetailView(c channel.Channel, joined bool, ac *channel.ActorContext) channelView {
+// attachLastMessageAt on this exit, so last-message keys stay absent; the M4
+// projector still supplies the real read/mute/display state.
+func channelDetailView(c channel.Channel, joined bool, ac *channel.ActorContext, m4 m4ChannelProjectionRow) channelView {
 	v := baseChannelView(c, joined)
 	v.addAuthority(ac)
 	v.addMuteState(&c, true)
 	v.addDisplayPrefs()
 	v.jointMetadata()
+	v.applyM4Projection(m4)
+	// The original detail exit attaches no last-message keys.
+	v.LastMessageAt = nil
+	v.LastMessagePreview = nil
 	return v
 }
 
@@ -148,7 +161,7 @@ func baseChannelView(c channel.Channel, joined bool) channelView {
 	return channelView{
 		Wire:      c.Wire(),
 		Joined:    joined,
-		ReadState: readStateFrontier{Kind: "absent"},
+		ReadState: m4ReadStateAbsent,
 	}
 }
 
@@ -161,7 +174,7 @@ type createView struct {
 	JointInvite  any   `json:"jointInvite"`
 }
 
-func channelCreateView(c channel.Channel, ac *channel.ActorContext) createView {
+func channelCreateView(c channel.Channel, ac *channel.ActorContext, m4 m4ChannelProjectionRow) createView {
 	v := createView{
 		channelView:  baseChannelView(c, true),
 		JointInvites: []any{},
@@ -170,6 +183,15 @@ func channelCreateView(c channel.Channel, ac *channel.ActorContext) createView {
 	v.addAuthority(ac)
 	v.addMuteState(&c, true)
 	v.jointMetadata()
+	// A fresh channel legitimately has no viewer state; the wired projector
+	// states that from the same snapshot instead of a hardcoded old scope.
+	v.applyM4Projection(m4)
+	// The original create exit never carries display or last-message keys;
+	// the projector's shared projection cannot widen this exit's key set.
+	v.CollapseLongMessages = nil
+	v.DisplayPrefsVersion = nil
+	v.LastMessageAt = nil
+	v.LastMessagePreview = nil
 	return v
 }
 

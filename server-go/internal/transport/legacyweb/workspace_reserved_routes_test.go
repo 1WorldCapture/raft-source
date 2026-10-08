@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestM3ReservedWorkspaceReadsDoNotBecomeWorkspaceIDs(t *testing.T) {
+func TestM4ReservedWorkspaceReadsDoNotBecomeWorkspaceIDs(t *testing.T) {
 	e := newTestEnv(t)
 	_, access, _ := e.fullAccount("reserved@example.test", "reservedtester")
 	for _, name := range []string{"unread-summary", "join-community"} {
@@ -16,7 +16,19 @@ func TestM3ReservedWorkspaceReadsDoNotBecomeWorkspaceIDs(t *testing.T) {
 					headers["X-Server-Id"] = header
 				}
 				res := e.serve(method, "/api/servers/"+name, nil, headers)
-				if res.status != http.StatusNotFound || res.body["code"] != "feature_not_implemented" {
+				if name == "unread-summary" {
+					// M4 replaces the old reserved/deferred surface with the
+					// actual user-scoped read model. This account has no spaces,
+					// so its real summary is an empty array, irrespective of a
+					// bogus X-Server-Id. Mutating methods remain explicit 405.
+					if method == http.MethodGet || method == http.MethodHead {
+						if res.status != http.StatusOK || len(decodeBareArray(t, res.raw)) != 0 {
+							t.Fatalf("%s user-scoped unread summary: %d %s", method, res.status, res.raw)
+						}
+					} else if res.status != http.StatusMethodNotAllowed || res.header.Get("Allow") != http.MethodGet {
+						t.Fatalf("%s unread summary method policy: %d %s", method, res.status, res.raw)
+					}
+				} else if res.status != http.StatusNotFound || res.body["code"] != "feature_not_implemented" {
 					t.Fatalf("%s reserved %s: %d %s", method, name, res.status, res.raw)
 				}
 			}

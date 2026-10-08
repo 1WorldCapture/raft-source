@@ -26,6 +26,13 @@ type Deps struct {
 	// RegisterAdditional assembles explicit phase-specific surfaces once at
 	// startup. It never forwards missing endpoints to a second backend.
 	RegisterAdditional func(*http.ServeMux, *AuthGate)
+	// The M4 bundle registers the real user-scoped unread summary. Leaving
+	// this false retains the older-stage explicit unsupported route in
+	// focused transport fixtures; it is not a user-controlled capability.
+	ReadstateRoutes bool
+	// SocketIO owns the actual Engine.IO/Socket.IO HTTP upgrade surface.
+	// Nil remains an explicit unsupported capability, never a raw-WS shim.
+	SocketIO http.Handler
 
 	AuthRatePerMinute         int
 	LoginAccountRatePerMinute int
@@ -146,7 +153,7 @@ func New(deps Deps) http.Handler {
 	}))
 	mux.Handle("GET /api/servers/order", gate(servers.GetOrder))
 	mux.Handle("PATCH /api/servers/order", gate(servers.UpdateOrder))
-	registerReservedWorkspaceRoutes(mux, gate)
+	registerReservedWorkspaceRoutes(mux, gate, deps.ReadstateRoutes)
 
 	// Workspace-scoped routes: X-Server-Id must match the URL id and the
 	// caller must be a real member; management surfaces additionally deny
@@ -177,7 +184,7 @@ func New(deps Deps) http.Handler {
 		mux.Handle("DELETE /api/servers/{id}/invites/{inviteId}", gate(scope(guestFree(invites.RevokeInvite))))
 	}
 	mux.Handle("GET /api/servers/{id}/agent-overview", gate(scope(guestFree(notImplemented("Office overview is not enabled in this server stage")))))
-	registerWorkspaceMethodFallbacks(mux, servers, gate)
+	registerWorkspaceMethodFallbacks(mux, servers, gate, deps.ReadstateRoutes)
 
 	mux.HandleFunc("GET /api/avatars/users/{file}", deps.Avatars.Serve)
 	mux.HandleFunc("GET /api/avatars/servers/{file}", deps.Avatars.ServeServer)
@@ -187,7 +194,11 @@ func New(deps Deps) http.Handler {
 	}
 
 	// Explicitly unsupported surfaces (no fake success).
-	mux.HandleFunc("/socket.io/", notImplemented("Socket.IO realtime transport is not implemented in the account phase"))
+	if deps.SocketIO != nil {
+		mux.Handle("/socket.io/", deps.SocketIO)
+	} else {
+		mux.HandleFunc("/socket.io/", notImplemented("Socket.IO realtime transport is not enabled in this server stage"))
+	}
 	mux.HandleFunc("/internal/", notImplemented("Agent and machine APIs are not implemented in the account phase"))
 	mux.HandleFunc("/daemon/", notImplemented("Daemon protocol is not implemented in the account phase"))
 

@@ -30,6 +30,8 @@ type App struct {
 	sessions  *auth.SessionService
 	mailer    mail.Mailer
 	execution *m3Runtime
+	messaging *m4Runtime
+	realtime  *m4Realtime
 	closeOnce sync.Once
 	closeErr  error
 }
@@ -131,6 +133,23 @@ func Build(opts Options) (*App, error) {
 		Store: workspaceStore, Now: wsClock.Now, Logger: logger,
 		SendInviteMail: inviteMailSender(mailer, cfg),
 	}
+	messaging, err := buildM4(handle, execution.channels, root)
+	if err != nil {
+		_ = handle.Close()
+		db.ReleaseAuthorityFence(handle)
+		return nil, err
+	}
+	var webOrigins []string
+	if cfg.WebOrigin != nil {
+		webOrigins = []string{cfg.WebOrigin.String()}
+	}
+	realtimeRuntime, err := buildM4Realtime(messaging, signer, logger, webOrigins)
+	if err != nil {
+		_ = execution.Close()
+		_ = handle.Close()
+		db.ReleaseAuthorityFence(handle)
+		return nil, err
+	}
 	handler := legacyweb.New(legacyweb.Deps{
 		Handlers: &legacyweb.Handlers{
 			Auth:     service,
@@ -139,10 +158,13 @@ func Build(opts Options) (*App, error) {
 			Users:    users,
 			Gate:     gate,
 		},
-		Servers: serversHandlers,
-		Invites: inviteHandlers,
+		Servers:         serversHandlers,
+		Invites:         inviteHandlers,
+		ReadstateRoutes: true,
+		SocketIO:        realtimeRuntime.Handler(),
 		RegisterAdditional: func(mux *http.ServeMux, gate *legacyweb.AuthGate) {
-			execution.register(mux, gate, serversHandlers)
+			execution.register(mux, gate, serversHandlers, messaging.channelProjector)
+			messaging.register(mux, gate)
 		},
 		Avatars: &legacyweb.AvatarHandlers{
 			Dir:      filepath.Join(cfg.DataDir, "avatars"),
@@ -160,7 +182,7 @@ func Build(opts Options) (*App, error) {
 	wrapped := legacyweb.RequestID(logger)(legacyweb.SecurityHeaders(handler))
 
 	assembled = true
-	return &App{Config: cfg, DB: handle, Handler: wrapped, sessions: sessions, mailer: mailer, execution: execution}, nil
+	return &App{Config: cfg, DB: handle, Handler: wrapped, sessions: sessions, mailer: mailer, execution: execution, messaging: messaging, realtime: realtimeRuntime}, nil
 }
 
 // inviteMailSender builds the one-time invitation delivery used by the
@@ -214,6 +236,9 @@ func (a *App) Ready(ctx context.Context) error {
 	if migrated == 0 {
 		return errNotMigrated
 	}
+	if a.messaging != nil {
+		return a.messaging.publications.Ready(ctx)
+	}
 	return nil
 }
 
@@ -259,10 +284,14 @@ func (a *App) StartJanitor(ctx context.Context, logger *slog.Logger) func() {
 // Concurrent callers observe the same completed shutdown.
 func (a *App) Close() error {
 	a.closeOnce.Do(func() {
+		if a.realtime != nil {
+			a.closeErr = a.realtime.Close()
+		}
 		if a.execution != nil {
-			a.closeErr = a.execution.Close()
+			a.closeErr = errors.Join(a.closeErr, a.execution.Close())
 		}
 		a.closeErr = errors.Join(a.closeErr, a.DB.Close())
+		db.ReleaseAuthorityFence(a.DB)
 	})
 	return a.closeErr
 }

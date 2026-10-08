@@ -3,6 +3,7 @@
 package legacyweb
 
 import (
+	"bufio"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -10,6 +11,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -57,9 +59,21 @@ type statusRecorder struct {
 	status int
 }
 
-// Unwrap lets http.ResponseController and WebSocket libraries reach the
-// underlying Hijacker/Flusher without bypassing the request logging chain.
+// Unwrap lets http.ResponseController-aware handlers reach optional writer
+// capabilities without bypassing the request logging chain.
 func (r *statusRecorder) Unwrap() http.ResponseWriter { return r.ResponseWriter }
+
+// Hijack also exposes the legacy interface directly: Gorilla/Engine.IO
+// asserts http.Hijacker and does not follow Unwrap. Delegate through the
+// controller so nested wrappers remain supported, and record the upgrade
+// only after hijacking succeeds (no fabricated 101 on errors).
+func (r *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	conn, rw, err := http.NewResponseController(r.ResponseWriter).Hijack()
+	if err == nil {
+		r.status = http.StatusSwitchingProtocols
+	}
+	return conn, rw, err
+}
 
 func (r *statusRecorder) WriteHeader(code int) {
 	r.status = code

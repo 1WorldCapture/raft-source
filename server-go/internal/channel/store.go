@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"raft.local/server-go/internal/platform/clock"
+	platformdb "raft.local/server-go/internal/platform/db"
 )
 
 // Executor is satisfied by *sql.DB and *sql.Tx so use cases run inside their
@@ -57,23 +58,20 @@ func (s *Store) now() time.Time { return s.clock.Now() }
 // DB exposes the handle for assembly-time wiring (e.g. auth adapters).
 func (s *Store) DB() *sql.DB { return s.db }
 
-// withTx runs fn inside one IMMEDIATE transaction and rolls back on error.
-// The optional beforeAuthorize hook runs after BEGIN and before fn, on the
-// same transaction, so a test demotion is visible to the recheck in fn and
-// rolls back with it.
+// withTx runs fn inside one IMMEDIATE transaction and rolls back on error,
+// through the shared db.WithWriteTx seam so M4 channel writes hold the
+// per-database authority fence through commit (readers using
+// db.WithAuthorityRead cannot authorize across that boundary). The optional
+// beforeAuthorize hook runs after BEGIN and before fn, on the same
+// transaction, so a test demotion is visible to the recheck in fn and rolls
+// back with it.
 func (s *Store) withTx(ctx context.Context, fn func(tx *sql.Tx) error) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	if s.beforeAuthorize != nil {
-		s.beforeAuthorize(ctx, tx)
-	}
-	if err := fn(tx); err != nil {
-		_ = tx.Rollback()
-		return err
-	}
-	return tx.Commit()
+	return platformdb.WithWriteTx(ctx, s.db, func(tx *sql.Tx) error {
+		if s.beforeAuthorize != nil {
+			s.beforeAuthorize(ctx, tx)
+		}
+		return fn(tx)
+	})
 }
 
 // newUUID mints the legacy UUIDv4 shape for channel/event ids.
@@ -212,6 +210,19 @@ const (
 // mode), a hidden #all is omitted, private channels need explicit membership,
 // and `joined` derives from the implicit-membership rule plus the roster.
 func (s *Store) ListChannels(ctx context.Context, workspaceID, userID, archivedFilter string) ([]ListItem, error) {
+	return s.listChannels(ctx, s.db, workspaceID, userID, archivedFilter, true)
+}
+
+// ListChannelsTx is the read-only executor variant for callers that pin one
+// snapshot for the whole list (and its M4 projections): it performs NO lazy
+// system-channel ensure — creating channels inside a caller's read snapshot
+// would either fail under query_only or tear the snapshot's consistency.
+// Workspaces created since M2 already hold the system rows.
+func (s *Store) ListChannelsTx(ctx context.Context, ex Executor, workspaceID, userID, archivedFilter string) ([]ListItem, error) {
+	return s.listChannels(ctx, ex, workspaceID, userID, archivedFilter, false)
+}
+
+func (s *Store) listChannels(ctx context.Context, ex Executor, workspaceID, userID, archivedFilter string, lazyEnsure bool) ([]ListItem, error) {
 	// TS listChannels treats an omitted filter as "exclude".
 	if archivedFilter == "" {
 		archivedFilter = ArchivedExclude
@@ -227,7 +238,7 @@ func (s *Store) ListChannels(ctx context.Context, workspaceID, userID, archivedF
 	default:
 		return nil, &DomainError{Code: CodeInvalidInput, Message: "archived must be one of: exclude, include, only"}
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT `+channelColumns+`
+	rows, err := ex.QueryContext(ctx, `SELECT `+channelColumns+`
 		FROM channels c WHERE `+conditions+` ORDER BY c.created_at ASC`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list channels: %w", err)
@@ -247,13 +258,13 @@ func (s *Store) ListChannels(ctx context.Context, workspaceID, userID, archivedF
 	}
 	rows.Close()
 
-	serverRole, err := s.HumanServerRole(ctx, workspaceID, userID)
+	serverRole, err := s.humanServerRole(ctx, ex, workspaceID, userID)
 	if err != nil {
 		return nil, err
 	}
 
 	// "only" never creates channels (the archived view must stay read-only).
-	if archivedFilter != ArchivedOnly {
+	if lazyEnsure && archivedFilter != ArchivedOnly {
 		if idx := indexOf(list, func(c *Channel) bool { return IsAllSystemChannel(c) }); idx < 0 {
 			all, err := s.ensureAllChannel(ctx, workspaceID)
 			if err != nil {
@@ -291,7 +302,7 @@ func (s *Store) ListChannels(ctx context.Context, workspaceID, userID, archivedF
 	}
 	_ = allChannel
 
-	joinedSet, err := s.humanChannelIDs(ctx, userID)
+	joinedSet, err := s.humanChannelIDsTx(ctx, ex, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -326,7 +337,11 @@ func indexOf(list []*Channel, pred func(*Channel) bool) int {
 // humanChannelIDs reads every channel_humans row of one user (the TS query is
 // user-scoped; only same-server channels can intersect the list).
 func (s *Store) humanChannelIDs(ctx context.Context, userID string) (map[string]bool, error) {
-	rows, err := s.db.QueryContext(ctx,
+	return s.humanChannelIDsTx(ctx, s.db, userID)
+}
+
+func (s *Store) humanChannelIDsTx(ctx context.Context, ex Executor, userID string) (map[string]bool, error) {
+	rows, err := ex.QueryContext(ctx,
 		`SELECT channel_id FROM channel_humans WHERE user_id = ?`, userID)
 	if err != nil {
 		return nil, fmt.Errorf("read channel memberships: %w", err)

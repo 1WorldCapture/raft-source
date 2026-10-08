@@ -1,0 +1,282 @@
+{
+  "baseline": "bc65213b377a992c381e809c72ba50ca9af367fd",
+  "collectedFrom": "go test ./tests/acceptance/m4-reference/ -run TestM4ReferenceExportGoWire (in-process public APIs; parent runs true HTTP separately)",
+  "report": {
+    "checks": [
+      "reaction viewer 11111111-1111-4111-8111-111111111111: 6 steps, versions strictly ordered (add/remove/add inclusive)",
+      "reaction viewer 22222222-2222-4222-8222-222222222222: 1 steps, versions strictly ordered (add/remove/add inclusive)",
+      "discussion versions non-decreasing across 2 probes",
+      "read-state stream: original ledger accepts all 2 changed emits (versions strictly advance)",
+      "activitySnapshot: passes the generated Activity JSON Schema",
+      "activityDifferenceAfterChange: passes the generated Activity JSON Schema",
+      "activityNotModified: passes the generated Activity JSON Schema",
+      "activitySnapshotAfterDone: passes the generated Activity JSON Schema",
+      "activityAfterDoneNotModified: passes the generated Activity JSON Schema",
+      "REAL Go difference rows all enter the original reducer state (1 rows)",
+      "post-Done snapshot carries a done tombstone (rowVersion 3)"
+    ],
+    "failures": [],
+    "ok": true
+  },
+  "wire": {
+    "activityAfterDoneNotModified": {
+      "activityVersion": "6",
+      "epoch": "1",
+      "requestId": "req-export-5",
+      "scope": {
+        "filter": "all",
+        "principalId": "11111111-1111-4111-8111-111111111111",
+        "serverId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "windowId": "main"
+      },
+      "type": "notModified",
+      "watermark": "6"
+    },
+    "activityDifferenceAfterChange": {
+      "activityVersion": "4",
+      "complete": true,
+      "epoch": "1",
+      "fromSeq": "3",
+      "hasMore": false,
+      "nextCursor": null,
+      "nextFromSeq": null,
+      "requestId": "req-export-2",
+      "rows": [
+        {
+          "channelId": "cccccccc-cccc-4ccc-8ccc-cccccccccc01",
+          "channelKind": "channel",
+          "channelName": "general",
+          "firstMentionMessageId": null,
+          "firstUnreadMessageId": "b9ebeda2-1c74-4e71-aa4c-fd54fcc66fe4",
+          "hasMention": false,
+          "lastActivityAt": "2026-10-08T12:00:00.040Z",
+          "lastMessageId": "b9ebeda2-1c74-4e71-aa4c-fd54fcc66fe4",
+          "lastMessagePreview": "export message 4",
+          "lastMessageSenderId": "22222222-2222-4222-8222-222222222222",
+          "lastMessageSenderKind": "user",
+          "lastMessageSenderName": "Bob",
+          "latestActivitySeq": "4",
+          "maxReadSeq": "3",
+          "readStateVersion": "2",
+          "rowId": "cccccccc-cccc-4ccc-8ccc-cccccccccc01",
+          "rowVersion": "2",
+          "type": "channel",
+          "unreadCount": 1
+        }
+      ],
+      "scope": {
+        "filter": "all",
+        "principalId": "11111111-1111-4111-8111-111111111111",
+        "serverId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "windowId": "main"
+      },
+      "toSeq": "4",
+      "tombstones": [],
+      "totalCount": 1,
+      "totalUnreadCount": 1,
+      "type": "difference"
+    },
+    "activityNotModified": {
+      "activityVersion": "4",
+      "epoch": "1",
+      "requestId": "req-export-3",
+      "scope": {
+        "filter": "all",
+        "principalId": "11111111-1111-4111-8111-111111111111",
+        "serverId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "windowId": "main"
+      },
+      "type": "notModified",
+      "watermark": "4"
+    },
+    "activitySnapshot": {
+      "activityVersion": "2",
+      "epoch": "1",
+      "requestId": "req-export-1",
+      "scope": {
+        "filter": "all",
+        "principalId": "11111111-1111-4111-8111-111111111111",
+        "serverId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "windowId": "main"
+      },
+      "type": "snapshot",
+      "watermark": "2",
+      "window": {
+        "complete": true,
+        "hasMore": false,
+        "nextCursor": null,
+        "rows": [
+          {
+            "channelId": "cccccccc-cccc-4ccc-8ccc-cccccccccc01",
+            "channelKind": "channel",
+            "channelName": "general",
+            "firstMentionMessageId": null,
+            "firstUnreadMessageId": null,
+            "hasMention": false,
+            "lastActivityAt": "2026-10-08T12:00:00.030Z",
+            "lastMessageId": "e76a70c1-9814-4187-9ba9-8eff75ce84d8",
+            "lastMessagePreview": "export message 3",
+            "lastMessageSenderId": "22222222-2222-4222-8222-222222222222",
+            "lastMessageSenderKind": "user",
+            "lastMessageSenderName": "Bob",
+            "latestActivitySeq": "3",
+            "maxReadSeq": "3",
+            "readStateVersion": "2",
+            "rowId": "cccccccc-cccc-4ccc-8ccc-cccccccccc01",
+            "rowVersion": "1",
+            "type": "channel",
+            "unreadCount": 0
+          }
+        ],
+        "tombstones": [],
+        "totalCount": 1,
+        "totalUnreadCount": 0
+      }
+    },
+    "activitySnapshotAfterDone": {
+      "activityVersion": "6",
+      "epoch": "1",
+      "requestId": "req-export-4",
+      "scope": {
+        "filter": "all",
+        "principalId": "11111111-1111-4111-8111-111111111111",
+        "serverId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "windowId": "main"
+      },
+      "type": "snapshot",
+      "watermark": "6",
+      "window": {
+        "complete": true,
+        "hasMore": false,
+        "nextCursor": null,
+        "rows": [],
+        "tombstones": [
+          {
+            "reason": "done",
+            "rowId": "cccccccc-cccc-4ccc-8ccc-cccccccccc01",
+            "rowVersion": "3"
+          }
+        ],
+        "totalCount": 0,
+        "totalUnreadCount": 0
+      }
+    },
+    "messages": [
+      {
+        "from": "22222222-2222-4222-8222-222222222222",
+        "id": "dd1f73cd-eb61-45f6-a487-4c2b80619a56",
+        "seq": 1
+      },
+      {
+        "from": "22222222-2222-4222-8222-222222222222",
+        "id": "56da878b-6e38-4ae8-9db3-80cd0770e8b9",
+        "seq": 2
+      },
+      {
+        "from": "22222222-2222-4222-8222-222222222222",
+        "id": "e76a70c1-9814-4187-9ba9-8eff75ce84d8",
+        "seq": 3
+      }
+    ],
+    "reactionDiscussionVersions": [
+      {
+        "discussionVersion": 0,
+        "op": "initial"
+      },
+      {
+        "discussionVersion": 4,
+        "op": "after-bob-add"
+      }
+    ],
+    "reactionViewerVersionStream": [
+      {
+        "changed": true,
+        "op": "add",
+        "reactedEmojis": [
+          "👍"
+        ],
+        "viewer": "11111111-1111-4111-8111-111111111111",
+        "viewerVersion": 1
+      },
+      {
+        "changed": true,
+        "op": "remove",
+        "reactedEmojis": null,
+        "viewer": "11111111-1111-4111-8111-111111111111",
+        "viewerVersion": 2
+      },
+      {
+        "changed": true,
+        "op": "add",
+        "reactedEmojis": [
+          "🎉"
+        ],
+        "viewer": "11111111-1111-4111-8111-111111111111",
+        "viewerVersion": 3
+      },
+      {
+        "changed": false,
+        "op": "add-idempotent",
+        "reactedEmojis": [
+          "🎉"
+        ],
+        "viewer": "11111111-1111-4111-8111-111111111111",
+        "viewerVersion": 3
+      },
+      {
+        "changed": true,
+        "op": "add",
+        "reactedEmojis": [
+          "👍"
+        ],
+        "viewer": "22222222-2222-4222-8222-222222222222",
+        "viewerVersion": 1
+      },
+      {
+        "changed": true,
+        "op": "remove",
+        "reactedEmojis": null,
+        "viewer": "11111111-1111-4111-8111-111111111111",
+        "viewerVersion": 4
+      },
+      {
+        "changed": true,
+        "op": "add",
+        "reactedEmojis": [
+          "👍"
+        ],
+        "viewer": "11111111-1111-4111-8111-111111111111",
+        "viewerVersion": 5
+      }
+    ],
+    "readStateStream": [
+      {
+        "changed": true,
+        "maxReadSeq": 2,
+        "op": "read-to-seq2",
+        "readStateVersion": 1
+      },
+      {
+        "changed": false,
+        "maxReadSeq": 2,
+        "op": "unread-rewind",
+        "readStateVersion": 1,
+        "unreadCount": 1
+      },
+      {
+        "changed": false,
+        "maxReadSeq": 2,
+        "op": "late-read-seq2",
+        "readStateVersion": 1
+      },
+      {
+        "changed": true,
+        "maxReadSeq": 3,
+        "op": "read-all",
+        "readStateVersion": 2
+      }
+    ],
+    "unreadCounts": {},
+    "unreadSummary": {}
+  }
+}

@@ -1,0 +1,665 @@
+{
+  "area": "readstate-prefs-wire",
+  "baseline": "bc65213b377a992c381e809c72ba50ca9af367fd",
+  "contract": "raft.m4-reference",
+  "executed": {
+    "activityMuteEligibility": [
+      {
+        "channelType": "channel",
+        "supports": true
+      },
+      {
+        "channelType": "private",
+        "supports": true
+      },
+      {
+        "channelType": "joint",
+        "supports": true
+      },
+      {
+        "channelType": "dm",
+        "supports": false
+      },
+      {
+        "channelType": "thread",
+        "supports": false
+      },
+      {
+        "channelType": null,
+        "supports": false
+      },
+      {
+        "supports": false
+      }
+    ],
+    "canToggleActivityMute": {
+      "joinedChannel": true,
+      "joinedDm": false,
+      "unjoinedChannel": false
+    },
+    "notificationPrefs": {
+      "fold": {
+        "changedUpdateWrites": true,
+        "firstWrites": true,
+        "folded": {
+          "channelId": "c1",
+          "serverId": "srv",
+          "state": {
+            "activityMuteSupported": true,
+            "activityMuted": false,
+            "muteFromSeq": 3,
+            "prefsVersion": 2
+          },
+          "type": "channel"
+        },
+        "sameUpdateIsIdentityNoop": true
+      },
+      "scopeIds": {
+        "channel": "channel:c1",
+        "server": "server:srv"
+      }
+    },
+    "prefsNormalize": {
+      "displayDefault": {
+        "collapseLongMessages": true
+      },
+      "displayExplicitFalse": {
+        "collapseLongMessages": false
+      },
+      "displayWithVersion": {
+        "collapseLongMessages": true,
+        "prefsVersion": 2
+      },
+      "muteActiveStringSeq": {
+        "activityMuteSupported": false,
+        "activityMuted": true,
+        "muteFromSeq": "12"
+      },
+      "muteLegacyDefault": {
+        "activityMuteSupported": false,
+        "activityMuted": false,
+        "muteFromSeq": null
+      },
+      "muteNegativeVersionDropped": {
+        "activityMuteSupported": false,
+        "activityMuted": true,
+        "muteFromSeq": null
+      },
+      "muteWithVersion": {
+        "activityMuteSupported": false,
+        "activityMuted": true,
+        "muteFromSeq": 7,
+        "prefsVersion": 4
+      }
+    },
+    "prefsStalePatchGuard": {
+      "newerVersionApplies": {
+        "activityMuted": true,
+        "muteFromSeq": 10,
+        "prefsVersion": 6
+      },
+      "staleLowerVersionIsNoop": true
+    },
+    "readMutationErrorStatus": {
+      "INVALID_MUTATION_ID": 400,
+      "INVALID_MUTATION_PAYLOAD": 400,
+      "MUTATION_ID_PAYLOAD_MISMATCH": 409,
+      "SCOPE_NOT_FOUND": 404
+    },
+    "readMutationParse": [
+      {
+        "label": "row-read",
+        "parsed": {
+          "mutation": {
+            "kind": "row_read",
+            "scopeId": "scope-1",
+            "throughSeq": 5
+          },
+          "mutationId": "m-1"
+        },
+        "verdict": "ok"
+      },
+      {
+        "label": "row-unread",
+        "parsed": {
+          "mutation": {
+            "kind": "row_unread",
+            "scopeId": "scope-1",
+            "throughSeq": 7
+          },
+          "mutationId": "m-2"
+        },
+        "verdict": "ok"
+      },
+      {
+        "label": "channel-read-all",
+        "parsed": {
+          "mutation": {
+            "kind": "channel_read_all",
+            "scopeId": "scope-1"
+          },
+          "mutationId": "m-3"
+        },
+        "verdict": "ok"
+      },
+      {
+        "label": "global-read-all",
+        "parsed": {
+          "mutation": {
+            "kind": "global_read_all"
+          },
+          "mutationId": "m-4"
+        },
+        "verdict": "ok"
+      },
+      {
+        "code": "INVALID_MUTATION_PAYLOAD",
+        "label": "unknown-kind",
+        "message": "unsupported read mutation kind",
+        "verdict": "ReadMutationError"
+      },
+      {
+        "code": "INVALID_MUTATION_ID",
+        "label": "missing-mutation-id",
+        "message": "mutationId must be UUIDv4",
+        "verdict": "ReadMutationError"
+      },
+      {
+        "code": "INVALID_MUTATION_PAYLOAD",
+        "label": "null-body",
+        "message": "request body is required",
+        "verdict": "ReadMutationError"
+      },
+      {
+        "code": "INVALID_MUTATION_PAYLOAD",
+        "label": "string-body",
+        "message": "request body is required",
+        "verdict": "ReadMutationError"
+      },
+      {
+        "label": "cast-passthrough-string-throughseq",
+        "parsed": {
+          "mutation": {
+            "kind": "row_read",
+            "scopeId": 42,
+            "throughSeq": "5"
+          },
+          "mutationId": "m-6"
+        },
+        "verdict": "ok"
+      }
+    ],
+    "readReceiptMerge": {
+      "advance": {
+        "kind": "peers",
+        "peers": [
+          {
+            "maxReadSeq": 10,
+            "peerId": "u1",
+            "peerKind": "human"
+          },
+          {
+            "maxReadSeq": 9,
+            "peerId": "a1",
+            "peerKind": "agent"
+          }
+        ]
+      },
+      "hydrateKeepsHigherWatermarks": {
+        "kind": "peers",
+        "peers": [
+          {
+            "maxReadSeq": 10,
+            "peerId": "u1",
+            "peerKind": "human"
+          },
+          {
+            "maxReadSeq": 8,
+            "peerId": "a1",
+            "peerKind": "agent"
+          }
+        ]
+      },
+      "regressIsNoop": true,
+      "summaryScopeIsNoop": true,
+      "unknownPeerIsNoop": true
+    },
+    "readReceiptNormalize": {
+      "bothKeysPresent": null,
+      "nonObject": null,
+      "peersBadKind": null,
+      "peersDuplicate": null,
+      "peersEmptyArray": {
+        "kind": "peers",
+        "peers": []
+      },
+      "peersNegativeSeq": null,
+      "peersValid": {
+        "kind": "peers",
+        "peers": [
+          {
+            "maxReadSeq": 10,
+            "peerId": "u1",
+            "peerKind": "human"
+          },
+          {
+            "maxReadSeq": 4,
+            "peerId": "a1",
+            "peerKind": "agent"
+          }
+        ]
+      },
+      "summaryCountAbovePeerCount": null,
+      "summaryCountNotDescending": null,
+      "summaryDuplicateSeq": null,
+      "summaryValid": {
+        "kind": "summary",
+        "summary": {
+          "peerCount": 3,
+          "readCountAtSeq": [
+            {
+              "count": 3,
+              "seq": 4
+            },
+            {
+              "count": 2,
+              "seq": 9
+            }
+          ]
+        }
+      }
+    },
+    "readReceiptProject": {
+      "agentKnown": {
+        "read": true
+      },
+      "agentNotPeer": null,
+      "agentUnknownScope": null,
+      "invalidSeq": {
+        "peerCount": 0,
+        "read": false,
+        "readCount": 0
+      },
+      "peers": {
+        "peerCount": 2,
+        "read": true,
+        "readCount": 1
+      },
+      "peersUnread": {
+        "peerCount": 2,
+        "read": false,
+        "readCount": 0
+      },
+      "summary": {
+        "peerCount": 3,
+        "read": true,
+        "readCount": 2
+      }
+    },
+    "readReceiptScopeUpdated": {
+      "floatSeq": null,
+      "missingScopeId": null,
+      "summaryChanged": {
+        "scopeId": "scope-1",
+        "summaryChanged": true
+      },
+      "validPeer": {
+        "maxReadSeq": 12,
+        "peerId": "u1",
+        "peerKind": "human",
+        "scopeId": "scope-1"
+      }
+    },
+    "readStateLedger": [
+      {
+        "label": "accept-v2",
+        "result": "accepted"
+      },
+      {
+        "label": "stale-same-v2",
+        "result": "stale"
+      },
+      {
+        "label": "stale-lower-v1",
+        "result": "stale"
+      },
+      {
+        "label": "accept-v3",
+        "result": "accepted"
+      },
+      {
+        "accepted": {
+          "generation": 2,
+          "maxReadSeq": 12,
+          "readStateVersion": 3
+        },
+        "label": "read-back"
+      }
+    ],
+    "readStateNormalize": [
+      {
+        "corruptionLogged": false,
+        "label": "valid",
+        "parsed": {
+          "maxReadSeq": 10,
+          "readStateVersion": 2,
+          "scopeId": "scope-1",
+          "serverId": "srv"
+        },
+        "verdict": "valid"
+      },
+      {
+        "corruptionLogged": true,
+        "label": "missing-server-id",
+        "parsed": null,
+        "verdict": "corrupt-null"
+      },
+      {
+        "corruptionLogged": true,
+        "label": "empty-scope-id",
+        "parsed": null,
+        "verdict": "corrupt-null"
+      },
+      {
+        "corruptionLogged": true,
+        "label": "negative-max-read-seq",
+        "parsed": null,
+        "verdict": "corrupt-null"
+      },
+      {
+        "corruptionLogged": true,
+        "label": "float-version",
+        "parsed": null,
+        "verdict": "corrupt-null"
+      },
+      {
+        "corruptionLogged": true,
+        "label": "non-object",
+        "parsed": null,
+        "verdict": "corrupt-null"
+      },
+      {
+        "corruptionLogged": true,
+        "label": "null",
+        "parsed": null,
+        "verdict": "corrupt-null"
+      }
+    ],
+    "readStateNormalizeBulk": [
+      {
+        "count": 2,
+        "label": "mixed-good-and-bad",
+        "parsed": [
+          {
+            "maxReadSeq": 1,
+            "readStateVersion": 1,
+            "scopeId": "a",
+            "serverId": "srv"
+          },
+          {
+            "maxReadSeq": 3,
+            "readStateVersion": 3,
+            "scopeId": "b",
+            "serverId": "srv"
+          }
+        ]
+      },
+      {
+        "count": 0,
+        "label": "scopes-not-array",
+        "parsed": []
+      },
+      {
+        "count": 0,
+        "label": "server-id-missing",
+        "parsed": []
+      },
+      {
+        "count": 0,
+        "label": "not-object",
+        "parsed": []
+      }
+    ],
+    "readStateSnapshot": [
+      {
+        "label": "absent-first-is-cleared",
+        "outcome": {
+          "kind": "cleared",
+          "latestActivitySeq": null
+        }
+      },
+      {
+        "label": "corrupt-union",
+        "outcome": {
+          "kind": "corrupt",
+          "latestActivitySeq": null
+        }
+      },
+      {
+        "label": "present-leading-zero-string",
+        "outcome": {
+          "kind": "corrupt",
+          "latestActivitySeq": null
+        }
+      },
+      {
+        "label": "present-beyond-safe-integer",
+        "outcome": {
+          "kind": "corrupt",
+          "latestActivitySeq": null
+        }
+      },
+      {
+        "label": "present-valid-42",
+        "outcome": {
+          "kind": "accepted",
+          "latestActivitySeq": null
+        }
+      },
+      {
+        "label": "present-stale-version",
+        "outcome": {
+          "kind": "stale",
+          "latestActivitySeq": null
+        }
+      },
+      {
+        "label": "present-newer-version",
+        "outcome": {
+          "kind": "accepted",
+          "latestActivitySeq": "61"
+        }
+      }
+    ],
+    "readStateStream": [
+      {
+        "id": "read-v1-to-10",
+        "normalized": {
+          "maxReadSeq": 10,
+          "readStateVersion": 1,
+          "scopeId": "scope-1",
+          "serverId": "srv"
+        },
+        "outcome": "accepted"
+      },
+      {
+        "id": "unread-rewind-to-4",
+        "normalized": {
+          "maxReadSeq": 4,
+          "readStateVersion": 2,
+          "scopeId": "scope-1",
+          "serverId": "srv"
+        },
+        "outcome": "accepted"
+      },
+      {
+        "id": "late-read-v1-to-10-again",
+        "normalized": {
+          "maxReadSeq": 10,
+          "readStateVersion": 1,
+          "scopeId": "scope-1",
+          "serverId": "srv"
+        },
+        "outcome": "stale"
+      },
+      {
+        "id": "same-v2-different-value",
+        "normalized": {
+          "maxReadSeq": 6,
+          "readStateVersion": 2,
+          "scopeId": "scope-1",
+          "serverId": "srv"
+        },
+        "outcome": "stale"
+      },
+      {
+        "id": "read-v3-to-12",
+        "normalized": {
+          "maxReadSeq": 12,
+          "readStateVersion": 3,
+          "scopeId": "scope-1",
+          "serverId": "srv"
+        },
+        "outcome": "accepted"
+      },
+      {
+        "id": "corrupt-negative",
+        "normalized": null,
+        "outcome": "corrupt-null"
+      },
+      {
+        "id": "corrupt-float-version",
+        "normalized": null,
+        "outcome": "corrupt-null"
+      },
+      {
+        "id": "read-v4-to-13-after-corrupt",
+        "normalized": {
+          "maxReadSeq": 13,
+          "readStateVersion": 4,
+          "scopeId": "scope-1",
+          "serverId": "srv"
+        },
+        "outcome": "accepted"
+      }
+    ],
+    "readStateStreamFinal": {
+      "generation": 4,
+      "maxReadSeq": 13,
+      "readStateVersion": 4
+    },
+    "readStateSupersededBySocket": {
+      "generationAtRequest": 1,
+      "result": {
+        "kind": "stale",
+        "latestActivitySeq": null
+      }
+    }
+  },
+  "generatedBy": "original-execution (route parser segment, web read-state ledger, read-receipt domain, channel/prefs folds)",
+  "notes": [
+    "read-mutation parsePayload + real ReadMutationError class executed (official TS transform for the parameter property)"
+  ],
+  "sourcePins": {
+    "activityBehaviorVectors": {
+      "path": "packages/sync-core/contracts/activity-v1/fixtures/activity-sync.behavior.jsonl",
+      "sha256": "ac94f85c23656184724e7b91e4957e278b4a8554878600842c3684b9c7855bd1"
+    },
+    "activityContractVectors": {
+      "path": "packages/sync-core/contracts/activity-v1/fixtures/activity-sync.contract-vectors.jsonl",
+      "sha256": "89ef866cc5e16dd321945c422e5f9ae7919157312d4bafbc68e9241d6ae3bee3"
+    },
+    "activityJsonSchema": {
+      "path": "packages/sync-core/contracts/activity-v1/generated/json-schema/activity-sync.schema.json",
+      "sha256": "58177bc39e9038b65d72b768dcf5ceb9687117b8d362cd7c21eec684e56fc248"
+    },
+    "activityManifest": {
+      "path": "packages/sync-core/contracts/activity-v1/manifest.json",
+      "sha256": "7743a8086e6d443656b7527486a6170439c3a0c8681e9b4f02e74e0165967cf1"
+    },
+    "activityRunner": {
+      "path": "packages/sync-core/contracts/activity-v1/runner/runBehaviorVectors.ts",
+      "sha256": "eb9bb37ccef7c545c9b3ea22638735ece54c9685f5e930a934d40089b22ba984"
+    },
+    "serverChannelsRoute": {
+      "path": "packages/server/src/routes/channels.ts",
+      "sha256": "1014a8e565e4cc2906616af8274eb4b1fd2a63b347839ae8ac5c33b761265109"
+    },
+    "serverMessageRealtimeEvents": {
+      "path": "packages/server/src/services/messageRealtimeEvents.ts",
+      "sha256": "aa8b88ed8ec08cca36f858043be31807e08a97b694ba39e48bb070cce6f7edff"
+    },
+    "serverMessageService": {
+      "path": "packages/server/src/services/messageService.ts",
+      "sha256": "d49aad2a3d25a6d4cef1225f16aacb80c2fbf1188d483782ce4654b3aa38d280"
+    },
+    "serverMessagesRoute": {
+      "path": "packages/server/src/routes/messages.ts",
+      "sha256": "7a7ca204e4956cfb6bc180ccc7689f419c2197c51aa9e1f64a1e89ee8bd759a7"
+    },
+    "serverReadMutationSequencer": {
+      "path": "packages/server/src/services/readMutationSequencer.ts",
+      "sha256": "d7b9c53834fffe3d196aa8340ecbcab29284b0ff3454b6ab32e4934e17f12800"
+    },
+    "serverReadMutationsRoute": {
+      "path": "packages/server/src/routes/readMutations.ts",
+      "sha256": "3c8587881b6dd9dd34cfa37863a40cf05136b4fae107b8d1b24fdd2974f55e0d"
+    },
+    "sharedActivityMute": {
+      "path": "packages/shared/src/activityMute.ts",
+      "sha256": "e356b1341dd626d2bab51b5f86ed61f8436cbc156b8d654bd8d949a4efb7230e"
+    },
+    "sharedCanonicalMessageManifest": {
+      "path": "packages/shared/src/canonicalMessageManifest.ts",
+      "sha256": "f1cecab62c6380b5416f3cdf7a17c6efdd33445609c3c2aae10bbd7d8fed660f"
+    },
+    "sharedIndex": {
+      "path": "packages/shared/src/index.ts",
+      "sha256": "9224fa36c718ec9b4d8a04ab0906c5d3ab597a03adaf2c48a3d3d78c33e750cb"
+    },
+    "syncCoreActivityDomain": {
+      "path": "packages/sync-core/src/domains/activity.ts",
+      "sha256": "f4ef5ac8ff045a6de4c7327d27a32930ba3db70e8d54f7f33f8a6f164ad863f5"
+    },
+    "syncCoreCore": {
+      "path": "packages/sync-core/src/core.ts",
+      "sha256": "b3906ae8dcb80037de36f79630197129febc333b3f171c8d6f2b376181f21104"
+    },
+    "syncCoreUint64": {
+      "path": "packages/sync-core/src/uint64.ts",
+      "sha256": "1551c72973aeecee7422009e931f7abc31d294b4e8779a97aecfd1fce3cc4781"
+    },
+    "syncCoreViolations": {
+      "path": "packages/sync-core/src/violations.ts",
+      "sha256": "148effe9deaf4c5e88ff24cee6dc6a247cd08043f515ecbca1869addce72276c"
+    },
+    "webChannelDomain": {
+      "path": "packages/web/src/store/channelDomain.ts",
+      "sha256": "2337d2458d0c994d51e7cb361483aacea843cbee55185245fc43c08b486a0392"
+    },
+    "webMessageStore": {
+      "path": "packages/web/src/store/messageStore.ts",
+      "sha256": "4304afdeefa98ebe3e0fee858e4067cbb019da5c54a7489a676bcd8426b4760b"
+    },
+    "webMessageSyncDomain": {
+      "path": "packages/web/src/store/messageSyncDomain.ts",
+      "sha256": "17e7f4bdc6bb959aec8be87a9f75e96e567cbaaa17925ed3fd06cc510b015b29"
+    },
+    "webNotificationPrefsSyncDomain": {
+      "path": "packages/web/src/store/notificationPrefsSyncDomain.ts",
+      "sha256": "bd167f42c37e186fb63c0900cc627b5fb6efa1f802a1dbbd73d742c8e3780d0d"
+    },
+    "webReactionReadModels": {
+      "path": "packages/web/src/store/reactionReadModels.ts",
+      "sha256": "d22b8995e15fc8c24405434022ae91bb7beb985819ed50749fdd4767f9440b0b"
+    },
+    "webReadReceiptDomain": {
+      "path": "packages/web/src/store/readReceiptDomain.ts",
+      "sha256": "12aad0e3a6e1b2d69adc3db2a69cff8f3fc7a70bbf2ff7ba52a31a08b343bb24"
+    },
+    "webReadStateSync": {
+      "path": "packages/web/src/store/readStateSync.ts",
+      "sha256": "ef1b5b56a7336b352294c8e32bb0343a8830a5e76edf4807a0cf115cd3928a37"
+    }
+  }
+}

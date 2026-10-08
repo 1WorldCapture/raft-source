@@ -249,3 +249,71 @@ func (s *Store) IsChannelAgent(ctx context.Context, channelID, agentID string) (
 	}
 	return true, nil
 }
+
+// GetChannelTx is the executor-scoped GetChannel for pinned snapshots.
+func (s *Store) GetChannelTx(ctx context.Context, ex Executor, id string) (*Channel, error) {
+	return s.getChannel(ctx, ex, id, false)
+}
+
+// HumanServerRoleTx is the executor-scoped HumanServerRole.
+func (s *Store) HumanServerRoleTx(ctx context.Context, ex Executor, workspaceID, userID string) (string, error) {
+	return s.humanServerRole(ctx, ex, workspaceID, userID)
+}
+
+// IsChannelHumanTx is the executor-scoped IsChannelHuman.
+func (s *Store) IsChannelHumanTx(ctx context.Context, ex Executor, channelID, userID string) (bool, error) {
+	return s.isChannelHuman(ctx, ex, channelID, userID)
+}
+
+// ResolveChannelActorContextTx is the executor-scoped actor resolution for
+// pinned snapshots (list/detail enrich one read boundary).
+func (s *Store) ResolveChannelActorContextTx(ctx context.Context, ex Executor, workspaceID, channelID, actorType, actorID string) (*ActorContext, error) {
+	return s.resolveChannelActorContext(ctx, ex, workspaceID, channelID, actorType, actorID)
+}
+
+// CanUserAccessChannelTx is the executor-scoped CanUserAccessChannel.
+func (s *Store) CanUserAccessChannelTx(ctx context.Context, ex Executor, workspaceID, channelID, userID string) (bool, error) {
+	channel, err := s.getChannel(ctx, ex, channelID, false)
+	if err != nil {
+		return false, err
+	}
+	if channel == nil || channel.WorkspaceID != workspaceID {
+		return false, nil
+	}
+	serverRole, err := s.humanServerRole(ctx, ex, workspaceID, userID)
+	if err != nil {
+		return false, err
+	}
+	if serverRole == RoleGuest {
+		member, err := s.isChannelHuman(ctx, ex, channelID, userID)
+		if err != nil {
+			return false, err
+		}
+		return CanGuestReadChannel(false, /* gate disabled (frozen policy) */
+			serverRole, channel.Type, channel.Name,
+			IsAllSystemChannel(channel) && !IsEnabledAllChannel(channel),
+			channel.GuestVisible, channel.GuestJoinable, member,
+			channel.ArchivedAt != nil, channel.DeletedAt != nil), nil
+	}
+	if IsAllSystemChannel(channel) && !IsEnabledAllChannel(channel) {
+		return false, nil
+	}
+	if channel.Type == TypeChannel {
+		return true, nil
+	}
+	if channel.Type == TypeDM {
+		var one int
+		err := ex.QueryRowContext(ctx, `
+			SELECT 1 FROM channel_humans WHERE channel_id = ? AND user_id = ?`,
+			channelID, userID).Scan(&one)
+		if err == sql.ErrNoRows {
+			return false, nil
+		}
+		return err == nil, err
+	}
+	member, err := s.isChannelHuman(ctx, ex, channelID, userID)
+	if err != nil {
+		return false, err
+	}
+	return member, nil
+}

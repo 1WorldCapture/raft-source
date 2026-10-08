@@ -75,6 +75,11 @@ func (t *TokenSigner) SignAccessToken(userID, familyID string) (string, error) {
 // ErrTokenInvalid marks any token that must be treated as unauthenticated.
 var ErrTokenInvalid = errors.New("invalid access token")
 
+// ErrTokenWrongType still classifies as unauthenticated, but lets the original
+// Socket.IO client distinguish a validly signed token of the wrong purpose.
+// This verdict is never derived from an unverified JWT payload.
+var ErrTokenWrongType = fmt.Errorf("invalid token type: %w", ErrTokenInvalid)
+
 // VerifyAccessToken parses and validates a token, returning its claims.
 func (t *TokenSigner) VerifyAccessToken(token string) (*AccessTokenClaims, error) {
 	parsed, err := jwt.Parse(token, func(tk *jwt.Token) (any, error) {
@@ -103,7 +108,7 @@ func (t *TokenSigner) VerifyAccessToken(token string) (*AccessTokenClaims, error
 	}
 	rawType, ok := mapClaims["type"].(string)
 	if !ok || rawType != "access" {
-		return nil, ErrTokenInvalid
+		return nil, ErrTokenWrongType
 	}
 	issuedAt, err := mapClaims.GetIssuedAt()
 	if err != nil || issuedAt == nil {

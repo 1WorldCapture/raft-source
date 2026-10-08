@@ -118,7 +118,7 @@ func buildM3(db *sql.DB, cfg *config.Config, sessions *auth.SessionService, sign
 	return m, nil
 }
 
-func (m *m3Runtime) register(mux *http.ServeMux, gate *legacyweb.AuthGate, servers *legacyweb.ServersHandlers) {
+func (m *m3Runtime) register(mux *http.ServeMux, gate *legacyweb.AuthGate, servers *legacyweb.ServersHandlers, channelProjector legacyweb.M4ChannelProjector) {
 	internalRoutes := []computer.InternalRouteEntry{
 		{Method: http.MethodPost, Path: "/preflight", Principal: "sk_computer"},
 	}
@@ -138,7 +138,7 @@ func (m *m3Runtime) register(mux *http.ServeMux, gate *legacyweb.AuthGate, serve
 		InternalRoutes:    internalRoutes,
 		ClaimedPrefixes:   []string{"/internal/computer/", "/internal/agent-api/"},
 	}
-	legacyweb.RegisterChannelRoutes(mux, &legacyweb.ChannelHandlers{Store: m.channels}, gate)
+	legacyweb.RegisterChannelRoutes(mux, &legacyweb.ChannelHandlers{Store: m.channels, M4: channelProjector}, gate)
 	legacyweb.RegisterComputerRoutes(mux, computerHandlers, gate)
 	legacyweb.RegisterAgentRoutes(mux, &legacyweb.AgentHandlers{
 		Store: m.agents, Service: m.service, Computers: computerHandlers,

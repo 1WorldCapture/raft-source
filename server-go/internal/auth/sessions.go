@@ -17,6 +17,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	platformdb "raft.local/server-go/internal/platform/db"
 )
 
 // SessionService owns session persistence and rotation policy.
@@ -467,15 +469,7 @@ func (s *SessionService) CleanupExpired(ctx context.Context) error {
 }
 
 func (s *SessionService) withTx(ctx context.Context, fn func(tx *sql.Tx) error) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if err := fn(tx); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return platformdb.WithWriteTx(ctx, s.db, fn)
 }
 
 // ── AES-256-GCM sealing of successor receipts ──

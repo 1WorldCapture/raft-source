@@ -183,10 +183,15 @@ func TestUnchangedHonestSurfaces(t *testing.T) {
 	if res := e.serve("GET", "/internal/agent-api/server", nil, bearer(access)); res.status != http.StatusUnauthorized {
 		t.Fatalf("human token on Agent API = %d, want 401: %s", res.status, res.raw)
 	}
-	// Realtime and unsupported daemon routes remain explicit 501s.
-	for _, path := range []string{"/socket.io/?EIO=4", "/daemon/ping"} {
-		if res := e.serve("GET", path, nil, bearer(access)); res.status != http.StatusNotImplemented {
-			t.Fatalf("%s = %d, want 501", path, res.status)
+	// M4 serves Socket.IO, but rejects missing/unsupported transports before
+	// upgrade. Keep this distinct from genuinely unsupported daemon routes.
+	for _, path := range []string{"/socket.io/?EIO=4", "/socket.io/?EIO=4&transport=polling"} {
+		res := e.serve("GET", path, nil, bearer(access))
+		if res.status != http.StatusBadRequest || string(res.raw) != "only the websocket transport is supported\n" {
+			t.Fatalf("%s = %d, want explicit websocket-only rejection: %s", path, res.status, res.raw)
 		}
+	}
+	if res := e.serve("GET", "/daemon/ping", nil, bearer(access)); res.status != http.StatusNotImplemented {
+		t.Fatalf("/daemon/ping = %d, want 501", res.status)
 	}
 }

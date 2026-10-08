@@ -1,0 +1,1224 @@
+{
+  "area": "activity-v1",
+  "baseline": "bc65213b377a992c381e809c72ba50ca9af367fd",
+  "contract": "raft.m4-reference",
+  "executed": {
+    "actualStream": {
+      "description": "snapshot(baseline 2 rows) -> new-message frame -> readStateUpdated advance -> done tombstone; then a difference replay of (2,5]",
+      "digest": "85cc953761f527cae09db9d2ca4caccd1a45a8831e4758272839110de99c5b5d",
+      "finalState": {
+        "activityVersion": "5",
+        "complete": true,
+        "hasMore": false,
+        "nextCursor": null,
+        "rows": [
+          {
+            "channelId": "ch-1",
+            "channelKind": "channel",
+            "channelName": "general",
+            "firstMentionMessageId": null,
+            "firstUnreadMessageId": null,
+            "hasMention": false,
+            "lastActivityAt": "2026-10-01T00:00:00.000Z",
+            "lastMessageId": "m-2",
+            "lastMessagePreview": "new message",
+            "lastMessageSenderId": "u-1",
+            "lastMessageSenderKind": "user",
+            "lastMessageSenderName": "Ada",
+            "latestActivitySeq": "2",
+            "maxReadSeq": "2",
+            "readStateVersion": "5",
+            "rowId": "row-ch-1",
+            "rowVersion": "2",
+            "type": "channel",
+            "unreadCount": 1
+          }
+        ],
+        "tombstones": {
+          "row-th-1": "3"
+        },
+        "totalCount": 2,
+        "totalUnreadCount": 0
+      },
+      "perStepOutcomes": [
+        {
+          "kind": "applied",
+          "scopeId": "[\"srv-1\",\"p-1\",\"all\",\"w-1\"]",
+          "seq": "2"
+        },
+        {
+          "kind": "applied",
+          "scopeId": "[\"srv-1\",\"p-1\",\"all\",\"w-1\"]",
+          "seq": "3"
+        },
+        {
+          "kind": "applied",
+          "scopeId": "[\"srv-1\",\"p-1\",\"all\",\"w-1\"]",
+          "seq": "4"
+        },
+        {
+          "kind": "applied",
+          "scopeId": "[\"srv-1\",\"p-1\",\"all\",\"w-1\"]",
+          "seq": "5"
+        }
+      ],
+      "replayDifference": {
+        "finalRows": 1,
+        "outcome": {
+          "kind": "applied",
+          "scopeId": "[\"srv-1\",\"p-1\",\"all\",\"w-1\"]",
+          "seq": "5"
+        }
+      },
+      "steps": [
+        {
+          "activityVersion": "2",
+          "epoch": "1",
+          "requestId": "req-1",
+          "scope": {
+            "filter": "all",
+            "principalId": "p-1",
+            "serverId": "srv-1",
+            "windowId": "w-1"
+          },
+          "type": "snapshot",
+          "watermark": "2",
+          "window": {
+            "complete": true,
+            "hasMore": false,
+            "nextCursor": null,
+            "rows": [
+              {
+                "channelId": "ch-1",
+                "channelKind": "channel",
+                "channelName": "general",
+                "firstMentionMessageId": null,
+                "firstUnreadMessageId": null,
+                "hasMention": false,
+                "lastActivityAt": "2026-10-01T00:00:00.000Z",
+                "lastMessageId": "m-1",
+                "lastMessagePreview": "p",
+                "lastMessageSenderId": "u-1",
+                "lastMessageSenderKind": "user",
+                "lastMessageSenderName": "Ada",
+                "latestActivitySeq": "1",
+                "maxReadSeq": "0",
+                "readStateVersion": "0",
+                "rowId": "row-ch-1",
+                "rowVersion": "1",
+                "type": "channel",
+                "unreadCount": 0
+              },
+              {
+                "channelId": "ch-1",
+                "channelKind": "channel",
+                "channelName": "general",
+                "firstMentionMessageId": null,
+                "firstUnreadMessageId": null,
+                "hasMention": false,
+                "lastActivityAt": "2026-10-01T00:00:00.000Z",
+                "lastMessageId": "m-1",
+                "lastMessagePreview": "p",
+                "lastMessageSenderId": "u-1",
+                "lastMessageSenderKind": "user",
+                "lastMessageSenderName": "Ada",
+                "latestActivitySeq": "1",
+                "maxReadSeq": "0",
+                "readStateVersion": "0",
+                "rowId": "row-th-1",
+                "rowVersion": "1",
+                "type": "thread",
+                "unreadCount": 0
+              }
+            ],
+            "tombstones": [],
+            "totalCount": 2,
+            "totalUnreadCount": 0
+          }
+        },
+        {
+          "activityVersion": "3",
+          "epoch": "1",
+          "rows": [
+            {
+              "channelId": "ch-1",
+              "channelKind": "channel",
+              "channelName": "general",
+              "firstMentionMessageId": null,
+              "firstUnreadMessageId": null,
+              "hasMention": false,
+              "lastActivityAt": "2026-10-01T00:00:00.000Z",
+              "lastMessageId": "m-2",
+              "lastMessagePreview": "new message",
+              "lastMessageSenderId": "u-1",
+              "lastMessageSenderKind": "user",
+              "lastMessageSenderName": "Ada",
+              "latestActivitySeq": "2",
+              "maxReadSeq": "0",
+              "readStateVersion": "0",
+              "rowId": "row-ch-1",
+              "rowVersion": "2",
+              "type": "channel",
+              "unreadCount": 1
+            }
+          ],
+          "scope": {
+            "filter": "all",
+            "principalId": "p-1",
+            "serverId": "srv-1",
+            "windowId": "w-1"
+          },
+          "seq": "3",
+          "tombstones": [],
+          "type": "frame"
+        },
+        {
+          "activityVersion": "4",
+          "epoch": "1",
+          "scope": {
+            "filter": "all",
+            "principalId": "p-1",
+            "serverId": "srv-1",
+            "windowId": "w-1"
+          },
+          "seq": "4",
+          "type": "readStateUpdated",
+          "updates": [
+            {
+              "channelId": "ch-1",
+              "maxReadSeq": "2",
+              "readStateVersion": "5",
+              "scopeId": "row-ch-1"
+            }
+          ]
+        },
+        {
+          "activityVersion": "5",
+          "epoch": "1",
+          "rows": [],
+          "scope": {
+            "filter": "all",
+            "principalId": "p-1",
+            "serverId": "srv-1",
+            "windowId": "w-1"
+          },
+          "seq": "5",
+          "tombstones": [
+            {
+              "reason": "done",
+              "rowId": "row-th-1",
+              "rowVersion": "3"
+            }
+          ],
+          "type": "frame"
+        }
+      ]
+    },
+    "authoredSequences": [
+      {
+        "id": "snapshot-baseline",
+        "outcome": {
+          "kind": "applied",
+          "scopeId": "[\"srv-1\",\"p-1\",\"all\",\"w-1\"]",
+          "seq": "3"
+        }
+      },
+      {
+        "id": "snapshot-stale-same-epoch",
+        "outcome": {
+          "kind": "duplicate_dropped",
+          "scopeId": "[\"srv-1\",\"p-1\",\"all\",\"w-1\"]",
+          "seq": "1"
+        }
+      },
+      {
+        "id": "snapshot-stale-violations",
+        "violations": [
+          {
+            "domain": "activity",
+            "epoch": "1",
+            "kind": "version_regression",
+            "scopeId": "[\"srv-1\",\"p-1\",\"all\",\"w-1\"]",
+            "seq": "1"
+          }
+        ]
+      },
+      {
+        "id": "notModified-observable",
+        "outcome": {
+          "kind": "not_modified",
+          "scopeId": "[\"srv-1\",\"p-1\",\"all\",\"w-1\"]"
+        }
+      },
+      {
+        "id": "difference-applies",
+        "outcome": {
+          "kind": "applied",
+          "scopeId": "[\"srv-1\",\"p-1\",\"all\",\"w-1\"]",
+          "seq": "2"
+        }
+      },
+      {
+        "id": "difference-state",
+        "state": {
+          "activityVersion": "2",
+          "complete": true,
+          "hasMore": false,
+          "nextCursor": null,
+          "rows": [
+            {
+              "channelId": "ch-1",
+              "channelKind": "channel",
+              "channelName": "general",
+              "firstMentionMessageId": null,
+              "firstUnreadMessageId": null,
+              "hasMention": false,
+              "lastActivityAt": "2026-10-01T00:00:00.000Z",
+              "lastMessageId": "m-1",
+              "lastMessagePreview": "p",
+              "lastMessageSenderId": "u-1",
+              "lastMessageSenderKind": "user",
+              "lastMessageSenderName": "Ada",
+              "latestActivitySeq": "5",
+              "maxReadSeq": "0",
+              "readStateVersion": "0",
+              "rowId": "r1",
+              "rowVersion": "5",
+              "type": "channel",
+              "unreadCount": 0
+            },
+            {
+              "channelId": "ch-1",
+              "channelKind": "channel",
+              "channelName": "general",
+              "firstMentionMessageId": null,
+              "firstUnreadMessageId": null,
+              "hasMention": false,
+              "lastActivityAt": "2026-10-01T00:00:00.000Z",
+              "lastMessageId": "m-1",
+              "lastMessagePreview": "p",
+              "lastMessageSenderId": "u-1",
+              "lastMessageSenderKind": "user",
+              "lastMessageSenderName": "Ada",
+              "latestActivitySeq": "7",
+              "maxReadSeq": "0",
+              "readStateVersion": "0",
+              "rowId": "r2",
+              "rowVersion": "7",
+              "type": "channel",
+              "unreadCount": 0
+            }
+          ],
+          "tombstones": {},
+          "totalCount": 2,
+          "totalUnreadCount": 0
+        }
+      },
+      {
+        "id": "difference-hasmore-folded-complete",
+        "outcome": {
+          "kind": "applied",
+          "scopeId": "[\"srv-1\",\"p-1\",\"all\",\"w-1\"]",
+          "seq": "4"
+        },
+        "pending": []
+      },
+      {
+        "id": "core-partial-difference-regenerates-request",
+        "outcome": {
+          "fromSeq": "7",
+          "kind": "gap_repair_requested",
+          "scopeId": "[\"srv-1\",\"p-1\",\"all\",\"w-1\"]",
+          "toSeq": "6"
+        },
+        "pending": [
+          {
+            "domain": "activity",
+            "epoch": null,
+            "kind": "difference",
+            "scopeId": "[\"srv-1\",\"p-1\",\"all\",\"w-1\"]",
+            "sinceSeq": "6"
+          }
+        ]
+      },
+      {
+        "id": "frame-without-baseline",
+        "outcome": {
+          "fromSeq": "0",
+          "kind": "gap_repair_requested",
+          "scopeId": "[\"srv-1\",\"p-1\",\"all\",\"w-1\"]",
+          "toSeq": "1"
+        },
+        "pending": [
+          {
+            "domain": "activity",
+            "kind": "snapshot",
+            "reason": "initial",
+            "scopeId": "[\"srv-1\",\"p-1\",\"all\",\"w-1\"]"
+          }
+        ]
+      },
+      {
+        "id": "frame-baseline-snapshot",
+        "outcome": {
+          "kind": "applied",
+          "scopeId": "[\"srv-1\",\"p-1\",\"all\",\"w-1\"]",
+          "seq": "2"
+        }
+      },
+      {
+        "id": "frame-3-applies",
+        "outcome": {
+          "kind": "applied",
+          "scopeId": "[\"srv-1\",\"p-1\",\"all\",\"w-1\"]",
+          "seq": "3"
+        }
+      },
+      {
+        "id": "frame-gap-5",
+        "outcome": {
+          "fromSeq": "4",
+          "kind": "gap_repair_requested",
+          "scopeId": "[\"srv-1\",\"p-1\",\"all\",\"w-1\"]",
+          "toSeq": "4"
+        },
+        "pending": [
+          {
+            "domain": "activity",
+            "epoch": "1",
+            "kind": "difference",
+            "scopeId": "[\"srv-1\",\"p-1\",\"all\",\"w-1\"]",
+            "sinceSeq": "3"
+          }
+        ]
+      },
+      {
+        "id": "frame-gap-state-unchanged",
+        "state": {
+          "activityVersion": "3",
+          "complete": true,
+          "hasMore": false,
+          "nextCursor": null,
+          "rows": [
+            {
+              "channelId": "ch-1",
+              "channelKind": "channel",
+              "channelName": "general",
+              "firstMentionMessageId": null,
+              "firstUnreadMessageId": null,
+              "hasMention": false,
+              "lastActivityAt": "2026-10-01T00:00:00.000Z",
+              "lastMessageId": "m-1",
+              "lastMessagePreview": "p",
+              "lastMessageSenderId": "u-1",
+              "lastMessageSenderKind": "user",
+              "lastMessageSenderName": "Ada",
+              "latestActivitySeq": "1",
+              "maxReadSeq": "0",
+              "readStateVersion": "0",
+              "rowId": "r1",
+              "rowVersion": "1",
+              "type": "channel",
+              "unreadCount": 0
+            },
+            {
+              "channelId": "ch-1",
+              "channelKind": "channel",
+              "channelName": "general",
+              "firstMentionMessageId": null,
+              "firstUnreadMessageId": null,
+              "hasMention": false,
+              "lastActivityAt": "2026-10-01T00:00:00.000Z",
+              "lastMessageId": "m-1",
+              "lastMessagePreview": "p",
+              "lastMessageSenderId": "u-1",
+              "lastMessageSenderKind": "user",
+              "lastMessageSenderName": "Ada",
+              "latestActivitySeq": "3",
+              "maxReadSeq": "0",
+              "readStateVersion": "0",
+              "rowId": "r3",
+              "rowVersion": "3",
+              "type": "channel",
+              "unreadCount": 0
+            }
+          ],
+          "tombstones": {},
+          "totalCount": 1,
+          "totalUnreadCount": 0
+        }
+      },
+      {
+        "id": "frame-seq-baseline",
+        "outcome": {
+          "kind": "applied",
+          "scopeId": "[\"srv-1\",\"p-1\",\"all\",\"w-1\"]",
+          "seq": "0"
+        }
+      },
+      {
+        "id": "frame-first-apply",
+        "outcome": {
+          "kind": "applied",
+          "scopeId": "[\"srv-1\",\"p-1\",\"all\",\"w-1\"]",
+          "seq": "1"
+        }
+      },
+      {
+        "id": "frame-identical-replay",
+        "outcome": {
+          "kind": "duplicate_dropped",
+          "scopeId": "[\"srv-1\",\"p-1\",\"all\",\"w-1\"]",
+          "seq": "1"
+        }
+      },
+      {
+        "id": "frame-same-seq-different-fact",
+        "outcome": {
+          "kind": "violation",
+          "scopeId": "[\"srv-1\",\"p-1\",\"all\",\"w-1\"]",
+          "violation": "producer_version_conflict"
+        },
+        "pending": [
+          {
+            "domain": "activity",
+            "kind": "snapshot",
+            "reason": "snapshot_required",
+            "scopeId": "[\"srv-1\",\"p-1\",\"all\",\"w-1\"]"
+          }
+        ],
+        "violations": [
+          {
+            "domain": "activity",
+            "epoch": "1",
+            "kind": "producer_version_conflict",
+            "scopeId": "[\"srv-1\",\"p-1\",\"all\",\"w-1\"]",
+            "seq": "1"
+          }
+        ]
+      },
+      {
+        "id": "conflict-state-kept-first-fact",
+        "state": {
+          "activityVersion": "1",
+          "complete": true,
+          "hasMore": false,
+          "nextCursor": null,
+          "rows": [
+            {
+              "channelId": "ch-1",
+              "channelKind": "channel",
+              "channelName": "general",
+              "firstMentionMessageId": null,
+              "firstUnreadMessageId": null,
+              "hasMention": false,
+              "lastActivityAt": "2026-10-01T00:00:00.000Z",
+              "lastMessageId": "m-1",
+              "lastMessagePreview": "p",
+              "lastMessageSenderId": "u-1",
+              "lastMessageSenderKind": "user",
+              "lastMessageSenderName": "Ada",
+              "latestActivitySeq": "1",
+              "maxReadSeq": "0",
+              "readStateVersion": "0",
+              "rowId": "r1",
+              "rowVersion": "1",
+              "type": "channel",
+              "unreadCount": 0
+            }
+          ],
+          "tombstones": {},
+          "totalCount": 0,
+          "totalUnreadCount": 0
+        }
+      },
+      {
+        "id": "tombstone-baseline",
+        "outcome": {
+          "kind": "applied",
+          "scopeId": "[\"srv-1\",\"p-1\",\"all\",\"w-1\"]",
+          "seq": "0"
+        }
+      },
+      {
+        "id": "tombstone-buries-row",
+        "outcome": {
+          "kind": "applied",
+          "scopeId": "[\"srv-1\",\"p-1\",\"all\",\"w-1\"]",
+          "seq": "1"
+        }
+      },
+      {
+        "id": "tombstone-v5",
+        "outcome": {
+          "kind": "applied",
+          "scopeId": "[\"srv-1\",\"p-1\",\"all\",\"w-1\"]",
+          "seq": "2"
+        }
+      },
+      {
+        "id": "older-row-cannot-resurrect",
+        "outcome": {
+          "kind": "applied",
+          "scopeId": "[\"srv-1\",\"p-1\",\"all\",\"w-1\"]",
+          "seq": "3"
+        },
+        "state": {
+          "activityVersion": "3",
+          "complete": true,
+          "hasMore": false,
+          "nextCursor": null,
+          "rows": [],
+          "tombstones": {
+            "r1": "5"
+          },
+          "totalCount": 0,
+          "totalUnreadCount": 0
+        }
+      },
+      {
+        "id": "newer-row-resurrects",
+        "outcome": {
+          "kind": "applied",
+          "scopeId": "[\"srv-1\",\"p-1\",\"all\",\"w-1\"]",
+          "seq": "4"
+        },
+        "state": {
+          "activityVersion": "4",
+          "complete": true,
+          "hasMore": false,
+          "nextCursor": null,
+          "rows": [
+            {
+              "channelId": "ch-1",
+              "channelKind": "channel",
+              "channelName": "general",
+              "firstMentionMessageId": null,
+              "firstUnreadMessageId": null,
+              "hasMention": false,
+              "lastActivityAt": "2026-10-01T00:00:00.000Z",
+              "lastMessageId": "m-1",
+              "lastMessagePreview": "p",
+              "lastMessageSenderId": "u-1",
+              "lastMessageSenderKind": "user",
+              "lastMessageSenderName": "Ada",
+              "latestActivitySeq": "6",
+              "maxReadSeq": "0",
+              "readStateVersion": "0",
+              "rowId": "r1",
+              "rowVersion": "6",
+              "type": "channel",
+              "unreadCount": 0
+            }
+          ],
+          "tombstones": {},
+          "totalCount": 0,
+          "totalUnreadCount": 0
+        }
+      },
+      {
+        "id": "readstate-seed",
+        "outcome": {
+          "kind": "applied",
+          "scopeId": "[\"srv-1\",\"p-1\",\"all\",\"w-1\"]",
+          "seq": "1"
+        }
+      },
+      {
+        "id": "readstate-stale-echo",
+        "outcome": {
+          "kind": "applied",
+          "scopeId": "[\"srv-1\",\"p-1\",\"all\",\"w-1\"]",
+          "seq": "2"
+        },
+        "state": {
+          "activityVersion": "2",
+          "complete": true,
+          "hasMore": false,
+          "nextCursor": null,
+          "rows": [
+            {
+              "channelId": "ch-1",
+              "channelKind": "channel",
+              "channelName": "general",
+              "firstMentionMessageId": null,
+              "firstUnreadMessageId": null,
+              "hasMention": false,
+              "lastActivityAt": "2026-10-01T00:00:00.000Z",
+              "lastMessageId": "m-1",
+              "lastMessagePreview": "p",
+              "lastMessageSenderId": "u-1",
+              "lastMessageSenderKind": "user",
+              "lastMessageSenderName": "Ada",
+              "latestActivitySeq": "2",
+              "maxReadSeq": "0",
+              "readStateVersion": "1",
+              "rowId": "r1",
+              "rowVersion": "2",
+              "type": "channel",
+              "unreadCount": 0
+            }
+          ],
+          "tombstones": {},
+          "totalCount": 1,
+          "totalUnreadCount": 0
+        }
+      },
+      {
+        "id": "readstate-newer-applies",
+        "outcome": {
+          "kind": "applied",
+          "scopeId": "[\"srv-1\",\"p-1\",\"all\",\"w-1\"]",
+          "seq": "3"
+        },
+        "state": {
+          "activityVersion": "3",
+          "complete": true,
+          "hasMore": false,
+          "nextCursor": null,
+          "rows": [
+            {
+              "channelId": "ch-1",
+              "channelKind": "channel",
+              "channelName": "general",
+              "firstMentionMessageId": null,
+              "firstUnreadMessageId": null,
+              "hasMention": false,
+              "lastActivityAt": "2026-10-01T00:00:00.000Z",
+              "lastMessageId": "m-1",
+              "lastMessagePreview": "p",
+              "lastMessageSenderId": "u-1",
+              "lastMessageSenderKind": "user",
+              "lastMessageSenderName": "Ada",
+              "latestActivitySeq": "2",
+              "maxReadSeq": "12",
+              "readStateVersion": "4",
+              "rowId": "r1",
+              "rowVersion": "2",
+              "type": "channel",
+              "unreadCount": 0
+            }
+          ],
+          "tombstones": {},
+          "totalCount": 1,
+          "totalUnreadCount": 0
+        }
+      },
+      {
+        "id": "exact-2p53",
+        "outcome": {
+          "kind": "applied",
+          "scopeId": "[\"srv-1\",\"p-1\",\"all\",\"w-1\"]",
+          "seq": "9007199254740992"
+        }
+      },
+      {
+        "id": "exact-2p53-plus-one-applies",
+        "outcome": {
+          "kind": "applied",
+          "scopeId": "[\"srv-1\",\"p-1\",\"all\",\"w-1\"]",
+          "seq": "9007199254740993"
+        }
+      },
+      {
+        "id": "exact-gap-detected",
+        "outcome": {
+          "fromSeq": "9007199254740994",
+          "kind": "gap_repair_requested",
+          "scopeId": "[\"srv-1\",\"p-1\",\"all\",\"w-1\"]",
+          "toSeq": "9007199254740994"
+        }
+      },
+      {
+        "id": "epoch-1-baseline",
+        "outcome": {
+          "kind": "applied",
+          "scopeId": "[\"srv-1\",\"p-1\",\"all\",\"w-1\"]",
+          "seq": "3"
+        }
+      },
+      {
+        "id": "epoch-2-frame-rebaselines",
+        "outcome": {
+          "kind": "epoch_rebaseline_requested",
+          "scopeId": "[\"srv-1\",\"p-1\",\"all\",\"w-1\"]"
+        },
+        "pending": [
+          {
+            "domain": "activity",
+            "kind": "snapshot",
+            "reason": "epoch_mismatch",
+            "scopeId": "[\"srv-1\",\"p-1\",\"all\",\"w-1\"]"
+          }
+        ],
+        "violations": [
+          {
+            "domain": "activity",
+            "epoch": "2",
+            "kind": "cross_epoch_arrival",
+            "scopeId": "[\"srv-1\",\"p-1\",\"all\",\"w-1\"]",
+            "seq": "4"
+          }
+        ]
+      },
+      {
+        "id": "fold-unknown-event-total",
+        "identityPreserved": true
+      },
+      {
+        "id": "fold-partial-row-skipped",
+        "note": "isRow guards maxReadSeq/readStateVersion/lastActivityAt/type — a partial row never enters state",
+        "rowsStored": []
+      }
+    ],
+    "behaviorVectors": {
+      "aggregateDigest": "d43b3da565b81306b3ef5338ed50f432dfd84a66c7db050b8405af51078a236d",
+      "branches": [
+        "snapshot",
+        "notModified",
+        "difference",
+        "frame",
+        "readStateUpdated"
+      ],
+      "caseCount": 8,
+      "cases": [
+        {
+          "caseId": "baseline-then-ordered-frames",
+          "digest": "db4e0d162c21ce4b776d44988394cdb6ff16d7c70007f298396eda7429784fcc"
+        },
+        {
+          "caseId": "gap-stop-gates-into-repair",
+          "digest": "34f7c599da22516c0d392f76f3629db9e75e8a49c2a7e7ef058cf2e38e7ad105"
+        },
+        {
+          "caseId": "difference-repairs-the-gap",
+          "digest": "82a058cc8b210973e3ff6050fb06e9f02391f3875271ad1c12d4f08b5c532c78"
+        },
+        {
+          "caseId": "not-modified-changes-nothing",
+          "digest": "64e88f5e18f665001d84f6d625de74e7191ce93a825e1c74e2ea305f4dc6d752"
+        },
+        {
+          "caseId": "out-of-order-row-version-does-not-regress",
+          "digest": "9f009a9952ab1c3343bee8a24e3bb78a7f13a1571cb60f65440999ecd9db7a42"
+        },
+        {
+          "caseId": "snapshot-tombstone-blocks-stale-resurrection",
+          "digest": "f80136728835244c218983a74f49b077e7437894ef02167c5129cc3af3f75fce"
+        },
+        {
+          "caseId": "uint64-adjacent-across-2p53",
+          "digest": "4b27d9b76d6a9a20590ab3447a144ccbf210d8432c7abefb93e22065e60fb322"
+        },
+        {
+          "caseId": "read-state-updated-is-version-monotonic",
+          "digest": "998cde3449a80d146758f6aee5e4744120fb362d9f23fa3de228da1f31825969"
+        }
+      ],
+      "vectorsSha256": "ac94f85c23656184724e7b91e4957e278b4a8554878600842c3684b9c7855bd1"
+    },
+    "contractVectorReplay": [
+      {
+        "constraintClass": "positive",
+        "validatorVerdict": "accept",
+        "vectorId": "P1-valid-snapshot"
+      },
+      {
+        "constraintClass": "positive",
+        "validatorVerdict": "accept",
+        "vectorId": "P2-beyond-js-safe-integer"
+      },
+      {
+        "constraintClass": "positive",
+        "validatorVerdict": "accept",
+        "vectorId": "P3-required-null-present"
+      },
+      {
+        "constraintClass": "structural",
+        "validatorVerdict": "reject",
+        "vectorId": "N1-missing-required-field"
+      },
+      {
+        "constraintClass": "structural",
+        "validatorVerdict": "reject",
+        "vectorId": "N2-unknown-discriminator"
+      },
+      {
+        "constraintClass": "structural",
+        "validatorVerdict": "reject",
+        "vectorId": "N3-extra-property"
+      },
+      {
+        "constraintClass": "structural",
+        "validatorVerdict": "reject",
+        "vectorId": "N4-decimal-as-number"
+      },
+      {
+        "constraintClass": "structural",
+        "validatorVerdict": "reject",
+        "vectorId": "N5-unsafe-decimal-as-number"
+      },
+      {
+        "constraintClass": "valueDomain",
+        "validatorVerdict": "reject",
+        "vectorId": "N6-leading-zero"
+      },
+      {
+        "constraintClass": "valueDomain",
+        "validatorVerdict": "reject",
+        "vectorId": "N7-negative-decimal"
+      },
+      {
+        "constraintClass": "valueDomain",
+        "validatorVerdict": "reject",
+        "vectorId": "N8-non-decimal-string"
+      },
+      {
+        "constraintClass": "structural",
+        "validatorVerdict": "reject",
+        "vectorId": "N9-required-nullable-missing"
+      },
+      {
+        "constraintClass": "structural",
+        "validatorVerdict": "reject",
+        "vectorId": "N10-nested-enum-invalid"
+      },
+      {
+        "constraintClass": "structural",
+        "validatorVerdict": "reject",
+        "vectorId": "I1-thread-done-missing-throughActivitySeq"
+      },
+      {
+        "constraintClass": "structural",
+        "validatorVerdict": "reject",
+        "vectorId": "I2-thread-done-number-throughActivitySeq"
+      },
+      {
+        "constraintClass": "valueDomain",
+        "validatorVerdict": "reject",
+        "vectorId": "I3-thread-done-leading-zero-throughActivitySeq"
+      },
+      {
+        "constraintClass": "structural",
+        "validatorVerdict": "reject",
+        "vectorId": "I4-inbox-done-missing-throughActivitySeq"
+      },
+      {
+        "constraintClass": "positive",
+        "validatorVerdict": "accept",
+        "vectorId": "I5-thread-done-valid-throughActivitySeq"
+      }
+    ],
+    "runnerProtocol": {
+      "notModified": "recorded no-op observable { kind: \"not_modified\", scopeId }",
+      "sequencedBranches": [
+        "snapshot",
+        "notModified",
+        "difference",
+        "frame",
+        "readStateUpdated"
+      ],
+      "unsequencedBranches": [
+        "commandReceipt",
+        "commandRejected — the frozen contract gives them no seq; runnerProtocol 1 refuses to sequence them"
+      ]
+    },
+    "schemaBoundary": [
+      {
+        "id": "notModified-happy",
+        "verdict": "accept"
+      },
+      {
+        "id": "epoch-leading-zero",
+        "verdict": "reject"
+      },
+      {
+        "id": "epoch-as-number",
+        "verdict": "reject"
+      },
+      {
+        "id": "watermark-empty-string",
+        "verdict": "reject"
+      },
+      {
+        "id": "notModified-sealed-extra-key",
+        "verdict": "reject"
+      },
+      {
+        "id": "wrong-discriminator",
+        "verdict": "reject"
+      },
+      {
+        "id": "uint64-beyond-js-safe-accepted",
+        "verdict": "accept"
+      },
+      {
+        "id": "rowVersion-leading-zero-rejected",
+        "verdict": "reject"
+      },
+      {
+        "id": "rowVersion-as-number-rejected",
+        "verdict": "reject"
+      },
+      {
+        "id": "rowVersion-negative-rejected",
+        "verdict": "reject"
+      },
+      {
+        "id": "difference-nextFromSeq-null-accepted",
+        "verdict": "accept"
+      },
+      {
+        "id": "difference-nextFromSeq-zero-accepted",
+        "verdict": "accept"
+      },
+      {
+        "id": "markThreadDone-zero-throughSeq-rejected",
+        "verdict": "reject"
+      },
+      {
+        "id": "filter-wrong-case-rejected",
+        "verdict": "reject"
+      }
+    ],
+    "schemaStructural": {
+      "ingressBranchCount": 7,
+      "uint64Pattern": "^(0|[1-9][0-9]*)$"
+    },
+    "uint64": {
+      "compare": [
+        {
+          "left": "0",
+          "result": 0,
+          "right": "0"
+        },
+        {
+          "left": "1",
+          "result": 1,
+          "right": "0"
+        },
+        {
+          "left": "0",
+          "result": -1,
+          "right": "1"
+        },
+        {
+          "left": "9",
+          "result": -1,
+          "right": "10"
+        },
+        {
+          "left": "10",
+          "result": 1,
+          "right": "9"
+        },
+        {
+          "left": "2",
+          "result": -1,
+          "right": "10"
+        },
+        {
+          "left": "9007199254740992",
+          "result": -1,
+          "right": "9007199254740993"
+        },
+        {
+          "left": "18446744073709551615",
+          "result": -1,
+          "right": "18446744073709551616"
+        },
+        {
+          "left": "123456789012345678901",
+          "result": -1,
+          "right": "123456789012345678902"
+        }
+      ],
+      "isUInt64String": [
+        {
+          "input": "0",
+          "verdict": "valid"
+        },
+        {
+          "input": "1",
+          "verdict": "valid"
+        },
+        {
+          "input": "00",
+          "verdict": "invalid"
+        },
+        {
+          "input": "01",
+          "verdict": "invalid"
+        },
+        {
+          "input": "9",
+          "verdict": "valid"
+        },
+        {
+          "input": "10",
+          "verdict": "valid"
+        },
+        {
+          "input": "9007199254740992",
+          "verdict": "valid"
+        },
+        {
+          "input": "9007199254740993",
+          "verdict": "valid"
+        },
+        {
+          "input": "18446744073709551615",
+          "verdict": "valid"
+        },
+        {
+          "input": "18446744073709551616",
+          "verdict": "valid"
+        },
+        {
+          "input": "-1",
+          "verdict": "invalid"
+        },
+        {
+          "input": "+1",
+          "verdict": "invalid"
+        },
+        {
+          "input": "",
+          "verdict": "invalid"
+        },
+        {
+          "input": " 1",
+          "verdict": "invalid"
+        },
+        {
+          "input": "1 ",
+          "verdict": "invalid"
+        },
+        {
+          "input": "0x1",
+          "verdict": "invalid"
+        },
+        {
+          "input": {
+            "typeof": "number"
+          },
+          "verdict": "invalid"
+        },
+        {
+          "input": {
+            "typeof": "object"
+          },
+          "verdict": "invalid"
+        }
+      ]
+    }
+  },
+  "generatedBy": "original-execution (uint64, reducer + core, contract behavior runner, ajv over generated JSON Schema)",
+  "notes": [
+    "frozen behavior vectors replayed through the ORIGINAL runner; aggregate digest recorded here for the first time (packet manifest has canonicalBehaviorResultSha256: null)",
+    "runnerProtocol-1 fact: applyStep does not map difference.hasMore onto core partial — frozen as observed",
+    "actualStream: a frozen message->read->done->difference ingress sequence with the original reducer digest; Go ports replay it via verify area activity.stream.digest"
+  ],
+  "sourcePins": {
+    "activityBehaviorVectors": {
+      "path": "packages/sync-core/contracts/activity-v1/fixtures/activity-sync.behavior.jsonl",
+      "sha256": "ac94f85c23656184724e7b91e4957e278b4a8554878600842c3684b9c7855bd1"
+    },
+    "activityContractVectors": {
+      "path": "packages/sync-core/contracts/activity-v1/fixtures/activity-sync.contract-vectors.jsonl",
+      "sha256": "89ef866cc5e16dd321945c422e5f9ae7919157312d4bafbc68e9241d6ae3bee3"
+    },
+    "activityJsonSchema": {
+      "path": "packages/sync-core/contracts/activity-v1/generated/json-schema/activity-sync.schema.json",
+      "sha256": "58177bc39e9038b65d72b768dcf5ceb9687117b8d362cd7c21eec684e56fc248"
+    },
+    "activityManifest": {
+      "path": "packages/sync-core/contracts/activity-v1/manifest.json",
+      "sha256": "7743a8086e6d443656b7527486a6170439c3a0c8681e9b4f02e74e0165967cf1"
+    },
+    "activityRunner": {
+      "path": "packages/sync-core/contracts/activity-v1/runner/runBehaviorVectors.ts",
+      "sha256": "eb9bb37ccef7c545c9b3ea22638735ece54c9685f5e930a934d40089b22ba984"
+    },
+    "serverChannelsRoute": {
+      "path": "packages/server/src/routes/channels.ts",
+      "sha256": "1014a8e565e4cc2906616af8274eb4b1fd2a63b347839ae8ac5c33b761265109"
+    },
+    "serverMessageRealtimeEvents": {
+      "path": "packages/server/src/services/messageRealtimeEvents.ts",
+      "sha256": "aa8b88ed8ec08cca36f858043be31807e08a97b694ba39e48bb070cce6f7edff"
+    },
+    "serverMessageService": {
+      "path": "packages/server/src/services/messageService.ts",
+      "sha256": "d49aad2a3d25a6d4cef1225f16aacb80c2fbf1188d483782ce4654b3aa38d280"
+    },
+    "serverMessagesRoute": {
+      "path": "packages/server/src/routes/messages.ts",
+      "sha256": "7a7ca204e4956cfb6bc180ccc7689f419c2197c51aa9e1f64a1e89ee8bd759a7"
+    },
+    "serverReadMutationSequencer": {
+      "path": "packages/server/src/services/readMutationSequencer.ts",
+      "sha256": "d7b9c53834fffe3d196aa8340ecbcab29284b0ff3454b6ab32e4934e17f12800"
+    },
+    "serverReadMutationsRoute": {
+      "path": "packages/server/src/routes/readMutations.ts",
+      "sha256": "3c8587881b6dd9dd34cfa37863a40cf05136b4fae107b8d1b24fdd2974f55e0d"
+    },
+    "sharedActivityMute": {
+      "path": "packages/shared/src/activityMute.ts",
+      "sha256": "e356b1341dd626d2bab51b5f86ed61f8436cbc156b8d654bd8d949a4efb7230e"
+    },
+    "sharedCanonicalMessageManifest": {
+      "path": "packages/shared/src/canonicalMessageManifest.ts",
+      "sha256": "f1cecab62c6380b5416f3cdf7a17c6efdd33445609c3c2aae10bbd7d8fed660f"
+    },
+    "sharedIndex": {
+      "path": "packages/shared/src/index.ts",
+      "sha256": "9224fa36c718ec9b4d8a04ab0906c5d3ab597a03adaf2c48a3d3d78c33e750cb"
+    },
+    "syncCoreActivityDomain": {
+      "path": "packages/sync-core/src/domains/activity.ts",
+      "sha256": "f4ef5ac8ff045a6de4c7327d27a32930ba3db70e8d54f7f33f8a6f164ad863f5"
+    },
+    "syncCoreCore": {
+      "path": "packages/sync-core/src/core.ts",
+      "sha256": "b3906ae8dcb80037de36f79630197129febc333b3f171c8d6f2b376181f21104"
+    },
+    "syncCoreUint64": {
+      "path": "packages/sync-core/src/uint64.ts",
+      "sha256": "1551c72973aeecee7422009e931f7abc31d294b4e8779a97aecfd1fce3cc4781"
+    },
+    "syncCoreViolations": {
+      "path": "packages/sync-core/src/violations.ts",
+      "sha256": "148effe9deaf4c5e88ff24cee6dc6a247cd08043f515ecbca1869addce72276c"
+    },
+    "webChannelDomain": {
+      "path": "packages/web/src/store/channelDomain.ts",
+      "sha256": "2337d2458d0c994d51e7cb361483aacea843cbee55185245fc43c08b486a0392"
+    },
+    "webMessageStore": {
+      "path": "packages/web/src/store/messageStore.ts",
+      "sha256": "4304afdeefa98ebe3e0fee858e4067cbb019da5c54a7489a676bcd8426b4760b"
+    },
+    "webMessageSyncDomain": {
+      "path": "packages/web/src/store/messageSyncDomain.ts",
+      "sha256": "17e7f4bdc6bb959aec8be87a9f75e96e567cbaaa17925ed3fd06cc510b015b29"
+    },
+    "webNotificationPrefsSyncDomain": {
+      "path": "packages/web/src/store/notificationPrefsSyncDomain.ts",
+      "sha256": "bd167f42c37e186fb63c0900cc627b5fb6efa1f802a1dbbd73d742c8e3780d0d"
+    },
+    "webReactionReadModels": {
+      "path": "packages/web/src/store/reactionReadModels.ts",
+      "sha256": "d22b8995e15fc8c24405434022ae91bb7beb985819ed50749fdd4767f9440b0b"
+    },
+    "webReadReceiptDomain": {
+      "path": "packages/web/src/store/readReceiptDomain.ts",
+      "sha256": "12aad0e3a6e1b2d69adc3db2a69cff8f3fc7a70bbf2ff7ba52a31a08b343bb24"
+    },
+    "webReadStateSync": {
+      "path": "packages/web/src/store/readStateSync.ts",
+      "sha256": "ef1b5b56a7336b352294c8e32bb0343a8830a5e76edf4807a0cf115cd3928a37"
+    }
+  }
+}

@@ -36,7 +36,9 @@ func TestRoutePolicy(t *testing.T) {
 		{"DELETE", "/api/auth/me", http.StatusMethodNotAllowed},
 		// M2 server paths run the account gates before method policy.
 		{"PUT", "/api/servers", http.StatusUnauthorized},
-		{"GET", "/socket.io/?EIO=4&transport=polling", http.StatusNotImplemented},
+		// M4 enables Socket.IO with websocket-only transport; polling is an
+		// explicit protocol rejection, not an unimplemented feature.
+		{"GET", "/socket.io/?EIO=4&transport=polling", http.StatusBadRequest},
 		{"POST", "/internal/agent-api/anything", http.StatusUnauthorized},
 		{"GET", "/daemon/v1/nothing", http.StatusNotImplemented},
 		// accept-invite is implemented (M3 invitations fix): without identity

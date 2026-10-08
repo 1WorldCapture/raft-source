@@ -8,7 +8,7 @@ import (
 // registerWorkspaceMethodFallbacks extends the existing M1 explicit 405/Allow
 // policy to M2 while still running identity, scope and guest checks first.
 // Method-specific ServeMux registrations win over these method-free fallbacks.
-func registerWorkspaceMethodFallbacks(mux *http.ServeMux, servers *ServersHandlers, gate func(http.HandlerFunc) http.Handler) {
+func registerWorkspaceMethodFallbacks(mux *http.ServeMux, servers *ServersHandlers, gate func(http.HandlerFunc) http.Handler, readstateEnabled bool) {
 	reject := func(methods ...string) http.HandlerFunc {
 		return func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Allow", strings.Join(methods, ", "))
@@ -22,6 +22,10 @@ func registerWorkspaceMethodFallbacks(mux *http.ServeMux, servers *ServersHandle
 	mux.Handle("/api/servers/{id}", gate(func(w http.ResponseWriter, r *http.Request) {
 		if r.PathValue("id") == "order" {
 			reject(http.MethodGet, http.MethodPatch)(w, r)
+			return
+		}
+		if readstateEnabled && r.PathValue("id") == "unread-summary" {
+			reject(http.MethodGet)(w, r)
 			return
 		}
 		servers.RequireServerScope(reject(http.MethodGet, http.MethodPatch))(w, r)

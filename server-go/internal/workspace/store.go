@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"raft.local/server-go/internal/platform/clock"
+	platformdb "raft.local/server-go/internal/platform/db"
 )
 
 // executor is satisfied by *sql.DB and *sql.Tx so use cases can run queries
@@ -74,15 +75,7 @@ func (s *Store) now() time.Time { return s.clock.Now() }
 // rolls back on error. Transactions belong to use cases; channel and audit
 // writers accept the tx and never open their own.
 func (s *Store) withTx(ctx context.Context, fn func(tx *sql.Tx) error) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	if err := fn(tx); err != nil {
-		_ = tx.Rollback()
-		return err
-	}
-	return tx.Commit()
+	return platformdb.WithWriteTx(ctx, s.db, fn)
 }
 
 // workspaceColumns is the full external ServerRecord column set.

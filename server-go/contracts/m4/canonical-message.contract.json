@@ -1,0 +1,516 @@
+{
+  "area": "canonical-message",
+  "baseline": "bc65213b377a992c381e809c72ba50ca9af367fd",
+  "contract": "raft.m4-reference",
+  "executed": {
+    "absentOptionalPreserved": {
+      "mentions": [
+        {
+          "id": "u-2",
+          "name": "Bob",
+          "type": "user"
+        }
+      ],
+      "reactions": [
+        {
+          "count": 1,
+          "emoji": "👍",
+          "reactorIds": [
+            "u-2"
+          ],
+          "reactorNames": [
+            "Bob"
+          ]
+        }
+      ]
+    },
+    "commentRefSharedNullPreserved": {
+      "anchorLabel": null,
+      "anchorQuote": null,
+      "attachmentId": "a-1",
+      "filename": "f.png",
+      "hostMessageId": null,
+      "hostSource": null
+    },
+    "displayOrderSeqPreferred": [
+      "m-c",
+      "m-b",
+      "m-a"
+    ],
+    "foldNewBucket": [
+      5,
+      10
+    ],
+    "manifestJson": "{\n  \"version\": 5,\n  \"producerRegistryAnchor\": \"slock#4593@b0fcdfd9fae9f0af9b32a87a1d5c3e196d3fdaa1\",\n  \"fields\": [\n    {\n      \"name\": \"channelId\",\n      \"class\": \"canonicalRequired\",\n      \"wireType\": \"string\",\n      \"nullable\": false,\n      \"mergePolicy\": \"overwrite\",\n      \"presence\": {\n        \"messageNew\": \"present\",\n        \"enrichedUpdated\": \"present\",\n        \"taskStatusUpdated\": \"present\"\n      }\n    },\n    {\n      \"name\": \"content\",\n      \"class\": \"canonicalRequired\",\n      \"wireType\": \"string\",\n      \"nullable\": false,\n      \"mergePolicy\": \"overwrite\",\n      \"presence\": {\n        \"messageNew\": \"present\",\n        \"enrichedUpdated\": \"present\",\n        \"taskStatusUpdated\": \"present\"\n      }\n    },\n    {\n      \"name\": \"createdAt\",\n      \"class\": \"canonicalRequired\",\n      \"wireType\": \"string\",\n      \"nullable\": false,\n      \"mergePolicy\": \"overwrite\",\n      \"presence\": {\n        \"messageNew\": \"present\",\n        \"enrichedUpdated\": \"present\",\n        \"taskStatusUpdated\": \"present\"\n      }\n    },\n    {\n      \"name\": \"id\",\n      \"class\": \"canonicalRequired\",\n      \"wireType\": \"string\",\n      \"nullable\": false,\n      \"mergePolicy\": \"overwrite\",\n      \"presence\": {\n        \"messageNew\": \"present\",\n        \"enrichedUpdated\": \"present\",\n        \"taskStatusUpdated\": \"present\"\n      }\n    },\n    {\n      \"name\": \"messageType\",\n      \"class\": \"canonicalRequired\",\n      \"wireType\": \"string-union-raw\",\n      \"nullable\": false,\n      \"mergePolicy\": \"overwrite\",\n      \"presence\": {\n        \"messageNew\": \"present\",\n        \"enrichedUpdated\": \"present\",\n        \"taskStatusUpdated\": \"present\"\n      }\n    },\n    {\n      \"name\": \"randomId\",\n      \"class\": \"canonicalRequired\",\n      \"wireType\": \"string\",\n      \"nullable\": true,\n      \"mergePolicy\": \"overwrite\",\n      \"presence\": {\n        \"messageNew\": \"present\",\n        \"enrichedUpdated\": \"present\",\n        \"taskStatusUpdated\": \"present\"\n      }\n    },\n    {\n      \"name\": \"senderId\",\n      \"class\": \"canonicalRequired\",\n      \"wireType\": \"string\",\n      \"nullable\": false,\n      \"mergePolicy\": \"overwrite\",\n      \"presence\": {\n        \"messageNew\": \"present\",\n        \"enrichedUpdated\": \"present\",\n        \"taskStatusUpdated\": \"present\"\n      }\n    },\n    {\n      \"name\": \"senderType\",\n      \"class\": \"canonicalRequired\",\n      \"wireType\": \"string-union-raw\",\n      \"nullable\": false,\n      \"mergePolicy\": \"overwrite\",\n      \"presence\": {\n        \"messageNew\": \"present\",\n        \"enrichedUpdated\": \"present\",\n        \"taskStatusUpdated\": \"present\"\n      }\n    },\n    {\n      \"name\": \"seq\",\n      \"class\": \"canonicalRequired\",\n      \"wireType\": \"number\",\n      \"nullable\": false,\n      \"mergePolicy\": \"overwrite\",\n      \"presence\": {\n        \"messageNew\": \"present\",\n        \"enrichedUpdated\": \"present\",\n        \"taskStatusUpdated\": \"present\"\n      }\n    },\n    {\n      \"name\": \"threadId\",\n      \"class\": \"canonicalRequired\",\n      \"wireType\": \"string\",\n      \"nullable\": true,\n      \"mergePolicy\": \"overwrite\",\n      \"presence\": {\n        \"messageNew\": \"present\",\n        \"enrichedUpdated\": \"present\",\n        \"taskStatusUpdated\": \"present\"\n      }\n    },\n    {\n      \"name\": \"actionMetadata\",\n      \"class\": \"optionalAggregate\",\n      \"wireType\": \"structured-json\",\n      \"nullable\": true,\n      \"mergePolicy\": \"present-overwrite\",\n      \"presence\": {\n        \"messageNew\": \"present\",\n        \"enrichedUpdated\": \"present\",\n        \"taskStatusUpdated\": \"present\"\n      }\n    },\n    {\n      \"name\": \"attachments\",\n      \"class\": \"optionalAggregate\",\n      \"wireType\": \"array<attachment>\",\n      \"nullable\": false,\n      \"mergePolicy\": \"present-overwrite\",\n      \"presence\": {\n        \"messageNew\": \"present\",\n        \"enrichedUpdated\": \"present\",\n        \"taskStatusUpdated\": \"absent\"\n      }\n    },\n    {\n      \"name\": \"commentRef\",\n      \"class\": \"optionalAggregate\",\n      \"wireType\": \"object<commentRef>\",\n      \"nullable\": true,\n      \"mergePolicy\": \"shared-null-preserve\",\n      \"presence\": {\n        \"messageNew\": \"present\",\n        \"enrichedUpdated\": \"present\",\n        \"taskStatusUpdated\": \"absent\"\n      }\n    },\n    {\n      \"name\": \"conversationContext\",\n      \"class\": \"optionalAggregate\",\n      \"wireType\": \"object<conversationContext>\",\n      \"nullable\": false,\n      \"mergePolicy\": \"present-overwrite\",\n      \"presence\": {\n        \"messageNew\": \"present\",\n        \"enrichedUpdated\": \"absent\",\n        \"taskStatusUpdated\": \"absent\"\n      }\n    },\n    {\n      \"name\": \"externalAuthor\",\n      \"class\": \"optionalAggregate\",\n      \"wireType\": \"object<externalAuthor>\",\n      \"nullable\": true,\n      \"mergePolicy\": \"present-overwrite\",\n      \"presence\": {\n        \"messageNew\": \"present\",\n        \"enrichedUpdated\": \"present\",\n        \"taskStatusUpdated\": \"absent\"\n      }\n    },\n    {\n      \"name\": \"mentions\",\n      \"class\": \"optionalAggregate\",\n      \"wireType\": \"array<mention>\",\n      \"nullable\": false,\n      \"mergePolicy\": \"present-overwrite\",\n      \"presence\": {\n        \"messageNew\": \"present\",\n        \"enrichedUpdated\": \"present\",\n        \"taskStatusUpdated\": \"absent\"\n      }\n    },\n    {\n      \"name\": \"reactions\",\n      \"class\": \"optionalAggregate\",\n      \"wireType\": \"array<reaction>\",\n      \"nullable\": false,\n      \"mergePolicy\": \"present-overwrite\",\n      \"presence\": {\n        \"messageNew\": \"present\",\n        \"enrichedUpdated\": \"present\",\n        \"taskStatusUpdated\": \"absent\"\n      }\n    },\n    {\n      \"name\": \"senderDescription\",\n      \"class\": \"optionalAggregate\",\n      \"wireType\": \"string\",\n      \"nullable\": true,\n      \"mergePolicy\": \"present-overwrite\",\n      \"presence\": {\n        \"messageNew\": \"present\",\n        \"enrichedUpdated\": \"present\",\n        \"taskStatusUpdated\": \"absent\"\n      }\n    },\n    {\n      \"name\": \"senderMembershipStatus\",\n      \"class\": \"optionalAggregate\",\n      \"wireType\": \"string-union-raw\",\n      \"nullable\": true,\n      \"mergePolicy\": \"present-overwrite\",\n      \"presence\": {\n        \"messageNew\": \"present\",\n        \"enrichedUpdated\": \"present\",\n        \"taskStatusUpdated\": \"absent\"\n      }\n    },\n    {\n      \"name\": \"senderName\",\n      \"class\": \"optionalAggregate\",\n      \"wireType\": \"string\",\n      \"nullable\": false,\n      \"mergePolicy\": \"present-overwrite\",\n      \"presence\": {\n        \"messageNew\": \"present\",\n        \"enrichedUpdated\": \"present\",\n        \"taskStatusUpdated\": \"present\"\n      }\n    }\n  ],\n  \"nestedWireShapes\": {\n    \"attachment\": [\n      {\n        \"name\": \"filename\",\n        \"wireType\": \"string\",\n        \"nullable\": false\n      },\n      {\n        \"name\": \"height\",\n        \"wireType\": \"number\",\n        \"nullable\": true\n      },\n      {\n        \"name\": \"id\",\n        \"wireType\": \"string\",\n        \"nullable\": false\n      },\n      {\n        \"name\": \"mimeType\",\n        \"wireType\": \"string\",\n        \"nullable\": false\n      },\n      {\n        \"name\": \"sizeBytes\",\n        \"wireType\": \"number\",\n        \"nullable\": false\n      },\n      {\n        \"name\": \"thumbnailUrl\",\n        \"wireType\": \"string\",\n        \"nullable\": true\n      },\n      {\n        \"name\": \"width\",\n        \"wireType\": \"number\",\n        \"nullable\": true\n      }\n    ],\n    \"reaction\": [\n      {\n        \"name\": \"count\",\n        \"wireType\": \"number\",\n        \"nullable\": false\n      },\n      {\n        \"name\": \"emoji\",\n        \"wireType\": \"string\",\n        \"nullable\": false\n      },\n      {\n        \"name\": \"reactorIds\",\n        \"wireType\": \"array<string>\",\n        \"nullable\": false\n      },\n      {\n        \"name\": \"reactorNames\",\n        \"wireType\": \"array<string>\",\n        \"nullable\": false\n      }\n    ],\n    \"mention\": [\n      {\n        \"name\": \"id\",\n        \"wireType\": \"string\",\n        \"nullable\": false\n      },\n      {\n        \"name\": \"name\",\n        \"wireType\": \"string\",\n        \"nullable\": false\n      },\n      {\n        \"name\": \"type\",\n        \"wireType\": \"string-union-raw\",\n        \"nullable\": false\n      }\n    ],\n    \"commentRef\": [\n      {\n        \"name\": \"anchorLabel\",\n        \"wireType\": \"string\",\n        \"nullable\": true\n      },\n      {\n        \"name\": \"anchorQuote\",\n        \"wireType\": \"string\",\n        \"nullable\": true\n      },\n      {\n        \"name\": \"attachmentId\",\n        \"wireType\": \"string\",\n        \"nullable\": false\n      },\n      {\n        \"name\": \"filename\",\n        \"wireType\": \"string\",\n        \"nullable\": false\n      },\n      {\n        \"name\": \"hostMessageId\",\n        \"wireType\": \"string\",\n        \"nullable\": true\n      },\n      {\n        \"name\": \"hostSource\",\n        \"wireType\": \"object<hostSource>\",\n        \"nullable\": true\n      }\n    ],\n    \"commentRefHostSource\": [\n      {\n        \"name\": \"channelId\",\n        \"wireType\": \"string\",\n        \"nullable\": false\n      },\n      {\n        \"name\": \"parentMessageId\",\n        \"wireType\": \"string\",\n        \"nullable\": false,\n        \"optionalKey\": true\n      },\n      {\n        \"name\": \"rootThreadChannelId\",\n        \"wireType\": \"string\",\n        \"nullable\": false,\n        \"optionalKey\": true\n      },\n      {\n        \"name\": \"routeKind\",\n        \"wireType\": \"string-union-raw\",\n        \"nullable\": false\n      },\n      {\n        \"name\": \"threadChannelId\",\n        \"wireType\": \"string\",\n        \"nullable\": false,\n        \"optionalKey\": true\n      },\n      {\n        \"name\": \"type\",\n        \"wireType\": \"string-union-raw\",\n        \"nullable\": false\n      }\n    ],\n    \"conversationContext\": [\n      {\n        \"name\": \"channelType\",\n        \"wireType\": \"string-union-raw\",\n        \"nullable\": false\n      },\n      {\n        \"name\": \"parentChannelId\",\n        \"wireType\": \"string\",\n        \"nullable\": false,\n        \"optionalKey\": true\n      },\n      {\n        \"name\": \"parentChannelType\",\n        \"wireType\": \"string-union-raw\",\n        \"nullable\": false,\n        \"optionalKey\": true\n      },\n      {\n        \"name\": \"parentMessageId\",\n        \"wireType\": \"string\",\n        \"nullable\": false,\n        \"optionalKey\": true\n      }\n    ],\n    \"externalAuthor\": [\n      {\n        \"name\": \"actorKind\",\n        \"wireType\": \"string-union-raw\",\n        \"nullable\": false\n      },\n      {\n        \"name\": \"actorProjectionRevision\",\n        \"wireType\": \"number\",\n        \"nullable\": false\n      },\n      {\n        \"name\": \"appRegistrationId\",\n        \"wireType\": \"string\",\n        \"nullable\": false\n      },\n      {\n        \"name\": \"avatarDigest\",\n        \"wireType\": \"string\",\n        \"nullable\": true\n      },\n      {\n        \"name\": \"avatarUrl\",\n        \"wireType\": \"string\",\n        \"nullable\": true\n      },\n      {\n        \"name\": \"displayName\",\n        \"wireType\": \"string\",\n        \"nullable\": false\n      },\n      {\n        \"name\": \"externalActorId\",\n        \"wireType\": \"string\",\n        \"nullable\": false\n      },\n      {\n        \"name\": \"externalConversationId\",\n        \"wireType\": \"string\",\n        \"nullable\": false\n      },\n      {\n        \"name\": \"externalMessageId\",\n        \"wireType\": \"string\",\n        \"nullable\": false\n      },\n      {\n        \"name\": \"installId\",\n        \"wireType\": \"string\",\n        \"nullable\": false\n      },\n      {\n        \"name\": \"projectionId\",\n        \"wireType\": \"string\",\n        \"nullable\": false\n      },\n      {\n        \"name\": \"provider\",\n        \"wireType\": \"string\",\n        \"nullable\": false\n      },\n      {\n        \"name\": \"workspaceId\",\n        \"wireType\": \"string\",\n        \"nullable\": false\n      }\n    ]\n  },\n  \"exclusions\": {\n    \"taskDomainProjection\": {\n      \"fields\": [\n        \"taskAssigneeId\",\n        \"taskAssigneeName\",\n        \"taskAssigneeType\",\n        \"taskClaimedAt\",\n        \"taskCompletedAt\",\n        \"taskCurrentProjection\",\n        \"taskNumber\",\n        \"taskStatus\"\n      ],\n      \"migrationStatus\": \"active-consumers (web taskStore / KMP task projection); dual-dispatch at ingress\"\n    },\n    \"emittedUnconsumed\": {\n      \"fields\": [\n        \"updatedAt\"\n      ],\n      \"migrationStatus\": \"web canonical zero-consumption; mobile legacy consumption to retire in round-2 (label/event-key/SQL cache -> (epoch,seq,id/revision) adjudication)\"\n    },\n    \"viewerScopedFields\": {\n      \"fields\": [\n        \"attachment.commentCount\"\n      ],\n      \"migrationStatus\": \"overlay-domain data; never apply shared-stripped values to canonical or overlay state\"\n    },\n    \"clientOnly\": {\n      \"fields\": [\n        \"optimisticDisplaySeq\"\n      ],\n      \"migrationStatus\": \"n/a (never on wire)\"\n    },\n    \"storageOnlySealed\": {\n      \"fields\": [\n        \"agentSendKey\",\n        \"searchText\",\n        \"searchVector\"\n      ],\n      \"migrationStatus\": \"sealed server-side; G6 registry gate enforces post-projection shape\"\n    }\n  },\n  \"excludedClientOnly\": [\n    \"optimisticDisplaySeq\"\n  ]\n}\n",
+    "manifestVersion": 5,
+    "mergePolicies": {
+      "actionMetadata": {
+        "mergePolicy": "present-overwrite",
+        "nullable": true,
+        "wireType": "structured-json"
+      },
+      "attachments": {
+        "mergePolicy": "present-overwrite",
+        "nullable": false,
+        "wireType": "array<attachment>"
+      },
+      "channelId": {
+        "mergePolicy": "overwrite",
+        "nullable": false,
+        "wireType": "string"
+      },
+      "commentRef": {
+        "mergePolicy": "shared-null-preserve",
+        "nullable": true,
+        "wireType": "object<commentRef>"
+      },
+      "content": {
+        "mergePolicy": "overwrite",
+        "nullable": false,
+        "wireType": "string"
+      },
+      "conversationContext": {
+        "mergePolicy": "present-overwrite",
+        "nullable": false,
+        "wireType": "object<conversationContext>"
+      },
+      "createdAt": {
+        "mergePolicy": "overwrite",
+        "nullable": false,
+        "wireType": "string"
+      },
+      "externalAuthor": {
+        "mergePolicy": "present-overwrite",
+        "nullable": true,
+        "wireType": "object<externalAuthor>"
+      },
+      "id": {
+        "mergePolicy": "overwrite",
+        "nullable": false,
+        "wireType": "string"
+      },
+      "mentions": {
+        "mergePolicy": "present-overwrite",
+        "nullable": false,
+        "wireType": "array<mention>"
+      },
+      "messageType": {
+        "mergePolicy": "overwrite",
+        "nullable": false,
+        "wireType": "string-union-raw"
+      },
+      "randomId": {
+        "mergePolicy": "overwrite",
+        "nullable": true,
+        "wireType": "string"
+      },
+      "reactions": {
+        "mergePolicy": "present-overwrite",
+        "nullable": false,
+        "wireType": "array<reaction>"
+      },
+      "senderDescription": {
+        "mergePolicy": "present-overwrite",
+        "nullable": true,
+        "wireType": "string"
+      },
+      "senderId": {
+        "mergePolicy": "overwrite",
+        "nullable": false,
+        "wireType": "string"
+      },
+      "senderMembershipStatus": {
+        "mergePolicy": "present-overwrite",
+        "nullable": true,
+        "wireType": "string-union-raw"
+      },
+      "senderName": {
+        "mergePolicy": "present-overwrite",
+        "nullable": false,
+        "wireType": "string"
+      },
+      "senderType": {
+        "mergePolicy": "overwrite",
+        "nullable": false,
+        "wireType": "string-union-raw"
+      },
+      "seq": {
+        "mergePolicy": "overwrite",
+        "nullable": false,
+        "wireType": "number"
+      },
+      "threadId": {
+        "mergePolicy": "overwrite",
+        "nullable": true,
+        "wireType": "string"
+      }
+    },
+    "noopUpdateIdentityStable": true,
+    "omissionLedger": {
+      "clientOnly": [
+        "optimisticDisplaySeq"
+      ],
+      "emittedUnconsumed": [
+        "updatedAt"
+      ],
+      "storageOnlySealed": [
+        "agentSendKey",
+        "searchText",
+        "searchVector"
+      ],
+      "taskDomainProjection": [
+        "taskAssigneeId",
+        "taskAssigneeName",
+        "taskAssigneeType",
+        "taskClaimedAt",
+        "taskCompletedAt",
+        "taskCurrentProjection",
+        "taskNumber",
+        "taskStatus"
+      ],
+      "viewerScopedFields": [
+        "attachment.commentCount"
+      ]
+    },
+    "optionalAggregateFields": [
+      "actionMetadata",
+      "attachments",
+      "commentRef",
+      "conversationContext",
+      "externalAuthor",
+      "mentions",
+      "reactions",
+      "senderDescription",
+      "senderMembershipStatus",
+      "senderName"
+    ],
+    "presenceMatrix": {
+      "actionMetadata": {
+        "enrichedUpdated": "present",
+        "messageNew": "present",
+        "taskStatusUpdated": "present"
+      },
+      "attachments": {
+        "enrichedUpdated": "present",
+        "messageNew": "present",
+        "taskStatusUpdated": "absent"
+      },
+      "channelId": {
+        "enrichedUpdated": "present",
+        "messageNew": "present",
+        "taskStatusUpdated": "present"
+      },
+      "commentRef": {
+        "enrichedUpdated": "present",
+        "messageNew": "present",
+        "taskStatusUpdated": "absent"
+      },
+      "content": {
+        "enrichedUpdated": "present",
+        "messageNew": "present",
+        "taskStatusUpdated": "present"
+      },
+      "conversationContext": {
+        "enrichedUpdated": "absent",
+        "messageNew": "present",
+        "taskStatusUpdated": "absent"
+      },
+      "createdAt": {
+        "enrichedUpdated": "present",
+        "messageNew": "present",
+        "taskStatusUpdated": "present"
+      },
+      "externalAuthor": {
+        "enrichedUpdated": "present",
+        "messageNew": "present",
+        "taskStatusUpdated": "absent"
+      },
+      "id": {
+        "enrichedUpdated": "present",
+        "messageNew": "present",
+        "taskStatusUpdated": "present"
+      },
+      "mentions": {
+        "enrichedUpdated": "present",
+        "messageNew": "present",
+        "taskStatusUpdated": "absent"
+      },
+      "messageType": {
+        "enrichedUpdated": "present",
+        "messageNew": "present",
+        "taskStatusUpdated": "present"
+      },
+      "randomId": {
+        "enrichedUpdated": "present",
+        "messageNew": "present",
+        "taskStatusUpdated": "present"
+      },
+      "reactions": {
+        "enrichedUpdated": "present",
+        "messageNew": "present",
+        "taskStatusUpdated": "absent"
+      },
+      "senderDescription": {
+        "enrichedUpdated": "present",
+        "messageNew": "present",
+        "taskStatusUpdated": "absent"
+      },
+      "senderId": {
+        "enrichedUpdated": "present",
+        "messageNew": "present",
+        "taskStatusUpdated": "present"
+      },
+      "senderMembershipStatus": {
+        "enrichedUpdated": "present",
+        "messageNew": "present",
+        "taskStatusUpdated": "absent"
+      },
+      "senderName": {
+        "enrichedUpdated": "present",
+        "messageNew": "present",
+        "taskStatusUpdated": "present"
+      },
+      "senderType": {
+        "enrichedUpdated": "present",
+        "messageNew": "present",
+        "taskStatusUpdated": "present"
+      },
+      "seq": {
+        "enrichedUpdated": "present",
+        "messageNew": "present",
+        "taskStatusUpdated": "present"
+      },
+      "threadId": {
+        "enrichedUpdated": "present",
+        "messageNew": "present",
+        "taskStatusUpdated": "present"
+      }
+    },
+    "presentEmptyClears": [],
+    "requiredFields": [
+      "channelId",
+      "content",
+      "createdAt",
+      "id",
+      "messageType",
+      "randomId",
+      "senderId",
+      "senderType",
+      "seq",
+      "threadId"
+    ],
+    "socketProjection": {
+      "plain": {
+        "input": {
+          "actionMetadata": null,
+          "channelId": "ch-1",
+          "content": "hi",
+          "createdAt": "2026-10-01T00:00:00.000Z",
+          "id": "0b2a6f3e-9c1d-4e7b-8f2a-1c3b5d7e9a01",
+          "messageType": "chat",
+          "randomId": "rnd-1",
+          "senderId": "u-1",
+          "senderType": "user",
+          "seq": 7,
+          "taskAssigneeId": null,
+          "taskAssigneeType": null,
+          "taskClaimedAt": null,
+          "taskCompletedAt": null,
+          "taskNumber": null,
+          "taskStatus": null,
+          "threadId": null,
+          "updatedAt": "2026-10-01T00:00:01.000Z"
+        },
+        "output": {
+          "actionMetadata": null,
+          "channelId": "ch-1",
+          "content": "hi",
+          "createdAt": "2026-10-01T00:00:00.000Z",
+          "id": "0b2a6f3e-9c1d-4e7b-8f2a-1c3b5d7e9a01",
+          "messageType": "chat",
+          "randomId": "rnd-1",
+          "senderId": "u-1",
+          "senderName": "Ada",
+          "senderType": "user",
+          "seq": 7,
+          "taskAssigneeId": null,
+          "taskAssigneeType": null,
+          "taskClaimedAt": null,
+          "taskCompletedAt": null,
+          "taskNumber": null,
+          "taskStatus": null,
+          "threadId": null,
+          "updatedAt": "2026-10-01T00:00:01.000Z"
+        }
+      },
+      "withTaskAssignee": {
+        "output": {
+          "actionMetadata": null,
+          "channelId": "ch-1",
+          "content": "hi",
+          "createdAt": "2026-10-01T00:00:00.000Z",
+          "id": "0b2a6f3e-9c1d-4e7b-8f2a-1c3b5d7e9a01",
+          "messageType": "chat",
+          "randomId": "rnd-1",
+          "senderId": "u-1",
+          "senderName": "Ada",
+          "senderType": "user",
+          "seq": 7,
+          "taskAssigneeId": "u-2",
+          "taskAssigneeName": "Bob",
+          "taskAssigneeType": null,
+          "taskClaimedAt": null,
+          "taskCompletedAt": null,
+          "taskNumber": null,
+          "taskStatus": null,
+          "threadId": null,
+          "updatedAt": "2026-10-01T00:00:01.000Z"
+        }
+      }
+    },
+    "storageSeal": {
+      "output": {
+        "content": "x",
+        "id": "0b2a6f3e-9c1d-4e7b-8f2a-1c3b5d7e9a01",
+        "seq": 1
+      }
+    }
+  },
+  "generatedBy": "original-execution (shared manifest, socket projector, web canonical fold)",
+  "notes": [
+    "commentRef shared-null-preserve, present-overwrite and viewer/storage omission rules all run original code"
+  ],
+  "omissionRules": {
+    "commentRefSharedNull": "a null commentRef on a shared (room-broadcast) surface is privacy-scrub, NOT a clear; only a receiver-private surface may clear it",
+    "sealedAtSocketBoundary": [
+      "agentSendKey",
+      "searchText",
+      "searchVector",
+      "senderHandle"
+    ],
+    "sharedFramesMustNotCarry": {
+      "clientOnly": [
+        "optimisticDisplaySeq"
+      ],
+      "receiverPrivate": [
+        "reaction viewer snapshot",
+        "read state (viewer)",
+        "mute state (viewer prefs)"
+      ],
+      "storageOnly": [
+        "agentSendKey",
+        "searchText",
+        "searchVector"
+      ],
+      "viewerScopedNested": [
+        "attachment.commentCount"
+      ]
+    },
+    "wireOnlyDroppedByWebAdapter": [
+      "readState",
+      "lastMessageAt"
+    ]
+  },
+  "sourcePins": {
+    "activityBehaviorVectors": {
+      "path": "packages/sync-core/contracts/activity-v1/fixtures/activity-sync.behavior.jsonl",
+      "sha256": "ac94f85c23656184724e7b91e4957e278b4a8554878600842c3684b9c7855bd1"
+    },
+    "activityContractVectors": {
+      "path": "packages/sync-core/contracts/activity-v1/fixtures/activity-sync.contract-vectors.jsonl",
+      "sha256": "89ef866cc5e16dd321945c422e5f9ae7919157312d4bafbc68e9241d6ae3bee3"
+    },
+    "activityJsonSchema": {
+      "path": "packages/sync-core/contracts/activity-v1/generated/json-schema/activity-sync.schema.json",
+      "sha256": "58177bc39e9038b65d72b768dcf5ceb9687117b8d362cd7c21eec684e56fc248"
+    },
+    "activityManifest": {
+      "path": "packages/sync-core/contracts/activity-v1/manifest.json",
+      "sha256": "7743a8086e6d443656b7527486a6170439c3a0c8681e9b4f02e74e0165967cf1"
+    },
+    "activityRunner": {
+      "path": "packages/sync-core/contracts/activity-v1/runner/runBehaviorVectors.ts",
+      "sha256": "eb9bb37ccef7c545c9b3ea22638735ece54c9685f5e930a934d40089b22ba984"
+    },
+    "serverChannelsRoute": {
+      "path": "packages/server/src/routes/channels.ts",
+      "sha256": "1014a8e565e4cc2906616af8274eb4b1fd2a63b347839ae8ac5c33b761265109"
+    },
+    "serverMessageRealtimeEvents": {
+      "path": "packages/server/src/services/messageRealtimeEvents.ts",
+      "sha256": "aa8b88ed8ec08cca36f858043be31807e08a97b694ba39e48bb070cce6f7edff"
+    },
+    "serverMessageService": {
+      "path": "packages/server/src/services/messageService.ts",
+      "sha256": "d49aad2a3d25a6d4cef1225f16aacb80c2fbf1188d483782ce4654b3aa38d280"
+    },
+    "serverMessagesRoute": {
+      "path": "packages/server/src/routes/messages.ts",
+      "sha256": "7a7ca204e4956cfb6bc180ccc7689f419c2197c51aa9e1f64a1e89ee8bd759a7"
+    },
+    "serverReadMutationSequencer": {
+      "path": "packages/server/src/services/readMutationSequencer.ts",
+      "sha256": "d7b9c53834fffe3d196aa8340ecbcab29284b0ff3454b6ab32e4934e17f12800"
+    },
+    "serverReadMutationsRoute": {
+      "path": "packages/server/src/routes/readMutations.ts",
+      "sha256": "3c8587881b6dd9dd34cfa37863a40cf05136b4fae107b8d1b24fdd2974f55e0d"
+    },
+    "sharedActivityMute": {
+      "path": "packages/shared/src/activityMute.ts",
+      "sha256": "e356b1341dd626d2bab51b5f86ed61f8436cbc156b8d654bd8d949a4efb7230e"
+    },
+    "sharedCanonicalMessageManifest": {
+      "path": "packages/shared/src/canonicalMessageManifest.ts",
+      "sha256": "f1cecab62c6380b5416f3cdf7a17c6efdd33445609c3c2aae10bbd7d8fed660f"
+    },
+    "sharedIndex": {
+      "path": "packages/shared/src/index.ts",
+      "sha256": "9224fa36c718ec9b4d8a04ab0906c5d3ab597a03adaf2c48a3d3d78c33e750cb"
+    },
+    "syncCoreActivityDomain": {
+      "path": "packages/sync-core/src/domains/activity.ts",
+      "sha256": "f4ef5ac8ff045a6de4c7327d27a32930ba3db70e8d54f7f33f8a6f164ad863f5"
+    },
+    "syncCoreCore": {
+      "path": "packages/sync-core/src/core.ts",
+      "sha256": "b3906ae8dcb80037de36f79630197129febc333b3f171c8d6f2b376181f21104"
+    },
+    "syncCoreUint64": {
+      "path": "packages/sync-core/src/uint64.ts",
+      "sha256": "1551c72973aeecee7422009e931f7abc31d294b4e8779a97aecfd1fce3cc4781"
+    },
+    "syncCoreViolations": {
+      "path": "packages/sync-core/src/violations.ts",
+      "sha256": "148effe9deaf4c5e88ff24cee6dc6a247cd08043f515ecbca1869addce72276c"
+    },
+    "webChannelDomain": {
+      "path": "packages/web/src/store/channelDomain.ts",
+      "sha256": "2337d2458d0c994d51e7cb361483aacea843cbee55185245fc43c08b486a0392"
+    },
+    "webMessageStore": {
+      "path": "packages/web/src/store/messageStore.ts",
+      "sha256": "4304afdeefa98ebe3e0fee858e4067cbb019da5c54a7489a676bcd8426b4760b"
+    },
+    "webMessageSyncDomain": {
+      "path": "packages/web/src/store/messageSyncDomain.ts",
+      "sha256": "17e7f4bdc6bb959aec8be87a9f75e96e567cbaaa17925ed3fd06cc510b015b29"
+    },
+    "webNotificationPrefsSyncDomain": {
+      "path": "packages/web/src/store/notificationPrefsSyncDomain.ts",
+      "sha256": "bd167f42c37e186fb63c0900cc627b5fb6efa1f802a1dbbd73d742c8e3780d0d"
+    },
+    "webReactionReadModels": {
+      "path": "packages/web/src/store/reactionReadModels.ts",
+      "sha256": "d22b8995e15fc8c24405434022ae91bb7beb985819ed50749fdd4767f9440b0b"
+    },
+    "webReadReceiptDomain": {
+      "path": "packages/web/src/store/readReceiptDomain.ts",
+      "sha256": "12aad0e3a6e1b2d69adc3db2a69cff8f3fc7a70bbf2ff7ba52a31a08b343bb24"
+    },
+    "webReadStateSync": {
+      "path": "packages/web/src/store/readStateSync.ts",
+      "sha256": "ef1b5b56a7336b352294c8e32bb0343a8830a5e76edf4807a0cf115cd3928a37"
+    }
+  }
+}

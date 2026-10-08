@@ -108,6 +108,11 @@ func Open(path string) (*sql.DB, error) {
 			}
 		}
 	}
+	if err := initializeAuthorityEpochs(ctx, handle); err != nil {
+		ReleaseAuthorityFence(handle)
+		_ = handle.Close()
+		return nil, fmt.Errorf("initialize authority generations: %w", err)
+	}
 	return handle, nil
 }
 

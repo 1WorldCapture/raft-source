@@ -309,6 +309,26 @@ func (s *Store) ShouldHideHumanDirectory(ctx context.Context, workspaceID, reque
 	return hideHumans != 0 && role.String == RoleMember, nil
 }
 
+// ShouldHideHumanDirectoryTx is the executor-scoped variant of the same
+// lookup for callers inside a transaction/snapshot.
+func (s *Store) ShouldHideHumanDirectoryTx(ctx context.Context, ex Executor, workspaceID, requesterID string) (bool, error) {
+	var hideHumans int
+	var role sql.NullString
+	err := ex.QueryRowContext(ctx, `
+		SELECT w.hide_humans_from_members, m.role
+		FROM workspace_memberships m
+		JOIN workspaces w ON w.id = m.workspace_id
+		WHERE m.workspace_id = ? AND m.user_id = ? AND w.deleted_at IS NULL`,
+		workspaceID, requesterID).Scan(&hideHumans, &role)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read directory visibility: %w", err)
+	}
+	return hideHumans != 0 && role.String == RoleMember, nil
+}
+
 // ExposeHumanInHiddenDirectory ports shouldExposeHumanInHiddenDirectory: the
 // requester themself, plus community-server owners/admins.
 func ExposeHumanInHiddenDirectory(human RosterHuman, requesterID string) bool {
