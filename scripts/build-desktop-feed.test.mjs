@@ -6,13 +6,14 @@
 // Run: node --test scripts/build-desktop-feed.test.mjs
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-import { buildDesktopFeed, latestMacYml } from "./build-desktop-feed.mjs";
+import { buildDesktopFeed, isDirectRun, latestMacYml } from "./build-desktop-feed.mjs";
 
 const scriptDir = join(tmpdir(), "build-desktop-feed-");
 
@@ -110,4 +111,26 @@ test("latestMacYml shape matches what the app's checker parses (contract pin)", 
     "  - url: 1.2.3/a-arm64.zip\n" +
     "    sha512: BBB=\n" +
     "    size: 2\n");
+});
+
+test("isDirectRun matches paths containing spaces and other URL-encoded characters", () => {
+  const file = "/tmp/dir with space/#hash/build-desktop-feed.mjs";
+  const url = new URL(`file://${encodeURI(file).replace("#", "%23")}`).href;
+  assert.equal(isDirectRun(url, file), true);
+  assert.equal(isDirectRun(url, "/tmp/other.mjs"), false);
+  assert.equal(isDirectRun(url, undefined), false);
+});
+
+test("the CLI really runs from a directory whose name contains a space", () => {
+  const root = mkdtempSync(join(tmpdir(), "feed cli "));
+  try {
+    const copy = join(root, "build-desktop-feed.mjs");
+    copyFileSync(fileURLToPath(new URL("./build-desktop-feed.mjs", import.meta.url)), copy);
+    // No arguments: a running CLI must fail loudly (non-zero), not exit 0 silently.
+    const result = spawnSync(process.execPath, [copy], { encoding: "utf8" });
+    assert.notEqual(result.status, 0, `stdout=${result.stdout} stderr=${result.stderr}`);
+    assert.match(result.stderr, /\[desktop-feed\]/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
