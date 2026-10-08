@@ -1196,6 +1196,7 @@ export const en = {
   "agent.reminders.pendingLabel": "Pending Reminders",
   "agent.reminders.retry": "Retry",
   "agent.reminders.noPending": "No pending reminders.",
+  "agent.reminders.notEnabled": "Reminders are not available from this server.",
   "agent.reportIssue.exportNotConfigured": "Feedback export is not configured for this deployment yet.",
   "agent.reportIssue.serverUnavailable": "Current server is unavailable.",
   "agent.reportIssue.stepCollectFailed": "Collect report bundle failed",
@@ -1351,6 +1352,7 @@ export const en = {
   "agent.scopes.row.actionPrepare.description":
     "Allow this agent to prepare quick-commit action cards (channel / agent / member additions) for you to click and commit.",
   "agent.skills.loadFailed": "Failed to load skills",
+  "agent.skills.notEnabled": "Skills are not available from this server.",
   "agent.skills.loading": "Loading skills…",
   "agent.skills.retry": "Retry",
   "agent.skills.title": "Skills ({count})",
@@ -3448,6 +3450,7 @@ export const en = {
   "office.previewNotice": "Preview data. The live agent overview replaces this after it ships.",
   "office.loading": "Loading the office…",
   "office.loadFailed": "The office could not be loaded.",
+  "office.notEnabled": "The office view is not enabled on this server.",
 
   // MainLayout.tsx — mobile bottom tab bar.
   "layout.mobileTabBar.home": "Home",
@@ -3975,6 +3978,11 @@ export const en = {
   "pages.deviceLogin.approve": "Approve Device Login",
   "pages.deviceLogin.useAnotherAccount": "Use Another Account",
   "pages.deviceLogin.approveFailedFallback": "Device login could not be approved.",
+  "pages.deviceLogin.deny": "Deny",
+  "pages.deviceLogin.denying": "Denying…",
+  "pages.deviceLogin.denyFailedFallback": "Device login could not be denied.",
+  "pages.deviceLogin.deniedTitle": "Device login denied",
+  "pages.deviceLogin.deniedDescription": "The sign-in request was denied. You can close this browser page.",
   "pages.deviceLogin.codeInvalid": "That code is invalid. Check the code shown in Raft Desktop and try again.",
   "pages.deviceLogin.codeExpired": "That code has expired. Start sign-in again from Raft Desktop.",
   "pages.deviceLogin.codeAlreadyUsed": "That sign-in request was already used. Start sign-in again from Raft Desktop if needed.",

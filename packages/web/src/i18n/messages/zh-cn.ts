@@ -1185,6 +1185,7 @@ export const zhCn: Record<MessageId, string> = {
   "agent.reminders.pendingLabel": "待触发提醒",
   "agent.reminders.retry": "重试",
   "agent.reminders.noPending": "暂无待触发提醒。",
+  "agent.reminders.notEnabled": "此服务器未提供提醒功能。",
   "agent.reportIssue.exportNotConfigured": "此部署尚未配置反馈导出。",
   "agent.reportIssue.serverUnavailable": "当前服务器不可用。",
   "agent.reportIssue.stepCollectFailed": "收集报告包失败",
@@ -1340,6 +1341,7 @@ export const zhCn: Record<MessageId, string> = {
   "agent.scopes.row.actionPrepare.description":
     "允许此 Agent 准备快速提交 action cards（频道 / Agent / 成员添加），供你点击并提交。",
   "agent.skills.loadFailed": "加载 skills 失败",
+  "agent.skills.notEnabled": "此服务器未提供 Skills 功能。",
   "agent.skills.loading": "正在加载 skills…",
   "agent.skills.retry": "重试",
   "agent.skills.title": "Skills（{count}）",
@@ -3376,6 +3378,7 @@ export const zhCn: Record<MessageId, string> = {
   "office.previewNotice": "预览数据。总览接口上线后会换成真实 agent。",
   "office.loading": "正在加载办公室…",
   "office.loadFailed": "办公室加载失败。",
+  "office.notEnabled": "此服务器未启用办公室视图。",
 
   // MainLayout.tsx — 移动端底部标签栏
   "layout.mobileTabBar.home": "主页",
@@ -3869,6 +3872,11 @@ export const zhCn: Record<MessageId, string> = {
   "pages.deviceLogin.approve": "批准设备登录",
   "pages.deviceLogin.useAnotherAccount": "使用其他账户",
   "pages.deviceLogin.approveFailedFallback": "无法批准设备登录。",
+  "pages.deviceLogin.deny": "拒绝",
+  "pages.deviceLogin.denying": "正在拒绝…",
+  "pages.deviceLogin.denyFailedFallback": "无法拒绝设备登录。",
+  "pages.deviceLogin.deniedTitle": "设备登录已拒绝",
+  "pages.deviceLogin.deniedDescription": "该登录请求已被拒绝。你可以关闭此浏览器页面。",
   "pages.deviceLogin.codeInvalid": "该代码无效。请核对 Raft Desktop 中显示的代码后重试。",
   "pages.deviceLogin.codeExpired": "该代码已过期。请从 Raft Desktop 重新开始登录。",
   "pages.deviceLogin.codeAlreadyUsed": "该登录请求已被使用。如有需要，请从 Raft Desktop 重新开始登录。",

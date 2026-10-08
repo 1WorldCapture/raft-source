@@ -1546,3 +1546,88 @@ test("collapsed Sidebar section shows attention for mixed muted and unmuted unre
 
   assert.ok(screen.getByTestId("sidebar-section-unread-dot-channels"));
 });
+
+// M3 acceptance finding #4: on the Go server every channel load surfaced
+// "Failed to load Activity mute setting." because GET /api/channels/{id}/
+// notification-settings answers 501 feature_not_implemented. That is the
+// server honestly declining an unimplemented surface — the header must
+// degrade to a feature-not-enabled state (no control, no banner) instead of
+// a repeated failure banner. Genuine failures keep the banner.
+test("Activity mute control degrades silently when the server answers 501 feature_not_implemented", async () => {
+  api.get = (async (url: string) => {
+    if (url.endsWith("/members")) return { data: { agents: [], humans: [] } };
+    throw {
+      response: {
+        status: 501,
+        data: { error: "This channel capability is not implemented in this phase", code: "feature_not_implemented" },
+      },
+    };
+  }) as typeof api.get;
+
+  renderChatPanel(makeChannel());
+
+  await waitFor(() => {
+    assert.equal(screen.queryByTestId("activity-mute-error"), null);
+  });
+  await waitFor(() => {
+    assert.equal(screen.queryByRole("button", { name: /activity for this channel/i }), null);
+  });
+});
+
+test("a generic 404 keeps the load error banner — it is never a not-enabled signal", async () => {
+  // 404 is ambiguous (missing resource / proxy / typo) and must surface as a
+  // real, dismissible failure on every backend shape.
+  for (const data of [{ error: "Not found" }, { error: "Not found", code: "not_found", path: "/api/channels/x/notification-settings" }]) {
+    api.get = (async (url: string) => {
+      if (url.endsWith("/members")) return { data: { agents: [], humans: [] } };
+      throw { response: { status: 404, data } };
+    }) as typeof api.get;
+
+    renderChatPanel(makeChannel());
+
+    const alert = await screen.findByTestId("activity-mute-error");
+    assert.equal(alert.textContent?.includes("Failed to load Activity mute setting."), true);
+    // The control stays present for a retry path via reload, it is not hidden.
+    assert.ok(screen.getByRole("button", { name: "Mute activity for this channel" }));
+    cleanup();
+  }
+});
+
+test("a mute toggle that hits the honest 501 rolls back and hides the control without a banner", async () => {
+  api.get = (async (url: string) => {
+    if (url.endsWith("/members")) return { data: { agents: [], humans: [] } };
+    return { data: { activityMuted: false, muteFromSeq: null, activityMuteSupported: true } };
+  }) as typeof api.get;
+  const patchCalls: Array<{ url: string; body: unknown }> = [];
+  api.patch = (async (url: string, body: unknown) => {
+    patchCalls.push({ url, body });
+    throw {
+      response: {
+        status: 501,
+        data: { error: "This channel capability is not implemented in this phase", code: "feature_not_implemented" },
+      },
+    };
+  }) as typeof api.patch;
+
+  const channel = makeChannel();
+  renderChatPanel(channel);
+
+  const muteButton = await screen.findByRole("button", { name: "Mute activity for this channel" });
+  await act(async () => {
+    fireEvent.click(muteButton);
+    await flushAsyncWork();
+  });
+
+  await waitFor(() => {
+    assert.equal(screen.queryByTestId("activity-mute-error"), null);
+  });
+  await waitFor(() => {
+    assert.equal(screen.queryByRole("button", { name: /activity for this channel/i }), null);
+  });
+  // The optimistic mute was rolled back.
+  assert.equal(useChannelStore.getState().channels.find((item) => item.id === channel.id)?.activityMuted, false);
+  assert.deepEqual(patchCalls, [{
+    url: "/channels/channel-activity-mute/notification-settings",
+    body: { activityMuted: true },
+  }]);
+});

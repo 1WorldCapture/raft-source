@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"raft.local/server-go/internal/platform/buildinfo"
 	"raft.local/server-go/internal/platform/config"
 )
 
@@ -52,6 +54,13 @@ func TestHealthAndReadiness(t *testing.T) {
 	if health.Code != http.StatusOK {
 		t.Fatalf("healthz: %d", health.Code)
 	}
+	var healthBody map[string]string
+	if err := json.Unmarshal(health.Body.Bytes(), &healthBody); err != nil {
+		t.Fatal(err)
+	}
+	if healthBody["status"] != "alive" || healthBody["stage"] != buildinfo.Current().Stage {
+		t.Fatalf("healthz must identify the running build without claiming capability readiness: %v", healthBody)
+	}
 
 	ready := httptest.NewRecorder()
 	mux.ServeHTTP(ready, httptest.NewRequest(http.MethodGet, "/readyz", nil))
@@ -73,5 +82,15 @@ func TestReadinessFailsWhenDatabaseClosed(t *testing.T) {
 
 	if err := built.Ready(context.Background()); err == nil {
 		t.Fatal("readiness must fail after the database closes")
+	}
+	ready := httptest.NewRecorder()
+	built.ReadinessHandler()(ready, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if ready.Code != http.StatusServiceUnavailable {
+		t.Fatalf("closed database readiness: %d", ready.Code)
+	}
+	health := httptest.NewRecorder()
+	built.LivenessHandler()(health, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	if health.Code != http.StatusOK {
+		t.Fatalf("a closed database must not change process liveness: %d", health.Code)
 	}
 }

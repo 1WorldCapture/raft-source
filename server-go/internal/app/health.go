@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"time"
+
+	"raft.local/server-go/internal/platform/buildinfo"
 )
 
 func contextWithTimeout(parent context.Context, d time.Duration) (context.Context, context.CancelFunc) {
@@ -16,7 +18,7 @@ func contextWithTimeout(parent context.Context, d time.Duration) (context.Contex
 // LivenessHandler proves only that the process serves HTTP.
 func (a *App) LivenessHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
-		writeHealthJSON(w, http.StatusOK, map[string]string{"status": "alive", "stage": "account_phase"})
+		writeHealthJSON(w, http.StatusOK, map[string]string{"status": "alive", "stage": buildinfo.Stage})
 	}
 }
 

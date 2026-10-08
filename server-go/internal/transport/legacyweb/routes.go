@@ -19,6 +19,7 @@ import (
 type Deps struct {
 	Handlers *Handlers
 	Servers  *ServersHandlers
+	Invites  *InviteHandlers
 	Avatars  *AvatarHandlers
 	Logger   interface{ Info(string, ...any) } // satisfied by *slog.Logger via adapter below
 
@@ -115,6 +116,15 @@ func New(deps Deps) http.Handler {
 	mux.Handle("POST /api/auth/forgot-password", forgotLimiter.Wrap(generalAuth.Wrap(http.HandlerFunc(h.ForgotPassword))))
 	auth("POST /api/auth/reset-password", h.ResetPassword)
 
+	// Invitation accept surface: the preview is public (the token itself is
+	// the capability, exactly like the TS route); accepting requires the full
+	// verified+profile-complete identity chain.
+	invites := deps.Invites
+	if invites != nil {
+		auth("GET /api/auth/invite-info", invites.InviteInfo)
+		mux.Handle("POST /api/auth/accept-invite", generalAuth.Wrap(h.Gate.RequireVerifiedProfileComplete(invites.AcceptInvite)))
+	}
+
 	// Workspace surface. Every route sits behind the verified+complete auth
 	// gates, exactly like the legacy /api/servers mount.
 	servers := deps.Servers
@@ -156,6 +166,17 @@ func New(deps Deps) http.Handler {
 	mux.Handle("POST /api/servers/{id}/setup-handoff", gate(scope(servers.SetupHandoff)))
 	mux.Handle("GET /api/servers/{id}/sidebar-order", gate(scope(servers.SidebarOrder)))
 	mux.Handle("GET /api/servers/{id}/machines", gate(scope(guestFree(servers.Machines))))
+	if invites != nil {
+		// Join links and email invites are legacy guest-hidden management
+		// surfaces (TS guestHiddenServerSurfaces lists both).
+		mux.Handle("GET /api/servers/{id}/join-links", gate(scope(guestFree(invites.ListJoinLinks))))
+		mux.Handle("POST /api/servers/{id}/join-links", gate(scope(guestFree(invites.CreateJoinLink))))
+		mux.Handle("DELETE /api/servers/{id}/join-links/{linkId}", gate(scope(guestFree(invites.RevokeJoinLink))))
+		mux.Handle("GET /api/servers/{id}/invites", gate(scope(guestFree(invites.ListInvites))))
+		mux.Handle("POST /api/servers/{id}/invites", gate(scope(guestFree(invites.CreateInvite))))
+		mux.Handle("DELETE /api/servers/{id}/invites/{inviteId}", gate(scope(guestFree(invites.RevokeInvite))))
+	}
+	mux.Handle("GET /api/servers/{id}/agent-overview", gate(scope(guestFree(notImplemented("Office overview is not enabled in this server stage")))))
 	registerWorkspaceMethodFallbacks(mux, servers, gate)
 
 	mux.HandleFunc("GET /api/avatars/users/{file}", deps.Avatars.Serve)

@@ -3,6 +3,7 @@ import { Globe, FolderOpen, RefreshCw } from "lucide-react";
 import { InlineCode } from "raft-ui";
 import { useIntl } from "react-intl";
 import apiClient from "../../api/client";
+import { isServerFeatureUnavailableResponse } from "../../utils/serverFeatureAvailability";
 import type { SkillInfo } from "@botiverse/raft-shared";
 import SurfaceListItem from "../ui/SurfaceListItem";
 import SectionEyebrow from "../ui/SectionEyebrow";
@@ -94,14 +95,25 @@ export default function AgentSkills({ agentId, embedded }: { agentId: string; em
   const [data, setData] = useState<SkillsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [unavailable, setUnavailable] = useState(false);
 
   const fetchSkills = async () => {
     setLoading(true);
     setError(null);
+    setUnavailable(false);
     try {
       const res = await apiClient.get<SkillsData>(`/agents/${agentId}/skills`);
       setData(res.data);
     } catch (err: any) {
+      // The explicit 501 feature_not_implemented contract (the Go deferred
+      // endpoint answers it after auth + authority checks) is not a failure:
+      // show the not-enabled state without a retry loop. Everything else —
+      // auth errors, 5xx, and ambiguous 404s (missing resource / proxy /
+      // typo) — keeps the error + retry path.
+      if (isServerFeatureUnavailableResponse(err)) {
+        setUnavailable(true);
+        return;
+      }
       setError(err.response?.data?.error || formatMessageRef.current({ id: "agent.skills.loadFailed" }));
     } finally {
       setLoading(false);
@@ -121,6 +133,14 @@ export default function AgentSkills({ agentId, embedded }: { agentId: string; em
     return (
       <div className={embedded ? "px-5 py-4" : "flex flex-1 items-center justify-center bg-white"}>
         <span className="text-sm text-black/40 font-mono">{formatMessage({ id: "agent.skills.loading" })}</span>
+      </div>
+    );
+  }
+
+  if (unavailable) {
+    return (
+      <div className={embedded ? "px-5 py-4" : "flex flex-1 items-center justify-center bg-white"}>
+        <span className="text-sm text-black/60 font-mono">{formatMessage({ id: "agent.skills.notEnabled" })}</span>
       </div>
     );
   }

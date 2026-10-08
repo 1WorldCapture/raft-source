@@ -39,7 +39,9 @@ func TestRoutePolicy(t *testing.T) {
 		{"GET", "/socket.io/?EIO=4&transport=polling", http.StatusNotImplemented},
 		{"POST", "/internal/agent-api/anything", http.StatusUnauthorized},
 		{"GET", "/daemon/v1/nothing", http.StatusNotImplemented},
-		{"POST", "/api/auth/accept-invite", http.StatusNotImplemented},
+		// accept-invite is implemented (M3 invitations fix): without identity
+		// it answers the auth gate's 401, not the old unimplemented 501.
+		{"POST", "/api/auth/accept-invite", http.StatusUnauthorized},
 		{"GET", "/api/feature-flags", http.StatusNotFound},
 	}
 	for _, tc := range cases {

@@ -41,11 +41,23 @@ func registerWorkspaceMethodFallbacks(mux *http.ServeMux, servers *ServersHandle
 		{"setup-handoff", []string{http.MethodPost}, false},
 		{"sidebar-order", []string{http.MethodGet}, false},
 		{"machines", []string{http.MethodGet}, true},
+		{"join-links", []string{http.MethodGet, http.MethodPost}, true},
+		{"invites", []string{http.MethodGet, http.MethodPost}, true},
 	} {
 		handler := reject(spec.methods...)
 		if spec.denyGuests {
 			handler = servers.DenyGuests(handler)
 		}
 		mux.Handle("/api/servers/{id}/"+spec.path, gate(servers.RequireServerScope(handler)))
+	}
+	for _, nested := range []struct {
+		path    string
+		methods []string
+	}{
+		{"join-links/{linkId}", []string{http.MethodDelete}},
+		{"invites/{inviteId}", []string{http.MethodDelete}},
+	} {
+		mux.Handle("/api/servers/{id}/"+nested.path,
+			gate(servers.RequireServerScope(servers.DenyGuests(reject(nested.methods...)))))
 	}
 }

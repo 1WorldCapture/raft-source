@@ -94,6 +94,7 @@ export default function AgentRemindersSection({
   reminders,
   loading,
   error,
+  unavailable = false,
   onRetry,
   onOpenMsgRef,
   variant = "section",
@@ -101,6 +102,8 @@ export default function AgentRemindersSection({
   reminders: ReminderSummary[];
   loading: boolean;
   error: string | null;
+  /** The server honestly reported it has no reminders surface (M3 Go: 404/501). */
+  unavailable?: boolean;
   onRetry?: () => void | Promise<void>;
   onOpenMsgRef?: (permalink: string) => void;
   variant?: "section" | "tab";
@@ -131,7 +134,9 @@ export default function AgentRemindersSection({
         />
       )}
 
-      {error ? (
+      {unavailable ? (
+        <div className="text-sm text-black/50">{formatMessage({ id: "agent.reminders.notEnabled" })}</div>
+      ) : error ? (
         <Banner intent="warning" density="sm" className="font-bold">
           <div>{error}</div>
           {onRetry && (

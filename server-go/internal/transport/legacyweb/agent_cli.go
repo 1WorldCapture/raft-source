@@ -25,6 +25,7 @@ func RegisterAgentRoutes(mux *http.ServeMux, handlers *AgentHandlers, gate *Auth
 	scoped := func(next http.HandlerFunc) http.HandlerFunc {
 		return verified(handlers.agentScope(handlers.agentGuestGate(next)))
 	}
+	registerDeferredAgentUIRoutes(mux, handlers, scoped)
 	mux.Handle("GET /api/agents", scoped(handlers.List))
 	mux.Handle("POST /api/agents", scoped(handlers.Create))
 	mux.Handle("GET /api/agents/{id}", scoped(handlers.Get))

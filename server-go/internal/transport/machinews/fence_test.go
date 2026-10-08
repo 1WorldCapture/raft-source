@@ -321,9 +321,22 @@ func TestRotationRejectsEstablishedMutation(t *testing.T) {
 		machineID, _, ws := dialLegacy(t, env)
 		defer closeQuietly(ws)
 		rotateLegacyVerifier(t, env, machineID)
-		sendFrame(t, ws, `{"type":"agent:status","agentId":"a","status":"running"}`)
+		// The peer may reject the rotated credential before it reads this
+		// frame. With unbuffered net.Pipe, waiting for Write before starting
+		// Read can deadlock against the peer's close handshake. Drain the
+		// close concurrently; the invariants are close=1008 and no callback,
+		// not that a frame on an already-revoked connection must be accepted.
+		ctx, cancel := context.WithTimeout(context.Background(), dialWait)
+		defer cancel()
+		written := make(chan error, 1)
+		go func() {
+			written <- ws.Write(ctx, websocket.MessageText, []byte(`{"type":"agent:status","agentId":"a","status":"running"}`))
+		}()
 		if got := expectClose(t, ws); got != websocket.StatusCode(1008) {
 			t.Fatalf("close = %d, want 1008", got)
+		}
+		if err := <-written; err != nil && ctx.Err() != nil {
+			t.Fatalf("write did not finish within the close handshake: %v", err)
 		}
 		if env.messageCount() != 0 {
 			t.Fatalf("OnMessage ran after rotation: %d", env.messageCount())

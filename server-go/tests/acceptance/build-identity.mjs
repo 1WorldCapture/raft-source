@@ -26,8 +26,9 @@ export async function verifyBuildIdentity({ origin, capture, executable, env }) 
     assert.equal(health.headers.get('x-raft-go-stage'), local.stage);
     assert.equal(health.headers.get('x-raft-go-revision'), local.revision);
     assert.equal(health.headers.get('x-raft-go-build-time'), local.buildTime);
-    await health.arrayBuffer();
-    console.log('PASS executable and running HTTP build identity agree; version command has no data/config side effects');
+    assert.equal(health.status, 200);
+    assert.deepEqual(await health.json(), { status: 'alive', stage: local.stage }, 'health body must agree with /version and build headers');
+    console.log('PASS executable, /version, /healthz body and HTTP build headers agree; version command has no data/config side effects');
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

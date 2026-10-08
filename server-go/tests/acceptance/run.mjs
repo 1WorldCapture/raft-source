@@ -18,6 +18,7 @@ import { verifyM3ComputerAdmission } from './m3-computer-admission.mjs';
 import { verifyM3DaemonWire } from './m3-daemon-wire.mjs';
 import { verifyM3AgentIdentity } from './m3-agent-identity.mjs';
 import { verifyM3Channels } from './m3-channels.mjs';
+import { verifyM3Invitations } from './m3-invitations.mjs';
 import { verifyM3Persistence } from './m3-persistence.mjs';
 import { verifyOriginalClients } from './original-clients.mjs';
 import { verifyM3CreationReadModels } from './m3-creation-read-models.mjs';
@@ -28,8 +29,8 @@ const dir = await mkdtemp(path.join(tmpdir(), 'raft-go-http-'));
 let child;
 let logs = '';
 const selectedSuite = process.env.RAFT_GO_TEST_SUITE ?? 'all';
-if (!['all', 'computer', 'daemon', 'agents', 'channels', 'persistence', 'upgrade', 'original-clients', 'creation-read-models'].includes(selectedSuite)) {
-  throw new Error('Unknown RAFT_GO_TEST_SUITE; use all/computer/daemon/agents/channels/persistence/upgrade/original-clients/creation-read-models');
+if (!['all', 'computer', 'daemon', 'agents', 'channels', 'invitations', 'persistence', 'upgrade', 'original-clients', 'creation-read-models'].includes(selectedSuite)) {
+  throw new Error('Unknown RAFT_GO_TEST_SUITE; use all/computer/daemon/agents/channels/invitations/persistence/upgrade/original-clients/creation-read-models');
 }
 
 // Every subprocess has a deadline and is reaped before temporary data removal.
@@ -129,7 +130,7 @@ try {
   // M3 bootstrap tests use the explicit opt-in policy, not a fake default.
   await stop();
   env.RAFT_GO_AGENT_BOOTSTRAP_ENABLED = 'true';
-  for (const [name, verify] of [['computer', verifyM3ComputerAdmission], ['daemon', verifyM3DaemonWire], ['agents', verifyM3AgentIdentity], ['channels', verifyM3Channels]]) {
+  for (const [name, verify] of [['computer', verifyM3ComputerAdmission], ['daemon', verifyM3DaemonWire], ['agents', verifyM3AgentIdentity], ['channels', verifyM3Channels], ['invitations', verifyM3Invitations]]) {
     if (selectedSuite !== 'all' && selectedSuite !== name) continue;
     await start();
     await verify({ origin, data });

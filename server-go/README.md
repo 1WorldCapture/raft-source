@@ -9,6 +9,11 @@
 - [M2 实施、验收证据、兼容差异及联调交接](docs/phase-2-backend-handoff.md)
 - [M2 输入设计（保留原稿）](docs/phase-2-workspaces.md)
 - [M3 实施结果、后端验收、升级与 UI 测试交接](docs/phase-3-backend-handoff.md)
+- [M3 UI 问题修复与最终集成验证（含0009迁移及部署状态）](docs/m3-ui-fix-closeout.md)
+- [M4 消息与实时通信总体设计（待实施）](docs/phase-4-messaging.md)
+- [M4 HTTP / Socket.IO 兼容合同](docs/m4-compatibility-contract.md)
+- [M4 人类 Activity / Inbox / 已读状态合同](docs/m4-activity-readstate-contract.md)
+- [M4 实施协调、工作包与验收责任](docs/m4-implementation-coordination.md)
 - [现有 Web 账号协议参考](contracts/legacyweb/account-entry.md)
 
 ## 启动：不需要 PostgreSQL、Redis、Docker 或系统 SQLite
@@ -97,6 +102,7 @@ SMTP/Mailpit 是可选项，不是启动依赖。远程 SMTP 必须提供 STARTT
 - 找回与重置密码、登录后改密；一次性 token 消费和所有 session 撤销在事务内执行。
 - 工作空间创建、成员资格列表、详情、账号级排序与版本；创建事务同时保存显式 owner、setup 初始状态、成员偏好、协议审计、#all/#announcement，按 opener 配置创建私有引导频道。
 - owner/admin 名称、头像、hideHumansFromMembers 管理；成员目录与邮箱隐私；聚合设置、旧 onboarding 设置及个人偏好写入。
+- workspace邀请链接与邮件邀请的创建/列表/撤销、公开预览及登录后接受；次数/过期/邮箱绑定、事务内权限重验与完整成员初始化。Guest邀请仍冻结禁用。此M3补丁追加0009 migration，自动化回归与未部署现场的区别见上述修复交接。
 - 完整 setup 投影、start/complete/reset/handoff 命令及首次 handoff/session-family 事实；机器目录来自真实持久数据与当前 WebSocket 连接。官方 Cindy 创建、角色与 setup checkpoint 原子提交；不会声称已发送 briefing。
 - 公共/私有频道的创建、列表、详情、成员与角色、加入/退出、归档、删除及系统频道保护；不伪造消息历史、未读或 Socket.IO 事件。
 - 外部与托管 Agent 创建、列表/详情/设置、机器分配、头像、官方身份收养；`sk_agent_*` 凭据签发/列表/撤销、一次性 bootstrap 及 CLI 身份、空间与频道成员读取。

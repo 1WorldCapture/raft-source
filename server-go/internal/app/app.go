@@ -127,6 +127,10 @@ func Build(opts Options) (*App, error) {
 		AvatarDir:      filepath.Join(cfg.DataDir, "avatars"),
 		MaxAvatarBytes: cfg.MaxAvatarBytes, MaxAvatarSide: cfg.MaxAvatarSidePixels,
 	}
+	inviteHandlers := &legacyweb.InviteHandlers{
+		Store: workspaceStore, Now: wsClock.Now, Logger: logger,
+		SendInviteMail: inviteMailSender(mailer, cfg),
+	}
 	handler := legacyweb.New(legacyweb.Deps{
 		Handlers: &legacyweb.Handlers{
 			Auth:     service,
@@ -136,6 +140,7 @@ func Build(opts Options) (*App, error) {
 			Gate:     gate,
 		},
 		Servers: serversHandlers,
+		Invites: inviteHandlers,
 		RegisterAdditional: func(mux *http.ServeMux, gate *legacyweb.AuthGate) {
 			execution.register(mux, gate, serversHandlers)
 		},
@@ -156,6 +161,28 @@ func Build(opts Options) (*App, error) {
 
 	assembled = true
 	return &App{Config: cfg, DB: handle, Handler: wrapped, sessions: sessions, mailer: mailer, execution: execution}, nil
+}
+
+// inviteMailSender builds the one-time invitation delivery used by the
+// invite handlers: TS-parity HTML, the accept link pinned to the configured
+// Web origin (never the request Host), and the machine-readable kind/token
+// pair the private outbox exposes to tests.
+func inviteMailSender(mailer mail.Mailer, cfg *config.Config) legacyweb.InviteMailSender {
+	return func(ctx context.Context, to, inviterName, serverName, token string) error {
+		origin := "http://127.0.0.1:4301"
+		if cfg.WebOrigin != nil {
+			origin = cfg.WebOrigin.String()
+		}
+		link := origin + "?invite=" + token
+		return mailer.Send(ctx, mail.Message{
+			From:    cfg.FromAddress,
+			To:      to,
+			Subject: workspace.InviteEmailSubject(inviterName, serverName),
+			HTML:    workspace.RenderInviteEmailHTML(inviterName, serverName, link),
+			Kind:    "invite",
+			Token:   token,
+		})
+	}
 }
 
 // mailAdapter bridges the platform mailer to the auth MailSender.

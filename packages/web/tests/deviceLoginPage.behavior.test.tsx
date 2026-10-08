@@ -101,3 +101,139 @@ test("approved device login closes the browser page from the Raft Desktop return
   await waitFor(() => assert.equal(closed, true));
   assert.ok(await screen.findByText("If this tab stays open, close it manually."));
 });
+
+test("denying device login posts approve:false and shows the denied return state", async () => {
+  const posts: Array<{ url: string; body: unknown }> = [];
+  window.history.pushState({}, "", "/login/device?user_code=vswa-7m58");
+  resetAuthUser();
+  api.post = (async (url: string, body: unknown) => {
+    posts.push({ url, body });
+    return { data: { ok: true, action: "denied" } };
+  }) as typeof api.post;
+
+  render(<TestIntlProvider><DeviceLoginPage /></TestIntlProvider>);
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Deny" }));
+  });
+
+  assert.deepEqual(posts, [{
+    url: "/auth/device/approve",
+    body: { userCode: "VSWA-7M58", approve: false },
+  }]);
+  assert.ok(await screen.findByText("Device login denied"));
+  assert.ok(await screen.findByText("The sign-in request was denied. You can close this browser page."));
+  // The code input is gone once a decision has been made.
+  assert.equal(screen.queryByPlaceholderText("XXXX-XXXX"), null);
+});
+
+test("denied device login keeps the close-page affordance shared with approval", async () => {
+  let closed = false;
+  window.history.pushState({}, "", "/login/device?user_code=VSWA-7M58");
+  window.close = () => {
+    closed = true;
+  };
+  resetAuthUser();
+  api.post = async () => ({ data: { ok: true, action: "denied" } });
+
+  render(<TestIntlProvider><DeviceLoginPage /></TestIntlProvider>);
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Deny" }));
+  });
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Close this page" }));
+  });
+
+  await waitFor(() => assert.equal(closed, true));
+  assert.ok(await screen.findByText("If this tab stays open, close it manually."));
+});
+
+test("only the selected action shows its in-flight label; both stay disabled", async () => {
+  window.history.pushState({}, "", "/login/device?user_code=VSWA-7M58");
+  resetAuthUser();
+  let resolvePost: (() => void) = () => {};
+  api.post = () => new Promise((resolve) => {
+    resolvePost = () => resolve({ data: { ok: true } });
+  }) as typeof api.post;
+
+  render(<TestIntlProvider><DeviceLoginPage /></TestIntlProvider>);
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Approve Device Login" }));
+  });
+
+  // Approve is the action in flight: it alone shows "Approving…".
+  const approveButton = screen.getByRole("button", { name: "Approving…" }) as HTMLButtonElement;
+  assert.equal(approveButton.disabled, true);
+  // Deny keeps its resting label while still disabled — not "Denying…".
+  const denyButton = screen.getByRole("button", { name: "Deny" }) as HTMLButtonElement;
+  assert.equal(denyButton.disabled, true);
+  assert.equal(screen.queryByRole("button", { name: "Denying…" }), null);
+
+  await act(async () => {
+    resolvePost();
+  });
+  assert.ok(await screen.findByText("Sign-in is complete. You can close this browser page."));
+});
+
+test("same-tick double submission issues exactly one POST", async () => {
+  window.history.pushState({}, "", "/login/device?user_code=VSWA-7M58");
+  resetAuthUser();
+  const posts: unknown[] = [];
+  let resolvePost: (() => void) = () => {};
+  api.post = (() => new Promise((resolve) => {
+    posts.push(Date.now());
+    resolvePost = () => resolve({ data: { ok: true } });
+  })) as typeof api.post;
+
+  render(<TestIntlProvider><DeviceLoginPage /></TestIntlProvider>);
+  await act(async () => {
+    // Two clicks inside one tick, before the disabled state can flush.
+    fireEvent.click(screen.getByRole("button", { name: "Deny" }));
+    fireEvent.click(screen.getByRole("button", { name: "Deny" }));
+  });
+
+  assert.equal(posts.length, 1);
+  await act(async () => {
+    resolvePost();
+  });
+  assert.ok(await screen.findByText("Device login denied"));
+});
+
+test("a landed decision is terminal: the form is gone and nothing can resubmit", async () => {
+  window.history.pushState({}, "", "/login/device?user_code=VSWA-7M58");
+  resetAuthUser();
+  const posts: Array<{ url: string; body: unknown }> = [];
+  api.post = (async (url: string, body: unknown) => {
+    posts.push({ url, body });
+    return { data: { ok: true } };
+  }) as typeof api.post;
+
+  render(<TestIntlProvider><DeviceLoginPage /></TestIntlProvider>);
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Deny" }));
+  });
+  await screen.findByText("Device login denied");
+
+  // The decision view replaced the form: no submission affordance remains.
+  assert.equal(screen.queryByRole("button", { name: "Deny" }), null);
+  assert.equal(screen.queryByRole("button", { name: "Approve Device Login" }), null);
+  assert.equal(screen.queryByPlaceholderText("XXXX-XXXX"), null);
+  assert.deepEqual(posts.map((post) => post.body), [{ userCode: "VSWA-7M58", approve: false }]);
+});
+
+test("denial failures reuse the shared code-lifecycle error copy", async () => {
+  await submitDenyWithError("expired");
+  assert.ok(await screen.findByText("That code has expired. Start sign-in again from Raft Desktop."));
+});
+
+async function submitDenyWithError(code: string) {
+  window.history.pushState({}, "", "/login/device?user_code=VSWA-7M58");
+  resetAuthUser();
+  api.post = async () => {
+    throw { response: { data: { code } } };
+  };
+
+  render(<TestIntlProvider><DeviceLoginPage /></TestIntlProvider>);
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Deny" }));
+  });
+}

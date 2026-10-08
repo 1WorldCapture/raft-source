@@ -19,6 +19,7 @@ import type { AgentOverview } from "./agentOverview";
 import { calibratedNow } from "./durationTier";
 import { USE_FAKE_AGENT_OVERVIEW, loadAgentOverview } from "./loadAgentOverview";
 import { loadOfficeAssets } from "./loadOfficeAssets";
+import { isServerFeatureUnavailableResponse } from "../utils/serverFeatureAvailability";
 import { paintOffice, raftAgentId } from "./officeScene";
 import { buildOfficeScene } from "./roomLayout";
 import type { OfficeBoss } from "./roomLayout";
@@ -29,7 +30,15 @@ export default function OfficePage() {
   const serverId = useServerStore((s) => s.current?.id ?? null);
   const [overview, setOverview] = useState<AgentOverview | null>(null);
   const [assetsReady, setAssetsReady] = useState(false);
-  const [error, setError] = useState(false);
+  // Asset loading is scope-independent front-end packaging: its failure is
+  // its own error and is never cleared by a workspace switch.
+  const [assetsError, setAssetsError] = useState(false);
+  // Scoped per-workspace overview state, fully reset on every scope change.
+  // The explicit 501 feature_not_implemented contract means the office
+  // overview capability is not enabled on this server: not a malfunction, and
+  // the copy must say so rather than "could not load".
+  const [overviewError, setOverviewError] = useState(false);
+  const [unavailable, setUnavailable] = useState(false);
   const [tick, setTick] = useState(0);
   const [zoom, setZoom] = useState(3);
   const [query, setQuery] = useState("");
@@ -56,24 +65,42 @@ export default function OfficePage() {
         if (!cancelled) setAssetsReady(true);
       })
       .catch(() => {
-        if (!cancelled) setError(true);
+        if (!cancelled) setAssetsError(true);
       });
     return () => {
       cancelled = true;
     };
   }, []);
 
+  // oxlint-disable-next-line react-doctor/no-cascading-set-state -- scope-entry clears four pieces of prior-scope state, then exactly one terminal state per load outcome.
   useEffect(() => {
-    if (!serverId) return;
     let cancelled = false;
+    // Drop the PREVIOUS workspace's overview before loading the new one: the
+    // scene memo and the canvas subtree derive from `overview`, so clearing it
+    // here unmounts any stale canvas instead of leaving it rendered under the
+    // new scope's unavailable/error notice. The office scene refs are layout
+    // caches for that overview — they go with it.
+    setOverview(null);
+    officeRef.current = null;
+    structureRef.current = null;
+    setOverviewError(false);
+    setUnavailable(false);
+    // A cleared workspace is a scope change too (logout/removal/navigation).
+    // Clear its predecessor's state without requesting an unscoped overview.
+    if (!serverId) return;
     void loadAgentOverview(serverId)
       .then((next) => {
         if (cancelled) return;
         noteServerTime(next.serverTime);
         setOverview(next);
       })
-      .catch(() => {
-        if (!cancelled) setError(true);
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        if (isServerFeatureUnavailableResponse(err)) {
+          setUnavailable(true);
+          return;
+        }
+        setOverviewError(true);
       });
     return () => {
       cancelled = true;
@@ -198,10 +225,13 @@ export default function OfficePage() {
           {formatMessage({ id: "office.previewNotice" })}
         </p>
       ) : null}
-      {error ? (
+      {unavailable ? (
+        <p className="p-4 text-sm text-white" data-testid="office-unavailable">{formatMessage({ id: "office.notEnabled" })}</p>
+      ) : null}
+      {assetsError || overviewError ? (
         <p className="p-4 text-sm text-white" data-testid="office-error">{formatMessage({ id: "office.loadFailed" })}</p>
       ) : null}
-      {!error && !officeState ? (
+      {!assetsError && !overviewError && !unavailable && !officeState ? (
         <p className="p-4 text-sm text-white" data-testid="office-loading">{formatMessage({ id: "office.loading" })}</p>
       ) : null}
       {officeState && scene ? (

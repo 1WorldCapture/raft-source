@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { useIntl } from "react-intl";
 import api from "../api/client";
@@ -16,6 +16,8 @@ function normalizeUserCode(value: string): string {
   return value.trim().toUpperCase();
 }
 
+type DeviceLoginDecision = "pending" | "approved" | "denied";
+
 export default function DeviceLoginPage() {
   const { formatMessage } = useIntl();
   const user = useAuthStore((s) => s.user);
@@ -23,27 +25,41 @@ export default function DeviceLoginPage() {
   const initialCode = useMemo(() => initialUserCode(), []);
   const [userCode, setUserCode] = useState(initialCode);
   const [submitting, setSubmitting] = useState(false);
-  const [approved, setApproved] = useState(false);
+  const [pendingAction, setPendingAction] = useState<"approve" | "deny" | null>(null);
+  const [decision, setDecision] = useState<DeviceLoginDecision>("pending");
   const [closeAttempted, setCloseAttempted] = useState(false);
   const [error, setError] = useState("");
+  // Guards read synchronously, unlike the `submitting`/`decision` state whose
+  // updates React batches: a second click in the same tick, or any click once
+  // a decision has landed, must not issue another POST.
+  const inFlightRef = useRef(false);
+  const decidedRef = useRef(false);
 
   const normalizedCode = normalizeUserCode(userCode);
 
-  async function approveDeviceLogin(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  // One submission path for both decisions: the backend resolves the pending
+  // authorization either way (`approve: false` → access_denied for the polling
+  // device). Error mapping is shared because the code lifecycle is shared.
+  async function submitDeviceLoginDecision(approve: boolean, event?: FormEvent<HTMLFormElement>) {
+    if (event) event.preventDefault();
     if (!normalizedCode) return;
+    if (inFlightRef.current || decidedRef.current) return;
+    inFlightRef.current = true;
 
     setSubmitting(true);
+    setPendingAction(approve ? "approve" : "deny");
     setError("");
     try {
-      await api.post("/auth/device/approve", { userCode: normalizedCode, approve: true });
-      setApproved(true);
+      await api.post("/auth/device/approve", { userCode: normalizedCode, approve });
+      decidedRef.current = true;
+      setDecision(approve ? "approved" : "denied");
       const url = new URL(window.location.href);
       url.searchParams.delete("user_code");
       window.history.replaceState({}, "", url.pathname + url.hash);
     } catch (err: any) {
       const code = err.response?.data?.code;
-      const fallback = err.response?.data?.error || formatMessage({ id: "pages.deviceLogin.approveFailedFallback" });
+      const fallback = err.response?.data?.error
+        || formatMessage({ id: approve ? "pages.deviceLogin.approveFailedFallback" : "pages.deviceLogin.denyFailedFallback" });
       if (code === "user_code_invalid") {
         setError(formatMessage({ id: "pages.deviceLogin.codeInvalid" }));
       } else if (code === "expired") {
@@ -54,22 +70,25 @@ export default function DeviceLoginPage() {
         setError(fallback);
       }
     } finally {
+      inFlightRef.current = false;
       setSubmitting(false);
+      setPendingAction(null);
     }
   }
 
-  if (approved) {
-    function closePage() {
-      setCloseAttempted(true);
-      window.close();
-    }
+  function closePage() {
+    setCloseAttempted(true);
+    window.close();
+  }
 
+  if (decision !== "pending") {
+    const denied = decision === "denied";
     return (
       <AuthPageFrame>
         <div className="w-full">
           <AuthPageIntro
-            title={formatMessage({ id: "pages.deviceLogin.approvedTitle" })}
-            description={formatMessage({ id: "pages.deviceLogin.approvedDescription" })}
+            title={formatMessage({ id: denied ? "pages.deviceLogin.deniedTitle" : "pages.deviceLogin.approvedTitle" })}
+            description={formatMessage({ id: denied ? "pages.deviceLogin.deniedDescription" : "pages.deviceLogin.approvedDescription" })}
           />
           <button
             type="button"
@@ -104,7 +123,7 @@ export default function DeviceLoginPage() {
           <Banner intent="warning" className="mb-4 font-bold">{error}</Banner>
         ) : null}
 
-        <form onSubmit={approveDeviceLogin} className="space-y-4">
+        <form onSubmit={(event) => submitDeviceLoginDecision(true, event)} className="space-y-4">
           <FormField label={formatMessage({ id: "pages.deviceLogin.deviceCodeLabel" })} labelStyle="plain">
             <input
               type="text"
@@ -117,13 +136,23 @@ export default function DeviceLoginPage() {
             />
           </FormField>
 
-          <button
-            type="submit"
-            disabled={submitting || !normalizedCode}
-            className="btn-brutal w-full bg-brutal-pink px-3 py-2 text-sm disabled:opacity-50"
-          >
-            {submitting ? formatMessage({ id: "pages.deviceLogin.approving" }) : formatMessage({ id: "pages.deviceLogin.approve" })}
-          </button>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="submit"
+              disabled={submitting || !normalizedCode}
+              className="btn-brutal bg-brutal-pink px-3 py-2 text-sm disabled:opacity-50"
+            >
+              {pendingAction === "approve" ? formatMessage({ id: "pages.deviceLogin.approving" }) : formatMessage({ id: "pages.deviceLogin.approve" })}
+            </button>
+            <button
+              type="button"
+              onClick={() => submitDeviceLoginDecision(false)}
+              disabled={submitting || !normalizedCode}
+              className="btn-brutal bg-white px-3 py-2 text-sm disabled:opacity-50"
+            >
+              {pendingAction === "deny" ? formatMessage({ id: "pages.deviceLogin.denying" }) : formatMessage({ id: "pages.deviceLogin.deny" })}
+            </button>
+          </div>
         </form>
 
         <button

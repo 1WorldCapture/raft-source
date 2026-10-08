@@ -191,6 +191,7 @@ import AgentWorkspace from "./AgentWorkspace";
 import { AgentMcpTab } from "./AgentMcpTab";
 import AgentActivityLog from "./AgentActivityLog";
 import AgentSkills from "./AgentSkills";
+import { isServerFeatureUnavailableResponse } from "../../utils/serverFeatureAvailability";
 import AgentRemindersSection from "./AgentRemindersSection";
 import ReportIssueDialog from "./ReportIssueDialog";
 import AvatarListRow from "../ui/AvatarListRow";
@@ -3995,6 +3996,7 @@ export default function AgentDetailPanel({ agent, onClose, onBack, onOpenProfile
   const [reminderItems, setReminderItems] = useState<ReminderSummary[]>([]);
   const [remindersLoading, setRemindersLoading] = useState(true);
   const [remindersError, setRemindersError] = useState<string | null>(null);
+  const [remindersUnavailable, setRemindersUnavailable] = useState(false);
 
   // Reminders are a PRIVATE agent surface. A peer-server agent's public profile
   // must not make this server fetch them, and a caught error is not the same as
@@ -4023,6 +4025,7 @@ export default function AgentDetailPanel({ agent, onClose, onBack, onOpenProfile
     setReminderItems([]);
     setRemindersLoading(true);
     setRemindersError(null);
+    setRemindersUnavailable(false);
     try {
       const { data } = await api.get("/reminders", {
         params: {
@@ -4034,7 +4037,15 @@ export default function AgentDetailPanel({ agent, onClose, onBack, onOpenProfile
       setReminderItems((data?.reminders ?? []) as ReminderSummary[]);
     } catch (err: any) {
       if (reminderScopeRef.current !== startedScope) return;
-      setRemindersError(err.response?.data?.error || formatMessageRef.current({ id: "agent.detail.loadRemindersFailed" }));
+      // The server's explicit 501 feature_not_implemented contract for the
+      // reminders surface is not a failure — render the not-enabled state
+      // instead of a retryable banner. Genuine errors (including ambiguous
+      // 404s) still surface.
+      if (isServerFeatureUnavailableResponse(err)) {
+        setRemindersUnavailable(true);
+      } else {
+        setRemindersError(err.response?.data?.error || formatMessageRef.current({ id: "agent.detail.loadRemindersFailed" }));
+      }
     } finally {
       if (reminderScopeRef.current === startedScope) setRemindersLoading(false);
     }
@@ -4553,6 +4564,7 @@ export default function AgentDetailPanel({ agent, onClose, onBack, onOpenProfile
           reminders={reminderItems}
           loading={remindersLoading}
           error={remindersError}
+          unavailable={remindersUnavailable}
           onRetry={handleRetryReminders}
           onOpenMsgRef={handleOpenReminderMsgRef}
         />

@@ -46,3 +46,37 @@ test("reminder message refs stay keyboard-reachable links with app-chrome cursor
   fireEvent.click(link);
   assert.deepEqual(opened, ["https://app.raft.ai/s/botiverse/channel/uiux?msg=4bcb253d"]);
 });
+
+test("unavailable state states the server lacks the surface instead of an error banner", () => {
+  render(
+    <TestIntlProvider>
+      <AgentRemindersSection
+        reminders={[]}
+        loading={false}
+        error={null}
+        unavailable
+      />
+    </TestIntlProvider>,
+  );
+
+  assert.ok(screen.getByText("Reminders are not available from this server."));
+  // No retry affordance: retrying a surface the server does not have cannot succeed.
+  assert.equal(screen.queryByRole("button"), null);
+  assert.equal(screen.queryByTestId("agent-reminders-error-banner"), null);
+});
+
+test("available servers keep the retryable error banner", () => {
+  render(
+    <TestIntlProvider>
+      <AgentRemindersSection
+        reminders={[]}
+        loading={false}
+        error="Failed to load reminders"
+        onRetry={() => {}}
+      />
+    </TestIntlProvider>,
+  );
+
+  assert.ok(screen.getByText("Failed to load reminders"));
+  assert.ok(screen.getByRole("button", { name: "Retry" }));
+});

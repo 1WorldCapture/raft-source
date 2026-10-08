@@ -10,6 +10,7 @@ import { refreshLatestOverlayPages, refreshVisibleOverlayPages } from "../../cac
 import { useChannelStore } from "../../store/channelStore";
 import type { Channel } from "../../store/channelStore";
 import { canToggleActivityMute, matchesActivityMuteState, matchesMessageDisplayPrefsState, normalizeActivityMuteState, normalizeMessageDisplayPrefs } from "../../store/channelDomain";
+import { isServerFeatureUnavailableResponse } from "../../utils/serverFeatureAvailability";
 import {
   selectChannelMessageBucket,
   selectChannelWindowMeta,
@@ -393,6 +394,8 @@ export default function ChatPanel({
     let canceled = false;
     // oxlint-disable-next-line react-doctor/no-adjust-state-on-prop-change
     setActivityMuteError(null);
+    // oxlint-disable-next-line react-doctor/no-adjust-state-on-prop-change
+    setActivityMuteUnavailable(false);
 
     if (!activityMuteSupported || !channelId) {
       // oxlint-disable-next-line react-doctor/no-adjust-state-on-prop-change
@@ -408,8 +411,15 @@ export default function ChatPanel({
         const normalized = normalizeActivityMuteSettings(res.data);
         setChannelActivityMuteState(channelId, normalized);
       })
-      .catch(() => {
+      .catch((err: unknown) => {
         if (canceled) return;
+        // The explicit 501 feature_not_implemented contract means the mute
+        // surface is not enabled on this server — degrade silently. Genuine
+        // failures (auth, 5xx, network, ambiguous 404s) keep the banner.
+        if (isServerFeatureUnavailableResponse(err)) {
+          setActivityMuteUnavailable(true);
+          return;
+        }
         setActivityMuteError("message.chatPanel.loadActivityMuteError");
       })
       .finally(() => {
@@ -514,6 +524,10 @@ export default function ChatPanel({
   const [activityMuteLoading, setActivityMuteLoading] = useState(false);
   const [activityMuteSaving, setActivityMuteSaving] = useState(false);
   const [activityMuteError, setActivityMuteError] = useState<ActivityMuteErrorKey | null>(null);
+  // True once the server answers the explicit 501 feature_not_implemented
+  // contract for notification-settings. The control then hides with no
+  // failure banner — the capability is absent, so retrying cannot succeed.
+  const [activityMuteUnavailable, setActivityMuteUnavailable] = useState(false);
   const [messageDisplayPrefsLoading, setMessageDisplayPrefsLoading] = useState(false);
   const [messageDisplayPrefsSaving, setMessageDisplayPrefsSaving] = useState(false);
   const [messageDisplayPrefsError, setMessageDisplayPrefsError] = useState<MessageDisplayPrefsErrorKey | null>(null);
@@ -788,7 +802,7 @@ export default function ChatPanel({
     : undefined;
 
   const handleToggleActivityMute = useCallback(async () => {
-    if (!activityMuteSupported || !channelId || activityMuteSaving) return;
+    if (!activityMuteSupported || !channelId || activityMuteSaving || activityMuteUnavailable) return;
     const previous = {
       activityMuted: channelActivityMuted,
       muteFromSeq: channelMuteFromSeq,
@@ -812,14 +826,20 @@ export default function ChatPanel({
       });
       const normalized = normalizeActivityMuteSettings(data);
       setChannelActivityMuteState(channelId, normalized);
-    } catch {
+    } catch (err: unknown) {
       const current = useChannelStore.getState().channels.find((candidate) => candidate.id === channelId)
         ?? useChannelStore.getState().dmChannels.find((candidate) => candidate.id === channelId);
       if (matchesActivityMuteState(current, optimistic)) {
         setChannelActivityMuteState(channelId, previous);
-        setActivityMuteError(nextActivityMuted
-          ? "message.chatPanel.muteActivityError"
-          : "message.chatPanel.unmuteActivityError");
+        if (isServerFeatureUnavailableResponse(err)) {
+          // The write hit the same honest "no such surface" rejection: roll
+          // back and hide the control instead of promising a retryable error.
+          setActivityMuteUnavailable(true);
+        } else {
+          setActivityMuteError(nextActivityMuted
+            ? "message.chatPanel.muteActivityError"
+            : "message.chatPanel.unmuteActivityError");
+        }
       }
     } finally {
       setActivityMuteSaving(false);
@@ -827,6 +847,7 @@ export default function ChatPanel({
   }, [
     activityMuteSaving,
     activityMuteSupported,
+    activityMuteUnavailable,
     activityMuted,
     channelActivityMuted,
     channelId,
@@ -1351,7 +1372,7 @@ export default function ChatPanel({
       {activityMuted && <ActivityMutedBadge />}
     </div>
   ) : undefined;
-  const activityMuteButton = activityMuteSupported ? (
+  const activityMuteButton = activityMuteSupported && !activityMuteUnavailable ? (
     <ActivityMuteToggleButton
       activityMuted={activityMuted}
       disabled={activityMuteLoading || activityMuteSaving}
@@ -1379,7 +1400,7 @@ export default function ChatPanel({
       open={overflowOpen}
       onOpenChange={setOverflowOpen}
       onSearch={() => handleSearchThisChannel(channel.id)}
-      activityMute={activityMuteSupported ? {
+      activityMute={activityMuteSupported && !activityMuteUnavailable ? {
         muted: activityMuted,
         busy: activityMuteLoading || activityMuteSaving,
         onToggle: () => void handleToggleActivityMute(),
