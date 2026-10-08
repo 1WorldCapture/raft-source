@@ -64,16 +64,25 @@ async function seed(slug: string): Promise<Seeded> {
   };
 }
 
-test("GET /pm starts unset, PUT sets the PM with an audit line, GET reports set", async ({ app }) => {
+test("GET /pm starts unset, PUT sets the PM with an audit line, GET reports set", async ({ app, db }) => {
   const s = await seed("pm-basic");
   const pmUrl = `${app.baseUrl}/api/servers/${s.slug}/pm`;
 
   const res = await fetch(pmUrl, { headers: { Authorization: `Bearer ${s.ownerToken}` } });
   assert.equal(res.status, 200);
-  const before = await res.json() as { pm: unknown; dmChannelId: unknown; setup: string };
+  const before = await res.json() as { pm: unknown; dmChannelId: unknown; setup: string; autoProvision: boolean };
   assert.equal(before.pm, null);
   assert.equal(before.dmChannelId, null);
   assert.equal(before.setup, "unset");
+  assert.equal(before.autoProvision, true, "freshly created server qualifies for auto-provision");
+
+  // A legacy server (created before the auto-provision cutoff) reports false
+  // so clients show the manual-pick guide instead.
+  await db.update(servers).set({ createdAt: new Date("2026-10-01T00:00:00Z") })
+    .where(eq(servers.id, s.serverId));
+  const legacyGet = await fetch(pmUrl, { headers: { Authorization: `Bearer ${s.ownerToken}` } });
+  const legacy = await legacyGet.json() as { autoProvision: boolean };
+  assert.equal(legacy.autoProvision, false);
 
   const put = await fetch(pmUrl, {
     method: "PUT",
@@ -90,7 +99,6 @@ test("GET /pm starts unset, PUT sets the PM with an audit line, GET reports set"
   assert.equal(after.pm?.agentId, s.pmAgentId);
   assert.equal(after.setup, "set");
 
-  const db = getDb();
   const audit = await db.select().from(pmRoleAuditEvents).where(eq(pmRoleAuditEvents.serverId, s.serverId));
   assert.equal(audit.length, 1);
   assert.equal(audit[0]?.fromAgentId, null);

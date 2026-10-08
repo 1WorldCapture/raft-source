@@ -3090,11 +3090,16 @@ export interface ServerPmAgentSummary {
  * Wire shape of GET /api/servers/:slug/pm. `pm` is null when no PM is set OR
  * when the stored PM points at a soft-deleted agent (read as "not set").
  * `dmChannelId` locates the caller's existing DM with the PM (null = none yet).
+ * `autoProvision` tells whether this server will get a PM automatically once
+ * its owner/admin connects a computer (phase B hook) — false means the user
+ * must pick one manually, so clients show the manual-pick guide instead of
+ * the connect-a-computer guide.
  */
 export interface ServerPmState {
   pm: ServerPmAgentSummary | null;
   dmChannelId: string | null;
   setup: ServerPmSetupState;
+  autoProvision: boolean;
 }
 
 /** Plans shown in the pricing comparison UI (includes coming-soon tiers). */

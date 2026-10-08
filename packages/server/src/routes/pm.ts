@@ -21,7 +21,7 @@ import {
   serverMembers,
   servers,
 } from "../db/schema.js";
-import { getServerBySlug } from "../services/serverService.js";
+import { getServerBySlug, PM_AUTO_PROVISION_SINCE } from "../services/serverService.js";
 import type { ServerPmAgentSummary, ServerPmSetupState } from "@botiverse/raft-shared";
 import { requireAuth, requireVerified } from "../middleware/auth.js";
 
@@ -109,7 +109,12 @@ pmRouter.get("/:slug/pm", requireAuth, requireVerified, async (req, res) => {
     ? await findPmDmChannelId(server.id, userId, storedPmId)
     : null;
 
-  res.json({ pm, dmChannelId, setup });
+  // Phase B auto-provision eligibility (see PM_AUTO_PROVISION_SINCE): clients
+  // use this to pick the guide copy — "connect a computer" for auto servers,
+  // "pick an agent manually" for legacy ones.
+  const autoProvision = server.createdAt >= PM_AUTO_PROVISION_SINCE;
+
+  res.json({ pm, dmChannelId, setup, autoProvision });
 });
 
 pmRouter.put("/:slug/pm", requireAuth, requireVerified, async (req, res) => {

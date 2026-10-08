@@ -105,6 +105,14 @@ export interface ServerProfileUpdates {
 
 const SIDEBAR_SORT_MODES = new Set(["manual", "recent", "az"]);
 
+// Rethink UI phase B (task #3): servers created before this instant are
+// "legacy" for PM purposes — the auto-provision hook (runs on the attaching
+// machine's first capabilities report) skips them and the user picks their PM
+// manually. GET /api/servers/:slug/pm derives its `autoProvision` flag from
+// this same instant, so client guide copy and server behavior can never
+// disagree. Phase B's hook MUST reference this constant, not its own copy.
+export const PM_AUTO_PROVISION_SINCE = new Date("2026-10-08T00:00:00Z");
+
 function toSidebarSortMode(value: unknown): SidebarOrderPreferences["channelSortMode"] {
   return typeof value === "string" && SIDEBAR_SORT_MODES.has(value)
     ? (value as SidebarOrderPreferences["channelSortMode"])
