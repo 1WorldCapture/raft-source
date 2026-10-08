@@ -21,7 +21,8 @@ import {
   serverMembers,
   servers,
 } from "../db/schema.js";
-import { getServerBySlug, PM_AUTO_PROVISION_SINCE } from "../services/serverService.js";
+import { getServerBySlug } from "../services/serverService.js";
+import { PM_AUTO_PROVISION_SINCE } from "../services/serverPmProvisioning.js";
 import type { ServerPmAgentSummary, ServerPmSetupState } from "@botiverse/raft-shared";
 import { requireAuth, requireVerified } from "../middleware/auth.js";
 
