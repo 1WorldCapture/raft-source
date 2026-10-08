@@ -22,7 +22,7 @@
    - 脚本产出 `raft-source-server:deploy-$SHA` 与 `raft-source-web-selfhost:deploy-$SHA`（**分支参数与 tag 用 `deploy`/`deploy-<sha>`**，修正 /api/version 显示 "dev" 的历史遗留）
 3. 同源 downloads：`node scripts/build-release-artifacts.mjs --platforms linux-x64 --out <dir>` → rsync 进 `/opt/raft-prod-docker/downloads/{cli,computer,daemon}`；desktop 子树仅在桌面发版时更新。**`downloads/mobile/` 为手工放置目录**（Android APK，IT 经手上传+sha256 核对），发版 rsync 不涉及、不会被冲掉
 4. 改 `.env` 两个镜像 tag → `cd /opt/raft-prod-docker && docker compose -p raft-prod up -d server web`
-5. 验证：`/api/version` 三参数、health 200、登录探针（错误凭据 401）、容器健康
+5. 验证：`/api/version` 三参数、health 200、登录探针（错误凭据 401）、容器健康；**desktop/mobile feed 落位后，对 latest-mac.yml 里的每个 url 逐条 `curl -I` 确认 200**（nginx 路径大小写敏感；上传目标只写目录不写文件名——见「已知坑」）
 6. 有迁移时：entrypoint guarded migration 自动应用（日志确认 `[MIGRATION_DEPLOY_OK]`）；大表索引提前评估锁表（参考 0273 案例：2081 行毫秒级随部署走）
 
 **deploy.sh 已不再用于生产**（pm2 源码栈时代的工具，随栈退役；保留在仓库供源码栈部署场景使用）。
@@ -70,6 +70,8 @@ rm /tmp/redis-migrate.rdb
 - **web 镜像证书要通用名**：`certs/fullchain.pem`+`privkey.pem`，不能用域名命名文件
 - compose 卷名=项目前缀+声明名：uploads 实际卷是 `raft-prod_raft-uploads`，不是 `raft-prod_uploads`
 - 构建期磁盘峰值：pnpm install + 双镜像层需 >5G 余量，盘紧会 ENOSPC 失败（先清 journal/悬空层再构建）
+- **从 owner Mac 往服务器传产物，默认走 tailscale**（`root@100.99.233.89`，链路 direct），只有 tailscale 不通才退回公网 IP（38.55.131.6）。实测产物级 ~125KB/s——瓶颈是 Mac 上行带宽，与链路类型无关，200MB 级文件预算 25-30 分钟
+- **传输目标只写目录，不写文件名**（如 `rsync -av src/ host:/opt/raft-prod-docker/downloads/desktop/0.1.6/`）：nginx 下载路径**大小写敏感**，手写目标文件名一旦大小写与 latest-mac.yml 的 url 不一致就 404（0.1.6 发版实测：rsync 目标名小写化 → yml 引用的 `Raft-Desktop-…` 404）。需要中转就整目录一起传；落位后按发版清单第 5 步对 yml 每个 url `curl -I` 核 200
 - pipefail 下 `xxx --list | grep -q` 会因 SIGPIPE 假失败——长输出流校验用文件中转
 - 空 crontab 时 `crontab -l | grep -v X` 退出码 1，在 set -e/pipefail 的 subshell 里会静默吞掉后续行——加 `|| true` 护栏
 - **后台启动三件套**：先建好日志目录再重定向、脚本自写 pidfile、启动后 kill -0 验活——只看日志判断进度，不靠 pgrep（自匹配假阳性曾吞掉 25 分钟）
