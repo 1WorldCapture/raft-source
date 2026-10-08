@@ -11,7 +11,13 @@
  *   1. the machine belongs to the server;
  *   2. the machine's registering user (the attach initiator, immutable on
  *      the machines row) is currently owner/admin on that server;
- *   3. the server has no PM yet (`servers.pm_agent_id IS NULL`).
+ *   3. the server has no PM yet (`servers.pm_agent_id IS NULL`);
+ *   4. the server was CREATED after the feature cutover (PM_AUTO_PROVISION_SINCE):
+ *      only NEW servers auto-provision. Pre-existing servers choose their PM
+ *      through the onboarding guide (PUT /pm) — auto-creating one there would
+ *      conjure an agent the user never asked for;
+ *   5. the user has not dismissed the setup guide (`pm_setup_dismissed_at`
+ *      null) — a dismissed server never gets an auto-provisioned PM.
  *
  * Runtime selection uses ONLY the reported list, in declared preference
  * order. Zero hits -> do not create anything; the PM tab shows manual-setup
@@ -29,14 +35,23 @@
  * PM identity is written exactly once at creation. No code path ever updates
  * `agents.description` afterwards, so user edits always survive upgrades.
  */
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { getDefaultModel } from "@botiverse/raft-shared";
 import { getDb } from "../db/index.js";
-import { machines, servers } from "../db/schema.js";
+import { agents, machines, servers } from "../db/schema.js";
 import { getActorServerRoleInServer } from "../lib/actorPermissions.js";
 import { createAgent, PmAlreadyProvisionedError } from "./agentService.js";
 import { findOrCreateDM } from "./channelService.js";
 import { addTraceEvent } from "../tracing/semanticTrace.js";
+
+/**
+ * Feature cutover for auto-provisioning (UTC). Servers created before this
+ * instant are LEGACY: their PM comes from the user's choice in the onboarding
+ * guide (PUT /pm), never from the hook — otherwise every existing server's
+ * owner machine would grow a "PM" agent on its next capabilities report
+ * (PM ruling on PR #218 review). Bump this only with a product decision.
+ */
+export const PM_AUTO_PROVISION_SINCE = new Date("2026-10-08T00:00:00Z");
 
 /** Standard role description for an auto-provisioned PM. Written once. */
 export const PM_ROLE_SPEC_V1 = [
@@ -109,12 +124,56 @@ export async function maybeProvisionServerPm(input: {
     const { serverId } = machine;
 
     // Fast path: nothing to do when a PM already exists (the common case for
-    // every capabilities report after the first).
+    // every capabilities report after the first). Legacy servers (created
+    // before the cutover) and dismissed guides never auto-provision — their
+    // PM comes from the user's choice in the onboarding guide.
     const [server] = await db
-      .select({ pmAgentId: servers.pmAgentId, deletedAt: servers.deletedAt })
+      .select({
+        pmAgentId: servers.pmAgentId,
+        deletedAt: servers.deletedAt,
+        createdAt: servers.createdAt,
+        pmSetupDismissedAt: servers.pmSetupDismissedAt,
+      })
       .from(servers)
       .where(eq(servers.id, serverId));
     if (!server || server.deletedAt || server.pmAgentId) return null;
+    if (server.createdAt < PM_AUTO_PROVISION_SINCE) {
+      addTraceEvent("server.pm.auto_provision", {
+        surface: "server",
+        kind: "internal",
+        attrs: { server_id: serverId, machine_id: input.machineId, outcome: "skipped_legacy_server" },
+      });
+      return null;
+    }
+    if (server.pmSetupDismissedAt) {
+      addTraceEvent("server.pm.auto_provision", {
+        surface: "server",
+        kind: "internal",
+        attrs: { server_id: serverId, machine_id: input.machineId, outcome: "skipped_dismissed" },
+      });
+      return null;
+    }
+
+    // A live agent already owns the "PM" handle (unique index would reject
+    // the create anyway). Check BEFORE creating so every capabilities report
+    // doesn't retry the insert and log an error for the same conflict; the
+    // owner can appoint that agent via PUT /pm instead.
+    const [nameTwin] = await db
+      .select({ id: agents.id })
+      .from(agents)
+      .where(and(
+        eq(agents.serverId, serverId),
+        eq(agents.name, PM_IDENTITY.name),
+        isNull(agents.deletedAt),
+      ));
+    if (nameTwin) {
+      addTraceEvent("server.pm.auto_provision", {
+        surface: "server",
+        kind: "internal",
+        attrs: { server_id: serverId, machine_id: input.machineId, agent_id: nameTwin.id, outcome: "skipped_name_conflict" },
+      });
+      return null;
+    }
 
     // The registering user must still be owner/admin — attach enforced this
     // at attach time; re-check for future non-attach callers.

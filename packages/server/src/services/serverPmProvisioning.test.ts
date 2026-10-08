@@ -228,13 +228,47 @@ test("silently gives up when an agent named PM already exists", async () => {
     runtime: "codex",
   }).returning();
 
+  // Repeated reports must not retry the doomed create (no error churn):
+  // the name twin is detected up front.
+  const first = await maybeProvisionServerPm({ machineId: machine.id });
+  const second = await maybeProvisionServerPm({ machineId: machine.id });
+
+  assert.equal(first, null);
+  assert.equal(second, null);
+  assert.equal(await getServerPmAgentId(db, server.id), null);
+  const rows = await listServerAgents(db, server.id);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].id, existingPm.id);
+});
+
+test("does not auto-provision for a server created before the feature cutover", async () => {
+  const db = await openDb();
+  const { owner, server } = await seedOwnerServer(db);
+  const machine = await seedMachine(db, { serverId: server.id, userId: owner.id, runtimes: ["claude"] });
+  // Legacy server: predates PM_AUTO_PROVISION_SINCE — its PM comes from the
+  // user's choice in the onboarding guide, never from the hook.
+  await db.update(servers).set({ createdAt: new Date("2026-01-01T00:00:00Z") }).where(eq(servers.id, server.id));
+
   const result = await maybeProvisionServerPm({ machineId: machine.id });
 
   assert.equal(result, null);
   assert.equal(await getServerPmAgentId(db, server.id), null);
   const rows = await listServerAgents(db, server.id);
-  assert.equal(rows.length, 1);
-  assert.equal(rows[0].id, existingPm.id);
+  assert.equal(rows.length, 0);
+});
+
+test("does not auto-provision when the setup guide was dismissed", async () => {
+  const db = await openDb();
+  const { owner, server } = await seedOwnerServer(db);
+  const machine = await seedMachine(db, { serverId: server.id, userId: owner.id, runtimes: ["claude"] });
+  await db.update(servers).set({ pmSetupDismissedAt: new Date() }).where(eq(servers.id, server.id));
+
+  const result = await maybeProvisionServerPm({ machineId: machine.id });
+
+  assert.equal(result, null);
+  assert.equal(await getServerPmAgentId(db, server.id), null);
+  const rows = await listServerAgents(db, server.id);
+  assert.equal(rows.length, 0);
 });
 
 test("returns null without throwing for an unknown machine", async () => {
