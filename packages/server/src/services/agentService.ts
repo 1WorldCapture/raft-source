@@ -65,6 +65,22 @@ export class PmRoleDeleteBlockedError extends Error {
   }
 }
 
+/**
+ * Rethink UI phase B — thrown by `createAgent` when `claimServerPm` is set
+ * and the conditional `servers.pm_agent_id` claim updates zero rows, i.e. a
+ * concurrent creator won the PM slot first. The whole create transaction
+ * rolls back, so the loser leaves no orphan agent behind. Callers treat this
+ * as "PM already provisioned, nothing to do", not as a failure.
+ */
+export class PmAlreadyProvisionedError extends Error {
+  readonly code = "PM_ALREADY_PROVISIONED";
+
+  constructor() {
+    super("PM_ALREADY_PROVISIONED: this server already has a PM agent");
+    this.name = "PmAlreadyProvisionedError";
+  }
+}
+
 export async function createAgent(
   serverId: string,
   name: string,
@@ -80,6 +96,10 @@ export async function createAgent(
     creatorType?: CreatorType;
     creatorId?: string;
     expectedSetupStatus?: "not_started" | "in_progress" | "deferred" | "complete" | null;
+    // Rethink UI phase B. When true, the same create transaction also claims
+    // the server's PM slot with a conditional update (pm_agent_id IS NULL).
+    // Zero rows updated -> PmAlreadyProvisionedError -> full rollback.
+    claimServerPm?: boolean;
     providerConnection?: {
       id: string;
       configVersion: number;
@@ -164,6 +184,22 @@ export async function createAgent(
         machineId,
       })
       .returning();
+
+    if (opts.claimServerPm) {
+      // Raw SQL on purpose: servers.pm_agent_id ships with migration 0275
+      // (phase A). Until it lands the drizzle schema must not reference the
+      // column (unfiltered servers inserts/selects in migration tests would
+      // break). Switch to the drizzle field when 0275 merges.
+      const claimed = await tx.execute(sql`
+        UPDATE servers
+        SET pm_agent_id = ${newAgent.id}
+        WHERE id = ${serverId} AND pm_agent_id IS NULL
+        RETURNING id
+      `);
+      if (claimed.rows.length === 0) {
+        throw new PmAlreadyProvisionedError();
+      }
+    }
 
     await tx.insert(serverAgentMembers).values({
       serverId,

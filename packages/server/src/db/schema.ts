@@ -254,6 +254,14 @@ export const servers = pgTable("servers", {
   kind: text("kind", { enum: ["normal", "joint_storage"] }).notNull().default("normal"),
   ownerId: uuid("owner_id").notNull().references(() => users.id),
   onboardingAgentId: uuid("onboarding_agent_id"),
+  // NOTE (Rethink UI phase B): the pm_agent_id column ships with phase A's
+  // migration 0275 together with pm_setup_dismissed_at. Until that lands, the
+  // column is intentionally NOT declared here — a drizzle field would make
+  // every unfiltered servers insert/select reference a column the committed
+  // migrations don't have (migration tests build databases from migrations
+  // directly). serverPmProvisioning and agentService's claimServerPm use raw
+  // SQL for this column in the meantime and switch to the drizzle field when
+  // 0275 merges.
   agentAllChannelGreetingEnabled: boolean("agent_all_channel_greeting_enabled").notNull().default(true),
   hideHumansFromMembers: boolean("hide_humans_from_members").notNull().default(false),
   // Task #70. When true, logged-out visitors may READ this server's guest-visible ordinary
