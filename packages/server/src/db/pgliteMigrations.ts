@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,10 +13,25 @@ type MigrationJournal = {
   }>;
 };
 
-const DRIZZLE_DIR = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "../../drizzle",
-);
+// Resolve the drizzle directory for both source and bundled layouts:
+// under src/db the journal sits at ../../drizzle, but the esbuild bundle
+// flattens this module into dist/, where ../drizzle is the correct hop.
+// Prefer whichever candidate actually contains the journal; keep the source
+// layout as the canonical fallback for error reporting.
+function resolveDrizzleDir(moduleDir: string): string {
+  const candidates = [
+    path.resolve(moduleDir, "../../drizzle"),
+    path.resolve(moduleDir, "../drizzle"),
+  ];
+  for (const candidate of candidates) {
+    if (existsSync(path.join(candidate, "meta", "_journal.json"))) {
+      return candidate;
+    }
+  }
+  return candidates[0];
+}
+
+const DRIZZLE_DIR = resolveDrizzleDir(path.dirname(fileURLToPath(import.meta.url)));
 
 const PGLITE_COMPATIBILITY_STATEMENTS = [
   `CREATE UNIQUE INDEX IF NOT EXISTS "idx_messages_user_random_id"
