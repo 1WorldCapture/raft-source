@@ -3,12 +3,14 @@ import { createHash } from "node:crypto";
 import { sql, type SQL } from "drizzle-orm";
 import { drizzle as drizzleNodePg, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { PgDialect } from "drizzle-orm/pg-core";
-import { drizzle as drizzlePglite } from "drizzle-orm/pglite";
-import { PGlite } from "@electric-sql/pglite";
+// pglite is a test-only database backend: its packages live in devDependencies and
+// are loaded lazily below, exactly when a pglite:// URL is requested. The type-only
+// import keeps full type safety while costing nothing at runtime (erased on emit),
+// so production installs never need @electric-sql/pglite present.
+import type { PGlite } from "@electric-sql/pglite";
 import pg from "pg";
 import { noopTracer, type TraceContext, type Tracer } from "@botiverse/raft-shared";
 import * as schema from "./schema.js";
-import { migratePglite } from "./pgliteMigrations.js";
 import { closeRisingWavePool } from "./risingwave.js";
 import { dbPoolConnections, dbPoolWaitingRequests, pgPoolReadOnlyClientRecycledTotal } from "../metrics.js";
 import { getCurrentTraceContext } from "../tracing/semanticTrace.js";
@@ -740,7 +742,8 @@ export async function initDatabase(
   options: { log?: (...args: unknown[]) => void } = {},
 ) {
   if (isPgliteUrl(databaseUrl)) {
-    return initPgliteDatabase(new PGlite(getPgliteDataDir(databaseUrl)));
+    const { PGlite: PGliteClient } = await import("@electric-sql/pglite");
+    return initPgliteDatabase(new PGliteClient(getPgliteDataDir(databaseUrl)));
   }
 
   _pool = createPool(databaseUrl);
@@ -765,6 +768,10 @@ export async function initDatabase(
 
 /** Attach a caller-created PGlite instance, including one restored from a datadir. */
 export async function initPgliteDatabase(client: PGlite): Promise<Database> {
+  const [{ drizzle: drizzlePglite }, { migratePglite }] = await Promise.all([
+    import("drizzle-orm/pglite"),
+    import("./pgliteMigrations.js"),
+  ]);
   try {
     await migratePglite(client);
   } catch (error) {
