@@ -26,12 +26,23 @@ if [ "$mode" != "600" ]; then
   exit 1
 fi
 
+# Prebuild rewrites the android/ios npm scripts in package.json. Copy the file
+# first and put that copy back on success or failure, so uncommitted edits survive.
+pkg="$(pwd)/package.json"
+backup="$(mktemp)"
+cp "$pkg" "$backup"
+restore_pkg() {
+  exit_status=$?
+  trap - EXIT
+  if [ -n "${backup:-}" ] && [ -f "$backup" ]; then
+    cp "$backup" "$pkg" || exit_status=1
+    rm -f "$backup"
+  fi
+  exit "$exit_status"
+}
+trap restore_pkg EXIT
+
 npx expo prebuild --platform android --clean --no-install
-# Prebuild rewrites the android/ios npm scripts. The release build does not
-# want that change, so put package.json back when this is a git checkout.
-if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  git checkout -- package.json
-fi
 cd android
 ./gradlew assembleRelease
 

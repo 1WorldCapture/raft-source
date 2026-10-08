@@ -59,7 +59,7 @@ export RAFT_ANDROID_KEYSTORE_PROPERTIES=/absolute/path/raft-mobile-release.prope
 sh scripts/android-release.sh
 ```
 
-The script refuses a properties file that is not mode 600. The APK is written to `android/app/build/outputs/apk/release/app-release.apk`. The server origin is baked in at bundle time from `EXPO_PUBLIC_RAFT_SERVER_URL`. There is no in-app address screen. Without `RAFT_ANDROID_KEYSTORE_PROPERTIES`, a prebuild still succeeds and the release build type keeps the debug keystore.
+The script refuses a properties file that is not mode 600. Prebuild rewrites the `android` and `ios` scripts in `package.json`. The script copies `package.json` aside first and restores that copy when the build finishes or fails, including edits that are not committed yet. The APK is written to `android/app/build/outputs/apk/release/app-release.apk`. The server origin is baked in at bundle time from `EXPO_PUBLIC_RAFT_SERVER_URL`. There is no in-app address screen. Without `RAFT_ANDROID_KEYSTORE_PROPERTIES`, a prebuild still succeeds and the release build type keeps the debug keystore.
 
 Lint uses oxlint, the same linter as `packages/web`, instead of a second ESLint setup.
 
