@@ -40,7 +40,14 @@ export default function PmScreen() {
   if (loading && !state) {
     body = <View style={styles.centered}><ActivityIndicator color={color.ink} /></View>;
   } else if (error && !state) {
-    body = <ScreenMessage title={t("mobile.channels.loadFailed")} body={error} />;
+    const failed = t("mobile.channels.loadFailed");
+    body = (
+      <View style={styles.centered}>
+        <AppText style={styles.guideTitle}>{failed}</AppText>
+        {error !== failed ? <AppText style={styles.guideBody}>{error}</AppText> : null}
+        <PrimaryButton label={t("mobile.preview.retry")} onPress={() => void reload()} />
+      </View>
+    );
   } else if (state?.pm) {
     body = (
       <PmConversation
