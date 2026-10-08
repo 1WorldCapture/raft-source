@@ -200,11 +200,24 @@ func TestServersMembershipQuery(t *testing.T) {
 	}
 }
 
-func TestWorkspaceCreateUnsupported(t *testing.T) {
+func TestWorkspaceCreateAfterVerifiedAccountFlow(t *testing.T) {
 	env := newTestEnv(t)
-	_, access, _ := env.fullAccount("create@example.com", "creator")
+	ownerID, access, _ := env.fullAccount("create@example.com", "creator")
 	res := env.do("POST", "/api/servers", map[string]any{"name": "New Place"}, access)
-	if res.status != http.StatusNotImplemented || res.body["code"] != "feature_not_implemented" {
-		t.Fatalf("workspace create must be explicitly unsupported: %d %s", res.status, res.raw)
+	if res.status != http.StatusBadRequest || res.body["error"] != "Name and slug are required" {
+		t.Fatalf("create must still validate required slug: %d %s", res.status, res.raw)
+	}
+	res = env.do("POST", "/api/servers", map[string]any{"name": "New Place", "slug": "new-place"}, access)
+	if res.status != http.StatusOK || res.body["ownerId"] != ownerID || res.body["id"] == nil {
+		t.Fatalf("verified account should create a real owned workspace: %d %s", res.status, res.raw)
+	}
+	createdID := res.body["id"]
+	list := env.do("GET", "/api/servers", nil, access)
+	var members []map[string]any
+	if err := json.Unmarshal(list.raw, &members); err != nil || list.status != http.StatusOK || len(members) != 1 {
+		t.Fatalf("created membership must be readable: %d %s", list.status, list.raw)
+	}
+	if members[0]["id"] != createdID || members[0]["role"] != "owner" {
+		t.Fatalf("created membership must retain the actual owner: %s", list.raw)
 	}
 }

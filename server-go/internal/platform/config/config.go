@@ -24,7 +24,7 @@ const (
 
 // Config is the fully validated process configuration.
 type Config struct {
-	// ListenAddr is the loopback (by default) TCP address to bind.
+	// ListenAddr is the loopback (default) TCP address to bind.
 	ListenAddr string
 	// AllowNonLoopback explicitly opts out of the loopback bind guard.
 	AllowNonLoopback bool
@@ -39,7 +39,7 @@ type Config struct {
 	MailMode MailMode
 	// SMTP settings; required when MailMode == MailModeSMTP.
 	SMTP SMTPSettings
-	// OutboxDir receives .json dev messages when MailMode == MailModeOutbox.
+	// OutboxDir receives .json dev messages when MailMode is MailModeOutbox.
 	OutboxDir string
 	// FromAddress is the sender for outgoing mail.
 	FromAddress string
@@ -52,6 +52,10 @@ type Config struct {
 	PasswordResetTTL    time.Duration
 
 	Argon2 Argon2Settings
+
+	// WorkspacePolicy is the frozen local workspace feature-flag vector
+	// (design §1.3, C0). Flags default to false — a missing flag is disabled.
+	WorkspacePolicy WorkspacePolicySettings
 
 	// MaxAvatarBytes caps uploaded avatar decoding (matches legacy 5MB).
 	MaxAvatarBytes int64
@@ -66,6 +70,16 @@ type Config struct {
 	RegisterRatePerHour int
 	// ForgotPasswordRatePerHour matches the legacy 5/hour/IP limiter.
 	ForgotPasswordRatePerHour int
+}
+
+// WorkspacePolicySettings is the local policy provider for the M2 workspace
+// flags. It is deliberately scope-limited: no push/platform flags, no
+// per-request evaluation, no client-visible Go-specific switches. FeedbackEnabled
+// truthfully reports whether a feedback system is configured (C0: false).
+type WorkspacePolicySettings struct {
+	OnboardingOpenerV2      bool
+	OnboardingOwnerWizardV0 bool
+	FeedbackEnabled         bool
 }
 
 // MailMode selects the outgoing mail transport.
@@ -143,6 +157,14 @@ func Load(env LookupFunc, dataDirDefault string, jwtSecretFile string) (*Config,
 		}
 		cfg.DataDir = abs
 	}
+
+	// Freeze the M2 policy vector; invalid or unsupported enablement is an
+	// explicit startup error, not a successfully ignored configuration.
+	workspacePolicy, err := loadWorkspacePolicy(get)
+	if err != nil {
+		return nil, err
+	}
+	cfg.WorkspacePolicy = workspacePolicy
 
 	listen := get("LISTEN")
 	if listen == "" {

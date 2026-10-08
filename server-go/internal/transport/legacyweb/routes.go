@@ -1,5 +1,7 @@
 // Route assembly for the legacy-web surface, including the honest 404/405/501
 // policy: no generic 200 fallbacks, unsupported surfaces say so explicitly.
+// Workspace routes follow the legacy chain: auth gates, then (for /:id
+// routes) the scope middleware, then the guest denial on management surfaces.
 package legacyweb
 
 import (
@@ -49,6 +51,9 @@ func apiRoutes() []routeSpec {
 		{"/api/auth/me/username-available", []string{http.MethodGet}},
 		{"/api/auth/me/timezone-observation", []string{http.MethodPost}},
 		{"/api/servers", []string{http.MethodGet, http.MethodPost}},
+		// Workspace routes answer 405 through registerWorkspaceMethodFallbacks
+		// (auth/scope/guest gates run first), so no dynamic specs are needed
+		// here.
 	}
 }
 
@@ -106,10 +111,42 @@ func New(deps Deps) http.Handler {
 	mux.Handle("POST /api/auth/forgot-password", forgotLimiter.Wrap(generalAuth.Wrap(http.HandlerFunc(h.ForgotPassword))))
 	auth("POST /api/auth/reset-password", h.ResetPassword)
 
-	mux.Handle("GET /api/servers", generalAuth.Wrap(h.Gate.RequireVerifiedProfileComplete(deps.Servers.List)))
-	mux.Handle("POST /api/servers", generalAuth.Wrap(h.Gate.RequireVerifiedProfileComplete(deps.Servers.CreateWorkspace)))
+	// Workspace surface. Every route sits behind the verified+complete auth
+	// gates, exactly like the legacy /api/servers mount.
+	servers := deps.Servers
+	gate := func(handler http.HandlerFunc) http.Handler {
+		return generalAuth.Wrap(h.Gate.RequireVerifiedProfileComplete(handler))
+	}
+	// User-scoped routes (no X-Server-Id; a foreign header never changes the
+	// acting user). Registered before/alongside the {id} patterns; the exact
+	// literal "/api/servers/order" outranks "/api/servers/{id}".
+	mux.Handle("GET /api/servers", gate(servers.List))
+	mux.Handle("POST /api/servers", gate(servers.Create))
+	mux.Handle("GET /api/servers/order", gate(servers.GetOrder))
+	mux.Handle("PATCH /api/servers/order", gate(servers.UpdateOrder))
+
+	// Workspace-scoped routes: X-Server-Id must match the URL id and the
+	// caller must be a real member; management surfaces additionally deny
+	// guests for every method on those paths.
+	scope := servers.RequireServerScope
+	guestFree := servers.DenyGuests
+	mux.Handle("GET /api/servers/{id}", gate(scope(servers.GetWorkspace)))
+	mux.Handle("PATCH /api/servers/{id}", gate(scope(servers.UpdateWorkspace)))
+	mux.Handle("POST /api/servers/{id}/avatar", gate(scope(servers.UploadWorkspaceAvatar)))
+	mux.Handle("GET /api/servers/{id}/members", gate(scope(servers.Members)))
+	mux.Handle("GET /api/servers/{id}/settings", gate(scope(guestFree(servers.GetSettings))))
+	mux.Handle("GET /api/servers/{id}/onboarding-settings", gate(scope(guestFree(servers.GetOnboardingSettings))))
+	mux.Handle("PATCH /api/servers/{id}/onboarding-settings", gate(scope(guestFree(servers.PatchOnboardingSettings))))
+	mux.Handle("GET /api/servers/{id}/setup-projection", gate(scope(guestFree(servers.SetupProjection))))
+	mux.Handle("POST /api/servers/{id}/setup-transition", gate(scope(servers.SetupTransition)))
+	mux.Handle("POST /api/servers/{id}/setup-reset", gate(scope(servers.SetupReset)))
+	mux.Handle("POST /api/servers/{id}/setup-handoff", gate(scope(servers.SetupHandoff)))
+	mux.Handle("GET /api/servers/{id}/sidebar-order", gate(scope(servers.SidebarOrder)))
+	mux.Handle("GET /api/servers/{id}/machines", gate(scope(guestFree(servers.Machines))))
+	registerWorkspaceMethodFallbacks(mux, servers, gate)
 
 	mux.HandleFunc("GET /api/avatars/users/{file}", deps.Avatars.Serve)
+	mux.HandleFunc("GET /api/avatars/servers/{file}", deps.Avatars.ServeServer)
 
 	// Explicitly unsupported surfaces (no fake success).
 	mux.HandleFunc("/socket.io/", notImplemented("Socket.IO realtime transport is not implemented in the account phase"))

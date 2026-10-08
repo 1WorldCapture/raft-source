@@ -57,10 +57,7 @@ func Open(path string) (*sql.DB, error) {
 		return nil, err
 	}
 	dsn := buildDSN(path)
-	handle, err := sql.Open("sqlite", dsn)
-	if err != nil {
-		return nil, fmt.Errorf("open sqlite: %w", err)
-	}
+	handle := sql.OpenDB(&busyConnector{dsn: dsn})
 	// A modest connection pool: SQLite serializes writers anyway; the cap
 	// bounds file descriptors and keeps SQLITE_BUSY pressure predictable.
 	handle.SetMaxOpenConns(8)
@@ -88,6 +85,15 @@ func Open(path string) (*sql.DB, error) {
 		case <-time.After(20 * time.Millisecond):
 		}
 	}
+	var journalMode string
+	if err := handle.QueryRowContext(ctx, `PRAGMA journal_mode`).Scan(&journalMode); err != nil {
+		handle.Close()
+		return nil, fmt.Errorf("verify SQLite journal mode: %w", err)
+	}
+	if journalMode != "wal" {
+		handle.Close()
+		return nil, fmt.Errorf("SQLite WAL mode is required, got %q", journalMode)
+	}
 	if err := migrate(ctx, handle); err != nil {
 		handle.Close()
 		return nil, err
@@ -112,7 +118,7 @@ func buildDSN(path string) string {
 	u := url.URL{Scheme: "file", Path: filepath.ToSlash(path)}
 	q := url.Values{}
 	q.Set("_txlock", "immediate")
-	q.Add("_pragma", "busy_timeout(10000)")
+	q.Add("_pragma", "busy_timeout(50)")
 	q.Add("_pragma", "journal_mode(WAL)")
 	q.Add("_pragma", "synchronous(FULL)")
 	q.Add("_pragma", "foreign_keys(1)")
@@ -189,6 +195,9 @@ func migrate(ctx context.Context, handle *sql.DB) error {
 			if _, err := tx.ExecContext(ctx, string(body)); err != nil {
 				return fmt.Errorf("apply %s: %w", name, err)
 			}
+			if err := checkForeignKeys(ctx, tx); err != nil {
+				return fmt.Errorf("validate %s: %w", name, err)
+			}
 			_, err := tx.ExecContext(ctx,
 				`INSERT INTO schema_migrations(version, applied_at) VALUES(?, ?)`,
 				name, time.Now().UnixMilli())
@@ -199,6 +208,27 @@ func migrate(ctx context.Context, handle *sql.DB) error {
 		}
 	}
 	return nil
+}
+
+// checkForeignKeys consumes the pragma's result. Executing the pragma without
+// reading its rows does not validate anything: SQLite reports violations as data.
+// Run this before recording a migration so a failed rebuild rolls back atomically.
+func checkForeignKeys(ctx context.Context, tx *sql.Tx) error {
+	rows, err := tx.QueryContext(ctx, `PRAGMA foreign_key_check`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	if rows.Next() {
+		var table, parent string
+		var rowID sql.NullInt64
+		var foreignKeyID int64
+		if err := rows.Scan(&table, &rowID, &parent, &foreignKeyID); err != nil {
+			return err
+		}
+		return fmt.Errorf("foreign key violation in table %s referencing %s (constraint %d); restore or repair the source data before retrying migration", table, parent, foreignKeyID)
+	}
+	return rows.Err()
 }
 
 // withTx runs fn inside an IMMEDIATE transaction (the dsn's _txlock applies

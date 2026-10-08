@@ -44,20 +44,20 @@ func TestHealthAndReadiness(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", built.LivenessHandler())
 	mux.HandleFunc("GET /readyz", built.ReadinessHandler())
-	server := httptest.NewServer(mux)
-	defer server.Close()
 
-	health, _ := http.Get(server.URL + "/healthz")
-	if health.StatusCode != http.StatusOK {
-		t.Fatalf("healthz: %d", health.StatusCode)
+	// Drive the handlers with a recorder: no TCP listener is needed, so the
+	// readiness assertions also run in sandboxes that forbid local binds.
+	health := httptest.NewRecorder()
+	mux.ServeHTTP(health, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	if health.Code != http.StatusOK {
+		t.Fatalf("healthz: %d", health.Code)
 	}
-	health.Body.Close()
 
-	ready, _ := http.Get(server.URL + "/readyz")
-	if ready.StatusCode != http.StatusOK {
-		t.Fatalf("readyz: %d", ready.StatusCode)
+	ready := httptest.NewRecorder()
+	mux.ServeHTTP(ready, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if ready.Code != http.StatusOK {
+		t.Fatalf("readyz: %d", ready.Code)
 	}
-	ready.Body.Close()
 }
 
 func TestReadinessFailsWhenDatabaseClosed(t *testing.T) {

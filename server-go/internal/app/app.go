@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"raft.local/server-go/internal/auth"
+	"raft.local/server-go/internal/platform/clock"
 	"raft.local/server-go/internal/platform/config"
 	"raft.local/server-go/internal/platform/db"
 	"raft.local/server-go/internal/platform/keys"
@@ -79,6 +80,29 @@ func Build(opts Options) (*App, error) {
 	users := legacyweb.UserLookup(store.UserByID)
 	gate := &legacyweb.AuthGate{Signer: signer, Sessions: sessions, Users: users}
 
+	// The workspace domain runs on one injected clock and the frozen local
+	// policy vector (C0: unconfigured flags read as disabled).
+	wsClock := clock.Real{}
+	workspaceStore := workspace.NewStoreWithOptions(handle, workspace.Options{
+		Clock: wsClock,
+		Policy: workspace.Policy{
+			OnboardingOpenerV2:      cfg.WorkspacePolicy.OnboardingOpenerV2,
+			OnboardingOwnerWizardV0: cfg.WorkspacePolicy.OnboardingOwnerWizardV0,
+			FeedbackEnabled:         cfg.WorkspacePolicy.FeedbackEnabled,
+		},
+	})
+
+	diagnosticCtx, cancelDiagnostics := context.WithTimeout(context.Background(), 30*time.Second)
+	diagnostics, err := workspaceStore.Diagnose(diagnosticCtx)
+	cancelDiagnostics()
+	if err != nil {
+		handle.Close()
+		return nil, err
+	}
+	for _, issue := range diagnostics {
+		logger.Warn("workspace data requires explicit operator review", "code", issue.Code, "workspace_id", issue.WorkspaceID)
+	}
+
 	handler := legacyweb.New(legacyweb.Deps{
 		Handlers: &legacyweb.Handlers{
 			Auth:     service,
@@ -87,7 +111,13 @@ func Build(opts Options) (*App, error) {
 			Users:    users,
 			Gate:     gate,
 		},
-		Servers: &legacyweb.ServersHandlers{Store: workspace.NewStore(handle)},
+		Servers: &legacyweb.ServersHandlers{
+			Store:          workspaceStore,
+			Now:            wsClock.Now,
+			AvatarDir:      filepath.Join(cfg.DataDir, "avatars"),
+			MaxAvatarBytes: cfg.MaxAvatarBytes,
+			MaxAvatarSide:  cfg.MaxAvatarSidePixels,
+		},
 		Avatars: &legacyweb.AvatarHandlers{
 			Dir:      filepath.Join(cfg.DataDir, "avatars"),
 			MaxBytes: cfg.MaxAvatarBytes,

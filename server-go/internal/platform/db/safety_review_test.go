@@ -68,6 +68,10 @@ func TestReviewForeignKeysOnEveryPooledConnection(t *testing.T) {
 }
 
 func TestReviewConcurrentFirstStartup(t *testing.T) {
+	migrationFiles, err := filepath.Glob("migrations/*.sql")
+	if err != nil || len(migrationFiles) == 0 {
+		t.Fatalf("discover expected migrations: %v", err)
+	}
 	p := filepath.Join(t.TempDir(), "raft.sqlite")
 	var wg sync.WaitGroup
 	errs := make(chan error, 3)
@@ -81,8 +85,8 @@ func TestReviewConcurrentFirstStartup(t *testing.T) {
 			if err == nil {
 				var count int
 				err = db.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&count)
-				if err == nil && count != 2 {
-					t.Errorf("migration count = %d; want init and email-quota migration exactly once each", count)
+				if err == nil && count != len(migrationFiles) {
+					t.Errorf("migration count = %d; want all %d embedded migrations exactly once each", count, len(migrationFiles))
 				}
 				_ = db.Close()
 			}

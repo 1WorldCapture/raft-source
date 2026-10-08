@@ -9,6 +9,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { verifyProcessLifecycle } from './process-lifecycle.mjs';
+import { verifyWorkspaceContract } from './workspaces-contract.mjs';
+import { verifyWorkspaceLifecycle } from './workspaces-lifecycle.mjs';
+import { verifyM1WorkspaceUpgrade } from './workspaces-upgrade.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '../..');
@@ -102,6 +105,9 @@ try {
     env: { ...process.env, RAFT_GO_TEST_URL: origin, RAFT_GO_TEST_MAILDIR: path.join(data, 'outbox') },
   });
   await verifyProcessLifecycle({ origin, data, start, stop, capture, executable, env });
+  const workspaceFixture = await verifyWorkspaceContract({ origin, data });
+  await verifyWorkspaceLifecycle({ origin, data, start, stop, fixture: workspaceFixture });
+  await verifyM1WorkspaceUpgrade({ origin, env, start, stop, capture });
   await stop();
   if (/[?&](verify|reset)=|Bearer\s+[A-Za-z0-9._-]{20,}|eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\./.test(logs)) {
     throw new Error('Server emitted credential-like material to logs');

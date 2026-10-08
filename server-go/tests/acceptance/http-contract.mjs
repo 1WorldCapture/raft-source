@@ -114,8 +114,14 @@ await check('profile validation, setup gate and bare workspace array', async () 
   status(result, 200, 'complete profile'); assert.equal(result.data.id, session.user.id);
   assert.match(result.data.profileSetupCompletedAt, /^\d{4}-\d{2}-\d{2}T.*\.\d{3}Z$/);
   const workspaces = await request('/api/servers', { token: session.accessToken }); status(workspaces, 200, 'workspace list'); assert.deepEqual(workspaces.data, []);
-  const unsupported = await request('/api/servers', { method: 'POST', token: session.accessToken, body: { name: 'Not yet', slug: 'not-yet' } });
-  assert.ok(unsupported.status >= 400, 'unimplemented workspace creation must not claim success');
+  const created = await request('/api/servers', { method: 'POST', token: session.accessToken, body: { name: 'Account handoff', slug: `account-${suffix}` } });
+  status(created, 200, 'workspace creation');
+  assert.equal(created.data.ownerId, session.user.id);
+  const reread = await request('/api/servers', { token: session.accessToken });
+  status(reread, 200, 'workspace list after creation');
+  assert.equal(reread.data.length, 1);
+  assert.equal(reread.data[0].id, created.data.id);
+  assert.equal(reread.data[0].role, 'owner');
 });
 await check('profile patch cannot grant verification, workspace or identity privileges', async () => {
   const patch = await request('/api/auth/me', { method: 'PATCH', token: session.accessToken, body: { displayName: 'Updated Name', displayLanguage: 'en', preferredTimezone: 'UTC' } });

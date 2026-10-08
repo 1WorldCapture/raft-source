@@ -21,10 +21,14 @@ import (
 
 // testEnv is a fully wired app over a temp data dir with fast Argon2 and an
 // outbox mailer. No env mutation: config comes from an injected lookup.
+//
+// Requests are driven through the assembled handler with an in-process
+// recorder: the full middleware chain runs for every request without a TCP
+// listener, so the suite also executes in sandboxes that forbid local binds.
+// End-to-end TCP coverage lives in tests/acceptance/*.mjs.
 type testEnv struct {
 	t       *testing.T
 	app     *app.App
-	server  *httptest.Server
 	outbox  string
 	dataDir string
 }
@@ -54,13 +58,11 @@ func newTestEnv(t *testing.T) *testEnv {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = built.Close() })
-	server := httptest.NewServer(built.Handler)
-	t.Cleanup(server.Close)
 	outbox := cfg.OutboxDir
 	if _, err := os.Stat(outbox); err != nil {
 		t.Fatalf("outbox not created: %v", err)
 	}
-	return &testEnv{t: t, app: built, server: server, outbox: outbox, dataDir: dataDir}
+	return &testEnv{t: t, app: built, outbox: outbox, dataDir: dataDir}
 }
 
 // reopen simulates a process restart on the same data dir.
@@ -95,9 +97,7 @@ func (e *testEnv) reopen() *testEnv {
 		e.t.Fatal(err)
 	}
 	e.t.Cleanup(func() { _ = built.Close() })
-	server := httptest.NewServer(built.Handler)
-	e.t.Cleanup(server.Close)
-	return &testEnv{t: e.t, app: built, server: server, outbox: cfg.OutboxDir, dataDir: e.dataDir}
+	return &testEnv{t: e.t, app: built, outbox: cfg.OutboxDir, dataDir: e.dataDir}
 }
 
 type response struct {
@@ -107,7 +107,8 @@ type response struct {
 	header http.Header
 }
 
-func (e *testEnv) do(method, path string, body any, bearer string) response {
+// serveRequest drives one request through the app handler without TCP.
+func (e *testEnv) serveRequest(method, path string, body any, headers map[string]string) response {
 	e.t.Helper()
 	var reader io.Reader
 	switch v := body.(type) {
@@ -116,13 +117,13 @@ func (e *testEnv) do(method, path string, body any, bearer string) response {
 	case io.Reader:
 		reader = v
 	default:
-		buf, err := json.Marshal(body)
+		buf, err := json.Marshal(v)
 		if err != nil {
 			e.t.Fatal(err)
 		}
 		reader = bytes.NewReader(buf)
 	}
-	req, err := http.NewRequest(method, e.server.URL+path, reader)
+	req, err := http.NewRequest(method, path, reader)
 	if err != nil {
 		e.t.Fatal(err)
 	}
@@ -131,21 +132,30 @@ func (e *testEnv) do(method, path string, body any, bearer string) response {
 			req.Header.Set("Content-Type", "application/json")
 		}
 	}
-	if bearer != "" {
-		req.Header.Set("Authorization", "Bearer "+bearer)
+	for k, v := range headers {
+		req.Header.Set(k, v)
 	}
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		e.t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	raw, _ := io.ReadAll(resp.Body)
+	rec := httptest.NewRecorder()
+	e.app.Handler.ServeHTTP(rec, req)
+	return parseResponse(rec)
+}
+
+func parseResponse(rec *httptest.ResponseRecorder) response {
+	raw := rec.Body.Bytes()
 	parsed := map[string]any{}
-	if strings.Contains(resp.Header.Get("Content-Type"), "json") {
+	if strings.Contains(rec.Header().Get("Content-Type"), "json") {
 		_ = json.Unmarshal(raw, &parsed)
 	}
-	return response{status: resp.StatusCode, body: parsed, raw: raw, header: resp.Header}
+	return response{status: rec.Code, body: parsed, raw: raw, header: rec.Header()}
+}
+
+func (e *testEnv) do(method, path string, body any, bearer string) response {
+	e.t.Helper()
+	headers := map[string]string{}
+	if bearer != "" {
+		headers["Authorization"] = "Bearer " + bearer
+	}
+	return e.serveRequest(method, path, body, headers)
 }
 
 func (e *testEnv) latestOutboxLink(kind string) string {
@@ -215,7 +225,7 @@ func (e *testEnv) doRaw(method, path string, body any, headers map[string]string
 	if err != nil {
 		e.t.Fatal(err)
 	}
-	req, err := http.NewRequest(method, e.server.URL+path, bytes.NewReader(buf))
+	req, err := http.NewRequest(method, path, bytes.NewReader(buf))
 	if err != nil {
 		e.t.Fatal(err)
 	}
@@ -223,15 +233,9 @@ func (e *testEnv) doRaw(method, path string, body any, headers map[string]string
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
-	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
-	if err != nil {
-		e.t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	raw, _ := io.ReadAll(resp.Body)
-	parsed := map[string]any{}
-	_ = json.Unmarshal(raw, &parsed)
-	return response{status: resp.StatusCode, body: parsed, raw: raw, header: resp.Header}
+	rec := httptest.NewRecorder()
+	e.app.Handler.ServeHTTP(rec, req)
+	return parseResponse(rec)
 }
 
 // insertWorkspace seeds a real workspace row for membership queries.

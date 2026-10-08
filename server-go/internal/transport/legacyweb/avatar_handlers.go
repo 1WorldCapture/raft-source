@@ -1,20 +1,17 @@
 // Avatar upload with strict validation (declared + sniffed type, dimension
 // caps, size caps) and re-encoding to PNG so nothing but pixels persists.
 // Uploaded bytes live under the private data dir; served paths are
-// content-addressed and immutable.
+// content-addressed and immutable. The same pipeline serves user avatars
+// (/api/avatars/users) and workspace avatars (/api/avatars/servers).
 package legacyweb
 
 import (
 	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"image"
 	"image/png"
 	"io"
 	"net/http"
-	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -45,13 +42,11 @@ type AvatarHandlers struct {
 	Users    UserLookup
 }
 
-// Upload validates and stores the multipart "avatar" file, then persists the
-// stored path as the user's avatarUrl.
-func (h *AvatarHandlers) Upload(w http.ResponseWriter, r *http.Request) {
-	if _, ok := requestUser(h.Users, w, r, userID(r)); !ok {
-		return
-	}
-	maxBytes := h.MaxBytes
+// decodeValidatedAvatarPNG parses the multipart "avatar" field, enforces the
+// legacy size/content/dimension caps and re-encodes the pixels to PNG. Error
+// responses (including the legacy errorCode shapes) are written here; the
+// caller only checks ok.
+func decodeValidatedAvatarPNG(w http.ResponseWriter, r *http.Request, maxBytes int64, maxSide int) ([]byte, bool) {
 	if maxBytes <= 0 {
 		maxBytes = maxAvatarBytesDefault
 	}
@@ -60,30 +55,30 @@ func (h *AvatarHandlers) Upload(w http.ResponseWriter, r *http.Request) {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
 			writeAvatarTooLarge(w, maxBytes)
-			return
+			return nil, false
 		}
 		writeError(w, http.StatusBadRequest, "No avatar file provided")
-		return
+		return nil, false
 	}
 	file, _, err := r.FormFile("avatar")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "No avatar file provided")
-		return
+		return nil, false
 	}
 	defer file.Close()
 
 	buf, err := io.ReadAll(io.LimitReader(file, maxBytes+1))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, avatarBadFormatMsg)
-		return
+		return nil, false
 	}
 	if int64(len(buf)) > maxBytes {
 		writeAvatarTooLarge(w, maxBytes)
-		return
+		return nil, false
 	}
 	if len(buf) == 0 {
 		writeError(w, http.StatusBadRequest, avatarBadFormatMsg)
-		return
+		return nil, false
 	}
 
 	sniffed := http.DetectContentType(buf)
@@ -91,47 +86,58 @@ func (h *AvatarHandlers) Upload(w http.ResponseWriter, r *http.Request) {
 	case "image/jpeg", "image/png", "image/gif", "image/webp":
 	default:
 		writeAvatarBadFormat(w)
-		return
+		return nil, false
 	}
 
 	config, _, err := image.DecodeConfig(bytes.NewReader(buf))
 	if err != nil {
 		writeAvatarBadFormat(w)
-		return
+		return nil, false
 	}
-	maxSide := h.MaxSide
 	if maxSide <= 0 {
 		maxSide = maxAvatarSideDefault
 	}
 	if config.Width <= 0 || config.Height <= 0 || config.Width > maxSide || config.Height > maxSide {
 		writeAvatarBadFormat(w)
-		return
+		return nil, false
 	}
 	// Full decode validates integrity (truncated files fail here) and feeds
 	// the re-encode below.
 	decoded, _, err := image.Decode(bytes.NewReader(buf))
 	if err != nil {
 		writeAvatarBadFormat(w)
-		return
+		return nil, false
 	}
 
 	var pngBuf bytes.Buffer
 	if err := png.Encode(&pngBuf, decoded); err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to upload avatar")
+		return nil, false
+	}
+	return pngBuf.Bytes(), true
+}
+
+// publishServerAvatar stores a workspace avatar under <dir>/servers.
+func publishServerAvatar(dir string, png []byte) (string, error) {
+	return publishAvatar(dir, "servers", png)
+}
+
+// Upload validates and stores the multipart "avatar" file, then persists the
+// stored path as the user's avatarUrl.
+func (h *AvatarHandlers) Upload(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requestUser(h.Users, w, r, userID(r)); !ok {
 		return
 	}
-	sum := sha256.Sum256(pngBuf.Bytes())
-	name := hex.EncodeToString(sum[:16]) + ".png"
-	if err := os.MkdirAll(filepath.Join(h.Dir, "users"), 0o700); err != nil {
+	png, ok := decodeValidatedAvatarPNG(w, r, h.MaxBytes, h.MaxSide)
+	if !ok {
+		return
+	}
+	avatarURL, err := publishAvatar(h.Dir, "users", png)
+	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to upload avatar")
 		return
 	}
-	target := filepath.Join(h.Dir, "users", name)
-	if err := os.WriteFile(target, pngBuf.Bytes(), 0o600); err != nil {
-		writeError(w, http.StatusInternalServerError, "Failed to upload avatar")
-		return
-	}
-	user, err := h.Auth.SetAvatarURL(r.Context(), userID(r), "/api/avatars/users/"+name)
+	user, err := h.Auth.SetAvatarURL(r.Context(), userID(r), avatarURL)
 	if err != nil && !errors.Is(err, auth.ErrNotFound) {
 		writeAuthUnavailable(w)
 		return
@@ -143,24 +149,41 @@ func (h *AvatarHandlers) Upload(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, UserToDTO(user))
 }
 
-// Serve returns a stored avatar with immutable caching.
+// Serve returns a stored user avatar with immutable caching.
 func (h *AvatarHandlers) Serve(w http.ResponseWriter, r *http.Request) {
+	serveAvatarFile(w, r, h.Dir, "users")
+}
+
+// ServeServer returns a stored workspace avatar with immutable caching.
+func (h *AvatarHandlers) ServeServer(w http.ResponseWriter, r *http.Request) {
+	serveAvatarFile(w, r, h.Dir, "servers")
+}
+
+// serveAvatarFile streams one immutable content-addressed avatar file. The
+// name pattern and traversal guards keep the namespace fixed.
+func serveAvatarFile(w http.ResponseWriter, r *http.Request, dir, namespace string) {
 	name := r.PathValue("file")
 	if !avatarFilePattern.MatchString(name) || strings.Contains(name, "/") || strings.Contains(name, "..") {
 		writeError(w, http.StatusNotFound, "Not found")
 		return
 	}
-	target := filepath.Join(h.Dir, "users", filepath.Base(name))
-	data, err := os.ReadFile(target)
+	root, err := openAvatarNamespace(dir, namespace, false)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "Not found")
 		return
 	}
+	defer root.Close()
+	file, err := openRegularAvatar(root, name)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "Not found")
+		return
+	}
+	defer file.Close()
 	w.Header().Set("Content-Type", "image/png")
 	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(data)
+	_, _ = io.Copy(w, file)
 }
 
 func writeAvatarTooLarge(w http.ResponseWriter, maxBytes int64) {

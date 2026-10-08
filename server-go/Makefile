@@ -1,10 +1,10 @@
 GO ?= go
 NODE ?= node
 
-.PHONY: check fmt-check vet test race test-http build cross-build vuln
+.PHONY: check fmt-check vet test race test-reference test-http build cross-build vuln
 
 # Backend only: no browser, frontend build, TS server, Postgres or Redis.
-check: fmt-check vet test race test-http
+check: fmt-check vet test race test-reference test-http build
 
 fmt-check:
 	@files="$$(gofmt -l .)"; if [ -n "$$files" ]; then printf 'Unformatted Go files:\n%s\n' "$$files"; exit 1; fi
@@ -17,6 +17,9 @@ test:
 
 race:
 	$(GO) test -race -count=1 ./...
+
+test-reference:
+	$(NODE) tests/acceptance/workspaces-reference.mjs
 
 test-http:
 	$(NODE) tests/acceptance/run.mjs

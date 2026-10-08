@@ -3,13 +3,11 @@ package legacyweb_test
 import (
 	"bytes"
 	"encoding/base64"
-	"encoding/json"
-	"io"
 	"mime/multipart"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestProvidersContract(t *testing.T) {
@@ -36,7 +34,8 @@ func TestRoutePolicy(t *testing.T) {
 	}{
 		{"GET", "/api/definitely-not-a-route", http.StatusNotFound},
 		{"DELETE", "/api/auth/me", http.StatusMethodNotAllowed},
-		{"PUT", "/api/servers", http.StatusMethodNotAllowed},
+		// M2 server paths run the account gates before method policy.
+		{"PUT", "/api/servers", http.StatusUnauthorized},
 		{"GET", "/socket.io/?EIO=4&transport=polling", http.StatusNotImplemented},
 		{"POST", "/internal/agent-api/anything", http.StatusNotImplemented},
 		{"GET", "/daemon/v1/nothing", http.StatusNotImplemented},
@@ -93,21 +92,15 @@ func TestAvatarUploadAndServe(t *testing.T) {
 		if err := writer.Close(); err != nil {
 			t.Fatal(err)
 		}
-		req, err := http.NewRequest("POST", env.server.URL+"/api/auth/me/avatar", &buf)
+		req, err := http.NewRequest("POST", "/api/auth/me/avatar", &buf)
 		if err != nil {
 			t.Fatal(err)
 		}
 		req.Header.Set("Content-Type", writer.FormDataContentType())
 		req.Header.Set("Authorization", "Bearer "+access)
-		resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer resp.Body.Close()
-		raw, _ := io.ReadAll(resp.Body)
-		parsed := map[string]any{}
-		_ = json.Unmarshal(raw, &parsed)
-		return response{status: resp.StatusCode, body: parsed, raw: raw, header: resp.Header}
+		rec := httptest.NewRecorder()
+		env.app.Handler.ServeHTTP(rec, req)
+		return parseResponse(rec)
 	}
 
 	noFile := env.do("POST", "/api/auth/me/avatar", map[string]any{}, access)
