@@ -20,6 +20,7 @@ import { isDeviceAuthSurfaceEnabled } from "./services/deviceAuthService.js";
 import { internalComputerRouter } from "./routes/internalComputer.js";
 import { internalAgentApiRouter } from "./routes/internalAgentApi.js";
 import { serverRouter } from "./routes/servers.js";
+import { pmRouter } from "./routes/pm.js";
 import { billingRouter, stripeWebhookHandler } from "./routes/billing.js";
 import { resendNewsletterWebhookHandler } from "./routes/newsletterWebhooks.js";
 import { taskRouter } from "./routes/tasks.js";
@@ -413,6 +414,11 @@ export function createApp(options: CreateAppOptions = {}): Express {
   });
 
   // Server routes (auth + verified required, no server context needed)
+  // Rethink UI phase A: PM role routes derive the server from :slug (no
+  // X-Server-Id required), so they must register BEFORE serverRouter — its
+  // `use("/:id", requireServerMatchesParam)` would otherwise intercept the
+  // two-segment /:slug/pm paths and 400 on the missing header.
+  app.use("/api/servers", requireAuth, requireVerified, pmRouter);
   app.use("/api/servers", requireAuth, requireVerified, serverRouter);
   app.use("/api/feature-flags", requireAuth, requireVerified, featureFlagsRouter);
 

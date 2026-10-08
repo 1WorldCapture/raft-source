@@ -195,7 +195,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     if (badgeRefreshTimer.current !== null) clearTimeout(badgeRefreshTimer.current);
     badgeRefreshTimer.current = setTimeout(() => {
       badgeRefreshTimer.current = null;
-      void useServerRailStore.getState().refreshBadges(client);
+      if (!snapshotRef.current.origin) return;
+      void useServerRailStore.getState().refreshBadges(client).catch(() => {});
     }, BADGE_REFRESH_DEBOUNCE_MS);
   }, [client]);
 
@@ -458,7 +459,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       if (board.loaded) void board.load(client);
       // Cross-server rail dots cannot arrive over the (single, active-server)
       // socket; refresh them when the app returns to the foreground.
-      void useServerRailStore.getState().refreshBadges(client);
+      if (snapshotRef.current.origin) {
+        void useServerRailStore.getState().refreshBadges(client).catch(() => {});
+      }
       void flushReads();
     });
     return () => subscription.remove();

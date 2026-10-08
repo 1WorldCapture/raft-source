@@ -53,6 +53,34 @@ export class ServerSetupChangedRetryError extends Error {
   }
 }
 
+// Rethink UI phase A (owner rule): a PM can only be REPLACED, never deleted.
+// Thrown by deleteAgent when the target is the standing PM of any live
+// server; the route maps it to 409 pm_role_delete_blocked.
+export class PmRoleDeleteBlockedError extends Error {
+  readonly code = "pm_role_delete_blocked";
+
+  constructor() {
+    super("请先更换 PM");
+    this.name = "PmRoleDeleteBlockedError";
+  }
+}
+
+/**
+ * Rethink UI phase B — thrown by `createAgent` when `claimServerPm` is set
+ * and the conditional `servers.pm_agent_id` claim updates zero rows, i.e. a
+ * concurrent creator won the PM slot first. The whole create transaction
+ * rolls back, so the loser leaves no orphan agent behind. Callers treat this
+ * as "PM already provisioned, nothing to do", not as a failure.
+ */
+export class PmAlreadyProvisionedError extends Error {
+  readonly code = "PM_ALREADY_PROVISIONED";
+
+  constructor() {
+    super("PM_ALREADY_PROVISIONED: this server already has a PM agent");
+    this.name = "PmAlreadyProvisionedError";
+  }
+}
+
 export async function createAgent(
   serverId: string,
   name: string,
@@ -68,6 +96,18 @@ export async function createAgent(
     creatorType?: CreatorType;
     creatorId?: string;
     expectedSetupStatus?: "not_started" | "in_progress" | "deferred" | "complete" | null;
+    // Rethink UI phase B. When true, the same create transaction also claims
+    // the server's PM slot with a conditional update (pm_agent_id IS NULL).
+    // Zero rows updated -> PmAlreadyProvisionedError -> full rollback.
+    claimServerPm?: boolean;
+    // Rethink UI phase B (PM ruling): "auto" (default) keeps the durable
+    // first-agent-means-setup-complete write below; "skip" is for SYSTEM-
+    // provisioned agents only (the auto-provisioned PM). A preseeded PM is
+    // not a fact about the USER having finished setup, so it must not flip
+    // the owner's setup gate — the user still walks their own onboarding,
+    // and web/desktop guidance stays untouched. The first agent the USER
+    // creates completes setup as before.
+    setupCompletion?: "auto" | "skip";
     providerConnection?: {
       id: string;
       configVersion: number;
@@ -152,6 +192,17 @@ export async function createAgent(
         machineId,
       })
       .returning();
+
+    if (opts.claimServerPm) {
+      const claimed = await tx
+        .update(servers)
+        .set({ pmAgentId: newAgent.id })
+        .where(and(eq(servers.id, serverId), isNull(servers.pmAgentId)))
+        .returning({ id: servers.id });
+      if (claimed.length === 0) {
+        throw new PmAlreadyProvisionedError();
+      }
+    }
 
     await tx.insert(serverAgentMembers).values({
       serverId,
@@ -249,7 +300,9 @@ export async function createAgent(
     // `transitionServerSetupState("complete")` is deliberately not used: it requires a
     // USABLE official onboarding agent, and this path is precisely the one where the agent
     // may not be Cindy. Someone running a non-Cindy agent has still set their server up.
-    await markServerSetupCompleteOnFirstAgent(tx, serverId);
+    if (opts.setupCompletion !== "skip") {
+      await markServerSetupCompleteOnFirstAgent(tx, serverId);
+    }
 
     return newAgent;
   });
@@ -1037,6 +1090,19 @@ export async function deleteAgent(agentId: string, options: { purgeMachineId?: s
   const deletedAt = new Date();
 
   await db.transaction(async (tx) => {
+    // Rethink UI phase A: a standing PM of a live server can only be replaced,
+    // never deleted. Soft-deleted servers no longer count (their PM role dies
+    // with the server). Checked inside the transaction so a concurrent
+    // set-PM cannot slip past the guard.
+    const [pmServer] = await tx
+      .select({ id: servers.id })
+      .from(servers)
+      .where(and(eq(servers.pmAgentId, agentId), isNull(servers.deletedAt)))
+      .limit(1);
+    if (pmServer) {
+      throw new PmRoleDeleteBlockedError();
+    }
+
     await tx.update(agents)
       .set({
         deletedAt,

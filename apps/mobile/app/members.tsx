@@ -1,17 +1,17 @@
 import { useCallback, useState } from "react";
 import { Alert, FlatList, Pressable, StyleSheet, View } from "react-native";
 import { useFocusEffect, useRouter } from "expo-router";
-import { ApiError, StaleRequestError } from "../../src/api/client";
-import { useT } from "../../src/i18n/provider";
-import { isRecord } from "../../src/model/messages";
-import { useSession } from "../../src/state/session";
-import { RailLayout } from "../../src/home/RailLayout";
-import { useServerRail } from "../../src/home/useServerRail";
-import { Avatar } from "../../src/ui/Avatar";
-import { LoadingScreen, ScreenMessage } from "../../src/ui/screen";
-import { PanelHeader } from "../../src/ui/PanelHeader";
-import { AppText } from "../../src/ui/text";
-import { color, fontSize } from "../../src/ui/tokens";
+import { ApiError, StaleRequestError } from "../src/api/client";
+import { useT } from "../src/i18n/provider";
+import { isRecord } from "../src/model/messages";
+import { useSession } from "../src/state/session";
+import { RailLayout } from "../src/home/RailLayout";
+import { useServerRail } from "../src/home/useServerRail";
+import { Avatar } from "../src/ui/Avatar";
+import { LoadingScreen, ScreenMessage } from "../src/ui/screen";
+import { PanelHeader } from "../src/ui/PanelHeader";
+import { AppText } from "../src/ui/text";
+import { color, fontSize } from "../src/ui/tokens";
 
 interface Person {
   id: string;

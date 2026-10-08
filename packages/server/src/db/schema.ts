@@ -268,10 +268,40 @@ export const servers = pgTable("servers", {
   // always exists, this flag only gates the timers/reminders/proxy posts.
   progressAnnouncementsEnabled: boolean("progress_announcements_enabled").notNull().default(false),
   planDowngradedAt: timestamp("plan_downgraded_at", { withTimezone: true }),
+  // Rethink UI phase A (task #2): the server's PM agent. Null until an
+  // owner/admin sets one. Deliberately a BARE uuid (onboardingAgentId
+  // precedent): a schema-level references(() => agents.id) would make
+  // servers↔agents mutually recursive for TS. The physical FK
+  // (ON DELETE SET NULL — hard agent delete clears the pointer; agent
+  // deletion is soft so this is only a hard-delete backstop) is created in
+  // migration 0275. Agent deletion is normally soft and never fires FK
+  // actions, so routes guard soft-deleted/inactive PMs explicitly, and the
+  // owner rule "a PM can only be replaced, never deleted" lives in
+  // deleteAgent (pm_role_delete_blocked).
+  pmAgentId: uuid("pm_agent_id"),
+  // Phase B's "skip the PM setup guide" marker (column shipped with phase A's
+  // migration to keep one servers ALTER; written only by the dismiss-setup
+  // route, read by GET /pm's `setup` tri-state).
+  pmSetupDismissedAt: timestamp("pm_setup_dismissed_at", { withTimezone: true }),
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+// Append-only audit trail for PM role changes (Rethink UI phase A). Rows are
+// never updated or deleted; from/to agent references degrade to null if an
+// agent row is ever hard-deleted so the audit line itself survives.
+export const pmRoleAuditEvents = pgTable("pm_role_audit_events", {
+  id: uuid("id").primaryKey().$defaultFn(() => randomUUID()),
+  serverId: uuid("server_id").notNull().references(() => servers.id, { onDelete: "cascade" }),
+  actorType: text("actor_type", { enum: ["user"] }).notNull(),
+  actorId: uuid("actor_id").notNull().references(() => users.id),
+  fromAgentId: uuid("from_agent_id").references(() => agents.id, { onDelete: "set null" }),
+  toAgentId: uuid("to_agent_id").references(() => agents.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  index("idx_pm_role_audit_server").on(t.serverId, t.createdAt),
+]);
 
 // Server members — user ↔ server relationship
 export const serverMembers = pgTable("server_members", {
@@ -312,7 +342,11 @@ export const serverMembers = pgTable("server_members", {
   // different browser (stdrc, 2026-07-13).
   setupHandoffAcknowledgedAt: timestamp("setup_handoff_acknowledged_at", { withTimezone: true }),
   serverPushMuted: boolean("server_push_muted").notNull().default(false),
-  serverPushMode: text("server_push_mode", { enum: ["all", "mentions", "none"] }).notNull().default("all"),
+  // "pm_dm_mentions" is the Rethink-UI mobile profile (phase E): push DMs
+  // (including the PM's DM) + channel @mentions; other channel traffic stays
+  // silent. Only a "rethink"-profile push registration flips it from the
+  // factory default; legacy clients never send the marker.
+  serverPushMode: text("server_push_mode", { enum: ["all", "mentions", "none", "pm_dm_mentions"] }).notNull().default("all"),
   notificationPrefsVersion: integer("notification_prefs_version").notNull().default(0),
   onboardingDmSentAt: timestamp("onboarding_dm_sent_at", { withTimezone: true }),
   onboardingDmSentByAgentId: uuid("onboarding_dm_sent_by_agent_id"),
@@ -376,7 +410,7 @@ export const serverMembers = pgTable("server_members", {
   ),
   check(
     "server_members_server_push_mode_valid",
-    sql`${t.serverPushMode} IN ('all', 'mentions', 'none')`,
+    sql`${t.serverPushMode} IN ('all', 'mentions', 'none', 'pm_dm_mentions')`,
   ),
 ]);
 

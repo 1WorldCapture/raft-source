@@ -92,6 +92,7 @@ import * as agentPurgeService from "./agentPurgeService.js";
 import * as agentMigrationService from "./agentMigrationService.js";
 import * as agentRuntimeProfileService from "./agentRuntimeProfileService.js";
 import * as machineService from "./machineService.js";
+import { maybeProvisionServerPm } from "./serverPmProvisioning.js";
 import * as channelService from "./channelService.js";
 import * as messageService from "./messageService.js";
 import * as mentionDeliveryOccurrenceService from "./mentionDeliveryOccurrenceService.js";
@@ -4205,6 +4206,11 @@ export class AgentOrchestrator extends EventEmitter {
     daemonVersion?: string | null,
   ) {
     await machineService.updateMachineRuntimes(machineId, runtimes, hostname, os, daemonVersion);
+    // Rethink UI phase B: the machine just persisted a reported runtime list —
+    // the moment it first becomes usable. Auto-provision the server's PM if
+    // none exists. The hook swallows all of its own errors (log + trace), so
+    // capabilities persistence is never affected.
+    await maybeProvisionServerPm({ machineId, io: this.io });
   }
 
   protected async persistMachineComputerVersion(

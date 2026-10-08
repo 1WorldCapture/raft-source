@@ -250,6 +250,22 @@ pushRouter.post("/registrations", requireAuth, requireVerified, requireServer, a
       res.status(401).json({ error: "Session family is no longer active" });
       return;
     }
+
+    // Rethink UI phase E: a "rethink"-profile client opts this (user, server)
+    // membership into the pm_dm_mentions push mode — but ONLY while the
+    // preference is still in its factory state (never explicitly changed by
+    // the user). Registrations repeat on every app launch, so an
+    // unconditionally-applied switch would clobber the user's own choice.
+    // Preferences are stored per (user, server): other servers are untouched,
+    // and the switch does propagate to the same user's other devices on that
+    // server (documented trade-off).
+    if (req.body?.pushProfile === "rethink") {
+      await serverService.switchPushModeFromFactoryState(serverId, userId, "pm_dm_mentions");
+    }
+    if (!result) {
+      res.status(401).json({ error: "Session family is no longer active" });
+      return;
+    }
     const { registration, revokeCapability } = result;
     res.json({
       ok: true,
