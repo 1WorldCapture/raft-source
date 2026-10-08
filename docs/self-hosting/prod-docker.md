@@ -41,13 +41,14 @@ redis 镜像自带 `VOLUME /data`，旧版 compose 未显式命名时 Docker 会
 ```bash
 # 0) 确认现状：redis 容器当前挂的匿名卷名（记下来）
 docker inspect raft-test8443-redis-1 --format '{{range .Mounts}}{{.Name}} {{end}}'
-# 1) 取出 RDB（redis 无需停：BGSAVE 后从容器拷）
-docker exec raft-test8443-redis-1 redis-cli BGSAVE
+# 1) 取出 RDB——用同步 SAVE（数据仅 KB 级，阻塞可忽略；BGSAVE 是异步的，
+#    紧接着 docker cp 可能拷到写一半的文件）
+docker exec raft-test8443-redis-1 redis-cli SAVE
 docker cp raft-test8443-redis-1:/data/dump.rdb /tmp/redis-migrate.rdb
-# 2) 同步新版 compose（含 raft-redisdata 声明）到栈目录后，创建命名卷并注入 RDB
+# 2) 同步新版 compose（含 raft-redisdata 顶层声明）到栈目录后，创建命名卷并注入 RDB
 docker volume create raft-test8443_raft-redisdata
 docker run --rm -v raft-test8443_raft-redisdata:/data -v /tmp/redis-migrate.rdb:/src.rdb:ro alpine \
-  sh -c 'cp /src.rdb /data/dump.rdb && chmod 999:999 /data/dump.rdb'
+  sh -c 'cp /src.rdb /data/dump.rdb && chown 999:999 /data/dump.rdb'
 # 3) 重建 redis 容器（挂载新命名卷）
 docker compose -p raft-test8443 up -d redis
 # 4) 验证：容器 Up(healthy)、redis-cli ping 正常、旧匿名卷不再被引用后删除

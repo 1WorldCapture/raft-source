@@ -152,3 +152,4 @@ networks:
 volumes:
   raft-pgdata:
   raft-uploads:
+  raft-redisdata:
