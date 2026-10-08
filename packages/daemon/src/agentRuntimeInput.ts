@@ -288,6 +288,15 @@ export const NATIVE_STANDING_PROMPT_STARTUP_INPUT: AxSurfaceText = axSurfaceLite
   "Start."
 );
 
+/** Plain text of the notice (also the marker the restart path uses to recognize a session reset). */
+export const CURSOR_SESSION_RESET_NOTICE =
+  "The previous runtime session was reset because of a runtime fault. Read MEMORY.md first to restore your context, then continue with the unread messages.";
+/** Prepended to the first turn of a fresh session created by a poisoned-session reset. */
+export const CURSOR_SESSION_RESET_NOTICE_INPUT: AxSurfaceText = axSurfaceLiteral(
+  "Cursor SDK session reset notice for the first turn of a replacement session.",
+  `${CURSOR_SESSION_RESET_NOTICE}\n\n`,
+);
+
 function formatUnreadChannelLines(unreadSummary: Record<string, number>): string {
   let lines = "";
   for (const [ch, count] of Object.entries(unreadSummary)) {

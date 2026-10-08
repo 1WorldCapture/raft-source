@@ -4056,6 +4056,77 @@ test("stale review watchdog surfaces missing review_finished and restores delive
   }
 });
 
+test("activity heartbeat recovers a stalled runtime that has queued messages without a new delivery", async () => {
+  const realSetInterval = globalThis.setInterval;
+  const realClearInterval = globalThis.clearInterval;
+  const realDateNow = Date.now;
+  let now = 1_000_000;
+  let intervalCallback: (() => void) | null = null;
+  (Date as any).now = () => now;
+  (globalThis as any).setInterval = ((callback: () => void, ms?: number, ...args: any[]) => {
+    if (ms && ms > 1000) {
+      intervalCallback = callback;
+      return { fake: true };
+    }
+    return realSetInterval(callback, ms, ...args);
+  }) as typeof setInterval;
+  (globalThis as any).clearInterval = ((timer: unknown) => {
+    if ((timer as any)?.fake) return;
+    return realClearInterval(timer as ReturnType<typeof setInterval>);
+  }) as typeof clearInterval;
+
+  try {
+    const driver = new FakeCodexDriver({ id: "cursor-sdk", supportsStdinNotification: true, busyDeliveryMode: "direct" });
+    await withManager(async ({ manager }) => {
+      await manager.startAgent("agent-1", makeConfig({ runtime: "cursor-sdk", sessionId: "sess-1" }));
+      driver.parsedLines.set("work", [{ kind: "thinking", text: "hmm" } as any]);
+      driver.processes[0].stdout.emit("data", Buffer.from("work\n"));
+      await flush();
+      assert.ok(intervalCallback, "working activity installs the heartbeat");
+      const ap = (manager as any).agents.get("agent-1");
+      ap.inbox.push(makeMessage("queued while wedged"));
+      const stops: unknown[] = [];
+      let described = 0;
+      ap.runtime.stop = async (input: unknown) => { stops.push(input); };
+      ap.runtime.describeStallState = () => { described += 1; return { hasRun: true }; };
+
+      now += 5 * 60_000;
+      intervalCallback!();
+      assert.equal(stops.length, 0, "not stale yet");
+
+      now += 11 * 60_000;
+      intervalCallback!();
+      await flush();
+      assert.equal(stops.length, 1, "heartbeat tick terminates the stalled runtime without any new message");
+      assert.equal(described, 1, "stall state snapshot taken once");
+      assert.equal(ap.gatedSteering.expectedTerminationReason, "stalled_recovery");
+    }, { driver });
+
+    // Other runtimes are untouched: same wedge, queued message, 16 min, no termination.
+    const other = new FakeCodexDriver({ id: "claude", supportsStdinNotification: true, busyDeliveryMode: "direct" });
+    intervalCallback = null;
+    await withManager(async ({ manager }) => {
+      await manager.startAgent("agent-1", makeConfig({ runtime: "claude", sessionId: "sess-1" }));
+      other.parsedLines.set("work", [{ kind: "thinking", text: "hmm" } as any]);
+      other.processes[0].stdout.emit("data", Buffer.from("work\n"));
+      await flush();
+      assert.ok(intervalCallback);
+      const ap = (manager as any).agents.get("agent-1");
+      ap.inbox.push(makeMessage("queued during a long tool call"));
+      const stops: unknown[] = [];
+      ap.runtime.stop = async (input: unknown) => { stops.push(input); };
+      now += 16 * 60_000;
+      intervalCallback!();
+      await flush();
+      assert.equal(stops.length, 0, "non-cursor runtimes are not recovered by the heartbeat");
+    }, { driver: other });
+  } finally {
+    (Date as any).now = realDateNow;
+    globalThis.setInterval = realSetInterval;
+    globalThis.clearInterval = realClearInterval;
+  }
+});
+
 test("activity heartbeat marks silent runtime progress as stalled", async () => {
   const realSetInterval = globalThis.setInterval;
   const realClearInterval = globalThis.clearInterval;
@@ -9740,6 +9811,49 @@ test("missing Claude resume session falls back to a cold start", async () => {
       "the known-terminal session is invalidated once",
     );
 
+    await manager.stopAgent("agent-1");
+  } finally {
+    cleanupTestManager(manager);
+    restoreFetch();
+    await rm(dataDir, { recursive: true, force: true });
+  }
+});
+
+test("Cursor SDK resumed session that cannot accept runs is reset once, with a context-reset notice", async () => {
+  const dataDir = await mkdtemp(path.join(os.tmpdir(), "slock-daemon-test-"));
+  const sent: MachineToServerMessage[] = [];
+  const restoreFetch = installManagedRunnerMintFetch();
+  const driver = new FakeCodexDriver({ id: "cursor-sdk", supportsStdinNotification: true });
+  const manager = new AgentProcessManager(
+    (msg) => sent.push(msg),
+    "sk_machine_test",
+    { dataDir, serverUrl: "https://daemon.example.com", driverResolver: () => driver },
+  );
+
+  try {
+    await manager.startAgent("agent-1", makeConfig({ runtime: "cursor-sdk", sessionId: "poisoned-session" }), undefined, undefined, undefined, "launch-1");
+    assert.equal(driver.spawnCalls.length, 1);
+    driver.processes[0].stderr.emit("data", Buffer.from("[cursor-sdk] resumed session cannot accept runs (3 consecutive submit failures); requesting session reset\n"));
+    driver.processes[0].exit(0);
+    driver.processes[0].close(0);
+    await waitFor(() => driver.spawnCalls.length === 2, "cursor session reset cold restart");
+
+    assert.equal(driver.spawnCalls[1].config.sessionId, null);
+    assert.equal(driver.spawnCalls[1].prompt.split("previous runtime session was reset").length - 1, 1, "notice appears exactly once");
+    assert.equal(sent.filter((msg) => msg.type === "agent:session:invalidate").length, 1);
+    assert.ok(sent.some((msg) => msg.type === "agent:activity" && /Runtime session reset/i.test(msg.detail)));
+
+    // A second poisoned exit inside the 30 minute window must NOT reset again.
+    driver.processes[1].stderr.emit("data", Buffer.from("[cursor-sdk] resumed session cannot accept runs (3 consecutive submit failures); requesting session reset\n"));
+    driver.processes[1].exit(1);
+    driver.processes[1].close(1);
+    await flush();
+    assert.equal(driver.spawnCalls.length, 2);
+    assert.equal(sent.filter((msg) => msg.type === "agent:session:invalidate").length, 1);
+    await manager.stopAgent("agent-1");
+    // The notice is one-shot: a later start of the same agent does not repeat it.
+    await manager.startAgent("agent-1", makeConfig({ runtime: "cursor-sdk", sessionId: null }), undefined, undefined, undefined, "launch-2");
+    assert.doesNotMatch(driver.spawnCalls.at(-1)!.prompt, /previous runtime session was reset/i);
     await manager.stopAgent("agent-1");
   } finally {
     cleanupTestManager(manager);

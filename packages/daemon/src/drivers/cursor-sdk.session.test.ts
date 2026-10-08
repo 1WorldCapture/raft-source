@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "vitest";
+import { CURSOR_SDK_RESUME_UNUSABLE_MARKER } from "../cursorSdk/sessionReset.js";
 import {
   CursorSdkAssetsUnavailableError,
   CursorSdkRuntimeSession,
@@ -1078,6 +1079,173 @@ test("IPC send false (closed/backpressure) is never queued or resent", async () 
     assert.equal(runTexts.filter((text) => text === "fresh submission").length, 1, "exactly one hand-off per accepted message");
     assert.equal(new Set(runTexts).size, runTexts.length, "no message is ever submitted twice");
     await session.stop({ reason: "test" });
+  } finally {
+    cleanup();
+  }
+});
+
+// ── Repeated submit failures: session reset (resumed) and backoff (fresh) ───
+
+async function failSubmit(
+  script: ScriptedHostConnection,
+  session: CursorSdkRuntimeSession,
+  captured: CapturedRun,
+  attemptId: string,
+  result: "failed" | "revert" | "complete_delivered" = "failed",
+): Promise<void> {
+  const before = kind(captured, "delivery_outcome").length;
+  const sent = session.send({ mode: "idle", text: `msg ${attemptId}`, attemptId });
+  assert.equal(sent.ok, true, `send ${attemptId} accepted`);
+  script.deliver({
+    kind: "attempt_result",
+    attemptId,
+    result,
+    ...(result === "complete_delivered" ? {} : { error: { message: "rejected", errorClass: "auth" } }),
+  } as CursorSdkHostToDriverMessage);
+  await waitFor(() => (kind(captured, "delivery_outcome").length > before ? true : undefined));
+}
+
+test("resumed session: 3 consecutive failed submits request a session reset and stop the session", async () => {
+  const script = new ScriptedHostConnection();
+  const { deps, cleanup } = makeSessionDeps({ connection: script });
+  const { session } = makeSession(deps, { sessionId: "saved-session" });
+  const captured = capture(session);
+  try {
+    await session.start({ text: "first", attemptId: "a0" });
+    script.deliver({ kind: "attempt_result", attemptId: "a0", result: "failed", error: { message: "x", errorClass: "auth" } });
+    await waitFor(() => (kind(captured, "delivery_outcome").length > 0 ? true : undefined));
+    await failSubmit(script, session, captured, "a1");
+    assert.equal(captured.stderrTexts.some((t) => t.includes(CURSOR_SDK_RESUME_UNUSABLE_MARKER)), false, "not yet");
+    await failSubmit(script, session, captured, "a2");
+    await waitFor(() => (captured.stderrTexts.some((t) => t.includes(CURSOR_SDK_RESUME_UNUSABLE_MARKER)) ? true : undefined));
+    await waitFor(() => (session.closed ? true : undefined));
+    assert.equal(script.runs().length, 3, "each failed attempt was sent exactly once, never resent");
+  } finally {
+    cleanup();
+  }
+});
+
+test("a success between failures resets the count; revert is not counted", async () => {
+  const script = new ScriptedHostConnection();
+  const { deps, cleanup } = makeSessionDeps({ connection: script });
+  const { session } = makeSession(deps, { sessionId: "saved-session" });
+  const captured = capture(session);
+  try {
+    await session.start({ text: "first", attemptId: "a0" });
+    script.deliver({ kind: "attempt_result", attemptId: "a0", result: "failed", error: { message: "x", errorClass: "auth" } });
+    await waitFor(() => (kind(captured, "delivery_outcome").length > 0 ? true : undefined));
+    await failSubmit(script, session, captured, "a2", "revert");
+    await failSubmit(script, session, captured, "a3");
+    assert.equal(session.closed, false, "revert in between does not count, and only 2 failures so far");
+    // A run the SDK accepted resets the streak (and proves the session works).
+    const sent = session.send({ mode: "idle", text: "ok", attemptId: "a4" });
+    assert.equal(sent.ok, true);
+    script.deliver({ kind: "attempt_result", attemptId: "a4", result: "complete_delivered" });
+    const runId = (script.runs().at(-1) as { runId: string }).runId;
+    script.deliver({ kind: "run_settled", runId, finishReason: "completed" });
+    await waitFor(() => (kind(captured, "turn_end").length >= 1 ? true : undefined));
+    await failSubmit(script, session, captured, "a5");
+    await failSubmit(script, session, captured, "a6");
+    assert.equal(session.closed, false);
+    assert.equal(captured.stderrTexts.some((t) => t.includes(CURSOR_SDK_RESUME_UNUSABLE_MARKER)), false);
+    await session.stop({ reason: "test-done" });
+  } finally {
+    cleanup();
+  }
+});
+
+test("fresh session: repeated failures back off instead of resetting, then surface an error", async () => {
+  const script = new ScriptedHostConnection();
+  let now = 1_000_000;
+  const { deps, cleanup } = makeSessionDeps({ connection: script });
+  const { session } = makeSession({ ...deps, nowMs: () => now });
+  const captured = capture(session);
+  try {
+    await session.start({ text: "first", attemptId: "a0" });
+    script.deliver({ kind: "attempt_result", attemptId: "a0", result: "failed", error: { message: "x", errorClass: "auth" } });
+    await waitFor(() => (kind(captured, "delivery_outcome").length > 0 ? true : undefined));
+    await failSubmit(script, session, captured, "a1");
+    await failSubmit(script, session, captured, "a2");
+    assert.equal(session.closed, false, "fresh sessions are never reset");
+    assert.equal(captured.stderrTexts.some((t) => t.includes(CURSOR_SDK_RESUME_UNUSABLE_MARKER)), false);
+    // In the 60 s backoff window the SDK is not hit again.
+    const runsBefore = script.runs().length;
+    assert.deepEqual(session.send({ mode: "idle", text: "x", attemptId: "b" }), { ok: false, reason: "busy_rejected" });
+    assert.equal(script.runs().length, runsBefore);
+    now += 61_000;
+    await failSubmit(script, session, captured, "a3");
+    now += 61_000;
+    await failSubmit(script, session, captured, "a4");
+    now += 61_000;
+    await failSubmit(script, session, captured, "a5");
+    assert.deepEqual(session.send({ mode: "idle", text: "x", attemptId: "c" }), { ok: false, reason: "busy_rejected" });
+    now += 61_000;
+    assert.deepEqual(session.send({ mode: "idle", text: "x", attemptId: "d" }), { ok: false, reason: "busy_rejected" }, "5 minute backoff after twice the limit");
+    assert.ok(kind(captured, "error").length >= 1, "visible error after twice the limit");
+    await session.stop({ reason: "test-done" });
+  } finally {
+    cleanup();
+  }
+});
+
+test("real host (poisoned resumed session): 3 rejected submits end the session with the reset marker", async () => {
+  const { deps, cleanup } = realHostDeps("poisoned");
+  const { session } = makeSession(deps, { sessionId: "saved-session" });
+  const captured = capture(session);
+  try {
+    await session.start({ text: "first", attemptId: "p0" });
+    for (const id of ["p1", "p2"]) {
+      await waitFor(() => (session.closed || kind(captured, "delivery_outcome").length >= Number(id.slice(1)) ? true : undefined));
+      if (session.closed) break;
+      session.send({ mode: "idle", text: `again ${id}`, attemptId: id });
+    }
+    await waitFor(() => (session.closed ? true : undefined), 8_000);
+    assert.ok(captured.stderrTexts.some((t) => t.includes(CURSOR_SDK_RESUME_UNUSABLE_MARKER)));
+    assert.ok(captured.exits.length >= 1, "session exited so the daemon can cold-start a new one");
+  } finally {
+    cleanup();
+  }
+});
+
+// ── Late steer ack: honored once, gate released only then ───────────────────
+
+test("late steer ack: settles unknown at the bound, holds the gate, then releases it once and reports delivered", async () => {
+  const script = new ScriptedHostConnection();
+  const { deps, cleanup } = makeSessionDeps({ connection: script, ackTimeoutMs: 50 });
+  const { session } = makeSession(deps);
+  const captured = capture(session);
+  try {
+    await session.start({ text: "first turn" });
+    assert.deepEqual(session.send({ mode: "busy", text: "slow steer", attemptId: "s1" }), { ok: true, acceptedAs: "steer" });
+    await waitFor(() => (kind(captured, "delivery_outcome").length > 0 ? true : undefined));
+    assert.deepEqual(kind(captured, "delivery_outcome"), [
+      { kind: "delivery_outcome", source: "cursor_sdk", attemptId: "s1", outcome: "unknown" },
+    ]);
+    // The SDK may still apply the steer: the gate must stay closed at the timeout.
+    assert.equal(session.send({ mode: "busy", text: "second", attemptId: "s2" }).ok, false);
+
+    script.deliver({ kind: "attempt_result", attemptId: "s1", result: "complete_delivered" });
+    await waitFor(() => (kind(captured, "delivery_outcome").length > 1 ? true : undefined));
+    assert.deepEqual(kind(captured, "delivery_outcome")[1], {
+      kind: "delivery_outcome", source: "cursor_sdk", attemptId: "s1", outcome: "delivered", late: true,
+    });
+    assert.ok(captured.stderrTexts.some((t) => /late steer ack after \d+ms/.test(t)));
+    assert.ok(!captured.stderrTexts.some((t) => t.includes("discarded stale attempt result")), "no longer noise");
+
+    // Gate released exactly once: one new steer is accepted, a second is not.
+    assert.deepEqual(session.send({ mode: "busy", text: "third", attemptId: "s3" }), { ok: true, acceptedAs: "steer" });
+    assert.equal(session.send({ mode: "busy", text: "fourth", attemptId: "s4" }).ok, false);
+
+    // A duplicate late ack changes nothing.
+    script.deliver({ kind: "attempt_result", attemptId: "s1", result: "complete_delivered" });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(kind(captured, "delivery_outcome").length, 2);
+    assert.equal(session.send({ mode: "busy", text: "fifth", attemptId: "s5" }).ok, false);
+    const state = session.describeStallState();
+    assert.equal(state.hasRun, true);
+    assert.equal(typeof state.lastHostMessageAgeMs, "number");
+    assert.ok(!JSON.stringify(state).includes("slow steer"), "metadata only");
+    await session.stop({ reason: "test-done" });
   } finally {
     cleanup();
   }

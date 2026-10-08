@@ -49,7 +49,7 @@ keyAlias=raft-mobile
 keyPassword=...
 ```
 
-`storeFile` is an absolute path. `version` in `app.json` is `0.1.0` and `android.versionCode` is `1`.
+`storeFile` is an absolute path. `version` in `app.json` tracks the production release. `android.versionCode` is `major * 10000 + minor * 100 + patch`, so `0.1.4` is `104`.
 
 From `apps/mobile`, with the Android SDK and JDK 17 installed:
 

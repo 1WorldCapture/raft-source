@@ -3,6 +3,7 @@ import { lstat, readFile, readdir, rm, stat } from "node:fs/promises";
 import { createHash, randomInt, randomUUID } from "node:crypto";
 import path from "node:path";
 import os from "node:os";
+import { CURSOR_SDK_RESUME_UNUSABLE_MARKER } from "./cursorSdk/sessionReset.js";
 import { daemonFetch } from "./daemonFetch.js";
 import { buildDaemonActivityMessage, daemonActivityDropTraceAttrs, runtimeEventEndsThinking, trajectoryActivityProjection, type DaemonActivityInput } from "./agentActivityProducer.js";
 
@@ -103,6 +104,7 @@ import {
 import { AgentVisibleDeliveryLedger, formatAgentMessageVisibleTarget } from "./agentVisibleDeliveryLedger.js";
 import {
   NATIVE_STANDING_PROMPT_STARTUP_INPUT,
+  CURSOR_SESSION_RESET_NOTICE_INPUT,
   RUNTIME_PROFILE_DAEMON_NOTICE_MESSAGE_PREFIX,
   adoptAxSurfaceText,
   composeAxSurfaces,
@@ -452,6 +454,7 @@ const COMPACTION_STALE_MS = 5 * 60_000;
 const REVIEW_STALE_MS = 10 * 60_000;
 /** Surface silent runtime stalls instead of letting activity heartbeats mask them indefinitely. */
 const RUNTIME_PROGRESS_STALE_MS = 15 * 60_000;
+const CURSOR_SESSION_RESET_MIN_INTERVAL_MS = 30 * 60_000;
 /** Startup should either emit a runtime event or fail visibly; do not leave users on Starting forever. */
 const DEFAULT_RUNTIME_START_TIMEOUT_MS = 2 * 60_000;
 /** If stale recovery has already decided to terminate a process, surface and unblock SIGTERM hangs. */
@@ -1029,6 +1032,10 @@ function resumeSessionRecoveryReason(ap: AgentProcess): "missing" | "provider_re
     return candidates.some(isPiReplayRejectedByProvider) ? "provider_replay_rejected" : null;
   }
 
+  if (ap.driver.id === "cursor-sdk") {
+    return candidates.some((text) => text.includes(CURSOR_SDK_RESUME_UNUSABLE_MARKER)) ? "missing" : null;
+  }
+
   if (ap.driver.id === "gemini") {
     return candidates.some((text) =>
       /Error resuming session:\s*Invalid session identifier/i.test(text) &&
@@ -1211,6 +1218,11 @@ export class AgentProcessManager {
   private readonly appInboxNoticedItemIds = new Map<string, Set<string>>();
   private readonly appInboxIdleDrains = new Set<string>();
   private readonly runtimeErrorProcessRestartTimers = new Map<string, unknown>();
+  /** Last Cursor SDK poisoned-session reset per agent (rate limit). */
+  private readonly cursorSessionResetAtMs = new Map<string, number>();
+  private readonly cursorStallRestartAtMs = new Map<string, number>();
+  /** Agents whose next fresh session is a poisoned-session replacement (notice shown once). */
+  private readonly pendingCursorResetNotice = new Set<string>();
   private readonly busyDelivery = new RuntimeBusyDeliveryCoordinator<AgentProcess>({
     nowMs: () => this.clockNow(),
     commitDecisionState: (...args) => this.commitGatedSteeringDecisionState(...args),
@@ -3085,6 +3097,10 @@ export class AgentProcessManager {
         : standingPrompt;
       promptSource = "cold_start";
     }
+    if (!isResume && this.pendingCursorResetNotice.delete(agentId)) {
+      // Fresh session after a poisoned-session reset: tell the agent its context is gone.
+      prompt = composeAxSurfaces(CURSOR_SESSION_RESET_NOTICE_INPUT, prompt);
+    }
     const runtimeInputTraceAttrs = buildRuntimeInputTraceAttrs({
       source: promptSource,
       prompt,
@@ -3408,7 +3424,7 @@ export class AgentProcessManager {
         // code 0, and the clean-exit path then hid the failure on the status dot).
         const processEndedCleanly = !stickyTerminalFailureDetail && !startupTimeoutTermination && !startupRequestErrorTermination && ((finalCode === 0 && turnBoundarySatisfied) || (expectedTermination && !ap.lastRuntimeError));
         const terminalFailureDetail = processEndedCleanly ? null : (stickyTerminalFailureDetail ?? classifyTerminalFailure(ap));
-        const resumeRecoveryReason = resumeSessionRecoveryReason(ap);
+        const resumeRecoveryReason = this.limitCursorSessionReset(agentId, ap, resumeSessionRecoveryReason(ap));
         const shouldColdStartResumeSession = resumeRecoveryReason !== null;
         const summary = summarizeCrash(finalCode, finalSignal);
         this.endRuntimeTrace(ap, processEndedCleanly ? "ok" : "error", {
@@ -3433,10 +3449,13 @@ export class AgentProcessManager {
           const runtimeLabel = runtimeDisplayName(ap.driver.id);
           const restartConfig = this.buildRestartSafeConfig(ap.config, null);
           if (staleSessionId) this.sendToServer({ type: "agent:session:invalidate", agentId, sessionId: staleSessionId, launchId: ap.launchId || undefined, reason: resumeRecoveryReason });
-          const reasonText = resumeRecoveryReason === "provider_replay_rejected" ? "was rejected by the provider during replay" : "is unavailable locally";
+          const cursorReset = ap.driver.id === "cursor-sdk";
+          const reasonText = resumeRecoveryReason === "provider_replay_rejected" ? "was rejected by the provider during replay" : cursorReset ? "stopped accepting messages" : "is unavailable locally";
           const activityText = resumeRecoveryReason === "provider_replay_rejected"
             ? `Stored ${runtimeLabel} session replay rejected; cold-starting a new session…`
-            : `Stored ${runtimeLabel} session missing; cold-starting a new session…`;
+            : cursorReset
+              ? `Runtime session reset: the stored ${runtimeLabel} session stopped accepting messages; starting a new session…`
+              : `Stored ${runtimeLabel} session missing; cold-starting a new session…`;
           logger.warn(
             `[Agent ${agentId}] Stored ${runtimeLabel} session ${staleSessionId} ${reasonText}; falling back to cold start`,
           );
@@ -3452,6 +3471,7 @@ export class AgentProcessManager {
             "runtime_unavailable",
           );
           this.lifecycleRecords.setPendingSpawnCause(agentId, "restart_crash");
+          if (ap.driver.id === "cursor-sdk") this.pendingCursorResetNotice.add(agentId);
           this.startAgent(
             agentId,
             restartConfig,
@@ -5902,6 +5922,11 @@ export class AgentProcessManager {
       if (activityKind === "working" || activityKind === "thinking") {
         if (ap.activityHeartbeat.kind === "inactive") {
           const timer = setInterval(() => {
+            // A wedged Cursor SDK runtime with queued messages must not wait for
+            // the next incoming message to be noticed (the 33 minute stall).
+            // Other runtimes keep the on-delivery check only: a long single tool
+            // call with a queued message must not be killed mid-run.
+            if (ap.driver.id === "cursor-sdk" && ap.inbox.length > 0 && this.recoverStaleProcessForQueuedMessageIfNeeded(agentId, ap)) return;
             if (this.markRuntimeProgressStaleIfNeeded(agentId, ap)) return;
             this.recordRuntimeTraceEvent(agentId, ap, "activity.heartbeat.sent", {
               activity: ap.lastActivityKind,
@@ -6568,6 +6593,19 @@ export class AgentProcessManager {
         attempt_id: event.attemptId,
         outcome: event.outcome,
         reason: "driver_not_in_attempt_protocol",
+      });
+      return;
+    }
+    if (event.late) {
+      const resolved = event.outcome === "delivered" && ap.deliveryAttempts.resolveLateDelivered(event.attemptId);
+      this.recordDaemonTrace("daemon.agent.delivery_outcome.late", {
+        agentId,
+        launchId: ap.launchId || undefined,
+        runtime: ap.config.runtime,
+        attempt_id: event.attemptId,
+        outcome: event.outcome,
+        resolved_retained_unknown: resolved,
+        retained_unknown_count: ap.deliveryAttempts.retainedUnknownCount,
       });
       return;
     }
@@ -7276,6 +7314,17 @@ export class AgentProcessManager {
       return true;
     }
     if (!reduction.shouldTerminate) return false;
+    if (ap.driver.id === "cursor-sdk") {
+      // One stall restart per window: a restart that did not help must not loop.
+      const last = this.cursorStallRestartAtMs.get(agentId);
+      if (last !== undefined && this.clockNow() - last < CURSOR_SESSION_RESET_MIN_INTERVAL_MS) {
+        if (!ap.runtimeProgress.isStale) ap.runtimeProgress.markStale();
+        logger.warn(`[Agent ${agentId}] Cursor SDK runtime stalled again within 30 minutes of a restart; not restarting again`);
+        this.broadcastActivity(agentId, "error", "Cursor SDK runtime is not accepting messages; automatic restart paused", [], undefined, "runtime_stalled");
+        return true;
+      }
+      this.cursorStallRestartAtMs.set(agentId, this.clockNow());
+    }
     this.commitGatedSteeringDecisionState(agentId, ap, reduction.nextState);
 
     const staleForMinutes = Math.max(1, Math.floor(staleForMs / 60_000));
@@ -7305,6 +7354,8 @@ export class AgentProcessManager {
     logger.warn(
       `[Agent ${agentId}] ${runtimeLabel} process stalled for ${staleForMinutes}m with ${ap.inbox.length} queued message(s); terminating for restart`,
     );
+    const stallState = ap.runtime.describeStallState?.();
+    if (stallState) logger.warn(`[Agent ${agentId}] ${runtimeLabel} stall state ${JSON.stringify(stallState)}`);
     this.broadcastActivity(agentId, "working", `Restarting stalled ${runtimeLabel} runtime for queued message`, [], undefined, "stalled_recovery");
     try {
       this.runtimeExitTraceAttrs.set(ap.runtime, projection.processExitAttrs);
@@ -7333,6 +7384,21 @@ export class AgentProcessManager {
       return false;
     }
     return true;
+  }
+
+  /**
+   * At most one Cursor SDK poisoned-session reset per agent per window: a reset
+   * session that fails again is a different problem and takes the normal crash path.
+   */
+  private limitCursorSessionReset<T extends string>(agentId: string, ap: AgentProcess, reason: T | null): T | null {
+    if (reason === null || ap.driver.id !== "cursor-sdk") return reason;
+    const lastReset = this.cursorSessionResetAtMs.get(agentId);
+    if (lastReset !== undefined && this.clockNow() - lastReset < CURSOR_SESSION_RESET_MIN_INTERVAL_MS) {
+      logger.warn(`[Agent ${agentId}] Cursor SDK session reset suppressed: last reset was less than 30 minutes ago`);
+      return null;
+    }
+    this.cursorSessionResetAtMs.set(agentId, this.clockNow());
+    return reason;
   }
 
   /** Handle a single ParsedEvent from any runtime driver */

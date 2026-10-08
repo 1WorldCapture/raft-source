@@ -445,6 +445,8 @@ export interface CursorSdkDeliveryOutcomeEvent {
   source: "cursor_sdk";
   attemptId: string;
   outcome: CursorSdkAttemptOutcome;
+  /** Ack for an attempt already settled `unknown`; see ParsedEvent. */
+  late?: boolean;
 }
 
 /**
