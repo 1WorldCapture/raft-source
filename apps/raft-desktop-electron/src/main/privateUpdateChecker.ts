@@ -115,15 +115,19 @@ export function parseLatestMacYml(text: string): { version: string; files: Array
 /**
  * The manual-install artifact for THIS machine: the `.dmg` entry whose name
  * ends in `-${arch}.dmg` (electron-builder's artifactName is
- * `Raft-Desktop-${version}-${arch}.${ext}`). Zips (updater artifacts) and
- * other architectures are ignored; when the tree carries no matching dmg
- * there is nothing to prompt about.
+ * `Raft-Desktop-${version}-${arch}.${ext}`); when the feed carries no dmg for
+ * this arch (zip-only feeds), the `-${arch}.zip` instead. Other architectures
+ * are always ignored; with neither there is nothing to prompt about.
  */
 export function selectDownloadFile(
   files: ReadonlyArray<{ url: string; size?: number }>,
   arch: string,
 ): { url: string; size?: number } | null {
-  return files.find((file) => file.url.endsWith(`-${arch}.dmg`)) ?? null;
+  return (
+    files.find((file) => file.url.endsWith(`-${arch}.dmg`)) ??
+    files.find((file) => file.url.endsWith(`-${arch}.zip`) || file.url.endsWith(`-${arch}-mac.zip`)) ??
+    null
+  );
 }
 
 /**
@@ -224,7 +228,7 @@ export function startPrivateUpdateChecker(deps: PrivateUpdateDeps): {
     if (!artifact) {
       // Nothing installable for this machine (zips only / other arch):
       // never steer the user at the wrong package.
-      log(`no ${deps.arch ?? process.arch} dmg in private latest-mac.yml`);
+      log(`no ${deps.arch ?? process.arch} dmg or zip in private latest-mac.yml`);
       setStatus({ state: "none" });
       return;
     }

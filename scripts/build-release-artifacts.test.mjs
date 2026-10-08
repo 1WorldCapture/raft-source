@@ -26,3 +26,12 @@ test("--only desktop needs a macOS host", { skip: process.platform === "darwin" 
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /--only desktop needs a macOS host/);
 });
+
+test("--desktop-arch / --desktop-formats are validated before any build step", () => {
+  const badArch = run("--desktop-arch", "x64");
+  assert.notEqual(badArch.status, 0);
+  assert.match(badArch.stderr, /--desktop-arch must be one of: arm64, all/);
+  const badFormats = run("--desktop-formats", "pkg");
+  assert.notEqual(badFormats.status, 0);
+  assert.match(badFormats.stderr, /--desktop-formats must be/);
+});
