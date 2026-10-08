@@ -5922,6 +5922,9 @@ export class AgentProcessManager {
       if (activityKind === "working" || activityKind === "thinking") {
         if (ap.activityHeartbeat.kind === "inactive") {
           const timer = setInterval(() => {
+            // A wedged runtime with queued messages must not wait for the next
+            // incoming message to be noticed (the 33 minute Cursor SDK stall).
+            if (ap.inbox.length > 0 && this.recoverStaleProcessForQueuedMessageIfNeeded(agentId, ap)) return;
             if (this.markRuntimeProgressStaleIfNeeded(agentId, ap)) return;
             this.recordRuntimeTraceEvent(agentId, ap, "activity.heartbeat.sent", {
               activity: ap.lastActivityKind,
@@ -6588,6 +6591,19 @@ export class AgentProcessManager {
         attempt_id: event.attemptId,
         outcome: event.outcome,
         reason: "driver_not_in_attempt_protocol",
+      });
+      return;
+    }
+    if (event.late) {
+      const resolved = event.outcome === "delivered" && ap.deliveryAttempts.resolveLateDelivered(event.attemptId);
+      this.recordDaemonTrace("daemon.agent.delivery_outcome.late", {
+        agentId,
+        launchId: ap.launchId || undefined,
+        runtime: ap.config.runtime,
+        attempt_id: event.attemptId,
+        outcome: event.outcome,
+        resolved_retained_unknown: resolved,
+        retained_unknown_count: ap.deliveryAttempts.retainedUnknownCount,
       });
       return;
     }
@@ -7336,6 +7352,8 @@ export class AgentProcessManager {
     logger.warn(
       `[Agent ${agentId}] ${runtimeLabel} process stalled for ${staleForMinutes}m with ${ap.inbox.length} queued message(s); terminating for restart`,
     );
+    const stallState = ap.runtime.describeStallState?.();
+    if (stallState) logger.warn(`[Agent ${agentId}] ${runtimeLabel} stall state ${JSON.stringify(stallState)}`);
     this.broadcastActivity(agentId, "working", `Restarting stalled ${runtimeLabel} runtime for queued message`, [], undefined, "stalled_recovery");
     try {
       this.runtimeExitTraceAttrs.set(ap.runtime, projection.processExitAttrs);

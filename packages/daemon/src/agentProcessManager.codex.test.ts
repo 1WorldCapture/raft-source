@@ -4056,6 +4056,58 @@ test("stale review watchdog surfaces missing review_finished and restores delive
   }
 });
 
+test("activity heartbeat recovers a stalled runtime that has queued messages without a new delivery", async () => {
+  const realSetInterval = globalThis.setInterval;
+  const realClearInterval = globalThis.clearInterval;
+  const realDateNow = Date.now;
+  let now = 1_000_000;
+  let intervalCallback: (() => void) | null = null;
+  (Date as any).now = () => now;
+  (globalThis as any).setInterval = ((callback: () => void, ms?: number, ...args: any[]) => {
+    if (ms && ms > 1000) {
+      intervalCallback = callback;
+      return { fake: true };
+    }
+    return realSetInterval(callback, ms, ...args);
+  }) as typeof setInterval;
+  (globalThis as any).clearInterval = ((timer: unknown) => {
+    if ((timer as any)?.fake) return;
+    return realClearInterval(timer as ReturnType<typeof setInterval>);
+  }) as typeof clearInterval;
+
+  try {
+    const driver = new FakeCodexDriver({ id: "cursor-sdk", supportsStdinNotification: true, busyDeliveryMode: "direct" });
+    await withManager(async ({ manager }) => {
+      await manager.startAgent("agent-1", makeConfig({ runtime: "cursor-sdk", sessionId: "sess-1" }));
+      driver.parsedLines.set("work", [{ kind: "thinking", text: "hmm" } as any]);
+      driver.processes[0].stdout.emit("data", Buffer.from("work\n"));
+      await flush();
+      assert.ok(intervalCallback, "working activity installs the heartbeat");
+      const ap = (manager as any).agents.get("agent-1");
+      ap.inbox.push(makeMessage("queued while wedged"));
+      const stops: unknown[] = [];
+      let described = 0;
+      ap.runtime.stop = async (input: unknown) => { stops.push(input); };
+      ap.runtime.describeStallState = () => { described += 1; return { hasRun: true }; };
+
+      now += 5 * 60_000;
+      intervalCallback!();
+      assert.equal(stops.length, 0, "not stale yet");
+
+      now += 11 * 60_000;
+      intervalCallback!();
+      await flush();
+      assert.equal(stops.length, 1, "heartbeat tick terminates the stalled runtime without any new message");
+      assert.equal(described, 1, "stall state snapshot taken once");
+      assert.equal(ap.gatedSteering.expectedTerminationReason, "stalled_recovery");
+    }, { driver });
+  } finally {
+    (Date as any).now = realDateNow;
+    globalThis.setInterval = realSetInterval;
+    globalThis.clearInterval = realClearInterval;
+  }
+});
+
 test("activity heartbeat marks silent runtime progress as stalled", async () => {
   const realSetInterval = globalThis.setInterval;
   const realClearInterval = globalThis.clearInterval;
