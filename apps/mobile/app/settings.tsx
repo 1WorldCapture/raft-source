@@ -3,13 +3,13 @@ import { Pressable, StyleSheet, View } from "react-native";
 import Constants from "expo-constants";
 import { getLocales } from "expo-localization";
 import { useRouter } from "expo-router";
-import { resolveLocale } from "../../src/i18n/catalog";
-import { useT } from "../../src/i18n/provider";
-import { userLabel } from "../../src/model/messages";
-import { useSession } from "../../src/state/session";
-import { PanelHeader } from "../../src/ui/PanelHeader";
-import { AppText } from "../../src/ui/text";
-import { color, fontSize } from "../../src/ui/tokens";
+import { resolveLocale } from "../src/i18n/catalog";
+import { useT } from "../src/i18n/provider";
+import { userLabel } from "../src/model/messages";
+import { useSession } from "../src/state/session";
+import { PanelHeader } from "../src/ui/PanelHeader";
+import { AppText } from "../src/ui/text";
+import { color, fontSize } from "../src/ui/tokens";
 
 const FONT_SIZES = [
   { id: "sm", label: "settings.appearance.fontSizeSmall" },

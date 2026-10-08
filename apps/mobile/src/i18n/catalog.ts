@@ -101,6 +101,17 @@ export const mobileEn = {
   "mobile.conversations.unreadOnly": "Unread",
   "mobile.conversations.unreadOnlyCount": "Unread {n}",
   "mobile.conversations.unreadEmpty": "No unread conversations",
+  "mobile.tabs.pm": "PM",
+  "mobile.tabs.dms": "DMs",
+  "mobile.tabs.channels": "Channels",
+  "mobile.menu.search": "Search",
+  "mobile.menu.saved": "Saved",
+  "mobile.menu.settings": "Settings",
+  "mobile.menu.members": "Members",
+  "mobile.dms.empty": "No direct messages yet.",
+  "mobile.pm.enableTitle": "PM is not enabled yet",
+  "mobile.pm.enableBody": "Connect a computer to this server to enable the PM agent.",
+  "mobile.pm.stageCHint": "PM conversations arrive with the next server update.",
 } as const;
 
 export const mobileZh: Record<keyof typeof mobileEn, string> = {
@@ -202,6 +213,17 @@ export const mobileZh: Record<keyof typeof mobileEn, string> = {
   "mobile.conversations.unreadOnly": "未读",
   "mobile.conversations.unreadOnlyCount": "未读 {n}",
   "mobile.conversations.unreadEmpty": "没有未读会话",
+  "mobile.tabs.pm": "PM",
+  "mobile.tabs.dms": "私信",
+  "mobile.tabs.channels": "频道",
+  "mobile.menu.search": "搜索",
+  "mobile.menu.saved": "收藏",
+  "mobile.menu.settings": "设置",
+  "mobile.menu.members": "成员",
+  "mobile.dms.empty": "还没有私信。",
+  "mobile.pm.enableTitle": "PM 尚未启用",
+  "mobile.pm.enableBody": "为本 server 连接一台电脑后即可启用 PM agent。",
+  "mobile.pm.stageCHint": "PM 对话将随下一次服务端更新开放。",
 };
 
 export type MobileId = keyof typeof mobileEn;

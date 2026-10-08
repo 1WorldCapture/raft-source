@@ -1,23 +1,20 @@
 import { Pressable, StyleSheet, View, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Home, Settings, SquareCheck, Users } from "lucide-react-native";
+import { Hash, MessageSquare, Sparkles } from "lucide-react-native";
 import { useT } from "../i18n/provider";
 import { AppText } from "../ui/text";
 import { color } from "../ui/tokens";
-import { useServerRole } from "./serverRole";
 
 const ICONS = {
-  home: Home,
-  tasks: SquareCheck,
-  members: Users,
-  settings: Settings,
+  pm: Sparkles,
+  dms: MessageSquare,
+  channels: Hash,
 } as const;
 
 const LABELS = {
-  home: "layout.mobileTabBar.home",
-  tasks: "layout.mobileTabBar.tasks",
-  members: "layout.mobileTabBar.members",
-  settings: "layout.mobileTabBar.settings",
+  pm: "mobile.tabs.pm",
+  dms: "mobile.tabs.dms",
+  channels: "mobile.tabs.channels",
 } as const;
 
 export function HomeTabBar({
@@ -28,14 +25,12 @@ export function HomeTabBar({
   navigation: { navigate: (name: string) => void };
 }) {
   const t = useT();
-  const role = useServerRole();
   const { height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const compact = height <= 600;
-  const routes = state.routes.filter((route) => route.name !== "members" || role !== "guest");
   return (
     <View style={[styles.bar, { paddingBottom: Math.min(insets.bottom, 34) }]}>
-      {routes.map((route, index) => {
+      {state.routes.map((route, index) => {
         const name = route.name as keyof typeof ICONS;
         const Icon = ICONS[name];
         const active = state.routes[state.index]?.key === route.key;
@@ -44,7 +39,7 @@ export function HomeTabBar({
             key={route.key}
             accessibilityRole="button"
             onPress={() => navigation.navigate(route.name)}
-            style={[styles.tab, active ? styles.active : null, index < routes.length - 1 ? styles.divider : null]}
+            style={[styles.tab, active ? styles.active : null, index < state.routes.length - 1 ? styles.divider : null]}
           >
             {compact || !Icon ? null : <Icon color={color.ink} size={18} />}
             <AppText style={styles.label}>{t(LABELS[name])}</AppText>
