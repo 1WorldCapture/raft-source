@@ -1,9 +1,9 @@
-import { CURSOR_SDK_RESUME_UNUSABLE_MARKER } from "./cursorSdk/sessionReset.js";
 import { readFileSync, rmSync } from "node:fs";
 import { lstat, readFile, readdir, rm, stat } from "node:fs/promises";
 import { createHash, randomInt, randomUUID } from "node:crypto";
 import path from "node:path";
 import os from "node:os";
+import { CURSOR_SDK_RESUME_UNUSABLE_MARKER } from "./cursorSdk/sessionReset.js";
 import { daemonFetch } from "./daemonFetch.js";
 import { buildDaemonActivityMessage, daemonActivityDropTraceAttrs, runtimeEventEndsThinking, trajectoryActivityProjection, type DaemonActivityInput } from "./agentActivityProducer.js";
 
@@ -104,7 +104,6 @@ import {
 import { AgentVisibleDeliveryLedger, formatAgentMessageVisibleTarget } from "./agentVisibleDeliveryLedger.js";
 import {
   NATIVE_STANDING_PROMPT_STARTUP_INPUT,
-  CURSOR_SESSION_RESET_NOTICE,
   CURSOR_SESSION_RESET_NOTICE_INPUT,
   RUNTIME_PROFILE_DAEMON_NOTICE_MESSAGE_PREFIX,
   adoptAxSurfaceText,
@@ -1222,6 +1221,8 @@ export class AgentProcessManager {
   /** Last Cursor SDK poisoned-session reset per agent (rate limit). */
   private readonly cursorSessionResetAtMs = new Map<string, number>();
   private readonly cursorStallRestartAtMs = new Map<string, number>();
+  /** Agents whose next fresh session is a poisoned-session replacement (notice shown once). */
+  private readonly pendingCursorResetNotice = new Set<string>();
   private readonly busyDelivery = new RuntimeBusyDeliveryCoordinator<AgentProcess>({
     nowMs: () => this.clockNow(),
     commitDecisionState: (...args) => this.commitGatedSteeringDecisionState(...args),
@@ -3096,7 +3097,7 @@ export class AgentProcessManager {
         : standingPrompt;
       promptSource = "cold_start";
     }
-    if (!isResume && resumePrompt?.startsWith(CURSOR_SESSION_RESET_NOTICE)) {
+    if (!isResume && this.pendingCursorResetNotice.delete(agentId)) {
       // Fresh session after a poisoned-session reset: tell the agent its context is gone.
       prompt = composeAxSurfaces(CURSOR_SESSION_RESET_NOTICE_INPUT, prompt);
     }
@@ -3470,15 +3471,13 @@ export class AgentProcessManager {
             "runtime_unavailable",
           );
           this.lifecycleRecords.setPendingSpawnCause(agentId, "restart_crash");
-          const coldStartResumePrompt = ap.driver.id === "cursor-sdk"
-            ? [CURSOR_SESSION_RESET_NOTICE, ap.startup.resumePrompt].filter(Boolean).join("\n\n")
-            : ap.startup.resumePrompt;
+          if (ap.driver.id === "cursor-sdk") this.pendingCursorResetNotice.add(agentId);
           this.startAgent(
             agentId,
             restartConfig,
             ap.startup.wakeMessage,
             ap.startup.unreadSummary,
-            coldStartResumePrompt,
+            ap.startup.resumePrompt,
             ap.launchId || undefined,
           ).catch((err) => {
             logger.error(`[Agent ${agentId}] Cold start recovery failed`, err);
@@ -7300,13 +7299,13 @@ export class AgentProcessManager {
     if (ap.driver.id === "cursor-sdk") {
       // One stall restart per window: a restart that did not help must not loop.
       const last = this.cursorStallRestartAtMs.get(agentId);
-      if (last !== undefined && Date.now() - last < CURSOR_SESSION_RESET_MIN_INTERVAL_MS) {
+      if (last !== undefined && this.clockNow() - last < CURSOR_SESSION_RESET_MIN_INTERVAL_MS) {
         if (!ap.runtimeProgress.isStale) ap.runtimeProgress.markStale();
         logger.warn(`[Agent ${agentId}] Cursor SDK runtime stalled again within 30 minutes of a restart; not restarting again`);
         this.broadcastActivity(agentId, "error", "Cursor SDK runtime is not accepting messages; automatic restart paused", [], undefined, "runtime_stalled");
         return true;
       }
-      this.cursorStallRestartAtMs.set(agentId, Date.now());
+      this.cursorStallRestartAtMs.set(agentId, this.clockNow());
     }
     this.commitGatedSteeringDecisionState(agentId, ap, reduction.nextState);
 
@@ -7374,11 +7373,11 @@ export class AgentProcessManager {
   private limitCursorSessionReset<T extends string>(agentId: string, ap: AgentProcess, reason: T | null): T | null {
     if (reason === null || ap.driver.id !== "cursor-sdk") return reason;
     const lastReset = this.cursorSessionResetAtMs.get(agentId);
-    if (lastReset !== undefined && Date.now() - lastReset < CURSOR_SESSION_RESET_MIN_INTERVAL_MS) {
+    if (lastReset !== undefined && this.clockNow() - lastReset < CURSOR_SESSION_RESET_MIN_INTERVAL_MS) {
       logger.warn(`[Agent ${agentId}] Cursor SDK session reset suppressed: last reset was less than 30 minutes ago`);
       return null;
     }
-    this.cursorSessionResetAtMs.set(agentId, Date.now());
+    this.cursorSessionResetAtMs.set(agentId, this.clockNow());
     return reason;
   }
 

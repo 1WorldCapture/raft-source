@@ -9768,7 +9768,7 @@ test("Cursor SDK resumed session that cannot accept runs is reset once, with a c
     await waitFor(() => driver.spawnCalls.length === 2, "cursor session reset cold restart");
 
     assert.equal(driver.spawnCalls[1].config.sessionId, null);
-    assert.match(driver.spawnCalls[1].prompt, /previous runtime session was reset/i);
+    assert.equal(driver.spawnCalls[1].prompt.split("previous runtime session was reset").length - 1, 1, "notice appears exactly once");
     assert.equal(sent.filter((msg) => msg.type === "agent:session:invalidate").length, 1);
     assert.ok(sent.some((msg) => msg.type === "agent:activity" && /Runtime session reset/i.test(msg.detail)));
 
@@ -9779,6 +9779,10 @@ test("Cursor SDK resumed session that cannot accept runs is reset once, with a c
     await flush();
     assert.equal(driver.spawnCalls.length, 2);
     assert.equal(sent.filter((msg) => msg.type === "agent:session:invalidate").length, 1);
+    await manager.stopAgent("agent-1");
+    // The notice is one-shot: a later start of the same agent does not repeat it.
+    await manager.startAgent("agent-1", makeConfig({ runtime: "cursor-sdk", sessionId: null }), undefined, undefined, undefined, "launch-2");
+    assert.doesNotMatch(driver.spawnCalls.at(-1)!.prompt, /previous runtime session was reset/i);
     await manager.stopAgent("agent-1");
   } finally {
     cleanupTestManager(manager);

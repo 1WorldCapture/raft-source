@@ -1,9 +1,9 @@
-import { CURSOR_SDK_RESUME_UNUSABLE_MARKER } from "../cursorSdk/sessionReset.js";
 import { spawn, type ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { CURSOR_SDK_RESUME_UNUSABLE_MARKER } from "../cursorSdk/sessionReset.js";
 import {
   hydrateRuntimeConfig,
   runtimeConfigToLaunchFields,
