@@ -20,6 +20,11 @@ const EXTERNAL = [
   "pg",
   "pg-native",
   "@electric-sql/pglite",
+  // drizzle-orm/pglite statically imports @electric-sql/pglite; bundling it
+  // would hoist that into a top-level link-time import and force pglite into
+  // the prod image. Keep it external so only the pglite:// code path (which
+  // dynamic-imports it) ever resolves it.
+  "drizzle-orm/pglite",
   "fsevents",
   "jieba-wasm",
 ];
