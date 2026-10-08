@@ -39,6 +39,11 @@ RUN pnpm --filter @botiverse/raft-server run bundle
 RUN pnpm --config.allow-unused-patches=true deploy --prod --legacy \
   --filter=@botiverse/raft-server /deploy-out
 
+# Everything esbuild bundled (stripe/xlsx/aws-sdk/mcp-sdk/... plus the
+# inlined workspace deps) is dead weight in node_modules — keep only the
+# external closure the bundles resolve at runtime (~54MB vs ~208MB).
+RUN node packages/server/scripts/prune-runtime-deps.mjs /deploy-out
+
 # ---- Runtime: slim image running the prebuilt bundles (no tsx, no sources).
 FROM node:${NODE_VERSION}-bookworm-slim
 
