@@ -53,6 +53,18 @@ export class ServerSetupChangedRetryError extends Error {
   }
 }
 
+// Rethink UI phase A (owner rule): a PM can only be REPLACED, never deleted.
+// Thrown by deleteAgent when the target is the standing PM of any live
+// server; the route maps it to 409 pm_role_delete_blocked.
+export class PmRoleDeleteBlockedError extends Error {
+  readonly code = "pm_role_delete_blocked";
+
+  constructor() {
+    super("请先更换 PM");
+    this.name = "PmRoleDeleteBlockedError";
+  }
+}
+
 export async function createAgent(
   serverId: string,
   name: string,
@@ -1037,6 +1049,19 @@ export async function deleteAgent(agentId: string, options: { purgeMachineId?: s
   const deletedAt = new Date();
 
   await db.transaction(async (tx) => {
+    // Rethink UI phase A: a standing PM of a live server can only be replaced,
+    // never deleted. Soft-deleted servers no longer count (their PM role dies
+    // with the server). Checked inside the transaction so a concurrent
+    // set-PM cannot slip past the guard.
+    const [pmServer] = await tx
+      .select({ id: servers.id })
+      .from(servers)
+      .where(and(eq(servers.pmAgentId, agentId), isNull(servers.deletedAt)))
+      .limit(1);
+    if (pmServer) {
+      throw new PmRoleDeleteBlockedError();
+    }
+
     await tx.update(agents)
       .set({
         deletedAt,
