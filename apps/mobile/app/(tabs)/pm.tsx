@@ -40,7 +40,7 @@ export default function PmScreen() {
   if (loading && !state) {
     body = <View style={styles.centered}><ActivityIndicator color={color.ink} /></View>;
   } else if (error && !state) {
-    const failed = t("mobile.channels.loadFailed");
+    const failed = t("mobile.pm.loadFailed");
     body = (
       <View style={styles.centered}>
         <AppText style={styles.guideTitle}>{failed}</AppText>
@@ -136,7 +136,7 @@ function PmSetupGuide({ onChanged }: { onChanged: () => void }) {
       setAgents(parsePmAgentChoices(data));
     } catch (caught) {
       if (caught instanceof StaleRequestError) return;
-      setError(caught instanceof ApiError ? caught.message : tRef.current("mobile.channels.loadFailed"));
+      setError(caught instanceof ApiError ? caught.message : tRef.current("mobile.pm.loadFailed"));
     } finally {
       setLoading(false);
     }

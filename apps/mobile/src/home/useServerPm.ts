@@ -46,7 +46,7 @@ export function useServerPm(slug: string | null) {
     } catch (caught) {
       if (slugRef.current !== requested || caught instanceof StaleRequestError) return;
       setState(null);
-      setError(pmLoadErrorMessage(caught, tRef.current("mobile.channels.loadFailed")));
+      setError(pmLoadErrorMessage(caught, tRef.current("mobile.pm.loadFailed")));
     } finally {
       if (slugRef.current === requested) setLoading(false);
     }
@@ -65,7 +65,7 @@ export function useServerPm(slug: string | null) {
     const timer = setTimeout(() => {
       if (!shouldStopWaitingForSession(SESSION_READY_WAIT_MS, session.ready, Boolean(session.origin))) return;
       setLoading(false);
-      setError(tRef.current("mobile.channels.loadFailed"));
+      setError(tRef.current("mobile.pm.loadFailed"));
     }, remaining);
     return () => clearTimeout(timer);
   }, [session.origin, session.ready, slug, waitAttempt]);
