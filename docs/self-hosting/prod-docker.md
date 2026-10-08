@@ -32,7 +32,7 @@
 - **每日备份 cron**：04:15 UTC `docker exec raft-prod-db-1 pg_dump` → `/root/raft-prod-backups/raft-prod-<ts>.dump`（umask 077、容器侧 pg_restore 核读、滚动留 14 份）——**校验必须用容器内 pg_restore**（宿主 pg16 读不了 pg17 的 1.16 格式头）
 - 切换时点备份：`/root/prod-docker-switch/backups/`（pg dump+RDB+附件 census）
 - 回滚阶梯：上一版镜像改 tag `up -d`（分钟级）；数据库回退用备份反向 restore（有损，需 owner 决策）
-- 旧 pm2 栈回滚体：`/opt/raft/source` 已于 2026-10-08 清理（task #16，配置已打包 `/root/raft-prod-backups/opt-raft-configs-*.tar.gz`）。宿主 postgres16/redis 服务仍在跑（systemd 已 disable，仅监听 127.0.0.1；`/var/lib/postgresql` 192M 含 pm2 时代 `raft` 旧快照+`raft_test`，`/var/lib/redis` 8K）——去留待 owner 决策
+- 旧 pm2 栈回滚体：`/opt/raft/source` 已于 2026-10-08 清理（task #16，配置已打包 `/root/raft-prod-backups/opt-raft-configs-*.tar.gz`）。宿主 postgres16/redis 也已于同日**退役**（task #17：purge+数据目录清理；最终备份在 `/root/raft-prod-backups/host-pg16-final-20261008T130133Z/`——raft.dump 18.2MB+raft_test.dump 978KB 均 197 表核读通过、redis-dump.rdb）——**回滚到 pm2 形态已不可行**，数据库级回退仅靠 dump 备份链
 
 ### redis 匿名卷 → 命名卷迁移（逐栈执行）
 
