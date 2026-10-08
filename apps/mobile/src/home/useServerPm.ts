@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useFocusEffect } from "expo-router";
 import { ApiError, StaleRequestError } from "../api/client";
 import { useT } from "../i18n/provider";
@@ -8,6 +8,8 @@ import { parsePmTabState, type PmTabState } from "./pmState";
 export function useServerPm(slug: string | null) {
   const session = useSession();
   const t = useT();
+  const tRef = useRef(t);
+  tRef.current = t;
   const [state, setState] = useState<PmTabState | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -27,14 +29,13 @@ export function useServerPm(slug: string | null) {
     } catch (caught) {
       if (caught instanceof StaleRequestError) return;
       setState(null);
-      setError(caught instanceof ApiError ? caught.message : t("mobile.channels.loadFailed"));
+      setError(caught instanceof ApiError ? caught.message : tRef.current("mobile.channels.loadFailed"));
     } finally {
       setLoading(false);
     }
-  }, [session.client, slug, t]);
+  }, [session.client, slug]);
 
   useFocusEffect(useCallback(() => {
-    setLoading(true);
     void load();
   }, [load]));
 

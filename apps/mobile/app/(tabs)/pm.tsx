@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, View } from "react-native";
 import { ApiError, StaleRequestError } from "../../src/api/client";
 import { useT } from "../../src/i18n/provider";
@@ -104,6 +104,8 @@ function PmConversation({ agentId, dmChannelId, title }: { agentId: string; dmCh
 function PmSetupGuide({ onChanged }: { onChanged: () => void }) {
   const session = useSession();
   const t = useT();
+  const tRef = useRef(t);
+  tRef.current = t;
   const { current } = useServerRail();
   const [agents, setAgents] = useState<PmAgentChoice[]>([]);
   const [loading, setLoading] = useState(true);
@@ -117,11 +119,11 @@ function PmSetupGuide({ onChanged }: { onChanged: () => void }) {
       setAgents(parsePmAgentChoices(data));
     } catch (caught) {
       if (caught instanceof StaleRequestError) return;
-      setError(caught instanceof ApiError ? caught.message : t("mobile.channels.loadFailed"));
+      setError(caught instanceof ApiError ? caught.message : tRef.current("mobile.channels.loadFailed"));
     } finally {
       setLoading(false);
     }
-  }, [session.client, t]);
+  }, [session.client]);
 
   useEffect(() => {
     void load();
