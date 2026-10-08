@@ -224,7 +224,11 @@ export async function verifyWorkspaceContract({ origin, data }) {
     const machines=await request(endpoint(first,'/machines'),scoped(first)); expectStatus(machines,200,'empty machine catalog'); assert.deepEqual(machines.data,{machines:[],latestDaemonVersion:null,latestComputerVersion:null});
   });
   await check('unsupported commands and wrong methods never claim success', async () => {
-    for(const route of ['/api/channels','/internal/agent-api/server','/daemon/unsupported','/socket.io/']) { const result=await request(route,scoped(first)); assert.ok(result.status>=400, 'unsupported surface cannot return successful placeholder'); }
+    // M3 now exposes the system channels M2 already created. They must be
+    // read from those rows, not hidden behind the old unsupported assertion.
+    const channels=await request('/api/channels',scoped(first)); expectStatus(channels,200,'M3 reads M2 system channels');
+    assert.deepEqual(channels.data.map(channel=>channel.systemKind).sort(),['all','announcement']);
+    for(const route of ['/internal/agent-api/server','/daemon/unsupported','/socket.io/']) { const result=await request(route,scoped(first)); assert.ok(result.status>=400, 'unsupported or wrong-principal surface cannot return successful placeholder'); }
     const wrong=await request(endpoint(first,'/settings'),scoped(first,a,{method:'PATCH',body:{name:'not-a-profile-endpoint'}})); expectStatus(wrong,405,'settings is read-only'); assert.match(wrong.headers.get('allow')??'',/GET/);
   });
   await check('concurrent same-slug creation has only one winner and complete ownership', async () => {

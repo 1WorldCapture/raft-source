@@ -89,8 +89,14 @@ func userID(r *http.Request) string {
 	return v
 }
 
-// RequireVerified adds the email-verification gate (403 like the legacy chain).
+// RequireVerified mirrors the TS function with this name: email verification
+// is followed by account-global identity setup, not just the email check.
 func (g *AuthGate) RequireVerified(next http.HandlerFunc) http.HandlerFunc {
+	return g.RequireVerifiedProfileComplete(next)
+}
+
+// RequireVerifiedProfileComplete preserves both gates from the legacy chain.
+func (g *AuthGate) RequireVerifiedProfileComplete(next http.HandlerFunc) http.HandlerFunc {
 	return g.Require(func(w http.ResponseWriter, r *http.Request) {
 		user, ok := requestUser(g.Users, w, r, userID(r))
 		if !ok {
@@ -98,17 +104,6 @@ func (g *AuthGate) RequireVerified(next http.HandlerFunc) http.HandlerFunc {
 		}
 		if !user.EmailVerified {
 			writeError(w, http.StatusForbidden, "Email verification required")
-			return
-		}
-		next(w, r)
-	})
-}
-
-// RequireProfileComplete adds the identity-setup gate.
-func (g *AuthGate) RequireVerifiedProfileComplete(next http.HandlerFunc) http.HandlerFunc {
-	return g.RequireVerified(func(w http.ResponseWriter, r *http.Request) {
-		user, ok := requestUser(g.Users, w, r, userID(r))
-		if !ok {
 			return
 		}
 		if user.NeedsIdentitySetup() {

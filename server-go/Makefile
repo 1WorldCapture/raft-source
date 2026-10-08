@@ -1,5 +1,6 @@
 GO ?= go
 NODE ?= node
+BUILD_TIME ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 
 .PHONY: check fmt-check vet test race test-reference test-http build cross-build vuln
 
@@ -25,7 +26,7 @@ test-http:
 	$(NODE) tests/acceptance/run.mjs
 
 build:
-	CGO_ENABLED=0 $(GO) build -o bin/raft-server ./cmd/raft-server
+	CGO_ENABLED=0 $(GO) build -ldflags "-X raft.local/server-go/internal/platform/buildinfo.BuildTime=$(BUILD_TIME)" -o bin/raft-server ./cmd/raft-server
 
 # Compilation evidence only; not a claim of runtime testing on these systems.
 cross-build:

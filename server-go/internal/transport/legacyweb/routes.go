@@ -22,6 +22,10 @@ type Deps struct {
 	Avatars  *AvatarHandlers
 	Logger   interface{ Info(string, ...any) } // satisfied by *slog.Logger via adapter below
 
+	// RegisterAdditional assembles explicit phase-specific surfaces once at
+	// startup. It never forwards missing endpoints to a second backend.
+	RegisterAdditional func(*http.ServeMux, *AuthGate)
+
 	AuthRatePerMinute         int
 	LoginAccountRatePerMinute int
 	RegisterRatePerHour       int
@@ -122,8 +126,17 @@ func New(deps Deps) http.Handler {
 	// literal "/api/servers/order" outranks "/api/servers/{id}".
 	mux.Handle("GET /api/servers", gate(servers.List))
 	mux.Handle("POST /api/servers", gate(servers.Create))
+	// Original Computer ServersClient requests this exact trailing-slash
+	// path. An exact {$} alias avoids both redirects and wildcard ID capture.
+	mux.Handle("GET /api/servers/{$}", gate(servers.List))
+	mux.Handle("POST /api/servers/{$}", gate(servers.Create))
+	mux.Handle("/api/servers/{$}", gate(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Allow", "GET, POST")
+		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+	}))
 	mux.Handle("GET /api/servers/order", gate(servers.GetOrder))
 	mux.Handle("PATCH /api/servers/order", gate(servers.UpdateOrder))
+	registerReservedWorkspaceRoutes(mux, gate)
 
 	// Workspace-scoped routes: X-Server-Id must match the URL id and the
 	// caller must be a real member; management surfaces additionally deny
@@ -147,6 +160,10 @@ func New(deps Deps) http.Handler {
 
 	mux.HandleFunc("GET /api/avatars/users/{file}", deps.Avatars.Serve)
 	mux.HandleFunc("GET /api/avatars/servers/{file}", deps.Avatars.ServeServer)
+
+	if deps.RegisterAdditional != nil {
+		deps.RegisterAdditional(mux, h.Gate)
+	}
 
 	// Explicitly unsupported surfaces (no fake success).
 	mux.HandleFunc("/socket.io/", notImplemented("Socket.IO realtime transport is not implemented in the account phase"))

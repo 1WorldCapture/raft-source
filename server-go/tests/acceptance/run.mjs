@@ -12,12 +12,25 @@ import { verifyProcessLifecycle } from './process-lifecycle.mjs';
 import { verifyWorkspaceContract } from './workspaces-contract.mjs';
 import { verifyWorkspaceLifecycle } from './workspaces-lifecycle.mjs';
 import { verifyM1WorkspaceUpgrade } from './workspaces-upgrade.mjs';
+import { verifyBuildIdentity } from './build-identity.mjs';
+import { verifyM2ToM3Upgrade } from './m2-to-m3-upgrade.mjs';
+import { verifyM3ComputerAdmission } from './m3-computer-admission.mjs';
+import { verifyM3DaemonWire } from './m3-daemon-wire.mjs';
+import { verifyM3AgentIdentity } from './m3-agent-identity.mjs';
+import { verifyM3Channels } from './m3-channels.mjs';
+import { verifyM3Persistence } from './m3-persistence.mjs';
+import { verifyOriginalClients } from './original-clients.mjs';
+import { verifyM3CreationReadModels } from './m3-creation-read-models.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '../..');
 const dir = await mkdtemp(path.join(tmpdir(), 'raft-go-http-'));
 let child;
 let logs = '';
+const selectedSuite = process.env.RAFT_GO_TEST_SUITE ?? 'all';
+if (!['all', 'computer', 'daemon', 'agents', 'channels', 'persistence', 'upgrade', 'original-clients', 'creation-read-models'].includes(selectedSuite)) {
+  throw new Error('Unknown RAFT_GO_TEST_SUITE; use all/computer/daemon/agents/channels/persistence/upgrade/original-clients/creation-read-models');
+}
 
 // Every subprocess has a deadline and is reaped before temporary data removal.
 function capture(program, args, { timeout = 120000, env = process.env, cwd = root, inherit = false } = {}) {
@@ -101,6 +114,8 @@ try {
     throw new Error('Server readiness timed out');
   };
   await start();
+  await verifyBuildIdentity({ origin, capture, executable, env });
+  if (selectedSuite === 'all') {
   await command(process.execPath, [path.join(here, 'http-contract.mjs')], {
     env: { ...process.env, RAFT_GO_TEST_URL: origin, RAFT_GO_TEST_MAILDIR: path.join(data, 'outbox') },
   });
@@ -108,12 +123,46 @@ try {
   const workspaceFixture = await verifyWorkspaceContract({ origin, data });
   await verifyWorkspaceLifecycle({ origin, data, start, stop, fixture: workspaceFixture });
   await verifyM1WorkspaceUpgrade({ origin, env, start, stop, capture });
+  }
+  // Each suite starts a fresh process (same private DB) so deliberately
+  // exercised public rate limits do not bleed into an unrelated suite.
+  // M3 bootstrap tests use the explicit opt-in policy, not a fake default.
   await stop();
+  env.RAFT_GO_AGENT_BOOTSTRAP_ENABLED = 'true';
+  for (const [name, verify] of [['computer', verifyM3ComputerAdmission], ['daemon', verifyM3DaemonWire], ['agents', verifyM3AgentIdentity], ['channels', verifyM3Channels]]) {
+    if (selectedSuite !== 'all' && selectedSuite !== name) continue;
+    await start();
+    await verify({ origin, data });
+    await stop();
+  }
+  if (selectedSuite === 'all' || selectedSuite === 'creation-read-models') {
+    await start();
+    await verifyM3CreationReadModels({ origin, data });
+    await stop();
+  }
+  if (selectedSuite === 'all' || selectedSuite === 'original-clients') {
+    await start();
+    // These are unmodified Computer/Daemon classes in an isolated process,
+    // not browser E2E. The helper scans credentials before returning output.
+    await verifyOriginalClients({
+      origin, data,
+      capture: ({ text }) => { logs = (logs + text).slice(-1024 * 1024); },
+    });
+    await stop();
+  }
+  if (selectedSuite === 'all' || selectedSuite === 'persistence') {
+    await start();
+    await verifyM3Persistence({ origin, data, start, stop });
+    await stop();
+  }
+  if (selectedSuite === 'all' || selectedSuite === 'upgrade') {
+    await verifyM2ToM3Upgrade({ executable, capture });
+  }
   if (/[?&](verify|reset)=|Bearer\s+[A-Za-z0-9._-]{20,}|eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\./.test(logs)) {
     throw new Error('Server emitted credential-like material to logs');
   }
   console.log('PASS graceful shutdown and credential-safe process output');
-  console.log('Backend HTTP acceptance complete; no Web UI was started or tested.');
+  console.log(`Backend HTTP acceptance (${selectedSuite}) complete; no Web UI was started or tested.`);
 } finally {
   await stop({ strict: false });
   await rm(dir, { recursive: true, force: true });

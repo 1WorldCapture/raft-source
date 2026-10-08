@@ -24,6 +24,12 @@ var ctxScopeMembership ctxScopeMembershipKeyType
 // It must run after the verified+profile-complete auth gates.
 func (h *ServersHandlers) RequireServerScope(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Method-specific /{id} routes must not swallow known user routes
+		// even when called with an unsupported method.
+		if deferredWorkspaceUserRoute(r.PathValue("id")) {
+			deferredWorkspaceUserResponse(w, r)
+			return
+		}
 		header := r.Header.Get("X-Server-Id")
 		if header == "" {
 			writeError(w, http.StatusBadRequest, "Missing X-Server-Id header")

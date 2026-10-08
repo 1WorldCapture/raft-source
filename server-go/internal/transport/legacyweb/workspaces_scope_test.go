@@ -178,8 +178,13 @@ func TestUnchangedHonestSurfaces(t *testing.T) {
 	if res := e.serve("GET", "/api/servers/"+ws+"/labs", nil, scoped(access, ws)); res.status != http.StatusNotFound {
 		t.Fatalf("labs override: %d %s", res.status, res.raw)
 	}
-	// Realtime/agent surfaces remain explicit 501s.
-	for _, path := range []string{"/socket.io/?EIO=4", "/internal/agent-api/server", "/daemon/ping"} {
+	// Agent routes now authenticate a distinct principal in M3. A human
+	// session must not become an Agent credential, even in the M2 fixture.
+	if res := e.serve("GET", "/internal/agent-api/server", nil, bearer(access)); res.status != http.StatusUnauthorized {
+		t.Fatalf("human token on Agent API = %d, want 401: %s", res.status, res.raw)
+	}
+	// Realtime and unsupported daemon routes remain explicit 501s.
+	for _, path := range []string{"/socket.io/?EIO=4", "/daemon/ping"} {
 		if res := e.serve("GET", path, nil, bearer(access)); res.status != http.StatusNotImplemented {
 			t.Fatalf("%s = %d, want 501", path, res.status)
 		}

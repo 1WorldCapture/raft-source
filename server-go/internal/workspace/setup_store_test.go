@@ -138,11 +138,11 @@ func setupSeedOfficialCindy(t *testing.T, handle *sql.DB, workspaceID, agentID, 
 	}
 }
 
-func withProbe(t *testing.T, fn func(ctx context.Context, machineID string) (bool, error)) {
+func withProbe(t *testing.T, store *Store, fn func(ctx context.Context, machineID string) (bool, error)) {
 	t.Helper()
-	prev := machineStatusProbe
-	machineStatusProbe = fn
-	t.Cleanup(func() { machineStatusProbe = prev })
+	prev := store.machineStatusProbe
+	store.machineStatusProbe = fn
+	t.Cleanup(func() { store.machineStatusProbe = prev })
 }
 
 func mustDomainCode(t *testing.T, err error) string {
@@ -328,7 +328,7 @@ func TestSetupProjectionOnlineComputerWithRuntimes(t *testing.T) {
 	setupSeedComputer(t, handle, "ws", "computer-1", "machine-1", false)
 	store, _ := newSetupStore(t, handle)
 
-	withProbe(t, func(context.Context, string) (bool, error) { return true, nil })
+	withProbe(t, store, func(context.Context, string) (bool, error) { return true, nil })
 	proj, err := store.GetSetupProjection(context.Background(), "ws", "owner")
 	if err != nil {
 		t.Fatal(err)

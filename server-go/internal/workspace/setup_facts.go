@@ -8,7 +8,7 @@
 //
 // Fact reads NEVER mutate setup state: no auto-complete, no messages, no
 // agent creation (design doc 10.1). The one deliberate Go deviation is the
-// machine-status source, documented on machineStatusProbe below.
+// machine-status source, injected per Store (never a mutable global).
 package workspace
 
 import (
@@ -28,13 +28,14 @@ import (
 // question this build cannot ask (design 2.2: never fabricate online state).
 var errNoLiveMachineConnection = errors.New("no live machine connection layer in M2")
 
-// machineStatusProbe reports whether a machine currently holds a live daemon
-// connection (TS AgentOrchestrator.getMachineStatus). Returning an error maps
-// to status "unknown", exactly like the TS catch branch. The default probe
-// always errors; M3 replaces it with the real presence layer and tests
-// override it to exercise online branches.
-var machineStatusProbe = func(ctx context.Context, machineID string) (online bool, err error) {
-	return false, errNoLiveMachineConnection
+// probeMachineStatus returns unknown without a connection layer (M2), or
+// asks the instance-local M3 presence provider. Multiple servers/tests sharing
+// a process must never overwrite each other's view of live machines.
+func (s *Store) probeMachineStatus(ctx context.Context, machineID string) (bool, error) {
+	if s.machineStatusProbe == nil {
+		return false, errNoLiveMachineConnection
+	}
+	return s.machineStatusProbe(ctx, machineID)
 }
 
 // isoMillis renders a millisecond-precision UTC ISO-8601 timestamp, the
@@ -239,7 +240,7 @@ func (s *Store) ResolveSetupLiveFacts(ctx context.Context, q executor, workspace
 			return facts, fmt.Errorf("scan machine: %w", err)
 		}
 		runtimesByID[row.ID] = row.Runtimes
-		online, probeErr := machineStatusProbe(ctx, row.ID)
+		online, probeErr := s.probeMachineStatus(ctx, row.ID)
 		machines = append(machines, machineStatus{id: row.ID, online: online && probeErr == nil, known: probeErr == nil})
 	}
 	if err := machineRows.Err(); err != nil {

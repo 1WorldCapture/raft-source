@@ -57,6 +57,10 @@ type statusRecorder struct {
 	status int
 }
 
+// Unwrap lets http.ResponseController and WebSocket libraries reach the
+// underlying Hijacker/Flusher without bypassing the request logging chain.
+func (r *statusRecorder) Unwrap() http.ResponseWriter { return r.ResponseWriter }
+
 func (r *statusRecorder) WriteHeader(code int) {
 	r.status = code
 	r.ResponseWriter.WriteHeader(code)

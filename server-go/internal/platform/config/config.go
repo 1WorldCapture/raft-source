@@ -57,6 +57,9 @@ type Config struct {
 	// (design §1.3, C0). Flags default to false — a missing flag is disabled.
 	WorkspacePolicy WorkspacePolicySettings
 
+	// Computer controls device-user login and the separate Agent bootstrap grant.
+	Computer ComputerSettings
+
 	// MaxAvatarBytes caps uploaded avatar decoding (matches legacy 5MB).
 	MaxAvatarBytes int64
 	// MaxAvatarSidePixels caps decoded image dimensions (decompression guard).
@@ -126,6 +129,7 @@ func Load(env LookupFunc, dataDirDefault string, jwtSecretFile string) (*Config,
 		DataDir:             get("DATA_DIR"),
 		WebOrigin:           nil,
 		MailMode:            MailModeOutbox,
+		Computer:            readComputerSettings(get),
 		AccessTokenTTL:      15 * time.Minute,
 		RefreshTokenTTL:     30 * 24 * time.Hour,
 		RefreshReplayGrace:  10 * time.Second,

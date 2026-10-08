@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"raft.local/server-go/internal/auth"
@@ -23,11 +24,14 @@ import (
 
 // App is the assembled server.
 type App struct {
-	Config   *config.Config
-	DB       *sql.DB
-	Handler  http.Handler
-	sessions *auth.SessionService
-	mailer   mail.Mailer
+	Config    *config.Config
+	DB        *sql.DB
+	Handler   http.Handler
+	sessions  *auth.SessionService
+	mailer    mail.Mailer
+	execution *m3Runtime
+	closeOnce sync.Once
+	closeErr  error
 }
 
 // Options are the assembly inputs.
@@ -80,11 +84,26 @@ func Build(opts Options) (*App, error) {
 	users := legacyweb.UserLookup(store.UserByID)
 	gate := &legacyweb.AuthGate{Signer: signer, Sessions: sessions, Users: users}
 
+	execution, err := buildM3(handle, cfg, sessions, signer, logger)
+	if err != nil {
+		_ = handle.Close()
+		return nil, err
+	}
+	assembled := false
+	defer func() {
+		if !assembled {
+			_ = execution.Close()
+		}
+	}()
+
 	// The workspace domain runs on one injected clock and the frozen local
 	// policy vector (C0: unconfigured flags read as disabled).
 	wsClock := clock.Real{}
 	workspaceStore := workspace.NewStoreWithOptions(handle, workspace.Options{
-		Clock: wsClock,
+		Clock:              wsClock,
+		MachineStatusProbe: execution.probe,
+		MachineMetadata:    execution.metadata,
+		OnComputerRevoked:  execution.machines.Disconnect,
 		Policy: workspace.Policy{
 			OnboardingOpenerV2:      cfg.WorkspacePolicy.OnboardingOpenerV2,
 			OnboardingOwnerWizardV0: cfg.WorkspacePolicy.OnboardingOwnerWizardV0,
@@ -103,6 +122,11 @@ func Build(opts Options) (*App, error) {
 		logger.Warn("workspace data requires explicit operator review", "code", issue.Code, "workspace_id", issue.WorkspaceID)
 	}
 
+	serversHandlers := &legacyweb.ServersHandlers{
+		Store: workspaceStore, Now: wsClock.Now,
+		AvatarDir:      filepath.Join(cfg.DataDir, "avatars"),
+		MaxAvatarBytes: cfg.MaxAvatarBytes, MaxAvatarSide: cfg.MaxAvatarSidePixels,
+	}
 	handler := legacyweb.New(legacyweb.Deps{
 		Handlers: &legacyweb.Handlers{
 			Auth:     service,
@@ -111,12 +135,9 @@ func Build(opts Options) (*App, error) {
 			Users:    users,
 			Gate:     gate,
 		},
-		Servers: &legacyweb.ServersHandlers{
-			Store:          workspaceStore,
-			Now:            wsClock.Now,
-			AvatarDir:      filepath.Join(cfg.DataDir, "avatars"),
-			MaxAvatarBytes: cfg.MaxAvatarBytes,
-			MaxAvatarSide:  cfg.MaxAvatarSidePixels,
+		Servers: serversHandlers,
+		RegisterAdditional: func(mux *http.ServeMux, gate *legacyweb.AuthGate) {
+			execution.register(mux, gate, serversHandlers)
 		},
 		Avatars: &legacyweb.AvatarHandlers{
 			Dir:      filepath.Join(cfg.DataDir, "avatars"),
@@ -133,7 +154,8 @@ func Build(opts Options) (*App, error) {
 
 	wrapped := legacyweb.RequestID(logger)(legacyweb.SecurityHeaders(handler))
 
-	return &App{Config: cfg, DB: handle, Handler: wrapped, sessions: sessions, mailer: mailer}, nil
+	assembled = true
+	return &App{Config: cfg, DB: handle, Handler: wrapped, sessions: sessions, mailer: mailer, execution: execution}, nil
 }
 
 // mailAdapter bridges the platform mailer to the auth MailSender.
@@ -206,5 +228,14 @@ func (a *App) StartJanitor(ctx context.Context, logger *slog.Logger) func() {
 	return func() { cancel(); <-done }
 }
 
-// Close releases resources.
-func (a *App) Close() error { return a.DB.Close() }
+// Close joins the control plane before releasing its shared SQLite handle.
+// Concurrent callers observe the same completed shutdown.
+func (a *App) Close() error {
+	a.closeOnce.Do(func() {
+		if a.execution != nil {
+			a.closeErr = a.execution.Close()
+		}
+		a.closeErr = errors.Join(a.closeErr, a.DB.Close())
+	})
+	return a.closeErr
+}

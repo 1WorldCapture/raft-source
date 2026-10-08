@@ -19,12 +19,20 @@ import (
 	"time"
 
 	"raft.local/server-go/internal/app"
+	"raft.local/server-go/internal/platform/buildinfo"
 	"raft.local/server-go/internal/platform/config"
 	"raft.local/server-go/internal/platform/mail"
 )
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	if len(os.Args) > 1 && (os.Args[1] == "version" || os.Args[1] == "--version" || os.Args[1] == "-version") {
+		if err := buildinfo.Write(os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, "version:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "mailbox" {
 		if err := runMailbox(os.Args[2:], os.Stdout); err != nil {
 			fmt.Fprintln(os.Stderr, "mailbox:", err)
@@ -71,10 +79,11 @@ func run(logger *slog.Logger) error {
 	root := http.NewServeMux()
 	root.HandleFunc("GET /healthz", built.LivenessHandler())
 	root.HandleFunc("GET /readyz", built.ReadinessHandler())
+	root.HandleFunc("GET /version", buildinfo.Handler)
 	root.Handle("/", built.Handler)
 
 	server := &http.Server{
-		Handler:           root,
+		Handler:           buildinfo.Headers(root),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      60 * time.Second,
@@ -94,6 +103,7 @@ func run(logger *slog.Logger) error {
 		"data_dir", cfg.DataDir,
 		"mail_mode", cfg.MailMode,
 		"web_origin", webOriginString(cfg),
+		"build", buildinfo.Current(),
 	)
 
 	select {

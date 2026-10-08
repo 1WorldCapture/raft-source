@@ -37,7 +37,7 @@ func TestRoutePolicy(t *testing.T) {
 		// M2 server paths run the account gates before method policy.
 		{"PUT", "/api/servers", http.StatusUnauthorized},
 		{"GET", "/socket.io/?EIO=4&transport=polling", http.StatusNotImplemented},
-		{"POST", "/internal/agent-api/anything", http.StatusNotImplemented},
+		{"POST", "/internal/agent-api/anything", http.StatusUnauthorized},
 		{"GET", "/daemon/v1/nothing", http.StatusNotImplemented},
 		{"POST", "/api/auth/accept-invite", http.StatusNotImplemented},
 		{"GET", "/api/feature-flags", http.StatusNotFound},

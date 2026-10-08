@@ -215,6 +215,7 @@ type SetupResetResult struct {
 // nothing else is touched — no member, channel or profile deletion.
 func (s *Store) ResetSetup(ctx context.Context, workspaceID, userID string) (SetupResetResult, error) {
 	result := SetupResetResult{}
+	var revokedMachines []string
 	err := s.withTx(ctx, func(tx *sql.Tx) error {
 		var ownerID string
 		var onboardingAgentID sql.NullString
@@ -249,6 +250,37 @@ func (s *Store) ResetSetup(ctx context.Context, workspaceID, userID string) (Set
 			return &DomainError{Code: CodeServerAlreadySetUp, Message: "This server has had an onboarding agent; setup cannot be rolled back"}
 		}
 
+		if s.onComputerRevoked != nil {
+			// Capture exactly the live attachments being revoked, not every
+			// machine in the workspace. Disconnect only after commit, and do
+			// not let a corrupt foreign binding affect another workspace.
+			rows, err := tx.QueryContext(ctx, `
+				SELECT DISTINCT c.machine_id
+				FROM computers c JOIN machines m
+				  ON m.id = c.machine_id AND m.workspace_id = c.workspace_id
+				WHERE c.workspace_id = ? AND c.revoked_at IS NULL
+				ORDER BY c.machine_id`, workspaceID)
+			if err != nil {
+				return fmt.Errorf("read reset computer bindings: %w", err)
+			}
+			for rows.Next() {
+				var machineID string
+				if err := rows.Scan(&machineID); err != nil {
+					_ = rows.Close()
+					return fmt.Errorf("read reset machine id: %w", err)
+				}
+				revokedMachines = append(revokedMachines, machineID)
+			}
+			readErr := rows.Err()
+			closeErr := rows.Close()
+			if readErr != nil {
+				return fmt.Errorf("read reset machines: %w", readErr)
+			}
+			if closeErr != nil {
+				return fmt.Errorf("close reset machines: %w", closeErr)
+			}
+		}
+
 		revokedAt := s.now().UnixMilli()
 		res, err := tx.ExecContext(ctx, `
 			UPDATE computers SET revoked_at = ?
@@ -274,6 +306,9 @@ func (s *Store) ResetSetup(ctx context.Context, workspaceID, userID string) (Set
 	})
 	if err != nil {
 		return SetupResetResult{}, err
+	}
+	for _, machineID := range revokedMachines {
+		s.onComputerRevoked(machineID)
 	}
 	projection, err := s.GetSetupProjection(ctx, workspaceID, userID)
 	if err != nil {

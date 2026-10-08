@@ -21,17 +21,29 @@ type executor interface {
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
-// Options injects the clock and the frozen feature policy.
+// MachineStatusProbe reports live connection state. It must be a bounded
+// local read, not a network call: setup may ask while holding a read snapshot.
+type MachineStatusProbe func(context.Context, string) (bool, error)
+
+// Options injects the clock, feature policy and this instance's live presence.
 type Options struct {
-	Clock  clock.Clock
-	Policy Policy
+	Clock              clock.Clock
+	Policy             Policy
+	MachineStatusProbe MachineStatusProbe
+	MachineMetadata    MachineMetadataProbe
+	// OnComputerRevoked retires an established machine connection after a
+	// setup reset commits. Never called while holding the SQLite transaction.
+	OnComputerRevoked func(machineID string)
 }
 
 // Store reads and writes workspace tables.
 type Store struct {
-	db     *sql.DB
-	clock  clock.Clock
-	policy Policy
+	db                 *sql.DB
+	clock              clock.Clock
+	policy             Policy
+	machineStatusProbe MachineStatusProbe
+	machineMetadata    MachineMetadataProbe
+	onComputerRevoked  func(string)
 }
 
 // NewStore wraps the database with the real clock and the C0 policy (all
@@ -43,7 +55,11 @@ func NewStore(db *sql.DB) *Store {
 
 // NewStoreWithOptions wraps the database with an injected clock and policy.
 func NewStoreWithOptions(db *sql.DB, opts Options) *Store {
-	s := &Store{db: db, policy: opts.Policy}
+	s := &Store{
+		db: db, policy: opts.Policy,
+		machineStatusProbe: opts.MachineStatusProbe, machineMetadata: opts.MachineMetadata,
+		onComputerRevoked: opts.OnComputerRevoked,
+	}
 	s.clock = opts.Clock
 	if s.clock == nil {
 		s.clock = clock.Real{}

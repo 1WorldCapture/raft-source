@@ -157,7 +157,16 @@ func (s *Store) ListMachines(ctx context.Context, workspaceID, userID string) ([
 			// loudly instead of silently reporting "no machines".
 			return nil, fmt.Errorf("machine %s has unparseable runtimes: %w", row.ID, err)
 		}
-		machines = append(machines, s.machineReadModel(row, links, creators, agentCounts, userID))
+		model := s.machineReadModel(row, links, creators, agentCounts, userID)
+		if err := s.applyLiveMachinePresence(ctx, row, model); err != nil {
+			return nil, err
+		}
+		if model["status"] == ComputerStateOnline {
+			if err := s.applyLiveMachineMetadata(ctx, row, model); err != nil {
+				return nil, err
+			}
+		}
+		machines = append(machines, model)
 	}
 	return machines, nil
 }
@@ -170,11 +179,14 @@ func (s *Store) machineReadModel(row machineDirectoryRow,
 
 	// runtimes: persisted JSON array; NULL = not reported → [] on the wire
 	// (TS machine.runtimes || []). ListMachines validated the JSON already.
-	var runtimes []string
+	runtimes := []string{}
 	if row.Runtimes != nil {
 		if err := json.Unmarshal(row.Runtimes, &runtimes); err != nil {
 			runtimes = []string{}
 		}
+	}
+	if runtimes == nil {
+		runtimes = []string{}
 	}
 
 	var lastHeartbeat any

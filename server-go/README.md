@@ -1,13 +1,14 @@
-# Raft Go Server — 账号与工作空间后端（M1 + M2）
+# Raft Go Server — 账号、工作空间与执行接入后端（M1 + M2 + M3）
 
 在 `raft-source/server-go/` 中独立重建的 Go Server。旧 TypeScript Server 仅作为协议与行为参考，不参与运行。
 
-**当前交付：M1 账号能力与 M2 工作空间后端已实现，并通过 `make check`。本次未运行或验收原 Web 浏览器界面。** 新 owner 创建真实工作空间后，保持原 `onboarding-setup-v2` 的 Computer 初始化门禁；不会伪造 Agent 或标记完成。Computer/Agent 接入、完整频道与消息、Socket.IO、CLI/Daemon 协议仍属后续阶段。
+**当前阶段：M3 频道、Agent 身份与生命周期、Computer 接入和 Daemon 协议已接入同一 Go 进程。后端验收及交接记录见 [M3 交接文档](docs/phase-3-backend-handoff.md)。本次不运行或验收 Web UI 端到端测试。** M1/M2 账号与工作空间能力保持兼容；新 owner 仍使用原 `onboarding-setup-v2` 门禁，真实 Agent 创建与官方 Cindy 身份由同一 SQLite 事务保存。聊天消息、Socket.IO 和可靠投递仍属于 M4/M5，不使用假成功绕过。
 
 - [整体架构与阶段设计](docs/architecture-and-phase-1.md)
 - [M1 后端验收记录及联调交接](docs/backend-handoff.md)
 - [M2 实施、验收证据、兼容差异及联调交接](docs/phase-2-backend-handoff.md)
 - [M2 输入设计（保留原稿）](docs/phase-2-workspaces.md)
+- [M3 实施结果、后端验收、升级与 UI 测试交接](docs/phase-3-backend-handoff.md)
 - [现有 Web 账号协议参考](contracts/legacyweb/account-entry.md)
 
 ## 启动：不需要 PostgreSQL、Redis、Docker 或系统 SQLite
@@ -17,18 +18,19 @@
 ```sh
 cd /Users/lyon/workspace/raft-source/server-go
 # 首次试用使用独立目录；不要未经备份直接升级原 var/。
-export RAFT_GO_DATA_DIR="$PWD/var-m2-dev"
+export RAFT_GO_DATA_DIR="$PWD/var-m3-dev"
 export RAFT_GO_WEB_ORIGIN=http://127.0.0.1:5175
 go run ./cmd/raft-server
 ```
 
-`RAFT_GO_WEB_ORIGIN` 请换成 UI 协作者实际使用的前端 origin。它用于生成验证/重置邮件链接，**不是启动 Web UI 的开关，也不会配置浏览器 CORS**。后端本身不提供前端页面；联调优先使用前端同源代理。
+`RAFT_GO_WEB_ORIGIN` 请换成 UI 协作者实际使用的前端 origin。它用于生成验证/重置邮件链接、设备授权页面链接及 Agent 控制平面地址，**不是启动 Web UI 的开关，也不会配置浏览器 CORS**。后端本身不提供前端页面；同源代理需要一起转发 `/api`、`/internal` 和支持 WebSocket upgrade 的 `/daemon`。
 
 默认监听 `127.0.0.1:4301`，数据存入当前工作目录的 `var/`。首次启动自动执行嵌入的 SQLite migration，生成并持久化独立签名密钥。Go 语言基线是 1.26；本次实际测试工具链为 `go1.27.1 darwin/arm64`。
 
 ```sh
 curl -i http://127.0.0.1:4301/healthz
 curl -i http://127.0.0.1:4301/readyz
+curl -i http://127.0.0.1:4301/version  # stage=m3；核对实际运行的构建
 ```
 
 `/healthz` 表示进程存活；`/readyz` 检查数据库和 migration，不声称 SMTP 可投递或完整聊天系统已经就绪。
@@ -40,7 +42,7 @@ make build
 RAFT_GO_WEB_ORIGIN=http://127.0.0.1:5175 ./bin/raft-server
 ```
 
-`make build` 使用 `CGO_ENABLED=0`。测试工具与运行依赖分开：HTTP 验收及 TS 纯投影对照需要 Node，本次实测 `v26.3.0`；对照脚本使用内置 `node:module.stripTypeScriptTypes`。竞态检测需要对应平台支持的 race 工具链。
+`make build` 使用 `CGO_ENABLED=0`。部署后的 Go Server 不需要 Node。测试工具与运行依赖分开：HTTP 验收及 TS 纯投影对照需要 Node；原版 Computer/Daemon 客户端兼容测试还需要仓库已有的 `node_modules/.bin/tsx` 及相应客户端依赖。对照脚本使用内置 `node:module.stripTypeScriptTypes`。竞态检测需要对应平台支持的 race 工具链。
 
 ## 本地开发邮件
 
@@ -76,7 +78,9 @@ SMTP/Mailpit 是可选项，不是启动依赖。远程 SMTP 必须提供 STARTT
 | `RAFT_GO_REFRESH_TTL` | `720h` | 刷新会话期限 |
 | `RAFT_GO_REFRESH_REPLAY_GRACE` | `10s` | 同一旧 refresh token 可恢复同一 successor 的宽限期 |
 | `RAFT_GO_ARGON2_MEMORY_KIB` / `ITERATIONS` / `PARALLELISM` / `MAX_CONCURRENCY` | `65536 / 3 / 1 / 4` | 密码成本和哈希并发上限；较高参数需要相应内存预算 |
-| `RAFT_GO_POLICY_ONBOARDING_OPENER_V2` | `0` | `1` 时创建私有 #all 及 owner 私有引导频道；不启用 Agent 投递 |
+| `RAFT_GO_DEVICE_LOGIN_ENABLED` | 启用 | `0` / `false` / `no` / `off` 关闭设备登录及相应新凭据签发表面；既有凭据管理按各路由契约处理 |
+| `RAFT_GO_AGENT_BOOTSTRAP_ENABLED` | 关闭 | 仅显式 `true` 启用一次性 Agent bootstrap token 签发与交换 |
+| `RAFT_GO_POLICY_ONBOARDING_OPENER_V2` | `0` | `1` 时创建私有 #all 及 owner 私有引导频道；不启用消息投递 |
 | `RAFT_GO_POLICY_ONBOARDING_OWNER_WIZARD_V0` | `0` | 旧 wizard 偏好投影开关，不改变新 setup 的 blocksChat |
 | `RAFT_GO_POLICY_FEEDBACK_ENABLED` | `0` | M2 无反馈服务，设置为 `1` 会明确拒绝启动 |
 
@@ -93,7 +97,12 @@ SMTP/Mailpit 是可选项，不是启动依赖。远程 SMTP 必须提供 STARTT
 - 找回与重置密码、登录后改密；一次性 token 消费和所有 session 撤销在事务内执行。
 - 工作空间创建、成员资格列表、详情、账号级排序与版本；创建事务同时保存显式 owner、setup 初始状态、成员偏好、协议审计、#all/#announcement，按 opener 配置创建私有引导频道。
 - owner/admin 名称、头像、hideHumansFromMembers 管理；成员目录与邮箱隐私；聚合设置、旧 onboarding 设置及个人偏好写入。
-- 完整 setup 投影、start/complete/reset/handoff 命令及首次 handoff/session-family 事实；真实最小机器目录和完整侧栏偏好读取。没有接入 writer 时，不制造在线机器、官方 Agent 或已发送 briefing。
+- 完整 setup 投影、start/complete/reset/handoff 命令及首次 handoff/session-family 事实；机器目录来自真实持久数据与当前 WebSocket 连接。官方 Cindy 创建、角色与 setup checkpoint 原子提交；不会声称已发送 briefing。
+- 公共/私有频道的创建、列表、详情、成员与角色、加入/退出、归档、删除及系统频道保护；不伪造消息历史、未读或 Socket.IO 事件。
+- 外部与托管 Agent 创建、列表/详情/设置、机器分配、头像、官方身份收养；`sk_agent_*` 凭据签发/列表/撤销、一次性 bootstrap 及 CLI 身份、空间与频道成员读取。
+- Computer 设备码授权、用户批准/拒绝、一次性会话交换、attach、preflight；legacy machine 注册、编辑、删除和密钥轮换。用户、Computer、machine 与 Agent 凭据不互相冒充。
+- 原始 `/daemon/connect` WebSocket、首帧 `machine:context`、ready/心跳、在线目录、替换重连、撤销与停机；真实 `agent:start`/stop/reset/purge 派发，以及托管 Runner 的凭据签发与撤销。
+- 创建表单所需的运行时选择、form definition、实时模型目录与 rescan；结果来自该机器的关联回复，离线或不支持时返回明确错误，不伪造模型可用性。
 
 HTTP 形状：注册/登录返回 `{user, accessToken, refreshToken}`；`GET /api/auth/me` 返回 User 本身；`GET /api/servers` 返回数组；forgot/reset 的 `ok` 是 JSON 布尔值。日期输出为 UTC 毫秒 ISO 字符串。详细接口和边界见交接文档。
 
@@ -123,7 +132,7 @@ go mod verify
 go mod tidy -diff  # 只检查依赖整理差异，不改 go.mod/go.sum
 ```
 
-HTTP runner 在系统临时目录构建并运行新二进制，使用临时 SQLite/独立密钥/outbox，执行 M1 的 10 组和 M2 的 18 组 HTTP 验收、真实进程重启、密钥恢复、完整冷备份恢复，以及仅应用原 0001/0002 的 M1 数据库升级后真实登录/验证/空间读取；退出后清理自己的进程和临时文件。另有 1,216 组直接执行冻结 TS 原函数的纯投影对照，不代表完整 PostgreSQL/TS HTTP 对照已完成。**不启动 Vite、浏览器、旧 TS Server，也不修改已有 UI 测试或其结果。**
+HTTP runner 在系统临时目录构建并运行新二进制，使用临时 SQLite/独立密钥/outbox。它保留 M1/M2 验收，并增加 M3 Computer、Daemon、Agent、频道与跨进程持久化；升级测试先构建冻结的、已提交的 M2 程序，生成真实旧数据后交给 M3 升级，并验证旧程序对新 schema 拒绝启动。原版 Computer/Daemon 客户端通过直连及隔离的同源代理访问 Go。所有测试只清理自己的进程与临时目录。另有冻结 TS 原函数的纯投影对照，不代表完整 PostgreSQL/TS HTTP 对照。**不启动 Vite、浏览器、旧 TS Server 或真实 LLM，也不修改已有 UI 测试结果。**
 
 ## 备份、升级与恢复
 
@@ -131,14 +140,14 @@ HTTP runner 在系统临时目录构建并运行新二进制，使用临时 SQLi
 
 启动自动执行增量 migration。M2 新增 `0003_workspace_foundation.sql`、`0004_workspace_setup.sql`、`0005_workspace_preferences.sql`，不修改 M1 的 0001/0002。membership 只改变未来 INSERT 的默认角色为 member，已有 owner/co-owner 原样保留；旧 owner setup 不被自动标记 complete。启动会记录缺失 owner 关系或无法解释的 onboarding 指针诊断，不会自动补权限或清空指针。遇到未知 schema version 的旧二进制拒绝启动，不自动降级或清空数据。
 
-本次升级证据来自隔离的 M1 数据库；没有替用户升级现有 `var/`。生产升级与恢复操作顺序见 M2 交接文档。
+M3 仅追加 `0006_channel_core.sql`、`0007_computer_admission.sql`、`0008_agent_identity.sql`，不改写 0001–0005。升级证据同时覆盖隔离的 M1 数据库与真实 M2 二进制生成的数据；没有替用户升级现有 `var/`。升级前完整冷备份，回滚使用旧程序与其匹配的旧数据备份，不把旧程序直接指向已升级数据库。
 
 密钥损坏时恢复原密钥，而不是删除密钥文件重新启动；否则原 access token 和加密刷新收据无法正常恢复。密钥与数据库必须配套备份，备份本身含账号和凭据材料。
 
 ## 交付边界
 
-本阶段完成的是**开发环境可独立运行、经过后端验证的账号与工作空间 Server**，不是整套 Raft 上线验收。17 条 M2 路由已实现；Socket.IO、`/internal/*` 和 `/daemon/*` 仍明确未实现，其他未实现的产品读取不使用全局假 200 或空目录掩盖。系统频道真实存在，但完整频道 API、聊天和 Agent 执行不在 M2 中。
+本阶段交付的是**可独立运行的 M3 后端及客户端协议接入**，不是整套 Raft 上线验收。仅注册实际支持的 `/internal/*` 和 `/daemon/connect`；未知内部路由拒绝访问，未实现的已知产品表面明确返回 404/501。M4 消息/历史/未读/Socket.IO、M5 可靠投递/ACK/任务执行闭环不在本次范围。
 
-新空间 owner 的正确终点是 `surface=computer_runtime`、`phase=not_started`、`blocksChat=true`、`runtimeStatus=unknown`。原 Web 创建后实际页面与请求覆盖仍需独立浏览器验收；不能把缺失后续请求或前端降级显示主界面当作成功证据。
+新空间初始仍是 `surface=computer_runtime`、`phase=not_started`、`blocksChat=true`；随后可以接入真实 Computer、创建 Agent 并提交真实 setup checkpoint。创建身份或派发启动命令不等于 LLM 已成功执行，不把缺失后续请求或前端降级显示当作成功证据。
 
-Web UI、原 CLI、Daemon 以及旧 TS 服务端源码本轮均未修改。浏览器交互、外部 SMTP、Linux/Windows 实际运行、公网 TLS/代理限流与生产负载仍由各自阶段验收。
+Web UI、原 CLI、Computer/Daemon 以及旧 TS 服务端源码本轮不修改。UI 端到端测试明确交给测试人员；此外，实际模型供应商、外部 SMTP、Linux/Windows 真机运行、公网 TLS/代理与生产负载未由本轮后端测试替代。
