@@ -3175,7 +3175,11 @@ agentRouter.delete("/:id", async (req, res) => {
     io?.to(`server:${req.serverId}`).emit("agent:deleted", { agentId: req.params.id });
 
     res.json({ ok: true });
-  } catch {
+  } catch (err) {
+    if (err instanceof agentService.PmRoleDeleteBlockedError) {
+      res.status(409).json({ code: "pm_role_delete_blocked", error: err.message });
+      return;
+    }
     res.status(500).json({ error: "Failed to delete agent" });
   }
 });

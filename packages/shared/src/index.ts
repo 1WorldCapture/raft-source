@@ -3070,6 +3070,33 @@ export * from "./taskPermissions.js";
 /** Plan identifiers stored in the database. */
 export type ServerPlan = "free" | "founder" | "partner" | "pro";
 
+// ── Server PM role (Rethink UI phase A) ──
+
+/** Tri-state for the PM setup guide: no PM yet / PM set / guide dismissed. */
+export type ServerPmSetupState = "unset" | "set" | "dismissed";
+
+/** The PM agent as exposed by GET /api/servers/:slug/pm (additive shape). */
+export interface ServerPmAgentSummary {
+  agentId: string;
+  name: string;
+  displayName: string | null;
+  avatarUrl: string | null;
+  status: AgentStatus;
+  runtime: string | null;
+  model: string | null;
+}
+
+/**
+ * Wire shape of GET /api/servers/:slug/pm. `pm` is null when no PM is set OR
+ * when the stored PM points at a soft-deleted agent (read as "not set").
+ * `dmChannelId` locates the caller's existing DM with the PM (null = none yet).
+ */
+export interface ServerPmState {
+  pm: ServerPmAgentSummary | null;
+  dmChannelId: string | null;
+  setup: ServerPmSetupState;
+}
+
 /** Plans shown in the pricing comparison UI (includes coming-soon tiers). */
 export type DisplayPlan = "free" | "pro" | "enterprise";
 
