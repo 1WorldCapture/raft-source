@@ -3,6 +3,7 @@ import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { CURSOR_SDK_RESUME_UNUSABLE_MARKER } from "../cursorSdk/sessionReset.js";
 import {
   hydrateRuntimeConfig,
   runtimeConfigToLaunchFields,
@@ -96,6 +97,13 @@ export class CursorSdkAssetsUnavailableError extends Error {
     this.name = "CursorSdkAssetsUnavailableError";
   }
 }
+
+/** Consecutive run_submit failures (no run created) that make a session suspect. */
+export const CURSOR_SDK_SUBMIT_FAILURE_LIMIT = 3;
+/** The failures must fall inside this window to count as consecutive. */
+export const CURSOR_SDK_SUBMIT_FAILURE_WINDOW_MS = 2 * 60_000;
+/** Submit backoff once a fresh (non-resumed) session hit the limit / twice the limit. */
+export const CURSOR_SDK_SUBMIT_BACKOFF_MS = [60_000, 5 * 60_000] as const;
 
 /**
  * Internal marker: start() was superseded by an explicit stop()/dispose()
@@ -397,6 +405,11 @@ export class CursorSdkRuntimeSession implements RuntimeSession {
    */
   private pendingNullAttempt: SubmittedAttempt | null = null;
   private epoch = 0;
+  /** Consecutive failed run_submits (the host never obtained a run). */
+  private submitFailures = 0;
+  private submitFailuresSinceMs = 0;
+  private submitBackoffUntilMs = 0;
+  private runEverAccepted = false;
   private exitInfo: RuntimeExitInfo | null = null;
   private stopReason: string | undefined;
   private shutdownSettled: { outcome: "clean" | "deadline" | "forced" } | null = null;
@@ -710,6 +723,11 @@ export class CursorSdkRuntimeSession implements RuntimeSession {
     }
     const attemptId =
       typeof input.attemptId === "string" && input.attemptId.length > 0 ? input.attemptId : null;
+    if (!this.currentRun && this.nowMs() < this.submitBackoffUntilMs) {
+      // Repeated immediate submit failures: stop hammering the SDK every
+      // retry tick; the APM keeps the message pending and retries later.
+      return { ok: false, reason: "busy_rejected" };
+    }
     if (this.currentRun) {
       // A run is active or its ACK settlement is pending: every follow-up is
       // a steer. No adapter follow-up queue — the APM owns rescheduling.
@@ -913,6 +931,7 @@ export class CursorSdkRuntimeSession implements RuntimeSession {
       // Suppress further busy steering for this run until true idle.
       run!.steeringSuppressed = true;
     }
+    if (kind === "run_submit") this.trackSubmitOutcome(message.result);
     if (kind === "run_submit" && runStillCurrent && !run!.terminal &&
         (message.result === "revert" || message.result === "failed")) {
       // The optimistic run never started — the SDK refused the submission.
@@ -925,6 +944,49 @@ export class CursorSdkRuntimeSession implements RuntimeSession {
       run!.pendingSteerCount = Math.max(0, run!.pendingSteerCount - 1);
     }
     this.maybeSettleTurn();
+  }
+
+  /**
+   * Count consecutive run_submit failures. The host answers `failed` only when
+   * agent.send rejected before returning a run, so a counted failure always
+   * means no run object exists (nothing was accepted, nothing can duplicate).
+   * `revert` (busy) and anything after a run started are never counted.
+   */
+  private trackSubmitOutcome(result: CursorSdkAttemptResultMessage["result"]): void {
+    if (result === "complete_delivered") {
+      this.runEverAccepted = true;
+      this.submitFailures = 0;
+      this.submitBackoffUntilMs = 0;
+      return;
+    }
+    if (result !== "failed") return;
+    const now = this.nowMs();
+    if (this.submitFailures === 0 || (this.submitFailures < CURSOR_SDK_SUBMIT_FAILURE_LIMIT && now - this.submitFailuresSinceMs > CURSOR_SDK_SUBMIT_FAILURE_WINDOW_MS)) {
+      this.submitFailures = 0;
+      this.submitFailuresSinceMs = now;
+    }
+    this.submitFailures += 1;
+    if (this.submitFailures < CURSOR_SDK_SUBMIT_FAILURE_LIMIT) return;
+    const resumed = Boolean(this.ctx.config.sessionId);
+    if (resumed && !this.runEverAccepted) {
+      // A resumed session that never accepted a run in this launch: the saved
+      // conversation itself is suspect. Ask the daemon to reset it.
+      this.events.emit(
+        "stderr",
+        `${CURSOR_SDK_RESUME_UNUSABLE_MARKER} (${this.submitFailures} consecutive submit failures); requesting session reset`,
+      );
+      void this.stop({ reason: "resume_submit_failed" });
+      return;
+    }
+    const twice = this.submitFailures >= CURSOR_SDK_SUBMIT_FAILURE_LIMIT * 2;
+    this.submitBackoffUntilMs = now + CURSOR_SDK_SUBMIT_BACKOFF_MS[twice ? 1 : 0];
+    this.events.emit("stderr", `[cursor-sdk] ${this.submitFailures} consecutive submit failures; backing off`);
+    if (this.submitFailures === CURSOR_SDK_SUBMIT_FAILURE_LIMIT * 2) {
+      this.events.emit("runtime_event", {
+        kind: "error",
+        message: "Cursor runtime cannot accept messages (repeated submit failures); retrying every few minutes.",
+      } satisfies ParsedEvent);
+    }
   }
 
   private onAttemptAckTimeout(attemptId: string): void {

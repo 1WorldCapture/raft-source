@@ -9748,6 +9748,49 @@ test("missing Claude resume session falls back to a cold start", async () => {
   }
 });
 
+test("Cursor SDK resumed session that cannot accept runs is reset once, with a context-reset notice", async () => {
+  const dataDir = await mkdtemp(path.join(os.tmpdir(), "slock-daemon-test-"));
+  const sent: MachineToServerMessage[] = [];
+  const restoreFetch = installManagedRunnerMintFetch();
+  const driver = new FakeCodexDriver({ id: "cursor-sdk", supportsStdinNotification: true });
+  const manager = new AgentProcessManager(
+    (msg) => sent.push(msg),
+    "sk_machine_test",
+    { dataDir, serverUrl: "https://daemon.example.com", driverResolver: () => driver },
+  );
+
+  try {
+    await manager.startAgent("agent-1", makeConfig({ runtime: "cursor-sdk", sessionId: "poisoned-session" }), undefined, undefined, undefined, "launch-1");
+    assert.equal(driver.spawnCalls.length, 1);
+    driver.processes[0].stderr.emit("data", Buffer.from("[cursor-sdk] resumed session cannot accept runs (3 consecutive submit failures); requesting session reset\n"));
+    driver.processes[0].exit(0);
+    driver.processes[0].close(0);
+    await waitFor(() => driver.spawnCalls.length === 2, "cursor session reset cold restart");
+
+    assert.equal(driver.spawnCalls[1].config.sessionId, null);
+    assert.equal(driver.spawnCalls[1].prompt.split("previous runtime session was reset").length - 1, 1, "notice appears exactly once");
+    assert.equal(sent.filter((msg) => msg.type === "agent:session:invalidate").length, 1);
+    assert.ok(sent.some((msg) => msg.type === "agent:activity" && /Runtime session reset/i.test(msg.detail)));
+
+    // A second poisoned exit inside the 30 minute window must NOT reset again.
+    driver.processes[1].stderr.emit("data", Buffer.from("[cursor-sdk] resumed session cannot accept runs (3 consecutive submit failures); requesting session reset\n"));
+    driver.processes[1].exit(1);
+    driver.processes[1].close(1);
+    await flush();
+    assert.equal(driver.spawnCalls.length, 2);
+    assert.equal(sent.filter((msg) => msg.type === "agent:session:invalidate").length, 1);
+    await manager.stopAgent("agent-1");
+    // The notice is one-shot: a later start of the same agent does not repeat it.
+    await manager.startAgent("agent-1", makeConfig({ runtime: "cursor-sdk", sessionId: null }), undefined, undefined, undefined, "launch-2");
+    assert.doesNotMatch(driver.spawnCalls.at(-1)!.prompt, /previous runtime session was reset/i);
+    await manager.stopAgent("agent-1");
+  } finally {
+    cleanupTestManager(manager);
+    restoreFetch();
+    await rm(dataDir, { recursive: true, force: true });
+  }
+});
+
 test("missing-session error without a bound session sends no invalidation", async () => {
   await withManager(async ({ driver, sent, manager }) => {
     await manager.startAgent(

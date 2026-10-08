@@ -8,7 +8,7 @@
  * importing @cursor/sdk.
  *
  * Scenario knobs:
- *   - env FAKE_HOST_MODE: happy (default) | hang_run | hang_stop | crash_after_init
+ *   - env FAKE_HOST_MODE: happy (default) | hang_run | hang_stop | crash_after_init | poisoned
  *   - run text markers: "RUN_ERROR:<msg>" (error settle), "HANG_RUN" (never settle)
  *   - steer text markers: "REVERT:<msg>" | "FAIL:<msg>" | "HANG" | else delivered
  */
@@ -53,6 +53,13 @@ function handleInit(init) {
 
 function handleRunSubmit(msg) {
   runCount += 1;
+  if (mode === "poisoned") {
+    // Like the real host when agent.send rejects: failed attempt, then settlement.
+    const error = { message: "Cursor rejected a concurrent run", errorClass: "busy" };
+    send({ kind: "attempt_result", attemptId: msg.attemptId ?? null, result: "failed", error });
+    send({ kind: "run_settled", runId: msg.runId, finishReason: "error", error });
+    return;
+  }
   if (msg.attemptId !== null && msg.attemptId !== undefined) {
     send({ kind: "attempt_result", attemptId: msg.attemptId, result: "complete_delivered" });
   }
