@@ -11,5 +11,5 @@ export default function Index() {
     return <ScreenMessage title={t("mobile.config.missingTitle")} body={t("mobile.config.missingBody")} />;
   }
   if (!session.signedIn) return <Redirect href="/login" />;
-  return <Redirect href="/home" />;
+  return <Redirect href="/pm" />;
 }

@@ -3,18 +3,38 @@
   "compilerOptions": {
     "strict": true,
     "resolveJsonModule": true,
-    "types": ["react"],
+    "types": [
+      "react"
+    ],
     "baseUrl": ".",
     "paths": {
-      "@botiverse/raft-shared/src/raftRefs.ts": ["../../packages/shared/src/raftRefs.ts"],
-      "@botiverse/raft-shared/src/timeFormatPreference.ts": ["../../packages/shared/src/timeFormatPreference.ts"],
-      "@botiverse/raft-shared/src/attachmentPreview.ts": ["../../packages/shared/src/attachmentPreview.ts"],
-      "@botiverse/raft-shared/src/messageSnippet.ts": ["../../packages/shared/src/messageSnippet.ts"],
-      "@botiverse/raft-shared/src/cacheMerge.ts": ["../../packages/shared/src/cacheMerge.ts"],
-      "@botiverse/raft-shared/src/cacheRepoContract.ts": ["../../packages/shared/src/cacheRepoContract.ts"],
-      "@botiverse/raft-shared/src/cacheSync.ts": ["../../packages/shared/src/cacheSync.ts"],
-      "@botiverse/raft-shared/src/cacheBoot.ts": ["../../packages/shared/src/cacheBoot.ts"],
-      "@botiverse/raft-shared/src/cacheReconcile.ts": ["../../packages/shared/src/cacheReconcile.ts"]
+      "@botiverse/raft-shared/src/raftRefs.ts": [
+        "../../packages/shared/src/raftRefs.ts"
+      ],
+      "@botiverse/raft-shared/src/timeFormatPreference.ts": [
+        "../../packages/shared/src/timeFormatPreference.ts"
+      ],
+      "@botiverse/raft-shared/src/attachmentPreview.ts": [
+        "../../packages/shared/src/attachmentPreview.ts"
+      ],
+      "@botiverse/raft-shared/src/messageSnippet.ts": [
+        "../../packages/shared/src/messageSnippet.ts"
+      ],
+      "@botiverse/raft-shared/src/cacheMerge.ts": [
+        "../../packages/shared/src/cacheMerge.ts"
+      ],
+      "@botiverse/raft-shared/src/cacheRepoContract.ts": [
+        "../../packages/shared/src/cacheRepoContract.ts"
+      ],
+      "@botiverse/raft-shared/src/cacheSync.ts": [
+        "../../packages/shared/src/cacheSync.ts"
+      ],
+      "@botiverse/raft-shared/src/cacheBoot.ts": [
+        "../../packages/shared/src/cacheBoot.ts"
+      ],
+      "@botiverse/raft-shared/src/cacheReconcile.ts": [
+        "../../packages/shared/src/cacheReconcile.ts"
+      ]
     }
   },
   "include": [
@@ -22,8 +42,9 @@
     "app/**/*.tsx",
     "src/**/*.ts",
     "src/**/*.tsx",
-    "src/**/*.d.ts",
-    ".expo/types/**/*.ts"
+    "src/**/*.d.ts"
   ],
-  "exclude": ["src/**/*.test.ts"]
+  "exclude": [
+    "src/**/*.test.ts"
+  ]
 }
