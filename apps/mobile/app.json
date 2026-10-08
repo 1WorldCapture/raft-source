@@ -18,6 +18,7 @@
     },
     "android": {
       "package": "build.raft.mobile",
+      "allowBackup": false,
       "versionCode": 104,
       "predictiveBackGestureEnabled": false,
       "usesCleartextTraffic": false,
