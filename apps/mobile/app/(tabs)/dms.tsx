@@ -5,7 +5,9 @@ import { ConversationRow } from "../../src/home/ConversationRow";
 import { TabHeader } from "../../src/home/TabHeader";
 import { channelHasDraft } from "../../src/home/drafts";
 import { conversationUnreadCount, filterUnreadConversations } from "../../src/home/conversations";
+import { isPmDirectMessage } from "../../src/home/pmState";
 import { useDirectory } from "../../src/home/useDirectory";
+import { useServerPm } from "../../src/home/useServerPm";
 import { useServerRail } from "../../src/home/useServerRail";
 import { formatRelativeTime, relativeTimeStrings } from "../../src/tasks/relativeTime";
 import { useT } from "../../src/i18n/provider";
@@ -17,10 +19,8 @@ import { ScreenMessage } from "../../src/ui/screen";
 import { border, color, fontSize } from "../../src/ui/tokens";
 
 /**
- * DMs tab (Rethink UI §2): one-on-one conversations only — the DM half of
- * the retired home list. The server's PM agent is hidden here in stage D
- * (the PM has its own first tab); until GET pm exists there is nothing to
- * exclude yet.
+ * DMs tab (Rethink UI): one-on-one conversations only. The server PM's DM
+ * stays on the PM tab, so it is left out of this list.
  */
 export default function DmsScreen() {
   const session = useSession();
@@ -30,12 +30,14 @@ export default function DmsScreen() {
   const compact = height <= 600;
   const { current } = useServerRail();
   const { loading, error, reload } = useDirectory();
+  const { state: pmState } = useServerPm(current?.slug ?? null);
   const conversations = useRaftStore((state) => state.conversations);
   const channelUnread = useRaftStore((state) => state.channelUnread);
   const liveUnread = useRaftStore((state) => state.liveUnread);
   const [unreadOnly, setUnreadOnly] = useState(false);
 
-  const dms = conversations.filter((entry) => entry.channel.type === "dm");
+  const pmAgentId = pmState?.pm?.agentId ?? null;
+  const dms = conversations.filter((entry) => entry.channel.type === "dm" && !isPmDirectMessage(entry.channel, pmAgentId));
   const unreadDms = filterUnreadConversations(dms, channelUnread, liveUnread);
   const visible = unreadOnly ? unreadDms : dms;
   const timeStrings = relativeTimeStrings(t);
