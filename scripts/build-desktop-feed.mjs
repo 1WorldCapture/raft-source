@@ -30,6 +30,7 @@ import { createReadStream } from "node:fs";
 import { copyFile, mkdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
+import { fileURLToPath } from "node:url";
 
 const ARCHES = ["arm64", "x64"];
 const FORMATS = ["dmg", "zip"];
@@ -131,8 +132,17 @@ async function main() {
   console.log(`[desktop-feed] wrote ${args.out}: version ${manifest.version}, ${manifest.files.length} files, commit ${manifest.commit.slice(0, 8)}`);
 }
 
+/**
+ * True when this module is the process entry point. Compares filesystem paths
+ * (fileURLToPath decodes %20 etc.); a raw URL pathname never matches argv[1]
+ * in a directory whose name has a space, and the CLI would silently do nothing.
+ */
+export function isDirectRun(moduleUrl, argv1) {
+  return Boolean(argv1) && path.resolve(argv1) === path.resolve(fileURLToPath(moduleUrl));
+}
+
 // CLI entry only when run directly; tests import the helpers.
-if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname)) {
+if (isDirectRun(import.meta.url, process.argv[1])) {
   main().catch((err) => {
     console.error(`[desktop-feed] ${err.message}`);
     process.exit(1);
