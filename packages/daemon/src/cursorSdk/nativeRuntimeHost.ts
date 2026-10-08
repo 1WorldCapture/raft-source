@@ -31,6 +31,23 @@ export interface NativeCursorHostDeps {
   warn?: (message: string) => void;
 }
 
+/**
+ * Diagnostic summary of a failure: only the error's class name, a short
+ * code token and a numeric HTTP status, each shape-checked. Never the message
+ * (it can carry request bodies, keys or user text).
+ */
+export function describeSdkError(error: unknown): string {
+  const value = error as { name?: unknown; code?: unknown; status?: unknown; statusCode?: unknown } | null;
+  const token = (raw: unknown): string | null =>
+    typeof raw === "string" && /^[A-Za-z0-9_.-]{1,64}$/.test(raw) ? raw : null;
+  const parts = [token(value?.name) ?? (error instanceof Error ? "Error" : typeof error)];
+  const code = token(value?.code);
+  if (code) parts.push(`code=${code}`);
+  const status = [value?.status, value?.statusCode].find((n) => typeof n === "number" && Number.isInteger(n) && n >= 100 && n <= 599);
+  if (status !== undefined) parts.push(`status=${status}`);
+  return parts.join(" ");
+}
+
 function errorCode(error: unknown): CursorSdkWireError {
   const value = error as { name?: unknown; code?: unknown } | null;
   if (value?.name === "AuthenticationError") return { errorClass: "auth", message: "Cursor authentication failed. Reconnect this computer's Cursor account." };
@@ -200,6 +217,7 @@ export class NativeCursorHost {
     } catch (error) {
       await this.releaseLock?.();
       this.releaseLock = null;
+      this.logFailure("init", error);
       this.post({ kind: "init_result", ok: false, sessionId: null, error: errorCode(error) });
     } finally { this.starting = false; }
   }
@@ -252,6 +270,11 @@ export class NativeCursorHost {
     active.done = this.execute(active, attemptId, text);
   }
 
+  private logFailure(operation: string, error: unknown): void {
+    const warn = this.deps.warn ?? ((message: string) => { process.stderr.write(`${message}\n`); });
+    warn(`cursor-sdk: ${operation} failed (${describeSdkError(error)})`);
+  }
+
   private async execute(active: Active, attemptId: string | null, text: string): Promise<void> {
     let result: RunResult | null = null;
     let failure: CursorSdkWireError | undefined;
@@ -272,11 +295,12 @@ export class NativeCursorHost {
       // never abandons an unhandled wait promise or releases the run early.
       const [drained, waited] = await Promise.allSettled([consume, terminal]);
       if (waited.status === "fulfilled") result = waited.value;
-      else failure = errorCode(waited.reason);
-      if (drained.status === "rejected") failure = errorCode(drained.reason);
+      else { this.logFailure("run wait", waited.reason); failure = errorCode(waited.reason); }
+      if (drained.status === "rejected") { this.logFailure("run stream", drained.reason); failure = errorCode(drained.reason); }
       await active.pendingSteer;
       if (result?.status === "error") failure ??= { errorClass: "host_internal", message: "Cursor SDK run ended with an error." };
     } catch (error) {
+      this.logFailure(active.run ? "run" : "send", error);
       failure = errorCode(error);
       if (!active.run) this.post({ kind: "attempt_result", attemptId, result: "failed", error: failure });
     } finally {
@@ -307,6 +331,7 @@ export class NativeCursorHost {
           this.post({ kind: "attempt_result", attemptId, result: "revert" });
         }
       } catch (error) {
+        this.logFailure("steer", error);
         active.suppressSteer = true;
         if (this.active === active && !this.stopping) {
           this.post({ kind: "attempt_result", attemptId, result: "failed", error: errorCode(error) });
