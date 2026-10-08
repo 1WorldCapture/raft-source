@@ -1,11 +1,11 @@
-# Raft 私有化发行包 交付文档（私有版 0.1.0，commit 68b6d61）
+# Raft 私有化发行包 交付文档（私有版 0.1.3，commit d574ce4）
 
-> 状态：私有版 0.1.0，commit 68b6d61，已验收（升级、回滚、断网全新安装均已在测试环境实测）。全部产物的路径、大小和 sha256 见 `INVENTORY-68b6d61.txt`。「恢复数据库备份」操作未演练，文中已标注（§5）。
+> 状态：私有版 **0.1.3**，构建 commit **d574ce4667456cd9d02bdf0cc05b4ba5da48865b**。已实测：全新离线安装、升级与回滚（不含迁移的版本对）、断网安装、从既有部署迁移到 Docker（含数据，§8，在真实环境验证，停机约 2 分钟）。**含迁移的升级后回滚（先恢复备份）尚未整段演练**（§5 已给出完整顺序与注意事项）。产物清单：0.1.0 基线见 `INVENTORY-68b6d61.txt`；0.1.3 的通用发行包是否重新组装由发行方另行决定，未重组装时桌面件按 §6 单独交付。
 > 技术细节的权威来源是发行包内的 `deploy/README.md`。构建流程见内部文档 BUILD-INTERNAL.md，不随客户交付。
 
 ## 1. 发行包内容
 
-构建 commit：`68b6d61ff019dddbcf81f4785d9806df3f49603f`（所有 manifest 的 `commit` 字段一致，可核对）。
+构建 commit：**`d574ce4667456cd9d02bdf0cc05b4ba5da48865b`**（发行版 **0.1.3**；所有 manifest 的 `commit` 字段一致，可核对）。
 
 | 组件 | 版本 | 形态 |
 |---|---|---|
@@ -17,7 +17,7 @@
 | CLI | 0.0.24-zcode.1 | tgz |
 | daemon | 1.0.26 | tgz |
 | downloads 树 | — | `computer/ cli/ daemon/` + 各 manifest（`desktop/` 按客户单独提供） + `install.sh/ps1` |
-| Desktop | **0.1.0** | **不在通用发行包中，按客户单独提供**（arm64/x64 的 dmg、zip、`latest-mac.yml`、manifest，未签名；见 §6） |
+| Desktop | **0.1.3** | **不在通用发行包中，按客户单独提供**（arm64/x64 的 dmg、zip、`latest-mac.yml`、manifest，未签名；见 §6） |
 
 完整的文件路径、大小、sha256 见《产物清单》（SHA256SUMS）。
 
@@ -63,7 +63,13 @@
 **回滚**（已实测，dd8c608 ↔ 68b6d61 双向）：把 `.env` 的镜像 tag 改回旧版本，`docker compose up -d`，`/api/version` 回显旧 commit，数据完好，旧代码的迁移检查同样通过。
 
 - 本版本对之间**没有数据库迁移**，所以回滚只需换镜像重启，**不需要恢复数据库备份**。
-- **若某次升级包含数据库迁移**，回滚前必须先恢复升级前的备份（`pg_dumpall` 或卷快照），再换回旧镜像。该「恢复备份」操作本次**没有演练**（本次没有需要恢复的迁移），首次遇到时请先在测试环境验证。
+- **若某次升级包含数据库迁移**，回滚 = 恢复升级前备份 + 换回旧镜像，完整顺序（**注意：不能对现有库直接 `pg_restore`**——迁移后的库里对象已存在，会报大量 already exists 并留下不一致状态；往全新空库恢复是另一个场景）：
+  1. `docker compose stop server web`（停写入）
+  2. 重建空库（二选一）：`docker compose exec db dropdb -U raft raft && docker compose exec db createdb -U raft raft`，或用 `pg_restore --clean --if-exists` 逐对象清后建（较慢但不停库）
+  3. `docker compose exec -T db pg_restore --no-owner --no-privileges -U raft -d raft < 升级前备份.dump`
+  4. `.env` 镜像 tag 换回旧版本，`docker compose up -d`
+  5. 校验：`/api/version` 回显旧 commit、账号登录、抽查数据与附件
+  该完整顺序**尚未整段演练过**（其组成步骤——停栈、空库恢复、换镜像起栈——均已分别实测），首次执行前请先在测试环境完整走一遍。
 - 升级前仍建议双备份（数据库 + `raft-uploads` 卷），并保留上一版镜像 tar 和 `downloads/` 树。
 
 ## 6. Desktop 与客户地址
@@ -80,7 +86,6 @@ Desktop 安装包在构建时写入服务器地址，因此**每个客户的 Des
 - 官方 `@botiverse/raft-daemon` 若已全局安装，会被本服务器版本覆盖（预期行为）。
 - 发行包按 docker compose 部署；Desktop 的 pm2 源码栈分发路径不在本次范围。
 - Managed MCP 内网放行名单修改 `.env` 后需 `docker compose up -d` 重建容器，`restart` 不会重读环境变量。
-- 含数据库迁移的升级的回滚（先恢复备份）流程未演练（§5）。
 
 ## 8. 从源码部署（pm2 + 反向代理）迁移到 Docker
 
@@ -110,3 +115,24 @@ Desktop 安装包在构建时写入服务器地址，因此**每个客户的 Des
 - 宿主机与容器的 PostgreSQL 端口冲突（见第 5 步）。
 - 写迁移脚本时 `set -e` 与 `diff`（有差异时返回非零）组合会让脚本提前结束；比对结果请显式判断。
 - 切换后以新 compose 为准做后续升级（§5），不要再回到旧的拉源码 + pm2 方式。
+
+### 8.1 切换脚本与演练方法（生产实战提炼）
+
+正式切换建议用**分阶段幂等脚本 + 自动回滚**，要点（全部实战验证）：
+
+- **脚本形态**：nohup 独立运行（不依赖操作者会话）、分阶段标记文件支持断点续跑、任一阶段失败自动回滚（`docker compose down` **保留卷** + 重启旧栈）、全程写日志。给脚本加「完成闩」：全部通过后写标记，之后任何重跑被拒绝（防止误触清理卷的动作碰到已承载生产数据的卷）。
+- **阶段与验收门**：预检（镜像/密钥/证书/desktop feed 在场，live 版本==目标版本，**切换不顺带升级**）→ 备份（pg 逻辑备份+上传目录快照+旧 .env 副本）→ 停旧栈（停机计时）→ 起 db → 导库+传附件 → 起 server/web → 验收门（版本三参数、错误凭据登录应答 401、socket.io 握手、downloads manifest、**附件三层校验**：库内行数一致+卷内样本字节大小一致+附件路由非 404）。
+- **回滚域**：失败发生在停旧栈之前时不重启旧栈（它从未被碰）；回滚后清除停机及之后的阶段标记，重跑才会重新停旧栈。
+- **演练**：临时 compose 项目+临时端口，用生产数据**副本**+演练专用随机密钥跑完整流程，量出真实停机时间；compose 的网络拓扑（server/db 仅挂 `internal: true` 网络）天然阻断出站，演练中从 server 容器内 `fetch` 任意外网域名应失败（DNS 都不解析），以此证明生产凭据不会从演练环境外泄。
+- **回滚窗口**：新栈开始接受写入后新旧数据开始分叉；切换刚完成的短窗口内可一键回滚，之后回滚需恢复备份（有损，需决策）。
+
+### 8.2 迁移实战补充清单
+
+- **证书文件名必须是通用名**：web 容器 nginx 读 `/etc/nginx/certs/fullchain.pem` 与 `privkey.pem`，用域名命名的证书文件会导致 web 容器崩溃循环。
+- **卷名规则**：compose 顶层声明的卷实际名=「compose 项目名_声明名」（如 `raft-uploads` 在项目 `x` 下是 `x_raft-uploads`）；预创建卷再 `up` 会被采纳（有一条无害 warning）。
+- **Redis 可选迁移**：默认按易失处理（重连自愈）即可；如需保留在场状态，`redis-cli SAVE` 后把 `dump.rdb` 放进 redis 容器 `/data/` 再首启（compose 未给 redis 声明卷，用 `compose create` + `docker cp` + `start`）。注意 RDB 里的短 TTL 键（如心跳）在快照与加载间隔过长时会自然过期，属预期。
+- **磁盘与日志**：切换/构建前确认磁盘余量（建议 ≥6G；构建期 pnpm+双镜像层峰值明显）；给宿主 journald 设上限（如 `SystemMaxUse=200M`），否则日志可无声涨到数十 G。加每小时磁盘水位检查（超 85% 记日志）。
+- **日常备份**：切换后第一天起建容器内 `pg_dump` 定时备份（umask 077、滚动保留）；**核读必须用容器内的 pg_restore**——宿主机低版本 pg_restore 读不了容器高版本产生的备份头。
+- **`downloads/desktop/` 必须在切换前到位**：若原环境桌面端走官方更新源，切到私有模式后没有本地 desktop feed 会导致「检查更新」无源可用；先布放当前版本的 dmg/zip/latest-mac.yml/manifest 再切换。
+- **后台启动三件套**：先建好日志目录再重定向、脚本自写 pidfile、启动后 `kill -0` 验活；进度只看日志，不要用 `pgrep -f` 判断（会自匹配给出假阳性）。
+- **shell 陷阱**：`set -o pipefail` 下 `xxx --list | grep -q` 会因 SIGPIPE 假失败（长输出流校验用文件中转）；空 crontab 时 `crontab -l | grep -v X` 的退出码会吞掉后续行（加 `|| true` 护栏）。
