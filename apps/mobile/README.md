@@ -36,6 +36,31 @@ pnpm --filter @botiverse/raft-mobile check:colors
 
 The interface stays light. Fonts load before the splash hides. Chinese falls back to PingFang SC on iOS and the system CJK face on Android.
 
+## Android release APK
+
+Local release builds use Expo prebuild and Gradle. They do not use EAS. `android/` stays gitignored. The release keystore and its properties file stay outside the repo, mode 600. Later upgrades must reuse that same keystore. Do not commit either file or paste the passwords into chat.
+
+The properties file is a Java properties file:
+
+```
+storeFile=/absolute/path/raft-mobile-release.keystore
+storePassword=...
+keyAlias=raft-mobile
+keyPassword=...
+```
+
+`storeFile` is an absolute path. `version` in `app.json` is `0.1.0` and `android.versionCode` is `1`.
+
+From `apps/mobile`, with the Android SDK and JDK 17 installed:
+
+```sh
+export EXPO_PUBLIC_RAFT_SERVER_URL=https://example.invalid
+export RAFT_ANDROID_KEYSTORE_PROPERTIES=/absolute/path/raft-mobile-release.properties
+sh scripts/android-release.sh
+```
+
+The script refuses a properties file that is not mode 600. Prebuild rewrites the `android` and `ios` scripts in `package.json`. The script copies `package.json` aside first and restores that copy when the build finishes or fails, including edits that are not committed yet. The APK is written to `android/app/build/outputs/apk/release/app-release.apk`. The server origin is baked in at bundle time from `EXPO_PUBLIC_RAFT_SERVER_URL`. There is no in-app address screen. Without `RAFT_ANDROID_KEYSTORE_PROPERTIES`, a prebuild still succeeds and the release build type keeps the debug keystore.
+
 Lint uses oxlint, the same linter as `packages/web`, instead of a second ESLint setup.
 
 Mention matching imports `createRaftStructuredUserRefRegex` from `@botiverse/raft-shared`. The package barrel pulls in generated server modules, so the app imports `src/raftRefs.ts` directly.
