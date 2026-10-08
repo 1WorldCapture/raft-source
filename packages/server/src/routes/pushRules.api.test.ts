@@ -143,7 +143,6 @@ test("pm_dm_mentions suppression matrix over the real membership table", async (
   const mentioned = await getServerPushSuppressedUserIds(s.server.id, [s.owner.id], new Set([s.owner.id]), { channelType: "channel" });
   assert.deepEqual([...mentioned], []);
 
-  void s.agent;
 });
 
 test("buildPushTargetsFromContext stamps pmDirectMessage only for the PM's own DM traffic", () => {
@@ -153,7 +152,7 @@ test("buildPushTargetsFromContext stamps pmDirectMessage only for the PM's own D
     senderName: "PM",
     body: "hello",
   };
-  const channelOf = (type: "dm" | "channel") => ({ id: "ch-1", type, name: type === "dm" ? null : "general" });
+  const channelOf = (type: "dm" | "channel") => ({ id: "ch-1", type, name: type === "dm" ? "Direct" : "general", parentMessageId: null });
 
   // PM agent speaking in a DM → fact stamped.
   const pmDm = buildPushTargetsFromContext({
