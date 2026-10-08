@@ -1,0 +1,8 @@
+/bin/
+/var/
+/.cache/
+.env
+.env.*
+!.env.example
+coverage.out
+*.test
