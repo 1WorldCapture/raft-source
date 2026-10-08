@@ -18,6 +18,7 @@
     },
     "android": {
       "package": "build.raft.mobile",
+      "versionCode": 1,
       "predictiveBackGestureEnabled": false,
       "usesCleartextTraffic": false,
       "adaptiveIcon": {
@@ -36,6 +37,7 @@
         }
       ],
       "./plugins/withCleartext",
+      "./plugins/withReleaseKeystore",
       "expo-font",
       "expo-splash-screen",
       "expo-localization",
