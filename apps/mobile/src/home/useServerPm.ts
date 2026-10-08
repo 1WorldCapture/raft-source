@@ -15,6 +15,7 @@ export function useServerPm(slug: string | null) {
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
+    if (!session.ready || !session.origin) return;
     if (!slug) {
       setState(null);
       setLoading(false);
@@ -33,7 +34,7 @@ export function useServerPm(slug: string | null) {
     } finally {
       setLoading(false);
     }
-  }, [session.client, slug]);
+  }, [session.client, session.origin, session.ready, slug]);
 
   useFocusEffect(useCallback(() => {
     void load();

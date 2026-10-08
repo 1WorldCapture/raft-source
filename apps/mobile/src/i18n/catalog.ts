@@ -108,6 +108,7 @@ export const mobileEn = {
   "mobile.menu.saved": "Saved",
   "mobile.menu.settings": "Settings",
   "mobile.menu.members": "Members",
+  "mobile.menu.choosePm": "Choose PM",
   "mobile.dms.empty": "No direct messages yet.",
   "mobile.pm.enableTitle": "PM is not enabled yet",
   "mobile.pm.enableBody": "Connect a computer to this server to enable the PM agent.",
@@ -118,6 +119,10 @@ export const mobileEn = {
   "mobile.pm.skip": "Skip for now",
   "mobile.pm.pickFailed": "Couldn't set the PM",
   "mobile.pm.noAgents": "This server has no agents yet. Connect a computer to create one.",
+  "mobile.pm.pickLaterTitle": "Choose a PM from the menu",
+  "mobile.pm.pickLaterBody": "Once this server has an agent, choose one as PM from the menu.",
+  "mobile.pm.waitPickTitle": "Waiting for an admin",
+  "mobile.pm.waitPickBody": "Once this server has an agent, an admin can choose one as PM from the menu.",
 } as const;
 
 export const mobileZh: Record<keyof typeof mobileEn, string> = {
@@ -226,6 +231,7 @@ export const mobileZh: Record<keyof typeof mobileEn, string> = {
   "mobile.menu.saved": "收藏",
   "mobile.menu.settings": "设置",
   "mobile.menu.members": "成员",
+  "mobile.menu.choosePm": "选择 PM",
   "mobile.dms.empty": "还没有私信。",
   "mobile.pm.enableTitle": "PM 尚未启用",
   "mobile.pm.enableBody": "为本 server 连接一台电脑后即可启用 PM agent。",
@@ -236,6 +242,10 @@ export const mobileZh: Record<keyof typeof mobileEn, string> = {
   "mobile.pm.skip": "暂时跳过",
   "mobile.pm.pickFailed": "设置 PM 失败",
   "mobile.pm.noAgents": "这个 server 还没有 agent。连接一台电脑后即可创建。",
+  "mobile.pm.pickLaterTitle": "从菜单选择 PM",
+  "mobile.pm.pickLaterBody": "这个 server 有 agent 之后，可以在菜单里选一个当 PM。",
+  "mobile.pm.waitPickTitle": "等待管理员",
+  "mobile.pm.waitPickBody": "这个 server 有 agent 之后，管理员可以在菜单里选一个当 PM。",
 };
 
 export type MobileId = keyof typeof mobileEn;

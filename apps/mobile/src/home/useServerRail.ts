@@ -29,9 +29,13 @@ export function useServerRail() {
   // realtime socket only connects to the active server, so this fetch (plus
   // the foreground refresh in the session provider) is the only other-server
   // unread source besides pull-to-refresh.
+  // The PM tab mounts this hook three times. Each one used to call the API
+  // on the first paint, before the session had an address, and those three
+  // promises were uncaught ("Set a server address").
   useFocusEffect(useCallback(() => {
-    void refreshBadges(session.client);
-  }, [refreshBadges, session.client]));
+    if (!session.ready || !session.origin) return;
+    void refreshBadges(session.client).catch(() => {});
+  }, [refreshBadges, session.client, session.origin, session.ready]));
 
   return { servers, serverUnread, activityUnread, current, switchServer, loadServers };
 }

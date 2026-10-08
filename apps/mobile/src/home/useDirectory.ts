@@ -181,9 +181,9 @@ export function useDirectory(): DirectoryState {
   // reload: realtime events keep the list fresh and pull-to-refresh is the
   // explicit escape hatch (task #2/#6).
   useEffect(() => {
-    if (!session.ready) return;
+    if (!session.ready || !session.origin) return;
     void loadFor(session.serverId);
-  }, [loadFor, session.ready, session.serverId]);
+  }, [loadFor, session.origin, session.ready, session.serverId]);
 
   // Directory bumps reload the list after a debounce, so a burst of bumps
   // (catch-up after reconnect, several new conversations at once) coalesces.
@@ -191,7 +191,7 @@ export function useDirectory(): DirectoryState {
   useEffect(() => {
     if (seenDirectoryVersion.current === directoryVersion) return;
     seenDirectoryVersion.current = directoryVersion;
-    if (!sessionRef.current.ready) return;
+    if (!sessionRef.current.ready || !sessionRef.current.origin) return;
     if (directoryTimer.current) clearTimeout(directoryTimer.current);
     directoryTimer.current = setTimeout(() => {
       directoryTimer.current = null;

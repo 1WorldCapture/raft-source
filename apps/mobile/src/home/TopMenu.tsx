@@ -1,16 +1,21 @@
 import { useState } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 import { useRouter } from "expo-router";
-import { Bookmark, MoreHorizontal, Search, Settings, Users } from "lucide-react-native";
+import { Bookmark, MoreHorizontal, Search, Settings, UserRound, Users } from "lucide-react-native";
 import { useT } from "../i18n/provider";
 import { AppText } from "../ui/text";
 import { color } from "../ui/tokens";
+import { requestChoosePm } from "./choosePm";
+import { canSetPm } from "./pmState";
+import { useServerRole } from "./serverRole";
+import { useServerPm } from "./useServerPm";
+import { useServerRail } from "./useServerRail";
 
 type MenuItem = {
   key: string;
   label: string;
   icon: typeof Search;
-  route: string;
+  onPress: () => void;
 };
 
 /**
@@ -22,12 +27,32 @@ export function TopMenu() {
   const router = useRouter();
   const t = useT();
   const [open, setOpen] = useState(false);
+  const { current } = useServerRail();
+  const roleFromStore = useServerRole();
+  const role = current?.role ?? roleFromStore;
+  const { state } = useServerPm(current?.slug ?? null);
+  const showChoosePm = canSetPm(role) && state != null && state.pm == null;
+
+  const go = (route: string) => {
+    setOpen(false);
+    router.push(route as never);
+  };
 
   const items: MenuItem[] = [
-    { key: "search", label: t("mobile.menu.search"), icon: Search, route: "/search" },
-    { key: "saved", label: t("mobile.menu.saved"), icon: Bookmark, route: "/saved" },
-    { key: "settings", label: t("mobile.menu.settings"), icon: Settings, route: "/settings" },
-    { key: "members", label: t("mobile.menu.members"), icon: Users, route: "/members" },
+    ...(showChoosePm ? [{
+      key: "choosePm",
+      label: t("mobile.menu.choosePm"),
+      icon: UserRound,
+      onPress: () => {
+        setOpen(false);
+        requestChoosePm();
+        router.push("/pm" as never);
+      },
+    }] : []),
+    { key: "search", label: t("mobile.menu.search"), icon: Search, onPress: () => go("/search") },
+    { key: "saved", label: t("mobile.menu.saved"), icon: Bookmark, onPress: () => go("/saved") },
+    { key: "settings", label: t("mobile.menu.settings"), icon: Settings, onPress: () => go("/settings") },
+    { key: "members", label: t("mobile.menu.members"), icon: Users, onPress: () => go("/members") },
   ];
 
   return (
@@ -45,10 +70,7 @@ export function TopMenu() {
                 <Pressable
                   key={item.key}
                   accessibilityRole="button"
-                  onPress={() => {
-                    setOpen(false);
-                    router.push(item.route as never);
-                  }}
+                  onPress={item.onPress}
                   style={styles.item}
                 >
                   <Icon color={color.ink} size={16} />

@@ -15,6 +15,7 @@ import { useServerRail } from "../../src/home/useServerRail";
 import { useServerRole } from "../../src/home/serverRole";
 import { useServerPm } from "../../src/home/useServerPm";
 import { canSetPm, parsePmAgentChoices, type PmAgentChoice } from "../../src/home/pmState";
+import { closeChoosePm, useChoosePm } from "../../src/home/choosePm";
 
 /**
  * PM tab (Rethink UI stage D). Reads GET /api/servers/:slug/pm on focus.
@@ -28,7 +29,12 @@ export default function PmScreen() {
   const roleFromStore = useServerRole();
   const role = current?.role ?? roleFromStore;
   const { state, loading, error, reload } = useServerPm(current?.slug ?? null);
+  const choosing = useChoosePm();
   const manager = canSetPm(role);
+
+  useEffect(() => {
+    if (state?.pm) closeChoosePm();
+  }, [state?.pm]);
 
   let body;
   if (loading && !state) {
@@ -43,12 +49,16 @@ export default function PmScreen() {
         title={state.pm.displayName || state.pm.name}
       />
     );
-  } else if (state?.setup === "unset" && manager) {
-    body = <PmSetupGuide onChanged={() => void reload()} />;
-  } else if (manager) {
+  } else if (manager && (state?.setup === "unset" || choosing)) {
+    body = <PmSetupGuide onChanged={() => { closeChoosePm(); void reload(); }} />;
+  } else if (manager && state?.autoProvision) {
     body = <ScreenMessage title={t("mobile.pm.enableTitle")} body={t("mobile.pm.enableBody")} />;
-  } else {
+  } else if (manager) {
+    body = <ScreenMessage title={t("mobile.pm.pickLaterTitle")} body={t("mobile.pm.pickLaterBody")} />;
+  } else if (state?.autoProvision) {
     body = <ScreenMessage title={t("mobile.pm.waitTitle")} body={t("mobile.pm.waitBody")} />;
+  } else {
+    body = <ScreenMessage title={t("mobile.pm.waitPickTitle")} body={t("mobile.pm.waitPickBody")} />;
   }
 
   const title = state?.pm

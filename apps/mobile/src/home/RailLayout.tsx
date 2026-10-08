@@ -20,9 +20,9 @@ export function RailLayout({ children, onSelect }: { children: ReactNode; onSele
   // A tab opened before home has loaded (deep link, restored tab) still needs
   // the server list for its rail.
   useEffect(() => {
-    if (!session.ready || servers.length > 0) return;
-    void loadServers(session.client, session.serverId);
-  }, [loadServers, servers.length, session.client, session.ready, session.serverId]);
+    if (!session.ready || !session.origin || servers.length > 0) return;
+    void loadServers(session.client, session.serverId).catch(() => {});
+  }, [loadServers, servers.length, session.client, session.origin, session.ready, session.serverId]);
 
   // Drag reorder (task #4): the store applies the order optimistically and
   // rolls back on failure — surface that failure once, here, for every tab.

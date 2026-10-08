@@ -11,6 +11,11 @@ export interface PmTabState {
   pm: PmAgentSummary | null;
   dmChannelId: string | null;
   setup: "unset" | "set" | "dismissed";
+  /**
+   * True only when GET /pm says connecting a computer will auto-create a PM.
+   * A missing field is an old server: connecting a computer will not.
+   */
+  autoProvision: boolean;
 }
 
 export interface PmAgentChoice {
@@ -28,11 +33,12 @@ export function parsePmTabState(data: unknown): PmTabState | null {
   if (!isRecord(data) || typeof data.setup !== "string" || !SETUPS.has(data.setup)) return null;
   const setup = data.setup as PmTabState["setup"];
   const dmChannelId = typeof data.dmChannelId === "string" ? data.dmChannelId : null;
-  if (data.pm == null) return { pm: null, dmChannelId, setup };
+  const autoProvision = data.autoProvision === true;
+  if (data.pm == null) return { pm: null, dmChannelId, setup, autoProvision };
   if (!isRecord(data.pm) || typeof data.pm.agentId !== "string") return null;
   const name = typeof data.pm.name === "string" ? data.pm.name : data.pm.agentId;
   const displayName = typeof data.pm.displayName === "string" ? data.pm.displayName : null;
-  return { pm: { agentId: data.pm.agentId, name, displayName }, dmChannelId, setup };
+  return { pm: { agentId: data.pm.agentId, name, displayName }, dmChannelId, setup, autoProvision };
 }
 
 export function parsePmAgentChoices(data: unknown): PmAgentChoice[] {

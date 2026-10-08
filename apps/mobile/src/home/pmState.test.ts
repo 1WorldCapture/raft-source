@@ -12,15 +12,13 @@ test("parsePmTabState keeps the setup tri-state and the caller's DM", () => {
     pm: { agentId: "agent-1", name: "pm", displayName: "PM" },
     dmChannelId: "dm-1",
     setup: "set",
+    autoProvision: false,
   });
 });
 
-test("parsePmTabState accepts a missing PM", () => {
-  assert.deepEqual(parsePmTabState({ pm: null, dmChannelId: null, setup: "unset" }), {
-    pm: null,
-    dmChannelId: null,
-    setup: "unset",
-  });
+test("parsePmTabState treats a missing autoProvision as an old server", () => {
+  assert.equal(parsePmTabState({ pm: null, dmChannelId: null, setup: "dismissed" })?.autoProvision, false);
+  assert.equal(parsePmTabState({ pm: null, dmChannelId: null, setup: "dismissed", autoProvision: true })?.autoProvision, true);
   assert.equal(parsePmTabState({ pm: null, setup: "later" }), null);
 });
 
