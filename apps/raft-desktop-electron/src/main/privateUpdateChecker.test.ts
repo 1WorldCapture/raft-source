@@ -70,10 +70,22 @@ test("selectDownloadFile picks the dmg for THIS arch only", () => {
   const parsed = parseLatestMacYml(DUAL_ARCH_YML)!;
   assert.equal(selectDownloadFile(parsed.files, "arm64")?.url, "0.2.0/Raft-Desktop-0.2.0-arm64.dmg");
   assert.equal(selectDownloadFile(parsed.files, "x64")?.url, "0.2.0/Raft-Desktop-0.2.0-x64.dmg");
-  // Zips only, or no entry for this arch → nothing to offer.
-  const zipsOnly = parsed.files.filter((f) => f.url.endsWith(".zip"));
-  assert.equal(selectDownloadFile(zipsOnly, "arm64"), null);
+  // No entry for this arch → nothing to offer.
   assert.equal(selectDownloadFile(parsed.files.filter((f) => !f.url.includes("x64")), "x64"), null);
+});
+
+test("selectDownloadFile falls back to THIS arch's zip when the feed has no dmg for it", () => {
+  const parsed = parseLatestMacYml(DUAL_ARCH_YML)!;
+  const zipsOnly = parsed.files.filter((f) => f.url.endsWith(".zip"));
+  assert.equal(selectDownloadFile(zipsOnly, "arm64")?.url, "0.2.0/Raft-Desktop-0.2.0-arm64-mac.zip");
+  assert.equal(selectDownloadFile(zipsOnly, "x64")?.url, "0.2.0/Raft-Desktop-0.2.0-x64-mac.zip");
+  // The feed script's artifactName form (no -mac suffix).
+  const plain = [{ url: "0.2.0/Raft-Desktop-0.2.0-arm64.zip", size: 5 }];
+  assert.equal(selectDownloadFile(plain, "arm64")?.url, "0.2.0/Raft-Desktop-0.2.0-arm64.zip");
+  assert.equal(selectDownloadFile(plain, "x64"), null);
+  // A dmg for this arch still wins over a zip.
+  const both = [{ url: "0.2.0/Raft-Desktop-0.2.0-arm64.zip" }, { url: "0.2.0/Raft-Desktop-0.2.0-arm64.dmg" }];
+  assert.equal(selectDownloadFile(both, "arm64")?.url, "0.2.0/Raft-Desktop-0.2.0-arm64.dmg");
 });
 
 test("resolvePrivateDownloadUrl enforces https same-origin exactly", () => {
@@ -150,15 +162,26 @@ test("checker: x64 machine gets the x64 dmg from the same feed", async () => {
   assert.deepEqual(opened, [`${ORIGIN}/downloads/desktop/0.2.0/Raft-Desktop-0.2.0-x64.dmg`]);
 });
 
-test("checker: same/older version, 404, zips-only, tampered feed, and network failure all stay quiet", async () => {
+test("checker: a zip-only arm64 feed offers the zip; the other arch stays quiet", async () => {
   const opened: string[] = [];
-  const zipsOnly = DUAL_ARCH_YML.split("\n").filter((line) => !line.includes(".dmg") || line.includes("-mac.zip")).join("\n");
+  const zipOnlyArm64 = "version: 0.2.0\nfiles:\n  - url: 0.2.0/Raft-Desktop-0.2.0-arm64.zip\n    sha512: ZZZZ\n    size: 193000000\n";
+  const arm = checkerWith(() => new Response(zipOnlyArm64), opened);
+  await arm.check();
+  assert.deepEqual(arm.status(), { state: "available", version: "0.2.0", size: 193000000 });
+  assert.equal(arm.openDownload(), true);
+  assert.deepEqual(opened, [`${ORIGIN}/downloads/desktop/0.2.0/Raft-Desktop-0.2.0-arm64.zip`]);
+  const x64 = checkerWith(() => new Response(zipOnlyArm64), [], "0.1.8", "x64");
+  await x64.check();
+  assert.deepEqual(x64.status(), { state: "none" });
+});
+
+test("checker: same/older version, 404, tampered feed, and network failure all stay quiet", async () => {
+  const opened: string[] = [];
   for (const feed of [
     () => new Response(DUAL_ARCH_YML.replace("version: 0.2.0", "version: 0.1.8")), // same version
     () => new Response(DUAL_ARCH_YML.replace("version: 0.2.0", "version: 0.1.7")), // older
     () => new Response("not found", { status: 404 }), // no desktop artifacts yet
-    () => new Response(zipsOnly), // no dmg for manual install
-    () => new Response(DUAL_ARCH_YML.replace("0.2.0/Raft-Desktop-0.2.0-arm64.dmg", "https://evil.example/x.dmg")), // tampered
+    () => new Response(DUAL_ARCH_YML.replace("0.2.0/Raft-Desktop-0.2.0-arm64.dmg", "https://evil.example/Raft-Desktop-0.2.0-arm64.dmg")), // tampered (selected, then rejected by the origin gate)
     () => new Error("ENETDOWN"),
   ]) {
     const checker = checkerWith(feed, opened);

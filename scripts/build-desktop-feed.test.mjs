@@ -48,6 +48,7 @@ test("feed tree: version-prefixed dual-arch yml + same-commit manifest", async (
     releaseDir,
     outDir,
     version: "0.2.0",
+    arches: ["arm64", "x64"], // legacy dual-arch (--desktop-arch all)
     commit: "abc123def456",
     origin: "https://raft.internal.example:18443",
     embedded: { computer: "1.0.29", cli: "0.0.24-zcode.1", daemon: "1.0.26" },
@@ -132,5 +133,46 @@ test("the CLI really runs from a directory whose name contains a space", () => {
     assert.match(result.stderr, /\[desktop-feed\]/);
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("buildDesktopFeed defaults to arm64 dmg+zip and lists only what it ships", async () => {
+  const dir = mkdtempSync(scriptDir);
+  try {
+    const releaseDir = join(dir, "release");
+    const outDir = join(dir, "out");
+    mkdirSync(releaseDir);
+    writeReleaseArtifacts(releaseDir, "0.3.0");
+    const manifest = await buildDesktopFeed({
+      releaseDir, outDir, version: "0.3.0", commit: "a".repeat(40), origin: "https://raft.example",
+      embedded: { computer: "1.0.0", cli: "1.0.0", daemon: "1.0.0" },
+    });
+    assert.deepEqual(manifest.files.map((f) => f.name), ["Raft-Desktop-0.3.0-arm64.dmg", "Raft-Desktop-0.3.0-arm64.zip"]);
+    const yml = readFileSync(join(outDir, "latest-mac.yml"), "utf8");
+    assert.doesNotMatch(yml, /x64/);
+    assert.match(yml, /0\.3\.0\/Raft-Desktop-0\.3\.0-arm64\.dmg/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("buildDesktopFeed with formats=zip skips the dmg entirely (feed, manifest and tree)", async () => {
+  const dir = mkdtempSync(scriptDir);
+  try {
+    const releaseDir = join(dir, "release");
+    const outDir = join(dir, "out");
+    mkdirSync(releaseDir);
+    writeFileSync(join(releaseDir, "Raft-Desktop-0.3.0-arm64.zip"), "zip-only\n"); // no dmg exists at all
+    const manifest = await buildDesktopFeed({
+      releaseDir, outDir, version: "0.3.0", commit: "b".repeat(40), origin: "https://raft.example",
+      embedded: { computer: "1.0.0", cli: "1.0.0", daemon: "1.0.0" },
+      arches: ["arm64"], formats: ["zip"],
+    });
+    assert.deepEqual(manifest.files.map((f) => f.name), ["Raft-Desktop-0.3.0-arm64.zip"]);
+    const yml = readFileSync(join(outDir, "latest-mac.yml"), "utf8");
+    assert.doesNotMatch(yml, /dmg|x64/);
+    assert.equal(yml.match(/url:/g).length, 1);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });

@@ -23,7 +23,8 @@
 // Usage (normally invoked by build-release-artifacts.mjs, macOS only):
 //   node scripts/build-desktop-feed.mjs --release-dir <dir> --version <v> \
 //     --commit <sha> --embedded-computer <v> --embedded-cli <v> \
-//     --embedded-daemon <v> --out <downloads>/desktop
+//     --embedded-daemon <v> --out <downloads>/desktop \
+//     [--arches arm64[,x64]] [--formats zip[,dmg]]   (default: arm64, dmg+zip)
 
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
@@ -32,8 +33,8 @@ import path from "node:path";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 
-const ARCHES = ["arm64", "x64"];
-const FORMATS = ["dmg", "zip"];
+const DEFAULT_ARCHES = ["arm64"];
+const DEFAULT_FORMATS = ["dmg", "zip"];
 
 function parseArgs(argv) {
   const args = {};
@@ -88,13 +89,17 @@ export function desktopManifest(version, commit, origin, embedded, files) {
 
 export async function buildDesktopFeed(deps) {
   const { releaseDir, outDir, version, commit, origin, embedded } = deps;
+  // Only the artifacts that were actually built and are shipped: the feed and
+  // manifest must never list a file the server does not carry.
+  const arches = deps.arches ?? DEFAULT_ARCHES;
+  const formats = deps.formats ?? DEFAULT_FORMATS;
   const versionDir = path.join(outDir, version);
   await mkdir(versionDir, { recursive: true });
 
   const ymlFiles = [];
   const manifestFiles = [];
-  for (const arch of ARCHES) {
-    for (const format of FORMATS) {
+  for (const arch of arches) {
+    for (const format of formats) {
       const name = `Raft-Desktop-${version}-${arch}.${format}`;
       const source = path.join(releaseDir, name);
       const size = (await stat(source)).size;
@@ -128,6 +133,8 @@ async function main() {
     commit: args.commit,
     origin: args.origin,
     embedded: { computer: args["embedded-computer"], cli: args["embedded-cli"], daemon: args["embedded-daemon"] },
+    ...(args.arches ? { arches: args.arches.split(",").filter(Boolean) } : {}),
+    ...(args.formats ? { formats: args.formats.split(",").filter(Boolean) } : {}),
   });
   console.log(`[desktop-feed] wrote ${args.out}: version ${manifest.version}, ${manifest.files.length} files, commit ${manifest.commit.slice(0, 8)}`);
 }
