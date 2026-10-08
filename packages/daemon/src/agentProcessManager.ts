@@ -5922,9 +5922,11 @@ export class AgentProcessManager {
       if (activityKind === "working" || activityKind === "thinking") {
         if (ap.activityHeartbeat.kind === "inactive") {
           const timer = setInterval(() => {
-            // A wedged runtime with queued messages must not wait for the next
-            // incoming message to be noticed (the 33 minute Cursor SDK stall).
-            if (ap.inbox.length > 0 && this.recoverStaleProcessForQueuedMessageIfNeeded(agentId, ap)) return;
+            // A wedged Cursor SDK runtime with queued messages must not wait for
+            // the next incoming message to be noticed (the 33 minute stall).
+            // Other runtimes keep the on-delivery check only: a long single tool
+            // call with a queued message must not be killed mid-run.
+            if (ap.driver.id === "cursor-sdk" && ap.inbox.length > 0 && this.recoverStaleProcessForQueuedMessageIfNeeded(agentId, ap)) return;
             if (this.markRuntimeProgressStaleIfNeeded(agentId, ap)) return;
             this.recordRuntimeTraceEvent(agentId, ap, "activity.heartbeat.sent", {
               activity: ap.lastActivityKind,

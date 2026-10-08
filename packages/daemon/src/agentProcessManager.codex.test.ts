@@ -4101,6 +4101,25 @@ test("activity heartbeat recovers a stalled runtime that has queued messages wit
       assert.equal(described, 1, "stall state snapshot taken once");
       assert.equal(ap.gatedSteering.expectedTerminationReason, "stalled_recovery");
     }, { driver });
+
+    // Other runtimes are untouched: same wedge, queued message, 16 min, no termination.
+    const other = new FakeCodexDriver({ id: "claude", supportsStdinNotification: true, busyDeliveryMode: "direct" });
+    intervalCallback = null;
+    await withManager(async ({ manager }) => {
+      await manager.startAgent("agent-1", makeConfig({ runtime: "claude", sessionId: "sess-1" }));
+      other.parsedLines.set("work", [{ kind: "thinking", text: "hmm" } as any]);
+      other.processes[0].stdout.emit("data", Buffer.from("work\n"));
+      await flush();
+      assert.ok(intervalCallback);
+      const ap = (manager as any).agents.get("agent-1");
+      ap.inbox.push(makeMessage("queued during a long tool call"));
+      const stops: unknown[] = [];
+      ap.runtime.stop = async (input: unknown) => { stops.push(input); };
+      now += 16 * 60_000;
+      intervalCallback!();
+      await flush();
+      assert.equal(stops.length, 0, "non-cursor runtimes are not recovered by the heartbeat");
+    }, { driver: other });
   } finally {
     (Date as any).now = realDateNow;
     globalThis.setInterval = realSetInterval;
