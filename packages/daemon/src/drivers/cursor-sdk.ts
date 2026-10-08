@@ -891,6 +891,12 @@ export class CursorSdkRuntimeSession implements RuntimeSession {
   ): void {
     const run = this.currentRun;
     const runStillCurrent = run !== null && run.runId === runId;
+    if (message.result === "failed") {
+      this.events.emit(
+        "stderr",
+        `[cursor-sdk] ${kind} failed (${sanitizeCursorSdkWireText(message.error?.errorClass ?? "unknown")})`,
+      );
+    }
     if (attemptId !== null) {
       this.emitOutcomeForAttempt(attemptId, kind, message);
     } else if (message.result === "failed") {
@@ -997,7 +1003,7 @@ export class CursorSdkRuntimeSession implements RuntimeSession {
     if (!run || run.runId !== message.runId) {
       this.events.emit(
         "stderr",
-        `[cursor-sdk] discarded stale run settlement (${sanitizeCursorSdkWireText(message.runId)})`,
+        `[cursor-sdk] discarded stale run settlement (${sanitizeCursorSdkWireText(message.runId)}, ${message.finishReason}${message.error?.errorClass ? `, ${sanitizeCursorSdkWireText(message.error.errorClass)}` : ""})`,
       );
       return;
     }
