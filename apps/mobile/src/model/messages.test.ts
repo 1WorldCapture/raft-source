@@ -39,6 +39,23 @@ test("thread preview times are normalized the same way as message times", () => 
   assert.equal(summaries.parent?.latestReplies?.[0]?.createdAt, "2026-09-26T08:58:28.486Z");
 });
 
+test("mergeMessages keeps one row when a cached page overlaps the network page", () => {
+  const cached = [
+    { id: "m1", channelId: "c1", content: "one", seq: 1 },
+    { id: "m2", channelId: "c1", content: "two-cached", seq: 2 },
+  ];
+  const network = [
+    { id: "m2", channelId: "c1", content: "two", seq: 2 },
+    { id: "m3", channelId: "c1", content: "three", seq: 3 },
+  ];
+  const merged = mergeMessages(cached, network);
+  assert.deepEqual(merged.map((message) => [message.id, message.content]), [
+    ["m1", "one"],
+    ["m2", "two"],
+    ["m3", "three"],
+  ]);
+});
+
 test("mergeMessages keeps an unsent row after messages that have a seq", () => {
   const merged = mergeMessages(
     [
