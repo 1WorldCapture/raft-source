@@ -48,6 +48,13 @@ services:
       timeout: 3s
       retries: 24
       start_period: 5s
+    # redis's image declares VOLUME /data, so without an explicit named volume
+    # Docker creates an anonymous one that is NOT carried over when the
+    # container is recreated (image upgrade) — the RDB and everything in it
+    # (machine online signals, caches) would be silently dropped. The named
+    # volume raft-redisdata pins /data across recreations.
+    volumes:
+      - raft-redisdata:/data
     networks:
       - raft-internal
 
