@@ -111,7 +111,13 @@ export const mobileEn = {
   "mobile.dms.empty": "No direct messages yet.",
   "mobile.pm.enableTitle": "PM is not enabled yet",
   "mobile.pm.enableBody": "Connect a computer to this server to enable the PM agent.",
-  "mobile.pm.stageCHint": "PM conversations arrive with the next server update.",
+  "mobile.pm.waitTitle": "Waiting for an admin",
+  "mobile.pm.waitBody": "An admin needs to connect a computer before the PM is available.",
+  "mobile.pm.pickTitle": "Choose a PM",
+  "mobile.pm.pickBody": "Pick an agent to be this server's PM. You can change it later.",
+  "mobile.pm.skip": "Skip for now",
+  "mobile.pm.pickFailed": "Couldn't set the PM",
+  "mobile.pm.noAgents": "This server has no agents yet. Connect a computer to create one.",
 } as const;
 
 export const mobileZh: Record<keyof typeof mobileEn, string> = {
@@ -223,7 +229,13 @@ export const mobileZh: Record<keyof typeof mobileEn, string> = {
   "mobile.dms.empty": "还没有私信。",
   "mobile.pm.enableTitle": "PM 尚未启用",
   "mobile.pm.enableBody": "为本 server 连接一台电脑后即可启用 PM agent。",
-  "mobile.pm.stageCHint": "PM 对话将随下一次服务端更新开放。",
+  "mobile.pm.waitTitle": "等待管理员",
+  "mobile.pm.waitBody": "需要管理员为本 server 连接一台电脑后，PM 才会出现。",
+  "mobile.pm.pickTitle": "选择 PM",
+  "mobile.pm.pickBody": "选一个 agent 作为这个 server 的 PM，之后可以更换。",
+  "mobile.pm.skip": "暂时跳过",
+  "mobile.pm.pickFailed": "设置 PM 失败",
+  "mobile.pm.noAgents": "这个 server 还没有 agent。连接一台电脑后即可创建。",
 };
 
 export type MobileId = keyof typeof mobileEn;

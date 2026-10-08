@@ -97,6 +97,7 @@ export interface RaftChannel {
   peerName?: string | null;
   peerAvatarUrl?: string | null;
   peerType?: string | null;
+  peerId?: string | null;
   lastMessageAt?: string | null;
   /** Structured latest-message summary from /channels and /channels/dm (null when the channel has no messages). */
   lastMessagePreview?: MessagePreview | null;
@@ -330,6 +331,7 @@ export function parseChannel(value: unknown): RaftChannel | null {
     peerName: typeof value.peerName === "string" ? value.peerName : null,
     peerAvatarUrl: typeof value.peerAvatarUrl === "string" ? value.peerAvatarUrl : null,
     peerType: typeof value.peerType === "string" ? value.peerType : null,
+    peerId: typeof value.peerId === "string" ? value.peerId : null,
     lastMessageAt: typeof value.lastMessageAt === "string" ? value.lastMessageAt : null,
     lastMessagePreview: parseMessagePreview(value.lastMessagePreview),
     joined: typeof value.joined === "boolean" ? value.joined : undefined,
