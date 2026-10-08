@@ -43,7 +43,10 @@ const common = {
   format: "esm",
   target: "node24",
   external: EXTERNAL,
-  sourcemap: "external",
+  // "linked" (not "external") so esbuild appends the //# sourceMappingURL
+  // comment — without it node --enable-source-maps never loads the .map and
+  // stacks stay in bundle line numbers.
+  sourcemap: "linked",
   banner: { js: banner },
   logLevel: "info",
 };
