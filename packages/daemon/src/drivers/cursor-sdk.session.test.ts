@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "vitest";
+import { CURSOR_SDK_RESUME_UNUSABLE_MARKER } from "../cursorSdk/sessionReset.js";
 import {
   CursorSdkAssetsUnavailableError,
   CursorSdkRuntimeSession,
@@ -1078,6 +1079,110 @@ test("IPC send false (closed/backpressure) is never queued or resent", async () 
     assert.equal(runTexts.filter((text) => text === "fresh submission").length, 1, "exactly one hand-off per accepted message");
     assert.equal(new Set(runTexts).size, runTexts.length, "no message is ever submitted twice");
     await session.stop({ reason: "test" });
+  } finally {
+    cleanup();
+  }
+});
+
+// ── Repeated submit failures: session reset (resumed) and backoff (fresh) ───
+
+async function failSubmit(
+  script: ScriptedHostConnection,
+  session: CursorSdkRuntimeSession,
+  captured: CapturedRun,
+  attemptId: string,
+  result: "failed" | "revert" | "complete_delivered" = "failed",
+): Promise<void> {
+  const before = kind(captured, "delivery_outcome").length;
+  const sent = session.send({ mode: "idle", text: `msg ${attemptId}`, attemptId });
+  assert.equal(sent.ok, true, `send ${attemptId} accepted`);
+  script.deliver({
+    kind: "attempt_result",
+    attemptId,
+    result,
+    ...(result === "complete_delivered" ? {} : { error: { message: "rejected", errorClass: "auth" } }),
+  } as CursorSdkHostToDriverMessage);
+  await waitFor(() => (kind(captured, "delivery_outcome").length > before ? true : undefined));
+}
+
+test("resumed session: 3 consecutive failed submits request a session reset and stop the session", async () => {
+  const script = new ScriptedHostConnection();
+  const { deps, cleanup } = makeSessionDeps({ connection: script });
+  const { session } = makeSession(deps, { sessionId: "saved-session" });
+  const captured = capture(session);
+  try {
+    await session.start({ text: "first", attemptId: "a0" });
+    script.deliver({ kind: "attempt_result", attemptId: "a0", result: "failed", error: { message: "x", errorClass: "auth" } });
+    await waitFor(() => (kind(captured, "delivery_outcome").length > 0 ? true : undefined));
+    await failSubmit(script, session, captured, "a1");
+    assert.equal(captured.stderrTexts.some((t) => t.includes(CURSOR_SDK_RESUME_UNUSABLE_MARKER)), false, "not yet");
+    await failSubmit(script, session, captured, "a2");
+    await waitFor(() => (captured.stderrTexts.some((t) => t.includes(CURSOR_SDK_RESUME_UNUSABLE_MARKER)) ? true : undefined));
+    await waitFor(() => (session.closed ? true : undefined));
+    assert.equal(script.runs().length, 3, "each failed attempt was sent exactly once, never resent");
+  } finally {
+    cleanup();
+  }
+});
+
+test("a success between failures resets the count; revert is not counted", async () => {
+  const script = new ScriptedHostConnection();
+  const { deps, cleanup } = makeSessionDeps({ connection: script });
+  const { session } = makeSession(deps, { sessionId: "saved-session" });
+  const captured = capture(session);
+  try {
+    await session.start({ text: "first", attemptId: "a0" });
+    script.deliver({ kind: "attempt_result", attemptId: "a0", result: "failed", error: { message: "x", errorClass: "auth" } });
+    await waitFor(() => (kind(captured, "delivery_outcome").length > 0 ? true : undefined));
+    await failSubmit(script, session, captured, "a2", "revert");
+    await failSubmit(script, session, captured, "a3");
+    assert.equal(session.closed, false, "revert in between does not count, and only 2 failures so far");
+    // A run the SDK accepted resets the streak (and proves the session works).
+    const sent = session.send({ mode: "idle", text: "ok", attemptId: "a4" });
+    assert.equal(sent.ok, true);
+    script.deliver({ kind: "attempt_result", attemptId: "a4", result: "complete_delivered" });
+    const runId = (script.runs().at(-1) as { runId: string }).runId;
+    script.deliver({ kind: "run_settled", runId, finishReason: "completed" });
+    await waitFor(() => (kind(captured, "turn_end").length >= 1 ? true : undefined));
+    await failSubmit(script, session, captured, "a5");
+    await failSubmit(script, session, captured, "a6");
+    assert.equal(session.closed, false);
+    assert.equal(captured.stderrTexts.some((t) => t.includes(CURSOR_SDK_RESUME_UNUSABLE_MARKER)), false);
+    await session.stop({ reason: "test-done" });
+  } finally {
+    cleanup();
+  }
+});
+
+test("fresh session: repeated failures back off instead of resetting, then surface an error", async () => {
+  const script = new ScriptedHostConnection();
+  let now = 1_000_000;
+  const { deps, cleanup } = makeSessionDeps({ connection: script });
+  const { session } = makeSession({ ...deps, nowMs: () => now });
+  const captured = capture(session);
+  try {
+    await session.start({ text: "first", attemptId: "a0" });
+    script.deliver({ kind: "attempt_result", attemptId: "a0", result: "failed", error: { message: "x", errorClass: "auth" } });
+    await waitFor(() => (kind(captured, "delivery_outcome").length > 0 ? true : undefined));
+    await failSubmit(script, session, captured, "a1");
+    await failSubmit(script, session, captured, "a2");
+    assert.equal(session.closed, false, "fresh sessions are never reset");
+    assert.equal(captured.stderrTexts.some((t) => t.includes(CURSOR_SDK_RESUME_UNUSABLE_MARKER)), false);
+    // In the 60 s backoff window the SDK is not hit again.
+    const runsBefore = script.runs().length;
+    assert.deepEqual(session.send({ mode: "idle", text: "x", attemptId: "b" }), { ok: false, reason: "busy_rejected" });
+    assert.equal(script.runs().length, runsBefore);
+    now += 61_000;
+    await failSubmit(script, session, captured, "a3");
+    now += 61_000;
+    await failSubmit(script, session, captured, "a4");
+    now += 61_000;
+    await failSubmit(script, session, captured, "a5");
+    assert.deepEqual(session.send({ mode: "idle", text: "x", attemptId: "c" }), { ok: false, reason: "busy_rejected" });
+    now += 61_000;
+    assert.deepEqual(session.send({ mode: "idle", text: "x", attemptId: "d" }), { ok: false, reason: "busy_rejected" }, "5 minute backoff after twice the limit");
+    assert.ok(kind(captured, "error").length >= 1, "visible error after twice the limit");
+    await session.stop({ reason: "test-done" });
   } finally {
     cleanup();
   }
