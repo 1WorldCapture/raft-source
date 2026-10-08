@@ -1,0 +1,5 @@
+# Drizzle migration snapshots are only consumed by `drizzle-kit generate`
+# at development time; the runtime migration path (migration-preflight /
+# migrate-deploy) reads the SQL files and meta/_journal.json, never the
+# per-migration *_snapshot.json files (~94MB across 248 files).
+packages/server/drizzle/meta/*_snapshot.json
