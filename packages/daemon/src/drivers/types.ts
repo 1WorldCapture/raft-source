@@ -157,6 +157,8 @@ export type ParsedEvent =
       source: "cursor_sdk";
       attemptId: string;
       outcome: "delivered" | "deferred_to_idle" | "unknown";
+      /** The SDK ack for an attempt already settled `unknown` arrived late; only `delivered` is acted on. */
+      late?: boolean;
     }
   | {
       kind: "internal_progress";
@@ -401,6 +403,9 @@ export interface RuntimeSession {
    * probe proves it dead.
    */
   isAlive(): boolean | undefined;
+
+  /** Metadata-only snapshot (no message content) logged when the stall watchdog fires. */
+  describeStallState?(): Record<string, string | number | boolean>;
 
   /** Read-only tool/process diagnosis. It may emit fact spans but cannot mutate runtime behavior. */
   emitToolDiagnosticSnapshots?(

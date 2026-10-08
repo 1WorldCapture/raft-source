@@ -166,6 +166,20 @@ export class RuntimeDeliveryAttemptLedger {
   }
 
   /**
+   * A runtime ack for an attempt already settled `unknown` arrived late and says
+   * it WAS delivered: drop it from the retained-unknown set so the terminal
+   * boundary does not restore its debt (and re-notify). Returns whether a
+   * retained attempt was resolved.
+   */
+  resolveLateDelivered(attemptId: string): boolean {
+    const index = this.retainedUnknown.findIndex((attempt) => attempt.attemptId === attemptId);
+    if (index < 0) return false;
+    this.retainedUnknown.splice(index, 1);
+    this.recordSettled(attemptId, "delivered");
+    return true;
+  }
+
+  /**
    * Take the retained-unknown attempts that still belong to the current
    * session. All retained entries are consumed; entries retired by a session
    * rollover are dropped (their contribution memo cannot suppress the new

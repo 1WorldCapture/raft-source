@@ -164,3 +164,16 @@ test("uncontributeMessages removes exactly the given rows and only clears a matc
   // Cross-session uncontribute is a no-op.
   assert.equal(notifications.uncontributeMessages([contributedA], "session-2"), 0);
 });
+
+test("resolveLateDelivered drops a retained unknown attempt so its debt is not restored", () => {
+  const ledger = new RuntimeDeliveryAttemptLedger();
+  const id = ledger.allocateAttemptId();
+  ledger.recordPendingAttempt(id, "s1", []);
+  assert.equal(ledger.settle(id, "unknown", "s1").status, "applied");
+  assert.equal(ledger.retainedUnknownCount, 1);
+  assert.equal(ledger.resolveLateDelivered(id), true);
+  assert.equal(ledger.retainedUnknownCount, 0);
+  assert.deepEqual(ledger.takeRetainedUnknown("s1"), []);
+  assert.equal(ledger.resolveLateDelivered(id), false, "only once");
+  assert.equal(ledger.resolveLateDelivered("999"), false);
+});

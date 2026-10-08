@@ -1206,3 +1206,47 @@ test("real host (poisoned resumed session): 3 rejected submits end the session w
     cleanup();
   }
 });
+
+// ── Late steer ack: honored once, gate released only then ───────────────────
+
+test("late steer ack: settles unknown at the bound, holds the gate, then releases it once and reports delivered", async () => {
+  const script = new ScriptedHostConnection();
+  const { deps, cleanup } = makeSessionDeps({ connection: script, ackTimeoutMs: 50 });
+  const { session } = makeSession(deps);
+  const captured = capture(session);
+  try {
+    await session.start({ text: "first turn" });
+    assert.deepEqual(session.send({ mode: "busy", text: "slow steer", attemptId: "s1" }), { ok: true, acceptedAs: "steer" });
+    await waitFor(() => (kind(captured, "delivery_outcome").length > 0 ? true : undefined));
+    assert.deepEqual(kind(captured, "delivery_outcome"), [
+      { kind: "delivery_outcome", source: "cursor_sdk", attemptId: "s1", outcome: "unknown" },
+    ]);
+    // The SDK may still apply the steer: the gate must stay closed at the timeout.
+    assert.equal(session.send({ mode: "busy", text: "second", attemptId: "s2" }).ok, false);
+
+    script.deliver({ kind: "attempt_result", attemptId: "s1", result: "complete_delivered" });
+    await waitFor(() => (kind(captured, "delivery_outcome").length > 1 ? true : undefined));
+    assert.deepEqual(kind(captured, "delivery_outcome")[1], {
+      kind: "delivery_outcome", source: "cursor_sdk", attemptId: "s1", outcome: "delivered", late: true,
+    });
+    assert.ok(captured.stderrTexts.some((t) => /late steer ack after \d+ms/.test(t)));
+    assert.ok(!captured.stderrTexts.some((t) => t.includes("discarded stale attempt result")), "no longer noise");
+
+    // Gate released exactly once: one new steer is accepted, a second is not.
+    assert.deepEqual(session.send({ mode: "busy", text: "third", attemptId: "s3" }), { ok: true, acceptedAs: "steer" });
+    assert.equal(session.send({ mode: "busy", text: "fourth", attemptId: "s4" }).ok, false);
+
+    // A duplicate late ack changes nothing.
+    script.deliver({ kind: "attempt_result", attemptId: "s1", result: "complete_delivered" });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(kind(captured, "delivery_outcome").length, 2);
+    assert.equal(session.send({ mode: "busy", text: "fifth", attemptId: "s5" }).ok, false);
+    const state = session.describeStallState();
+    assert.equal(state.hasRun, true);
+    assert.equal(typeof state.lastHostMessageAgeMs, "number");
+    assert.ok(!JSON.stringify(state).includes("slow steer"), "metadata only");
+    await session.stop({ reason: "test-done" });
+  } finally {
+    cleanup();
+  }
+});

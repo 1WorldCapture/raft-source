@@ -406,6 +406,12 @@ export class CursorSdkRuntimeSession implements RuntimeSession {
   private pendingNullAttempt: SubmittedAttempt | null = null;
   private epoch = 0;
   /** Consecutive failed run_submits (the host never obtained a run). */
+  /** Steer attempts whose ack timed out (settled `unknown`); a late ack is still honored. */
+  private readonly lateSteerAttempts = new Map<string, { runId: string; epoch: number; timedOutAtMs: number }>();
+  private lastHostMessageAtMs = 0;
+  private lastRunEventAtMs = 0;
+  private currentRunStartedAtMs = 0;
+  private readonly stderrTail: string[] = [];
   private submitFailures = 0;
   private submitFailuresSinceMs = 0;
   private submitBackoffUntilMs = 0;
@@ -434,10 +440,35 @@ export class CursorSdkRuntimeSession implements RuntimeSession {
     this.nowMs = deps.nowMs ?? Date.now;
     this.sessionId = ctx.config.sessionId || null;
     this.mappingState.sessionId = this.sessionId;
+    this.events.on("stderr", (text: string) => {
+      this.stderrTail.push(sanitizeCursorSdkWireText(text).slice(0, 160));
+      if (this.stderrTail.length > 3) this.stderrTail.shift();
+    });
   }
 
   get pid(): number | undefined {
     return this.connection?.pid;
+  }
+
+  /** Metadata only (counts, ages, phases) for the stall watchdog log; never message content. */
+  describeStallState(): Record<string, string | number | boolean> {
+    const now = this.nowMs();
+    const age = (at: number) => (at > 0 ? Math.max(0, now - at) : -1);
+    const run = this.currentRun;
+    return {
+      phase: this.phase,
+      hostReady: this.hostReady,
+      hasRun: run !== null,
+      runTerminal: run?.terminal ?? false,
+      runAgeMs: run ? age(this.currentRunStartedAtMs) : -1,
+      lastRunEventAgeMs: age(this.lastRunEventAtMs),
+      lastHostMessageAgeMs: age(this.lastHostMessageAtMs),
+      pendingAttempts: this.attempts.size,
+      pendingSteerCount: run?.pendingSteerCount ?? 0,
+      timedOutSteers: this.lateSteerAttempts.size,
+      submitFailures: this.submitFailures,
+      stderrTail: this.stderrTail.join(" | "),
+    };
   }
 
   get currentSessionId(): string | null {
@@ -749,6 +780,7 @@ export class CursorSdkRuntimeSession implements RuntimeSession {
   private submitRun(attemptId: string | null, text: string): boolean {
     const runId = randomUUID();
     if (!this.postToHost({ kind: "run_submit", runId, attemptId, text })) return false;
+    this.currentRunStartedAtMs = this.nowMs();
     this.currentRun = {
       runId,
       terminal: false,
@@ -805,6 +837,7 @@ export class CursorSdkRuntimeSession implements RuntimeSession {
   // ── host message handling ────────────────────────────────────────────────
 
   private handleHostMessage(message: unknown): void {
+    this.lastHostMessageAtMs = this.nowMs();
     if (!isCursorSdkHostToDriverMessage(message)) return;
     const typed = message as CursorSdkHostToDriverMessage;
     switch (typed.kind) {
@@ -855,6 +888,7 @@ export class CursorSdkRuntimeSession implements RuntimeSession {
   }
 
   private handleRunEvent(payload: unknown): void {
+    this.lastRunEventAtMs = this.nowMs();
     const type = (payload as { type?: unknown } | null)?.type;
     if (type === "diagnostic") {
       const message = (payload as { message?: unknown }).message;
@@ -881,6 +915,12 @@ export class CursorSdkRuntimeSession implements RuntimeSession {
       return;
     }
     const attempt = this.attempts.get(message.attemptId);
+    const late = !attempt ? this.lateSteerAttempts.get(message.attemptId) : undefined;
+    if (late) {
+      this.lateSteerAttempts.delete(message.attemptId);
+      this.handleLateSteerAck(message, late);
+      return;
+    }
     if (!attempt) {
       // Old epoch/run/attempt results are discarded — bounded stderr note.
       this.events.emit(
@@ -893,6 +933,41 @@ export class CursorSdkRuntimeSession implements RuntimeSession {
     if (attempt.timer) clearTimeout(attempt.timer);
     if (attempt.epoch !== this.epoch) return;
     this.applyAttemptTerminal(attempt.kind, attempt.runId, message, message.attemptId);
+  }
+
+  /**
+   * The SDK's steer ack arrived after the bounded wait already settled the
+   * attempt `unknown`. Only now is the one-pending-steer gate released (never
+   * at the timeout, so a steer the SDK might still apply cannot be doubled),
+   * and a confirmed delivery is reported so the APM does not re-notify.
+   */
+  private handleLateSteerAck(
+    message: CursorSdkAttemptResultMessage,
+    late: { runId: string; epoch: number; timedOutAtMs: number },
+  ): void {
+    if (late.epoch !== this.epoch) return;
+    this.events.emit(
+      "stderr",
+      `[cursor-sdk] late steer ack after ${Math.max(0, this.nowMs() - late.timedOutAtMs)}ms past the bound (${sanitizeCursorSdkWireText(message.result)})`,
+    );
+    const run = this.currentRun;
+    if (run && run.runId === late.runId) {
+      run.pendingSteerCount = Math.max(0, run.pendingSteerCount - 1);
+      if (message.result === "revert") run.steeringSuppressed = true;
+    }
+    if (message.result === "complete_delivered" && message.attemptId !== null) {
+      this.events.emit(
+        "runtime_event",
+        cursorSdkEventAsParsedEvent({
+          kind: "delivery_outcome",
+          source: "cursor_sdk",
+          attemptId: message.attemptId,
+          outcome: "delivered",
+          late: true,
+        }),
+      );
+    }
+    this.maybeSettleTurn();
   }
 
   /**
@@ -994,6 +1069,13 @@ export class CursorSdkRuntimeSession implements RuntimeSession {
     if (!attempt) return;
     this.attempts.delete(attemptId);
     if (attempt.timer) clearTimeout(attempt.timer);
+    if (attempt.epoch === this.epoch && attempt.kind === "steer_submit") {
+      this.lateSteerAttempts.set(attemptId, { runId: attempt.runId, epoch: attempt.epoch, timedOutAtMs: this.nowMs() });
+      if (this.lateSteerAttempts.size > 16) {
+        const oldest = this.lateSteerAttempts.keys().next();
+        if (!oldest.done) this.lateSteerAttempts.delete(oldest.value);
+      }
+    }
     if (attempt.epoch === this.epoch) {
       // ACK timeout → unknown. Deliberately NOT revert: we cannot prove the
       // SDK refused the attempt, so we must not claim a deferred delivery.
