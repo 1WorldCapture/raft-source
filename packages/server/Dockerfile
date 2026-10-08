@@ -32,8 +32,12 @@ RUN pnpm --filter @botiverse/raft-server run bundle
 
 # Production dependency tree for the runtime image. --legacy keeps the
 # deploy layout validated during stage 0: workspace deps (shared, sync-core)
-# are inlined into the output's node_modules.
-RUN pnpm deploy --prod --legacy --filter=@botiverse/raft-server /deploy-out
+# are inlined into the output's node_modules. The workspace-root patches
+# (k-carrier/hands-node/react-native-screens) target desktop/mobile deps the
+# server subtree never pulls, so allow them to stay unused for this subset
+# install instead of tripping ERR_PNPM_UNUSED_PATCH.
+RUN pnpm --config.allow-unused-patches=true deploy --prod --legacy \
+  --filter=@botiverse/raft-server /deploy-out
 
 # ---- Runtime: slim image running the prebuilt bundles (no tsx, no sources).
 FROM node:${NODE_VERSION}-bookworm-slim
