@@ -167,12 +167,20 @@ test("PUT rejects soft-deleted, inactive, and foreign-server agents", async ({ a
   await deleteAgent(doomed.id);
   assert.equal((await putAs(doomed.id)).status, 404);
 
-  // Inactive agent in this server → 409 pm_agent_not_active.
+  // Inactive (the resting default for idle agents) → allowed.
   await db.update(agents).set({ status: "inactive" }).where(eq(agents.id, s.adminAgentId));
   const inactivePut = await putAs(s.adminAgentId);
-  assert.equal(inactivePut.status, 409);
-  assert.equal((await inactivePut.json() as { code?: string }).code, "pm_agent_not_active");
-  await db.update(agents).set({ status: "active" }).where(eq(agents.id, s.adminAgentId));
+  assert.equal(inactivePut.status, 200, "inactive agents are eligible — most idle agents are inactive");
+  assert.equal((await inactivePut.json() as { changed: boolean }).changed, true);
+
+  // Stopped (explicitly stopped by the user) → allowed too; the appointer can
+  // start it afterwards and the PM tab shows it offline until then.
+  await db.update(agents).set({ status: "stopped" }).where(eq(agents.id, s.adminAgentId));
+  const stoppedPut = await putAs(s.pmAgentId);
+  assert.equal(stoppedPut.status, 200, "stopped agents are eligible — runtime state is not an eligibility criterion");
+  assert.equal((await stoppedPut.json() as { changed: boolean }).changed, true);
+  // Restore an eligible PM state for later tests in this file (none rely on it, keep clean).
+  await db.update(agents).set({ status: "inactive" }).where(eq(agents.id, s.pmAgentId));
 
   // Foreign-server agent → 404.
   const foreignOwner = await seedUser("pm-target", "foreign");

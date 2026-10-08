@@ -131,18 +131,20 @@ pmRouter.put("/:slug/pm", requireAuth, requireVerified, async (req, res) => {
   }
 
   const db = getDb();
-  // Target must belong to this server, not be soft-deleted, and be active.
+  // Eligibility = belongs to this server AND not soft-deleted. Runtime
+  // status (active/inactive/stopped) is deliberately NOT a criterion:
+  // `inactive` is the resting default for most idle agents and freshly
+  // auto-created PMs alike (agents are soft-deleted, never hard-deleted, so
+  // "deleted" already means the soft flag), and a `stopped` agent is a
+  // legitimate pick — the owner can appoint it and start it afterwards; the
+  // PM tab simply shows it offline until then.
   const [target] = await db
-    .select({ id: agents.id, status: agents.status })
+    .select({ id: agents.id })
     .from(agents)
     .where(and(eq(agents.id, agentId), eq(agents.serverId, server.id), isNull(agents.deletedAt)))
     .limit(1);
   if (!target) {
     res.status(404).json({ error: "Agent not found in this server" });
-    return;
-  }
-  if (target.status !== "active") {
-    res.status(409).json({ code: "pm_agent_not_active", error: "PM must be an active agent" });
     return;
   }
 
