@@ -1187,3 +1187,22 @@ test("fresh session: repeated failures back off instead of resetting, then surfa
     cleanup();
   }
 });
+
+test("real host (poisoned resumed session): 3 rejected submits end the session with the reset marker", async () => {
+  const { deps, cleanup } = realHostDeps("poisoned");
+  const { session } = makeSession(deps, { sessionId: "saved-session" });
+  const captured = capture(session);
+  try {
+    await session.start({ text: "first", attemptId: "p0" });
+    for (const id of ["p1", "p2"]) {
+      await waitFor(() => (session.closed || kind(captured, "delivery_outcome").length >= Number(id.slice(1)) ? true : undefined));
+      if (session.closed) break;
+      session.send({ mode: "idle", text: `again ${id}`, attemptId: id });
+    }
+    await waitFor(() => (session.closed ? true : undefined), 8_000);
+    assert.ok(captured.stderrTexts.some((t) => t.includes(CURSOR_SDK_RESUME_UNUSABLE_MARKER)));
+    assert.ok(captured.exits.length >= 1, "session exited so the daemon can cold-start a new one");
+  } finally {
+    cleanup();
+  }
+});
