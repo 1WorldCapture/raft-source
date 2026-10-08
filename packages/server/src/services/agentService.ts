@@ -194,17 +194,12 @@ export async function createAgent(
       .returning();
 
     if (opts.claimServerPm) {
-      // Raw SQL on purpose: servers.pm_agent_id ships with migration 0275
-      // (phase A). Until it lands the drizzle schema must not reference the
-      // column (unfiltered servers inserts/selects in migration tests would
-      // break). Switch to the drizzle field when 0275 merges.
-      const claimed = await tx.execute(sql`
-        UPDATE servers
-        SET pm_agent_id = ${newAgent.id}
-        WHERE id = ${serverId} AND pm_agent_id IS NULL
-        RETURNING id
-      `);
-      if (claimed.rows.length === 0) {
+      const claimed = await tx
+        .update(servers)
+        .set({ pmAgentId: newAgent.id })
+        .where(and(eq(servers.id, serverId), isNull(servers.pmAgentId)))
+        .returning({ id: servers.id });
+      if (claimed.length === 0) {
         throw new PmAlreadyProvisionedError();
       }
     }

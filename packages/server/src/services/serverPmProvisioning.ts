@@ -29,10 +29,10 @@
  * PM identity is written exactly once at creation. No code path ever updates
  * `agents.description` afterwards, so user edits always survive upgrades.
  */
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { getDefaultModel } from "@botiverse/raft-shared";
 import { getDb } from "../db/index.js";
-import { machines } from "../db/schema.js";
+import { machines, servers } from "../db/schema.js";
 import { getActorServerRoleInServer } from "../lib/actorPermissions.js";
 import { createAgent, PmAlreadyProvisionedError } from "./agentService.js";
 import { findOrCreateDM } from "./channelService.js";
@@ -109,15 +109,12 @@ export async function maybeProvisionServerPm(input: {
     const { serverId } = machine;
 
     // Fast path: nothing to do when a PM already exists (the common case for
-    // every capabilities report after the first). Raw SQL on purpose: the
-    // pm_agent_id column ships with migration 0275 (phase A); until then the
-    // drizzle schema must not reference it (see schema.ts note).
-    const [serverRow] = (await db.execute(sql`
-      SELECT pm_agent_id, deleted_at
-      FROM servers
-      WHERE id = ${serverId}
-    `)).rows as Array<{ pmAgentId: string | null; deletedAt: Date | string | null }>;
-    if (!serverRow || serverRow.deletedAt || serverRow.pmAgentId) return null;
+    // every capabilities report after the first).
+    const [server] = await db
+      .select({ pmAgentId: servers.pmAgentId, deletedAt: servers.deletedAt })
+      .from(servers)
+      .where(eq(servers.id, serverId));
+    if (!server || server.deletedAt || server.pmAgentId) return null;
 
     // The registering user must still be owner/admin — attach enforced this
     // at attach time; re-check for future non-attach callers.

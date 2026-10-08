@@ -1,6 +1,6 @@
 import { test, onTestFinished } from "vitest";
 import assert from "node:assert/strict";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 
 import { closeTestDatabase, openTestDatabase } from "../test/integration/database.js";
@@ -16,8 +16,6 @@ import {
 import { findOrCreateDM } from "./channelService.js";
 
 async function openDb() {
-  // The test database helper patches in the pm_agent_id / pm_setup_dismissed_at
-  // columns until migration 0275 (phase A) is committed.
   await openTestDatabase("pglite://");
   onTestFinished(async () => closeTestDatabase());
   return getDb();
@@ -59,9 +57,11 @@ async function listServerAgents(db: ReturnType<typeof getDb>, serverId: string) 
 }
 
 async function getServerPmAgentId(db: ReturnType<typeof getDb>, serverId: string): Promise<string | null> {
-  // Raw SQL until migration 0275 lands (see schema.ts note).
-  const [row] = (await db.execute(sql`SELECT pm_agent_id FROM servers WHERE id = ${serverId}`)).rows as Array<{ pm_agent_id: string | null }>;
-  return row?.pm_agent_id ?? null;
+  const [row] = await db
+    .select({ pmAgentId: servers.pmAgentId })
+    .from(servers)
+    .where(eq(servers.id, serverId));
+  return row?.pmAgentId ?? null;
 }
 
 test("selectPmRuntimeFromReported honors the declared preference order", () => {
@@ -146,7 +146,7 @@ test("does not override a PM that was already set (user-chosen)", async () => {
     displayName: "Chosen",
     runtime: "codex",
   }).returning();
-  await db.execute(sql`UPDATE servers SET pm_agent_id = ${chosen.id} WHERE id = ${server.id}`);
+  await db.update(servers).set({ pmAgentId: chosen.id }).where(eq(servers.id, server.id));
 
   const result = await maybeProvisionServerPm({ machineId: machine.id });
 
