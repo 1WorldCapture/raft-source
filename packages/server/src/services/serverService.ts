@@ -83,7 +83,7 @@ export interface ServerOnboardingSettings {
   onboardingWizardEnabled: boolean;
 }
 
-export type ServerPushMode = "all" | "mentions" | "none";
+export type ServerPushMode = "all" | "mentions" | "none" | "pm_dm_mentions";
 
 export interface MemberNotificationPreferences {
   serverPushMuted: boolean;
@@ -1343,8 +1343,58 @@ export async function updateMemberNotificationPreferences(
   };
 }
 
-export function shouldSuppressServerPush(mode: ServerPushMode, mentioned: boolean): boolean {
-  return mode === "none" || (mode === "mentions" && !mentioned);
+// Message-level context the push decision needs beyond the per-user mention
+// set. `isDm` is a message-level property: every target user of a DM channel
+// is by definition a direct recipient.
+export interface ServerPushDecisionContext {
+  mentioned: boolean;
+  isDm: boolean;
+}
+
+export function shouldSuppressServerPush(mode: ServerPushMode, ctx: ServerPushDecisionContext): boolean {
+  switch (mode) {
+    case "none":
+      return true;
+    case "mentions":
+      return !ctx.mentioned;
+    // Rethink UI phase E profile: DMs (any DM the user participates in —
+    // including the PM's DM) and channel @mentions push; other channel
+    // traffic stays silent. The PM posting in a shared channel deliberately
+    // does NOT push (only the pmDirectMessage payload fact marks it).
+    case "pm_dm_mentions":
+      return !(ctx.isDm || ctx.mentioned);
+    case "all":
+      return false;
+  }
+}
+
+/**
+ * Rethink UI phase E: flip a membership into the `pm_dm_mentions` profile,
+ * but ONLY while it is still in its factory state (`notificationPrefsVersion
+ * = 0`, i.e. the user never explicitly changed any push preference). The
+ * version guard is part of the WHERE clause, so this is race-free against a
+ * concurrent user edit and idempotent for repeated push registrations.
+ */
+export async function switchPushModeFromFactoryState(
+  serverId: string,
+  userId: string,
+  mode: "pm_dm_mentions",
+): Promise<boolean> {
+  const db = getDb();
+  const updated = await db
+    .update(serverMembers)
+    .set({
+      serverPushMode: mode,
+      serverPushMuted: false,
+      notificationPrefsVersion: sql`${serverMembers.notificationPrefsVersion} + 1` as unknown as number,
+    })
+    .where(and(
+      eq(serverMembers.serverId, serverId),
+      eq(serverMembers.userId, userId),
+      eq(serverMembers.notificationPrefsVersion, 0),
+    ))
+    .returning({ userId: serverMembers.userId });
+  return updated.length > 0;
 }
 
 export async function getServerPushMutedUserIds(serverId: string, userIds: string[]): Promise<Set<string>> {
@@ -1367,6 +1417,7 @@ export async function getServerPushSuppressedUserIds(
   serverId: string,
   userIds: string[],
   mentionedUserIds: ReadonlySet<string>,
+  message: { channelType: string },
 ): Promise<Set<string>> {
   if (userIds.length === 0) return new Set();
 
@@ -1382,11 +1433,12 @@ export async function getServerPushSuppressedUserIds(
       inArray(serverMembers.userId, userIds),
     ));
 
+  const ctx = { mentioned: false, isDm: message.channelType === "dm" };
   return new Set(
     rows
       .filter((row) => shouldSuppressServerPush(
         row.serverPushMode,
-        mentionedUserIds.has(row.userId),
+        { ...ctx, mentioned: mentionedUserIds.has(row.userId) },
       ))
       .map((row) => row.userId),
   );

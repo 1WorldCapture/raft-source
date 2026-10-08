@@ -6812,6 +6812,8 @@ type PushTargetHuman = {
 type PushTargetResolutionInput = {
   serverSlug: string;
   serverName?: string | null;
+  /** This server's current PM agent id (when set) — drives the pmDirectMessage fact. */
+  pmAgentId?: string | null;
   channel: PushTargetChannel;
   messageId: string;
   senderId: string;
@@ -6832,6 +6834,7 @@ export function buildPushTargetsFromContext(input: PushTargetResolutionInput): M
   const {
     serverSlug,
     serverName,
+    pmAgentId,
     channel,
     messageId,
     senderId,
@@ -6849,6 +6852,9 @@ export function buildPushTargetsFromContext(input: PushTargetResolutionInput): M
   } = input;
 
   const serverLabel = formatPushServerLabel(serverName, serverSlug);
+  // Rethink UI phase E fact: sender is the server's PM agent and this is a
+  // DM. Purely a display hint — never a push/suppress decision input.
+  const pmDirectMessage = pmAgentId != null && senderType === "agent" && senderId === pmAgentId && channel.type === "dm";
   const payloads = new Map<string, PushPayload>();
   const setPayload = (userId: string, payload: PushPayload) => {
     if (mutedUserIds.has(userId)) return;
@@ -6856,6 +6862,7 @@ export function buildPushTargetsFromContext(input: PushTargetResolutionInput): M
       ...payload,
       senderId,
       senderType,
+      ...(pmDirectMessage ? { pmDirectMessage: true } : {}),
     });
   };
 
@@ -6946,6 +6953,8 @@ export async function resolveServerPushSuppressionForPipeline(input: {
   serverId: string;
   targetUserIds: string[];
   targetVisibleMentionedUserIds: ReadonlySet<string>;
+  /** Type of the channel the message lands in — "dm" unlocks the pm_dm_mentions profile. */
+  channelType: string;
   resolveSuppressedUserIds?: typeof serverService.getServerPushSuppressedUserIds;
 }): Promise<Set<string>> {
   const resolveSuppressedUserIds = input.resolveSuppressedUserIds
@@ -6954,6 +6963,7 @@ export async function resolveServerPushSuppressionForPipeline(input: {
     input.serverId,
     input.targetUserIds,
     input.targetVisibleMentionedUserIds,
+    { channelType: input.channelType },
   );
 }
 
@@ -6972,7 +6982,7 @@ async function buildPushTargets(opts: {
   const db = getDb();
   const body = summarizePushBody(content, attachmentCount);
   const [serverRow] = await db
-    .select({ slug: servers.slug, name: servers.name })
+    .select({ slug: servers.slug, name: servers.name, pmAgentId: servers.pmAgentId })
     .from(servers)
     .where(eq(servers.id, channel.serverId))
     .limit(1);
@@ -7047,6 +7057,7 @@ async function buildPushTargets(opts: {
   const targets = buildPushTargetsFromContext({
     serverSlug: serverRow.slug,
     serverName: serverRow.name,
+    pmAgentId: serverRow.pmAgentId,
     channel: {
       id: channel.id,
       type: channel.type as "channel" | "private" | "joint" | "dm" | "thread",
@@ -7071,6 +7082,7 @@ async function buildPushTargets(opts: {
     serverId: channel.serverId,
     targetUserIds: [...targets.keys()],
     targetVisibleMentionedUserIds: mentionedUserIds,
+    channelType: channel.type,
   });
   const activityMutedUserIds = channel.type === "thread"
     ? new Set<string>()
@@ -7367,6 +7379,7 @@ async function handleJointThreadPostBroadcastSideEffects(input: {
       serverId: projection.localServerId,
       targetUserIds: [...projectionPushTargets.keys()],
       targetVisibleMentionedUserIds,
+      channelType: "thread",
     });
     for (const userId of serverMutedUserIds) projectionPushTargets.delete(userId);
     const notificationPushSocketIdentity: NotificationPushSocketIdentity = {
@@ -8924,6 +8937,7 @@ export async function broadcastAndDeliver(
         serverId: projection.serverId,
         targetUserIds: [...projectionPushTargets.keys()],
         targetVisibleMentionedUserIds: mentionedUserIds,
+        channelType: "joint",
       });
       const activityMutedUserIds = await channelService.getActivityMutedUserIdsForMessage({
         serverId: projection.serverId,
