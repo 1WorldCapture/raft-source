@@ -154,6 +154,9 @@ export async function maybeProvisionServerPm(input: {
         creatorType: "user",
         creatorId: machine.userId,
         claimServerPm: true,
+        // A system-provisioned PM is not the user finishing setup: the
+        // owner's setup gate must stay on its own track (PM ruling).
+        setupCompletion: "skip",
       });
       agentId = agent.id;
     } catch (err) {

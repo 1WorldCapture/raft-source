@@ -100,6 +100,14 @@ export async function createAgent(
     // the server's PM slot with a conditional update (pm_agent_id IS NULL).
     // Zero rows updated -> PmAlreadyProvisionedError -> full rollback.
     claimServerPm?: boolean;
+    // Rethink UI phase B (PM ruling): "auto" (default) keeps the durable
+    // first-agent-means-setup-complete write below; "skip" is for SYSTEM-
+    // provisioned agents only (the auto-provisioned PM). A preseeded PM is
+    // not a fact about the USER having finished setup, so it must not flip
+    // the owner's setup gate — the user still walks their own onboarding,
+    // and web/desktop guidance stays untouched. The first agent the USER
+    // creates completes setup as before.
+    setupCompletion?: "auto" | "skip";
     providerConnection?: {
       id: string;
       configVersion: number;
@@ -297,7 +305,9 @@ export async function createAgent(
     // `transitionServerSetupState("complete")` is deliberately not used: it requires a
     // USABLE official onboarding agent, and this path is precisely the one where the agent
     // may not be Cindy. Someone running a non-Cindy agent has still set their server up.
-    await markServerSetupCompleteOnFirstAgent(tx, serverId);
+    if (opts.setupCompletion !== "skip") {
+      await markServerSetupCompleteOnFirstAgent(tx, serverId);
+    }
 
     return newAgent;
   });

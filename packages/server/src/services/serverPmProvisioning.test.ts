@@ -260,3 +260,28 @@ test("a failing DM setup does not fail provisioning", async () => {
   const [dmCount] = await db.select({ id: channels.id }).from(channels).where(and(eq(channels.serverId, server.id), eq(channels.type, "dm")));
   assert.ok(dmCount);
 });
+
+test("a system-provisioned PM keeps the setup gate open; the user's own first agent completes setup", async () => {
+  const db = await openDb();
+  const { owner, server } = await seedOwnerServer(db);
+  const machine = await seedMachine(db, { serverId: server.id, userId: owner.id, runtimes: ["claude"] });
+
+  const pmId = await maybeProvisionServerPm({ machineId: machine.id });
+  assert.ok(pmId);
+
+  // The preseeded PM is not a fact about the user having finished setup:
+  // the gate stays open for the user's own onboarding.
+  const [afterPm] = await db
+    .select({ setupStatus: serverMembers.setupStatus })
+    .from(serverMembers)
+    .where(and(eq(serverMembers.serverId, server.id), eq(serverMembers.userId, owner.id)));
+  assert.equal(afterPm.setupStatus, "not_started");
+
+  // The user's own first agent completes setup, exactly as before.
+  await createAgent(server.id, "Worker", { runtime: "claude", creatorType: "user", creatorId: owner.id });
+  const [afterUserAgent] = await db
+    .select({ setupStatus: serverMembers.setupStatus })
+    .from(serverMembers)
+    .where(and(eq(serverMembers.serverId, server.id), eq(serverMembers.userId, owner.id)));
+  assert.equal(afterUserAgent.setupStatus, "complete");
+});
