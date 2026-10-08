@@ -22,7 +22,7 @@
 ```sh
 docker build -f packages/server/Dockerfile \
   --build-arg RAFT_RELEASE_SHA=<sha> --build-arg RAFT_BUILD_AT=<iso8601> \
-  --build-arg RAFT_RELEASE_BRANCH=dev -t raft-source-server:dev-<sha> .
+  --build-arg RAFT_RELEASE_BRANCH=<branch> -t raft-source-server:<branch>-<sha> .
 docker build -f packages/web/Dockerfile \
   --build-arg SELFHOST=1 --build-arg VITE_COMMIT_SHA=<sha> \
   -t raft-source-web-selfhost:dev-<sha> .
@@ -188,3 +188,13 @@ manifest 而非官网——官方部署不受影响（唯一判断入口
 ## 内部构建流程
 
 内部构建流程（Linux/Mac 分工、darwin 签名、Desktop 按客户重打）见 `docs/private-deploy/BUILD-INTERNAL.md`（不随客户交付）。
+
+## 版本标签（发版追溯）
+
+每次发版完成后，在部署分支（如 `deploy`）对应的 commit 上打 annotated tag：
+
+```sh
+git tag -a v0.1.x -m "release v0.1.x" <sha> && git push origin v0.1.x
+```
+
+历史版本：`v0.1.0`=`e4a40e8`、`v0.1.1`=`b5f7fdd`、`v0.1.2`=`0391e80`、`v0.1.3`=`d574ce4`。

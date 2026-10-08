@@ -1,13 +1,13 @@
 # 私有化发行包 内部打包手册（不对客户交付）
 
-> 对应 commit 68b6d61；客户文档见 DELIVERY.md。
+> 对应 commit **d574ce4667456cd9d02bdf0cc05b4ba5da48865b**（私有版 0.1.3，tag `v0.1.3`）；客户文档见 DELIVERY.md。
 
 ## 1. 分工与顺序（正式构建）
 
 全部使用同一个 commit，构建前确认工作区干净（脚本拒绝 dirty tree）。
 
 1. **Linux（xai）**：linux-x64 Computer、CLI、daemon、downloads 树和 manifests；用 rcodesign 构建 darwin-arm64/x64 Computer；cursor-sdk 的 darwin 资产。
-2. **服务器**：private 模式的 server/web 镜像，`docker save` 成 tar，记录 sha256 和大小。
+2. **服务器**：private 模式的 server/web 镜像（入库脚本 `ops/docker/build-release.sh <full-sha> <branch>` 一键完成：frozen install→双镜像（tag `<branch>-<sha>`）→linux-x64 downloads 产物，自写 pidfile+分步日志），`docker save` 成 tar，记录 sha256 和大小；**自有生产发版走 deploy 分支并打 `v0.1.x` annotated tag**（客户交付包仍按本手册三路构建）。
 3. **Mac**：`--only desktop`，产出 Desktop 的 arm64/x64 dmg/zip、`latest-mac.yml`、desktop manifest，传走后立即清理（峰值约 10–11GB）。
 4. **汇总**：在服务器组装发行包，整包重算 sha256，与各方清单逐项比对；所有 manifest 的 commit 必须一致。
 5. 全新安装复验：downloads 树整体重建（desktop/ 只留当前版本）、断网安装、完整用户流程、首次检查更新不提示。
