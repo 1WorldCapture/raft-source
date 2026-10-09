@@ -163,7 +163,7 @@ export const MessageRow = memo(function MessageRow({
             delayLongPress={500}
             onLongPress={(event) => onLongPressMessage?.(message.id, event.nativeEvent.pageX, event.nativeEvent.pageY)}
             onPress={() => onPressMessage?.(message.id)}
-            style={bubbles ? [styles.bubble, own ? skinStyle.ownBubble : styles.bubbleOther, failed ? styles.failedBubble : null] : styles.body}
+            style={bubbles ? [styles.bubble, styles.bubbleFill, own ? skinStyle.ownBubble : styles.bubbleOther, failed ? styles.failedBubble : null] : styles.body}
           >
             {group.showAvatar ? (
               <View>
@@ -286,6 +286,7 @@ export const MessageRow = memo(function MessageRow({
             ) : null}
           </Pressable>
           </BubbleShell>
+          {bubbles ? <View style={styles.bubbleGutter} /> : null}
         </View>
       )}
     </View>
@@ -408,8 +409,10 @@ const styles = StyleSheet.create({
   system: { ...fontSize.time, color: color.muted, fontFamily: "mono", paddingVertical: 6, textAlign: "center" },
   row: { flexDirection: "row", gap: 12, paddingHorizontal: 8, paddingVertical: 4 },
   rowReverse: { flexDirection: "row-reverse" },
-  bubbleLimit: { flexShrink: 1, maxWidth: "75%" },
+  bubbleLimit: { flexGrow: 1, flexShrink: 1, minWidth: 0 },
+  bubbleGutter: { width: "20%" },
   bubble: { borderColor: color.border, borderWidth: 2, paddingHorizontal: 10, paddingVertical: 6 },
+  bubbleFill: { alignSelf: "stretch" },
   bubbleOther: { backgroundColor: color.white },
   failedBubble: { borderColor: color.red },
   highlight: { bottom: 0, left: 0, position: "absolute", right: 0, top: 0 },
