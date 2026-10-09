@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createMigrationController } from "./migrationIpc.ts";
+import { createMigrationController, refuseWhileMigrating } from "./migrationIpc.ts";
 import type { MigrateRun } from "./migration.ts";
 import type { InstallResult } from "./bundledInstall.ts";
 
@@ -89,4 +89,12 @@ test("rolled back: nothing is written and the app stays embedded", async () => {
   const state = await controller.apply();
   assert.equal(state.phase, "rolled_back");
   assert.deepEqual([modes.length, switched()], [0, 0]);
+});
+
+test("embedded controls are refused in main while applying, and work again afterwards", () => {
+  let applying = true;
+  const start = refuseWhileMigrating(() => applying, (x: number) => x + 1);
+  assert.throws(() => start(1), /being moved/);
+  applying = false;
+  assert.equal(start(1), 2);
 });

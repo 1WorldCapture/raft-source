@@ -70,7 +70,8 @@ test("runner: no result line (old binary, crash, missing file, timeout) is an er
   assert.equal(missing.outcome, "error");
   await withScript(`sleep 5`, async (script) => {
     const run = await runMigrateHome({ binaryPath: script, from: "/a", apply: true, timeoutMs: 100 });
-    assert.deepEqual([run.outcome, run.detail], ["error", "migrate-home timed out"]);
+    assert.deepEqual([run.outcome, run.timedOut], ["error", true]);
+    await new Promise((r) => setTimeout(r, 50));
   });
 });
 
@@ -168,6 +169,40 @@ test("binary preparation failure (e.g. bundled copy failed) is an error before a
   const { c, calls } = controller({ runs: [], ensureBinary: async () => { throw new Error("disk full"); } });
   const s = await c.plan();
   assert.deepEqual([s.phase, s.error, calls], ["error", "disk full", []]);
+});
+
+test("apply that outlives the wait is NOT killed: the result file is watched (both homes) and its result is honoured", async () => {
+  const reads: string[] = [];
+  const outcomes: string[] = [];
+  const c = new MigrationController({
+    available: true,
+    getFromHome: async () => "/app/home",
+    ensureBinary: async () => "/bin/rc",
+    run: async (input) => input.apply
+      ? { outcome: "error", events: [], final: null, detail: "still running", exitCode: null, timedOut: true }
+      : { outcome: "planned", events: [ev("preflight", "ok", { to: "/t" })], final: null, detail: null, exitCode: 0 },
+    readResult: async (home) => { reads.push(home); return reads.length < 4 ? null : { result: "rolled_back", startedAt: "2999-01-01T00:00:00Z", from: "/app/home", to: "/t", error: "late failure" }; },
+    sleep: async () => undefined,
+    afterSuccess: async () => { outcomes.push("switched"); return { warnings: [] }; },
+    publish: () => undefined,
+  });
+  await c.plan();
+  const s = await c.apply();
+  assert.deepEqual([s.phase, s.error, s.slow], ["rolled_back", "late failure", true]);
+  assert.ok(reads.includes("/t") && reads.includes("/app/home"));
+  assert.deepEqual(outcomes, []);
+});
+
+test("a stale result file from an earlier run is ignored while waiting", async () => {
+  let n = 0;
+  const c = new MigrationController({
+    available: true, getFromHome: async () => "/h", ensureBinary: async () => "/b",
+    run: async (input) => input.apply ? { outcome: "error", events: [], final: null, detail: null, exitCode: null, timedOut: true } : { outcome: "planned", events: [ev("preflight", "ok", { to: "/t" })], final: null, detail: null, exitCode: 0 },
+    readResult: async () => (++n < 3 ? { result: "success", startedAt: "2000-01-01T00:00:00Z", from: "/h", to: "/t", error: null } : { result: "failed", startedAt: "2999-01-01T00:00:00Z", from: "/h", to: "/t", error: "x" }),
+    sleep: async () => undefined, afterSuccess: async () => ({ warnings: [] }), publish: () => undefined,
+  });
+  await c.plan();
+  assert.equal((await c.apply()).phase, "failed");
 });
 
 test("a second plan/apply while one is running is ignored; progress is published step by step", async () => {

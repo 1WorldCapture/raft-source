@@ -11,6 +11,7 @@
 // file ({result: success|rolled_back|failed, from, to, error, rollback, serviceState, steps}) or, for a dry run,
 // {dryRun: true, outcome: planned|blocked, blocked}.
 import { spawn } from "node:child_process";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 export interface MigrationEvent {
@@ -64,6 +65,8 @@ export interface MigrateRun {
   /** Last lines of stderr, for the "error" outcome (no usable final line: crash, unknown command, missing binary). */
   detail: string | null;
   exitCode: number | null;
+  /** The wait limit passed; the process was NOT killed (it may be mid-move and must finish or roll back itself). */
+  timedOut?: boolean;
 }
 
 export interface MigrateRunInput {
@@ -87,14 +90,14 @@ export const runMigrateHome: MigrateRunner = (input) =>
     let stdoutRest = "";
     let stderrTail = "";
     let settled = false;
-    const finish = (exitCode: number | null, spawnError?: string) => {
+    const finish = (exitCode: number | null, spawnError?: string, timedOut = false) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       if (stdoutRest.trim()) consume(stdoutRest);
       const outcome: MigrationOutcome = final ? final.result : dry ?? "error";
       const detail = outcome === "error" ? spawnError ?? (stderrTail.trim().split("\n").filter(Boolean).slice(-3).join(" ") || `raft-computer exited with ${exitCode} and no result`) : null;
-      resolve({ outcome, events, final, detail, exitCode });
+      resolve({ outcome, events, final, detail, exitCode, ...(timedOut ? { timedOut: true } : {}) });
     };
     const consume = (line: string) => {
       const parsed = parseMigrationLine(line.trim());
@@ -112,8 +115,8 @@ export const runMigrateHome: MigrateRunner = (input) =>
       return;
     }
     const timer = setTimeout(() => {
-      child.kill("SIGKILL");
-      finish(null, "migrate-home timed out");
+      // Stop waiting, never kill: a migration cut off between move and start could not roll itself back.
+      finish(null, "migrate-home is still running", true);
     }, input.timeoutMs ?? 10 * 60_000);
     child.stdout?.setEncoding("utf8");
     child.stdout?.on("data", (chunk: string) => {
@@ -144,6 +147,8 @@ export interface MigrationState {
   resultFile: string | null;
   /** The app restarts itself shortly after a successful move. */
   relaunching: boolean;
+  /** Apply is taking longer than expected; the result file is being watched. */
+  slow: boolean;
 }
 
 export interface MigrationDeps {
@@ -156,11 +161,24 @@ export interface MigrationDeps {
   /** After a successful move: switch the app to standalone mode and prepare the restart. Throws if that fails. */
   afterSuccess: (to: string) => Promise<{ warnings: string[] }>;
   publish: (state: MigrationState) => void;
+  /** Reads <home>/computer/migrate-result.json (null when absent/unreadable). */
+  readResult?: (home: string) => Promise<{ result: string; startedAt: string; from: string | null; to: string | null; error: string | null } | null>;
+  sleep?: (ms: number) => Promise<void>;
+  pollMs?: number;
 }
 
-const EMPTY: MigrationState = { phase: "idle", from: null, to: null, steps: [], blockers: [], warnings: [], error: null, resultFile: null, relaunching: false };
+const EMPTY: MigrationState = { phase: "idle", from: null, to: null, steps: [], blockers: [], warnings: [], error: null, resultFile: null, relaunching: false, slow: false };
 const resultFileOf = (home: string | null) => (home ? path.join(home, "computer", "migrate-result.json") : null);
 const strings = (value: unknown): string[] => (Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : []);
+
+async function readResultFile(home: string): Promise<{ result: string; startedAt: string; from: string | null; to: string | null; error: string | null } | null> {
+  try {
+    const raw = JSON.parse(await readFile(resultFileOf(home) ?? "", "utf8")) as Record<string, unknown>;
+    return { result: String(raw.result), startedAt: String(raw.startedAt ?? ""), from: str(raw.from), to: str(raw.to), error: str(raw.error) };
+  } catch {
+    return null;
+  }
+}
 
 export class MigrationController {
   private state: MigrationState;
@@ -198,7 +216,9 @@ export class MigrationController {
       this.set({ ...EMPTY, phase: "applying", from: planned.from, to: planned.to });
       const prepared = await this.prepare(planned.from);
       if (!prepared) return this.state;
-      const run = await (this.deps.run ?? runMigrateHome)({ binaryPath: prepared.binaryPath, from: prepared.from, apply: true, onEvent: (e) => this.addStep(e) });
+      const startedAt = new Date().toISOString();
+      let run = await (this.deps.run ?? runMigrateHome)({ binaryPath: prepared.binaryPath, from: prepared.from, apply: true, onEvent: (e) => this.addStep(e) });
+      if (run.timedOut) run = await this.waitForResultFile(prepared.from, planned.to, startedAt, run);
       if (run.outcome === "success") {
         const to = run.final?.to ?? planned.to;
         try {
@@ -218,6 +238,23 @@ export class MigrationController {
   reset(): MigrationState {
     if (this.busy || this.state.phase === "unavailable" || this.state.phase === "applying" || this.state.phase === "success") return this.state;
     return this.set({ ...EMPTY });
+  }
+
+  /** The process outlived our wait: watch both homes' result file (the move may have landed in either) until it reports. */
+  private async waitForResultFile(from: string, to: string | null, since: string, run: MigrateRun): Promise<MigrateRun> {
+    this.set({ ...this.state, slow: true, resultFile: resultFileOf(to ?? from) });
+    const read = this.deps.readResult ?? readResultFile;
+    const sleep = this.deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+    for (;;) {
+      for (const home of [to, from]) {
+        if (!home) continue;
+        const file = await read(home);
+        if (file && file.startedAt >= since && (file.result === "success" || file.result === "rolled_back" || file.result === "failed")) {
+          return { ...run, timedOut: false, outcome: file.result, final: { result: file.result, from: file.from, to: file.to, error: file.error, serviceState: null }, detail: null };
+        }
+      }
+      await sleep(this.deps.pollMs ?? 5_000);
+    }
   }
 
   private async prepare(knownFrom?: string | null): Promise<{ binaryPath: string; from: string } | null> {

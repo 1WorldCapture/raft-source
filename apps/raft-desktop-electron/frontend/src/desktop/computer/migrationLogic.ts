@@ -15,6 +15,7 @@ export interface MigrationState {
   error: string | null;
   resultFile: string | null;
   relaunching: boolean;
+  slow?: boolean;
 }
 
 export type MigrationActionId = "apply" | "recheck" | "close";
@@ -128,7 +129,7 @@ export function deriveMigrationView(state: MigrationState | null): MigrationView
         actions: [act("recheck", "Check again", true), act("close", "Close")],
       };
     case "applying":
-      return { ...base, open: true, tone: "busy", title: "Moving the Computer…", lines: ["Keep this app open until it finishes. Agents are offline during the move."], locked: true, actions: [] };
+      return { ...base, open: true, tone: "busy", title: "Moving the Computer…", lines: state.slow ? ["The move is taking longer than expected but is still running. Keep this app open; this dialog updates when it reports.", ...resultLine] : ["Keep this app open until it finishes. Agents are offline during the move."], locked: true, actions: [] };
     case "success":
       return {
         ...base,

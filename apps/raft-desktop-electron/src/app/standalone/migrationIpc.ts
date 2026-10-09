@@ -62,6 +62,14 @@ export function createMigrationController(deps: MigrationWiringDeps): MigrationC
   });
 }
 
+/** Embedded-host controls that must not run while a move is in progress (converge() would restart the service in the source home). */
+export function refuseWhileMigrating<A extends unknown[], R>(isApplying: () => boolean, fn: (...args: A) => R): (...args: A) => R {
+  return (...args: A) => {
+    if (isApplying()) throw new Error("The Computer is being moved out of this app. Wait until it finishes.");
+    return fn(...args);
+  };
+}
+
 export function registerMigrationIpc(ipc: IpcMainLike, controller: MigrationController): void {
   ipc.handle("migration:state", () => controller.getState());
   ipc.handle("migration:plan", () => controller.plan());
