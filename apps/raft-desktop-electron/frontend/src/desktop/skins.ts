@@ -12,6 +12,7 @@
 import {
   chromeChannels,
   DEFAULT_SKIN_ID,
+  isSkinId,
   SIGNAL_SCALE,
   signalStepCss,
   SKINS,
@@ -22,6 +23,16 @@ export type { Skin } from "@botiverse/raft-shared/src/skins.ts";
 export { DEFAULT_SKIN_ID, SKINS, skinById };
 
 const STORAGE_KEY = "raft-desktop-skin";
+
+/** The skin the user picked on this device, or null when they never chose one (default applies). */
+export function explicitSkinId(): string | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw && isSkinId(raw) ? raw : null;
+  } catch {
+    return null;
+  }
+}
 
 export function currentSkinId(): string {
   try {
@@ -61,7 +72,15 @@ export function subscribeSkin(listener: (id: string) => void): () => void {
   return () => listeners.delete(listener);
 }
 
-export function setSkin(id: string): void {
+// The user's own picks (switcher click) — the account sync listens to these;
+// a skin adopted FROM the server must not be written back as if it were a pick.
+const userChangeListeners = new Set<(id: string) => void>();
+export function onUserSkinChange(listener: (id: string) => void): () => void {
+  userChangeListeners.add(listener);
+  return () => userChangeListeners.delete(listener);
+}
+
+function persistAndApply(id: string): void {
   try {
     localStorage.setItem(STORAGE_KEY, id);
   } catch {
@@ -69,6 +88,16 @@ export function setSkin(id: string): void {
   }
   applySkin(id);
   for (const listener of listeners) listener(id);
+}
+
+export function setSkin(id: string): void {
+  persistAndApply(id);
+  for (const l of userChangeListeners) l(id);
+}
+
+/** Apply + remember a skin that came from the account (no write-back). */
+export function adoptSyncedSkin(id: string): void {
+  persistAndApply(id);
 }
 
 export function initSkin(): void {
