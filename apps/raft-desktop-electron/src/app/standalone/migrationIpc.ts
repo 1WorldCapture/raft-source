@@ -29,11 +29,32 @@ export interface MigrationWiringDeps {
  * The binary is installed BEFORE the move (version-gated: an older raft-computer is replaced by the bundled one,
  * which carries `migrate-home`), but the Cursor SDK only AFTER it: the target home must be empty for the move.
  */
+/**
+ * What follows a successful move, in the dialog and in launch-time recovery alike: copy the Cursor SDK next to the
+ * moved home (a failure is only a warning) and write the standalone marker.
+ */
+export async function finishSwitch(
+  deps: Pick<MigrationWiringDeps, "bundled" | "binaryTarget" | "userDataDir" | "install" | "writeMode">,
+  to: string,
+): Promise<{ warnings: string[] }> {
+  if (!to) throw new Error("the migration did not report the new home");
+  const install = deps.install ?? installBundledComputer;
+  const writeMode = deps.writeMode ?? writeHostMode;
+  const warnings: string[] = [];
+  try {
+    await install({ bundled: { ...deps.bundled, binaryPath: null, photonWasmPath: null }, binaryTarget: deps.binaryTarget, home: to, installedBinaryVersion: null });
+  } catch (error) {
+    warnings.push(`The Cursor SDK could not be copied next to the moved Computer (${error instanceof Error ? error.message : String(error)}); the card will offer Update.`);
+  }
+  // Without this, the app would come back up hosting a Computer that no longer lives where it looks.
+  await writeMode(deps.userDataDir, { mode: "standalone", home: to });
+  return { warnings };
+}
+
 export function createMigrationController(deps: MigrationWiringDeps): MigrationController {
   const install = deps.install ?? installBundledComputer;
   const fileExists = deps.fileExists ?? existsSync;
   const readVersion = deps.readVersion ?? ((binaryPath: string, home: string) => createStandaloneCli({ binaryPath, home }).version());
-  const writeMode = deps.writeMode ?? writeHostMode;
   return new MigrationController({
     available: deps.bundled.binaryPath !== null,
     getFromHome: deps.getFromHome,
@@ -47,15 +68,7 @@ export function createMigrationController(deps: MigrationWiringDeps): MigrationC
       return deps.binaryTarget;
     },
     afterSuccess: async (to) => {
-      if (!to) throw new Error("the migration did not report the new home");
-      const warnings: string[] = [];
-      try {
-        await install({ bundled: { ...deps.bundled, binaryPath: null, photonWasmPath: null }, binaryTarget: deps.binaryTarget, home: to, installedBinaryVersion: null });
-      } catch (error) {
-        warnings.push(`The Cursor SDK could not be copied next to the moved Computer (${error instanceof Error ? error.message : String(error)}); the card will offer Update.`);
-      }
-      // Without this, the app would come back up hosting a Computer that no longer lives where it looks.
-      await writeMode(deps.userDataDir, { mode: "standalone", home: to });
+      const { warnings } = await finishSwitch(deps, to);
       deps.switchToStandalone();
       return { warnings };
     },
