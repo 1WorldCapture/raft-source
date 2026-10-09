@@ -104,4 +104,9 @@ export const size = {
   mentionMark: 16,
 } as const;
 
+/** Total height of the yellow tab header, including the status-bar inset. */
+export function tabHeaderBlockHeight(windowHeight: number, insetTop: number): number {
+  return (windowHeight <= 600 ? size.headerCompact : size.header) + insetTop;
+}
+
 export const pressShift = 2;

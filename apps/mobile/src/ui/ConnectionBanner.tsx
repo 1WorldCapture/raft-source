@@ -1,6 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { StyleSheet, View } from "react-native";
-import { StatusBar } from "expo-status-bar";
+import { StyleSheet, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { RefreshCw, WifiOff } from "lucide-react-native";
 import { useOfflineStore } from "../cache/cacheCleanup";
@@ -8,7 +7,7 @@ import { useCacheSyncStatus } from "../cache/cacheSyncRuntime";
 import { useT } from "../i18n/provider";
 import { connectionBannerFrame } from "./connectionBannerFrame";
 import { AppText } from "./text";
-import { border, color, fontSize } from "./tokens";
+import { border, color, fontSize, tabHeaderBlockHeight } from "./tokens";
 
 // Brief blips (background return, a reconnect that lands within a second)
 // should not flash a banner, so each state must hold for a moment first.
@@ -36,14 +35,18 @@ function useHeld(active: boolean, delayMs: number): boolean {
 export function ConnectionBanner({ children }: { children: ReactNode }) {
   const t = useT();
   const insets = useSafeAreaInsets();
+  const { height } = useWindowDimensions();
   const offline = useHeld(useOfflineStore((state) => state.offline), OFFLINE_DELAY_MS);
   const updating = useHeld(useCacheSyncStatus((state) => state.syncing), UPDATING_DELAY_MS) && !offline;
   const visible = offline || updating;
+  // Sit on the content, just under the yellow header, so the server name and
+  // the status bar keep the header color. The strip stays absolute: it covers
+  // the top of the page instead of pushing it down.
   const strip = visible ? (
     <View
       accessibilityLiveRegion="polite"
       pointerEvents="none"
-      style={[styles.bar, offline ? styles.offline : styles.updating, { paddingTop: insets.top + 6 }]}
+      style={[styles.bar, offline ? styles.offline : styles.updating, { top: tabHeaderBlockHeight(height, insets.top) }]}
     >
       {offline ? (
         <WifiOff color={color.white} size={14} strokeWidth={2.5} />
@@ -55,15 +58,13 @@ export function ConnectionBanner({ children }: { children: ReactNode }) {
       </AppText>
     </View>
   ) : null;
-  // The ink strip sits under the status bar: switch its icons to light so the clock stays readable.
-  const status = offline ? <StatusBar style="light" /> : null;
   return connectionBannerFrame({
     Host: View as unknown as (props: { children?: ReactNode; style?: typeof styles.root }) => ReactNode,
     rootStyle: styles.root,
     bodyStyle: styles.body,
     children,
     strip,
-    status,
+    status: null,
   });
 }
 
@@ -78,9 +79,9 @@ const styles = StyleSheet.create({
     left: 0,
     paddingBottom: 6,
     paddingHorizontal: 16,
+    paddingTop: 6,
     position: "absolute",
     right: 0,
-    top: 0,
     zIndex: 2,
   },
   offline: { backgroundColor: color.ink },
