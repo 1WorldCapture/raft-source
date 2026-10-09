@@ -59,7 +59,7 @@ test("the CLI wrapper runs the right commands with the standalone home in the en
   assert.deepEqual(await cli.start(), { ok: true, state: "running", error: null });
   assert.deepEqual(await cli.stop(), { ok: true, state: "stopped", error: null });
   assert.equal(await cli.version(), "1.0.29");
-  assert.deepEqual(calls.map((c) => c.args), [["status", "--json"], ["start", "--json"], ["stop", "--json"], ["--version"]]);
+  assert.deepEqual(calls.map((c) => c.args), [["status", "--json"], ["start"], ["stop"], ["--version"]]);
   assert.ok(calls.every((c) => c.file === "/bin/raft-computer" && c.home === "/iso/.slock"));
 });
 
@@ -102,4 +102,22 @@ test("contract fixture: the exact output of the computer package's projectStatus
   const status = parseStatusJson(real);
   assert.deepEqual([status.service.state, status.service.pid, status.desiredState, status.agentCount, status.servers[0]?.agentCount, status.servers[0]?.daemonState], ["running", 7, "running", 0, 0, "online"]);
   assert.deepEqual([status.cursorSdk.installed, status.hostLifecycleOwner, status.migration?.state], [false, null, "none"]);
+});
+
+test("indented multi-line JSON (what the real binary prints) parses, for status and for commands", () => {
+  const status = parseStatusJson(JSON.stringify({ home: "/h", service: { state: "stopped", desiredState: "running" }, servers: [] }, null, 2));
+  assert.equal(status.home, "/h");
+  assert.equal(status.service.state, "stopped");
+  assert.deepEqual(parseCommandJson(JSON.stringify({ ok: true, state: "running" }, null, 2)), { ok: true, state: "running", error: null });
+});
+
+test("start/stop without --json: the exit code decides; a failure carries the last output line", async () => {
+  const outputs = [
+    { stdout: "Raft Computer started.\n", stderr: "", code: 0 },
+    { stdout: "", stderr: "warn\nport busy\n", code: 1 },
+  ];
+  const run: RunCommand = async () => outputs.shift()!;
+  const cli = createStandaloneCli({ binaryPath: "/b", home: "/h", run, baseEnv: {} });
+  assert.deepEqual(await cli.start(), { ok: true, state: "running", error: null });
+  assert.deepEqual(await cli.stop(), { ok: false, state: null, error: { code: "exit_1", message: "port busy" } });
 });

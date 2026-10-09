@@ -59,7 +59,7 @@ test("start and stop run the CLI and return the refreshed state; a failing comma
   assert.deepEqual(h.calls, ["start"]);
   assert.equal(started.phase, "running");
   const failingHost = new StandaloneComputerHost({
-    home: "/h", binaryPath: "/b", bundled: { binaryPath: null, binaryVersion: null, cursorRoot: null }, fileExists: async () => true,
+    home: "/h", binaryPath: "/b", bundled: { binaryPath: null, photonWasmPath: null, binaryVersion: null, cursorRoot: null }, fileExists: async () => true,
     cli: { status: async () => status({ state: "stopped" }), start: async () => ({ ok: false, state: null, error: { code: "x", message: "port busy" } }), stop: async () => ({ ok: true, state: "stopped", error: null }), version: async () => null },
   });
   assert.equal((await failingHost.start()).error, "port busy");
@@ -70,7 +70,7 @@ test("lifecycle commands never overlap", async () => {
   let maxActive = 0;
   const slow = async () => { active += 1; maxActive = Math.max(maxActive, active); await new Promise((r) => setTimeout(r, 15)); active -= 1; return { ok: true, state: "running" as const, error: null }; };
   const host = new StandaloneComputerHost({
-    home: "/h", binaryPath: "/b", bundled: { binaryPath: null, binaryVersion: null, cursorRoot: null }, fileExists: async () => true,
+    home: "/h", binaryPath: "/b", bundled: { binaryPath: null, photonWasmPath: null, binaryVersion: null, cursorRoot: null }, fileExists: async () => true,
     cli: { status: async () => status(), start: slow, stop: slow, version: async () => null },
   });
   await Promise.all([host.start(), host.stop(), host.start()]);
@@ -102,10 +102,11 @@ test("a failed copy during an upgrade never leaves agents down: the old Computer
 });
 
 test("bundled resource lookup: dev builds and builds without the Computer report nothing", () => {
-  assert.deepEqual(resolveBundledComputer({ isPackaged: false, resourcesPath: "/r" }), { binaryPath: null, binaryVersion: null, cursorRoot: null });
-  assert.deepEqual(resolveBundledComputer({ isPackaged: true, resourcesPath: "/r", exists: () => false }), { binaryPath: null, binaryVersion: null, cursorRoot: null });
+  assert.deepEqual(resolveBundledComputer({ isPackaged: false, resourcesPath: "/r" }), { binaryPath: null, photonWasmPath: null, binaryVersion: null, cursorRoot: null });
+  assert.deepEqual(resolveBundledComputer({ isPackaged: true, resourcesPath: "/r", exists: () => false }), { binaryPath: null, photonWasmPath: null, binaryVersion: null, cursorRoot: null });
   const present = resolveBundledComputer({ isPackaged: true, resourcesPath: "/r", exists: () => true, readText: () => "1.0.30\n" });
   assert.equal(present.binaryVersion, "1.0.30");
   assert.ok(present.binaryPath?.endsWith("raft-computer"));
   assert.equal(present.cursorRoot, "/r/cursor-sdk");
+  assert.equal(present.photonWasmPath, "/r/computer/photon_rs_bg.wasm");
 });

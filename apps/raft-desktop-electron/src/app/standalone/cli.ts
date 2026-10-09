@@ -18,14 +18,22 @@ export interface StandaloneStatus {
 
 const SERVICE_STATES: readonly ServiceState[] = ["running", "stopped", "starting", "failed"];
 const str = (value: unknown): string | null => (typeof value === "string" ? value : null);
+/** The CLI prints either one JSON document (possibly indented) or one JSON object per line; take the whole text first, else the last line. */
+function parseJsonOutput(text: string): unknown {
+  try {
+    return JSON.parse(text.trim());
+  } catch {
+    return JSON.parse(text.trim().split("\n").filter(Boolean).at(-1) ?? "");
+  }
+}
+
 const num = (value: unknown): number => (typeof value === "number" && Number.isFinite(value) ? value : 0);
 
 /** Strict about what the UI depends on (home, service.state), tolerant of everything else (fields get added). */
 export function parseStatusJson(text: string): StandaloneStatus {
-  const line = text.trim().split("\n").filter(Boolean).at(-1) ?? "";
   let raw: unknown;
   try {
-    raw = JSON.parse(line);
+    raw = parseJsonOutput(text);
   } catch {
     throw new Error("raft-computer status: output is not JSON");
   }
@@ -71,7 +79,7 @@ export interface CommandResult { ok: boolean; state: "running" | "stopped" | nul
 
 export function parseCommandJson(text: string): CommandResult {
   try {
-    const raw = JSON.parse(text.trim().split("\n").filter(Boolean).at(-1) ?? "") as Record<string, unknown>;
+    const raw = parseJsonOutput(text) as Record<string, unknown>;
     const error = raw.error as Record<string, unknown> | null | undefined;
     return {
       ok: raw.ok === true,
@@ -81,6 +89,14 @@ export function parseCommandJson(text: string): CommandResult {
   } catch {
     return { ok: false, state: null, error: { code: "bad_output", message: "raft-computer returned no JSON" } };
   }
+}
+
+function commandResult(result: { stdout: string; stderr: string; code: number }, okState: "running" | "stopped"): CommandResult {
+  const json = parseCommandJson(result.stdout);
+  if (json.error?.code !== "bad_output") return json;
+  if (result.code === 0) return { ok: true, state: okState, error: null };
+  const detail = (result.stderr.trim() || result.stdout.trim()).split("\n").filter(Boolean).at(-1) ?? "";
+  return { ok: false, state: null, error: { code: "exit_" + result.code, message: detail.slice(0, 300) } };
 }
 
 export type RunCommand = (file: string, args: string[], options: { env: NodeJS.ProcessEnv; timeoutMs: number }) => Promise<{ stdout: string; stderr: string; code: number }>;
@@ -102,11 +118,13 @@ export function createStandaloneCli(options: { binaryPath: string; home: string;
       if (result.code !== 0) throw new Error(`raft-computer status failed (${result.code}): ${result.stderr.trim().slice(0, 300)}`);
       return parseStatusJson(result.stdout);
     },
+    // `start`/`stop` have no --json yet: the exit code decides, the next `status` poll reports the state.
+    // A build that prints a JSON result (ok/state/error) is honoured when it does.
     async start(timeoutMs = 60_000): Promise<CommandResult> {
-      return parseCommandJson((await run(options.binaryPath, ["start", "--json"], { env, timeoutMs })).stdout);
+      return commandResult(await run(options.binaryPath, ["start"], { env, timeoutMs }), "running");
     },
     async stop(timeoutMs = 60_000): Promise<CommandResult> {
-      return parseCommandJson((await run(options.binaryPath, ["stop", "--json"], { env, timeoutMs })).stdout);
+      return commandResult(await run(options.binaryPath, ["stop"], { env, timeoutMs }), "stopped");
     },
     async version(timeoutMs = 8_000): Promise<string | null> {
       const result = await run(options.binaryPath, ["--version"], { env, timeoutMs });
