@@ -34,7 +34,9 @@ export type MigrateStep =
   | "stop"
   | "move"
   | "alias"
+  | "sessions"
   | "home-env"
+  | "backup"
   | "start"
   | "self-check"
   | "rollback";
@@ -55,6 +57,12 @@ export interface MigrateEvent {
 
 export type MigrateOutcome = "success" | "rolled_back" | "failed";
 
+export interface MigrateBackupEntry {
+  label: string;
+  originalPath: string;
+  backupPath: string;
+}
+
 export interface MigrateResultFile {
   schemaVersion: 1;
   result: MigrateOutcome;
@@ -66,6 +74,10 @@ export interface MigrateResultFile {
   serviceState: "running" | "stopped-by-user" | "down";
   error: string | null;
   rollback: { attempted: boolean; ok: boolean; detail?: string } | null;
+  /** Every login-item plist this run deleted, and where the byte-for-byte
+   *  copy landed (<home>/computer/migrate-backup/) — recoverable by hand
+   *  even after a successful migration (PM review requirement). */
+  backups: MigrateBackupEntry[];
   steps: Array<{ step: MigrateStep; status: MigrateStepStatus; detail?: Record<string, unknown> }>;
 }
 
@@ -123,13 +135,30 @@ export interface MigrateHomeDeps {
   runLaunchctl: (args: string[]) => Promise<{ code: number; stderr: string }>;
   /** Read-only discovery of source-home login items (LaunchAgents scan). */
   listSourceCarriers?: (homeDir: string, matchPaths: string[]) => Promise<SourceCarrierInfo[]>;
+  /** ~/.claude/projects location for the session-continuity step. */
+  claudeProjectsDir?: (homeDir: string) => string;
   selfCheckTimeoutMs?: number;
   selfCheckPollMs?: number;
 }
 
+/** A path occurrence only counts when it ends at a boundary — the character
+ *  right after it must be `<` (plist XML closing tag), `/` (subpath), or a
+ *  quote. A bare substring match would let /Users/x/foo catch plists that
+ *  mention /Users/x/foobar, and a successful migration would delete them
+ *  for good (PM review requirement). */
+const PATH_BOUNDARY_CHARS = new Set(["<", "/", '"', "'"]);
+
+export function mentionsPathBounded(content: string, p: string): boolean {
+  for (let idx = content.indexOf(p); idx !== -1; idx = content.indexOf(p, idx + 1)) {
+    const next = content[idx + p.length];
+    if (next !== undefined && PATH_BOUNDARY_CHARS.has(next)) return true;
+  }
+  return false;
+}
+
 /** Default LaunchAgents scan: any *.plist whose text mentions one of the
- *  home's path spellings. The home-env LaunchAgent is excluded — it has its
- *  own dedicated step. */
+ *  home's path spellings at a boundary. The home-env LaunchAgent is
+ *  excluded — it has its own dedicated step. */
 export async function defaultListSourceCarriers(
   homeDir: string,
   matchPaths: string[],
@@ -149,7 +178,7 @@ export async function defaultListSourceCarriers(
     const plistPath = path.join(dir, name);
     try {
       const content = await fs.readFile(plistPath, "utf8");
-      if (matchPaths.some((p) => content.includes(p))) {
+      if (matchPaths.some((p) => mentionsPathBounded(content, p))) {
         found.push({ label, plistPath, content });
       }
     } catch {
@@ -157,6 +186,23 @@ export async function defaultListSourceCarriers(
     }
   }
   return found;
+}
+
+// --- Claude Code session continuity (plan §10) -------------------------------
+//
+// Claude Code indexes sessions by the agent's cwd, encoded as a directory
+// name under ~/.claude/projects where every character outside [A-Za-z0-9-]
+// becomes "-" (verified against 125 real project dirs on this machine:
+// "/"→"-", " "→"-", "@"→"-", "."→"-"). Encoding is per-character, so
+// encode(a + "/" + b) === encode(a) + "-" + encode(b) — a prefix rename of
+// the encoded names moves every project dir under the old home in one sweep.
+
+export function encodeProjectDirName(p: string): string {
+  return p.replace(/[^A-Za-z0-9-]/g, "-");
+}
+
+export function defaultClaudeProjectsDir(homeDir: string): string {
+  return path.join(homeDir, ".claude", "projects");
 }
 
 export interface MigrateHomeOptions {
@@ -397,7 +443,9 @@ export async function migrateHome(
       ["stop", pre.serviceWasRunning ? "planned" : "skipped", pre.serviceWasRunning ? undefined : { reason: "service not running" }],
       ["move", "planned", { from: pre.from, to: pre.to }],
       ["alias", pre.alias ? "planned" : "skipped", pre.alias ? { path: pre.alias.path, currentTarget: pre.alias.currentTarget } : { reason: "no ~/.slock-raft symlink into the source home" }],
+      ["sessions", "planned", { note: "rename ~/.claude/projects dirs whose encoded name starts with the old home" }],
       ["home-env", pre.homeEnv ? "planned" : "skipped", pre.homeEnv ? { path: pre.homeEnv.path } : { reason: "no home-env LaunchAgent" }],
+      ["backup", pre.sourceCarriers.length > 0 || pre.homeEnv ? "planned" : "skipped", { dir: "<to>/computer/migrate-backup" }],
       ["start", pre.desiredState === "running" ? "planned" : "skipped", pre.desiredState === "running" ? undefined : { reason: 'desiredState is "stopped"; the login item is converged but the service stays stopped' }],
       ["self-check", pre.desiredState === "running" ? "planned" : "skipped", pre.desiredState === "running" ? { agentDirs: pre.agentDirs, serverDirs: pre.serverDirs } : undefined],
     ];
@@ -419,6 +467,7 @@ export async function migrateHome(
   const { stopServiceAt, startServiceAt, convergeCarrierAt, statusAt, runLaunchctl } = deps;
 
   const journal: UndoEntry[] = [];
+  const backups: MigrateBackupEntry[] = [];
   let failure: string | null = null;
   let failureStep: MigrateStep | null = null;
 
@@ -447,6 +496,7 @@ export async function migrateHome(
       serviceState,
       error: failure,
       rollback,
+      backups,
       steps,
     };
     // Result file lives in whichever home is real on disk after the run:
@@ -560,7 +610,55 @@ export async function migrateHome(
     record({ step: "alias", status: "skipped", detail: { reason: "no ~/.slock-raft symlink into the source home" } });
   }
 
-  // Step 5 — remove the home-env LaunchAgent (global setenv workaround).
+  // Step 5 — session continuity: Claude Code keys ~/.claude/projects dirs by
+  // the agent cwd's encoded name, so after the move every project dir under
+  // the old home would stop matching and agents would lose their session
+  // history. The encoding is per-character (see encodeProjectDirName), so a
+  // prefix rename of the encoded names carries the whole subtree over.
+  // Codex/Gemini session stores are NOT handled here (separate layouts).
+  {
+    const projectsDir = (deps.claudeProjectsDir ?? defaultClaudeProjectsDir)(homeDir);
+    if (await pathExists(projectsDir)) {
+      if (
+        !(await runStep("sessions", async () => {
+          const oldPrefix = encodeProjectDirName(pre.from);
+          const newPrefix = encodeProjectDirName(pre.to);
+          const entries = await fs.readdir(projectsDir, { withFileTypes: true });
+          let renamed = 0;
+          const skippedExisting: string[] = [];
+          for (const entry of entries) {
+            if (!entry.isDirectory()) continue;
+            const name = entry.name;
+            if (name !== oldPrefix && !name.startsWith(`${oldPrefix}-`)) continue;
+            const nextName = newPrefix + name.slice(oldPrefix.length);
+            const fromDir = path.join(projectsDir, name);
+            const toDir = path.join(projectsDir, nextName);
+            // Never clobber: if the new name is already taken (e.g. an old
+            // pre-migration run), leave the directory and report it.
+            if (await pathExists(toDir)) {
+              skippedExisting.push(name);
+              continue;
+            }
+            await fs.rename(fromDir, toDir);
+            journal.push({
+              label: `restore session dir ${name}`,
+              undo: async () => {
+                await fs.rename(toDir, fromDir);
+              },
+            });
+            renamed += 1;
+          }
+          return { renamed, skippedExisting, projectsDir };
+        }))
+      ) {
+        return rollbackAndFinish();
+      }
+    } else {
+      record({ step: "sessions", status: "skipped", detail: { reason: "no ~/.claude/projects directory" } });
+    }
+  }
+
+  // Step 6 — remove the home-env LaunchAgent (global setenv workaround).
   if (pre.homeEnv) {
     if (
       !(await runStep("home-env", async () => {
@@ -593,7 +691,38 @@ export async function migrateHome(
     record({ step: "home-env", status: "skipped", detail: { reason: "no home-env LaunchAgent" } });
   }
 
-  // Step 6 — start standalone at the new home (or converge the login item
+  // Step 7 — durable backup of every plist this run deleted (source
+  // carriers + home-env): byte-for-byte copies under the NEW home's
+  // computer/migrate-backup/, recorded in the result file. Even after a
+  // successful migration a mistakenly matched item stays recoverable by
+  // hand (PM review requirement). Runs after the move so the backup never
+  // creates directories at the target before the rename.
+  {
+    const removed = [
+      ...pre.sourceCarriers.map((c) => ({ label: c.label, originalPath: c.plistPath, content: c.content })),
+      ...(pre.homeEnv !== null ? [{ label: HOME_ENV_LABEL, originalPath: pre.homeEnv.path, content: pre.homeEnv.content }] : []),
+    ];
+    if (removed.length > 0) {
+      if (
+        !(await runStep("backup", async () => {
+          const dir = path.join(pre.to, "computer", "migrate-backup");
+          await fs.mkdir(dir, { recursive: true });
+          for (const item of removed) {
+            const backupPath = path.join(dir, `${item.label}.plist`);
+            await fs.writeFile(backupPath, item.content, "utf8");
+            backups.push({ label: item.label, originalPath: item.originalPath, backupPath });
+          }
+          return { dir, count: removed.length };
+        }))
+      ) {
+        return rollbackAndFinish();
+      }
+    } else {
+      record({ step: "backup", status: "skipped", detail: { reason: "nothing was deleted" } });
+    }
+  }
+
+  // Step 8 — start standalone at the new home (or converge the login item
   // only, preserving a stopped-by-user service). The undo entry is journalled
   // BEFORE the action: a start that fails halfway can still leave a process
   // at the target home, and the rollback must stop it before the move back.
@@ -638,7 +767,7 @@ export async function migrateHome(
     }
   }
 
-  // Step 7 — self-check (only meaningful when the service should be running).
+  // Step 9 — self-check (only meaningful when the service should be running).
   if (pre.desiredState === "running") {
     if (
       !(await runStep("self-check", async () => {
