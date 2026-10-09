@@ -1,6 +1,6 @@
 import { StyleSheet, View, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { color, size } from "../ui/tokens";
+import { color, size, tabHeaderBlockHeight } from "../ui/tokens";
 import { ServerTitle } from "./ServerTitle";
 import { TopMenu } from "./TopMenu";
 
@@ -11,8 +11,7 @@ import { TopMenu } from "./TopMenu";
 export function TabHeader() {
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
-  const compact = height <= 600;
-  const headerHeight = (compact ? size.headerCompact : size.header) + insets.top;
+  const headerHeight = tabHeaderBlockHeight(height, insets.top);
   return (
     <View style={[styles.header, { height: headerHeight, paddingTop: insets.top }]}>
       <ServerTitle menuTop={headerHeight} />

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createElement, isValidElement, type ReactNode } from "react";
 import { connectionBannerFrame } from "./connectionBannerFrame.ts";
+import { tabHeaderBlockHeight } from "./tokens.ts";
 
 function Host(props: { children?: ReactNode; style?: unknown }) {
   return createElement("host", null, props.children);
@@ -72,4 +73,9 @@ test("showing and hiding the strip keeps the child mounted on the same host", ()
     mounts += 1;
   }
   assert.equal(mounts, 1);
+});
+
+test("the strip offset matches the yellow tab header, including a short window", () => {
+  assert.equal(tabHeaderBlockHeight(800, 47), 62 + 47);
+  assert.equal(tabHeaderBlockHeight(600, 24), 48 + 24);
 });
