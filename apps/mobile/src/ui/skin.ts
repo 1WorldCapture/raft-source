@@ -1,5 +1,7 @@
 import { useSyncExternalStore } from "react";
-import { DEFAULT_SKIN_ID, signalHex, skinById, type SkinId } from "@botiverse/raft-shared/src/skins.ts";
+import { DEFAULT_SKIN_ID, isSkinId, signalHex, skinById, type SkinId } from "@botiverse/raft-shared/src/skins.ts";
+
+export type { SkinId };
 
 /** The four skin roles. Chrome is the surface; signal is the selected accent. */
 export interface SkinRoles {
@@ -32,6 +34,35 @@ export function skinRoles(id: string = DEFAULT_SKIN_ID): SkinRoles {
 
 let currentId: SkinId = DEFAULT_SKIN_ID;
 const listeners = new Set<() => void>();
+let writeSkin: (id: SkinId) => void = () => {};
+
+/**
+ * Install the local store and apply a previously saved id before the first paint.
+ * An unreadable store or an unknown id leaves the current skin alone.
+ * The writer runs on every change; a failed write still keeps the choice for this session.
+ */
+export function bindSkinStorage(storage: {
+  read: () => string | null;
+  write: (id: SkinId) => void;
+}): void {
+  writeSkin = (id) => {
+    try {
+      storage.write(id);
+    } catch {
+      // The choice still applies until the process exits.
+    }
+  };
+  let raw: string | null = null;
+  try {
+    raw = storage.read();
+  } catch {
+    return;
+  }
+  const id = raw?.trim() ?? "";
+  if (!isSkinId(id) || id === currentId) return;
+  currentId = id;
+  for (const listener of listeners) listener();
+}
 
 export function getSkinId(): SkinId {
   return currentId;
@@ -41,6 +72,7 @@ export function setSkin(id: string): void {
   const next = skinById(id).id;
   if (next === currentId) return;
   currentId = next;
+  writeSkin(next);
   for (const listener of listeners) listener();
 }
 

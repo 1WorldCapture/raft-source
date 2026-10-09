@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Pressable, StyleSheet, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, View } from "react-native";
 import Constants from "expo-constants";
 import { getLocales } from "expo-localization";
 import { useRouter } from "expo-router";
@@ -8,6 +8,7 @@ import { useT } from "../src/i18n/provider";
 import { userLabel } from "../src/model/messages";
 import { useSession } from "../src/state/session";
 import { PanelHeader } from "../src/ui/PanelHeader";
+import { SkinChoices } from "../src/ui/SkinChoices";
 import { AppText } from "../src/ui/text";
 import { useSkinStyles, type SkinRoles } from "../src/ui/skin";
 import { color, fontSize } from "../src/ui/tokens";
@@ -39,9 +40,14 @@ export default function SettingsScreen() {
   return (
     <View style={styles.page}>
       <PanelHeader tone="yellow" title={t("layout.mobileTabBar.settings")} />
+      <ScrollView contentContainerStyle={styles.scroll}>
       <View style={styles.block}>
         <AppText style={styles.label}>{userLabel(session.user) || t("mobile.account.signedIn")}</AppText>
         <AppText style={styles.hint}>{session.user?.email || ""}</AppText>
+      </View>
+      <AppText style={styles.section}>{t("mobile.menu.skin")}</AppText>
+      <View style={styles.skins}>
+        <SkinChoices />
       </View>
       <AppText style={styles.section}>{t("settings.appearance.fontSizeAria")}</AppText>
       <View style={styles.choices}>
@@ -66,13 +72,16 @@ export default function SettingsScreen() {
       <Pressable onPress={() => void session.logout().then(() => router.replace("/login"))} style={styles.logout}>
         <AppText style={styles.choiceLabel}>{t("pages.serverSelector.logOut")}</AppText>
       </Pressable>
+      </ScrollView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   page: { backgroundColor: color.page, flex: 1 },
+  scroll: { paddingBottom: 32 },
   block: { paddingHorizontal: 16, paddingTop: 16 },
+  skins: { paddingHorizontal: 8, paddingTop: 8 },
   label: { color: color.ink, fontSize: 16, fontWeight: "700" },
   hint: { ...fontSize.time, color: color.muted, fontFamily: "mono", paddingHorizontal: 16, paddingTop: 4 },
   section: { ...fontSize.group, color: color.ink, fontWeight: "700", letterSpacing: 0.8, paddingHorizontal: 16, paddingTop: 20, textTransform: "uppercase" },
