@@ -54,7 +54,7 @@ export default function DmsScreen() {
 
   return (
     <View style={styles.page}>
-      <TabHeader title={t("mobile.tabs.dms") + (current ? ` · ${current.name}` : "")} />
+      <TabHeader />
       {loading && dms.length === 0 ? (
         <View style={styles.centered}><ActivityIndicator color={color.ink} /></View>
       ) : error && dms.length === 0 ? (
