@@ -1665,7 +1665,8 @@ export function MessagePane({
             );
           }}
         />
-        {stickyAt && !embedded ? (
+        {/* The day divider already names the day. In a one-to-one chat the floating chip covers the first bubble. */}
+        {stickyAt && !embedded && !bubbles ? (
           <View pointerEvents="none" style={styles.sticky}>
             <AppText style={styles.stickyText}>{formatDayLabel(stickyAt, timeOptions)}</AppText>
           </View>
