@@ -7,6 +7,7 @@ import { test } from "vitest";
 import {
   aliasPathFor,
   defaultListSourceCarriers,
+  type HomeProcess,
   encodeProjectDirName,
   homeEnvPlistPath,
   mentionsPathBounded,
@@ -127,6 +128,11 @@ function fakeDeps(user: string, overrides: { statuses?: MigrateHomeStatus[] } = 
   const startCalls: string[] = [];
   const convergeCalls: Array<[string, "enabled" | "disabled"]> = [];
   const launchctlCalls: string[][] = [];
+  // Process-sweep fakes: seeded via liveProcesses; kills remove unless
+  // killWorks is set false (the unkillable-survivor case).
+  const liveProcesses = new Map<number, HomeProcess>();
+  const killLog: Array<[number, "SIGTERM" | "SIGKILL"]> = [];
+  const harnessKillWorks = { value: true };
   let poll = 0;
   const deps: MigrateHomeDeps = {
     homeDir: user,
@@ -135,6 +141,11 @@ function fakeDeps(user: string, overrides: { statuses?: MigrateHomeStatus[] } = 
     realHomeDir: () => user,
     uid: 501,
     env: {},
+    scanHomeProcesses: async () => [...liveProcesses.values()],
+    killHomeProcess: (pid, signal) => {
+      killLog.push([pid, signal]);
+      if (harnessKillWorks.value) liveProcesses.delete(pid);
+    },
     sleep: async () => {},
     selfCheckTimeoutMs: 200,
     selfCheckPollMs: 1,
@@ -159,7 +170,19 @@ function fakeDeps(user: string, overrides: { statuses?: MigrateHomeStatus[] } = 
       return { code: 0, stderr: "" };
     },
   };
-  return { deps, events, stopCalls, startCalls, convergeCalls, launchctlCalls };
+  return {
+    deps,
+    events,
+    stopCalls,
+    startCalls,
+    convergeCalls,
+    launchctlCalls,
+    liveProcesses,
+    killLog,
+    setKillWorks: (works: boolean) => {
+      harnessKillWorks.value = works;
+    },
+  };
 }
 
 const apply = { apply: true };
@@ -609,5 +632,76 @@ test("home-env: launchctl runs when the plist sits in the REAL user's LaunchAgen
     assert.equal(homeEnv?.detail?.launchctl, "domain");
   } finally {
     await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+test("stop step sweeps an orphaned runner tree of the source home (PM blocking fix)", async () => {
+  const f = await fixture({ livePid: true });
+  const h = fakeDeps(f.user);
+  h.liveProcesses.set(4242, { pid: 4242, kind: "runner", serverId: ATTACHED_SERVER_ID });
+  try {
+    const run = await migrateHome({ from: f.from, to: f.to, ...apply }, h.deps, (e) => h.events.push(e));
+    assert.equal(run.outcome, "success");
+    const stop = h.events.filter((e) => e.step === "stop").at(-1);
+    assert.equal(stop?.status, "ok");
+    assert.equal(stop?.detail?.treeClean, true);
+    assert.deepEqual(h.killLog, [[4242, "SIGTERM"]]);
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+test("stop step fails into rollback when a home process cannot be stopped", async () => {
+  const f = await fixture({ livePid: true });
+  const h = fakeDeps(f.user);
+  h.liveProcesses.set(666, { pid: 666, kind: "runner", serverId: ATTACHED_SERVER_ID });
+  h.setKillWorks(false);
+  h.deps.sweepTimeoutMs = 300;
+  try {
+    const run = await migrateHome({ from: f.from, to: f.to, ...apply }, h.deps, (e) => h.events.push(e));
+    assert.equal(run.outcome, "rolled_back");
+    const stop = h.events.filter((e) => e.step === "stop").at(-1);
+    assert.equal(stop?.status, "fail");
+    assert.match(String(stop?.detail?.error), /did not stop/);
+    // Nothing moved.
+    assert.equal((await stat(path.join(f.from, "agents", "a1"))).isDirectory(), true);
+    await assert.rejects(() => stat(f.to));
+    assert.ok(h.killLog.some(([pid, signal]) => pid === 666 && signal === "SIGKILL"));
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+test("self-check fails on a duplicate runner tree per server", async () => {
+  const f = await fixture({ livePid: true });
+  const h = fakeDeps(f.user);
+  try {
+    const run = await migrateHome({ from: f.from, to: f.to, ...apply }, h.deps, (e) => h.events.push(e));
+    assert.equal(run.outcome, "success"); // sanity: clean tree passes
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+  const f2 = await fixture({ livePid: true });
+  const h2 = fakeDeps(f2.user);
+  // Two runners for the same server visible at the target during self-check.
+  h2.deps.scanHomeProcesses = async (home: string) =>
+    home === f2.to
+      ? [
+          { pid: 900, kind: "runner", serverId: ATTACHED_SERVER_ID },
+          { pid: 901, kind: "runner", serverId: ATTACHED_SERVER_ID },
+        ]
+      : [];
+  h2.deps.selfCheckTimeoutMs = 200;
+  h2.deps.selfCheckPollMs = 5;
+  try {
+    const run = await migrateHome({ from: f2.from, to: f2.to, ...apply }, h2.deps, (e) => h2.events.push(e));
+    assert.equal(run.outcome, "rolled_back");
+    const selfCheck = h2.events.filter((e) => e.step === "self-check").at(-1);
+    assert.equal(selfCheck?.status, "fail");
+    assert.match(String(selfCheck?.detail?.error), /duplicate runner trees/);
+    // Rolled back to the source.
+    assert.equal((await stat(path.join(f2.from, "agents", "a1"))).isDirectory(), true);
+  } finally {
+    await rm(f2.root, { recursive: true, force: true });
   }
 });
