@@ -71,13 +71,20 @@ async function fixture(
   const sessionA = path.join(projectsDir, `${oldPrefix}-agents-a1`);
   const sessionClash = path.join(projectsDir, `${oldPrefix}-agents-a2`);
   const sessionUnrelated = path.join(projectsDir, "-Users-someone-else");
+  // Sibling decoy: encodes <from>-neighbor — shares the loose prefix but is
+  // NOT an agent cwd; it must stay put (PM review on #271).
+  const sessionSibling = path.join(projectsDir, `${oldPrefix}-neighbor`);
   const sessionClashTarget = path.join(projectsDir, `${newPrefix}-agents-a2`);
   await mkdir(sessionA, { recursive: true });
   await mkdir(sessionClash, { recursive: true });
   await mkdir(sessionUnrelated, { recursive: true });
+  await mkdir(sessionSibling, { recursive: true });
   await mkdir(sessionClashTarget, { recursive: true });
   await writeFile(path.join(sessionA, "session.jsonl"), "[]", "utf8");
-  return { root, user, from, to, alias, carrierPlist, projectsDir, sessionA, sessionClash, sessionUnrelated, sessionClashTarget };
+  return {
+    root, user, from, to, alias, carrierPlist, projectsDir,
+    sessionA, sessionClash, sessionUnrelated, sessionSibling, sessionClashTarget,
+  };
 }
 
 function fakeDeps(user: string, overrides: { statuses?: MigrateHomeStatus[] } = {}) {
@@ -196,6 +203,9 @@ test("apply: full success — move, alias repoint, home-env removal, start, self
     assert.equal((await stat(f.sessionClash)).isDirectory(), true);
     assert.equal((await stat(f.sessionClashTarget)).isDirectory(), true);
     assert.equal((await stat(f.sessionUnrelated)).isDirectory(), true);
+    assert.equal((await stat(f.sessionSibling)).isDirectory(), true, "sibling project dir stays put");
+    const sessions = h.events.filter((e) => e.step === "sessions").at(-1);
+    assert.deepEqual(sessions?.detail?.skippedSibling, [f.sessionSibling.split(path.sep).at(-1)]);
     // Durable backups of every deleted plist + recorded in the result file.
     const backupDir = path.join(f.to, "computer", "migrate-backup");
     assert.match(await readFile(path.join(backupDir, "build.raft.computer.test-carrier.plist"), "utf8"), /--slock-home/);

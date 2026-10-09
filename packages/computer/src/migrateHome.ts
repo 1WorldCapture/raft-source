@@ -621,16 +621,30 @@ export async function migrateHome(
     if (await pathExists(projectsDir)) {
       if (
         !(await runStep("sessions", async () => {
-          const oldPrefix = encodeProjectDirName(pre.from);
+          // The encoding maps BOTH "/" and "-" to "-", so a loose
+          // `${exact}-` prefix would also catch sibling projects like
+          // <oldHome>-neighbor — renaming those breaks THEIR session
+          // lookup (PM review). Only two shapes are safe to move:
+          //   1. exactly encode(from)            — cwd was the home itself
+          //   2. encode(from + "/agents/") …     — every agent cwd
+          // Anything else that merely shares the prefix is listed as a
+          // skipped sibling and left untouched.
+          const exact = encodeProjectDirName(pre.from);
+          const agentsPrefix = encodeProjectDirName(`${pre.from}${path.sep}agents${path.sep}`);
           const newPrefix = encodeProjectDirName(pre.to);
           const entries = await fs.readdir(projectsDir, { withFileTypes: true });
           let renamed = 0;
           const skippedExisting: string[] = [];
+          const skippedSibling: string[] = [];
           for (const entry of entries) {
             if (!entry.isDirectory()) continue;
             const name = entry.name;
-            if (name !== oldPrefix && !name.startsWith(`${oldPrefix}-`)) continue;
-            const nextName = newPrefix + name.slice(oldPrefix.length);
+            const isAgentProject = name === exact || name.startsWith(agentsPrefix);
+            if (!isAgentProject) {
+              if (name.startsWith(`${exact}-`)) skippedSibling.push(name);
+              continue;
+            }
+            const nextName = newPrefix + name.slice(exact.length);
             const fromDir = path.join(projectsDir, name);
             const toDir = path.join(projectsDir, nextName);
             // Never clobber: if the new name is already taken (e.g. an old
@@ -648,7 +662,7 @@ export async function migrateHome(
             });
             renamed += 1;
           }
-          return { renamed, skippedExisting, projectsDir };
+          return { renamed, skippedExisting, skippedSibling, projectsDir };
         }))
       ) {
         return rollbackAndFinish();
