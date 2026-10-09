@@ -15,6 +15,7 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRailMode } from "@web/hooks/useSidebarTab";
+import MigrationEntry from "./MigrationEntry";
 import StandaloneComputerCard from "./StandaloneComputerCard";
 import ThisComputerCard from "./ThisComputerCard";
 import { getComputerBridge, useSelfMachine } from "./useSelfComputer";
@@ -90,5 +91,5 @@ export function DesktopSelfComputerMount() {
     return () => style.remove();
   }, [active, selfId]);
 
-  return host ? createPortal(standalone ? <StandaloneComputerCard /> : <ThisComputerCard />, host) : null;
+  return host ? createPortal(standalone ? <StandaloneComputerCard /> : <><ThisComputerCard /><MigrationEntry /></>, host) : null;
 }

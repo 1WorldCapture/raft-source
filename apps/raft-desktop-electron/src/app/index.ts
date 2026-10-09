@@ -47,6 +47,7 @@ import { defaultBinaryPath, defaultStandaloneHome, readHostMode, type ComputerHo
 import { createStandaloneCli } from "./standalone/cli.js";
 import { resolveBundledComputer } from "./standalone/bundled.js";
 import { StandaloneComputerHost, type StandaloneUiState } from "./standalone/standaloneHost.js";
+import { createMigrationController, refuseWhileMigrating, registerMigrationIpc } from "./standalone/migrationIpc.js";
 import { registerEmbeddedStubs, registerHostModeIpc, registerStandaloneIpc } from "./standalone/ipc.js";
 import { resolveBundledCursorSdkAssets } from "./cursorSdkAssets.js";
 import { installStatusMonitorLifecycle } from "../main/statusMonitorLifecycle.js";
@@ -341,6 +342,12 @@ function broadcastComputerStatus(status: ComputerStatusReport): void {
   }
 }
 
+// While a migration is applying, the embedded controls are refused here in main (not just greyed out in the UI).
+let migrationApplying: () => boolean = () => false;
+function guardedHandle(channel: string, listener: (event: Electron.IpcMainInvokeEvent, ...args: any[]) => unknown): void {
+  ipcMain.handle(channel, refuseWhileMigrating(() => migrationApplying(), listener));
+}
+
 function registerComputerIpc(host: ComputerHost): void {
   // The local OS hostname lets the renderer correlate THIS machine to its row in
   // the server-derived machine list (so the self-card IS that computer, not a
@@ -354,16 +361,16 @@ function registerComputerIpc(host: ComputerHost): void {
   computerStatusMonitor = monitor;
   installStatusMonitorLifecycle(monitor, () => lifecycle.quitting);
   ipcMain.handle("computer:status", () => monitor.read());
-  ipcMain.handle("computer:enable", (_e, input: unknown) => monitor.afterOperation(() => host.enable(input as never)));
-  ipcMain.handle("computer:start", () => monitor.afterOperation(() => host.start()));
-  ipcMain.handle("computer:stop", () => monitor.afterOperation(() => host.stop()));
-  ipcMain.handle("computer:restart", () => monitor.afterOperation(() => host.restart()));
+  guardedHandle("computer:enable", (_e, input: unknown) => monitor.afterOperation(() => host.enable(input as never)));
+  guardedHandle("computer:start", () => monitor.afterOperation(() => host.start()));
+  guardedHandle("computer:stop", () => monitor.afterOperation(() => host.stop()));
+  guardedHandle("computer:restart", () => monitor.afterOperation(() => host.restart()));
   // Real stop→start recycle for a version-skewed resident (see computerHost).
   // The renderer confirms with the user first: it briefly offlines every agent
   // on this machine.
-  ipcMain.handle("computer:recycle", () => monitor.afterOperation(() => host.recycleService()));
-  ipcMain.handle("computer:retry-converge", () => monitor.afterOperation(() => host.retryConverge()));
-  ipcMain.handle("computer:connect-deployment", (_event, userId: unknown) => monitor.afterOperation(async () => {
+  guardedHandle("computer:recycle", () => monitor.afterOperation(() => host.recycleService()));
+  guardedHandle("computer:retry-converge", () => monitor.afterOperation(() => host.retryConverge()));
+  guardedHandle("computer:connect-deployment", (_event, userId: unknown) => monitor.afterOperation(async () => {
     const abort = new AbortController();
     const cancelOnQuit = () => abort.abort();
     app.once("before-quit", cancelOnQuit);
@@ -424,8 +431,8 @@ function registerComputerIpc(host: ComputerHost): void {
   }));
 
   ipcMain.handle("computer:upgrade-info", () => host.getUpgradeInfo());
-  ipcMain.handle("computer:upgrade", () => monitor.afterOperation(() => host.upgrade()));
-  ipcMain.handle("computer:upgrade-fresh-install", (_e, version: unknown) =>
+  guardedHandle("computer:upgrade", () => monitor.afterOperation(() => host.upgrade()));
+  guardedHandle("computer:upgrade-fresh-install", (_e, version: unknown) =>
     monitor.afterOperation(() => host.upgradeViaFreshInstall(typeof version === "string" ? version : "")),
   );
   ipcMain.handle("computer:management", () => host.getManagement());
@@ -904,6 +911,30 @@ if (headlessMode?.mode === "__service") {
       computerHost = new ComputerHost({ configuredOrigin: serverOriginConfig.current() });
       await computerHost.restoreSelection();
       registerComputerIpc(computerHost);
+      // One-click move of this app-hosted Computer to an independent raft-computer (needs the Computer bundled in
+      // this app; hidden otherwise). Nothing runs until the user starts it from the migration dialog.
+      if (process.platform !== "win32") {
+        const embeddedHost = computerHost;
+        const migration = createMigrationController({
+          bundled: resolveBundledComputer({ isPackaged: app.isPackaged, resourcesPath: process.resourcesPath }),
+          binaryTarget: defaultBinaryPath(),
+          getFromHome: async () => embeddedHost.slockHome,
+          userDataDir: app.getPath("userData"),
+          publish: (state) => {
+            for (const win of BrowserWindow.getAllWindows()) {
+              if (!win.isDestroyed()) win.webContents.send("migration:state-update", state);
+            }
+          },
+          switchToStandalone: () => {
+            // The Computer now lives elsewhere and is not ours to stop: forget the embedded host so the quit flow
+            // has nothing to stop, then restart into standalone mode (computer-host.json is already written).
+            computerHost = null;
+            setTimeout(() => { app.relaunch(); app.exit(0); }, 4_000);
+          },
+        });
+        migrationApplying = () => { const p = migration.getState().phase; return p === "applying" || p === "success"; };
+        registerMigrationIpc(ipcMain, migration);
+      }
       // Read-only mode observes + surfaces an already-installed Computer (the
       // "adopt" path) but does NOT converge host lifecycle — no launch-at-login
       // mutation, no service spawn. Safe to run on a machine already hosting a

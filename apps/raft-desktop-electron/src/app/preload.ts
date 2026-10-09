@@ -129,6 +129,15 @@ contextBridge.exposeInMainWorld("raftDesktop", {
   // heavy service is detached (survives app quit). Present => host-capable build.
   // Standalone-mode Computer (computer-host.json = standalone): the app is only the UI of an independent
   // `raft-computer`. `hostMode` tells the renderer which UI to show; `standalone.*` only works in that mode.
+  // One-click move of the app-hosted Computer to an independent raft-computer (embedded mode only; phase
+  // "unavailable" when this build carries no Computer).
+  migration: {
+    getState: (): Promise<unknown> => ipcRenderer.invoke("migration:state"),
+    onState: (handler: (state: unknown) => void): (() => void) => subscribe<unknown>("migration:state-update", handler),
+    plan: (): Promise<unknown> => ipcRenderer.invoke("migration:plan"),
+    apply: (): Promise<unknown> => ipcRenderer.invoke("migration:apply"),
+    reset: (): Promise<unknown> => ipcRenderer.invoke("migration:reset"),
+  },
   standalone: {
     hostMode: (): Promise<{ mode: "embedded" } | { mode: "standalone"; home: string }> => ipcRenderer.invoke("computer:host-mode"),
     getState: (): Promise<unknown> => ipcRenderer.invoke("standalone:state"),
