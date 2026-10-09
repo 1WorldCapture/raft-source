@@ -30,6 +30,7 @@ import { CliExit, info } from "./output.js";
 
 export type MigrateStep =
   | "preflight"
+  | "source-carrier"
   | "stop"
   | "move"
   | "alias"
@@ -92,24 +93,70 @@ export interface MigrateHomeStatus {
   serversOnline: boolean;
 }
 
+/** A login item in ~/Library/LaunchAgents whose definition points at the
+ *  source home (CLI carrier or the desktop app's embedded item). The
+ *  migration must boot it out BEFORE stopping the service — KeepAlive would
+ *  re-spawn the service at the source home mid-move — and remove the file so
+ *  the next login does not resurrect a second home. */
+export interface SourceCarrierInfo {
+  label: string;
+  plistPath: string;
+  content: string;
+}
+
 /** Seams the core drives; the CLI adapter injects the real ComputerApi /
- *  launchctl implementations, tests inject fakes. */
+ *  launchctl implementations, tests inject fakes. The five action seams are
+ *  REQUIRED — a missing one must fail loudly, never silently skip a stop. */
 export interface MigrateHomeDeps {
   homeDir?: string;
   uid?: number;
   env?: { RAFT_HOME?: string; SLOCK_HOME?: string };
   now?: () => Date;
   sleep?: (ms: number) => Promise<void>;
-  /** statfs device id, for the same-filesystem (mv-only) preflight. */
+  /** fs.Stats.dev, for the same-filesystem (mv-only) preflight. */
   deviceOf?: (p: string) => Promise<number>;
-  stopServiceAt?: (home: string) => Promise<void>;
-  startServiceAt?: (home: string) => Promise<void>;
+  stopServiceAt: (home: string) => Promise<void>;
+  startServiceAt: (home: string) => Promise<void>;
   /** Converge the CLI login-item carrier for the home (enabled). */
-  convergeCarrierAt?: (home: string, desired: "enabled" | "disabled") => Promise<void>;
-  statusAt?: (home: string) => Promise<MigrateHomeStatus>;
-  runLaunchctl?: (args: string[]) => Promise<{ code: number; stderr: string }>;
+  convergeCarrierAt: (home: string, desired: "enabled" | "disabled") => Promise<void>;
+  statusAt: (home: string) => Promise<MigrateHomeStatus>;
+  runLaunchctl: (args: string[]) => Promise<{ code: number; stderr: string }>;
+  /** Read-only discovery of source-home login items (LaunchAgents scan). */
+  listSourceCarriers?: (homeDir: string, matchPaths: string[]) => Promise<SourceCarrierInfo[]>;
   selfCheckTimeoutMs?: number;
   selfCheckPollMs?: number;
+}
+
+/** Default LaunchAgents scan: any *.plist whose text mentions one of the
+ *  home's path spellings. The home-env LaunchAgent is excluded — it has its
+ *  own dedicated step. */
+export async function defaultListSourceCarriers(
+  homeDir: string,
+  matchPaths: string[],
+): Promise<SourceCarrierInfo[]> {
+  const dir = path.join(homeDir, "Library", "LaunchAgents");
+  let entries: string[];
+  try {
+    entries = await fs.readdir(dir);
+  } catch {
+    return [];
+  }
+  const found: SourceCarrierInfo[] = [];
+  for (const name of entries) {
+    if (!name.endsWith(".plist")) continue;
+    const label = name.slice(0, -".plist".length);
+    if (label === HOME_ENV_LABEL) continue;
+    const plistPath = path.join(dir, name);
+    try {
+      const content = await fs.readFile(plistPath, "utf8");
+      if (matchPaths.some((p) => content.includes(p))) {
+        found.push({ label, plistPath, content });
+      }
+    } catch {
+      /* unreadable — skip */
+    }
+  }
+  return found;
 }
 
 export interface MigrateHomeOptions {
@@ -176,6 +223,7 @@ export interface MigratePreflight {
   serverDirs: number;
   alias: { path: string; currentTarget: string } | null;
   homeEnv: { path: string; content: string } | null;
+  sourceCarriers: SourceCarrierInfo[];
 }
 
 export async function preflightMigrateHome(
@@ -274,6 +322,14 @@ export async function preflightMigrateHome(
   const agentDirs = await countDirs(path.join(fromReal, "agents"));
   const serverDirs = await countDirs(path.join(fromReal, "computer", "servers"));
 
+  // Login items pointing at the source home (CLI carrier or desktop item):
+  // booting these out BEFORE the stop is what keeps launchd (KeepAlive /
+  // RunAtLoad) from re-spawning a service at the old path mid-move or after
+  // a successful migration.
+  const listSourceCarriers = deps.listSourceCarriers ?? defaultListSourceCarriers;
+  const matchPaths = [...new Set([fromReal, from, aliasLink !== null ? aliasPathFor(homeDir) : null].filter((v): v is string => v !== null))];
+  const sourceCarriers = blockers.length === 0 ? await listSourceCarriers(homeDir, matchPaths) : [];
+
   const plan: Record<string, unknown> = {
     from: fromReal,
     to,
@@ -283,6 +339,7 @@ export async function preflightMigrateHome(
     serverDirs,
     aliasRepoint: alias !== null,
     homeEnvRemoval: homeEnv !== null,
+    sourceCarriers: sourceCarriers.map((c) => c.label),
     uid,
   };
 
@@ -303,6 +360,7 @@ export async function preflightMigrateHome(
     serverDirs,
     alias,
     homeEnv,
+    sourceCarriers,
   };
 }
 
@@ -329,6 +387,13 @@ export async function migrateHome(
   // ---- dry-run: the preflight above IS the run; emit the plan as steps ----
   if (!opts.apply) {
     const planned: Array<[MigrateStep, MigrateStepStatus, Record<string, unknown> | undefined]> = [
+      [
+        "source-carrier",
+        pre.sourceCarriers.length > 0 ? "planned" : "skipped",
+        pre.sourceCarriers.length > 0
+          ? { carriers: pre.sourceCarriers.map((c) => ({ label: c.label, plistPath: c.plistPath })) }
+          : { reason: "no login items point at the source home" },
+      ],
       ["stop", pre.serviceWasRunning ? "planned" : "skipped", pre.serviceWasRunning ? undefined : { reason: "service not running" }],
       ["move", "planned", { from: pre.from, to: pre.to }],
       ["alias", pre.alias ? "planned" : "skipped", pre.alias ? { path: pre.alias.path, currentTarget: pre.alias.currentTarget } : { reason: "no ~/.slock-raft symlink into the source home" }],
@@ -342,19 +407,16 @@ export async function migrateHome(
     return { outcome: pre.blockers.length > 0 ? "blocked" : "planned", blocked: pre.blockers.length > 0, result: null };
   }
 
+  // ---- apply: blockers abort before ANY mutation (and write no result file) ----
+  if (pre.blockers.length > 0) {
+    return { outcome: "blocked", blocked: true, result: null };
+  }
+
   // ---- apply ----
   const homeDir = deps.homeDir ?? os.homedir();
   const uid = deps.uid ?? (typeof process.getuid === "function" ? process.getuid() : -1);
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
-  const stopServiceAt = deps.stopServiceAt ?? (async () => {});
-  const startServiceAt = deps.startServiceAt ?? (async () => {});
-  const convergeCarrierAt = deps.convergeCarrierAt ?? (async () => {});
-  const statusAt = deps.statusAt ?? (async () => ({ serviceRunning: false, serverCount: 0, serversOnline: true }));
-  const runLaunchctl =
-    deps.runLaunchctl ??
-    (async () => {
-      throw new Error("runLaunchctl unavailable");
-    });
+  const { stopServiceAt, startServiceAt, convergeCarrierAt, statusAt, runLaunchctl } = deps;
 
   const journal: UndoEntry[] = [];
   let failure: string | null = null;
@@ -403,17 +465,54 @@ export async function migrateHome(
     return { outcome: result, blocked: false, result: file };
   };
 
-  // Step 1 — stop the service at the source home (idempotent; migration is
-  // NOT a user stop, so this path never writes desiredState).
+  // Step 1 — retire the source home's login items (BEFORE the stop: a
+  // KeepAlive/RunAtLoad item would re-spawn the service at the old path
+  // mid-move, and would resurrect a second home at the next login).
+  if (pre.sourceCarriers.length > 0) {
+    if (
+      !(await runStep("source-carrier", async () => {
+        for (const carrier of pre.sourceCarriers) {
+          try {
+            await runLaunchctl(["bootout", `gui/${uid}/${carrier.label}`]);
+          } catch {
+            /* not loaded — nothing to boot out */
+          }
+          await fs.rm(carrier.plistPath, { force: true });
+          journal.push({
+            label: `restore login item ${carrier.label}`,
+            undo: async () => {
+              await fs.mkdir(path.dirname(carrier.plistPath), { recursive: true });
+              await fs.writeFile(carrier.plistPath, carrier.content, "utf8");
+              try {
+                await runLaunchctl(["bootstrap", `gui/${uid}`, carrier.plistPath]);
+              } catch {
+                /* best-effort; the file is back, next login re-loads it */
+              }
+            },
+          });
+        }
+        return { carriers: pre.sourceCarriers.map((c) => c.label) };
+      }))
+    ) {
+      return rollbackAndFinish();
+    }
+  } else {
+    record({ step: "source-carrier", status: "skipped", detail: { reason: "no login items point at the source home" } });
+  }
+
+  // Step 2 — stop the service at the source home (idempotent; migration is
+  // NOT a user stop, so this path never writes desiredState). A failed stop
+  // may leave the service half-stopped — run the rollback path so a service
+  // that was up before gets started again.
   if (pre.serviceWasRunning) {
     if (!(await runStep("stop", () => stopServiceAt(pre.from)))) {
-      return finish("failed", "down", null);
+      return rollbackAndFinish();
     }
   } else {
     record({ step: "stop", status: "skipped", detail: { reason: "service not running" } });
   }
 
-  // Step 2 — the move itself: rename (atomic on the same filesystem).
+  // Step 3 — the move itself: rename (atomic on the same filesystem).
   if (
     !(await runStep("move", async () => {
       await fs.mkdir(path.dirname(pre.to), { recursive: true });
@@ -439,7 +538,7 @@ export async function migrateHome(
     return rollbackAndFinish();
   }
 
-  // Step 3 — repoint the ~/.slock-raft alias at the new home.
+  // Step 4 — repoint the ~/.slock-raft alias at the new home.
   if (pre.alias) {
     if (
       !(await runStep("alias", async () => {
@@ -461,7 +560,7 @@ export async function migrateHome(
     record({ step: "alias", status: "skipped", detail: { reason: "no ~/.slock-raft symlink into the source home" } });
   }
 
-  // Step 4 — remove the home-env LaunchAgent (global setenv workaround).
+  // Step 5 — remove the home-env LaunchAgent (global setenv workaround).
   if (pre.homeEnv) {
     if (
       !(await runStep("home-env", async () => {
@@ -494,7 +593,7 @@ export async function migrateHome(
     record({ step: "home-env", status: "skipped", detail: { reason: "no home-env LaunchAgent" } });
   }
 
-  // Step 5 — start standalone at the new home (or converge the login item
+  // Step 6 — start standalone at the new home (or converge the login item
   // only, preserving a stopped-by-user service). The undo entry is journalled
   // BEFORE the action: a start that fails halfway can still leave a process
   // at the target home, and the rollback must stop it before the move back.
@@ -539,7 +638,7 @@ export async function migrateHome(
     }
   }
 
-  // Step 6 — self-check (only meaningful when the service should be running).
+  // Step 7 — self-check (only meaningful when the service should be running).
   if (pre.desiredState === "running") {
     if (
       !(await runStep("self-check", async () => {

@@ -22,7 +22,9 @@ import { writeDesiredState } from "./desiredState.js";
  *   <root>/user/.slock-raft → embedded  — the D1 alias
  *   <root>/user/Library/LaunchAgents/build.raft.desktop.home-env.plist
  */
-async function fixture(opts: { livePid?: boolean; stopped?: boolean; alias?: boolean; homeEnv?: boolean } = {}) {
+async function fixture(
+  opts: { livePid?: boolean; stopped?: boolean; alias?: boolean; homeEnv?: boolean; oldCarrier?: boolean } = {},
+) {
   // realpath up front: preflight resolves through symlinks (macOS /tmp → /private/tmp),
   // and the tests compare against the resolved paths.
   const root = await realpath(await mkdtemp(path.join(tmpdir(), "migrate-home-")));
@@ -49,7 +51,13 @@ async function fixture(opts: { livePid?: boolean; stopped?: boolean; alias?: boo
     await mkdir(path.dirname(plist), { recursive: true });
     await writeFile(plist, "<plist>home-env fixture</plist>\n", "utf8");
   }
-  return { root, user, from, to, alias };
+  let carrierPlist: string | null = null;
+  if (opts.oldCarrier !== false) {
+    carrierPlist = path.join(user, "Library", "LaunchAgents", "build.raft.computer.test-carrier.plist");
+    await mkdir(path.dirname(carrierPlist), { recursive: true });
+    await writeFile(carrierPlist, `<plist>--slock-home ${from} fixture</plist>\n`, "utf8");
+  }
+  return { root, user, from, to, alias, carrierPlist };
 }
 
 function fakeDeps(user: string, overrides: { statuses?: MigrateHomeStatus[] } = {}) {
@@ -111,7 +119,7 @@ test("dry-run plans the full migration and mutates nothing", async () => {
     const preflight = h.events.filter((e) => e.step === "preflight").at(-1);
     assert.equal(preflight?.status, "ok");
     const statuses = h.events.filter((e) => e.step !== "preflight").map((e) => e.status);
-    assert.deepEqual(statuses, ["planned", "planned", "planned", "planned", "planned", "planned"]);
+    assert.deepEqual(statuses, ["planned", "planned", "planned", "planned", "planned", "planned", "planned"]);
   } finally {
     await rm(f.root, { recursive: true, force: true });
   }
@@ -148,9 +156,16 @@ test("apply: full success — move, alias repoint, home-env removal, start, self
     assert.match((await readFile(path.join(f.to, "computer", "run", "service.pid"), "utf8")).trim(), /^\d+$/);
     // Alias repointed at the new home.
     assert.equal(await readlink(f.alias), f.to);
-    // home-env plist removed; bootout was issued for the right label.
+    // Old carrier login item removed; home-env plist removed; bootouts in
+    // step order — the source carrier goes out BEFORE the service stops.
+    await assert.rejects(() => readFile(f.carrierPlist!));
     await assert.rejects(() => readFile(homeEnvPlistPath(f.user)));
-    assert.deepEqual(h.launchctlCalls.map((c) => c.join(" ")), ["bootout gui/501/build.raft.desktop.home-env"]);
+    assert.deepEqual(h.launchctlCalls.map((c) => c.join(" ")), [
+      "bootout gui/501/build.raft.computer.test-carrier",
+      "bootout gui/501/build.raft.desktop.home-env",
+    ]);
+    const carrierBootoutAt = h.launchctlCalls.findIndex((c) => c[1] === "gui/501/build.raft.computer.test-carrier");
+    assert.ok(carrierBootoutAt >= 0);
     // Service lifecycle: stopped at source, started at target.
     assert.deepEqual(h.stopCalls, [f.from]);
     assert.deepEqual(h.startCalls, [f.to]);
@@ -163,6 +178,8 @@ test("apply: full success — move, alias repoint, home-env removal, start, self
       [
         "preflight:start",
         "preflight:ok",
+        "source-carrier:start",
+        "source-carrier:ok",
         "stop:start",
         "stop:ok",
         "move:start",
@@ -212,11 +229,13 @@ test("apply: self-check failure rolls everything back and restarts the source se
     await assert.rejects(() => readFile(migrateResultPath(f.to)));
     // Alias restored to the source home.
     assert.equal(await readlink(f.alias), f.from);
-    // home-env plist restored byte-for-byte and bootstrapped back in.
+    // Both plists restored byte-for-byte and bootstrapped back in.
+    assert.match(await readFile(f.carrierPlist!, "utf8"), /--slock-home/);
     assert.match(await readFile(homeEnvPlistPath(f.user), "utf8"), /home-env fixture/);
     const launchctl = h.launchctlCalls.map((c) => c.join(" "));
     assert.ok(launchctl.includes("bootout gui/501/build.raft.desktop.home-env"));
     assert.ok(launchctl.includes(`bootstrap gui/501 ${homeEnvPlistPath(f.user)}`));
+    assert.ok(launchctl.includes(`bootstrap gui/501 ${f.carrierPlist}`));
     // Target service stopped before the move back; source service restarted.
     assert.ok(h.stopCalls.includes(f.to));
     assert.equal(h.startCalls[h.startCalls.length - 1], f.from);
@@ -249,6 +268,29 @@ test("apply: rollback does not start a service that was down before the migratio
     assert.deepEqual(h.stopCalls, [f.to]);
     const result = JSON.parse(await readFile(migrateResultPath(f.from), "utf8")) as { serviceState: string };
     assert.equal(result.serviceState, "down");
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+test("apply: blockers abort before any mutation — no stop, no move, no result file", async () => {
+  const f = await fixture({ livePid: true });
+  const h = fakeDeps(f.user);
+  try {
+    await mkdir(f.to, { recursive: true });
+    await writeFile(path.join(f.to, "leftover.txt"), "x", "utf8");
+    const run = await migrateHome({ from: f.from, ...apply }, h.deps, (e) => h.events.push(e));
+    assert.equal(run.outcome, "blocked");
+    assert.equal(run.result, null);
+    // Nothing was touched at all.
+    assert.deepEqual(h.stopCalls, []);
+    assert.deepEqual(h.startCalls, []);
+    assert.deepEqual(h.launchctlCalls, []);
+    assert.equal((await stat(path.join(f.from, "agents", "a1"))).isDirectory(), true);
+    await readFile(path.join(f.to, "leftover.txt"), "utf8");
+    await readFile(f.carrierPlist!, "utf8");
+    await assert.rejects(() => readFile(migrateResultPath(f.from)));
+    await assert.rejects(() => readFile(migrateResultPath(f.to)));
   } finally {
     await rm(f.root, { recursive: true, force: true });
   }
