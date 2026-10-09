@@ -1339,6 +1339,7 @@ test("carrier plist carries self-contained RAFT_HOME/SLOCK_HOME env (#computer-e
     const slockKey = definition.indexOf("<key>SLOCK_HOME</key>");
     assert.ok(slockKey > 0, "SLOCK_HOME key present");
   } finally {
-    await rm(home, { recursive: true, force: true });
+    // `home` lives under `root`; removing `root` covers both (PM review nit, PR #266).
+    await rm(root, { recursive: true, force: true });
   }
 });
