@@ -28,7 +28,10 @@ export interface TrajectoryCoalescerDeps {
   now?(): number;
 }
 
-/** Whitespace-only or only ellipsis/dots/dashes: carries no information, never shown. */
+/**
+ * Whitespace-only or only ellipsis/dots/middle-dots/dashes/underscores: carries no
+ * information, never shown. Deliberate: a lone "---" separator is dropped too.
+ */
 export function isBlankTrajectoryText(text: string): boolean {
   return /^[\s.…·\-_]*$/u.test(text);
 }
