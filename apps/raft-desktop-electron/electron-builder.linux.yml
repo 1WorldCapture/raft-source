@@ -28,6 +28,11 @@ extraResources:
   # Keep the version segment in step with packages/daemon/cursor-sdk-assets.lock.json.
   - from: ../../packages/daemon/runtime-assets/cursor/1.0.36/linux-${arch}
     to: cursor-sdk
+  # Standalone Computer (single-file raft-computer + photon wasm + version.txt), staged by
+  # `pnpm run stage:computer*` (scripts/stageBundledComputer.mjs). The app copies it to
+  # ~/.local/bin on demand (src/app/standalone/bundledInstall.ts); it is never run from here.
+  - from: build/computer/linux-${arch}
+    to: computer
 protocols:
   - name: Raft
     schemes:

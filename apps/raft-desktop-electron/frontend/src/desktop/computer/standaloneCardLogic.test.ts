@@ -51,3 +51,11 @@ test("error messages are shortened for humans", () => {
   assert.match(friendlyStandaloneError("Command timed out"), /too long/);
   assert.match(friendlyStandaloneError("weird"), /Couldn't complete/);
 });
+
+test("fresh install with no server connected says so instead of 'stopped unexpectedly'", () => {
+  const fresh = deriveStandaloneCard({ ...base, phase: "stopped", status: { agentCount: 0, servers: [], service: { version: "1.0.29" } } });
+  assert.deepEqual([fresh.tone, fresh.title], ["idle", "Not connected"]);
+  assert.match(fresh.detail ?? "", /raft-computer setup/);
+  const withError = deriveStandaloneCard({ ...base, phase: "stopped", error: "boom", status: { agentCount: 0, servers: [], service: { version: "1.0.29" } } });
+  assert.equal(withError.title, "Not running");
+});

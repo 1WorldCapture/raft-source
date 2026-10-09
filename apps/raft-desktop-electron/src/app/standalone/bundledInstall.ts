@@ -34,6 +34,11 @@ export interface BundledComputer {
   /** `<resources>/computer/raft-computer` and its version (from the app's bundled version file). */
   binaryPath: string | null;
   binaryVersion: string | null;
+  /**
+   * `<resources>/computer/photon_rs_bg.wasm`: the image-processing resource the Computer reads from NEXT TO its
+   * binary (install.sh puts it beside ~/.local/bin/raft-computer too). Installed together with the binary.
+   */
+  photonWasmPath?: string | null;
   /** `<resources>/cursor-sdk` (manifest.json inside). */
   cursorRoot: string | null;
 }
@@ -59,6 +64,7 @@ export interface InstallResult {
 }
 
 export const CURSOR_RUNTIME_SUBPATH = path.join("runtime", "cursor-sdk");
+export const PHOTON_WASM_FILENAME = "photon_rs_bg.wasm";
 
 async function manifestSdkVersion(root: string): Promise<string | null> {
   try {
@@ -94,6 +100,14 @@ export async function installBundledComputer(input: InstallInput): Promise<Insta
       await cp(input.bundled.binaryPath, temp);
       await chmod(temp, 0o755);
       if (platform === "darwin") await strip(temp);
+      // The sidecar goes live FIRST: a binary must never start without the file it reads beside itself.
+      if (input.bundled.photonWasmPath && (await exists(input.bundled.photonWasmPath))) {
+        const wasmTarget = path.join(path.dirname(input.binaryTarget), PHOTON_WASM_FILENAME);
+        const wasmTemp = `${wasmTarget}.tmp-${process.pid}`;
+        await rm(wasmTemp, { force: true });
+        await cp(input.bundled.photonWasmPath, wasmTemp);
+        await rename(wasmTemp, wasmTarget);
+      }
       await rename(temp, input.binaryTarget);
       result.binary = present ? "upgraded" : "installed";
     }
