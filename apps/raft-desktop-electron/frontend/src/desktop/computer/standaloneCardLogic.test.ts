@@ -11,6 +11,7 @@ test("loading: no actions yet", () => {
 
 test("not installed: offers the bundled install, or nothing when the app carries no Computer", () => {
   assert.deepEqual(ids({ ...base, phase: "not_installed", status: null }), ["install"]);
+  assert.equal(deriveStandaloneCard({ ...base, phase: "not_installed", status: null }).title, "Not installed", "short: the narrow sidebar truncates long titles");
   assert.deepEqual(ids({ ...base, phase: "not_installed", status: null, bundledAvailable: false }), []);
   assert.match(deriveStandaloneCard({ ...base, phase: "not_installed", status: null, bundledAvailable: false }).detail ?? "", /raft-computer/);
 });

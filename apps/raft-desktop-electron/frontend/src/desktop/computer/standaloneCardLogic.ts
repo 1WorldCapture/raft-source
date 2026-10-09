@@ -45,7 +45,7 @@ export function deriveStandaloneCard(state: StandaloneState | null): StandaloneC
     case "not_installed":
       return {
         tone: "idle",
-        title: "Computer not installed",
+        title: "Not installed",
         detail: state.bundledAvailable
           ? "Install the Computer that comes with this app. It keeps running your agents even when this app is closed."
           : "Install Raft Computer (raft-computer) on this machine to run agents here.",
