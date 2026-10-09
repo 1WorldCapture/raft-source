@@ -122,6 +122,9 @@ function fakeDeps(user: string, overrides: { statuses?: MigrateHomeStatus[] } = 
   let poll = 0;
   const deps: MigrateHomeDeps = {
     homeDir: user,
+    // The fake harness runs "for real" against the fixture user — override
+    // per test when asserting the $HOME-isolation guard.
+    realHomeDir: () => user,
     uid: 501,
     env: {},
     sleep: async () => {},
@@ -464,6 +467,48 @@ test("apply: zero-attachment home migrates with converge-only start (fresh-insta
     };
     assert.equal(result.result, "success");
     assert.equal(result.serviceState, "down");
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+test("home-env: launchctl is never touched when $HOME is overridden (fixed label isolation)", async () => {
+  // PM incident 2026-10-10: the home-env label has no home hash, so a drill
+  // that overrides HOME must not bootout/bootstrap the REAL gui domain.
+  const f = await fixture({ livePid: true, attachment: false });
+  const h = fakeDeps(f.user);
+  h.deps.realHomeDir = () => "/Users/definitely-not-the-drill-home";
+  try {
+    const run = await migrateHome({ from: f.from, to: f.to, ...apply }, h.deps, (e) => h.events.push(e));
+    assert.equal(run.outcome, "success");
+    // File-level handling still happened locally…
+    await assert.rejects(() => readFile(homeEnvPlistPath(f.user)));
+    assert.match(
+      await readFile(path.join(f.to, "computer", "migrate-backup", "build.raft.desktop.home-env.plist"), "utf8"),
+      /home-env fixture/,
+    );
+    // …but the ONLY launchctl calls are the (home-hashed, safe) carrier ones.
+    assert.deepEqual(
+      h.launchctlCalls.map((c) => c.join(" ")),
+      ["bootout gui/501/build.raft.computer.test-carrier"],
+    );
+    const homeEnv = h.events.filter((e) => e.step === "home-env").at(-1);
+    assert.equal(homeEnv?.detail?.launchctl, "skipped-isolated-home");
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+test("home-env: launchctl runs when the plist sits in the REAL user's LaunchAgents", async () => {
+  const f = await fixture({ livePid: true, attachment: false });
+  const h = fakeDeps(f.user);
+  h.deps.realHomeDir = () => f.user; // simulate: HOME is the real home
+  try {
+    const run = await migrateHome({ from: f.from, to: f.to, ...apply }, h.deps, (e) => h.events.push(e));
+    assert.equal(run.outcome, "success");
+    assert.ok(h.launchctlCalls.some((c) => c.join(" ") === "bootout gui/501/build.raft.desktop.home-env"));
+    const homeEnv = h.events.filter((e) => e.step === "home-env").at(-1);
+    assert.equal(homeEnv?.detail?.launchctl, "domain");
   } finally {
     await rm(f.root, { recursive: true, force: true });
   }
