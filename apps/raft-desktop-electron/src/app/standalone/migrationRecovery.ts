@@ -2,14 +2,13 @@
 // Computer's `migrate-home` finishing and us writing computer-host.json). Without this, the next launch would see no
 // standalone marker, take the embedded path and converge a built-in host at the OLD home: a second Computer.
 //
-// Detection: no standalone marker, and a migrate-result.json (in the embedded home or the standard home) records a
-// success within the last day whose from/to is this app's embedded home. Completion is the same finish the dialog
+// There is no 'switch back to built-in' feature, so the age of the result does not matter: a built-in host that
+// converged after a long gap would take over ~/.slock-raft, which already points at the NEW home. Detection: no standalone marker, and a migrate-result.json (in the embedded home or the standard home) records a
+// success whose from/to is this app's embedded home. Completion is the same finish the dialog
 // does after a success (copy the Cursor SDK, write the marker); the app then continues straight into standalone mode.
 import { readFile, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import type { ComputerHostMode } from "./hostMode.js";
-
-export const RECOVERY_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 export interface MigrationResultSummary {
   result: string;
@@ -24,7 +23,6 @@ export interface RecoveryInput {
   embeddedHome: string;
   /** Other places a result file may live (the standard standalone home). */
   otherHomes: string[];
-  now?: () => number;
   readResult?: (home: string) => Promise<MigrationResultSummary | null>;
   canonical?: (p: string) => Promise<string>;
   isDirectory?: (p: string) => Promise<boolean>;
@@ -50,13 +48,10 @@ export async function findInterruptedMigration(input: RecoveryInput): Promise<{ 
   const read = input.readResult ?? readMigrationResult;
   const canonical = input.canonical ?? defaultCanonical;
   const isDirectory = input.isDirectory ?? defaultIsDirectory;
-  const now = (input.now ?? Date.now)();
   const mine = await canonical(input.embeddedHome);
   for (const home of [...new Set([input.embeddedHome, ...input.otherHomes])]) {
     const result = await read(home);
     if (!result || result.result !== "success" || !result.to) continue;
-    const finished = result.finishedAt ? Date.parse(result.finishedAt) : NaN;
-    if (!Number.isFinite(finished) || now - finished > RECOVERY_WINDOW_MS || finished > now + 60_000) continue;
     const candidates = await Promise.all([result.from, result.to].filter((p): p is string => p !== null).map((p) => canonical(p)));
     if (!candidates.includes(mine) && !candidates.includes(path.resolve(input.embeddedHome))) continue;
     if (!(await isDirectory(result.to))) continue;
