@@ -56,11 +56,20 @@ export const STEP_LABELS: Record<string, string> = {
   stop: "Stop the Computer",
   move: "Move its data to the new location",
   alias: "Keep the old path pointing at it",
+  sessions: "Keep agent chat sessions attached to the new path",
   "home-env": "Remove the old environment helper",
+  backup: "Back up what was removed",
   start: "Start the independent Computer",
   "self-check": "Check that agents are back online",
   rollback: "Restore the previous setup",
 };
+
+/** The Computer's own error codes, in words a person can act on; anything else is shown as reported. */
+export function friendlyMigrationError(raw: string): string {
+  if (/NO_ATTACHMENT/.test(raw)) return "No server is connected to this Computer yet, so it could not be started on its own. Connect it to a server first.";
+  if (/unknown command|migrate-home/i.test(raw) && /unknown|not found|ENOENT/i.test(raw)) return "The installed raft-computer is too old to move the Computer. Update it and try again.";
+  return raw;
+}
 
 const act = (id: MigrationActionId, label: string, primary = false, confirm: string | null = null): MigrationAction => ({ id, label, primary, confirm });
 
@@ -77,6 +86,7 @@ function stepNote(step: { step: string; status: string; detail?: Record<string, 
   if (!detail) return null;
   if (typeof detail.reason === "string") return detail.reason;
   if (typeof detail.error === "string") return detail.error;
+  if (typeof detail.note === "string") return detail.note;
   return null;
 }
 
@@ -135,7 +145,7 @@ export function deriveMigrationView(state: MigrationState | null): MigrationView
         open: true,
         tone: "warn",
         title: "Nothing changed",
-        lines: ["The move did not complete and was rolled back. The Computer is back the way it was.", ...(state.error ? [state.error] : []), ...resultLine],
+        lines: ["The move did not complete and was rolled back. The Computer is back the way it was.", ...(state.error ? [friendlyMigrationError(state.error)] : []), ...resultLine],
         actions: [act("recheck", "Try again", true), act("close", "Close")],
       };
     case "failed":
@@ -144,7 +154,7 @@ export function deriveMigrationView(state: MigrationState | null): MigrationView
         open: true,
         tone: "error",
         title: "The move failed",
-        lines: ["The move failed and the automatic rollback did not fully succeed. Your agents may be offline.", ...(state.error ? [state.error] : []), ...resultLine],
+        lines: ["The move failed and the automatic rollback did not fully succeed. Your agents may be offline.", ...(state.error ? [friendlyMigrationError(state.error)] : []), ...resultLine],
         actions: [act("close", "Close", true)],
       };
     case "error":
@@ -153,7 +163,7 @@ export function deriveMigrationView(state: MigrationState | null): MigrationView
         open: true,
         tone: "error",
         title: "Couldn't run the move",
-        lines: [state.error ?? "The migration command did not report a result.", ...resultLine],
+        lines: [state.error ? friendlyMigrationError(state.error) : "The migration command did not report a result.", ...resultLine],
         steps: [],
         actions: [act("recheck", "Try again", true), act("close", "Close")],
       };

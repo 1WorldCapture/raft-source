@@ -55,5 +55,22 @@ test("rolled back says nothing changed; failed says agents may be offline; error
   assert.match(deriveMigrationView({ ...base, phase: "failed" }).lines.join(" "), /may be offline/);
   assert.deepEqual(ids({ ...base, phase: "failed" }), ["close"]);
   const err = deriveMigrationView({ ...base, phase: "error", error: "unknown command 'migrate-home'" });
-  assert.deepEqual(err.lines, ["unknown command 'migrate-home'"]);
+  assert.match(err.lines[0], /too old/);
+  assert.deepEqual(deriveMigrationView({ ...base, phase: "error", error: "disk full" }).lines, ["disk full"]);
+});
+
+test("every step the Computer can report has a plain-language label (no raw step names in the dialog)", async () => {
+  const { STEP_LABELS } = await import("./migrationLogic.ts");
+  for (const step of ["preflight", "source-carrier", "stop", "move", "alias", "sessions", "home-env", "backup", "start", "self-check", "rollback"]) {
+    assert.ok(STEP_LABELS[step], step);
+  }
+});
+
+test("known Computer error codes read as sentences; unknown text is shown as reported", async () => {
+  const { friendlyMigrationError } = await import("./migrationLogic.ts");
+  assert.match(friendlyMigrationError("CliExit(1 NO_ATTACHMENT)"), /No server is connected/);
+  assert.match(friendlyMigrationError("error: unknown command 'migrate-home'"), /too old/);
+  assert.equal(friendlyMigrationError("disk full"), "disk full");
+  const rolled = deriveMigrationView({ ...base, phase: "rolled_back", error: "CliExit(1 NO_ATTACHMENT)" });
+  assert.match(rolled.lines.join(" "), /No server is connected/);
 });
