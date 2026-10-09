@@ -1,10 +1,36 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useFocusEffect } from "expo-router";
 import { StaleRequestError } from "../api/client";
+import { getCacheRuntime } from "../cache/runtime";
 import { useT } from "../i18n/provider";
 import { useSession } from "../state/session";
 import { pmLoadErrorMessage, SESSION_READY_WAIT_MS, shouldStopWaitingForSession } from "./pmLoad";
-import { parsePmTabState, type PmTabState } from "./pmState";
+import { parsePmTabState, PM_TAB_CACHE_KEY, pmTabCacheRecord, type PmTabState } from "./pmState";
+
+function readCachedPmTab(origin: string, userId: string, serverId: string): PmTabState | null {
+  try {
+    const runtime = getCacheRuntime();
+    if (runtime.scopeId === null) runtime.attach(origin, userId, serverId);
+    const scope = runtime.scopeFor(serverId);
+    if (scope === null) return null;
+    return parsePmTabState(runtime.repo.getKvSync(scope, PM_TAB_CACHE_KEY));
+  } catch {
+    return null;
+  }
+}
+
+function persistPmTab(serverId: string, parsed: PmTabState) {
+  void (async () => {
+    try {
+      const runtime = getCacheRuntime();
+      const scope = runtime.scopeFor(serverId);
+      if (scope === null) return;
+      await runtime.repo.putKv(scope, PM_TAB_CACHE_KEY, pmTabCacheRecord(parsed));
+    } catch {
+      // The screen still works from the network.
+    }
+  })();
+}
 
 export function useServerPm(slug: string | null) {
   const session = useSession();
@@ -18,24 +44,29 @@ export function useServerPm(slug: string | null) {
   slugRef.current = slug;
   const waitStartedRef = useRef<number | null>(null);
   const [waitAttempt, setWaitAttempt] = useState(0);
-  const [trackedSlug, setTrackedSlug] = useState(slug);
-  // Drop the previous server's PM before paint. Otherwise the new server
-  // briefly shows that conversation while its own GET /pm is in flight.
-  if (trackedSlug !== slug) {
-    setTrackedSlug(slug);
-    setState(null);
+  const serverId = session.serverId;
+  const cacheKey = session.ready && session.origin && session.user ? `${serverId ?? ""}:${slug ?? ""}` : null;
+  const [appliedKey, setAppliedKey] = useState<string | null>(null);
+  // Paint the cached PM before the network, including the first frame.
+  // A missing slug is still unknown: leave the spinner up instead of the
+  // "waiting for an admin" empty state.
+  if (cacheKey !== null && appliedKey !== cacheKey) {
+    setAppliedKey(cacheKey);
     setError(null);
-    setLoading(Boolean(slug));
+    if (!slug || !serverId || !session.origin || !session.user) {
+      setState(null);
+      setLoading(true);
+    } else {
+      const cached = readCachedPmTab(session.origin, session.user.id, serverId);
+      setState(cached);
+      setLoading(cached === null);
+    }
   }
 
   const load = useCallback(async () => {
     if (!session.ready || !session.origin) return;
     const requested = slug;
-    if (!requested) {
-      setState(null);
-      setLoading(false);
-      return;
-    }
+    if (!requested) return;
     setError(null);
     try {
       const data = await session.client.get<unknown>(`/servers/${encodeURIComponent(requested)}/pm`);
@@ -43,14 +74,14 @@ export function useServerPm(slug: string | null) {
       const parsed = parsePmTabState(data);
       if (!parsed) throw new Error("bad");
       setState(parsed);
+      if (session.serverId) persistPmTab(session.serverId, parsed);
     } catch (caught) {
       if (slugRef.current !== requested || caught instanceof StaleRequestError) return;
-      setState(null);
       setError(pmLoadErrorMessage(caught, tRef.current("mobile.pm.loadFailed")));
     } finally {
       if (slugRef.current === requested) setLoading(false);
     }
-  }, [session.client, session.origin, session.ready, slug]);
+  }, [session.client, session.origin, session.ready, session.serverId, slug]);
 
   // A session that never becomes ready used to leave loading true forever,
   // because load() returns before it can clear that flag.

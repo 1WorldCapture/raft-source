@@ -5,7 +5,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { openNodeSqliteDb } from "../cache/portNode.ts";
 import { __resetCacheRuntimeSingleton, getCacheRuntime, initCacheRuntime } from "../cache/runtime.ts";
-import { serversFromCacheValue } from "./serverRailCache.ts";
+import { serversFromCacheValue, applyCachedServerRail, cachedServerRail, resetCachedServerRailSeed } from "./serverRailCache.ts";
+import { currentServerRoleSnapshot, resetCurrentServerRole } from "./serverRole.ts";
 import { useServerRailStore, type ServerRailClient } from "./serverRailStore.ts";
 
 function freshRuntime() {
@@ -123,4 +124,28 @@ test("loadServers and applyServerOrder stay functional without an initialized ca
   await useServerRailStore.getState().loadServers(liveClient([{ id: "srv-a", name: "A", slug: "a" }]), "srv-a");
   useServerRailStore.getState().applyServerOrder(["srv-a"]);
   assert.deepEqual(useServerRailStore.getState().servers.map((s) => s.id), ["srv-a"], "no cache runtime → persist is skipped, store still works");
+});
+
+test("getKvSync seeds the rail and the selected server's role", async () => {
+  __resetCacheRuntimeSingleton();
+  const runtime = freshRuntime();
+  useServerRailStore.getState().reset();
+  resetCachedServerRailSeed();
+  resetCurrentServerRole();
+  const scope = runtime.scopeFor("srv-a") as number;
+  await runtime.repo.putKv(scope, "serverList", {
+    servers: [
+      { id: "srv-a", name: "Alpha", slug: "alpha", role: "owner" },
+      { id: "srv-b", name: "Beta", slug: "beta", role: "member" },
+    ],
+  });
+  const seeded = cachedServerRail(runtime.repo.getKvSync(scope, "serverList"), "srv-a");
+  assert.deepEqual(seeded?.servers.map((server) => server.id), ["srv-a", "srv-b"]);
+  assert.equal(seeded?.role, "owner");
+  assert.equal(cachedServerRail(null, "srv-a"), null);
+  assert.equal(applyCachedServerRail("srv-a"), true);
+  assert.equal(useServerRailStore.getState().servers[0]?.name, "Alpha");
+  assert.deepEqual(currentServerRoleSnapshot(), { role: "owner", known: true });
+  useServerRailStore.getState().reset();
+  resetCurrentServerRole();
 });

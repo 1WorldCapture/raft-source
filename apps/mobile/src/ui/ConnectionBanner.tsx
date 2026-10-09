@@ -1,11 +1,12 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { StyleSheet, View } from "react-native";
 import { StatusBar } from "expo-status-bar";
-import { SafeAreaInsetsContext, useSafeAreaInsets } from "react-native-safe-area-context";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { RefreshCw, WifiOff } from "lucide-react-native";
 import { useOfflineStore } from "../cache/cacheCleanup";
 import { useCacheSyncStatus } from "../cache/cacheSyncRuntime";
 import { useT } from "../i18n/provider";
+import { connectionBannerFrame } from "./connectionBannerFrame";
 import { AppText } from "./text";
 import { border, color, fontSize } from "./tokens";
 
@@ -29,47 +30,58 @@ function useHeld(active: boolean, delayMs: number): boolean {
 
 // App-wide connection strip (client-data-cache task #5): offline read-only
 // notice, or an "updating" hint while the cache catches up after reconnect.
-// It takes the status-bar inset itself and hands the screens below a zero top
-// inset, so headers don't double-pad under it.
+// The strip is an overlay sibling. Children stay in the same host whether it
+// is visible or not, so a sync blip does not remount the app stack or push
+// the page down.
 export function ConnectionBanner({ children }: { children: ReactNode }) {
   const t = useT();
   const insets = useSafeAreaInsets();
   const offline = useHeld(useOfflineStore((state) => state.offline), OFFLINE_DELAY_MS);
   const updating = useHeld(useCacheSyncStatus((state) => state.syncing), UPDATING_DELAY_MS) && !offline;
-  if (!offline && !updating) return <>{children}</>;
-  return (
-    <>
-      {/* The ink strip sits under the status bar: switch its icons to light so the clock stays readable. */}
-      {offline ? <StatusBar style="light" /> : null}
-      <View
-        accessibilityLiveRegion="polite"
-        style={[styles.bar, offline ? styles.offline : styles.updating, { paddingTop: insets.top + 6 }]}
-      >
-        {offline ? (
-          <WifiOff color={color.white} size={14} strokeWidth={2.5} />
-        ) : (
-          <RefreshCw color={color.ink} size={14} strokeWidth={2.5} />
-        )}
-        <AppText numberOfLines={1} style={[styles.text, offline ? styles.textOffline : null]}>
-          {offline ? t("mobile.connection.offline") : t("mobile.connection.updating")}
-        </AppText>
-      </View>
-      <SafeAreaInsetsContext.Provider value={{ ...insets, top: 0 }}>
-        <View style={styles.body}>{children}</View>
-      </SafeAreaInsetsContext.Provider>
-    </>
-  );
+  const visible = offline || updating;
+  const strip = visible ? (
+    <View
+      accessibilityLiveRegion="polite"
+      pointerEvents="none"
+      style={[styles.bar, offline ? styles.offline : styles.updating, { paddingTop: insets.top + 6 }]}
+    >
+      {offline ? (
+        <WifiOff color={color.white} size={14} strokeWidth={2.5} />
+      ) : (
+        <RefreshCw color={color.ink} size={14} strokeWidth={2.5} />
+      )}
+      <AppText numberOfLines={1} style={[styles.text, offline ? styles.textOffline : null]}>
+        {offline ? t("mobile.connection.offline") : t("mobile.connection.updating")}
+      </AppText>
+    </View>
+  ) : null;
+  // The ink strip sits under the status bar: switch its icons to light so the clock stays readable.
+  const status = offline ? <StatusBar style="light" /> : null;
+  return connectionBannerFrame({
+    Host: View as unknown as (props: { children?: ReactNode; style?: typeof styles.root }) => ReactNode,
+    rootStyle: styles.root,
+    bodyStyle: styles.body,
+    children,
+    strip,
+    status,
+  });
 }
 
 const styles = StyleSheet.create({
+  root: { flex: 1 },
   bar: {
     alignItems: "center",
     borderBottomWidth: border.strong,
     borderColor: color.border,
     flexDirection: "row",
     gap: 8,
+    left: 0,
     paddingBottom: 6,
     paddingHorizontal: 16,
+    position: "absolute",
+    right: 0,
+    top: 0,
+    zIndex: 2,
   },
   offline: { backgroundColor: color.ink },
   updating: { backgroundColor: color.cyan },
