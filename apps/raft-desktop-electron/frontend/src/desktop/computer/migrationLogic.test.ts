@@ -74,3 +74,13 @@ test("known Computer error codes read as sentences; unknown text is shown as rep
   const rolled = deriveMigrationView({ ...base, phase: "rolled_back", error: "CliExit(1 NO_ATTACHMENT)" });
   assert.match(rolled.lines.join(" "), /No server is connected/);
 });
+
+test("in-place: the button and text say Switch, and that no data is moved", () => {
+  const view = deriveMigrationView({ ...base, inPlace: true, from: "/h/.slock", to: "/h/.slock" });
+  assert.equal(view.title, "Switch to the independent Computer?");
+  assert.match(view.lines.join(" "), /No data is moved/);
+  assert.equal(view.actions[0].label, "Switch now");
+  assert.match(view.actions[0].confirm ?? "", /Switch to the independent Computer/);
+  assert.equal(deriveMigrationView({ ...base, phase: "applying", inPlace: true }).title, "Switching the Computer…");
+  assert.equal(deriveMigrationView(base).actions[0].label, "Move now");
+});
