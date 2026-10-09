@@ -773,6 +773,7 @@ if (headlessMode?.mode === "__service") {
         savePrefs: (prefs) => saveQuitNoConfirm(prefs.quitNoConfirm),
         orchestrateShutdown: orchestrateQuitShutdown,
         quit: () => app.quit(),
+        migrationInProgress: () => migrationApplying(),
       });
       return host ? host.runQuitAttempt(attempt) : attempt();
     },
