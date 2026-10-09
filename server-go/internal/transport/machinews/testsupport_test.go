@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -44,6 +45,15 @@ type testEnv struct {
 	httpSrv *http.Server
 	pipes   *pipeListener
 	client  *http.Client
+
+	// Presence fault-injection state shared with the env's PresenceStore.
+	// The production store captured plain func values at construction; these
+	// mutable slots are the TEST's own dispatchers, read by those captured
+	// closures on every call (no pointer-to-func seam exists on the store).
+	presence         *computer.PresenceStore
+	failReady        atomic.Int32
+	beforeReadyWrite func()
+	duringReadyTx    func()
 
 	mu       chanMutex
 	ready    []readyCapture
@@ -102,9 +112,25 @@ func newTestEnv(t *testing.T, mutate func(*Config)) *testEnv {
 		store: store,
 		mu:    newChanMutex(),
 	}
+	env.presence, err = computer.NewPresenceStore(handle, computer.PresenceOptions{
+		TestFailReady: &env.failReady,
+		TestBeforeReadyWrite: func() {
+			if env.beforeReadyWrite != nil {
+				env.beforeReadyWrite()
+			}
+		},
+		TestDuringReadyTx: func() {
+			if env.duringReadyTx != nil {
+				env.duringReadyTx()
+			}
+		},
+	})
+	if err != nil {
+		t.Fatalf("presence store: %v", err)
+	}
 	cfg := Config{
 		Authenticator: store,
-		DB:            handle,
+		Facts:         env.presence,
 		Clock:         fixed,
 		Logger:        discardLogger(),
 		Scheduler:     env.sched,

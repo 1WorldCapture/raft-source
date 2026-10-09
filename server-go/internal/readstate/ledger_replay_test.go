@@ -1,14 +1,11 @@
 package readstate
 
 import (
-	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
-
-	"raft.local/server-go/internal/auth"
 )
 
 // TestRealGoWireFeedsOriginalReadStateLedger drives a REAL mutation stream
@@ -38,34 +35,35 @@ func TestRealGoWireFeedsOriginalReadStateLedger(t *testing.T) {
 		Payload map[string]any `json:"payload"`
 	}
 	steps := []step{}
-	collect := func(id string, state ReadStateResult) {
-		events, err := fx.store.ProjectPublication(fx.ctx(), fx.claims[fxAlice],
-			PublicationIntent{
-				WorkspaceID: fxWS, ObjectType: "read_state", ObjectID: fxGeneral,
-				EventType: EventReadStateUpdated, Revision: state.ReadStateVersion,
-				SubjectUserID: fxAlice, ScopeID: fxGeneral,
-			})
-		if err != nil {
-			t.Fatal(err)
+	// The realtime dispatcher re-reads CURRENT facts at projection time and
+	// the presenter renders the read_state:updated payload
+	// ({serverId, scopeId, maxReadSeq, readStateVersion}); this builder mirrors
+	// that exact current-facts shape for the replay stream. The wire shape
+	// itself is pinned by the application/realtime tests and the acceptance
+	// wire export.
+	collect := func(id string) {
+		maxRead, version, present := fx.readStateRow(fxAlice, fxGeneral)
+		if !present {
+			t.Fatalf("step %s: no stored read state row", id)
 		}
-		if len(events) != 1 {
-			t.Fatalf("step %s projected %d events", id, len(events))
-		}
-		steps = append(steps, step{ID: id, Payload: events[0].Payload})
+		steps = append(steps, step{ID: id, Payload: map[string]any{
+			"serverId":         fxWS,
+			"scopeId":          fxGeneral,
+			"maxReadSeq":       maxRead,
+			"readStateVersion": version,
+		}})
 	}
 
 	// Server-ordered day: read up, explicit unread rewind, a LATE low read
 	// (no-op server-side: same payload re-emitted), read to the top.
-	read1, err := fx.store.MarkRead(fx.ctx(), fx.claims[fxAlice], fxWS, fxGeneral, seq1)
-	if err != nil {
+	if _, err := fx.store.MarkRead(fx.ctx(), fx.claims[fxAlice], fxWS, fxGeneral, seq1); err != nil {
 		t.Fatal(err)
 	}
-	collect("read-v1", read1)
-	rewind, err := fx.store.MarkUnread(fx.ctx(), fx.claims[fxAlice], fxWS, fxGeneral)
-	if err != nil {
+	collect("read-v1")
+	if _, err := fx.store.MarkUnread(fx.ctx(), fx.claims[fxAlice], fxWS, fxGeneral); err != nil {
 		t.Fatal(err)
 	}
-	collect("unread-rewind", rewind.State)
+	collect("unread-rewind")
 	late, err := fx.store.MarkRead(fx.ctx(), fx.claims[fxAlice], fxWS, fxGeneral, seq1)
 	if err != nil {
 		t.Fatal(err)
@@ -73,12 +71,12 @@ func TestRealGoWireFeedsOriginalReadStateLedger(t *testing.T) {
 	if late.Changed {
 		t.Fatalf("late low read changed the frontier: %+v", late)
 	}
-	collect("late-low-read-replay", late)
+	collect("late-low-read-replay")
 	final, err := fx.store.MarkRead(fx.ctx(), fx.claims[fxAlice], fxWS, fxGeneral, seq3)
 	if err != nil {
 		t.Fatal(err)
 	}
-	collect("read-final", final)
+	collect("read-final")
 
 	storedRead, storedVersion, _ := fx.readStateRow(fxAlice, fxGeneral)
 	if storedRead != seq3 || storedVersion != final.ReadStateVersion {
@@ -163,6 +161,4 @@ console.log(JSON.stringify({ outcomes, final }));
 	if steps[2].Payload["maxReadSeq"] != steps[1].Payload["maxReadSeq"] {
 		t.Fatalf("no-op read re-emitted a different frontier: %+v vs %+v", steps[2].Payload, steps[1].Payload)
 	}
-	_ = context.Background
-	_ = auth.AccessTokenClaims{}
 }

@@ -83,7 +83,7 @@ func TestPublicationContextOnThreadNewUpdatedAndReaction(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	assertThreadContext := func(t *testing.T, eventType string, cc *ConversationContextDTO) {
+	assertThreadContext := func(t *testing.T, eventType string, cc *ConversationContextFacts) {
 		t.Helper()
 		if cc == nil {
 			t.Fatalf("%s on a thread must carry conversationContext", eventType)
@@ -145,39 +145,5 @@ func TestPublicationContextOnThreadNewUpdatedAndReaction(t *testing.T) {
 	}
 	if viewerProjection == nil || viewerProjection.PrivacyClass != "viewer_private" || viewerProjection.Viewer == nil {
 		t.Fatalf("viewer projection: %+v", viewerProjection)
-	}
-}
-
-func TestSocketUpdatedInContextSealsAndCarriesContext(t *testing.T) {
-	f := newFixture(t)
-	f.seed()
-	f.seedChannel(txGeneral, "general", channel.TypeChannel, txAlice, txBob)
-	created, err := f.send(txAlice, txFamAlice, txGeneral, "seal", nil, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	projection, err := f.store.ProjectPublication(context.Background(), projectRef("message:updated", created.Message.ID, 1))
-	if err != nil || projection == nil {
-		t.Fatalf("projection: %v %v", projection, err)
-	}
-
-	payload := SocketMessageUpdatedInContext(projection.Message, projection.ConversationContext)
-	if _, ok := payload["conversationContext"]; !ok {
-		t.Fatalf("message:updated socket payload must carry the conversation context")
-	}
-	for _, sealed := range []string{"searchText", "searchVector", "agentSendKey", "senderHandle"} {
-		if _, ok := payload[sealed]; ok {
-			t.Fatalf("sealed storage column %q present on message:updated payload", sealed)
-		}
-	}
-	for _, viewerPrivate := range []string{"reactionViewer", "readState", "maxReadSeq", "activityMuted", "collapseLongMessages"} {
-		if _, ok := payload[viewerPrivate]; ok {
-			t.Fatalf("viewer-private field %q leaked onto the shared payload", viewerPrivate)
-		}
-	}
-	// A nil context must not fabricate one (omitempty anchors stay absent).
-	bare := SocketMessageUpdatedInContext(projection.Message, nil)
-	if _, ok := bare["conversationContext"]; ok {
-		t.Fatalf("nil context must stay nil, never fabricated")
 	}
 }

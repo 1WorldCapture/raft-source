@@ -62,7 +62,8 @@ type ReadFrontier struct {
 	LatestValid bool
 }
 
-// InboxItem is the internal union row; Wire() renders the exact TS shape.
+// InboxItem is the internal union row. The transport presenter renders its
+// client shape; domain-owned Activity token/canonical algorithms stay here.
 type InboxItem struct {
 	Kind        string // channel | dm | thread
 	ScopeID     string // channelId for chats, threadChannelId for threads
@@ -125,107 +126,8 @@ func wireTime(ms int64) string {
 	return time.UnixMilli(ms).UTC().Format("2006-01-02T15:04:05.000Z")
 }
 
-// Wire renders the exact TS InboxItem JSON shape (JSON key order is not
-// significant to the consumers; Go's map marshaling sorts keys stably).
-func (i InboxItem) Wire() map[string]any {
-	latestSeq := any(nil)
-	if i.LatestActivitySeq != nil {
-		latestSeq = formatUint64(uint64(*i.LatestActivitySeq))
-	}
-	nullString := func(p *string) any {
-		if p == nil {
-			return nil
-		}
-		return *p
-	}
-	readState := any(map[string]any{"kind": "absent"})
-	if i.ReadState != nil {
-		switch i.ReadState.Kind {
-		case "present":
-			present := map[string]any{
-				"kind":             "present",
-				"readStateVersion": i.ReadState.Version,
-				"maxReadSeq":       formatUint64(uint64(i.ReadState.MaxReadSeq)),
-			}
-			if i.ReadState.LatestValid {
-				present["latestActivity"] = map[string]any{
-					"messageId": i.ReadState.LatestID,
-					"seq":       formatUint64(uint64(i.ReadState.LatestSeq)),
-				}
-			} else {
-				present["latestActivity"] = nil
-			}
-			readState = present
-		default:
-			readState = map[string]any{"kind": i.ReadState.Kind}
-		}
-	}
-	if i.Kind == "thread" {
-		var lastReplyAt any
-		if i.LatestReplyAtMS != nil {
-			lastReplyAt = wireTime(*i.LatestReplyAtMS)
-		}
-		item := map[string]any{
-			"kind":                     "thread",
-			"threadChannelId":          i.ScopeID,
-			"parentMessageId":          i.ParentMessageID,
-			"parentChannelId":          i.ParentChannelID,
-			"parentChannelName":        i.ParentChannelName,
-			"parentChannelType":        i.ParentChannelType,
-			"parentMessagePreview":     i.ParentMessagePreview,
-			"parentMessageSenderType":  i.ParentSenderType,
-			"parentMessageSenderId":    i.ParentSenderID,
-			"latestActivityPreview":    i.LastMessagePreview,
-			"latestActivitySenderKind": i.LastSenderType,
-			"latestActivitySenderId":   i.LastSenderID,
-			"latestActivitySenderName": nullString(i.LastSenderName),
-			"latestActivityMessageId":  i.LastMessageID,
-			"latestActivitySeq":        latestSeq,
-			"firstUnreadMessageId":     nullString(i.FirstUnreadMessageID),
-			"firstMentionMessageId":    nullString(i.FirstMentionMessageID),
-			"lastActivityAt":           wireTime(i.LastActivityAtMS),
-			"lastReplyAt":              lastReplyAt,
-			"replyCount":               i.ReplyCount,
-			"unreadCount":              i.UnreadCount,
-			"hasMention":               i.HasMention,
-			"taskNumber":               nil,
-			"taskStatus":               nil,
-			"taskClaimedByName":        nil,
-			"readState":                readState,
-			"isFollowing":              i.IsFollowing,
-		}
-		if i.UnfollowedAtMS != nil {
-			item["unfollowedAt"] = wireTime(*i.UnfollowedAtMS)
-		}
-		if i.DoneAtMS != nil {
-			item["doneAt"] = wireTime(*i.DoneAtMS)
-		}
-		return item
-	}
-	item := map[string]any{
-		"kind":                  i.Kind,
-		"channelId":             i.ChannelID,
-		"channelName":           i.ChannelName,
-		"channelType":           i.ChannelType,
-		"lastMessageId":         i.LastMessageID,
-		"latestActivitySeq":     latestSeq,
-		"firstUnreadMessageId":  nullString(i.FirstUnreadMessageID),
-		"firstMentionMessageId": nullString(i.FirstMentionMessageID),
-		"lastMessageAt":         wireTime(i.LastActivityAtMS),
-		"lastMessagePreview":    i.LastMessagePreview,
-		"lastMessageSenderKind": i.LastSenderType,
-		"lastMessageSenderId":   i.LastSenderID,
-		"lastMessageSenderName": nullString(i.LastSenderName),
-		"unreadCount":           i.UnreadCount,
-		"hasMention":            i.HasMention,
-		"readState":             readState,
-	}
-	if i.DoneAtMS != nil {
-		item["doneAt"] = wireTime(*i.DoneAtMS)
-	}
-	return item
-}
-
+// The InboxItem wire projection lives in the transport presenter
+// (presenter.InboxItemWire); the domain exports facts only.
 // hiddenAllPredicate excludes the hidden (private) #all projection.
 const hiddenAllPredicate = ` NOT (c.name = 'all' AND c.type <> 'channel') `
 

@@ -183,8 +183,7 @@ func TestMuteEpochsSurviveRestartAndEqualTimestamps(t *testing.T) {
 	applySchemaDraft(t, handle)
 	fixed := fxNow()
 	channels := channel.NewStore(handle)
-	store := NewStore(handle, channels)
-	store.SetClock(func() time.Time { return fixed })
+	store := NewStoreWithOptions(handle, channels, Options{Clock: func() time.Time { return fixed }})
 	seedSecondPassFixture(t, handle)
 	claims := testClaims(fxBob, fxBob+"f", fixed)
 
@@ -228,8 +227,7 @@ func TestMuteEpochsSurviveRestartAndEqualTimestamps(t *testing.T) {
 	}
 	defer handle2.Close()
 	applySchemaDraft(t, handle2)
-	store2 := NewStore(handle2, channel.NewStore(handle2))
-	store2.SetClock(func() time.Time { return fixed })
+	store2 := NewStoreWithOptions(handle2, channel.NewStore(handle2), Options{Clock: func() time.Time { return fixed }})
 	unread2, err := store2.InboxItems(context.Background(), claims, fxWS, InboxQuery{Filter: FilterUnread, Limit: 30})
 	if err != nil {
 		t.Fatal(err)

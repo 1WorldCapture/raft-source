@@ -7,7 +7,7 @@
 //
 // Bulk recovery volume (>500 messages) is seeded by the TEST-ONLY
 // in-process Go helper tests/acceptance/m4-realtime-fixture (real
-// message.Store.CreateTx inside db.WithWriteTx: full metadata,
+// message fact/publication primitives inside db.WithWriteTx: full metadata,
 // transaction seq and same-commit outbox) because the production send
 // bucket is 60 writes/60s per user — neither twenty minutes of HTTP nor
 // disabling a production limit is acceptable.

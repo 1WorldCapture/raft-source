@@ -231,7 +231,7 @@ func (e *m4wEnv) readCursorOf(userID, wsID, channelID string) int64 {
 	var cursor int64
 	err := db.WithReadSnapshot(context.Background(), e.app.DB, func(ex db.Executor) error {
 		var err error
-		cursor, err = e.app.messaging.readstate.ReadCursorTx(context.Background(), ex, wsID, userID, channelID)
+		cursor, err = e.app.chat.readstate.ReadCursorTx(context.Background(), ex, wsID, userID, channelID)
 		return err
 	})
 	if err != nil {
@@ -290,18 +290,22 @@ func m4wMap(t *testing.T, v any) map[string]any {
 }
 
 // TestM4WiringAssemblyCompleteness asserts the composition root cannot come
-// up without its product-path seams: the thread-reply read hook and the
-// channel projector. Dropping either wiring from m4.go fails here first.
+// up without its cross-module use cases: the messaging service (whose send
+// step structurally pairs a NEW thread reply with the replier's own read
+// advance in one transaction — there is no unwired seam anymore) and the
+// channelview read model behind the list/detail/create exits. buildChat fails
+// closed when either fact owner is missing; this guards against a silent
+// regression back to optional seams.
 func TestM4WiringAssemblyCompleteness(t *testing.T) {
 	env := newM4wEnv(t)
-	if env.app.messaging == nil {
+	if env.app.chat == nil {
 		t.Fatal("messaging runtime missing from the real assembly")
 	}
-	if !env.app.messaging.messages.HasThreadReplyReadHook() {
-		t.Fatal("thread reply read hook is not wired at assembly: a human reply would leave the replier's thread unread")
+	if env.app.chat.messaging == nil {
+		t.Fatal("messaging use cases missing from the real assembly: a human reply would leave the replier's thread unread")
 	}
-	if env.app.messaging.channelProjector == nil {
-		t.Fatal("M4 channel projector is not wired at assembly: list/detail/create would emit M3 fixture defaults over real state")
+	if env.app.chat.channelView == nil {
+		t.Fatal("channelview read model missing from the real assembly: list/detail/create would have no viewer projection")
 	}
 }
 

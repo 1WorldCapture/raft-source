@@ -90,7 +90,7 @@ func TestPublicationProjectionsForParentPublisher(t *testing.T) {
 		t.Fatal(err)
 	}
 	if proj == nil || proj.Thread == nil || proj.Thread.ReplyCount != 1 ||
-		proj.Thread.ParentMessageID != created.Message.ID || proj.Thread.LastReplyAt == nil {
+		proj.Thread.ParentMessageID != created.Message.ID || proj.Thread.LastReplyAtMS == nil {
 		t.Fatalf("thread projection: %+v", proj)
 	}
 

@@ -5,7 +5,7 @@
 // suite, M1 through M4, in one fresh-process-per-suite pass over one
 // disposable database. The M4 process suites fail loudly (never skip) when a
 // backend surface is not wired yet; run them selectively with
-// RAFT_GO_TEST_SUITE=m4-backend | m4-realtime | m4-upgrade (see the Makefile
+// RAFT_GO_TEST_SUITE=m4-backend | m4-realtime | m4-upgrade | stabilization-rollback (see the Makefile
 // targets of the same names).
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
@@ -31,6 +31,7 @@ import { verifyOriginalClients } from './original-clients.mjs';
 import { verifyM3CreationReadModels } from './m3-creation-read-models.mjs';
 import { verifyM4Backend } from './m4-backend.mjs';
 import { verifyM3ToM4Upgrade } from './m3-to-m4-upgrade.mjs';
+import { verifyStabilizationRollback } from './stabilization-rollback.mjs';
 // verifyM4Realtime is imported lazily inside its suite branch: that suite
 // drives the repository's locked original socket.io-client from the
 // repo-root pnpm store, and the M1-M3 selections must not depend on the
@@ -44,7 +45,7 @@ let logs = '';
 const selectedSuite = process.env.RAFT_GO_TEST_SUITE ?? 'all';
 const knownSuites = ['all', 'computer', 'daemon', 'agents', 'channels', 'invitations',
   'persistence', 'upgrade', 'm4-upgrade', 'original-clients', 'creation-read-models',
-  'm4-backend', 'm4-realtime'];
+  'm4-backend', 'm4-realtime', 'stabilization-rollback'];
 if (!knownSuites.includes(selectedSuite)) {
   throw new Error(`Unknown RAFT_GO_TEST_SUITE; use one of: ${knownSuites.join('/')}`);
 }
@@ -198,6 +199,12 @@ try {
     // place, the old binary must refuse the M4 schema, and the cold backup
     // must restore a working old instance.
     await verifyM3ToM4Upgrade({ executable, capture });
+  }
+  if (selectedSuite === 'all' || selectedSuite === 'stabilization-rollback') {
+    // The default gate must compare the actual current executable with the
+    // frozen M4 binary. baselineOnly is strictly a standalone harness check,
+    // never an option here. This suite owns its own cold copies and children.
+    await verifyStabilizationRollback({ executable, capture });
   }
   if (/[?&](verify|reset)=|Bearer\s+[A-Za-z0-9._-]{20,}|eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\./.test(logs)) {
     throw new Error('Server emitted credential-like material to logs');

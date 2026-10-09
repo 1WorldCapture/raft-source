@@ -169,7 +169,7 @@ func TestReplacementWaitsForBlockedReadyWrite(t *testing.T) {
 	env := newTestEnv(t, nil)
 	machineID, apiKey, ws := dialLegacy(t, env)
 	defer closeQuietly(ws)
-	env.hub.facts.testDuringReadyTx = func() {
+	env.duringReadyTx = func() {
 		snap := env.hub.CurrentSnapshot(machineID)
 		if snap != nil {
 			saw.Store(snap.Generation)
@@ -225,7 +225,7 @@ func TestReadyRetryRepeatsUntilSuccess(t *testing.T) {
 	env := newTestEnv(t, nil)
 	machineID, _, ws := dialLegacy(t, env)
 	defer closeQuietly(ws)
-	env.hub.facts.testFailReady.Store(3)
+	env.failReady.Store(3)
 	sendFrame(t, ws, `{"type":"ready","runtimes":["claude"],"runningAgents":[]}`)
 	env.waitCond("first retry armed", func() bool { return readyRetryArmed(env.hub, machineID) })
 	if env.readyCount() != 0 {
@@ -256,7 +256,7 @@ func TestReadyRetryDoesNotCommitAfterReplacement(t *testing.T) {
 	env := newTestEnv(t, nil)
 	machineID, apiKey, ws := dialLegacy(t, env)
 	defer closeQuietly(ws)
-	env.hub.facts.testFailReady.Store(1)
+	env.failReady.Store(1)
 	sendFrame(t, ws, `{"type":"ready","runtimes":["stale"],"runningAgents":[]}`)
 	env.waitCond("retry armed", func() bool { return readyRetryArmed(env.hub, machineID) })
 	ws2 := env.dial(apiKey)
@@ -388,7 +388,7 @@ func TestCloseStopsReadyRetry(t *testing.T) {
 	env := newTestEnv(t, nil)
 	machineID, _, ws := dialLegacy(t, env)
 	defer closeQuietly(ws)
-	env.hub.facts.testFailReady.Store(5)
+	env.failReady.Store(5)
 	sendFrame(t, ws, `{"type":"ready","runtimes":["claude"],"runningAgents":[]}`)
 	env.waitCond("retry armed", func() bool { return readyRetryArmed(env.hub, machineID) })
 	done := make(chan error, 1)

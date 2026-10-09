@@ -17,7 +17,7 @@ import (
 	"sort"
 	"strconv"
 
-	"raft.local/server-go/internal/realtime"
+	"raft.local/server-go/internal/publication"
 )
 
 // Legacy thread route sentences (channels.ts / channelService).
@@ -55,7 +55,7 @@ const (
 // revision; ObjectID is relationship-specific so concurrent first-follows by
 // different users cannot collide.
 func enqueueFollowersUpdatedTx(ctx context.Context, tx *sql.Tx, workspaceID, userID, threadID string, revision int64) error {
-	return realtime.Enqueue(ctx, tx, realtime.Publication{
+	return publication.Enqueue(ctx, tx, publication.Publication{
 		WorkspaceID:   workspaceID,
 		ObjectType:    PublicationObjectTypeThreadFollow,
 		ObjectID:      threadID + ":" + userID,
@@ -210,9 +210,10 @@ func (s *Store) readParentMessage(ctx context.Context, ex Executor, parentMessag
 }
 
 // EnsureThreadTx finds or creates the unique thread channel of one parent
-// message, projects the thread id onto the parent message (messages.thread_id
-// has its single writer here), and records the parent author's
-// non-reactivating 'authored' follow. The partial unique index on
+// message and records the parent author's non-reactivating 'authored'
+// follow. The parent message's thread_id projection is message-owned: the
+// application use case attaches it in the same transaction through
+// message.AttachThreadToParentTx immediately after this returns. The partial unique index on
 // (type='thread', parent_message_id, live) arbitrates concurrent ensures onto
 // one channel; the loser re-reads the winner's row. The opener is never
 // auto-followed.
@@ -267,7 +268,7 @@ func (s *Store) EnsureThreadTx(ctx context.Context, tx *sql.Tx, workspaceID, cha
 		// The durable appearance of the thread channel; revision 1 is unique
 		// per thread because a thread can only be created once (soft-deleted
 		// threads are not revived by ensure in this phase).
-		if err := realtime.Enqueue(ctx, tx, realtime.Publication{
+		if err := publication.Enqueue(ctx, tx, publication.Publication{
 			WorkspaceID: workspaceID,
 			ObjectType:  "channel",
 			ObjectID:    thread.ID,
@@ -279,12 +280,11 @@ func (s *Store) EnsureThreadTx(ctx context.Context, tx *sql.Tx, workspaceID, cha
 		}
 	}
 
-	// Project the thread channel onto the parent message. Replies keep their
-	// own thread_id NULL; only the parent carries the reference.
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE messages SET thread_id = ? WHERE id = ?`, thread.ID, parentMessageID); err != nil {
-		return nil, fmt.Errorf("project parent thread_id: %w", err)
-	}
+	// The parent message's thread_id projection is message-owned: the
+	// application use case attaches it in this SAME transaction through
+	// message.AttachThreadToParentTx right after this ensure returns (the
+	// ordering with the author follow below is not constraint-relevant —
+	// both write disjoint tables inside one commit).
 
 	// Automatic 'authored' follow for a human parent author: insert-only or
 	// refresh-while-active; it must never resurrect an explicit unfollow.

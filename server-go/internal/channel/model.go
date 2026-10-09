@@ -7,7 +7,6 @@ package channel
 
 import (
 	"database/sql"
-	"encoding/json"
 	"time"
 )
 
@@ -69,66 +68,6 @@ func requiresExplicitMembership(channelType string) bool {
 // visibility through the generic PATCH field.
 const ALLChannelVisibilityRefusal = "The #all channel cannot be hidden or restored by changing channel visibility. " +
 	"Only a human can do it, from channel settings or server settings."
-
-// milliTime renders UTC ISO-8601 with millisecond precision (the legacy
-// JSON.stringify(Date) wire shape).
-type milliTime struct{ t time.Time }
-
-func (m milliTime) MarshalJSON() ([]byte, error) {
-	return json.Marshal(m.t.UTC().Format("2006-01-02T15:04:05.000Z"))
-}
-
-func toMilli(t *time.Time) *milliTime {
-	if t == nil {
-		return nil
-	}
-	return &milliTime{*t}
-}
-
-// Wire is the raw channel row exactly as the legacy API serializes the
-// drizzle select() (camelCase keys, nulls stay nulls). Transport embeds it in
-// the list/detail/create projections.
-type Wire struct {
-	ID               string     `json:"id"`
-	ServerID         string     `json:"serverId"`
-	Name             string     `json:"name"`
-	Description      *string    `json:"description"`
-	Type             string     `json:"type"`
-	SystemKind       *string    `json:"systemKind"`
-	GuestVisible     bool       `json:"guestVisible"`
-	GuestJoinable    bool       `json:"guestJoinable"`
-	ParentMessageID  *string    `json:"parentMessageId"`
-	CreatedAt        milliTime  `json:"createdAt"`
-	ArchivedAt       *milliTime `json:"archivedAt"`
-	ArchivedByUserID *string    `json:"archivedByUserId"`
-	ArchivedByAgent  *string    `json:"archivedByAgentId"`
-	DeletedAt        *milliTime `json:"deletedAt"`
-}
-
-func (c Channel) Wire() Wire {
-	return Wire{
-		ID:               c.ID,
-		ServerID:         c.WorkspaceID,
-		Name:             c.Name,
-		Description:      c.Description,
-		Type:             c.Type,
-		SystemKind:       c.SystemKind,
-		GuestVisible:     c.GuestVisible,
-		GuestJoinable:    c.GuestJoinable,
-		ParentMessageID:  c.ParentMessageID,
-		CreatedAt:        milliTime{c.CreatedAt},
-		ArchivedAt:       toMilli(c.ArchivedAt),
-		ArchivedByUserID: c.ArchivedByUserID,
-		ArchivedByAgent:  c.ArchivedByAgent,
-		DeletedAt:        toMilli(c.DeletedAt),
-	}
-}
-
-// MarshalJSON keeps the raw row shape for PATCH/archive/unarchive responses
-// (TS res.json(updated) with the bare select row).
-func (c Channel) MarshalJSON() ([]byte, error) {
-	return json.Marshal(c.Wire())
-}
 
 // channelColumns is the full column list used by every channel read.
 const channelColumns = `c.id, c.workspace_id, c.name, c.description, c.type, c.system_kind,

@@ -9,69 +9,69 @@ import (
 	"raft.local/server-go/internal/channel"
 	"raft.local/server-go/internal/platform/clock"
 	platformdb "raft.local/server-go/internal/platform/db"
-	"raft.local/server-go/internal/realtime"
+	"raft.local/server-go/internal/publication"
 )
 
 // Store owns message facts over the shared SQLite handle. Channel authority
 // is delegated to the locked channel.Store transaction APIs; this store never
 // mutates channel-owned tables.
 type Store struct {
-	db                  *sql.DB
-	channels            *channel.Store
-	clock               clock.Clock
-	nowFn               func() time.Time
-	fixedCursorSecret   []byte
-	threadReplyReadHook ThreadReplyReadHook
+	db                *sql.DB
+	channels          *channel.Store
+	clock             clock.Clock
+	nowFn             func() time.Time
+	fixedCursorSecret []byte
 }
 
-// NewStore is the locked constructor used by the app composition root.
+// Options are the constructor-time inputs. Every dependency is captured
+// once; there is no post-construction setter for the clock or the cursor
+// signing key.
+type Options struct {
+	// Clock overrides the time source. Nil means the real clock.
+	Clock clock.Clock
+	// CursorSecret pins the reaction-actors cursor signing key so cursors
+	// stay valid across restarts. Nil generates a process-random key once.
+	CursorSecret []byte
+}
+
+// NewStore builds the store with the real clock and a process-random
+// cursor key (test/fixture seeding default; cursors then do not survive a
+// restart, which only production wiring cares about).
 func NewStore(handle *sql.DB, channels *channel.Store) *Store {
-	s := &Store{db: handle, channels: channels, clock: clock.Real{}}
-	s.nowFn = s.clock.Now
-	return s
+	return NewStoreWithOptions(handle, channels, Options{})
 }
 
-// SetClock injects the clock (tests). Production keeps the real clock.
-func (s *Store) SetClock(c clock.Clock) {
+// NewStoreWithOptions is the locked constructor used by the app composition
+// root: the clock and the reaction-cursor signing key are injected here and
+// frozen — there is no post-construction setter for either.
+func NewStoreWithOptions(handle *sql.DB, channels *channel.Store, opts Options) *Store {
+	c := opts.Clock
 	if c == nil {
-		return
+		c = clock.Real{}
 	}
-	s.clock = c
+	var cursorSecret []byte
+	if opts.CursorSecret != nil {
+		cursorSecret = append([]byte(nil), opts.CursorSecret...)
+	}
+	s := &Store{db: handle, channels: channels, clock: c, fixedCursorSecret: cursorSecret}
 	s.nowFn = c.Now
+	return s
 }
 
-// SetCursorSecret pins the reaction-actors cursor signing key so cursors stay
-// valid across restarts. Without it a process-random key is generated once.
-func (s *Store) SetCursorSecret(secret []byte) { s.fixedCursorSecret = append([]byte(nil), secret...) }
-
-// SetThreadReplyReadHook injects the readstate seam invoked after every NEW
-// human thread reply, inside the committing transaction. See
-// ThreadReplyReadHook; the parent app assembly wires it to
-// readstate.MarkReadLatestTx.
-func (s *Store) SetThreadReplyReadHook(h ThreadReplyReadHook) { s.threadReplyReadHook = h }
-
-// HasThreadReplyReadHook reports whether the full product path (reply also
-// advancing the author's thread read cursor) is wired. Pure fact unit tests
-// may construct without it; production assembly must wire it.
-func (s *Store) HasThreadReplyReadHook() bool { return s.threadReplyReadHook != nil }
-
-// NewStoreWithOptionsForTest is NewStore with an injected clock for domain
-// tests; production wiring stays on NewStore + the real clock.
+// NewStoreWithOptionsForTest is NewStoreWithOptions with only the clock
+// injected, for domain tests and frozen external harnesses.
 func NewStoreWithOptionsForTest(handle *sql.DB, channels *channel.Store, c clock.Clock) *Store {
-	s := NewStore(handle, channels)
-	if c != nil {
-		s.SetClock(c)
-	}
-	return s
+	return NewStoreWithOptions(handle, channels, Options{Clock: c})
 }
 
 func (s *Store) now() time.Time { return s.nowFn() }
 
-// DB exposes the handle for transport-level wiring only.
+// DB exposes the owning handle for composition-time ownership validation and
+// test fixtures. Transport handlers must never obtain or query this handle.
 func (s *Store) DB() *sql.DB { return s.db }
 
-// Channels exposes the locked channel store for assembly-time wiring of the
-// conversation HTTP worker (thread initial content path).
+// Channels exposes the locked channel store for composition-time ownership
+// validation. Cross-domain conversation work belongs to application/messaging.
 func (s *Store) Channels() *channel.Store { return s.channels }
 
 // withWriteTx runs fn in one IMMEDIATE transaction under the authority fence.
@@ -95,11 +95,11 @@ func (s *Store) validateHuman(ctx context.Context, ex platformdb.Executor, claim
 	return auth.ValidateHumanTx(ctx, ex, claims, s.now())
 }
 
-// enqueue wraps realtime.Enqueue for the mutation transactions in this
+// enqueue wraps publication.Enqueue for the mutation transactions in this
 // package. Publications carry references only and join the same commit as
 // their fact.
 func enqueue(ctx context.Context, tx *sql.Tx, workspaceID, objectType, objectID, eventType string, revision int64, subjectUserID, scopeID string) error {
-	return realtime.Enqueue(ctx, tx, realtime.Publication{
+	return publication.Enqueue(ctx, tx, publication.Publication{
 		WorkspaceID:   workspaceID,
 		ObjectType:    objectType,
 		ObjectID:      objectID,
@@ -112,39 +112,39 @@ func enqueue(ctx context.Context, tx *sql.Tx, workspaceID, objectType, objectID,
 
 // BuildSendResponse projects the creation-surface DTO from one snapshot read
 // after the committing transaction returned.
-func (s *Store) BuildSendResponse(ctx context.Context, result *CreateResult) (*SendResponseMessageDTO, error) {
-	var dto *SendResponseMessageDTO
+func (s *Store) BuildSendResponse(ctx context.Context, result *CreateResult) (*Projection, error) {
+	var facts *Projection
 	err := s.withReadSnapshot(ctx, func(ex dbExecutor) error {
 		projected, err := s.SendResponseMessage(ctx, ex, result.Message, result.Mentions)
 		if err != nil {
 			return err
 		}
-		dto = projected
+		facts = projected
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
-	return dto, nil
+	return facts, nil
 }
 
 // ProjectSnapshot enriches committed rows on one fresh read snapshot. Used
 // by the transport to render history/context/sync responses after the
 // authoritative snapshot read returned the rows.
-func (s *Store) ProjectSnapshot(ctx context.Context, workspaceID string, msgs []*Message) ([]*MessageDTO, error) {
-	var dtos []*MessageDTO
+func (s *Store) ProjectSnapshot(ctx context.Context, workspaceID string, msgs []*Message) ([]*Projection, error) {
+	var projections []*Projection
 	err := s.withReadSnapshot(ctx, func(ex dbExecutor) error {
 		projected, err := s.ProjectMessages(ctx, ex, workspaceID, msgs)
 		if err != nil {
 			return err
 		}
-		dtos = projected
+		projections = projected
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
-	return dtos, nil
+	return projections, nil
 }
 
 // HasPriorRelationship backs the legacy 403/404 deny split on a snapshot.

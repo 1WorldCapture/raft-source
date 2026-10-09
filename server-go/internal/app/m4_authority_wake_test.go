@@ -89,7 +89,7 @@ func TestM4DelayedAuthorityWakePreservesFreshConnections(t *testing.T) {
 // The retained family generation itself must immediately evict old sockets,
 // without waiting for a heartbeat and without affecting other login families.
 func TestM4DeletedFamilyWakeDoesNotRequireOwnerLookup(t *testing.T) {
-	f := newRTFixture(t, func(cfg *m4RealtimeConfig) { cfg.HeartbeatInterval = time.Hour })
+	f := newRTFixture(t, func(cfg *realtimeConfig) { cfg.HeartbeatInterval = time.Hour })
 	f.connect("bob-deleted", rtBob, rtWS)
 	f.connect("alice-kept", rtAlice, rtWS)
 	if err := db.WithWriteTx(context.Background(), f.handle, func(tx *sql.Tx) error {

@@ -253,7 +253,7 @@ func TestNewHubValidatesConfig(t *testing.T) {
 	if _, err := NewHub(Config{}); err == nil {
 		t.Fatal("empty config must fail")
 	}
-	if _, err := NewHub(Config{DB: nil, Clock: nil, Authenticator: denyAuthenticator{}}); err == nil {
+	if _, err := NewHub(Config{Facts: nil, Clock: nil, Authenticator: denyAuthenticator{}}); err == nil {
 		t.Fatal("missing DB/Clock must fail")
 	}
 }

@@ -4,11 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	apprealtime "raft.local/server-go/internal/application/realtime"
 	"testing"
 
 	"raft.local/server-go/internal/channel"
 	"raft.local/server-go/internal/platform/db"
-	"raft.local/server-go/internal/realtime"
+	"raft.local/server-go/internal/publication"
 	"raft.local/server-go/internal/transport/socketio/core"
 )
 
@@ -29,18 +30,18 @@ func TestM4PublisherFrozenGuestGateAppliesToEverySharedAudience(t *testing.T) {
 	f.connect("guest", rtBob, rtWS)
 
 	for _, scope := range []string{rtGeneral, rtSecret, threadID} {
-		audience, exists, err := f.rt.pub.resolveConversationAudience(ctx, rtWS, scope)
+		audience, exists, err := f.rt.pub.ResolveConversationAudience(ctx, rtWS, scope)
 		if err != nil || !exists {
 			t.Fatalf("resolve %s: exists=%v err=%v", scope, exists, err)
 		}
-		if _, leaked := audience.live[rtBob]; leaked {
+		if _, leaked := audience.Live[rtBob]; leaked {
 			t.Errorf("guest entered live audience of %s", scope)
 		}
-		if _, leaked := audience.counting[rtBob]; leaked {
+		if _, leaked := audience.Counting[rtBob]; leaked {
 			t.Errorf("guest entered unread audience of %s", scope)
 		}
 	}
-	refs := []realtime.Publication{
+	refs := []publication.Publication{
 		{ObjectType: "message", ObjectID: created.ID, EventType: core.EventMessageNew},
 		{ObjectType: "message", ObjectID: created.ID, EventType: core.EventMessageUpdated},
 		{ObjectType: "channel", ObjectID: rtGeneral, EventType: channel.PublicationEventChannelUpdated},
@@ -49,7 +50,7 @@ func TestM4PublisherFrozenGuestGateAppliesToEverySharedAudience(t *testing.T) {
 	}
 	for _, ref := range refs {
 		ref.WorkspaceID, ref.Revision = rtWS, 1
-		if err := f.rt.pub.publish(ctx, ref); err != nil {
+		if err := f.rt.pub.Publish(ctx, ref); err != nil {
 			t.Fatal(err)
 		}
 		firstPayload(t, f, "ordinary", ref.EventType)
@@ -87,23 +88,23 @@ func TestM4PublisherPrivateThreadRequiresCurrentParentAuthority(t *testing.T) {
 	}
 	f.connect("authorized", rtAlice, rtWS)
 	f.connect("former-member", rtBob, rtWS)
-	audience, exists, err := f.rt.pub.resolveConversationAudience(ctx, rtWS, threadID)
+	audience, exists, err := f.rt.pub.ResolveConversationAudience(ctx, rtWS, threadID)
 	if err != nil || !exists {
 		t.Fatalf("thread audience: exists=%v err=%v", exists, err)
 	}
-	if _, leaked := audience.live[rtBob]; leaked {
+	if _, leaked := audience.Live[rtBob]; leaked {
 		t.Error("active follow incorrectly replaced the removed private-parent permission")
 	}
-	if _, leaked := audience.counting[rtBob]; leaked {
+	if _, leaked := audience.Counting[rtBob]; leaked {
 		t.Error("inaccessible thread entered former member's counting audience")
 	}
-	for _, ref := range []realtime.Publication{
+	for _, ref := range []publication.Publication{
 		{ObjectType: "message", ObjectID: reply.ID, EventType: core.EventMessageNew},
 		{ObjectType: "thread", ObjectID: threadID, EventType: core.EventThreadUpdated},
 		{ObjectType: "thread_follow", ObjectID: threadID, EventType: core.EventThreadFollowers},
 	} {
 		ref.WorkspaceID, ref.Revision = rtWS, 1
-		if err := f.rt.pub.publish(ctx, ref); err != nil {
+		if err := f.rt.pub.Publish(ctx, ref); err != nil {
 			t.Fatal(err)
 		}
 		firstPayload(t, f, "authorized", ref.EventType)
@@ -120,13 +121,13 @@ func TestM4MalformedKnownPublicationUsesPermanentFailureBudget(t *testing.T) {
 	f := newRTFixture(t, nil)
 	f.rt.stopPub()
 	ctx := context.Background()
-	ref := realtime.Publication{WorkspaceID: rtWS, ObjectType: "reaction_viewer", ObjectID: "malformed-ownerless-reference", EventType: core.EventReactionViewer, Revision: 1}
+	ref := publication.Publication{WorkspaceID: rtWS, ObjectType: "reaction_viewer", ObjectID: "malformed-ownerless-reference", EventType: core.EventReactionViewer, Revision: 1}
 	if err := db.WithWriteTx(ctx, f.handle, func(tx *sql.Tx) error {
-		return realtime.Enqueue(ctx, tx, ref)
+		return publication.Enqueue(ctx, tx, ref)
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.runtime.publications.DrainOnce(ctx, f.rt.pub.publish); !errors.Is(err, realtime.ErrPublicationRetry) {
+	if _, err := f.runtime.publications.DrainOnce(ctx, f.rt.pub.Publish); !errors.Is(err, publication.ErrPublicationRetry) {
 		t.Fatalf("unprojectable reference must initially remain retryable: %v", err)
 	}
 	var attempts int
@@ -138,18 +139,18 @@ func TestM4MalformedKnownPublicationUsesPermanentFailureBudget(t *testing.T) {
 		t.Fatalf("first failure did not remain pending: attempts=%d published=%v", attempts, published)
 	}
 	if err := db.WithWriteTx(ctx, f.handle, func(tx *sql.Tx) error {
-		_, err := tx.Exec(`UPDATE realtime_publications SET attempts=?,next_attempt_at=0 WHERE object_id=?`, unknownParkAttempts, ref.ObjectID)
+		_, err := tx.Exec(`UPDATE realtime_publications SET attempts=?,next_attempt_at=0 WHERE object_id=?`, apprealtime.UnknownParkAttempts, ref.ObjectID)
 		return err
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.runtime.publications.DrainOnce(ctx, f.rt.pub.publish); err != nil {
+	if _, err := f.runtime.publications.DrainOnce(ctx, f.rt.pub.Publish); err != nil {
 		t.Fatalf("known-type permanent failure exceeded its retry budget without being parked: %v", err)
 	}
 	if err := f.handle.QueryRow(`SELECT published_at FROM realtime_publications WHERE object_id=?`, ref.ObjectID).Scan(&published); err != nil || !published.Valid {
 		t.Fatalf("parked reference still consumes pending budget: published=%v err=%v", published, err)
 	}
-	if f.rt.pub.stats().Parked != 1 || f.rt.pub.stats().Unknown != 2 {
-		t.Fatalf("permanent failure was not explicitly accounted: %+v", f.rt.pub.stats())
+	if f.rt.pub.Stats().Parked != 1 || f.rt.pub.Stats().Unknown != 2 {
+		t.Fatalf("permanent failure was not explicitly accounted: %+v", f.rt.pub.Stats())
 	}
 }

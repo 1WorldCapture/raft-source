@@ -268,7 +268,7 @@ func TestProtocolReadyFactsRetryConverges(t *testing.T) {
 	machineID, _, ws := dialLegacy(t, env)
 	defer closeQuietly(ws)
 
-	env.hub.facts.testFailReady.Store(1)
+	env.failReady.Store(1)
 	sendFrame(t, ws, `{"type":"ready","runtimes":["claude"],"runningAgents":[]}`)
 	env.waitCond("retry armed", func() bool { return readyRetryArmed(env.hub, machineID) })
 	if env.readyCount() != 0 {

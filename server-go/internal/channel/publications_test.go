@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"testing"
 
-	"raft.local/server-go/internal/realtime"
+	"raft.local/server-go/internal/publication"
 )
 
 // fxPlainMember is a second ordinary workspace member (server role member,
@@ -470,16 +470,16 @@ func TestBacklogFullFailsRosterWritesClosed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := f.seedPendingPublications(realtime.MaxPending); err != nil {
+	if err := f.seedPendingPublications(publication.MaxPending); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.store.AddHumanTx(f.ctx(), created.ID, fxMember, ""); !errors.Is(err, realtime.ErrBacklogFull) {
+	if _, err := f.store.AddHumanTx(f.ctx(), created.ID, fxMember, ""); !errors.Is(err, publication.ErrBacklogFull) {
 		t.Fatalf("add under full backlog must fail with ErrBacklogFull, got %v", err)
 	}
 	if n := f.humanCount(t, created.ID, fxMember); n != 0 {
 		t.Fatalf("failed-closed add must leave no roster row, got %d", n)
 	}
-	if err := f.store.JoinChannel(f.ctx(), fxWS, created.ID, fxMember); !errors.Is(err, realtime.ErrBacklogFull) {
+	if err := f.store.JoinChannel(f.ctx(), fxWS, created.ID, fxMember); !errors.Is(err, publication.ErrBacklogFull) {
 		t.Fatalf("join under full backlog must fail with ErrBacklogFull, got %v", err)
 	}
 	if n := f.humanCount(t, created.ID, fxMember); n != 0 {
@@ -487,7 +487,7 @@ func TestBacklogFullFailsRosterWritesClosed(t *testing.T) {
 	}
 	// Rename under a full backlog fails closed as well.
 	rename := "blocked"
-	if _, err := f.store.UpdateChannel(f.ctx(), fxWS, fxOwner, created.ID, ChannelUpdates{Name: &rename}); !errors.Is(err, realtime.ErrBacklogFull) {
+	if _, err := f.store.UpdateChannel(f.ctx(), fxWS, fxOwner, created.ID, ChannelUpdates{Name: &rename}); !errors.Is(err, publication.ErrBacklogFull) {
 		t.Fatalf("rename under full backlog must fail with ErrBacklogFull, got %v", err)
 	}
 	if name := f.countWhere(`SELECT COUNT(*) FROM channels WHERE id = ? AND name = 'blocked'`, created.ID); name != 0 {

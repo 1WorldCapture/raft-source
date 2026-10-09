@@ -2,7 +2,7 @@ package message
 
 import "errors"
 
-// Domain failure taxonomy. The legacyweb transport maps each error to the
+// Domain failure taxonomy. The humanapi transport maps each error to the
 // exact legacy TS status/body; unknown errors stay 500 and never become an
 // authentication failure.
 

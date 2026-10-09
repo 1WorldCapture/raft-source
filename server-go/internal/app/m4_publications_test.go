@@ -13,6 +13,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	apprealtime "raft.local/server-go/internal/application/realtime"
 	"testing"
 	"time"
 
@@ -21,7 +22,7 @@ import (
 	"raft.local/server-go/internal/message"
 	"raft.local/server-go/internal/platform/db"
 	"raft.local/server-go/internal/platform/keys"
-	"raft.local/server-go/internal/realtime"
+	"raft.local/server-go/internal/publication"
 	"raft.local/server-go/internal/transport/socketio/core"
 )
 
@@ -301,7 +302,7 @@ func TestM4PublisherDMNewReachesParticipantsOnly(t *testing.T) {
 	f.connect("bob", rtBob, rtWS)
 	f.connect("cara", rtCara, rtWS)
 	if err := db.WithWriteTx(context.Background(), f.handle, func(tx *sql.Tx) error {
-		return realtime.Enqueue(context.Background(), tx, realtime.Publication{
+		return publication.Enqueue(context.Background(), tx, publication.Publication{
 			WorkspaceID: rtWS, ObjectType: "channel", ObjectID: dmID,
 			EventType: "dm:new", Revision: time.Now().UnixMilli(), ScopeID: dmID,
 		})
@@ -440,7 +441,7 @@ func TestM4PublisherBulkReadAndPrefsEvents(t *testing.T) {
 	// with the exact key readstate used to write (object read_state_bulk,
 	// revision = millis) and assert the projected scopes match current rows.
 	if err := db.WithWriteTx(context.Background(), f.handle, func(tx *sql.Tx) error {
-		return realtime.Enqueue(context.Background(), tx, realtime.Publication{
+		return publication.Enqueue(context.Background(), tx, publication.Publication{
 			WorkspaceID: rtWS, ObjectType: "read_state_bulk", ObjectID: rtWS,
 			EventType: "read_state:updated_bulk", Revision: time.Now().UnixMilli(),
 			SubjectUserID: rtBob, ScopeID: rtWS,
@@ -501,7 +502,7 @@ func TestM4PublisherDeletedFactCompletesWithoutDelivery(t *testing.T) {
 	f := newRTFixture(t, nil)
 	f.connect("bob", rtBob, rtWS)
 	err := db.WithWriteTx(context.Background(), f.handle, func(tx *sql.Tx) error {
-		return realtime.Enqueue(context.Background(), tx, realtime.Publication{
+		return publication.Enqueue(context.Background(), tx, publication.Publication{
 			WorkspaceID: rtWS, ObjectType: "message", ObjectID: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
 			EventType: "message:new", Revision: 1,
 		})
@@ -529,7 +530,7 @@ func TestM4PublisherDeletedFactCompletesWithoutDelivery(t *testing.T) {
 func TestM4PublisherUnknownIntentStaysPending(t *testing.T) {
 	f := newRTFixture(t, nil)
 	err := db.WithWriteTx(context.Background(), f.handle, func(tx *sql.Tx) error {
-		return realtime.Enqueue(context.Background(), tx, realtime.Publication{
+		return publication.Enqueue(context.Background(), tx, publication.Publication{
 			WorkspaceID: rtWS, ObjectType: "bogus", ObjectID: "x", EventType: "nope", Revision: 1,
 		})
 	})
@@ -561,12 +562,12 @@ func TestM4PublisherTransientDatabaseFailureDefers(t *testing.T) {
 		t.Fatal(err)
 	}
 	channels := channel.NewStoreWithOptions(handle, channel.Options{})
-	runtime, err := buildM4(handle, channels, keys.NewRoot([]byte(rtSecretKey)))
+	runtime, err := buildChat(handle, channels, keys.NewRoot([]byte(rtSecretKey)))
 	if err != nil {
 		t.Fatal(err)
 	}
 	signer := auth.NewTokenSigner([]byte(rtSecretKey), 15*time.Minute)
-	rt, err := assembleM4Realtime(runtime, signer, m4RealtimeConfig{
+	rt, err := assembleRealtime(runtime, signer, realtimeConfig{
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}, newRecordingTransport())
 	if err != nil {
@@ -577,9 +578,9 @@ func TestM4PublisherTransientDatabaseFailureDefers(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ref := realtime.Publication{WorkspaceID: rtWS, ObjectType: "message",
+	ref := publication.Publication{WorkspaceID: rtWS, ObjectType: "message",
 		ObjectID: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", EventType: "message:new", Revision: 1}
-	if err := rt.pub.publish(context.Background(), ref); err == nil {
+	if err := rt.pub.Publish(context.Background(), ref); err == nil {
 		t.Fatalf("transient database failure must defer, not fake success")
 	}
 	if stats := rt.Stats(); stats.Publisher.Deferred != 1 {
@@ -588,7 +589,7 @@ func TestM4PublisherTransientDatabaseFailureDefers(t *testing.T) {
 	// The store-level drain fails too and retains the intent.
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	if _, err := runtime.publications.DrainOnce(ctx, rt.pub.publish); err == nil {
+	if _, err := runtime.publications.DrainOnce(ctx, rt.pub.Publish); err == nil {
 		t.Fatalf("drain against a closed database must fail")
 	}
 }
@@ -601,11 +602,11 @@ func TestM4PublisherStaleAudienceSerialStopsDelivery(t *testing.T) {
 	f.connect("bob", rtBob, rtWS)
 
 	// Resolve the policy audience under the CURRENT authority serial...
-	audience, exists, err := f.rt.pub.resolveConversationAudience(context.Background(), rtWS, rtGeneral)
+	audience, exists, err := f.rt.pub.ResolveConversationAudience(context.Background(), rtWS, rtGeneral)
 	if err != nil || !exists {
 		t.Fatalf("audience: %v %v", exists, err)
 	}
-	if _, ok := audience.live[rtBob]; !ok {
+	if _, ok := audience.Live[rtBob]; !ok {
 		t.Fatalf("bob must be in the live policy set of a public channel")
 	}
 	// ...then a permission-relevant commit lands BEFORE the guarded publish.
@@ -618,7 +619,7 @@ func TestM4PublisherStaleAudienceSerialStopsDelivery(t *testing.T) {
 	// The serial binding inside the guarded predicate must refuse every send
 	// for the stale audience snapshot (no newly-valid connection can accept
 	// a pre-change audience).
-	f.rt.pub.deliver(audience, rtWS, core.EventMessageNew, map[string]any{"id": "stale"})
+	f.rt.pub.Deliver(audience, rtWS, core.EventMessageNew, map[string]any{"id": "stale"})
 	settle()
 	if got := f.transport.payloads("alice", core.EventMessageNew); len(got) != 0 {
 		t.Fatalf("stale audience delivered to alice: %v", got)
@@ -631,11 +632,11 @@ func TestM4PublisherStaleAudienceSerialStopsDelivery(t *testing.T) {
 	// conservative 0012 design); a reconnected socket is admitted under the
 	// NEW authority, and a freshly resolved audience delivers to it.
 	f.connect("bob2", rtBob, rtWS)
-	fresh, exists, err := f.rt.pub.resolveConversationAudience(context.Background(), rtWS, rtGeneral)
+	fresh, exists, err := f.rt.pub.ResolveConversationAudience(context.Background(), rtWS, rtGeneral)
 	if err != nil || !exists {
 		t.Fatalf("fresh audience: %v %v", exists, err)
 	}
-	f.rt.pub.deliver(fresh, rtWS, core.EventMessageNew, map[string]any{"id": "fresh"})
+	f.rt.pub.Deliver(fresh, rtWS, core.EventMessageNew, map[string]any{"id": "fresh"})
 	rtWaitUntil(t, 15*time.Second, func() bool {
 		return len(f.transport.payloads("bob2", core.EventMessageNew)) > 0
 	}, "fresh audience delivers")
@@ -709,17 +710,17 @@ func TestM4PublisherUnknownIntentParksAfterRetryBudget(t *testing.T) {
 	f := newRTFixture(t, nil)
 	before := f.rt.Stats().Publisher
 	// Under the budget: deferred (stays pending).
-	err := f.rt.pub.dispatch(context.Background(), realtime.Publication{
+	err := f.rt.pub.Dispatch(context.Background(), publication.Publication{
 		WorkspaceID: rtWS, ObjectType: "bogus", ObjectID: "x", EventType: "nope", Revision: 1, Attempts: 0})
-	var unknown *errUnknownPublication
+	var unknown *apprealtime.ErrUnknownPublication
 	if !errors.As(err, &unknown) {
 		t.Fatalf("under-budget unknown must defer: %v", err)
 	}
 	// At/over the budget: parked (processed) with the dedicated counter —
 	// never silently, and never occupying the bounded backlog forever.
-	if err := f.rt.pub.dispatch(context.Background(), realtime.Publication{
+	if err := f.rt.pub.Dispatch(context.Background(), publication.Publication{
 		WorkspaceID: rtWS, ObjectType: "bogus", ObjectID: "x", EventType: "nope", Revision: 1,
-		Attempts: unknownParkAttempts}); err != nil {
+		Attempts: apprealtime.UnknownParkAttempts}); err != nil {
 		t.Fatalf("over-budget unknown must park: %v", err)
 	}
 	after := f.rt.Stats().Publisher
@@ -803,7 +804,7 @@ func latestMessageID(t *testing.T, f *rtFixture, channelID string) string {
 func (f *rtFixture) enqueueChannelIntent(t *testing.T, event, channelID, subject string) {
 	t.Helper()
 	err := db.WithWriteTx(context.Background(), f.handle, func(tx *sql.Tx) error {
-		return realtime.Enqueue(context.Background(), tx, realtime.Publication{
+		return publication.Enqueue(context.Background(), tx, publication.Publication{
 			WorkspaceID:   rtWS,
 			ObjectType:    "channel",
 			ObjectID:      channelID,

@@ -5,7 +5,7 @@
 // recovery corpus over HTTP would take twenty minutes or require disabling
 // a production limit, and neither is acceptable.
 //
-// It inserts through the REAL domain API — message.Store.CreateTx inside
+// It inserts through the REAL domain fact/publication primitives inside
 // platform/db.WithWriteTx — so every row carries the full record/source
 // metadata, transaction-allocated seq, request digest and the SAME-commit
 // realtime_publications outbox intents a production write produces. It
@@ -46,7 +46,7 @@ func main() {
 	count := flag.Int("count", 0, "number of bulk messages")
 	prefix := flag.String("prefix", "m4bulk", "content prefix; content is '<prefix> <index>'")
 	cjkUnits := flag.Int("cjk-units", 0, "additionally insert one long CJK message of this many UTF-16 units")
-	batch := flag.Int("batch", 25, "CreateTx calls per write transaction")
+	batch := flag.Int("batch", 25, "message fact writes per transaction")
 	waitPublished := flag.Bool("wait-published", false, "read-only: wait until this channel's message publications are processed")
 	flag.Parse()
 	if *dbPath == "" || *workspace == "" || *channelID == "" {
@@ -61,8 +61,8 @@ func main() {
 		log.Fatalf("fixture: open db: %v", err)
 	}
 	defer func() {
-		platformdb.ReleaseAuthorityFence(handle)
 		_ = handle.Close()
+		platformdb.ReleaseAuthorityFence(handle)
 	}()
 
 	if *waitPublished {
@@ -99,13 +99,26 @@ func main() {
 
 	channels := channel.NewStoreWithOptions(handle, channel.Options{Clock: clock.Real{}})
 	messages := message.NewStore(handle, channels)
+	// This private fixture deliberately seeds domain facts in large batches.
+	// Keep its bundled helper here, not as a second production send entry.
+	// Real human sends use application/messaging.SendHuman, including reads.
+	seedMessageTx := func(tx *sql.Tx, input message.CreateInput) (*message.CreateResult, error) {
+		created, err := messages.CreateMessageTx(ctx, tx, claims, *workspace, input)
+		if err != nil {
+			return nil, err
+		}
+		if err := messages.RecordSendPublicationsTx(ctx, tx, *workspace, created); err != nil {
+			return nil, err
+		}
+		return created, nil
+	}
 
 	var firstSeq, lastSeq int64
 	inserted := 0
 	insert := func(content string, randomID string) error {
 		return platformdb.WithWriteTx(ctx, handle, func(tx *sql.Tx) error {
 			rid := randomID
-			res, err := messages.CreateTx(ctx, tx, claims, *workspace, message.CreateInput{
+			res, err := seedMessageTx(tx, message.CreateInput{
 				ChannelID: *channelID, Content: content, RandomID: &rid,
 			})
 			if err != nil {
@@ -139,7 +152,7 @@ func main() {
 			for i := 0; i < n; i++ {
 				rid := fmt.Sprintf("m4fixture-%d-%d", now.UnixNano(), done+i)
 				content := fmt.Sprintf("%s %d", *prefix, done+i)
-				res, err := messages.CreateTx(ctx, tx, claims, *workspace, message.CreateInput{
+				res, err := seedMessageTx(tx, message.CreateInput{
 					ChannelID: *channelID, Content: content, RandomID: &rid,
 				})
 				if err != nil {

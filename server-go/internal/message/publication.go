@@ -3,7 +3,6 @@ package message
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -11,7 +10,7 @@ import (
 )
 
 // PublicationRef is the durable reference shape the realtime publisher
-// dequeues (realtime.Publication minus transport bookkeeping).
+// dequeues (publication.Publication minus transport bookkeeping).
 type PublicationRef struct {
 	WorkspaceID   string
 	ObjectType    string
@@ -21,92 +20,37 @@ type PublicationRef struct {
 	SubjectUserID string // owner of a private state object; "" for shared
 }
 
-// ThreadUpdatedDTO is the EXACT thread:updated wire payload, ported from the
-// ordinary-channel emit in messageService.ts (payload = parentMessageId,
-// threadChannelId, ...threadInfo, parentChannelId, serverId,
-// syncCoreReplyWindow, latestReply) with the sync-core discussion graph
-// shapes from packages/shared/src/discussionGraph.ts.
-type ThreadUpdatedDTO struct {
-	ParentMessageID     string                    `json:"parentMessageId"`
-	ThreadChannelID     string                    `json:"threadChannelId"`
-	ReplyCount          int                       `json:"replyCount"`
-	LastReplyAt         *string                   `json:"lastReplyAt"`
-	ParticipantIDs      []string                  `json:"participantIds"`
-	ParentChannelID     string                    `json:"parentChannelId"`
-	ServerID            string                    `json:"serverId"`
-	SyncCoreReplyWindow ThreadSyncWindow          `json:"syncCoreReplyWindow"`
-	LatestReply         *ThreadLatestReplyMessage `json:"latestReply"`
+// ThreadFacts is the thread:updated fact bundle: what the shared thread
+// summary currently is. The presenter renders the exact frozen wire payload
+// (parentMessageId, threadChannelId, replyCount, lastReplyAt ISO string,
+// participantIds, plus the server identity); the sync-core window fields of
+// the original emit stay their honest zero values at the wire layer in this
+// phase, byte-identical to the previous projection.
+type ThreadFacts struct {
+	ParentMessageID string
+	ThreadChannelID string
+	ReplyCount      int
+	LastReplyAtMS   *int64
+	ParticipantIDs  []string
 }
 
-// ThreadSyncWindow is buildThreadRepliesSyncWindow's exact output.
-type ThreadSyncWindow struct {
-	Producer   string                  `json:"producer"`
-	Discussion ThreadRepliesDiscussion `json:"discussion"`
-	Window     SyncScopeWindowDTO      `json:"window"`
+// ConversationContextFacts is the creation-time identity projection
+// (channelType plus the thread's parent anchor when present).
+type ConversationContextFacts struct {
+	ChannelType       string
+	ParentMessageID   string
+	ParentChannelID   string
+	ParentChannelType string
 }
 
-// ThreadRepliesDiscussion is messageRepliesDiscussion's exact output.
-type ThreadRepliesDiscussion struct {
-	Root     MessageRefDTO `json:"root"`
-	Relation struct {
-		Kind string `json:"kind"`
-	} `json:"relation"`
-	ParentScopeKey SyncScopeKeyDTO `json:"parentScopeKey"`
-	Backing        string          `json:"backing"`
-}
-
-// MessageRefDTO is messageRef's wire shape.
-type MessageRefDTO struct {
-	Kind     string `json:"kind"`
-	ServerID string `json:"serverId"`
-	ID       string `json:"id"`
-}
-
-// SyncScopeKeyDTO is the {serverId,scopeKind,scopeId} scope key.
-type SyncScopeKeyDTO struct {
-	ServerID  string `json:"serverId"`
-	ScopeKind string `json:"scopeKind"`
-	ScopeID   string `json:"scopeId"`
-}
-
-// SyncScopeWindowDTO is syncScopeWindow()'s wire shape.
-type SyncScopeWindowDTO struct {
-	Kind        string  `json:"kind"`
-	ScopeCursor *string `json:"scopeCursor"`
-	Epoch       *string `json:"epoch"`
-}
-
-// ThreadLatestReplyMessage is projectThreadLatestReplyPayload's output: the
-// sealed message DTO plus senderDisplayName (mirrors senderName) and a null
-// senderAvatarUrl for non-external senders, plus the creation-time
-// conversation context.
-type ThreadLatestReplyMessage struct {
-	MessageDTO
-	SenderDisplayName string                  `json:"senderDisplayName"`
-	SenderAvatarURL   *string                 `json:"senderAvatarUrl"`
-	ConversationCtx   *ConversationContextDTO `json:"conversationContext"`
-}
-
-// MarshalJSON flattens the embedded message DTO and appends the latestReply
-// extras, preserving the exact key set of the TS projection.
-func (t ThreadLatestReplyMessage) MarshalJSON() ([]byte, error) {
-	base, err := json.Marshal(t.MessageDTO)
-	if err != nil {
-		return nil, err
-	}
-	var flat map[string]any
-	if err := json.Unmarshal(base, &flat); err != nil {
-		return nil, err
-	}
-	for _, sealed := range []string{"agentSendKey", "searchText", "searchVector", "senderHandle"} {
-		delete(flat, sealed)
-	}
-	flat["senderDisplayName"] = t.SenderDisplayName
-	flat["senderAvatarUrl"] = t.SenderAvatarURL
-	if t.ConversationCtx != nil {
-		flat["conversationContext"] = t.ConversationCtx
-	}
-	return json.Marshal(flat)
+// ViewerSnapshotFacts is the receiver-private reaction-viewer state of one
+// message: who owns it (workspace + message + viewer version) and the
+// reacted-emoji set. Rendered per-user only.
+type ViewerSnapshotFacts struct {
+	WorkspaceID   string
+	MessageID     string
+	ViewerVersion int64
+	ReactedEmojis []string
 }
 
 // PublicationProjection is the current re-projection of one publication
@@ -117,10 +61,10 @@ type PublicationProjection struct {
 	WorkspaceID         string
 	ChannelID           string // the conversation the fact lives in
 	PrivacyClass        string // "shared" | "viewer_private"
-	Message             *MessageDTO
-	ConversationContext *ConversationContextDTO    // message:new only
-	Viewer              *ReactionViewerSnapshotDTO // reaction_viewer:updated only
-	Thread              *ThreadUpdatedDTO          // thread:updated only
+	Message             *Projection
+	ConversationContext *ConversationContextFacts // message:new only
+	Viewer              *ViewerSnapshotFacts      // reaction_viewer:updated only
+	Thread              *ThreadFacts              // thread:updated only
 }
 
 // ProjectPublication re-projects a dequeued publication against CURRENT
@@ -141,18 +85,18 @@ func (s *Store) ProjectPublication(ctx context.Context, ref PublicationRef) (*Pu
 			if msg == nil {
 				return nil
 			}
-			dtos, err := s.ProjectMessages(ctx, ex, ref.WorkspaceID, []*Message{msg})
+			projections, err := s.ProjectMessages(ctx, ex, ref.WorkspaceID, []*Message{msg})
 			if err != nil {
 				return err
 			}
-			if len(dtos) != 1 {
+			if len(projections) != 1 {
 				return nil
 			}
 			out = &PublicationProjection{
 				WorkspaceID:  ref.WorkspaceID,
 				ChannelID:    msg.ChannelID,
 				PrivacyClass: "shared",
-				Message:      dtos[0],
+				Message:      projections[0],
 			}
 			if ref.EventType == "message:new" || ref.EventType == "message:updated" {
 				// The original pipeline attaches the SAME frontend
@@ -193,8 +137,8 @@ func (s *Store) ProjectPublication(ctx context.Context, ref PublicationRef) (*Pu
 				WorkspaceID:  ref.WorkspaceID,
 				ChannelID:    msg.ChannelID,
 				PrivacyClass: "viewer_private",
-				Viewer: &ReactionViewerSnapshotDTO{
-					ServerID:      ref.WorkspaceID,
+				Viewer: &ViewerSnapshotFacts{
+					WorkspaceID:   ref.WorkspaceID,
 					MessageID:     msg.ID,
 					ViewerVersion: state.ViewerVersion,
 					ReactedEmojis: emojis,
@@ -227,11 +171,11 @@ func (s *Store) ProjectPublication(ctx context.Context, ref PublicationRef) (*Pu
 				WorkspaceID:  ref.WorkspaceID,
 				ChannelID:    ref.ObjectID,
 				PrivacyClass: "shared",
-				Thread: &ThreadUpdatedDTO{
+				Thread: &ThreadFacts{
 					ParentMessageID: parentMessage,
 					ThreadChannelID: summary.ThreadChannelID,
 					ReplyCount:      summary.ReplyCount,
-					LastReplyAt:     summary.LastReplyAt,
+					LastReplyAtMS:   summary.LastReplyAt,
 					ParticipantIDs:  summary.ParticipantIDs,
 				},
 			}
@@ -248,7 +192,7 @@ func (s *Store) ProjectPublication(ctx context.Context, ref PublicationRef) (*Pu
 
 // conversationContextFor builds the creation-time identity projection
 // (channelType plus the parent anchor for threads).
-func (s *Store) conversationContextFor(ctx context.Context, ex dbExecutor, workspaceID, channelID string) (*ConversationContextDTO, error) {
+func (s *Store) conversationContextFor(ctx context.Context, ex dbExecutor, workspaceID, channelID string) (*ConversationContextFacts, error) {
 	var channelType string
 	var parentRaw any
 	err := ex.QueryRowContext(ctx, `SELECT type, parent_message_id FROM channels
@@ -257,7 +201,7 @@ func (s *Store) conversationContextFor(ctx context.Context, ex dbExecutor, works
 	if err != nil {
 		return nil, fmt.Errorf("conversation context channel: %w", err)
 	}
-	out := &ConversationContextDTO{ChannelType: channelType}
+	out := &ConversationContextFacts{ChannelType: channelType}
 	if channelType == "thread" {
 		if v, ok := parentRaw.(string); ok && v != "" {
 			out.ParentMessageID = v
@@ -273,20 +217,6 @@ func (s *Store) conversationContextFor(ctx context.Context, ex dbExecutor, works
 		}
 	}
 	return out, nil
-}
-
-// SocketMessageUpdatedInContext projects the message:updated broadcast
-// payload: the sealed shared aggregate plus the same conversationContext the
-// original reaction/aggregate emit carries (withFrontendConversationContext
-// at messageService.ts:5715-5721). A nil context yields the plain sealed
-// aggregate (the ordinary-channel projection always supplies a context, so
-// nil only means "caller has none", never a fabricated one).
-func SocketMessageUpdatedInContext(dto *MessageDTO, context *ConversationContextDTO) map[string]any {
-	payload := SocketMessageUpdated(dto)
-	if context != nil {
-		payload["conversationContext"] = *context
-	}
-	return payload
 }
 
 // LiveEligibility answers the LIVE (socket push) admission question, which

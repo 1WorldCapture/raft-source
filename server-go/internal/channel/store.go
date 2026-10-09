@@ -58,6 +58,13 @@ func (s *Store) now() time.Time { return s.clock.Now() }
 // DB exposes the handle for assembly-time wiring (e.g. auth adapters).
 func (s *Store) DB() *sql.DB { return s.db }
 
+// AgentExists reports whether the agent identity exists in the workspace,
+// reading through the store's own handle (roster-add validation callers no
+// longer touch a raw DB accessor).
+func (s *Store) AgentExists(ctx context.Context, agentID, workspaceID string) (bool, error) {
+	return s.AgentExistsInWorkspace(ctx, s.db, agentID, workspaceID)
+}
+
 // withTx runs fn inside one IMMEDIATE transaction and rolls back on error,
 // through the shared db.WithWriteTx seam so M4 channel writes hold the
 // per-database authority fence through commit (readers using

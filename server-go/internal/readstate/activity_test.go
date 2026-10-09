@@ -354,9 +354,8 @@ func TestActivityPersistenceAcrossRestart(t *testing.T) {
 	}
 	applySchemaDraft(t, handle)
 	channels := channel.NewStore(handle)
-	store := NewStore(handle, channels)
 	fixed := fxNow()
-	store.SetClock(func() time.Time { return fixed })
+	store := NewStoreWithOptions(handle, channels, Options{Clock: func() time.Time { return fixed }})
 	if _, err := handle.Exec(`INSERT INTO users (id, email, name, password_hash, email_verified, profile_setup_completed_at, created_at, updated_at)
 		VALUES (?, ?, ?, 'x', 1, 1, 0, 0)`, fxAlice, "alice@example.test", "alice"); err != nil {
 		t.Fatal(err)
@@ -392,8 +391,7 @@ func TestActivityPersistenceAcrossRestart(t *testing.T) {
 	}
 	defer handle2.Close()
 	applySchemaDraft(t, handle2)
-	store2 := NewStore(handle2, channel.NewStore(handle2))
-	store2.SetClock(func() time.Time { return fixed })
+	store2 := NewStoreWithOptions(handle2, channel.NewStore(handle2), Options{Clock: func() time.Time { return fixed }})
 	diff, err := store2.ActivityDifference(context.Background(), claims, fxWS, DifferenceQuery{
 		RequestID: "r", Filter: ActivityFilterAll, Epoch: before.Epoch, AfterWatermark: before.Watermark})
 	if err != nil {

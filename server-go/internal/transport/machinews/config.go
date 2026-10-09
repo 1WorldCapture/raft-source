@@ -2,7 +2,6 @@ package machinews
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"log/slog"
 	"time"
@@ -10,6 +9,27 @@ import (
 	"raft.local/server-go/internal/computer"
 	"raft.local/server-go/internal/platform/clock"
 )
+
+// MachineFacts is the required port over the computer-owned persistent
+// machine facts (the REAL machines row). The hub calls it synchronously
+// inside the current connection's admission guard; inputs are the verified
+// Computer principal and a typed observation, never a SQL handle. The
+// computer package provides the production implementation
+// (*computer.PresenceStore).
+type MachineFacts interface {
+	// ApplyReady persists one ready observation (runtimes always, optional
+	// hostname/os/daemon/computer version) and revalidates the principal
+	// inside the same short transaction.
+	ApplyReady(ctx context.Context, facts computer.ReadyFacts, principal computer.Principal) error
+	// TouchHeartbeat records a pong observation with the principal
+	// revalidated inside the write transaction.
+	TouchHeartbeat(ctx context.Context, machineID string, at time.Time, principal computer.Principal) error
+	// RecordStatusTransition applies the monotonic online/offline rules and
+	// reports the stored record and whether the machine row exists.
+	RecordStatusTransition(ctx context.Context, machineID, status string, at time.Time, principal computer.Principal) (computer.StatusRecord, bool, error)
+	// Exists reports whether the machine row exists.
+	Exists(ctx context.Context, machineID string) (bool, error)
+}
 
 // Default bounds. Every default reproduces the original TypeScript server's
 // value where one exists (see the contract doc for the source of each).
@@ -48,15 +68,6 @@ const (
 	// runs at handshake Authenticate only.
 	DefaultAuthRecheckInterval = 30 * time.Second
 
-	// machineOnlineContinuity matches MACHINE_ONLINE_CONTINUITY_MS: a
-	// reconnect whose previous heartbeat is at most this old is treated as
-	// the same online stretch, so status_changed_at stays.
-	machineOnlineContinuity = 3 * time.Minute
-
-	// computerVersionRefreshInterval matches
-	// COMPUTER_VERSION_REPORT_REFRESH_MS in machineService.ts.
-	computerVersionRefreshInterval = 24 * time.Hour
-
 	factsWriteTimeout = 5 * time.Second
 )
 
@@ -64,7 +75,7 @@ const (
 // bounds fall back to the documented defaults. See docs/m3-machinews-contract.md.
 type Config struct {
 	Authenticator Authenticator
-	DB            *sql.DB
+	Facts         MachineFacts
 	Clock         clock.Clock
 	Logger        *slog.Logger
 	Scheduler     Scheduler
@@ -126,8 +137,8 @@ func (cfg Config) validate() error {
 	if cfg.Authenticator == nil {
 		return errors.New("machinews: Config.Authenticator is required")
 	}
-	if cfg.DB == nil {
-		return errors.New("machinews: Config.DB is required")
+	if cfg.Facts == nil {
+		return errors.New("machinews: Config.Facts is required")
 	}
 	if cfg.Clock == nil {
 		return errors.New("machinews: Config.Clock is required")

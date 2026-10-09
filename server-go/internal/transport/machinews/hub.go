@@ -26,7 +26,7 @@ const ConnectPath = "/daemon/connect"
 // offline projection, delegating message semantics to the injected callbacks.
 type Hub struct {
 	cfg               Config
-	facts             *machineFacts
+	facts             MachineFacts
 	logger            *slog.Logger
 	clock             clock.Clock
 	scheduler         Scheduler
@@ -95,7 +95,7 @@ func NewHub(cfg Config) (*Hub, error) {
 	baseCtx, cancel := context.WithCancel(context.Background())
 	return &Hub{
 		cfg:               cfg,
-		facts:             &machineFacts{db: cfg.DB},
+		facts:             cfg.Facts,
 		logger:            logger,
 		clock:             cfg.Clock,
 		scheduler:         sched,
@@ -356,7 +356,7 @@ func (h *Hub) publish(c *machineConn) error {
 	}
 	writeCtx, cancel := context.WithTimeout(c.ctx, factsWriteTimeout)
 	defer cancel()
-	_, found, err := h.facts.recordStatusTransition(writeCtx, c.machineID, "online", h.clock.Now(), c.principal)
+	_, found, err := h.facts.RecordStatusTransition(writeCtx, c.machineID, "online", h.clock.Now(), c.principal)
 	if err != nil {
 		return err
 	}
@@ -552,7 +552,7 @@ func (h *Hub) applyOffline(p *pendingOffline) {
 		}
 	}
 	writeCtx, cancel := context.WithTimeout(p.ctx, factsWriteTimeout)
-	_, found, err := h.facts.recordStatusTransition(writeCtx, p.machineID, "offline", p.disconnectedAt, p.principal)
+	_, found, err := h.facts.RecordStatusTransition(writeCtx, p.machineID, "offline", p.disconnectedAt, p.principal)
 	cancel()
 	if err != nil || !found {
 		if err == nil {
@@ -719,7 +719,7 @@ func (h *Hub) Status(machineID string) string {
 	}
 	ctx, cancel := context.WithTimeout(h.baseCtx, factsWriteTimeout)
 	defer cancel()
-	exists, err := h.facts.machineExists(ctx, machineID)
+	exists, err := h.facts.Exists(ctx, machineID)
 	if err != nil || !exists {
 		return "unknown"
 	}
@@ -819,7 +819,7 @@ func (h *Hub) offlineOrUnknown(ctx context.Context, machineID string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	exists, err := h.facts.machineExists(ctx, machineID)
+	exists, err := h.facts.Exists(ctx, machineID)
 	if err != nil {
 		return err
 	}

@@ -1,19 +1,17 @@
 package readstate
 
 import (
-	"context"
 	"database/sql"
 	"errors"
 	"testing"
 	"time"
 
 	"raft.local/server-go/internal/auth"
-	platformdb "raft.local/server-go/internal/platform/db"
-	"raft.local/server-go/internal/realtime"
+	"raft.local/server-go/internal/publication"
 )
 
 // TestProductionDefaultsAreSharedHelpers: NewStore binds db.WithWriteTx /
-// db.WithReadSnapshot / auth.ValidateHumanTx / realtime.Enqueue (the review
+// db.WithReadSnapshot / auth.ValidateHumanTx / publication.Enqueue (the review
 // notes' item 1) — verified behaviorally: the authority fence serializes two
 // writers, the snapshot tolerates a concurrent writer, the exact identity
 // predicate runs, and a committed mutation leaves a real publication row.
@@ -36,7 +34,7 @@ func TestProductionDefaultsAreSharedHelpers(t *testing.T) {
 	}
 
 	// The committed mutation leaves exactly the expected publication rows
-	// (read_state + unread_summary wake) written by realtime.Enqueue.
+	// (read_state + unread_summary wake) written by publication.Enqueue.
 	if _, err := fx.store.MarkRead(fx.ctx(), fx.claims[fxAlice], fxWS, fxGeneral, 1); err != nil {
 		t.Fatal(err)
 	}
@@ -54,38 +52,48 @@ func TestProductionDefaultsAreSharedHelpers(t *testing.T) {
 	}
 }
 
-// TestWriteTxRunsCallbackExactlyOnce: the shared driver may retry
-// transaction ACQUISITION, never the business callback (review notes item 2).
-// A counting wrapper around the production binding proves one invocation per
-// operation for both the rollback and the commit path.
-func TestWriteTxRunsCallbackExactlyOnce(t *testing.T) {
+// TestWriteTxCommitAndRollbackEffects: the store's mutations run on the
+// SHARED db.WithWriteTx with no swappable seam; the callback-exactly-once
+// contract itself is owned and tested by the platform package
+// (transactions_test.go). What this package still proves behaviorally is that
+// one operation commits exactly one set of durable effects and a domain
+// denial rolls the whole transaction back.
+func TestWriteTxCommitAndRollbackEffects(t *testing.T) {
 	fx := newFixture(t)
 	fx.insertMessage(fxGeneral, fxBob, "one")
-	calls := 0
-	fx.store.SetWriteTx(func(ctx context.Context, handle *sql.DB, fn func(*sql.Tx) error) error {
-		calls++
-		return platformdb.WithWriteTx(ctx, handle, fn)
-	})
 
-	// Rollback path: a domain 404 inside the callback rolls the tx back.
+	// Rollback path: a domain 404 inside the callback rolls the tx back and
+	// leaves no durable effects.
 	_, err := fx.store.MarkRead(fx.ctx(), fx.claims[fxAlice], fxWS, "missing-channel", 1)
 	if AsError(err) == nil {
 		t.Fatalf("missing channel read should 404, got %v", err)
 	}
-	if calls != 1 {
-		t.Fatalf("rollback callback ran %d times", calls)
+	var rows int
+	if err := fx.db.QueryRow(`SELECT COUNT(*) FROM realtime_publications WHERE workspace_id = ?`, fxWS).Scan(&rows); err != nil {
+		t.Fatal(err)
 	}
-	// Commit path.
-	calls = 0
+	if rows != 0 {
+		t.Fatalf("rolled-back mutation left %d publication rows", rows)
+	}
+	// Commit path: exactly the expected wake rows.
 	if _, err := fx.store.MarkRead(fx.ctx(), fx.claims[fxAlice], fxWS, fxGeneral, 1); err != nil {
 		t.Fatal(err)
 	}
-	if calls != 1 {
-		t.Fatalf("commit callback ran %d times", calls)
+	var readWake, summaryWake int
+	if err := fx.db.QueryRow(`SELECT COUNT(*) FROM realtime_publications
+		WHERE workspace_id = ? AND event_type = 'read_state:updated'`, fxWS).Scan(&readWake); err != nil {
+		t.Fatal(err)
+	}
+	if err := fx.db.QueryRow(`SELECT COUNT(*) FROM realtime_publications
+		WHERE workspace_id = ? AND event_type = 'unread_summary:changed'`, fxWS).Scan(&summaryWake); err != nil {
+		t.Fatal(err)
+	}
+	if readWake != 1 || summaryWake < 1 {
+		t.Fatalf("publications = read %d / summary %d", readWake, summaryWake)
 	}
 }
 
-// TestBacklogFullRejectsAndRollsBack: realtime.Enqueue refuses new intents
+// TestBacklogFullRejectsAndRollsBack: publication.Enqueue refuses new intents
 // when the pending budget is exhausted; the associated fact must roll back
 // (review notes item 4 — no silent wake-loss fallback).
 func TestBacklogFullRejectsAndRollsBack(t *testing.T) {
@@ -95,7 +103,7 @@ func TestBacklogFullRejectsAndRollsBack(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < realtime.MaxPending; i++ {
+	for i := 0; i < publication.MaxPending; i++ {
 		if _, err := tx.Exec(`INSERT INTO realtime_publications
 			(workspace_id, object_type, object_id, event_type, revision, subject_user_id, scope_id, created_at, next_attempt_at)
 			VALUES (?, 'filler', ?, 'filled', ?, '', '', ?, 0)`,

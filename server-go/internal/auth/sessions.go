@@ -552,3 +552,31 @@ func receiptAAD(id receiptIdentity) []byte {
 	}
 	return []byte(aad)
 }
+
+// MaintenanceService runs the account-domain periodic cleanup: expired
+// sessions and receipts, expired account tokens and stale email-quota
+// request rows. It owns its SQL; the composition root only schedules it.
+type MaintenanceService struct {
+	Sessions *SessionService
+	Store    *Store
+	Now      func() time.Time
+}
+
+// NewMaintenanceService builds the maintenance runner (real clock default).
+func NewMaintenanceService(sessions *SessionService, store *Store) *MaintenanceService {
+	return &MaintenanceService{Sessions: sessions, Store: store, Now: time.Now}
+}
+
+// Run performs one cleanup pass.
+func (m *MaintenanceService) Run(ctx context.Context) error {
+	if err := m.Sessions.CleanupExpired(ctx); err != nil {
+		return err
+	}
+	if _, err := m.Store.db.ExecContext(ctx,
+		`DELETE FROM account_tokens WHERE expires_at <= ?`, m.Now().UnixMilli()); err != nil {
+		return err
+	}
+	_, err := m.Store.db.ExecContext(ctx,
+		`DELETE FROM account_email_requests WHERE created_at <= ?`, m.Now().Add(-time.Hour).UnixMilli())
+	return err
+}

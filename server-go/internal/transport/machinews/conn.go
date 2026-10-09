@@ -58,7 +58,7 @@ type shutdownIntent struct {
 }
 
 type pendingReady struct {
-	facts           readyFacts
+	facts           computer.ReadyFacts
 	raw             json.RawMessage
 	daemonVersion   string
 	computerVersion string
@@ -200,7 +200,7 @@ func (c *machineConn) handleFrame(data []byte, now time.Time) {
 		err := c.hub.withCurrent(c, "pong", func(ctx context.Context) error {
 			writeCtx, cancel := context.WithTimeout(ctx, factsWriteTimeout)
 			defer cancel()
-			return c.hub.facts.touchHeartbeat(writeCtx, c.machineID, now, c.principal)
+			return c.hub.facts.TouchHeartbeat(writeCtx, c.machineID, now, c.principal)
 		})
 		if err != nil && !errors.Is(err, errStale) && !errors.Is(err, context.Canceled) && computer.AsAuthError(err) == nil {
 			c.hub.logger.Error("failed to persist machine heartbeat",
@@ -261,7 +261,7 @@ func (c *machineConn) handleFrame(data []byte, now time.Time) {
 
 func readyFromFrame(c *machineConn, frame readyFrame, raw []byte, now time.Time) *pendingReady {
 	return &pendingReady{
-		facts: readyFacts{
+		facts: computer.ReadyFacts{
 			MachineID:       c.machineID,
 			Runtimes:        frame.Runtimes,
 			Hostname:        frame.Hostname,
@@ -302,7 +302,7 @@ func (c *machineConn) persistReady(incoming *pendingReady) {
 			return nil
 		}
 		writeCtx, cancel := context.WithTimeout(ctx, factsWriteTimeout)
-		err := c.hub.facts.applyReady(writeCtx, pending.facts, c.principal)
+		err := c.hub.facts.ApplyReady(writeCtx, pending.facts, c.principal)
 		cancel()
 		if err != nil {
 			return err

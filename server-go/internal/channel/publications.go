@@ -39,7 +39,7 @@ import (
 	"database/sql"
 	"fmt"
 
-	"raft.local/server-go/internal/realtime"
+	"raft.local/server-go/internal/publication"
 )
 
 // Publication event names on the frozen M4 wire (compatibility contract
@@ -84,7 +84,7 @@ func (s *Store) enqueueChannelUpdated(ctx context.Context, tx *sql.Tx, workspace
 	if err != nil {
 		return err
 	}
-	return realtime.Enqueue(ctx, tx, realtime.Publication{
+	return publication.Enqueue(ctx, tx, publication.Publication{
 		WorkspaceID: workspaceID,
 		ObjectType:  "channel",
 		ObjectID:    channelID,
@@ -104,7 +104,7 @@ func (s *Store) enqueueMembersUpdated(ctx context.Context, tx *sql.Tx, workspace
 	if err != nil {
 		return err
 	}
-	return realtime.Enqueue(ctx, tx, realtime.Publication{
+	return publication.Enqueue(ctx, tx, publication.Publication{
 		WorkspaceID:   workspaceID,
 		ObjectType:    "channel",
 		ObjectID:      channelID,

@@ -135,13 +135,13 @@ func (f *recordingTransport) closeCount(id string) int {
 type rtFixture struct {
 	t         *testing.T
 	handle    *sql.DB
-	runtime   *m4Runtime
+	runtime   *chatServices
 	signer    *auth.TokenSigner
-	rt        *m4Realtime
+	rt        *realtimeRuntime
 	transport *recordingTransport
 }
 
-func newRTFixture(t *testing.T, mutate func(*m4RealtimeConfig)) *rtFixture {
+func newRTFixture(t *testing.T, mutate func(*realtimeConfig)) *rtFixture {
 	t.Helper()
 	handle, err := db.Open(t.TempDir() + "/raft.db")
 	if err != nil {
@@ -149,23 +149,23 @@ func newRTFixture(t *testing.T, mutate func(*m4RealtimeConfig)) *rtFixture {
 	}
 	t.Cleanup(func() { _ = handle.Close() })
 	channels := channel.NewStoreWithOptions(handle, channel.Options{})
-	runtime, err := buildM4(handle, channels, keys.NewRoot([]byte(rtSecretKey)))
+	runtime, err := buildChat(handle, channels, keys.NewRoot([]byte(rtSecretKey)))
 	if err != nil {
-		t.Fatalf("buildM4: %v", err)
+		t.Fatalf("buildChat: %v", err)
 	}
 	signer := auth.NewTokenSigner([]byte(rtSecretKey), 15*time.Minute)
 	logDest := io.Discard
 	if os.Getenv("RT_TEST_LOGS") != "" {
 		logDest = os.Stderr
 	}
-	cfg := m4RealtimeConfig{Logger: slog.New(slog.NewTextHandler(logDest, nil)), Origins: []string{"https://app.example"}}
+	cfg := realtimeConfig{Logger: slog.New(slog.NewTextHandler(logDest, nil)), Origins: []string{"https://app.example"}}
 	if mutate != nil {
 		mutate(&cfg)
 	}
 	transport := newRecordingTransport()
-	rt, err := assembleM4Realtime(runtime, signer, cfg, transport)
+	rt, err := assembleRealtime(runtime, signer, cfg, transport)
 	if err != nil {
-		t.Fatalf("assembleM4Realtime: %v", err)
+		t.Fatalf("assembleRealtime: %v", err)
 	}
 	t.Cleanup(func() { _ = rt.Close() })
 	f := &rtFixture{t: t, handle: handle, runtime: runtime, signer: signer, rt: rt, transport: transport}
@@ -298,7 +298,7 @@ func (f *rtFixture) send(connID, event string, payload any) {
 // wakes the outbox worker on return).
 func (f *rtFixture) create(user, channelID, content string) *message.Message {
 	f.t.Helper()
-	created, err := f.runtime.messages.Create(context.Background(), rtClaims(user), rtWS,
+	created, err := f.runtime.messaging.SendHuman(context.Background(), rtClaims(user), rtWS,
 		message.CreateInput{ChannelID: channelID, Content: content})
 	if err != nil {
 		f.t.Fatalf("create message: %v", err)
@@ -469,11 +469,11 @@ func TestM4RealtimePerConnectionTokenExpiry(t *testing.T) {
 	// connection: enqueue refuses (exact token expiry) and the transport is
 	// closed instead of silently starved.
 	deliverAndWait := func() {
-		audience, exists, err := f.rt.pub.resolveConversationAudience(context.Background(), rtWS, rtGeneral)
+		audience, exists, err := f.rt.pub.ResolveConversationAudience(context.Background(), rtWS, rtGeneral)
 		if err != nil || !exists {
 			t.Fatalf("audience: %v %v", exists, err)
 		}
-		f.rt.pub.deliver(audience, rtWS, core.EventHeartbeat, map[string]any{"seq": 0})
+		f.rt.pub.Deliver(audience, rtWS, core.EventHeartbeat, map[string]any{"seq": 0})
 	}
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
@@ -698,7 +698,7 @@ func TestM4RealtimeResumeExcludesUninterestingThreads(t *testing.T) {
 }
 
 func TestM4RealtimeHeartbeatCarriesCommittedWorkspaceSeq(t *testing.T) {
-	f := newRTFixture(t, func(c *m4RealtimeConfig) { c.HeartbeatInterval = 25 * time.Millisecond })
+	f := newRTFixture(t, func(c *realtimeConfig) { c.HeartbeatInterval = 25 * time.Millisecond })
 	m := f.create(rtAlice, rtGeneral, "beat")
 	f.connect("bob", rtBob, rtWS)
 	rtWaitUntil(t, 5*time.Second, func() bool {
@@ -724,7 +724,7 @@ func TestM4RealtimeHandlerRejectsPollingAndDisallowedOrigins(t *testing.T) {
 	f := newRTFixture(t, nil)
 	// Exercise the REAL zishang wire binding's pre-library guards (they run
 	// before any Engine.IO work, so no listener is needed).
-	real, err := assembleM4Realtime(f.runtime, f.signer, m4RealtimeConfig{
+	real, err := assembleRealtime(f.runtime, f.signer, realtimeConfig{
 		Logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
 		Origins: []string{"https://app.example"},
 	}, nil)
@@ -760,7 +760,7 @@ func TestM4RealtimeHandlerRejectsPollingAndDisallowedOrigins(t *testing.T) {
 // ---- lifecycle ------------------------------------------------------------
 
 func TestM4RealtimeCloseIsIdempotentAndStopsSurfaces(t *testing.T) {
-	f := newRTFixture(t, func(c *m4RealtimeConfig) { c.HeartbeatInterval = 20 * time.Millisecond })
+	f := newRTFixture(t, func(c *realtimeConfig) { c.HeartbeatInterval = 20 * time.Millisecond })
 	f.connect("alice", rtAlice, rtWS)
 	f.create(rtAlice, rtGeneral, "before close")
 	if err := f.rt.Close(); err != nil {
@@ -781,7 +781,7 @@ func TestM4RealtimeCloseIsIdempotentAndStopsSurfaces(t *testing.T) {
 
 func TestM4RealtimeAssemblyRejectsMissingSigner(t *testing.T) {
 	f := newRTFixture(t, nil)
-	if _, err := assembleM4Realtime(f.runtime, nil, m4RealtimeConfig{}, nil); err == nil {
+	if _, err := assembleRealtime(f.runtime, nil, realtimeConfig{}, nil); err == nil {
 		t.Fatalf("nil signer must be refused")
 	}
 }
@@ -791,7 +791,7 @@ func TestM4RealtimeCloseRacingAuthorityCommits(t *testing.T) {
 	// unsubscribes it may still offer into the wake queue while/after Close
 	// runs. The queue is never closed; termination is signalled — no
 	// send-on-closed-channel panic, no deadlock, Close still joins cleanly.
-	f := newRTFixture(t, func(c *m4RealtimeConfig) { c.HeartbeatInterval = 20 * time.Millisecond })
+	f := newRTFixture(t, func(c *realtimeConfig) { c.HeartbeatInterval = 20 * time.Millisecond })
 	f.connect("alice", rtAlice, rtWS)
 	var wg sync.WaitGroup
 	commits := make(chan struct{})

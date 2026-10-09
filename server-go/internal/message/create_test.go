@@ -103,19 +103,19 @@ func TestCreateRejectsUnsupportedEffectsBeforeCommit(t *testing.T) {
 	f.seedChannel(txGeneral, "general", channel.TypeChannel, txAlice)
 
 	asTask := true
-	_, err := f.store.Create(context.Background(), claimsFor(txAlice, txFamAlice), txWS, CreateInput{
+	_, err := f.sendClaims(claimsFor(txAlice, txFamAlice), CreateInput{
 		ChannelID: txGeneral, Content: "x", AsTask: &asTask,
 	})
 	if u := AsUnsupportedEffect(err); u == nil {
 		t.Fatalf("asTask must be rejected, got %v", err)
 	}
-	_, err = f.store.Create(context.Background(), claimsFor(txAlice, txFamAlice), txWS, CreateInput{
+	_, err = f.sendClaims(claimsFor(txAlice, txFamAlice), CreateInput{
 		ChannelID: txGeneral, Content: "x", AttachmentIDs: []string{"dddddddd-dddd-4ddd-8ddd-dddddddddddd"},
 	})
 	if u := AsUnsupportedEffect(err); u == nil {
 		t.Fatalf("attachments must be rejected, got %v", err)
 	}
-	_, err = f.store.Create(context.Background(), claimsFor(txAlice, txFamAlice), txWS, CreateInput{
+	_, err = f.sendClaims(claimsFor(txAlice, txFamAlice), CreateInput{
 		ChannelID: txGeneral, Content: "x",
 		Mentions: []Mention{{Type: "agent", ID: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", Name: "bot"}},
 	})
@@ -123,7 +123,7 @@ func TestCreateRejectsUnsupportedEffectsBeforeCommit(t *testing.T) {
 		t.Fatalf("agent mention must be rejected (no partial accept), got %v", err)
 	}
 	// Mixed user+agent mentions reject the whole write too.
-	_, err = f.store.Create(context.Background(), claimsFor(txAlice, txFamAlice), txWS, CreateInput{
+	_, err = f.sendClaims(claimsFor(txAlice, txFamAlice), CreateInput{
 		ChannelID: txGeneral, Content: "x",
 		Mentions: []Mention{
 			{Type: "user", ID: txBob, Name: "bob"},
@@ -181,7 +181,7 @@ func TestCreateRevokedIdentityFailsClosed(t *testing.T) {
 
 	expired := claimsFor(txAlice, txFamAlice)
 	expired.ExpiresAt = f.clock.Now().Add(-time.Minute)
-	if _, err := f.store.Create(context.Background(), expired, txWS, CreateInput{ChannelID: txGeneral, Content: "x"}); !errors.Is(err, auth.ErrTokenInvalid) {
+	if _, err := f.sendClaims(expired, CreateInput{ChannelID: txGeneral, Content: "x"}); !errors.Is(err, auth.ErrTokenInvalid) {
 		t.Fatalf("expired claims: %v", err)
 	}
 	// Family revoked between verification and the transaction.
@@ -295,7 +295,7 @@ func TestCreateRollbackLeavesNoResidue(t *testing.T) {
 	var err error
 	// A mention that fails resolution aborts before the insert, and no
 	// residue of the failed write survives.
-	_, err = f.store.Create(context.Background(), claimsFor(txAlice, txFamAlice), txWS, CreateInput{
+	_, err = f.sendClaims(claimsFor(txAlice, txFamAlice), CreateInput{
 		ChannelID: txGeneral, Content: "boom",
 		Mentions: []Mention{{Type: "user", ID: "ffffffff-ffff-4fff-8fff-ffffffffffff", Name: "ghost"}},
 	})
@@ -385,13 +385,19 @@ func TestThreadReplyAutoFollowsAndNotifiesMentioned(t *testing.T) {
 		if err != nil {
 			return err
 		}
+		// messages.thread_id has exactly one writer: this message-owned
+		// primitive, orchestrated in the same transaction as the ensure
+		// (the application use case holds them together).
+		if err := f.store.AttachThreadToParentTx(context.Background(), tx, parent.Message.ID, thread.ID); err != nil {
+			return err
+		}
 		threadID = thread.ID
 		return nil
 	})
 	if err != nil {
 		t.Fatalf("ensure thread: %v", err)
 	}
-	// The parent message gains its thread_id projection (channel worker's
+	// The parent message gains its thread_id projection (message-owned
 	// single write point).
 	var parentThread string
 	var nullable sql.NullString

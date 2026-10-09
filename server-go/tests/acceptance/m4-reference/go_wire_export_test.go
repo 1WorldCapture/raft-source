@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	"raft.local/server-go/internal/application/messaging"
 	"raft.local/server-go/internal/auth"
 	"raft.local/server-go/internal/channel"
 	"raft.local/server-go/internal/message"
@@ -85,8 +86,11 @@ func TestM4ReferenceExportGoWire(t *testing.T) {
 	fixed := &clock.Fixed{T: start}
 	channelStore := channel.NewStoreWithOptions(handle, channel.Options{Clock: fixed})
 	msgStore := message.NewStoreWithOptionsForTest(handle, channelStore, fixed)
-	rsStore := readstate.NewStore(handle, channelStore)
-	rsStore.SetClock(func() time.Time { return fixed.T })
+	rsStore := readstate.NewStoreWithOptions(handle, channelStore, readstate.Options{Clock: func() time.Time { return fixed.T }})
+	sendSvc, err := messaging.NewService(channelStore, msgStore, rsStore)
+	if err != nil {
+		t.Fatalf("messaging service: %v", err)
+	}
 
 	out := map[string]any{}
 	step := func(ms int64) { fixed.T = fixed.T.Add(time.Duration(ms) * time.Millisecond) }
@@ -104,7 +108,7 @@ func TestM4ReferenceExportGoWire(t *testing.T) {
 		if from == xsBob {
 			claims = bobClaims
 		}
-		res, err := msgStore.Create(ctx, claims, xsWS, message.CreateInput{
+		res, err := sendSvc.SendHuman(ctx, claims, xsWS, message.CreateInput{
 			ChannelID: xsChan,
 			Content:   fmt.Sprintf("export message %d", i+1),
 		})
@@ -217,7 +221,7 @@ func TestM4ReferenceExportGoWire(t *testing.T) {
 
 	// One new message, then difference must return changes.
 	step(10)
-	if _, err := msgStore.Create(ctx, bobClaims, xsWS, message.CreateInput{ChannelID: xsChan, Content: "export message 4"}); err != nil {
+	if _, err := sendSvc.SendHuman(ctx, bobClaims, xsWS, message.CreateInput{ChannelID: xsChan, Content: "export message 4"}); err != nil {
 		t.Fatalf("create message 4: %v", err)
 	}
 	diff, err := rsStore.ActivityDifference(ctx, aliceClaims, xsWS, readstate.DifferenceQuery{

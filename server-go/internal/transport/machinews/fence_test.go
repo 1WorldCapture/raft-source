@@ -27,7 +27,7 @@ func TestNewHubRequiresPrincipalCheck(t *testing.T) {
 	env := newTestEnv(t, nil)
 	_, err := NewHub(Config{
 		Authenticator: stubAuthenticator{},
-		DB:            env.db,
+		Facts:         env.presence,
 		Clock:         env.clock,
 	})
 	if err == nil || !strings.Contains(err.Error(), "ValidatePrincipal") {
@@ -132,7 +132,7 @@ func TestReadyCallbackFollowsCommitAndLatestRetryWins(t *testing.T) {
 	env := newTestEnv(t, nil)
 	machineID, _, ws := dialLegacy(t, env)
 	defer closeQuietly(ws)
-	env.hub.facts.testFailReady.Store(1)
+	env.failReady.Store(1)
 	sendFrame(t, ws, `{"type":"ready","runtimes":["claude"],"runningAgents":[],"daemonVersion":"old"}`)
 	env.waitCond("first ready waiting to retry", func() bool { return readyRetryArmed(env.hub, machineID) })
 	if env.readyCount() != 0 {
@@ -351,7 +351,7 @@ func TestRotationRejectsEstablishedMutation(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		env.hub.facts.testBeforeReadyWrite = func() {
+		env.beforeReadyWrite = func() {
 			_, _ = env.db.Exec(`UPDATE machines SET api_key_hash = ?, api_key_prefix = ?, api_key_fingerprint = ? WHERE id = ?`,
 				hash, prefix, fingerprint, machineID)
 		}

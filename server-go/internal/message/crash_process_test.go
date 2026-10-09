@@ -12,10 +12,11 @@ import (
 	"testing"
 	"time"
 
+	"raft.local/server-go/internal/auth"
 	"raft.local/server-go/internal/channel"
 	"raft.local/server-go/internal/platform/clock"
 	"raft.local/server-go/internal/platform/db"
-	"raft.local/server-go/internal/realtime"
+	"raft.local/server-go/internal/publication"
 )
 
 const crashNoticePrefix = "RAFT_M4_CRASH_READY "
@@ -77,7 +78,7 @@ func TestM4CrashProcessHelper(t *testing.T) {
 		})
 		t.Fatalf("pre-commit barrier unexpectedly returned: %v", err)
 	}
-	created, err := store.Create(ctx, claims, txWS, crashInput())
+	created, err := sendCrashInput(ctx, store, claims)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +88,7 @@ func TestM4CrashProcessHelper(t *testing.T) {
 	if mode != "post-publish" {
 		t.Fatalf("unknown crash mode %q", mode)
 	}
-	_, err = realtime.NewStore(handle).DrainOnce(ctx, func(_ context.Context, ref realtime.Publication) error {
+	_, err = publication.NewStore(handle).DrainOnce(ctx, func(_ context.Context, ref publication.Publication) error {
 		// Simulate transport accepting the reference, then stop BEFORE
 		// returning to DrainOnce's durable published_at transaction.
 		barrier(created, ref.ID)
@@ -206,7 +207,7 @@ func TestM4RealProcessCrashPreservesAtomicFactsAndPublicationReplay(t *testing.T
 			if committed && (messageCount != 1 || pending == 0 || processed != 0) {
 				t.Fatalf("committed fact/intent lost or prematurely marked: messages=%d pending=%d processed=%d", messageCount, pending, processed)
 			}
-			retry, err := f.store.Create(context.Background(), claimsFor(txAlice, txFamAlice), txWS, crashInput())
+			retry, err := sendCrashInput(context.Background(), f.store, claimsFor(txAlice, txFamAlice))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -226,8 +227,8 @@ func TestM4RealProcessCrashPreservesAtomicFactsAndPublicationReplay(t *testing.T
 				}
 			}
 			seen := map[int64]bool{}
-			publications := realtime.NewStore(handle)
-			if _, err := publications.DrainOnce(context.Background(), func(_ context.Context, ref realtime.Publication) error {
+			publications := publication.NewStore(handle)
+			if _, err := publications.DrainOnce(context.Background(), func(_ context.Context, ref publication.Publication) error {
 				seen[ref.ID] = true
 				return nil
 			}); err != nil {
@@ -239,7 +240,7 @@ func TestM4RealProcessCrashPreservesAtomicFactsAndPublicationReplay(t *testing.T
 			if len(seen) == 0 {
 				t.Fatal("restarted publisher found no durable intents")
 			}
-			if _, err := publications.DrainOnce(context.Background(), func(context.Context, realtime.Publication) error {
+			if _, err := publications.DrainOnce(context.Background(), func(context.Context, publication.Publication) error {
 				t.Error("durably marked publication replayed again")
 				return nil
 			}); err != nil {
@@ -247,4 +248,22 @@ func TestM4RealProcessCrashPreservesAtomicFactsAndPublicationReplay(t *testing.T
 			}
 		})
 	}
+}
+
+// sendCrashInput commits one crash-input message through the
+// transaction-bound primitive in a single write transaction.
+func sendCrashInput(ctx context.Context, store *Store, claims auth.AccessTokenClaims) (*CreateResult, error) {
+	var result *CreateResult
+	err := db.WithWriteTx(ctx, store.DB(), func(tx *sql.Tx) error {
+		created, err := store.CreateTx(ctx, tx, claims, txWS, crashInput())
+		if err != nil {
+			return err
+		}
+		result = created
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
 }

@@ -3,7 +3,6 @@ package message
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -41,7 +40,7 @@ var ErrSyncDeadlineExceeded = errors.New("sync scan deadline exceeded")
 // are projected on the same snapshot as the scan.
 type SyncResult struct {
 	Messages       []*Message
-	DTOs           []*MessageDTO
+	Projections    []*Projection
 	CoveredThrough int64
 	HighWater      int64
 	HasMore        bool
@@ -110,7 +109,7 @@ func (s *Store) SyncHTTP(ctx context.Context, claims Claims, workspaceID string,
 				if _, err := s.authorizeRead(ctx, ex, workspaceID, channelID, claims.userID); err != nil {
 					return err
 				}
-				result = &SyncResult{Messages: []*Message{}, DTOs: []*MessageDTO{}, CoveredThrough: sinceSeq}
+				result = &SyncResult{Messages: []*Message{}, Projections: []*Projection{}, CoveredThrough: sinceSeq}
 				return nil
 			}
 		}
@@ -119,7 +118,7 @@ func (s *Store) SyncHTTP(ctx context.Context, claims Claims, workspaceID string,
 		if err != nil {
 			return err
 		}
-		result.DTOs, err = s.ProjectMessages(ctx, ex, workspaceID, result.Messages)
+		result.Projections, err = s.ProjectMessages(ctx, ex, workspaceID, result.Messages)
 		return err
 	})
 	if err != nil {
@@ -262,7 +261,7 @@ func (s *Store) SyncVisibleMessages(ctx context.Context, claims Claims, workspac
 				if _, err := s.authorizeRead(ctx, ex, workspaceID, channelID, claims.userID); err != nil {
 					return err
 				}
-				result = &SyncResult{Messages: []*Message{}, DTOs: []*MessageDTO{}, CoveredThrough: sinceSeq}
+				result = &SyncResult{Messages: []*Message{}, Projections: []*Projection{}, CoveredThrough: sinceSeq}
 				return nil
 			}
 		}
@@ -271,7 +270,7 @@ func (s *Store) SyncVisibleMessages(ctx context.Context, claims Claims, workspac
 		if err != nil {
 			return err
 		}
-		result.DTOs, err = s.ProjectMessages(ctx, ex, workspaceID, result.Messages)
+		result.Projections, err = s.ProjectMessages(ctx, ex, workspaceID, result.Messages)
 		return err
 	})
 	if err != nil {
@@ -294,148 +293,4 @@ func syncArgs(workspaceID string, cursor, high int64, channelID string, batch in
 	}
 	args = append(args, batch)
 	return args
-}
-
-// ResumeEnvelope is the Socket.IO sync:resume:response wire shape
-// {messages, currentSeq, hasMore}. The socket worker renders exactly this
-// from ResumePage; the HTTP surface never uses an envelope.
-type ResumeEnvelope struct {
-	Messages   []*MessageDTO `json:"messages"`
-	CurrentSeq int64         `json:"currentSeq"`
-	HasMore    bool          `json:"hasMore"`
-}
-
-// Resume budgets: at most 500 messages AND at most 1 MiB of the FULLY
-// ENCODED envelope per page (the per-connection send-queue bound). The byte
-// accounting includes the JSON envelope braces, keys, separators and the
-// cursor digits — never just the bare message bodies. A page is always a seq
-// PREFIX: when the bound cuts the tail, currentSeq stops at the last
-// INCLUDED message so the next resume re-fetches exactly the cut rows — no
-// visible message is ever skipped.
-const (
-	ResumeMaxEncodedBytes = 1 << 20
-	// envelopeSlack covers {"messages":[…],"currentSeq":N,"hasMore":B} plus
-	// a conservative margin; the final exact re-check below guarantees it.
-	envelopeSlack = 128
-)
-
-// ErrResumeMessageExceedsBudget is returned when even ONE visible message
-// (with the envelope) cannot fit the configured byte budget. The gateway
-// must apply its slow-consumer policy (retry with a full budget or close the
-// connection) — the API never silently skips the row and never returns an
-// empty-but-advanceless page that would loop forever.
-var ErrResumeMessageExceedsBudget = errors.New("resume page: a single message exceeds the byte budget")
-
-// ResumeOptions bounds one resume page. Zero values take the defaults
-// (500 messages / 1 MiB).
-type ResumeOptions struct {
-	MaxMessages     int
-	MaxEncodedBytes int64
-}
-
-// ResumePage serves one Socket resume page for lastSeq under the same
-// visibility rules as HTTP sync. currentSeq is the honest coverage cursor:
-// it advances over every examined row (holes included) and reaches H only
-// when the scan truly covered the range; hasMore is true while covered work
-// remains, the page filled exactly, or the byte bound cut the tail.
-func (s *Store) ResumePage(ctx context.Context, claims Claims, workspaceID string, lastSeq int64, opts ResumeOptions) (*ResumeEnvelope, error) {
-	if opts.MaxMessages <= 0 || opts.MaxMessages > ResumeLimit {
-		opts.MaxMessages = ResumeLimit
-	}
-	if opts.MaxEncodedBytes <= 0 {
-		opts.MaxEncodedBytes = ResumeMaxEncodedBytes
-	}
-	result, err := s.SyncVisibleMessages(ctx, claims, workspaceID, lastSeq, "", opts.MaxMessages)
-	if err != nil {
-		return nil, err
-	}
-	dtos := result.DTOs
-	if dtos == nil {
-		dtos = []*MessageDTO{}
-	}
-	currentSeq := result.CoveredThrough
-	hasMore := result.HasMore
-
-	// Byte bound on the WHOLE encoded envelope: select the longest prefix
-	// by per-message sizes + separators + slack, then verify exactly by
-	// marshaling the real envelope and shed tail rows until it fits.
-	if len(dtos) > 0 {
-		sizes := make([]int, len(dtos))
-		var total int64
-		for i, dto := range dtos {
-			encoded, err := json.Marshal(dto)
-			if err != nil {
-				return nil, fmt.Errorf("resume encode: %w", err)
-			}
-			sizes[i] = len(encoded)
-			total += int64(len(encoded))
-		}
-		kept := len(dtos)
-		if total+int64(len(dtos)-1)+envelopeSlack > opts.MaxEncodedBytes {
-			kept = 0
-			var acc int64
-			for i, size := range sizes {
-				next := acc + int64(size)
-				if i > 0 {
-					next++ // comma separator
-				}
-				if i > 0 && next+envelopeSlack > opts.MaxEncodedBytes {
-					break
-				}
-				acc = next
-				kept++
-			}
-			if kept == 0 {
-				// Not even one message fits: never admit it silently and
-				// never loop — surface the typed budget error for the
-				// gateway's retry/close policy.
-				return nil, ErrResumeMessageExceedsBudget
-			}
-		}
-		if kept < len(dtos) {
-			dtos = dtos[:kept]
-			hasMore = true
-			// currentSeq regresses to the last included row's seq; the
-			// dropped rows are re-fetched by the next resume, never skipped.
-			if seq := seqOfMessage(result.Messages, dtos[len(dtos)-1].ID); seq > 0 {
-				currentSeq = seq
-			}
-		}
-		// Exact verification with the real envelope (separators, keys and
-		// cursor digits included); shed the tail while it still exceeds.
-		for {
-			page := &ResumeEnvelope{Messages: dtos, CurrentSeq: currentSeq, HasMore: hasMore}
-			encoded, err := json.Marshal(page)
-			if err != nil {
-				return nil, fmt.Errorf("resume envelope encode: %w", err)
-			}
-			if int64(len(encoded)) <= opts.MaxEncodedBytes || len(dtos) == 0 {
-				break
-			}
-			dtos = dtos[:len(dtos)-1]
-			hasMore = true
-			if len(dtos) == 0 {
-				return nil, ErrResumeMessageExceedsBudget
-			}
-			if seq := seqOfMessage(result.Messages, dtos[len(dtos)-1].ID); seq > 0 {
-				currentSeq = seq
-			}
-		}
-	}
-	return &ResumeEnvelope{
-		Messages:   dtos,
-		CurrentSeq: currentSeq,
-		HasMore:    hasMore,
-	}, nil
-}
-
-// seqOfMessage finds the creation seq of one message id inside the scan's
-// row slice (the DTO list is the projection of those rows, same order).
-func seqOfMessage(msgs []*Message, id string) int64 {
-	for _, m := range msgs {
-		if m.ID == id {
-			return m.Seq
-		}
-	}
-	return 0
 }

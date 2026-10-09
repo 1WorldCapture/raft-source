@@ -27,46 +27,25 @@ type CreateInput struct {
 }
 
 // CreateResult carries the committed (or replayed) message plus the mention
-// facts projected for the sender response.
+// facts projected for the sender response. ThreadReply reports that this was
+// a NEW reply into a thread channel (the application use case pairs it with
+// the author's own read advance in the same transaction); a randomId replay
+// or a non-thread message never sets it.
 type CreateResult struct {
-	Message  *Message
-	Replayed bool
-	Mentions []Mention
+	Message     *Message
+	Replayed    bool
+	ThreadReply bool
+	Mentions    []Mention
 }
 
-// Create runs the full human send use case in one IMMEDIATE transaction:
-// identity revalidation, shape validation, unsupported-effect rejection,
-// posting authority, random-id idempotency, mention resolution, message fact,
-// thread follows and publication intents all commit atomically.
-func (s *Store) Create(ctx context.Context, claims auth.AccessTokenClaims, workspaceID string, input CreateInput) (*CreateResult, error) {
-	var result *CreateResult
-	err := s.withWriteTx(ctx, func(tx *sql.Tx) error {
-		created, err := s.CreateTx(ctx, tx, claims, workspaceID, input)
-		if err != nil {
-			return err
-		}
-		result = created
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	return result, nil
-}
-
-// ThreadReplyReadHook is the injected readstate seam: after a NEW human
-// thread reply commits its fact + auto-follow, the author's thread read
-// cursor must advance in the SAME transaction (original messageService.ts
-// markReadLatest after the 'replied' auto-follow). The parent wires this to
-// readstate.MarkReadLatestTx; message never calls a nested top-level
-// mutation. Only fresh replies invoke it — never a randomId replay, never a
-// history read.
-type ThreadReplyReadHook func(ctx context.Context, tx *sql.Tx, claims auth.AccessTokenClaims, workspaceID, threadID string) error
-
-// CreateTx is the transaction-bound creation path shared by the HTTP send
-// routes and the conversation worker's thread-initial-content use case (one
-// db.WithWriteTx, EnsureThreadTx then CreateTx; never Create inside a tx).
-func (s *Store) CreateTx(ctx context.Context, tx *sql.Tx, claims auth.AccessTokenClaims, workspaceID string, input CreateInput) (*CreateResult, error) {
+// CreateMessageTx is the transaction-bound creation STEP: identity
+// revalidation, shape validation, posting authority, random-id idempotency,
+// mention resolution, the message fact and the thread auto-follows — and
+// NOTHING else. It is orchestrated by application/messaging, which pairs a
+// NEW thread reply's read advance with the publication intents in the
+// original pipeline order (follows -> read advance -> publications). It is
+// never a complete human send on its own.
+func (s *Store) CreateMessageTx(ctx context.Context, tx *sql.Tx, claims auth.AccessTokenClaims, workspaceID string, input CreateInput) (*CreateResult, error) {
 	if err := s.validateHuman(ctx, tx, claims); err != nil {
 		return nil, err
 	}
@@ -161,24 +140,29 @@ func (s *Store) CreateTx(ctx context.Context, tx *sql.Tx, claims auth.AccessToke
 				return nil, err
 			}
 		}
-		if s.threadReplyReadHook != nil {
-			if err := s.threadReplyReadHook(ctx, tx, claims, workspaceID, conv.Channel.ID); err != nil {
-				return nil, fmt.Errorf("thread reply read hook: %w", err)
-			}
-		}
 	}
 
-	// Publication intents join the same commit. The socket worker reprojects
-	// and reauthorizes; no payloads or audience lists are stored here.
-	if err := enqueue(ctx, tx, workspaceID, "message", id, "message:new", 1, "", input.ChannelID); err != nil {
-		return nil, err
+	return &CreateResult{Message: msg, ThreadReply: conv.Channel.Type == channel.TypeThread, Mentions: resolved}, nil
+}
+
+// RecordSendPublicationsTx records the durable broadcast intents for one
+// committed send: message:new always, thread:updated for a NEW thread reply
+// (revision = the reply's seq, exactly like the original pipeline). The
+// messaging use case calls it in the SAME transaction AFTER the thread-reply
+// read advance, so the realtime_publications row order matches the original
+// send path (read_state intents first, then message:new, then
+// thread:updated). A replay records nothing.
+func (s *Store) RecordSendPublicationsTx(ctx context.Context, tx *sql.Tx, workspaceID string, created *CreateResult) error {
+	if created == nil || created.Replayed || created.Message == nil {
+		return nil
 	}
-	if conv.Channel.Type == channel.TypeThread {
-		if err := enqueue(ctx, tx, workspaceID, "thread", conv.Channel.ID, "thread:updated", seq, "", conv.Channel.ID); err != nil {
-			return nil, err
-		}
+	if err := enqueue(ctx, tx, workspaceID, "message", created.Message.ID, "message:new", 1, "", created.Message.ChannelID); err != nil {
+		return err
 	}
-	return &CreateResult{Message: msg, Mentions: resolved}, nil
+	if created.ThreadReply {
+		return enqueue(ctx, tx, workspaceID, "thread", created.Message.ChannelID, "thread:updated", created.Message.Seq, "", created.Message.ChannelID)
+	}
+	return nil
 }
 
 // validateCreateShape reproduces the TS parse/validation order so error

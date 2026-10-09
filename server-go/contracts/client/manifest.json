@@ -1,0 +1,265 @@
+{
+  "manifestVersion": 1,
+  "kind": "raft.client-contracts-index",
+  "title": "客户端契约能力索引(冻结 fixture 唯一索引)",
+  "baselineCommit": "6ffc168dd7025a2d5f61416347ecc9937853c3ad",
+  "baselineNote": "设计 §10 基线。checker 将每个冻结 fixture 与迁移文件同时和工作区、本 manifest、git 基线 commit 内 blob 三方比对;基线漂移即失败。",
+  "notes": [
+    "本文件是按能力组织的索引,不是第二份 golden:每个能力只指向唯一原始冻结 fixture(路径+sha256),不复制、不改写其内容。出现两套会各自漂移的 golden 是本索引要防止的结果。",
+    "checker(tests/acceptance/client-contracts.mjs)默认且仅只读:对自身错误返回非零,对契约文件、迁移、消费者与 git 历史零写入。自测用的畸形 manifest 全部放在系统临时目录。",
+    "哈希为 sha256(工作区字节)。上游溯源(upstream)取自文件内部记录的基线/pins,而不是本索引另行声称。",
+    "消费者分两类:direct=运行时真实加载该工件字节的代码(测试/装配);reference=仅在文档、注释或构建说明中引用它的文件。reference 不证明任何执行。",
+    "更新本 manifest 属于评审后的人工动作(与重新生成任何冻结 fixture 同级),checker 不提供写回模式。"
+  ],
+  "frozenRoots": ["contracts/m4", "contracts/legacyweb"],
+  "frozenFiles": ["contracts/m4-readstate-schema.sql"],
+  "entries": [
+    {
+      "id": "m4.messages-wire",
+      "capability": "消息创建 wire(v1/v2):正文上限、mentions、randomId 幂等、cursor、reaction 解析",
+      "path": "contracts/m4/messages-wire.contract.json",
+      "schema": "m4-reference-contract",
+      "area": "messages-wire",
+      "sha256": "74efd63e6bed6431af7cef67bf451d73a1ae8a2d35f7af7d161b822ce12b89ba",
+      "bytes": 24628,
+      "upstream": {
+        "producerBaseline": "bc65213b377a992c381e809c72ba50ca9af367fd",
+        "generatedBy": "original-execution (parsers/constants) + source-derived literals (route envelope)",
+        "sourcePinsInside": 25,
+        "regeneration": "node tests/acceptance/m4-reference/run.mjs [--check];仅评审后基线变更才可再生"
+      },
+      "consumers": {
+        "direct": ["tests/acceptance/m4-reference/run.mjs"],
+        "reference": []
+      }
+    },
+    {
+      "id": "m4.canonical-message",
+      "capability": "规范消息 manifest、共享/私有字段省略、socket allowlist、commentRef shared-null-preserve 折叠",
+      "path": "contracts/m4/canonical-message.contract.json",
+      "schema": "m4-reference-contract",
+      "area": "canonical-message",
+      "sha256": "fda46c3fa6f1e8ba4e6dff972f825495d1dcbebdeca69e5c0b1c99ce6f62cad2",
+      "bytes": 29848,
+      "upstream": {
+        "producerBaseline": "bc65213b377a992c381e809c72ba50ca9af367fd",
+        "generatedBy": "original-execution (shared manifest, socket projector, web canonical fold)",
+        "sourcePinsInside": 25,
+        "regeneration": "node tests/acceptance/m4-reference/run.mjs [--check];仅评审后基线变更才可再生"
+      },
+      "consumers": {
+        "direct": ["tests/acceptance/m4-reference/run.mjs"],
+        "reference": []
+      }
+    },
+    {
+      "id": "m4.history-coverage",
+      "capability": "MessageWindowCoverage 边界形状与消息分页 envelope(源推导,非执行;逐行锚定 pinned 函数)",
+      "path": "contracts/m4/history-coverage.contract.json",
+      "schema": "m4-reference-contract",
+      "area": "history-coverage",
+      "sha256": "830e556c037512aefc4f41556cea59d598eb5a372c293a18db24a9cfccd9f0fe",
+      "bytes": 12899,
+      "upstream": {
+        "producerBaseline": "bc65213b377a992c381e809c72ba50ca9af367fd",
+        "generatedBy": "source-derived (NOT executed: requires PostgreSQL + drizzle)",
+        "sourcePinsInside": 25,
+        "regeneration": "node tests/acceptance/m4-reference/run.mjs [--check];仅评审后基线变更才可再生"
+      },
+      "consumers": {
+        "direct": ["tests/acceptance/m4-reference/run.mjs", "tests/acceptance/m4-reference/verify-go-wire.mjs"],
+        "reference": []
+      }
+    },
+    {
+      "id": "m4.readstate-prefs-wire",
+      "capability": "读变更准入 parser、读状态 ledger(含迟到重复拒绝的多事件流)、已读回执、mute/display/通知偏好",
+      "path": "contracts/m4/readstate-prefs-wire.contract.json",
+      "schema": "m4-reference-contract",
+      "area": "readstate-prefs-wire",
+      "sha256": "e1988a2417604b264959f91688b03840a3f6f3381734dc09f99111bfddc5095d",
+      "bytes": 17666,
+      "upstream": {
+        "producerBaseline": "bc65213b377a992c381e809c72ba50ca9af367fd",
+        "generatedBy": "original-execution (route parser segment, web read-state ledger, read-receipt domain, channel/prefs folds)",
+        "sourcePinsInside": 25,
+        "regeneration": "node tests/acceptance/m4-reference/run.mjs [--check];仅评审后基线变更才可再生"
+      },
+      "consumers": {
+        "direct": ["tests/acceptance/m4-reference/run.mjs"],
+        "reference": []
+      }
+    },
+    {
+      "id": "m4.thread-dm-wire",
+      "capability": "频道可见性/名称校验、DM/thread 路由字面量、DM channel fold",
+      "path": "contracts/m4/thread-dm-wire.contract.json",
+      "schema": "m4-reference-contract",
+      "area": "thread-dm-wire",
+      "sha256": "ad65b0a797665c3447a7ccd755b43ef67e360f88f45b913c30e5275ca7348918",
+      "bytes": 12417,
+      "upstream": {
+        "producerBaseline": "bc65213b377a992c381e809c72ba50ca9af367fd",
+        "generatedBy": "original-execution (channel parsers, shared name validator, web DM fold) + source-derived route literals",
+        "sourcePinsInside": 25,
+        "regeneration": "node tests/acceptance/m4-reference/run.mjs [--check];仅评审后基线变更才可再生"
+      },
+      "consumers": {
+        "direct": ["tests/acceptance/m4-reference/run.mjs"],
+        "reference": []
+      }
+    },
+    {
+      "id": "m4.activity-v1",
+      "capability": "uint64 原语、Activity JSON Schema 判定、reducer 快照/差分/notModified/frame/readStateUpdated 行为 + 冻结真实流(message→read→done→difference)",
+      "path": "contracts/m4/activity-v1.contract.json",
+      "schema": "m4-reference-contract",
+      "area": "activity-v1",
+      "sha256": "58355a851e8497c75d6944bb9c942ea773d40fe801e1393ed283af4ace5efecf",
+      "bytes": 36806,
+      "upstream": {
+        "producerBaseline": "bc65213b377a992c381e809c72ba50ca9af367fd",
+        "generatedBy": "original-execution (uint64, reducer + core, contract behavior runner, ajv over generated JSON Schema)",
+        "sourcePinsInside": 25,
+        "regeneration": "node tests/acceptance/m4-reference/run.mjs [--check];仅评审后基线变更才可再生"
+      },
+      "consumers": {
+        "direct": ["tests/acceptance/m4-reference/run.mjs", "tests/acceptance/m4-reference/verify-go-wire.mjs", "tests/acceptance/m4-reference/selftest-verify.mjs"],
+        "reference": ["docs/m4-reference-report.md"]
+      }
+    },
+    {
+      "id": "m4.reaction-versions",
+      "capability": "reaction viewer/discussion 版本次序不变量(stale / duplicate / equal-version-different-payload)",
+      "path": "contracts/m4/reaction-versions.contract.json",
+      "schema": "m4-reference-contract",
+      "area": "reaction-versions",
+      "sha256": "934ce72861572bb6d2d20a0d3f5b6bb119ab17f0c7544d5e46dcac8aad0dcfae",
+      "bytes": 7995,
+      "upstream": {
+        "producerBaseline": "bc65213b377a992c381e809c72ba50ca9af367fd",
+        "generatedBy": "source-derived rule invariants (zustand store; two checkable invariants enforced on Go wire samples) + executed worked traces",
+        "sourcePinsInside": 25,
+        "regeneration": "node tests/acceptance/m4-reference/run.mjs [--check];仅评审后基线变更才可再生"
+      },
+      "consumers": {
+        "direct": ["tests/acceptance/m4-reference/run.mjs"],
+        "reference": ["docs/m4-reference-report.md"]
+      }
+    },
+    {
+      "id": "m4.go-wire-samples",
+      "capability": "真实 Go 公共 API wire 证据(in-process 采集,经原始 TS reducer/JSON Schema 校验通过后冻结)",
+      "path": "contracts/m4/go-wire-samples.json",
+      "schema": "m4-go-wire-samples",
+      "sha256": "35d35239c8b29c174ee40ac79cffd732751fba1b2ca167826da7c34240960bac",
+      "bytes": 8394,
+      "upstream": {
+        "producerBaseline": "bc65213b377a992c381e809c72ba50ca9af367fd",
+        "generatedBy": "go test ./tests/acceptance/m4-reference/ -run TestM4ReferenceExportGoWire + verify-go-wire",
+        "sourcePinsInside": 0,
+        "regeneration": "node tests/acceptance/m4-reference/run.mjs --go-wire(去掉 --check 再生证据;门禁模式只读)",
+        "consumerRoleNote": "run.mjs 是该证据文件的唯一写入者/对照者:--check 门禁保持只读,仅在显式再生时写回。"
+      },
+      "consumers": {
+        "direct": ["tests/acceptance/m4-reference/run.mjs"],
+        "reference": ["Makefile", "docs/m4-reference-report.md", "docs/m4-cross-slice-review.md", "docs/phase-4-backend-handoff.md"]
+      }
+    },
+    {
+      "id": "m4.contracts-readme",
+      "capability": "contracts/m4 冻结来源、执行/源推导边界与再生命令的说明文档",
+      "path": "contracts/m4/README.md",
+      "schema": "m4-contracts-readme",
+      "sha256": "83e7557d122fe4dfa10f9a66384978d2a47684862594f719d25b8c8ba991498b",
+      "bytes": 7551,
+      "upstream": {
+        "producerBaseline": "bc65213b377a992c381e809c72ba50ca9af367fd",
+        "generatedBy": "hand-written documentation of the frozen reference suite",
+        "sourcePinsInside": 0,
+        "regeneration": "人工维护;与冻结套件语义一起评审"
+      },
+      "consumers": {
+        "direct": [],
+        "reference": ["docs/m4-reference-report.md", "docs/m4-socket-worker-report.md", "tests/acceptance/m4-reference/verify-go-wire.mjs"]
+      }
+    },
+    {
+      "id": "legacyweb.account-entry",
+      "capability": "原 Web 客户端注册→验证→身份→空空间创建表单的协议盘点(浏览器验收计划,非后端签收声明)",
+      "path": "contracts/legacyweb/account-entry.md",
+      "schema": "legacyweb-account-entry",
+      "sha256": "920e0a82385d8a3c6cb48155ca068af2fe5a7ea137939993d024ffbb6a2338ff",
+      "bytes": 5626,
+      "upstream": {
+        "producerBaseline": null,
+        "generatedBy": "hand-curated inventory read from the original web client and TS reference routes (baseline not recorded inside the file)",
+        "sourcePinsInside": 0,
+        "regeneration": "人工维护的历史验收计划;保留原稿不重写"
+      },
+      "consumers": {
+        "direct": [],
+        "reference": ["README.md"]
+      }
+    },
+    {
+      "id": "legacyweb.workspaces-route-matrix",
+      "capability": "M2 工作空间兼容性与验收路由清单(状态:design-not-implementation-evidence,计划清单非通过声明)",
+      "path": "contracts/legacyweb/workspaces-route-matrix.json",
+      "schema": "legacyweb-workspaces-route-matrix",
+      "sha256": "7839d78bce518774482943128b8cd9cd0861356def501519fada814e43f22e0b",
+      "bytes": 17511,
+      "upstream": {
+        "producerBaseline": "c4a5015deb7dcc8b800df96675d899f384f76e36",
+        "generatedBy": "hand-curated design matrix from docs/phase-2-workspaces.md",
+        "sourcePinsInside": 0,
+        "regeneration": "人工维护的设计输入;保留原稿不重写"
+      },
+      "consumers": {
+        "direct": [],
+        "reference": ["docs/phase-2-workspaces.md", "docs/phase-2-backend-handoff.md", "docs/m2-http-worker-report.md", "docs/m2-implementation-coordination.md"]
+      }
+    },
+    {
+      "id": "readstate.schema-draft-0011",
+      "capability": "0011 readstate/activity 迁移草案(幂等 IF NOT EXISTS,可在已跑 0001-0010 的库上重放;正式 0011 由此评审而来,两者有意不同)",
+      "path": "contracts/m4-readstate-schema.sql",
+      "schema": "readstate-schema-ddl",
+      "sha256": "5eccae27d61ed696a0005c47d19a52010b0619f09e9400323dab6921413f9d9a",
+      "bytes": 13321,
+      "upstream": {
+        "producerBaseline": null,
+        "generatedBy": "readstate worker draft for migration 0011 (docs/m4-activity-readstate-contract.md §3 frozen notes)",
+        "sourcePinsInside": 0,
+        "regeneration": "人工维护的冻结草案;不随 0011 演进而改写"
+      },
+      "consumers": {
+        "direct": ["internal/readstate/fixture_test.go", "internal/transport/httpapi/humanapi/m4_readstate_http_test.go"],
+        "reference": ["internal/readstate/doc.go", "internal/platform/db/migrations/0011_readstate_activity.sql", "docs/m4-readstate-worker-report.md"]
+      }
+    }
+  ],
+  "migrations": {
+    "dir": "internal/platform/db/migrations",
+    "expectedCount": 13,
+    "invariant": "设计 §10:本轮稳定化预期 schema 变更为零。0001-0013 的 sha256 与工作区、本 manifest、git 基线三方一致;目录内不得出现额外或缺失的 .sql。",
+    "provenance": [
+      "0011_readstate_activity.sql 头部注明源自 contracts/m4-readstate-schema.sql 草案(评审调整后安装:失败于已存在表漂移、私有窗口行随 owner 级联;草案与正式版哈希不同且均为有意状态,checker 不断言两者相等,只断言 0011 头部保留该溯源引用)。"
+    ],
+    "files": [
+      { "file": "0001_init.sql", "sha256": "ddc200ba5f9168e6e45342470f61391b7c333cd10828515f40fcb3383a8eb99a" },
+      { "file": "0002_account_email_requests.sql", "sha256": "1e1fc723f86dcb59ed3594dc24308bd199e207808254461287b330be60fc402e" },
+      { "file": "0003_workspace_foundation.sql", "sha256": "6fdb4c08a93be6540ac8ccf478da3b8fce90054b47e9b20956ef772deecafa18" },
+      { "file": "0004_workspace_setup.sql", "sha256": "b3ec346a380becdb75c3c9ff5aeae1f3a44bb7a47193b3c7412d1cae6ec2d69d" },
+      { "file": "0005_workspace_preferences.sql", "sha256": "f7713507b44359fb583a0fb76053ef52b880acccc00a3f1bf6acacd678bc0ca7" },
+      { "file": "0006_channel_core.sql", "sha256": "66a2a48e2d6a99f2510f2ee97caf8cc6de2233b59adb4eafeb32297f9a949933" },
+      { "file": "0007_computer_admission.sql", "sha256": "97dc620a16326e25befee558b399acfb92fec36865524ddd73c6dac0392eea5f" },
+      { "file": "0008_agent_identity.sql", "sha256": "2bc3585a61b433d7168dccecb63ee84186e8ca786b4b24ebf8fc7b6f43bccbf6" },
+      { "file": "0009_workspace_invitations.sql", "sha256": "5c09efbbae5ba7fc4673fe6f79bf1219c14a2bf5734d334961abfc037ebdea6d" },
+      { "file": "0010_messaging_foundation.sql", "sha256": "6a9f7820574fb54e4815f68f96fdb0067cce2c2b2ef880dab74a8743d9a6068a" },
+      { "file": "0011_readstate_activity.sql", "sha256": "d54cd348f20503a1caf1de4c6a75b96b057cfabd8239c8f7f2a47e6bd7411988" },
+      { "file": "0012_authority_epochs.sql", "sha256": "ee0d55d84f61adda8ec1a0a033894d1ea5e348f7e6f1e7938b5e6281b5172ae4" },
+      { "file": "0013_activity_mute_epochs.sql", "sha256": "93e2fd19adc68c1cb555bd8bd019f14d3e758ea36a9fe5c12f01da0e31e21837" }
+    ]
+  }
+}

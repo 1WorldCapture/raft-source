@@ -15,7 +15,7 @@
 // the identity in the request context) and revalidates the session, the
 // workspace membership and the channel access inside the transaction. The
 // shared helpers the integrator supplies (db.WithWriteTx / WithReadSnapshot,
-// auth.ValidateHumanTx, realtime.Enqueue) are injected as function fields
+// auth.ValidateHumanTx, publication.Enqueue) are injected as function fields
 // with faithful defaults so the package compiles and tests run before the
 // parent lands them; the integrator overrides the fields at wiring time.
 //

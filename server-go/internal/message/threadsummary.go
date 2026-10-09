@@ -5,34 +5,9 @@ import (
 	"database/sql"
 	"fmt"
 	"sort"
+
+	"raft.local/server-go/internal/channel"
 )
-
-// ThreadSummary ports channelService.getThreadSummaries' ThreadSummaryResult
-// exactly: threadChannelId, replyCount, lastReplyAt, participantIds,
-// unreadCount, firstUnreadMessageId, latestReplies.
-type ThreadSummary struct {
-	ThreadChannelID      string              `json:"threadChannelId"`
-	ReplyCount           int                 `json:"replyCount"`
-	LastReplyAt          *string             `json:"lastReplyAt"`
-	ParticipantIDs       []string            `json:"participantIds"`
-	UnreadCount          int                 `json:"unreadCount"`
-	FirstUnreadMessageID *string             `json:"firstUnreadMessageId"`
-	LatestReplies        []ThreadLatestReply `json:"latestReplies"`
-}
-
-// ThreadLatestReply is the compact preview row (message_type <> 'system',
-// newest 3, rendered ascending).
-type ThreadLatestReply struct {
-	MessageID         string  `json:"messageId"`
-	Seq               int64   `json:"seq"`
-	Preview           string  `json:"preview"`
-	SenderID          string  `json:"senderId"`
-	SenderType        string  `json:"senderType"`
-	SenderName        string  `json:"senderName"`
-	SenderDisplayName string  `json:"senderDisplayName"`
-	SenderAvatarURL   *string `json:"senderAvatarUrl"`
-	CreatedAt         string  `json:"createdAt"`
-}
 
 // threadSummariesForParents builds the summary map for the page's parent
 // message ids in one snapshot. viewerID is optional: unread fields are only
@@ -40,9 +15,9 @@ type ThreadLatestReply struct {
 // the frozen TS formula (last_read_seq defaults to 0), so an actively
 // followed thread counts every message as unread. The readstate worker (P5)
 // extends this projection with real cursors through the same seam.
-func (s *Store) threadSummariesForParents(ctx context.Context, ex dbExecutor, workspaceID, channelID string, page []*Message, viewerID string) (map[string]ThreadSummary, error) {
+func (s *Store) threadSummariesForParents(ctx context.Context, ex dbExecutor, workspaceID, channelID string, page []*Message, viewerID string) (map[string]channel.ThreadSummary, error) {
 	if len(page) == 0 {
-		return map[string]ThreadSummary{}, nil
+		return map[string]channel.ThreadSummary{}, nil
 	}
 	rows, err := ex.QueryContext(ctx, `SELECT c.id, c.parent_message_id,
 		(SELECT COUNT(*) FROM messages m WHERE m.channel_id = c.id AND m.workspace_id = ?),
@@ -80,10 +55,10 @@ func (s *Store) threadSummariesForParents(ctx context.Context, ex dbExecutor, wo
 	}
 	rows.Close()
 	if len(threads) == 0 {
-		return map[string]ThreadSummary{}, nil
+		return map[string]channel.ThreadSummary{}, nil
 	}
 
-	out := make(map[string]ThreadSummary, len(threads))
+	out := make(map[string]channel.ThreadSummary, len(threads))
 	threadIDs := make([]string, 0, len(threads))
 	for _, tr := range threads {
 		threadIDs = append(threadIDs, tr.id)
@@ -103,22 +78,13 @@ func (s *Store) threadSummariesForParents(ctx context.Context, ex dbExecutor, wo
 	}
 
 	for _, tr := range threads {
-		summary := ThreadSummary{
+		summary := channel.ThreadSummary{
 			ThreadChannelID: tr.id,
 			ReplyCount:      tr.replyCount,
+			LastReplyAt:     tr.lastReplyAtMs,
 			ParticipantIDs:  participants[tr.id],
 			UnreadCount:     unread[tr.id],
 			LatestReplies:   latest[tr.id],
-		}
-		if summary.ParticipantIDs == nil {
-			summary.ParticipantIDs = []string{}
-		}
-		if summary.LatestReplies == nil {
-			summary.LatestReplies = []ThreadLatestReply{}
-		}
-		if tr.lastReplyAtMs != nil {
-			iso := millisISO(*tr.lastReplyAtMs)
-			summary.LastReplyAt = &iso
 		}
 		if id, ok := firstUnread[tr.id]; ok {
 			summary.FirstUnreadMessageID = &id
@@ -187,7 +153,7 @@ func (s *Store) threadUnread(ctx context.Context, ex dbExecutor, workspaceID str
 	return counts, first, rows.Err()
 }
 
-func (s *Store) threadLatestReplies(ctx context.Context, ex dbExecutor, threadIDs []string) (map[string][]ThreadLatestReply, error) {
+func (s *Store) threadLatestReplies(ctx context.Context, ex dbExecutor, threadIDs []string) (map[string][]channel.ThreadReplyPreview, error) {
 	args := append([]any{}, anyStrings(threadIDs)...)
 	rows, err := ex.QueryContext(ctx, `SELECT m.channel_id, m.id, m.seq, m.content, m.sender_id, m.sender_type, m.created_at
 		FROM messages m
@@ -197,10 +163,10 @@ func (s *Store) threadLatestReplies(ctx context.Context, ex dbExecutor, threadID
 		return nil, err
 	}
 	defer rows.Close()
-	byThread := map[string][]ThreadLatestReply{}
+	byThread := map[string][]channel.ThreadReplyPreview{}
 	for rows.Next() {
 		var channelID string
-		var reply ThreadLatestReply
+		var reply channel.ThreadReplyPreview
 		var createdAt int64
 		if err := rows.Scan(&channelID, &reply.MessageID, &reply.Seq, &reply.Preview,
 			&reply.SenderID, &reply.SenderType, &createdAt); err != nil {
@@ -209,7 +175,7 @@ func (s *Store) threadLatestReplies(ctx context.Context, ex dbExecutor, threadID
 		if len(byThread[channelID]) >= 3 {
 			continue
 		}
-		reply.CreatedAt = millisISO(createdAt)
+		reply.CreatedAt = createdAt
 		byThread[channelID] = append(byThread[channelID], reply)
 	}
 	if err := rows.Err(); err != nil {
@@ -227,15 +193,15 @@ func (s *Store) threadLatestReplies(ctx context.Context, ex dbExecutor, threadID
 	if err != nil {
 		return nil, err
 	}
+	// Raw directory facts only: the "User"/"Agent" display defaults are a
+	// presenter decision over these facts. The newest-3-ascending selection
+	// itself IS the frozen fact rule.
 	for _, list := range byThread {
 		for i := range list {
 			if list[i].SenderType == "user" {
 				prof := names[list[i].SenderID]
-				list[i].SenderName = orDefault(prof.Handle, "User")
-				list[i].SenderDisplayName = orDefault(prof.Name, "User")
-			} else {
-				list[i].SenderName = "Agent"
-				list[i].SenderDisplayName = "Agent"
+				list[i].SenderName = prof.Handle
+				list[i].SenderDisplayName = prof.Name
 			}
 		}
 		sort.Slice(list, func(i, j int) bool { return list[i].Seq < list[j].Seq })

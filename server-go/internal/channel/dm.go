@@ -12,7 +12,7 @@ import (
 	"fmt"
 	"sort"
 
-	"raft.local/server-go/internal/realtime"
+	"raft.local/server-go/internal/publication"
 )
 
 // Legacy DM route sentences (channels.ts POST /channels/dm).
@@ -175,7 +175,7 @@ func (s *Store) enqueueDMNew(ctx context.Context, tx *sql.Tx, workspaceID, chann
 	if revision <= previous {
 		revision = previous + 1
 	}
-	return realtime.Enqueue(ctx, tx, realtime.Publication{
+	return publication.Enqueue(ctx, tx, publication.Publication{
 		WorkspaceID: workspaceID,
 		ObjectType:  "channel",
 		ObjectID:    channelID,

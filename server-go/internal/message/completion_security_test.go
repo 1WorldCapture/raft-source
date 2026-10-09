@@ -57,8 +57,8 @@ func TestM4CompletionSyncRequiresWorkspaceBeforeEarlyReturns(t *testing.T) {
 							t.Errorf("unauthorized stream returned coverage: %+v", result)
 						}
 					case "resume":
-						var result *ResumeEnvelope
-						result, err = f.store.ResumePage(ctx, claims, workspaceID, since, ResumeOptions{})
+						var result *SyncResult
+						result, err = f.store.SyncVisibleMessages(ctx, claims, workspaceID, since, "", 200)
 						if result != nil {
 							t.Errorf("unauthorized resume returned a high-water mark: %+v", result)
 						}
@@ -110,13 +110,13 @@ func TestM4CompletionSyncRejectsNestedThreadWithResidualRoster(t *testing.T) {
 	}
 	for _, transport := range []string{"http", "visible", "resume"} {
 		t.Run(transport, func(t *testing.T) {
-			var dtos []*MessageDTO
+			var dtos []*Projection
 			if transport == "resume" {
-				result, err := f.store.ResumePage(ctx, claims, txWS, 0, ResumeOptions{})
+				result, err := f.store.SyncVisibleMessages(ctx, claims, txWS, 0, "", 200)
 				if err != nil {
 					t.Fatal(err)
 				}
-				dtos = result.Messages
+				dtos = result.Projections
 			} else {
 				var result *SyncResult
 				var err error
@@ -128,7 +128,7 @@ func TestM4CompletionSyncRejectsNestedThreadWithResidualRoster(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				dtos = result.DTOs
+				dtos = result.Projections
 			}
 			foundLegitimate := false
 			for _, dto := range dtos {

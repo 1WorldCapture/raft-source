@@ -1,5 +1,6 @@
 // Package app is the composition root: it opens the database, derives keys,
-// builds services and assembles the HTTP surface. No business rules live here.
+// builds the domain services and application use cases, assembles the HTTP
+// surface and owns the process lifecycle. No business rules live here.
 package app
 
 import (
@@ -18,20 +19,33 @@ import (
 	"raft.local/server-go/internal/platform/db"
 	"raft.local/server-go/internal/platform/keys"
 	"raft.local/server-go/internal/platform/mail"
-	"raft.local/server-go/internal/transport/legacyweb"
+	"raft.local/server-go/internal/transport/httpapi/authn"
+	"raft.local/server-go/internal/transport/httpapi/humanapi"
 	"raft.local/server-go/internal/workspace"
 )
 
 // App is the assembled server.
 type App struct {
-	Config    *config.Config
-	DB        *sql.DB
-	Handler   http.Handler
-	sessions  *auth.SessionService
-	mailer    mail.Mailer
-	execution *m3Runtime
-	messaging *m4Runtime
-	realtime  *m4Realtime
+	Config  *config.Config
+	DB      *sql.DB
+	Handler http.Handler
+
+	gate        *authn.AuthGate
+	users       authn.UserLookup
+	authService *auth.Service
+	sessions    *auth.SessionService
+	signer      *auth.TokenSigner
+	mailer      mail.Mailer
+	maintenance *auth.MaintenanceService
+
+	workspaceStore  *workspace.Store
+	serversHandlers *humanapi.ServersHandlers
+	inviteHandlers  *humanapi.InviteHandlers
+
+	control  *controlPlane
+	chat     *chatServices
+	realtime *realtimeRuntime
+
 	closeOnce sync.Once
 	closeErr  error
 }
@@ -57,11 +71,32 @@ func Build(opts Options) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
+	// db.Open registered the global authority fence entry for this handle, so
+	// every failure from here on unwinds through ONE reverse-order cleanup:
+	// the realtime runtime and the control plane own callbacks and workers
+	// that touch the database and must join BEFORE the handle closes, and the
+	// fence entry is released LAST. A fully assembled app hands ownership to
+	// App.Close, which runs this same order; the defer then becomes a no-op.
+	assembled := false
+	var realtime *realtimeRuntime
+	var control *controlPlane
+	defer func() {
+		if assembled {
+			return
+		}
+		if realtime != nil {
+			_ = realtime.Close()
+		}
+		if control != nil {
+			_ = control.Close()
+		}
+		_ = handle.Close()
+		db.ReleaseAuthorityFence(handle)
+	}()
 
 	root := keys.NewRoot(cfg.JWTSecret)
 	receiptKey, err := root.RefreshReceiptKey()
 	if err != nil {
-		handle.Close()
 		return nil, err
 	}
 
@@ -71,41 +106,33 @@ func Build(opts Options) (*App, error) {
 	} else {
 		outbox, err := mail.NewOutboxMailer(cfg.OutboxDir)
 		if err != nil {
-			handle.Close()
 			return nil, err
 		}
 		mailer = outbox
 	}
 
-	store := auth.NewStore(handle)
+	authStore := auth.NewStore(handle)
 	signer := auth.NewTokenSigner(cfg.JWTSecret, cfg.AccessTokenTTL)
-	sessions := auth.NewSessionService(handle, store, signer, receiptKey, cfg.RefreshTokenTTL, cfg.RefreshReplayGrace, cfg.DurableReplayTTL)
+	sessions := auth.NewSessionService(handle, authStore, signer, receiptKey, cfg.RefreshTokenTTL, cfg.RefreshReplayGrace, cfg.DurableReplayTTL)
 	hasher := auth.NewPasswordHasher(cfg.Argon2.MemoryKiB, cfg.Argon2.Iterations, cfg.Argon2.Parallelism, cfg.Argon2.MaxConcurrency)
-	service := auth.NewService(store, sessions, hasher, mailAdapter{mailer: mailer, from: cfg.FromAddress}, logger, cfg.WebOrigin, cfg.FromAddress, cfg.EmailVerifyTokenTTL, cfg.PasswordResetTTL)
+	authService := auth.NewService(authStore, sessions, hasher, mailAdapter{mailer: mailer, from: cfg.FromAddress}, logger, cfg.WebOrigin, cfg.FromAddress, cfg.EmailVerifyTokenTTL, cfg.PasswordResetTTL)
 
-	users := legacyweb.UserLookup(store.UserByID)
-	gate := &legacyweb.AuthGate{Signer: signer, Sessions: sessions, Users: users}
+	users := authn.UserLookup(authStore.UserByID)
+	gate := &authn.AuthGate{Signer: signer, Sessions: sessions, Users: users}
 
-	execution, err := buildM3(handle, cfg, sessions, signer, logger)
+	control, err = buildControl(handle, cfg, sessions, signer, logger)
 	if err != nil {
-		_ = handle.Close()
 		return nil, err
 	}
-	assembled := false
-	defer func() {
-		if !assembled {
-			_ = execution.Close()
-		}
-	}()
 
 	// The workspace domain runs on one injected clock and the frozen local
 	// policy vector (C0: unconfigured flags read as disabled).
 	wsClock := clock.Real{}
 	workspaceStore := workspace.NewStoreWithOptions(handle, workspace.Options{
 		Clock:              wsClock,
-		MachineStatusProbe: execution.probe,
-		MachineMetadata:    execution.metadata,
-		OnComputerRevoked:  execution.machines.Disconnect,
+		MachineStatusProbe: control.probe,
+		MachineMetadata:    control.metadata,
+		OnComputerRevoked:  control.machines.Disconnect,
 		Policy: workspace.Policy{
 			OnboardingOpenerV2:      cfg.WorkspacePolicy.OnboardingOpenerV2,
 			OnboardingOwnerWizardV0: cfg.WorkspacePolicy.OnboardingOwnerWizardV0,
@@ -117,79 +144,55 @@ func Build(opts Options) (*App, error) {
 	diagnostics, err := workspaceStore.Diagnose(diagnosticCtx)
 	cancelDiagnostics()
 	if err != nil {
-		handle.Close()
 		return nil, err
 	}
 	for _, issue := range diagnostics {
 		logger.Warn("workspace data requires explicit operator review", "code", issue.Code, "workspace_id", issue.WorkspaceID)
 	}
 
-	serversHandlers := &legacyweb.ServersHandlers{
+	chat, err := buildChat(handle, control.channels, root)
+	if err != nil {
+		return nil, err
+	}
+
+	app := &App{
+		Config: cfg, DB: handle,
+		gate: gate, users: users, authService: authService, sessions: sessions, signer: signer,
+		mailer: mailer, maintenance: auth.NewMaintenanceService(sessions, authStore),
+		workspaceStore: workspaceStore,
+		control:        control, chat: chat,
+	}
+	app.serversHandlers = &humanapi.ServersHandlers{
 		Store: workspaceStore, Now: wsClock.Now,
 		AvatarDir:      filepath.Join(cfg.DataDir, "avatars"),
 		MaxAvatarBytes: cfg.MaxAvatarBytes, MaxAvatarSide: cfg.MaxAvatarSidePixels,
 	}
-	inviteHandlers := &legacyweb.InviteHandlers{
+	app.inviteHandlers = &humanapi.InviteHandlers{
 		Store: workspaceStore, Now: wsClock.Now, Logger: logger,
 		SendInviteMail: inviteMailSender(mailer, cfg),
 	}
-	messaging, err := buildM4(handle, execution.channels, root)
-	if err != nil {
-		_ = handle.Close()
-		db.ReleaseAuthorityFence(handle)
-		return nil, err
-	}
+
 	var webOrigins []string
 	if cfg.WebOrigin != nil {
 		webOrigins = []string{cfg.WebOrigin.String()}
 	}
-	realtimeRuntime, err := buildM4Realtime(messaging, signer, logger, webOrigins)
+	realtime, err = buildRealtime(chat, signer, logger, webOrigins)
 	if err != nil {
-		_ = execution.Close()
-		_ = handle.Close()
-		db.ReleaseAuthorityFence(handle)
 		return nil, err
 	}
-	handler := legacyweb.New(legacyweb.Deps{
-		Handlers: &legacyweb.Handlers{
-			Auth:     service,
-			Sessions: sessions,
-			Signer:   signer,
-			Users:    users,
-			Gate:     gate,
-		},
-		Servers:         serversHandlers,
-		Invites:         inviteHandlers,
-		ReadstateRoutes: true,
-		SocketIO:        realtimeRuntime.Handler(),
-		RegisterAdditional: func(mux *http.ServeMux, gate *legacyweb.AuthGate) {
-			execution.register(mux, gate, serversHandlers, messaging.channelProjector)
-			messaging.register(mux, gate)
-		},
-		Avatars: &legacyweb.AvatarHandlers{
-			Dir:      filepath.Join(cfg.DataDir, "avatars"),
-			MaxBytes: cfg.MaxAvatarBytes,
-			MaxSide:  cfg.MaxAvatarSidePixels,
-			Auth:     service,
-			Users:    users,
-		},
-		AuthRatePerMinute:         cfg.AuthRatePerMinute,
-		LoginAccountRatePerMinute: cfg.LoginAccountRatePerMinute,
-		RegisterRatePerHour:       cfg.RegisterRatePerHour,
-		ForgotPasswordRatePerHour: cfg.ForgotPasswordRatePerHour,
-	})
+	app.realtime = realtime
 
-	wrapped := legacyweb.RequestID(logger)(legacyweb.SecurityHeaders(handler))
+	app.Handler = app.buildHTTP(realtime.Handler(), logger)
 
 	assembled = true
-	return &App{Config: cfg, DB: handle, Handler: wrapped, sessions: sessions, mailer: mailer, execution: execution, messaging: messaging, realtime: realtimeRuntime}, nil
+	return app, nil
 }
 
 // inviteMailSender builds the one-time invitation delivery used by the
 // invite handlers: TS-parity HTML, the accept link pinned to the configured
 // Web origin (never the request Host), and the machine-readable kind/token
 // pair the private outbox exposes to tests.
-func inviteMailSender(mailer mail.Mailer, cfg *config.Config) legacyweb.InviteMailSender {
+func inviteMailSender(mailer mail.Mailer, cfg *config.Config) func(ctx context.Context, to, inviterName, serverName, token string) error {
 	return func(ctx context.Context, to, inviterName, serverName, token string) error {
 		origin := "http://127.0.0.1:4301"
 		if cfg.WebOrigin != nil {
@@ -225,73 +228,11 @@ func (m mailAdapter) Name() string { return m.mailer.Name() }
 // Ready probes the migrated database. It does not contact SMTP or promise
 // mail delivery; transport failures are surfaced by sends and operator logs.
 func (a *App) Ready(ctx context.Context) error {
-	if err := a.DB.PingContext(ctx); err != nil {
+	if err := db.Ready(ctx, a.DB); err != nil {
 		return err
 	}
-	var migrated int
-	if err := a.DB.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM schema_migrations`).Scan(&migrated); err != nil {
-		return err
-	}
-	if migrated == 0 {
-		return errNotMigrated
-	}
-	if a.messaging != nil {
-		return a.messaging.publications.Ready(ctx)
+	if a.chat != nil {
+		return a.chat.publications.Ready(ctx)
 	}
 	return nil
-}
-
-var errNotMigrated = &readyError{reason: "database_not_migrated"}
-
-type readyError struct{ reason string }
-
-func (e *readyError) Error() string { return e.reason }
-
-// StartJanitor periodically removes expired session rows and receipts.
-func (a *App) StartJanitor(ctx context.Context, logger *slog.Logger) func() {
-	ctx, cancel := context.WithCancel(ctx)
-	done := make(chan struct{})
-	if logger == nil {
-		logger = slog.Default()
-	}
-	go func() {
-		defer close(done)
-		ticker := time.NewTicker(10 * time.Minute)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				if err := a.sessions.CleanupExpired(ctx); err != nil {
-					logger.Warn("session cleanup failed", "error", err.Error())
-				}
-				if _, err := a.DB.ExecContext(ctx, `DELETE FROM account_tokens WHERE expires_at <= ?`, time.Now().UnixMilli()); err != nil {
-					logger.Warn("account token cleanup failed", "error", err.Error())
-				}
-				if _, err := a.DB.ExecContext(ctx, `DELETE FROM account_email_requests WHERE created_at <= ?`, time.Now().Add(-time.Hour).UnixMilli()); err != nil {
-					logger.Warn("email quota cleanup failed", "error", err.Error())
-				}
-			}
-		}
-	}()
-	// Cancel is idempotent; joining prevents cleanup from racing DB.Close.
-	return func() { cancel(); <-done }
-}
-
-// Close joins the control plane before releasing its shared SQLite handle.
-// Concurrent callers observe the same completed shutdown.
-func (a *App) Close() error {
-	a.closeOnce.Do(func() {
-		if a.realtime != nil {
-			a.closeErr = a.realtime.Close()
-		}
-		if a.execution != nil {
-			a.closeErr = errors.Join(a.closeErr, a.execution.Close())
-		}
-		a.closeErr = errors.Join(a.closeErr, a.DB.Close())
-		db.ReleaseAuthorityFence(a.DB)
-	})
-	return a.closeErr
 }

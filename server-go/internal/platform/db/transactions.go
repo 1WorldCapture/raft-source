@@ -50,6 +50,24 @@ func fenceFor(handle *sql.DB) *authorityFence {
 // database have stopped. It is not a way to bypass a live authority check.
 func ReleaseAuthorityFence(handle *sql.DB) { authorityFences.Delete(handle) }
 
+// AuthorityFenceHeld reports whether a global authority fence entry is
+// currently registered for handle. Test/observability only: it reads the
+// registry without creating an entry, so a handle whose fence was never
+// acquired reports false instead of registering one.
+func AuthorityFenceHeld(handle *sql.DB) bool {
+	_, held := authorityFences.Load(handle)
+	return held
+}
+
+// AuthorityFenceCount returns how many global authority fence entries are
+// registered process-wide (at most one per open database handle). Test and
+// leak observability only.
+func AuthorityFenceCount() int {
+	count := 0
+	authorityFences.Range(func(any, any) bool { count++; return true })
+	return count
+}
+
 func (f *authorityFence) enter(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err

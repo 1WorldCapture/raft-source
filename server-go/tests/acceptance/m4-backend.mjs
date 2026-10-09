@@ -491,6 +491,8 @@ export async function verifyM4Backend({ origin, data, start, stop, capture, exec
     assert.equal(selfDm.data.type, 'dm', 'self-DM type');
     assert.equal(selfDm.data.peerType, 'user', 'self-DM peerType');
     assert.equal(selfDm.data.peerId, alice.user.id, 'self-DM peer is the caller');
+    assert.deepEqual(selfDm.data.readState, { kind: 'absent' },
+      'fresh self-DM frontier is the exact absent union, not null or zero-filled');
 
     dmAliceBob = (await request('/api/channels/dm', { method: 'POST', ...asAlice, body: { userId: bob.user.id } })).data;
     assert.ok(dmAliceBob && dmAliceBob.id, 'alice->bob DM creation');
@@ -507,6 +509,8 @@ export async function verifyM4Backend({ origin, data, start, stop, capture, exec
     const fromBob = await request('/api/channels/dm', { method: 'POST', ...asBob, body: { userId: alice.user.id } });
     expectStatus(fromBob, 200, 'DM ensure from bob side');
     assert.equal(fromBob.data.id, dmAliceBob.id, 'pair identity is direction independent');
+    assert.deepEqual(dmAliceBob.readState, { kind: 'absent' }, 'fresh DM creator frontier');
+    assert.deepEqual(fromBob.data.readState, { kind: 'absent' }, 'fresh peer frontier');
 
     // Agent DM branch: valid agentId shape -> explicit 501, no session row
     // (compat contract §2 POST /channels/dm decision).
@@ -555,6 +559,51 @@ export async function verifyM4Backend({ origin, data, start, stop, capture, exec
     expectStatus(strangerDms, 200, 'stranger DM list');
     assert.equal(strangerDms.data.some(dm => dm.id === dmAliceBob.id), false,
       'a foreign workspace sees none of these DMs');
+
+    // Independent #632 union contract: expected fields/types come from the
+    // protocol, never from calling the production presenter. Real HTTP reads
+    // create the row, and create/re-open + list must agree for each viewer.
+    assert.deepEqual(bobDms.data.find(dm => dm.id === dmAliceBob.id).readState,
+      { kind: 'absent' }, 'a message alone does not create the receiver read row');
+    const bobRead = await request(`/api/channels/${dmAliceBob.id}/read`, {
+      method: 'POST', ...asBob, body: { seq: dmMessage.data.message.seq },
+    });
+    expectStatus(bobRead, 200, 'DM first read');
+    assert.equal(bobRead.data.readStateVersion, 1, 'first read creates version one');
+    const expectedReadFrontier = {
+      kind: 'present', readStateVersion: 1,
+      maxReadSeq: String(dmMessage.data.message.seq),
+      latestActivity: { messageId: dmMessage.data.message.id, seq: String(dmMessage.data.message.seq) },
+    };
+    const bobReopened = await request('/api/channels/dm', {
+      method: 'POST', ...asBob, body: { userId: alice.user.id },
+    });
+    expectStatus(bobReopened, 200, 'read DM re-open');
+    assert.deepEqual(bobReopened.data.readState, expectedReadFrontier,
+      'create/re-open preserves present union with decimal-string seqs');
+    const bobReadList = await request('/api/channels/dm', asBob);
+    expectStatus(bobReadList, 200, 'read DM list');
+    assert.deepEqual(bobReadList.data.find(dm => dm.id === dmAliceBob.id).readState,
+      expectedReadFrontier, 'list preserves the same independently checked present union');
+    const aliceReadList = await request('/api/channels/dm', asAlice);
+    expectStatus(aliceReadList, 200, 'other viewer DM list');
+    assert.deepEqual(aliceReadList.data.find(dm => dm.id === dmAliceBob.id).readState,
+      { kind: 'absent' }, 'bob read state never leaks into alice frontier');
+
+    // Restore an unread message for the downstream Inbox tests, and prove a
+    // present row remains present when its frontier rewinds; it is not absent.
+    const bobUnreadAgain = await request(`/api/channels/${dmAliceBob.id}/unread`, {
+      method: 'POST', ...asBob, body: {},
+    });
+    expectStatus(bobUnreadAgain, 200, 'DM mark unread after read');
+    assert.equal(bobUnreadAgain.data.readStateVersion, 2, 'unread advances version');
+    assert.equal(bobUnreadAgain.data.unreadCount, 1, 'the sole incoming DM is unread again');
+    const bobRewoundList = await request('/api/channels/dm', asBob);
+    expectStatus(bobRewoundList, 200, 'rewound DM list');
+    assert.deepEqual(bobRewoundList.data.find(dm => dm.id === dmAliceBob.id).readState, {
+      ...expectedReadFrontier, readStateVersion: 2,
+      maxReadSeq: String(bobUnreadAgain.data.maxReadSeq),
+    }, 'rewound row keeps present union and newest activity pair');
   });
 
   // ---- 7. threads: replies, follow distinction ----------------------------

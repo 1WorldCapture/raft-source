@@ -103,12 +103,11 @@ func newFixture(t *testing.T) *fixture {
 	fx := &fixture{
 		t:      t,
 		db:     handle,
-		store:  NewStore(handle, channels),
+		store:  NewStoreWithOptions(handle, channels, Options{Clock: fixed.Now}),
 		clock:  fixed,
 		claims: map[string]auth.AccessTokenClaims{},
 		family: map[string]string{},
 	}
-	fx.store.SetClock(fixed.Now)
 	fx.seed()
 	return fx
 }

@@ -382,10 +382,6 @@ func assembleInboxPage(items []InboxItem, query InboxQuery) (InboxPage, error) {
 	if offset > len(final) {
 		offset = len(final)
 	}
-	pageItems := []map[string]any{}
-	for _, item := range final[offset:end] {
-		pageItems = append(pageItems, item.Wire())
-	}
 	return InboxPage{
 		Items:             final[offset:end],
 		Groups:            groups,

@@ -3,7 +3,6 @@ package message
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -216,25 +215,26 @@ func TestSyncHTTPReadsSparseDatasetBehindAdversarialBulk(t *testing.T) {
 		}
 	}
 
-	// The resume path pages through the same adversarial data to completion
-	// with an always-advanceable cursor.
+	// The resume scan pages through the same adversarial data to completion
+	// with an always-advanceable cursor (the byte-budget envelope cut now
+	// lives in the transport bridge suite).
 	seen := map[string]bool{}
 	cursor := int64(0)
 	for {
-		page, err := f.store.ResumePage(context.Background(), bob, txWS, cursor, ResumeOptions{})
+		page, err := f.store.SyncVisibleMessages(context.Background(), bob, txWS, cursor, "", ResumeLimit)
 		if err != nil {
 			t.Fatalf("resume through adversarial data: %v", err)
 		}
-		for _, m := range page.Messages {
+		for _, m := range page.Projections {
 			if seen[m.ID] {
 				t.Fatalf("duplicate delivery: %s", m.ID)
 			}
 			seen[m.ID] = true
 		}
-		if page.CurrentSeq <= cursor && len(page.Messages) > 0 {
-			t.Fatalf("cursor must advance: %d -> %d", cursor, page.CurrentSeq)
+		if page.CoveredThrough <= cursor && len(page.Projections) > 0 {
+			t.Fatalf("cursor must advance: %d -> %d", cursor, page.CoveredThrough)
 		}
-		cursor = page.CurrentSeq
+		cursor = page.CoveredThrough
 		if !page.HasMore {
 			break
 		}
@@ -270,158 +270,6 @@ func TestSyncHTTPRequiresMembershipEvenForEmptyStream(t *testing.T) {
 	res, err := f.store.SyncHTTP(context.Background(), alice, empty, 0, "", 200)
 	if err != nil || len(res.Messages) != 0 || res.HasMore {
 		t.Fatalf("member of empty workspace: %+v %v", res, err)
-	}
-}
-
-// TestResumePageByteBoundNeverSkipsVisibleMessages uses long CJK content so
-// the encoded page exceeds the byte budget long before the message-count
-// limit; the cut must be a prefix with an honest cursor.
-func TestResumePageByteBoundNeverSkipsVisibleMessages(t *testing.T) {
-	f := newFixture(t)
-	f.seed()
-	f.seedChannel(txGeneral, "general", channel.TypeChannel, txAlice)
-
-	long := strings.Repeat("聊", 32_000) // 32000 UTF-16 units ≈ 96KB UTF-8
-	var ids []string
-	var seqs []int64
-	for i := 0; i < 6; i++ {
-		msg, err := f.store.Create(context.Background(), claimsFor(txAlice, txFamAlice), txWS, CreateInput{
-			ChannelID: txGeneral, Content: long,
-		})
-		if err != nil {
-			t.Fatalf("long send %d: %v", i, err)
-		}
-		ids = append(ids, msg.Message.ID)
-		seqs = append(seqs, msg.Message.Seq)
-	}
-	alice := NewClaims(claimsFor(txAlice, txFamAlice))
-
-	page, err := f.store.ResumePage(context.Background(), alice, txWS, 0, ResumeOptions{
-		MaxMessages: 500, MaxEncodedBytes: 380 * 1024,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(page.Messages) >= len(ids) {
-		t.Fatalf("byte bound should have cut the page: %d", len(page.Messages))
-	}
-	if !page.HasMore {
-		t.Fatal("a cut page must report hasMore")
-	}
-	// The kept set is exactly the seq PREFIX.
-	for i, m := range page.Messages {
-		if m.ID != ids[i] {
-			t.Fatalf("kept set must be a prefix: position %d", i)
-		}
-	}
-	if page.CurrentSeq != seqs[len(page.Messages)-1] {
-		t.Fatalf("currentSeq must be the last included seq: %d want %d", page.CurrentSeq, seqs[len(page.Messages)-1])
-	}
-	// Paging through with the returned cursor reaches every message exactly once.
-	seen := map[string]bool{}
-	cursor := int64(0)
-	for {
-		page, err := f.store.ResumePage(context.Background(), alice, txWS, cursor, ResumeOptions{
-			MaxMessages: 500, MaxEncodedBytes: 380 * 1024,
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, m := range page.Messages {
-			if seen[m.ID] {
-				t.Fatalf("message %s served twice", m.ID)
-			}
-			seen[m.ID] = true
-		}
-		if page.CurrentSeq <= cursor && len(page.Messages) > 0 {
-			t.Fatalf("cursor must advance: %d -> %d", cursor, page.CurrentSeq)
-		}
-		cursor = page.CurrentSeq
-		if !page.HasMore {
-			break
-		}
-	}
-	if len(seen) != len(ids) {
-		t.Fatalf("byte-bounded resume lost messages: %d of %d", len(seen), len(ids))
-	}
-}
-
-// TestResumeByteBudgetIncludesEnvelopeAndNeverAdmitsOversize pins the
-// envelope-inclusive accounting: a single legal 32000-CJK message fits the
-// default 1 MiB budget whole; a budget shrunken below one message surfaces
-// the typed error (gateway retry/close) instead of silently admitting the
-// row or returning an empty page that loops forever.
-func TestResumeByteBudgetIncludesEnvelopeAndNeverAdmitsOversize(t *testing.T) {
-	f := newFixture(t)
-	f.seed()
-	f.seedChannel(txGeneral, "general", channel.TypeChannel, txAlice)
-	long := strings.Repeat("聊", 32_000) // 32000 UTF-16 units ≈ 96KB UTF-8
-	single, err := f.store.Create(context.Background(), claimsFor(txAlice, txFamAlice), txWS, CreateInput{
-		ChannelID: txGeneral, Content: long,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	alice := NewClaims(claimsFor(txAlice, txFamAlice))
-
-	// Default 1 MiB: the whole envelope with one long message fits.
-	page, err := f.store.ResumePage(context.Background(), alice, txWS, 0, ResumeOptions{})
-	if err != nil {
-		t.Fatalf("a single 32000-CJK message must fit the default budget: %v", err)
-	}
-	if len(page.Messages) != 1 || page.Messages[0].ID != single.Message.ID || page.HasMore {
-		t.Fatalf("single long message page: %+v", page)
-	}
-
-	// A budget far below one message: the typed error, never a silent
-	// admission and never an empty non-advancing page.
-	_, err = f.store.ResumePage(context.Background(), alice, txWS, 0, ResumeOptions{MaxEncodedBytes: 1024})
-	if !errors.Is(err, ErrResumeMessageExceedsBudget) {
-		t.Fatalf("shrunk budget must surface the typed error: %v", err)
-	}
-
-	// Envelope-inclusive accounting: every returned page's FULL encoded
-	// envelope stays within the configured budget.
-	second, err := f.store.Create(context.Background(), claimsFor(txAlice, txFamAlice), txWS, CreateInput{
-		ChannelID: txGeneral, Content: strings.Repeat("话", 16_000),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = second
-	budget := int64(120 * 1024) // fits one ~96KB message but not two
-	cursor := int64(0)
-	pages := 0
-	seen := map[string]bool{}
-	for {
-		page, err := f.store.ResumePage(context.Background(), alice, txWS, cursor, ResumeOptions{MaxEncodedBytes: budget})
-		if err != nil {
-			t.Fatalf("paging within a tight budget: %v", err)
-		}
-		raw, err := json.Marshal(page)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if int64(len(raw)) > budget {
-			t.Fatalf("page %d envelope %d exceeds budget %d", pages, len(raw), budget)
-		}
-		for _, m := range page.Messages {
-			if seen[m.ID] {
-				t.Fatalf("duplicate: %s", m.ID)
-			}
-			seen[m.ID] = true
-		}
-		pages++
-		if !page.HasMore {
-			break
-		}
-		if page.CurrentSeq <= cursor {
-			t.Fatalf("cursor stalled at %d", cursor)
-		}
-		cursor = page.CurrentSeq
-	}
-	if len(seen) != 2 {
-		t.Fatalf("tight-budget paging lost messages: %d", len(seen))
 	}
 }
 

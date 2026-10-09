@@ -4,9 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+
+	"raft.local/server-go/internal/channel"
 )
 
-// ContextResult is the domain message-context read. DTOs share the snapshot
+// ContextResult is the domain message-context read. Projections share the snapshot
 // with the window rows and the summaries.
 type ContextResult struct {
 	ChannelID       string
@@ -14,8 +16,8 @@ type ContextResult struct {
 	HasOlder        bool
 	HasNewer        bool
 	Messages        []*Message
-	DTOs            []*MessageDTO
-	ThreadSummaries map[string]ThreadSummary
+	Projections     []*Projection
+	ThreadSummaries map[string]channel.ThreadSummary
 	ChannelArchived bool
 }
 
@@ -81,7 +83,7 @@ func (s *Store) getMessageContext(ctx context.Context, ex dbExecutor, workspaceI
 		return nil, err
 	}
 
-	dtos, err := s.ProjectMessages(ctx, ex, workspaceID, window)
+	projections, err := s.ProjectMessages(ctx, ex, workspaceID, window)
 	if err != nil {
 		return nil, err
 	}
@@ -100,7 +102,7 @@ func (s *Store) getMessageContext(ctx context.Context, ex dbExecutor, workspaceI
 		HasOlder:        hasOlder,
 		HasNewer:        hasNewer,
 		Messages:        window,
-		DTOs:            dtos,
+		Projections:     projections,
 		ThreadSummaries: summaries,
 		ChannelArchived: archived,
 	}, nil

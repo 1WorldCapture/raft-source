@@ -397,12 +397,16 @@ func TestEnsureThread(t *testing.T) {
 		if !strings.HasPrefix(thread.Name, "thread-") || len(thread.Name) != len("thread-")+8 {
 			t.Fatalf("thread name: %q", thread.Name)
 		}
+		// messages.thread_id is MESSAGE-owned: the channel domain must
+		// leave it untouched here. The projection itself is attached in the
+		// same application transaction through message.AttachThreadToParentTx
+		// and asserted end-to-end by the messaging/HTTP conversation suites.
 		var projected sql.NullString
 		if err := f.db.QueryRow(`SELECT thread_id FROM messages WHERE id = ?`, parentMsg).Scan(&projected); err != nil {
 			t.Fatal(err)
 		}
-		if !projected.Valid || projected.String != thread.ID {
-			t.Fatalf("parent thread_id not projected: %+v", projected)
+		if projected.Valid {
+			t.Fatalf("channel domain wrote messages.thread_id: %+v", projected)
 		}
 		// Parent author follows (authored); the opener does not.
 		if unfollowed, _ := f.threadFollowRow(t, fxOwner, thread.ID); unfollowed.Valid {

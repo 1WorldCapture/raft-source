@@ -9,7 +9,7 @@ import (
 )
 
 // sessionClaims wraps the verified access-token claims for this request. The
-// transport layer (parent's legacyweb accessClaims) verified the JWT and the
+// transport layer (authn's verified access claims) verified the JWT and the
 // live gates; store methods revalidate the family/user/membership inside the
 // transaction before mutating anything.
 type sessionClaims struct {

@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"raft.local/server-go/internal/platform/db"
-	"raft.local/server-go/internal/realtime"
+	"raft.local/server-go/internal/publication"
 	"raft.local/server-go/internal/transport/socketio/core"
 )
 
@@ -32,17 +32,17 @@ func TestM4PrivatePublicationRechecksScopeAndFiltersBulkResidue(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.connect("fresh-bob", rtBob, rtWS)
-	for _, ref := range []realtime.Publication{
+	for _, ref := range []publication.Publication{
 		{ObjectType: "read_state", EventType: core.EventReadState},
 		{ObjectType: "notification_prefs", EventType: core.EventNotifPrefs},
 		{ObjectType: "message_display_prefs", EventType: core.EventDisplayPrefs},
 	} {
 		ref.WorkspaceID, ref.ObjectID, ref.SubjectUserID, ref.Revision = rtWS, rtSecret, rtBob, 1
-		if err := f.rt.pub.publish(ctx, ref); err != nil {
+		if err := f.rt.pub.Publish(ctx, ref); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := f.rt.pub.publish(ctx, realtime.Publication{
+	if err := f.rt.pub.Publish(ctx, publication.Publication{
 		WorkspaceID: rtWS, ObjectType: "read_state_bulk", ObjectID: rtWS,
 		EventType: core.EventReadStateBulk, SubjectUserID: rtBob, Revision: 1,
 	}); err != nil {
@@ -87,7 +87,7 @@ func TestM4PublicThreadMessageLiveHonorsPerSocketInterest(t *testing.T) {
 	f.send("viewer", core.EventJoinChannel, threadID)
 	settle()
 	reply := f.create(rtAlice, threadID, "only the subscribed thread stream")
-	if err := f.rt.pub.publish(context.Background(), realtime.Publication{
+	if err := f.rt.pub.Publish(context.Background(), publication.Publication{
 		WorkspaceID: rtWS, ObjectType: "message", ObjectID: reply.ID, EventType: core.EventMessageNew, Revision: 1,
 	}); err != nil {
 		t.Fatal(err)

@@ -93,7 +93,7 @@ func run(logger *slog.Logger) error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	stopJanitor := built.StartJanitor(ctx, logger)
+	stopJanitor := built.StartMaintenance(ctx, logger)
 	defer stopJanitor()
 
 	serveResult := make(chan error, 1)

@@ -116,14 +116,47 @@ func (f *fixture) seedChannel(id, name, channelType string, members ...string) {
 	}
 }
 
-// send is the shorthand creator over the fixture workspace.
+// send is the shorthand creator over the fixture workspace: the
+// transaction-bound creation primitive inside one write transaction (the
+// complete human send use case — including the thread-reply read advance —
+// lives in application/messaging and is tested there).
 func (f *fixture) send(user, family, channelID, content string, randomID *string, mentions []Mention) (*CreateResult, error) {
-	return f.store.Create(context.Background(), claimsFor(user, family), txWS, CreateInput{
-		ChannelID: channelID, Content: content, RandomID: randomID, Mentions: mentions,
+	var result *CreateResult
+	err := platformdb.WithWriteTx(context.Background(), f.db, func(tx *sql.Tx) error {
+		created, err := f.store.CreateTx(context.Background(), tx, claimsFor(user, family), txWS, CreateInput{
+			ChannelID: channelID, Content: content, RandomID: randomID, Mentions: mentions,
+		})
+		if err != nil {
+			return err
+		}
+		result = created
+		return nil
 	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 func stringPtr(v string) *string { return &v }
+
+// sendClaims commits one message with explicit claims through the
+// transaction-bound primitive.
+func (f *fixture) sendClaims(claims auth.AccessTokenClaims, input CreateInput) (*CreateResult, error) {
+	var result *CreateResult
+	err := platformdb.WithWriteTx(context.Background(), f.db, func(tx *sql.Tx) error {
+		created, err := f.store.CreateTx(context.Background(), tx, claims, txWS, input)
+		if err != nil {
+			return err
+		}
+		result = created
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
 
 // seedChannelRoster adds members to an already-seeded channel.
 func (f *fixture) seedChannelRoster(members ...string) {

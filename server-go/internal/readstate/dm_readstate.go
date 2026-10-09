@@ -3,33 +3,20 @@ package readstate
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
-	"fmt"
 )
 
-// ReadFrontierJSONTx renders the EXACT original #632 InboxScopeReadFrontier
-// wire union for one (workspace, user, channel) on the caller's snapshot:
-//
-//	{"kind":"absent"}
-//	{"kind":"corrupt"}                       (never produced from typed rows)
-//	{"kind":"present","readStateVersion":<number>,
-//	 "maxReadSeq":"<decimal string>",
-//	 "latestActivity":{"messageId":"…","seq":"<decimal string>"} | null}
-//
-// Presence is the STRUCTURAL fact "a cursor row exists" (version 0 and
-// maxReadSeq "0" are legal values); latestActivity is a same-source pair
-// from the scope's newest message, null when the scope has no message —
-// never assembled across sources. The caller has already authorized the
-// scope in the same snapshot; this projection adds no authorization of its
-// own beyond refusing unknown scopes.
-func (s *Store) ReadFrontierJSONTx(ctx context.Context, ex Queryer, workspaceID, userID, channelID string) (json.RawMessage, error) {
+// ReadFrontierTx loads
+// one (workspace, viewer, channel) frontier and its same-source
+// latest-activity pair on the caller's snapshot. Absent is expressed as
+// Present=false, not as a sentinel error.
+func (s *Store) ReadFrontierTx(ctx context.Context, ex Queryer, workspaceID, userID, channelID string) (*ReadFrontier, error) {
 	row, err := readStateForScopeTx(ctx, ex, workspaceID, userID, channelID)
 	if err != nil {
 		return nil, err
 	}
 	if row == nil {
-		return json.RawMessage(`{"kind":"absent"}`), nil
+		return readFrontierOf(nil, "", nil), nil
 	}
 	var latestID sql.NullString
 	var latestSeq sql.NullInt64
@@ -41,35 +28,24 @@ func (s *Store) ReadFrontierJSONTx(ctx context.Context, ex Queryer, workspaceID,
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
-	payload := map[string]any{
-		"kind":             "present",
-		"readStateVersion": row.version,
-		"maxReadSeq":       formatUint64(uint64(row.lastReadSeq)),
+	latest := (*int64)(nil)
+	if latestID.Valid && latestSeq.Valid {
+		v := latestSeq.Int64
+		latest = &v
 	}
-	if err == nil && latestID.Valid && latestSeq.Valid {
-		payload["latestActivity"] = map[string]any{
-			"messageId": latestID.String,
-			"seq":       formatUint64(uint64(latestSeq.Int64)),
-		}
-	} else {
-		payload["latestActivity"] = nil
+	id := ""
+	if latestID.Valid {
+		id = latestID.String
 	}
-	buf, err := json.Marshal(payload)
-	if err != nil {
-		return nil, fmt.Errorf("render read frontier: %w", err)
-	}
-	return json.RawMessage(buf), nil
+	return readFrontierOf(row, id, latest), nil
 }
 
-// DMReadStateTx is the DM-scoped variant the parent wires into the M4
-// conversation handlers: the caller has already authorized the DM scope on
-// the SAME snapshot, and this projection additionally fails closed when the
-// channel is not a DM of this workspace or the user is not a participant
-// (direct_messages pair; the channel roster row is accepted as the paired
-// write the channel worker performs). The returned bytes are the exact
-// #632 readFrontier wire — the parent never assembles kind/version/maxReadSeq
-// /latestActivity shapes itself.
-func (s *Store) DMReadStateTx(ctx context.Context, ex Queryer, workspaceID, userID, channelID string) (json.RawMessage, error) {
+// DMReadFrontierTx is the DM-scoped variant: the caller has already
+// authorized the DM scope on the SAME
+// snapshot, and this projection additionally fails closed when the scope is
+// not a DM or the viewer is not a participant (member readers follow the
+// documented roster exception).
+func (s *Store) DMReadFrontierTx(ctx context.Context, ex Queryer, workspaceID, userID, channelID string) (*ReadFrontier, error) {
 	conv, err := getConversationTx(ctx, ex, workspaceID, channelID, false)
 	if err != nil {
 		return nil, err
@@ -88,5 +64,5 @@ func (s *Store) DMReadStateTx(ctx context.Context, ex Queryer, workspaceID, user
 			return nil, notFound("Chat not found")
 		}
 	}
-	return s.ReadFrontierJSONTx(ctx, ex, workspaceID, userID, channelID)
+	return s.ReadFrontierTx(ctx, ex, workspaceID, userID, channelID)
 }

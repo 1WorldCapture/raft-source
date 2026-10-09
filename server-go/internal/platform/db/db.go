@@ -266,3 +266,24 @@ func IsUniqueViolation(err error, constraint string) bool {
 	}
 	return strings.Contains(strings.ToLower(se.Error()), strings.ToLower(constraint))
 }
+
+// Ready reports whether the database is reachable and fully migrated. It is
+// the readiness fact the composition root summarizes; no business state is
+// probed here.
+func Ready(ctx context.Context, handle *sql.DB) error {
+	if err := handle.PingContext(ctx); err != nil {
+		return err
+	}
+	var migrated int
+	if err := handle.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM schema_migrations`).Scan(&migrated); err != nil {
+		return err
+	}
+	if migrated == 0 {
+		return ErrNotMigrated
+	}
+	return nil
+}
+
+// ErrNotMigrated answers a reachable database with no applied migrations.
+var ErrNotMigrated = errors.New("database_not_migrated")

@@ -19,7 +19,7 @@ func TestJanitorStopIsIdempotentAndJoinsBeforeClose(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer built.Close()
-	stop := built.StartJanitor(context.Background(), nil)
+	stop := built.StartMaintenance(context.Background(), nil)
 	var wg sync.WaitGroup
 	for range 8 {
 		wg.Add(1)

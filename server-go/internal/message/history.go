@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"raft.local/server-go/internal/auth"
+	"raft.local/server-go/internal/channel"
 )
 
 // PageQuery is one channel-history page request. Before and After are seq
@@ -33,9 +34,9 @@ type Coverage struct {
 // the response can never mix two read boundaries into a false no-gap claim.
 type Page struct {
 	Messages        []*Message
-	DTOs            []*MessageDTO
+	Projections     []*Projection
 	Coverage        Coverage
-	ThreadSummaries map[string]ThreadSummary // keyed by parent message id
+	ThreadSummaries map[string]channel.ThreadSummary // keyed by parent message id
 }
 
 // Claims couples the verified access-token claims with the acting user id the
@@ -67,7 +68,7 @@ func (s *Store) ListChannelPage(ctx context.Context, claims Claims, workspaceID,
 		if err != nil {
 			return err
 		}
-		page.DTOs, err = s.ProjectMessages(ctx, ex, workspaceID, page.Messages)
+		page.Projections, err = s.ProjectMessages(ctx, ex, workspaceID, page.Messages)
 		return err
 	})
 	if err != nil {
