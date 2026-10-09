@@ -6,7 +6,10 @@ import { test } from "vitest";
 
 import {
   aliasPathFor,
+  defaultListSourceCarriers,
+  encodeProjectDirName,
   homeEnvPlistPath,
+  mentionsPathBounded,
   migrateHome,
   migrateResultPath,
   type MigrateEvent,
@@ -55,9 +58,26 @@ async function fixture(
   if (opts.oldCarrier !== false) {
     carrierPlist = path.join(user, "Library", "LaunchAgents", "build.raft.computer.test-carrier.plist");
     await mkdir(path.dirname(carrierPlist), { recursive: true });
-    await writeFile(carrierPlist, `<plist>--slock-home ${from} fixture</plist>\n`, "utf8");
+    // Path sits inside a <string> element with the closing tag right after it
+    // — the boundary the scan requires.
+    await writeFile(carrierPlist, `<plist><string>--slock-home</string><string>${from}</string></plist>\n`, "utf8");
   }
-  return { root, user, from, to, alias, carrierPlist };
+  // ~/.claude/projects: one dir for an agent cwd under the old home, one
+  // whose NEW name already exists (must be skipped, never clobbered), and
+  // one unrelated dir that must not move.
+  const projectsDir = path.join(user, ".claude", "projects");
+  const oldPrefix = encodeProjectDirName(from);
+  const newPrefix = encodeProjectDirName(to);
+  const sessionA = path.join(projectsDir, `${oldPrefix}-agents-a1`);
+  const sessionClash = path.join(projectsDir, `${oldPrefix}-agents-a2`);
+  const sessionUnrelated = path.join(projectsDir, "-Users-someone-else");
+  const sessionClashTarget = path.join(projectsDir, `${newPrefix}-agents-a2`);
+  await mkdir(sessionA, { recursive: true });
+  await mkdir(sessionClash, { recursive: true });
+  await mkdir(sessionUnrelated, { recursive: true });
+  await mkdir(sessionClashTarget, { recursive: true });
+  await writeFile(path.join(sessionA, "session.jsonl"), "[]", "utf8");
+  return { root, user, from, to, alias, carrierPlist, projectsDir, sessionA, sessionClash, sessionUnrelated, sessionClashTarget };
 }
 
 function fakeDeps(user: string, overrides: { statuses?: MigrateHomeStatus[] } = {}) {
@@ -119,7 +139,7 @@ test("dry-run plans the full migration and mutates nothing", async () => {
     const preflight = h.events.filter((e) => e.step === "preflight").at(-1);
     assert.equal(preflight?.status, "ok");
     const statuses = h.events.filter((e) => e.step !== "preflight").map((e) => e.status);
-    assert.deepEqual(statuses, ["planned", "planned", "planned", "planned", "planned", "planned", "planned"]);
+    assert.deepEqual(statuses, Array.from({ length: 9 }, () => "planned"));
   } finally {
     await rm(f.root, { recursive: true, force: true });
   }
@@ -169,10 +189,30 @@ test("apply: full success — move, alias repoint, home-env removal, start, self
     // Service lifecycle: stopped at source, started at target.
     assert.deepEqual(h.stopCalls, [f.from]);
     assert.deepEqual(h.startCalls, [f.to]);
+    // Session continuity: the old-home project dir moved to the new-encoded
+    // name; the clashing one stayed put (never clobbered); unrelated untouched.
+    assert.equal((await stat(path.join(f.projectsDir, `${encodeProjectDirName(f.to)}-agents-a1`, "session.jsonl"))).isFile(), true);
+    await assert.rejects(() => stat(f.sessionA));
+    assert.equal((await stat(f.sessionClash)).isDirectory(), true);
+    assert.equal((await stat(f.sessionClashTarget)).isDirectory(), true);
+    assert.equal((await stat(f.sessionUnrelated)).isDirectory(), true);
+    // Durable backups of every deleted plist + recorded in the result file.
+    const backupDir = path.join(f.to, "computer", "migrate-backup");
+    assert.match(await readFile(path.join(backupDir, "build.raft.computer.test-carrier.plist"), "utf8"), /--slock-home/);
+    assert.match(await readFile(path.join(backupDir, "build.raft.desktop.home-env.plist"), "utf8"), /home-env fixture/);
     // Result file at the NEW home.
-    const result = JSON.parse(await readFile(migrateResultPath(f.to), "utf8")) as { result: string; serviceState: string };
+    const result = JSON.parse(await readFile(migrateResultPath(f.to), "utf8")) as {
+      result: string;
+      serviceState: string;
+      backups: Array<{ label: string; originalPath: string; backupPath: string }>;
+    };
     assert.equal(result.result, "success");
     assert.equal(result.serviceState, "running");
+    assert.deepEqual(
+      result.backups.map((b) => b.label).sort(),
+      ["build.raft.computer.test-carrier", "build.raft.desktop.home-env"],
+    );
+    assert.ok(result.backups.every((b) => b.backupPath.startsWith(backupDir)));
     assert.deepEqual(
       h.events.map((e) => `${e.step}:${e.status}`),
       [
@@ -186,8 +226,12 @@ test("apply: full success — move, alias repoint, home-env removal, start, self
         "move:ok",
         "alias:start",
         "alias:ok",
+        "sessions:start",
+        "sessions:ok",
         "home-env:start",
         "home-env:ok",
+        "backup:start",
+        "backup:ok",
         "start:start",
         "start:ok",
         "self-check:start",
@@ -227,8 +271,10 @@ test("apply: self-check failure rolls everything back and restarts the source se
     // Home back at the source path; nothing left at the target.
     assert.equal((await stat(path.join(f.from, "agents", "a1"))).isDirectory(), true);
     await assert.rejects(() => readFile(migrateResultPath(f.to)));
-    // Alias restored to the source home.
+    // Alias restored to the source home; session dirs back at old names.
     assert.equal(await readlink(f.alias), f.from);
+    assert.equal((await stat(f.sessionA)).isDirectory(), true);
+    await assert.rejects(() => stat(path.join(f.projectsDir, `${encodeProjectDirName(f.to)}-agents-a1`)));
     // Both plists restored byte-for-byte and bootstrapped back in.
     assert.match(await readFile(f.carrierPlist!, "utf8"), /--slock-home/);
     assert.match(await readFile(homeEnvPlistPath(f.user), "utf8"), /home-env fixture/);
@@ -316,6 +362,48 @@ test("preflight: from === to is blocked", async () => {
     const run = await migrateHome({ from: f.to, to: f.to, ...dry }, h.deps, (e) => h.events.push(e));
     assert.equal(run.outcome, "blocked");
     assert.match(JSON.stringify(h.events.filter((e) => e.step === "preflight").at(-1)?.detail?.blockers), /distinct/);
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+test("scan: path boundary matching — a similar-prefix path does not match (PM review)", async () => {
+  assert.equal(mentionsPathBounded(`<string>/Users/x/foo</string>`, "/Users/x/foo"), true, "XML close tag is a boundary");
+  assert.equal(mentionsPathBounded(`<string>/Users/x/foo/sub</string>`, "/Users/x/foo"), true, "subpath is a boundary");
+  assert.equal(mentionsPathBounded(`<string>/Users/x/foo\"`, "/Users/x/foo"), true, "quote is a boundary");
+  assert.equal(mentionsPathBounded("<string>/Users/x/foobar</string>", "/Users/x/foo"), false, "longer path is NOT a match");
+  assert.equal(mentionsPathBounded("<string>/Users/x/foo-bar</string>", "/Users/x/foo"), false, "hyphen continuation is NOT a match");
+  assert.equal(mentionsPathBounded("<string>/Users/x/foo", "/Users/x/foo"), false, "end of content is NOT a match (strict rule)");
+
+  const f = await fixture({ oldCarrier: false, homeEnv: false });
+  try {
+    // A decoy plist that mentions a LONGER path sharing the source prefix.
+    const decoy = path.join(f.user, "Library", "LaunchAgents", "build.raft.computer.decoy.plist");
+    await mkdir(path.dirname(decoy), { recursive: true });
+    await writeFile(decoy, `<plist><string>${f.from}-neighbor</string></plist>\n`, "utf8");
+    const carriers = await defaultListSourceCarriers(f.user, [f.from]);
+    assert.deepEqual(carriers.map((c) => c.label), [], "similar-prefix plist is not selected");
+    // ...while an exact boundary mention IS selected.
+    await writeFile(decoy, `<plist><string>${f.from}</string></plist>\n`, "utf8");
+    const found = await defaultListSourceCarriers(f.user, [f.from]);
+    assert.deepEqual(found.map((c) => c.label), ["build.raft.computer.decoy"]);
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+test("dry-run lists the discovered source carriers and the backup plan", async () => {
+  const f = await fixture({ livePid: true });
+  const h = fakeDeps(f.user);
+  try {
+    await migrateHome({ from: f.from, ...dry }, h.deps, (e) => h.events.push(e));
+    const carrier = h.events.filter((e) => e.step === "source-carrier").at(-1);
+    assert.equal(carrier?.status, "planned");
+    assert.deepEqual((carrier?.detail?.carriers as Array<{ label: string }>).map((c) => c.label), [
+      "build.raft.computer.test-carrier",
+    ]);
+    const backup = h.events.filter((e) => e.step === "backup").at(-1);
+    assert.equal(backup?.status, "planned");
   } finally {
     await rm(f.root, { recursive: true, force: true });
   }
