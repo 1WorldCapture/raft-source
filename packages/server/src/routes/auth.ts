@@ -1,3 +1,4 @@
+import { parsePreferredSkin } from "./skinPreference.js";
 import { serializeErrorForLog } from "../tracing/safeErrorLog.js";
 import { Router, urlencoded, type NextFunction, type Request, type Response, type Router as RouterType } from "express";
 import type { Server as SocketServer } from "socket.io";
@@ -1337,6 +1338,7 @@ authRouter.patch("/me", requireAuth, async (req, res) => {
       preferredTranslationDisplay?: PreferredTranslationDisplay;
       preferredTimeFormat?: TimeFormatPreference | null;
       preferredMessageBodyFontSize?: MessageBodyFontSizePreference | null;
+      preferredSkin?: string | null;
       referralSource?: string | null;
       referralSourceOther?: string | null;
       referralSourceSkippedAt?: Date | null;
@@ -1375,6 +1377,8 @@ authRouter.patch("/me", requireAuth, async (req, res) => {
       if (preferredTimeFormat !== undefined) profileFields.preferredTimeFormat = preferredTimeFormat;
       const preferredMessageBodyFontSize = parsePreferredMessageBodyFontSize(req.body?.preferredMessageBodyFontSize);
       if (preferredMessageBodyFontSize !== undefined) profileFields.preferredMessageBodyFontSize = preferredMessageBodyFontSize;
+      const preferredSkin = parsePreferredSkin(req.body?.preferredSkin);
+      if (preferredSkin !== undefined) profileFields.preferredSkin = preferredSkin;
     } catch (err) {
       res.status(400).json({ error: err instanceof Error ? err.message : "Invalid account preference" });
       return;
