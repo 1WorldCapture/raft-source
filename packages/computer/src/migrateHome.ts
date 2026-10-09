@@ -625,26 +625,34 @@ export async function migrateHome(
       // place, converge at the new home fails closed with
       // HOST_LIFECYCLE_LAST_KNOWN_GOOD_UNVERIFIED (drill A1 finding). Clear
       // it — the start step converges a fresh carrier for the new home.
+      // Record cleared ONLY after the rm actually succeeded, so a marker that
+      // is still on disk is never treated as cleared.
       const markerPath = path.join(pre.to, "computer", "host-lifecycle-owner.json");
-      let clearedMarker: { path: string; content: string } | null = null;
+      let clearedMarkerContent: string | null = null;
       try {
-        clearedMarker = { path: markerPath, content: await fs.readFile(markerPath, "utf8") };
+        const content = await fs.readFile(markerPath, "utf8");
         await fs.rm(markerPath, { force: true });
+        clearedMarkerContent = content;
       } catch {
-        clearedMarker = null;
+        clearedMarkerContent = null;
       }
       journal.push({
         label: "move home back",
         undo: async () => {
           await fs.rename(pre.to, pre.from);
           if (removedEmptyTarget) await fs.mkdir(pre.to, { recursive: true });
-          if (clearedMarker !== null) {
-            await fs.mkdir(path.dirname(clearedMarker.path), { recursive: true });
-            await fs.writeFile(clearedMarker.path, clearedMarker.content, "utf8");
+          if (clearedMarkerContent !== null) {
+            // The home is back at the SOURCE path by now — the marker
+            // restores there, never at the target (which would re-create
+            // <to>/computer and block the next migration's empty-target
+            // preflight).
+            const restorePath = path.join(pre.from, "computer", "host-lifecycle-owner.json");
+            await fs.mkdir(path.dirname(restorePath), { recursive: true });
+            await fs.writeFile(restorePath, clearedMarkerContent, "utf8");
           }
         },
       });
-      return { from: pre.from, to: pre.to, staleLifecycleMarkerCleared: clearedMarker !== null };
+      return { from: pre.from, to: pre.to, staleLifecycleMarkerCleared: clearedMarkerContent !== null };
     }))
   ) {
     return rollbackAndFinish();

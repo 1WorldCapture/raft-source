@@ -71,6 +71,14 @@ async function fixture(
   if (opts.stopped) {
     await writeDesiredState(from, "stopped");
   }
+  // Stale host-lifecycle owner record (present after any real start; the
+  // migration must clear it on move and restore it byte-identically on
+  // rollback — at the SOURCE path, never re-creating the target).
+  await writeFile(
+    path.join(from, "computer", "host-lifecycle-owner.json"),
+    '{"formatVersion":1,"owner":"cli","enabled":true,"label":"build.raft.computer.login.fixture"}\n',
+    "utf8",
+  );
   const alias = aliasPathFor(user);
   if (opts.alias !== false) {
     await symlink(from, alias, "dir");
@@ -239,6 +247,10 @@ test("apply: full success — move, alias repoint, home-env removal, start, self
     const backupDir = path.join(f.to, "computer", "migrate-backup");
     assert.match(await readFile(path.join(backupDir, "build.raft.computer.test-carrier.plist"), "utf8"), /--slock-home/);
     assert.match(await readFile(path.join(backupDir, "build.raft.desktop.home-env.plist"), "utf8"), /home-env fixture/);
+    // The stale lifecycle marker was cleared by the move.
+    await assert.rejects(() => readFile(path.join(f.to, "computer", "host-lifecycle-owner.json")));
+    const moveStep = h.events.filter((e) => e.step === "move").at(-1);
+    assert.equal(moveStep?.detail?.staleLifecycleMarkerCleared, true);
     // Result file at the NEW home.
     const result = JSON.parse(await readFile(migrateResultPath(f.to), "utf8")) as {
       result: string;
@@ -324,6 +336,13 @@ test("apply: self-check failure rolls everything back and restarts the source se
     // Target service stopped before the move back; source service restarted.
     assert.ok(h.stopCalls.includes(f.to));
     assert.equal(h.startCalls[h.startCalls.length - 1], f.from);
+    // The stale lifecycle marker is back at the SOURCE home byte-identically,
+    // and the target path was NOT re-created (PM review on #278).
+    assert.equal(
+      await readFile(path.join(f.from, "computer", "host-lifecycle-owner.json"), "utf8"),
+      '{"formatVersion":1,"owner":"cli","enabled":true,"label":"build.raft.computer.login.fixture"}\n',
+    );
+    await assert.rejects(() => stat(f.to));
     // Result file at the SOURCE home after rollback.
     const result = JSON.parse(await readFile(migrateResultPath(f.from), "utf8")) as {
       result: string;
