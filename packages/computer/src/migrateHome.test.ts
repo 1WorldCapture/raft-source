@@ -25,8 +25,18 @@ import { writeDesiredState } from "./desiredState.js";
  *   <root>/user/.slock-raft → embedded  — the D1 alias
  *   <root>/user/Library/LaunchAgents/build.raft.desktop.home-env.plist
  */
+const ATTACHED_SERVER_ID = "00000000-0000-4000-8000-000000000001";
+
 async function fixture(
-  opts: { livePid?: boolean; stopped?: boolean; alias?: boolean; homeEnv?: boolean; oldCarrier?: boolean } = {},
+  opts: {
+    livePid?: boolean;
+    stopped?: boolean;
+    alias?: boolean;
+    homeEnv?: boolean;
+    oldCarrier?: boolean;
+    /** Write a real (parseable) runner.state.json so `start` has work. */
+    attachment?: boolean;
+  } = {},
 ) {
   // realpath up front: preflight resolves through symlinks (macOS /tmp → /private/tmp),
   // and the tests compare against the resolved paths.
@@ -36,8 +46,24 @@ async function fixture(
   const to = path.join(user, ".slock");
   await mkdir(path.join(from, "agents", "a1"), { recursive: true });
   await mkdir(path.join(from, "agents", "a2"), { recursive: true });
-  await mkdir(path.join(from, "computer", "servers", "s1"), { recursive: true });
+  await mkdir(path.join(from, "computer", "servers", ATTACHED_SERVER_ID), { recursive: true });
   await mkdir(path.join(from, "computer", "run"), { recursive: true });
+  if (opts.attachment !== false) {
+    // Real attachment shape (serverState.parseAttachment contract) — an
+    // empty servers/<id> dir does NOT count, which is exactly how the drill
+    // caught the NO_ATTACHMENT gap.
+    await writeFile(
+      path.join(from, "computer", "servers", ATTACHED_SERVER_ID, "runner.state.json"),
+      JSON.stringify({
+        kind: "computer-attachment",
+        serverId: ATTACHED_SERVER_ID,
+        serverMachineId: "drill-fixture-machine",
+        apiKey: "test-fixture-only",
+        serverUrl: "http://127.0.0.1:1",
+      }),
+      "utf8",
+    );
+  }
   if (opts.livePid) {
     // The vitest worker itself is a live pid — isProcessAlive() sees it.
     await writeFile(path.join(from, "computer", "run", "service.pid"), `${process.pid}\n`, "utf8");
@@ -414,6 +440,30 @@ test("dry-run lists the discovered source carriers and the backup plan", async (
     ]);
     const backup = h.events.filter((e) => e.step === "backup").at(-1);
     assert.equal(backup?.status, "planned");
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+test("apply: zero-attachment home migrates with converge-only start (fresh-install shape)", async () => {
+  const f = await fixture({ livePid: true, attachment: false });
+  const h = fakeDeps(f.user);
+  try {
+    const run = await migrateHome({ from: f.from, to: f.to, ...apply }, h.deps, (e) => h.events.push(e));
+    assert.equal(run.outcome, "success");
+    // Home moved; nothing was started (start refuses zero attachments);
+    // the login item was converged and self-check skipped.
+    await assert.rejects(() => stat(f.from));
+    assert.deepEqual(h.startCalls, []);
+    assert.deepEqual(h.stopCalls, [f.from]);
+    assert.deepEqual(h.convergeCalls, [[f.to, "enabled"]]);
+    assert.equal(h.events.filter((e) => e.step === "self-check").at(-1)?.status, "skipped");
+    const result = JSON.parse(await readFile(migrateResultPath(f.to), "utf8")) as {
+      result: string;
+      serviceState: string;
+    };
+    assert.equal(result.result, "success");
+    assert.equal(result.serviceState, "down");
   } finally {
     await rm(f.root, { recursive: true, force: true });
   }
