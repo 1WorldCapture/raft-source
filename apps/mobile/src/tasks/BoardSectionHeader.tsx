@@ -3,6 +3,7 @@ import { ChevronDown } from "lucide-react-native";
 import type { AppMessageId } from "../i18n/catalog";
 import { useT } from "../i18n/provider";
 import { AppText } from "../ui/text";
+import { useSkinStyles, type SkinRoles } from "../ui/skin";
 import { border, color } from "../ui/tokens";
 import { sectionHighlighted, type BoardSection } from "./board";
 
@@ -29,10 +30,11 @@ export function BoardSectionHeader({
   onPress?: () => void;
 }) {
   const t = useT();
+  const skinStyle = useSkinStyles(sectionSkin);
   const highlighted = sectionHighlighted(section, count);
   const body = (
     <View style={styles.header}>
-      <View style={[styles.pill, highlighted ? styles.pillHot : styles.pillPlain]}>
+      <View style={[styles.pill, highlighted ? skinStyle.pillHot : styles.pillPlain]}>
         <AppText style={styles.pillText}>{t(BOARD_SECTION_LABEL[section])}</AppText>
       </View>
       <AppText style={styles.count}>{String(count)}</AppText>
@@ -60,9 +62,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
     paddingVertical: 2,
   },
-  pillHot: { backgroundColor: color.yellow, borderColor: color.border },
   pillPlain: { backgroundColor: color.page, borderColor: color.borderSoft },
   pillText: { color: color.ink, fontSize: 10, fontWeight: "700", lineHeight: 12, textTransform: "uppercase" },
   count: { color: color.mutedStrong, fontFamily: "mono", fontSize: 12, lineHeight: 16 },
   chevronClosed: { transform: [{ rotate: "-90deg" }] },
 });
+
+function sectionSkin(skin: SkinRoles) {
+  return StyleSheet.create({
+    pillHot: { backgroundColor: skin.signal, borderColor: color.border },
+  });
+}

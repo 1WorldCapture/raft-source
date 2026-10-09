@@ -1,5 +1,6 @@
 import { StyleSheet, View } from "react-native";
 import { AppText } from "./text";
+import { useSkinStyles, type SkinRoles } from "./skin";
 import { border, color, fontSize, radius, size } from "./tokens";
 
 export function Badge({ count, quiet }: { count: number; quiet?: boolean }) {
@@ -14,8 +15,9 @@ export function Badge({ count, quiet }: { count: number; quiet?: boolean }) {
 }
 
 export function MentionMark() {
+  const skinStyle = useSkinStyles(mentionSkin);
   return (
-    <View style={styles.mark}>
+    <View style={[styles.mark, skinStyle.mark]}>
       <AppText style={styles.markLabel}>@</AppText>
     </View>
   );
@@ -35,7 +37,6 @@ const styles = StyleSheet.create({
   quiet: { color: color.muted, fontFamily: "mono", fontSize: fontSize.badge.fontSize, fontWeight: "700" },
   mark: {
     alignItems: "center",
-    backgroundColor: color.yellow,
     borderRadius: radius.badge,
     height: size.mentionMark,
     justifyContent: "center",
@@ -43,3 +44,9 @@ const styles = StyleSheet.create({
   },
   markLabel: { color: color.ink, fontSize: 11, fontWeight: "700" },
 });
+
+function mentionSkin(skin: SkinRoles) {
+  return StyleSheet.create({
+    mark: { backgroundColor: skin.signal },
+  });
+}

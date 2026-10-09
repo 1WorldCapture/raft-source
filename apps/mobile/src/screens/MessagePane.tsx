@@ -65,6 +65,7 @@ import { useSession } from "../state/session";
 import { useRaftStore } from "../state/store";
 import { colors, space } from "../ui/theme";
 import { AppText } from "../ui/text";
+import { useSkinStyles, type SkinRoles } from "../ui/skin";
 import { bodyFont, color, shadowOffset } from "../ui/tokens";
 import { Avatar } from "../ui/Avatar";
 import { collectSenderDirectory, senderDirectoryStep } from "./senderAvatars";
@@ -174,6 +175,7 @@ export function MessagePane({
   listHeader?: ReactNode;
 }) {
   const session = useSession();
+  const skinStyle = useSkinStyles(paneSkin);
   const insets = useSafeAreaInsets();
   const sessionRef = useRef(session);
   sessionRef.current = session;
@@ -1669,7 +1671,7 @@ export function MessagePane({
               setUnseen(0);
               listRef.current?.scrollToOffset({ offset: 0, animated: true });
             }}
-            style={styles.jump}
+            style={[styles.jump, skinStyle.jump]}
           >
             <AppText style={styles.jumpText}>{hasNewer || unseen === 0
               ? t("message.chatPanel.backToBottom")
@@ -1733,7 +1735,7 @@ export function MessagePane({
               <Pressable accessibilityRole="checkbox" accessibilityState={{ checked: asTask }} onPress={() => { setAsTask((current) => !current); focusComposer(); }} style={styles.taskToggle}>
                 <ListChecks color={color.ink} size={16} />
                 <AppText style={styles.taskLabel}>{t("message.composer.asTask")}</AppText>
-                <View style={[styles.box, asTask ? styles.boxOn : null]} />
+                <View style={[styles.box, asTask ? skinStyle.boxOn : null]} />
               </Pressable>
             )}
           </View>
@@ -1896,7 +1898,7 @@ const styles = StyleSheet.create({
   timeline: { flex: 1 },
   sticky: { alignSelf: "center", backgroundColor: color.white, borderColor: color.border, borderWidth: 2, paddingHorizontal: 10, paddingVertical: 3, position: "absolute", top: 6, zIndex: 2 },
   stickyText: { color: color.ink, fontSize: 10, fontWeight: "700", letterSpacing: 0.8, textTransform: "uppercase" },
-  jump: { alignSelf: "center", backgroundColor: color.yellow, borderColor: color.border, borderWidth: 2, bottom: 12, paddingHorizontal: 12, paddingVertical: 6, position: "absolute" },
+  jump: { alignSelf: "center", borderColor: color.border, borderWidth: 2, bottom: 12, paddingHorizontal: 12, paddingVertical: 6, position: "absolute" },
   jumpText: { color: color.ink, fontSize: 13, fontWeight: "700" },
   headerAction: { alignItems: "center", justifyContent: "center", minHeight: 32, paddingHorizontal: 4 },
   headerActionText: { color: color.ink, fontSize: 12, fontWeight: "700" },
@@ -1922,7 +1924,6 @@ const styles = StyleSheet.create({
   taskToggle: { alignItems: "center", flexDirection: "row", gap: 6 },
   taskLabel: { color: color.ink, fontSize: 12, fontWeight: "700" },
   box: { borderColor: color.border, borderWidth: 2, height: 16, width: 16 },
-  boxOn: { backgroundColor: color.yellow },
   send: { alignItems: "center", backgroundColor: color.pink, borderColor: color.border, borderWidth: 2, height: 32, justifyContent: "center", width: 36 },
   sendDisabled: { backgroundColor: color.pinkPale, borderColor: color.muted, marginBottom: shadowOffset.sm, marginRight: shadowOffset.sm },
   toolFace: { alignItems: "center", backgroundColor: color.page, borderColor: color.border, borderWidth: 2, height: 30, justifyContent: "center", width: 30 },
@@ -1934,3 +1935,10 @@ const styles = StyleSheet.create({
   uploadName: { color: color.ink, flex: 1, fontSize: 13 },
   uploadAction: { color: color.ink, fontSize: 13, fontWeight: "700" },
 });
+
+function paneSkin(skin: SkinRoles) {
+  return StyleSheet.create({
+    jump: { backgroundColor: skin.signal },
+    boxOn: { backgroundColor: skin.signal },
+  });
+}
