@@ -16,6 +16,7 @@ export interface MigrationState {
   resultFile: string | null;
   relaunching: boolean;
   slow?: boolean;
+  inPlace?: boolean;
 }
 
 export type MigrationActionId = "apply" | "recheck" | "close";
@@ -110,13 +111,24 @@ export function deriveMigrationView(state: MigrationState | null): MigrationView
         ...base,
         open: true,
         tone: "idle",
-        title: "Run the Computer independently?",
-        lines: [
-          `The Computer and its agents move out of this app to ${to}. They keep running when you close the app.`,
-          "Agents on this machine go offline for about a minute. If anything goes wrong, everything is rolled back automatically.",
-          ...state.warnings,
+        title: state.inPlace ? "Switch to the independent Computer?" : "Run the Computer independently?",
+        lines: state.inPlace
+          ? [
+              `No data is moved: this Computer already lives at ${to}. It is handed over to run independently, so it keeps running when you close this app.`,
+              "Agents on this machine go offline for a moment. If anything goes wrong, the previous setup is restored automatically.",
+              ...state.warnings,
+            ]
+          : [
+              `The Computer and its agents move out of this app to ${to}. They keep running when you close the app.`,
+              "Agents on this machine go offline for about a minute. If anything goes wrong, everything is rolled back automatically.",
+              ...state.warnings,
+            ],
+        actions: [
+          act("apply", state.inPlace ? "Switch now" : "Move now", true, state.inPlace
+            ? "Switch to the independent Computer now? Its agents go offline for a moment, and this app restarts when it is done."
+            : "Move the Computer out of this app now? Its agents go offline for about a minute, and this app restarts when it is done."),
+          act("close", "Cancel"),
         ],
-        actions: [act("apply", "Move now", true, "Move the Computer out of this app now? Its agents go offline for about a minute, and this app restarts when it is done."), act("close", "Cancel")],
       };
     case "blocked":
       return {
@@ -129,7 +141,7 @@ export function deriveMigrationView(state: MigrationState | null): MigrationView
         actions: [act("recheck", "Check again", true), act("close", "Close")],
       };
     case "applying":
-      return { ...base, open: true, tone: "busy", title: "Moving the Computer…", lines: state.slow ? ["The move is taking longer than expected but is still running. Keep this app open; this dialog updates when it reports.", ...resultLine] : ["Keep this app open until it finishes. Agents are offline during the move."], locked: true, actions: [] };
+      return { ...base, open: true, tone: "busy", title: state.inPlace ? "Switching the Computer…" : "Moving the Computer…", lines: state.slow ? ["The move is taking longer than expected but is still running. Keep this app open; this dialog updates when it reports.", ...resultLine] : ["Keep this app open until it finishes. Agents are offline during the move."], locked: true, actions: [] };
     case "success":
       return {
         ...base,

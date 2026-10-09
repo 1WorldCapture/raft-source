@@ -149,6 +149,8 @@ export interface MigrationState {
   relaunching: boolean;
   /** Apply is taking longer than expected; the result file is being watched. */
   slow: boolean;
+  /** The Computer already lives at the target: nothing is moved, the app only hands it over. */
+  inPlace: boolean;
 }
 
 export interface MigrationDeps {
@@ -167,7 +169,7 @@ export interface MigrationDeps {
   pollMs?: number;
 }
 
-const EMPTY: MigrationState = { phase: "idle", from: null, to: null, steps: [], blockers: [], warnings: [], error: null, resultFile: null, relaunching: false, slow: false };
+const EMPTY: MigrationState = { phase: "idle", from: null, to: null, steps: [], blockers: [], warnings: [], error: null, resultFile: null, relaunching: false, slow: false, inPlace: false };
 const resultFileOf = (home: string | null) => (home ? path.join(home, "computer", "migrate-result.json") : null);
 const strings = (value: unknown): string[] => (Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : []);
 
@@ -272,7 +274,9 @@ export class MigrationController {
   private settle(run: MigrateRun, from: string): MigrationState {
     const preflight = run.events.find((e) => e.step === "preflight" && (e.status === "ok" || e.status === "blocked"));
     const to = run.final?.to ?? str(preflight?.detail?.to) ?? this.state.to;
-    const common = { ...this.state, from: run.final?.from ?? from, to, warnings: strings(preflight?.detail?.warnings) };
+    const detail = preflight?.detail;
+    const inPlace = detail?.mode === "in-place" || (typeof detail?.from === "string" && detail.from === detail.to) || this.state.inPlace;
+    const common = { ...this.state, from: run.final?.from ?? from, to, inPlace, warnings: strings(detail?.warnings) };
     switch (run.outcome) {
       case "planned":
         return this.set({ ...common, phase: "ready" });

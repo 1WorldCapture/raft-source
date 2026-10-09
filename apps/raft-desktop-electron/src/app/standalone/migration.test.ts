@@ -214,3 +214,12 @@ test("a second plan/apply while one is running is ignored; progress is published
   assert.ok(published.some((s) => s.phase === "checking"));
   assert.ok(published.some((s) => s.steps.some((x) => x.step === "stop")));
 });
+
+test("plan detects in-place from the preflight (mode, or from == to)", async () => {
+  for (const detail of [{ mode: "in-place", to: "/h/.slock" }, { from: "/h/.slock", to: "/h/.slock" }]) {
+    const { c } = controller({ runs: [{ outcome: "planned", events: [ev("preflight", "ok", detail)] }] });
+    assert.equal((await c.plan()).inPlace, true);
+  }
+  const { c } = controller({ runs: [PLANNED] });
+  assert.equal((await c.plan()).inPlace, false);
+});
