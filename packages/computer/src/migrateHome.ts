@@ -137,6 +137,9 @@ export interface MigrateHomeDeps {
   listSourceCarriers?: (homeDir: string, matchPaths: string[]) => Promise<SourceCarrierInfo[]>;
   /** ~/.claude/projects location for the session-continuity step. */
   claudeProjectsDir?: (homeDir: string) => string;
+  /** The REAL user home (getpwuid source — immune to a $HOME override).
+   *  Guards fixed-label launchd operations to the real LaunchAgents dir. */
+  realHomeDir?: () => string;
   selfCheckTimeoutMs?: number;
   selfCheckPollMs?: number;
 }
@@ -203,6 +206,24 @@ export function encodeProjectDirName(p: string): string {
 
 export function defaultClaudeProjectsDir(homeDir: string): string {
   return path.join(homeDir, ".claude", "projects");
+}
+
+/**
+ * The invoking user's real home, from the password database — NOT $HOME,
+ * which isolation drills override. The home-env LaunchAgent's label is
+ * FIXED (no home hash), so its bootout/bootstrap target the user's real
+ * gui domain no matter what $HOME says; a drill that overrode $HOME must
+ * therefore never issue those launchctl calls (PM incident 2026-10-10:
+ * a drill booted out the owner's live home-env job).
+ */
+export function defaultRealHomeDir(): string {
+  try {
+    const info = os.userInfo();
+    if (info.homedir && info.homedir.length > 0) return info.homedir;
+  } catch {
+    /* fall through */
+  }
+  return os.homedir();
 }
 
 export interface MigrateHomeOptions {
@@ -697,14 +718,22 @@ export async function migrateHome(
 
   // Step 6 — remove the home-env LaunchAgent (global setenv workaround).
   if (pre.homeEnv) {
+    // The home-env label is FIXED per user, so bootout/bootstrap always act
+    // on the REAL gui domain. Only issue them when the plist really lives in
+    // the real user's LaunchAgents; a $HOME-overridden drill removes and
+    // restores the file locally but never touches the domain.
+    const realLaunchAgents = path.join((deps.realHomeDir ?? defaultRealHomeDir)(), "Library", "LaunchAgents");
+    const launchctlAllowed = path.dirname(pre.homeEnv.path) === realLaunchAgents;
     if (
       !(await runStep("home-env", async () => {
         // bootout first so the setenv effect dies with the session; a job
         // that was never loaded is not an error.
-        try {
-          await runLaunchctl(["bootout", `gui/${uid}/${HOME_ENV_LABEL}`]);
-        } catch {
-          /* not loaded — nothing to boot out */
+        if (launchctlAllowed) {
+          try {
+            await runLaunchctl(["bootout", `gui/${uid}/${HOME_ENV_LABEL}`]);
+          } catch {
+            /* not loaded — nothing to boot out */
+          }
         }
         await fs.rm(pre.homeEnv!.path, { force: true });
         journal.push({
@@ -712,14 +741,16 @@ export async function migrateHome(
           undo: async () => {
             await fs.mkdir(path.dirname(pre.homeEnv!.path), { recursive: true });
             await fs.writeFile(pre.homeEnv!.path, pre.homeEnv!.content, "utf8");
-            try {
-              await runLaunchctl(["bootstrap", `gui/${uid}`, pre.homeEnv!.path]);
-            } catch {
-              /* best-effort; the file is back, next load re-applies setenv */
+            if (launchctlAllowed) {
+              try {
+                await runLaunchctl(["bootstrap", `gui/${uid}`, pre.homeEnv!.path]);
+              } catch {
+                /* best-effort; the file is back, next load re-applies setenv */
+              }
             }
           },
         });
-        return { path: pre.homeEnv!.path };
+        return { path: pre.homeEnv!.path, launchctl: launchctlAllowed ? "domain" : "skipped-isolated-home" };
       }))
     ) {
       return rollbackAndFinish();
