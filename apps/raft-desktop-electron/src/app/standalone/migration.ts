@@ -196,6 +196,10 @@ export class MigrationController {
 
   /** Dry run: what would move and whether anything blocks it. Changes nothing on the machine. */
   async plan(): Promise<MigrationState> {
+    return this.guarded(() => this.planInner());
+  }
+
+  private async planInner(): Promise<MigrationState> {
     if (this.state.phase === "unavailable" || this.busy || this.state.phase === "applying" || this.state.phase === "success") return this.state;
     this.busy = true;
     try {
@@ -211,6 +215,10 @@ export class MigrationController {
 
   /** Do the move. Only after a plan came back ready in this session. */
   async apply(): Promise<MigrationState> {
+    return this.guarded(() => this.applyInner());
+  }
+
+  private async applyInner(): Promise<MigrationState> {
     if (this.state.phase !== "ready" || this.busy) return this.state;
     this.busy = true;
     try {
@@ -233,6 +241,15 @@ export class MigrationController {
       return this.settle(run, prepared.from);
     } finally {
       this.busy = false;
+    }
+  }
+
+  /** Any unexpected exception becomes an error state the dialog shows; nothing may leave the dialog stuck on a pending phase. */
+  private async guarded(run: () => Promise<MigrationState>): Promise<MigrationState> {
+    try {
+      return await run();
+    } catch (error) {
+      return this.set({ ...this.state, phase: "error", error: error instanceof Error ? error.message : String(error) });
     }
   }
 

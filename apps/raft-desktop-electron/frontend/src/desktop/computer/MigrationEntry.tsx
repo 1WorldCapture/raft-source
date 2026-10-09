@@ -1,7 +1,8 @@
 // "Run the Computer independently…" entry under the embedded "This Computer" card, plus its dialog.
 // Hidden unless this build carries a Computer to migrate with (see migrationLogic.ts / main migration.ts).
+import { useState } from "react";
 import Button from "@web/components/ui/Button";
-import { deriveMigrationView, type StepTone } from "./migrationLogic";
+import { deriveMigrationView, type MigrationAction, type StepTone } from "./migrationLogic";
 import { useMigration } from "./useMigration";
 
 const STEP_MARK: Record<StepTone, string> = { todo: "○", running: "◐", ok: "●", fail: "✕", skipped: "–" };
@@ -9,6 +10,8 @@ const STEP_MARK: Record<StepTone, string> = { todo: "○", running: "◐", ok: "
 export default function MigrationEntry() {
   const { state, begin, run, error } = useMigration();
   const view = deriveMigrationView(state);
+  // In-app confirmation: window.confirm is a synchronous native modal that freezes the renderer until answered.
+  const [asking, setAsking] = useState<MigrationAction | null>(null);
   if (!view.available) return null;
   return (
     <>
@@ -39,7 +42,17 @@ export default function MigrationEntry() {
               </ul>
             ) : null}
             {error ? <div className="mt-2 text-[11px] font-medium text-brutal-orange">{error}</div> : null}
-            {view.actions.length > 0 ? (
+            {asking ? (
+              <div className="mt-4 border-t-2 border-black/10 pt-2" data-testid="migrate-confirm">
+                <p className="text-xs font-medium text-black">{asking.confirm}</p>
+                <div className="mt-2 flex justify-end gap-1.5">
+                  <Button size="xs" tone="pink" emphasis="high" onClick={() => { const a = asking; setAsking(null); void run(a.id); }}>
+                    Yes, continue
+                  </Button>
+                  <Button size="xs" onClick={() => setAsking(null)}>Back</Button>
+                </div>
+              </div>
+            ) : view.actions.length > 0 ? (
               <div className="mt-4 flex justify-end gap-1.5">
                 {view.actions.map((action) => (
                   <Button
@@ -48,8 +61,8 @@ export default function MigrationEntry() {
                     tone={action.primary ? "pink" : undefined}
                     emphasis={action.primary ? "high" : undefined}
                     onClick={() => {
-                      if (action.confirm && !window.confirm(action.confirm)) return;
-                      void run(action.id);
+                      if (action.confirm) setAsking(action);
+                      else void run(action.id);
                     }}
                   >
                     {action.label}
