@@ -413,13 +413,92 @@ test("preflight: cross-filesystem targets are blocked (mv-only, never copy)", as
   }
 });
 
-test("preflight: from === to is blocked", async () => {
+test("preflight: nested (non-equal) targets stay blocked", async () => {
   const f = await fixture();
   const h = fakeDeps(f.user);
   try {
-    const run = await migrateHome({ from: f.to, to: f.to, ...dry }, h.deps, (e) => h.events.push(e));
+    const run = await migrateHome({ from: f.from, to: path.join(f.from, "sub"), ...dry }, h.deps, (e) => h.events.push(e));
     assert.equal(run.outcome, "blocked");
     assert.match(JSON.stringify(h.events.filter((e) => e.step === "preflight").at(-1)?.detail?.blockers), /distinct/);
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+test("in-place: from === to plans a takeover (no move steps, mode surfaced)", async () => {
+  const f = await fixture({ livePid: true });
+  const h = fakeDeps(f.user);
+  try {
+    const run = await migrateHome({ from: f.from, to: f.from, ...dry }, h.deps, (e) => h.events.push(e));
+    assert.equal(run.outcome, "planned");
+    assert.equal(run.mode, "in-place");
+    const preflight = h.events.filter((e) => e.step === "preflight").at(-1);
+    assert.equal(preflight?.detail?.mode, "in-place");
+    const steps = h.events.filter((e) => e.step !== "preflight").map((e) => e.step);
+    assert.ok(!steps.includes("move"), "no move step");
+    assert.ok(!steps.includes("alias"), "no alias step");
+    assert.ok(!steps.includes("sessions"), "no sessions step");
+    assert.deepEqual(steps, ["source-carrier", "stop", "home-env", "backup", "start", "self-check"]);
+    assert.equal((await stat(path.join(f.from, "agents", "a1"))).isDirectory(), true);
+    assert.deepEqual(h.stopCalls, []);
+    assert.deepEqual(h.startCalls, []);
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+test("in-place: apply takes over at the same path — never renames, removes the app owner record", async () => {
+  const f = await fixture({ livePid: true });
+  const markerFile = path.join(f.from, "computer", "host-lifecycle-owner.json");
+  await writeFile(markerFile, '{"formatVersion":1,"owner":"app","enabled":true}\n', "utf8");
+  const h = fakeDeps(f.user);
+  try {
+    const run = await migrateHome({ from: f.from, to: f.from, ...apply }, h.deps, (e) => h.events.push(e));
+    assert.equal(run.outcome, "success");
+    assert.equal(run.mode, "in-place");
+    // The home NEVER moved: same path, same tree.
+    assert.equal((await stat(path.join(f.from, "agents", "a1"))).isDirectory(), true);
+    assert.equal((await stat(path.join(f.from, "computer", "servers", ATTACHED_SERVER_ID))).isDirectory(), true);
+    await assert.rejects(() => stat(f.to), "in-place must not create the ~/.slock target");
+    // Lifecycle: app owner record removed, service started at the SAME home.
+    await assert.rejects(() => readFile(markerFile));
+    assert.deepEqual(h.stopCalls, [f.from]);
+    assert.deepEqual(h.startCalls, [f.from]);
+    const start = h.events.filter((e) => e.step === "start").at(-1);
+    assert.equal(start?.detail?.lifecycleTakeover, true);
+    assert.equal(start?.detail?.mode, "in-place");
+    const result = JSON.parse(await readFile(migrateResultPath(f.from), "utf8")) as {
+      result: string; mode: string; serviceState: string;
+    };
+    assert.equal(result.result, "success");
+    assert.equal(result.mode, "in-place");
+    assert.equal(result.serviceState, "running");
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+test("in-place: failure rolls back the carrier and the owner record byte-for-byte", async () => {
+  const f = await fixture({ livePid: true });
+  const markerFile = path.join(f.from, "computer", "host-lifecycle-owner.json");
+  const markerBefore = '{"formatVersion":1,"owner":"app","enabled":true}\n';
+  await writeFile(markerFile, markerBefore, "utf8");
+  const h = fakeDeps(f.user, { statuses: [{ serviceRunning: true, serverCount: 1, serversOnline: false }] });
+  try {
+    const run = await migrateHome({ from: f.from, to: f.from, ...apply }, h.deps, (e) => h.events.push(e));
+    assert.equal(run.outcome, "rolled_back");
+    assert.equal((await stat(path.join(f.from, "agents", "a1"))).isDirectory(), true);
+    assert.equal(
+      await readFile(f.carrierPlist!, "utf8"),
+      await readFile(path.join(f.from, "computer", "migrate-backup", "build.raft.computer.test-carrier.plist"), "utf8"),
+    );
+    assert.equal(await readFile(markerFile, "utf8"), markerBefore);
+    const launchctl = h.launchctlCalls.map((c) => c.join(" "));
+    assert.ok(launchctl.includes(`bootstrap gui/501 ${f.carrierPlist}`));
+    assert.equal(h.startCalls[h.startCalls.length - 1], f.from);
+    const result = JSON.parse(await readFile(migrateResultPath(f.from), "utf8")) as { result: string; mode: string };
+    assert.equal(result.result, "rolled_back");
+    assert.equal(result.mode, "in-place");
   } finally {
     await rm(f.root, { recursive: true, force: true });
   }
