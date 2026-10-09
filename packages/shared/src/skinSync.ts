@@ -1,4 +1,10 @@
-// Account sync for the desktop skin (#mobile-skin task #2).
+// Account sync for the skin, shared by desktop and mobile (#mobile-skin task #2).
+//
+// Pure logic: no DOM, no localStorage, no network, no imports. Storage, the
+// "which skin ids exist" check and the PATCH are injected through
+// SkinSyncDeps, so each app wires its own (desktop: localStorage + web auth
+// store; mobile: local file/SecureStore + its API client). Import by file path
+// (`@botiverse/raft-shared/src/skinSync.ts`), not through the barrel.
 //
 // The account's `preferredSkin` (server) and this device's localStorage value
 // are reconciled like this:

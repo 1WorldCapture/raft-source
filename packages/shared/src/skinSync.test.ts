@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createSkinSync } from "./skinSync.ts";
+import { createSkinSync } from "./skinSync.js";
 
 const KNOWN = new Set(["signal", "amber", "rose", "sky"]);
 
