@@ -33,8 +33,13 @@ export function skinRoles(id: string = DEFAULT_SKIN_ID): SkinRoles {
 }
 
 let currentId: SkinId = DEFAULT_SKIN_ID;
+/** Saved on this device. Null until a pick or an account value is stored — the default alone is not a pick. */
+let savedExplicit: SkinId | null = null;
 const listeners = new Set<() => void>();
+const userPickListeners = new Set<(id: SkinId) => void>();
 let writeSkin: (id: SkinId) => void = () => {};
+let readPending: () => boolean = () => false;
+let writePending: (value: boolean) => void = () => {};
 
 /**
  * Install the local store and apply a previously saved id before the first paint.
@@ -59,21 +64,83 @@ export function bindSkinStorage(storage: {
     return;
   }
   const id = raw?.trim() ?? "";
-  if (!isSkinId(id) || id === currentId) return;
+  if (!id) {
+    savedExplicit = null;
+    return;
+  }
+  if (!isSkinId(id)) return;
+  savedExplicit = id;
+  if (id === currentId) return;
   currentId = id;
   for (const listener of listeners) listener();
+}
+
+/** The skin stored on this device, or null when this device has never kept one. */
+export function explicitSkinId(): string | null {
+  return savedExplicit;
+}
+
+export function onUserSkinChange(listener: (id: SkinId) => void): () => void {
+  userPickListeners.add(listener);
+  return () => userPickListeners.delete(listener);
+}
+
+export function bindSkinPending(storage: {
+  read: () => boolean;
+  write: (value: boolean) => void;
+}): void {
+  readPending = () => {
+    try {
+      return storage.read();
+    } catch {
+      return false;
+    }
+  };
+  writePending = (value) => {
+    try {
+      storage.write(value);
+    } catch {
+      // The pick still applies; the next launch retries from the skin file.
+    }
+  };
+}
+
+export function getSkinPending(): boolean {
+  return readPending();
+}
+
+export function setSkinPending(value: boolean): void {
+  writePending(value);
 }
 
 export function getSkinId(): SkinId {
   return currentId;
 }
 
+function remember(next: SkinId): void {
+  savedExplicit = next;
+  writeSkin(next);
+  if (next === currentId) return;
+  currentId = next;
+  for (const listener of listeners) listener();
+}
+
 export function setSkin(id: string): void {
   const next = skinById(id).id;
   if (next === currentId) return;
-  currentId = next;
-  writeSkin(next);
-  for (const listener of listeners) listener();
+  remember(next);
+}
+
+/** A tap in the switcher. Counts even when the skin is already showing, so the default can be chosen on purpose. */
+export function pickSkin(id: string): void {
+  const next = skinById(id).id;
+  remember(next);
+  for (const listener of userPickListeners) listener(next);
+}
+
+/** Apply a skin that came from the account. Stored for the next cold start, and not reported as a user pick. */
+export function adoptSkin(id: string): void {
+  remember(skinById(id).id);
 }
 
 function subscribe(listener: () => void): () => void {

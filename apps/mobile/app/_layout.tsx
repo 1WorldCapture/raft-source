@@ -12,6 +12,7 @@ import { SessionProvider, useSession } from "../src/state/session";
 import { useRaftStore } from "../src/state/store";
 import { AppText } from "../src/ui/text";
 import { ConnectionBanner } from "../src/ui/ConnectionBanner";
+import { MobileSkinSync } from "../src/ui/MobileSkinSync";
 import { useSkin } from "../src/ui/skin";
 import { colors } from "../src/ui/theme";
 import { color } from "../src/ui/tokens";
@@ -117,6 +118,7 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SessionProvider>
         <LocaleProvider>
+          <MobileSkinSync />
           <SkinStatusBar />
           <SessionRedirect />
           <AccountNotice />

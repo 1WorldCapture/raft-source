@@ -1,9 +1,10 @@
 import { File, Paths } from "expo-file-system";
-import { bindSkinStorage } from "./skin";
+import { bindSkinPending, bindSkinStorage } from "./skin";
 
-// One local file, read synchronously so the first painted frame already uses
-// the saved skin. Server sync is a later step, after preferredSkin is on dev.
+// Read synchronously so the first painted frame already uses the saved skin.
+// The pending file is the unsent-pick flag createSkinSync retries after login or when the network returns.
 const FILE_NAME = "raft-mobile-skin";
+const PENDING_NAME = "raft-mobile-skin-pending";
 
 function skinFile(): File | null {
   try {
@@ -24,5 +25,31 @@ bindSkinStorage({
     if (!file) return;
     if (!file.exists) file.create();
     file.write(id);
+  },
+});
+
+function pendingFile(): File | null {
+  try {
+    return new File(Paths.document, PENDING_NAME);
+  } catch {
+    return null;
+  }
+}
+
+bindSkinPending({
+  read: () => {
+    const file = pendingFile();
+    if (!file?.exists) return false;
+    return file.textSync().trim() === "1";
+  },
+  write: (value) => {
+    const file = pendingFile();
+    if (!file) return;
+    if (!value) {
+      if (file.exists) file.delete();
+      return;
+    }
+    if (!file.exists) file.create();
+    file.write("1");
   },
 });

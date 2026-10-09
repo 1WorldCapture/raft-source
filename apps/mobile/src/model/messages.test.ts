@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseCreatedAt, parseMessage, parseThreadSummaries, mergeMessages } from "./messages.ts";
+import { parseCreatedAt, parseMessage, parseThreadSummaries, mergeMessages, parseUser } from "./messages.ts";
+
+test("parseUser keeps a missing preferredSkin distinct from an unset one", () => {
+  assert.equal(parseUser({ id: "u1" })?.preferredSkin, undefined);
+  assert.equal(parseUser({ id: "u1", preferredSkin: null })?.preferredSkin, null);
+  assert.equal(parseUser({ id: "u1", preferredSkin: " rose " })?.preferredSkin, "rose");
+  assert.equal(parseUser({ id: "u1", preferredSkin: "" })?.preferredSkin, null);
+});
 
 test("parseCreatedAt accepts a Postgres timestamp Hermes would reject", () => {
   assert.equal(parseCreatedAt("2026-09-25 19:01:14.059169-07"), "2026-09-26T02:01:14.059Z");

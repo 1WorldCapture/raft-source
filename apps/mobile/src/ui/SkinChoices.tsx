@@ -1,7 +1,7 @@
 import { Pressable, StyleSheet, View } from "react-native";
 import { SKINS } from "@botiverse/raft-shared/src/skins.ts";
 import { AppText } from "./text";
-import { setSkin, useSkin } from "./skin";
+import { pickSkin, useSkin } from "./skin";
 import { border, color } from "./tokens";
 
 /** Swatch, name, and a check on the current skin. Same rows in the menu and in Settings. */
@@ -17,7 +17,7 @@ export function SkinChoices({ onPick }: { onPick?: () => void }) {
             accessibilityRole="button"
             accessibilityState={{ selected }}
             onPress={() => {
-              setSkin(skin.id);
+              pickSkin(skin.id);
               onPick?.();
             }}
             style={[styles.row, selected ? [styles.selected, { backgroundColor: current.chrome }] : null]}
