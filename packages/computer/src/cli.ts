@@ -481,6 +481,23 @@ program
     });
   }));
 
+// --- migrate-home (extract §10–§11: unattended move to the default home) ---
+// Dry-run by default; `--apply` performs stop → mv → repoint ~/.slock-raft →
+// remove home-env LaunchAgent → start standalone → self-check, journalling
+// every mutation and rolling back automatically on failure. The result file
+// (<home>/computer/migrate-result.json) feeds `status --json`.migration.
+program
+  .command("migrate-home")
+  .description("Move this Computer's data to the default location (~/.slock) in one unattended step, with a self-check and automatic rollback. Checks and prints the plan without changing anything unless --apply is passed.")
+  .option("--from <dir>", "source home to move away from (default: the home this Computer uses now)")
+  .option("--to <dir>", "target home (default: ~/.slock)")
+  .option("--apply", "carry out the move (without this flag, the command only checks and prints the plan)")
+  .option("--json", "newline-delimited JSON events (interface v1); the final line carries the result summary")
+  .action(withCliExit(async (opts: { from?: string; to?: string; apply?: boolean; json?: boolean }) => {
+    const { runMigrateHomeCommand } = await import("./migrateHome.js");
+    await runMigrateHomeCommand(opts);
+  }));
+
 // --- doctor (aggregate per-server health) ---
 program
   .command("doctor")
