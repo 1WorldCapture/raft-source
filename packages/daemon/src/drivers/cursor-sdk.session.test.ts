@@ -1250,3 +1250,81 @@ test("late steer ack: settles unknown at the bound, holds the gate, then release
     cleanup();
   }
 });
+
+// ── Stream coalescing: whole blocks to the APM, per-chunk progress kept ─────
+
+const trajectoryKinds = (captured: CapturedRun) =>
+  captured.events
+    .filter((event) => event.kind === "text" || event.kind === "thinking" || event.kind === "tool_call" || event.kind === "turn_end" || event.kind === "internal_progress")
+    .map((event) => (event.kind === "text" || event.kind === "thinking" ? `${event.kind}:${event.text}` : event.kind));
+
+test("streamed chunks become one block, every chunk still signals progress, and the last block precedes turn_end", async () => {
+  const script = new ScriptedHostConnection();
+  const { deps, cleanup } = makeSessionDeps({ connection: script });
+  const { session } = makeSession(deps);
+  const captured = capture(session);
+  try {
+    await session.start({ text: "first turn" });
+    const runId = (script.runs()[0] as { runId: string }).runId;
+    for (const text of ["I'll read the new PM message", " from the Raft thread", " where I was mentioned."]) {
+      script.deliver({ kind: "run_event", payload: { type: "assistant_thinking", text } });
+    }
+    script.deliver({ kind: "run_event", payload: { type: "assistant_text", text: "\n\n" } }); // blank chunk: progress only
+    script.deliver({ kind: "run_event", payload: { type: "assistant_text", text: "Done." } });
+    await waitFor(() => (captured.events.filter((event) => event.kind === "internal_progress").length >= 5 ? true : undefined));
+    // Nothing visible yet except the thinking block flushed by the kind switch.
+    assert.deepEqual(captured.events.filter((event) => event.kind === "thinking"), [
+      { kind: "thinking", text: "I'll read the new PM message from the Raft thread where I was mentioned." },
+    ]);
+    script.deliver({ kind: "run_settled", runId, finishReason: "completed" });
+    await waitFor(() => (kind(captured, "turn_end").length >= 1 ? true : undefined));
+    const order = trajectoryKinds(captured);
+    assert.equal(order.filter((entry) => entry === "internal_progress").length, 5, "one progress signal per chunk");
+    assert.deepEqual(order.filter((entry) => entry !== "internal_progress"), [
+      "thinking:I'll read the new PM message from the Raft thread where I was mentioned.",
+      "text:Done.",
+      "turn_end",
+    ]);
+    assert.deepEqual(kind(captured, "internal_progress")[0], {
+      kind: "internal_progress", source: "cursor_sdk_stream", itemType: "assistant_thinking", payloadBytes: 28,
+    });
+    await session.stop({ reason: "test-done" });
+  } finally {
+    cleanup();
+  }
+});
+
+test("a tool call flushes the text before it; blank and ellipsis-only blocks are dropped", async () => {
+  const script = new ScriptedHostConnection();
+  const { deps, cleanup } = makeSessionDeps({ connection: script });
+  const { session } = makeSession(deps);
+  const captured = capture(session);
+  try {
+    await session.start({ text: "first turn" });
+    script.deliver({ kind: "run_event", payload: { type: "assistant_thinking", text: "…" } });
+    script.deliver({ kind: "run_event", payload: { type: "assistant_text", text: "Reading the file" } });
+    script.deliver({ kind: "run_event", payload: { type: "tool_call", name: "read", input: {} } });
+    await waitFor(() => (kind(captured, "tool_call").length >= 1 ? true : undefined));
+    const order = trajectoryKinds(captured).filter((entry) => entry !== "internal_progress");
+    assert.deepEqual(order, ["text:Reading the file", "tool_call"], "ellipsis dropped, text emitted before the tool call");
+    await session.stop({ reason: "test-done" });
+  } finally {
+    cleanup();
+  }
+});
+
+test("stop flushes buffered text before the session closes", async () => {
+  const script = new ScriptedHostConnection();
+  const { deps, cleanup } = makeSessionDeps({ connection: script });
+  const { session } = makeSession(deps);
+  const captured = capture(session);
+  try {
+    await session.start({ text: "first turn" });
+    script.deliver({ kind: "run_event", payload: { type: "assistant_text", text: "last words" } });
+    await waitFor(() => (kind(captured, "internal_progress").length >= 1 ? true : undefined));
+    await session.stop({ reason: "test-done" });
+    assert.ok(captured.events.some((event) => event.kind === "text" && event.text === "last words"));
+  } finally {
+    cleanup();
+  }
+});

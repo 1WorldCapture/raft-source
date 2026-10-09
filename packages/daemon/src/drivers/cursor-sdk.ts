@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { CURSOR_SDK_RESUME_UNUSABLE_MARKER } from "../cursorSdk/sessionReset.js";
+import { TrajectoryCoalescer, type TrajectoryCoalescerDeps } from "../cursorSdk/trajectoryCoalescer.js";
 import {
   hydrateRuntimeConfig,
   runtimeConfigToLaunchFields,
@@ -361,6 +362,8 @@ export interface CursorSdkRuntimeSessionDeps {
   /** SIGKILL escalation bound after the stop deadline signal. */
   killEscalationMs?: number;
   nowMs?: () => number;
+  /** Timer seam for the stream coalescer (tests drive it with fake timers). */
+  coalescerTimers?: Pick<TrajectoryCoalescerDeps, "setTimer" | "clearTimer" | "now">;
 }
 
 /**
@@ -412,6 +415,8 @@ export class CursorSdkRuntimeSession implements RuntimeSession {
   private lastRunEventAtMs = 0;
   private currentRunStartedAtMs = 0;
   private readonly stderrTail: string[] = [];
+  /** Merges streamed text/thinking chunks into whole blocks (see trajectoryCoalescer.ts). */
+  private readonly trajectory: TrajectoryCoalescer;
   private submitFailures = 0;
   private submitFailuresSinceMs = 0;
   private submitBackoffUntilMs = 0;
@@ -440,6 +445,15 @@ export class CursorSdkRuntimeSession implements RuntimeSession {
     this.nowMs = deps.nowMs ?? Date.now;
     this.sessionId = ctx.config.sessionId || null;
     this.mappingState.sessionId = this.sessionId;
+    this.trajectory = new TrajectoryCoalescer({
+      ...deps.coalescerTimers,
+      emit: (kind, text) => {
+        this.events.emit(
+          "runtime_event",
+          cursorSdkEventAsParsedEvent(kind === "text" ? { kind: "text", text } : { kind: "thinking", text }),
+        );
+      },
+    });
     this.events.on("stderr", (text: string) => {
       this.stderrTail.push(sanitizeCursorSdkWireText(text).slice(0, 160));
       if (this.stderrTail.length > 3) this.stderrTail.shift();
@@ -890,6 +904,22 @@ export class CursorSdkRuntimeSession implements RuntimeSession {
   private handleRunEvent(payload: unknown): void {
     this.lastRunEventAtMs = this.nowMs();
     const type = (payload as { type?: unknown } | null)?.type;
+    if (type === "assistant_text" || type === "assistant_thinking") {
+      const text = (payload as { text?: unknown }).text;
+      if (typeof text !== "string" || text.length === 0) return;
+      // Every chunk is still progress (stall detection, error-backoff reset);
+      // the visible text is emitted later, merged, by the coalescer.
+      this.events.emit("runtime_event", cursorSdkEventAsParsedEvent({
+        kind: "internal_progress",
+        source: "cursor_sdk_stream",
+        itemType: type,
+        payloadBytes: Buffer.byteLength(text, "utf8"),
+      }));
+      this.trajectory.push(type === "assistant_text" ? "text" : "thinking", text);
+      return;
+    }
+    // Any other run event is a boundary: the text before it is complete.
+    this.trajectory.flush();
     if (type === "diagnostic") {
       const message = (payload as { message?: unknown }).message;
       this.events.emit("stderr", `[cursor-sdk-host] ${sanitizeCursorSdkWireText(message)}`);
@@ -1144,6 +1174,7 @@ export class CursorSdkRuntimeSession implements RuntimeSession {
     error?: { message: string; errorClass?: string };
   }): void {
     const run = this.currentRun;
+    if (run && run.runId === message.runId) this.trajectory.flush();
     if (!run || run.runId !== message.runId) {
       this.events.emit(
         "stderr",
@@ -1168,6 +1199,8 @@ export class CursorSdkRuntimeSession implements RuntimeSession {
     for (const attempt of this.attempts.values()) {
       if (attempt.runId === run.runId && attempt.epoch === this.epoch) return;
     }
+    // The last block must reach the APM before the turn ends (never after idle).
+    this.trajectory.flush();
     run.turnEndEmitted = true;
     if (run.finishReason === "error") {
       this.events.emit("runtime_event", {
@@ -1192,6 +1225,7 @@ export class CursorSdkRuntimeSession implements RuntimeSession {
     reason?: string;
   }): Promise<void> {
     if (this.phase === "closed") return;
+    this.trajectory.flush();
     this.stopReason = opts?.reason;
     this.phase = "stopping";
     // Invalidate inputs and epochs: new sends are refused, and any in-flight
@@ -1311,6 +1345,7 @@ export class CursorSdkRuntimeSession implements RuntimeSession {
         }),
       );
     }
+    this.trajectory.flush();
     const run = this.currentRun;
     if (run && !run.turnEndEmitted) {
       if (!stopping) {
@@ -1336,6 +1371,8 @@ export class CursorSdkRuntimeSession implements RuntimeSession {
 
   private async finalizeClose(info: RuntimeExitInfo): Promise<void> {
     if (this.phase === "closed") return;
+    this.trajectory.flush();
+    this.trajectory.dispose();
     this.phase = "closed";
     // Any attempt still pending at close settles as unknown (bounded honesty:
     // never claim delivered, never claim deferred without evidence).

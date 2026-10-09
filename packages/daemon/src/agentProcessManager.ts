@@ -6082,9 +6082,12 @@ export class AgentProcessManager {
     clearTimeout(pending.timer);
     ap.pendingTrajectory = null;
 
-    const text = pending.text.length > MAX_TRAJECTORY_TEXT
-      ? pending.text.slice(0, MAX_TRAJECTORY_TEXT) + "\u2026"
-      : pending.text;
+    // Whitespace-only rows (stray "\n\n" chunks) and leading/trailing line
+    // breaks only showed up as blank lines in the activity stream.
+    const trimmed = pending.text.trim();
+    const text = trimmed.length > MAX_TRAJECTORY_TEXT
+      ? trimmed.slice(0, MAX_TRAJECTORY_TEXT) + "\u2026"
+      : trimmed;
     if (!text) return;
 
     const entry: TrajectoryEntry = pending.kind === "thinking"

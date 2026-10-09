@@ -10918,6 +10918,29 @@ test("respondToActivityProbe emits daemon.agent.activity.produced trace with exa
   }, { tracer });
 });
 
+test("trajectory rows are trimmed and whitespace-only rows are never persisted", async () => {
+  await withManager(async ({ driver, manager, sent }) => {
+    await manager.startAgent("agent-1", makeConfig());
+    sent.length = 0;
+    const entriesOf = () => sent
+      .filter((msg): msg is Extract<MachineToServerMessage, { type: "agent:activity" }> => msg.type === "agent:activity")
+      .flatMap((msg) => msg.entries ?? [])
+      .filter((entry) => entry.kind === "text" || entry.kind === "thinking");
+
+    driver.parsedLines.set("blank", [{ kind: "thinking", text: "\n\n  \n" }]);
+    driver.processes[0].stdout.emit("data", Buffer.from("blank\n"));
+    await flush();
+    (manager as any).flushPendingTrajectory("agent-1");
+    assert.deepEqual(entriesOf(), [], "whitespace-only thinking creates no row");
+
+    driver.parsedLines.set("padded", [{ kind: "text", text: "\n\n  No reply is needed.\n" }]);
+    driver.processes[0].stdout.emit("data", Buffer.from("padded\n"));
+    await flush();
+    (manager as any).flushPendingTrajectory("agent-1");
+    assert.deepEqual(entriesOf(), [{ kind: "text", text: "No reply is needed." }]);
+  });
+});
+
 test("empty thinking liveness updates do not persist blank trajectory status rows", async () => {
   await withManager(async ({ driver, manager, sent }) => {
     await manager.startAgent("agent-1", makeConfig());

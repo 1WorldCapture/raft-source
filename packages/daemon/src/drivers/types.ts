@@ -167,7 +167,8 @@ export type ParsedEvent =
         | "codex_app_server_notification"
         | "claude_stream_event"
         | "claude_system_status"
-        | "grok_acp_notification";
+        | "grok_acp_notification"
+        | "cursor_sdk_stream";
       itemType?: string;
       payloadBytes?: number;
     }
