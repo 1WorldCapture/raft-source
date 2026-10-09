@@ -933,6 +933,8 @@ if (headlessMode?.mode === "__service") {
           },
         });
         migrationApplying = () => { const p = migration.getState().phase; return p === "applying" || p === "success"; };
+        // Not just the IPC channels: converge/retry/any internal caller is refused inside the host while a move runs.
+        embeddedHost.setControlGate(() => (migrationApplying() ? "The Computer is being moved out of this app. Wait until it finishes." : null));
         registerMigrationIpc(ipcMain, migration);
       }
       // Read-only mode observes + surfaces an already-installed Computer (the

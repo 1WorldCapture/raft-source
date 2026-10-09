@@ -1,10 +1,11 @@
 // "This Computer" card for a machine whose Computer is a standalone `raft-computer` (see standaloneCardLogic.ts).
 // Same slot and look as ThisComputerCard, but it only shows status and Start / Stop / Install / Update:
 // the Computer is not hosted by this app, so closing the app never stops it.
+import { useState } from "react";
 import { Monitor } from "lucide-react";
 import Button from "@web/components/ui/Button";
 import StatusDot from "@web/components/ui/StatusDot";
-import { deriveStandaloneCard, friendlyStandaloneError } from "./standaloneCardLogic";
+import { deriveStandaloneCard, friendlyStandaloneError, type StandaloneAction } from "./standaloneCardLogic";
 import { useStandaloneComputer } from "./useStandaloneComputer";
 
 const DOT_TONE = { ok: "bg-brutal-lime", idle: "bg-gray-400", warn: "bg-brutal-orange", error: "bg-brutal-pink" } as const;
@@ -12,6 +13,8 @@ const DOT_TONE = { ok: "bg-brutal-lime", idle: "bg-gray-400", warn: "bg-brutal-o
 export default function StandaloneComputerCard() {
   const { state, busy, error, run } = useStandaloneComputer();
   const model = deriveStandaloneCard(state);
+  // In-app confirmation: window.confirm is a synchronous native modal that freezes the renderer until answered.
+  const [asking, setAsking] = useState<StandaloneAction | null>(null);
   return (
     <div className="mb-1.5 w-full border-2 border-black bg-white" data-testid="this-computer-card" data-standalone-computer="">
       <div className="flex items-center gap-2.5 px-2.5 py-2">
@@ -33,23 +36,35 @@ export default function StandaloneComputerCard() {
       {error || model.actions.length > 0 ? (
         <div className="border-t-2 border-black/10 px-2.5 py-1.5">
           {error ? <div className="mb-1 text-[11px] font-medium text-brutal-orange">{friendlyStandaloneError(error)}</div> : null}
-          <div className="flex flex-wrap items-center gap-1.5">
-            {model.actions.map((action) => (
-              <Button
-                key={action.id}
-                size="xs"
-                tone={action.primary ? "pink" : undefined}
-                emphasis={action.primary ? "high" : undefined}
-                disabled={busy != null}
-                onClick={() => {
-                  if (action.confirm && !window.confirm(action.confirm)) return;
-                  void run(action.id);
-                }}
-              >
-                {busy === action.id ? "Working…" : action.label}
-              </Button>
-            ))}
-          </div>
+          {asking ? (
+            <div data-testid="standalone-confirm">
+              <p className="mb-1 text-[11px] font-medium text-black">{asking.confirm}</p>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <Button size="xs" tone="pink" emphasis="high" disabled={busy != null} onClick={() => { const a = asking; setAsking(null); void run(a.id); }}>
+                  Yes, continue
+                </Button>
+                <Button size="xs" onClick={() => setAsking(null)}>Back</Button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-wrap items-center gap-1.5">
+              {model.actions.map((action) => (
+                <Button
+                  key={action.id}
+                  size="xs"
+                  tone={action.primary ? "pink" : undefined}
+                  emphasis={action.primary ? "high" : undefined}
+                  disabled={busy != null}
+                  onClick={() => {
+                    if (action.confirm) setAsking(action);
+                    else void run(action.id);
+                  }}
+                >
+                  {busy === action.id ? "Working…" : action.label}
+                </Button>
+              ))}
+            </div>
+          )}
         </div>
       ) : null}
     </div>

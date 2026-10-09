@@ -192,7 +192,21 @@ class ComputerHost {
     } finally { this.connecting = false; settle(); }
   }
 
+  /**
+   * While set and returning a message, every control operation (start/stop/restart/recycle/converge/enable/upgrade,
+   * whoever calls it: IPC, converge, retry) is refused. The one-click migration uses it so nothing can restart the
+   * service in the home that is being moved. Quit attempts are never gated.
+   */
+  private controlGate: (() => string | null) | null = null;
+  setControlGate(gate: (() => string | null) | null): void { this.controlGate = gate; }
+
   private async control<T>(operation: () => Promise<T>): Promise<T> {
+    const blocked = this.controlGate?.();
+    if (blocked) throw new Error(blocked);
+    return this.track(operation);
+  }
+
+  private async track<T>(operation: () => Promise<T>): Promise<T> {
     this.controlInFlight++;
     try { return await operation(); }
     finally { this.controlInFlight--; }
@@ -203,7 +217,7 @@ class ComputerHost {
   async runQuitAttempt(attempt: () => Promise<boolean>): Promise<boolean> {
     // Keep the selected root stable through confirmation and the full ladder,
     // including the window after stop() has returned but tools remain alive.
-    return this.control(attempt);
+    return this.track(attempt);
   }
 
   async assertCanControl(): Promise<void> {

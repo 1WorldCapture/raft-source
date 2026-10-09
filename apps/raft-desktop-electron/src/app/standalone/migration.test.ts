@@ -223,3 +223,14 @@ test("plan detects in-place from the preflight (mode, or from == to)", async () 
   const { c } = controller({ runs: [PLANNED] });
   assert.equal((await c.plan()).inPlace, false);
 });
+
+test("an unexpected exception anywhere becomes an error state, never a stuck dialog", async () => {
+  const c = new MigrationController({
+    available: true, getFromHome: async () => "/h", ensureBinary: async () => "/b",
+    run: async () => { throw new Error("kaboom"); },
+    afterSuccess: async () => ({ warnings: [] }), publish: () => undefined,
+  });
+  const s = await c.plan();
+  assert.deepEqual([s.phase, s.error], ["error", "kaboom"]);
+  assert.equal(c.reset().phase, "idle", "and the dialog can be dismissed / retried");
+});
