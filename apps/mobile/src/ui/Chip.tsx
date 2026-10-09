@@ -1,9 +1,11 @@
 import { StyleSheet, View } from "react-native";
 import { AppText } from "./text";
+import { useSkin } from "./skin";
 import { border, color, radius } from "./tokens";
 
 export function Chip({ label, kind }: { label: string; kind: "mention" | "channel" | "thread" }) {
-  const background = kind === "mention" ? color.yellow : kind === "channel" ? color.pink : color.cyan;
+  const skin = useSkin();
+  const background = kind === "mention" ? skin.signal : kind === "channel" ? color.pink : color.cyan;
   return (
     <View style={[styles.chip, { backgroundColor: background }]}>
       <AppText style={styles.label}>{label}</AppText>

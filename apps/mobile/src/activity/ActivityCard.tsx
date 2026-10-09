@@ -6,6 +6,7 @@ import { StatusIcon } from "../tasks/TasksView";
 import { HardShadow } from "../ui/shadow";
 import { InlineRichText } from "../ui/richText";
 import { AppText } from "../ui/text";
+import { useSkinStyles, type SkinRoles } from "../ui/skin";
 import { border, color, shadowOffset } from "../ui/tokens";
 import {
   activityBadges,
@@ -117,6 +118,7 @@ export function ActivityCard({
 
 function ActivityBadgeView({ badge }: { badge: ActivityBadge }) {
   const t = useT();
+  const skinStyle = useSkinStyles(activitySkin);
   if (badge.kind === "task") {
     return (
       <View style={[styles.badge, { backgroundColor: taskStatusFill(badge.status) }]}>
@@ -142,7 +144,7 @@ function ActivityBadgeView({ badge }: { badge: ActivityBadge }) {
   }
   if (badge.kind === "mention") {
     return (
-      <View style={[styles.badge, styles.badgeMention]}>
+      <View style={[styles.badge, skinStyle.badgeMention]}>
         <AtSign color={color.ink} size={10} strokeWidth={2.5} />
         <AppText style={styles.badgeText}>{t("thread.row.mentionBadgeLabel")}</AppText>
       </View>
@@ -208,7 +210,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
   },
   badgeOutline: { backgroundColor: color.page },
-  badgeMention: { backgroundColor: color.yellow },
   badgeUnread: { backgroundColor: color.pink },
   badgeText: { color: color.ink, fontSize: 10, fontWeight: "700", lineHeight: 12 },
   doneSlot: { position: "absolute", right: 12, top: 12 },
@@ -233,3 +234,9 @@ const styles = StyleSheet.create({
   boneLong: { height: 14, width: "78%" },
   boneMid: { width: "62%" },
 });
+
+function activitySkin(skin: SkinRoles) {
+  return StyleSheet.create({
+    badgeMention: { backgroundColor: skin.signal },
+  });
+}

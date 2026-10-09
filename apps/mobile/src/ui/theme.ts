@@ -8,7 +8,6 @@ export const colors = {
   muted: color.muted,
   line: color.border,
   accent: color.pink,
-  accentSoft: color.yellow,
   danger: color.red,
   mine: color.pink,
   mineText: color.white,

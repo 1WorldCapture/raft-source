@@ -2,6 +2,7 @@ import { Pressable, StyleSheet, View, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Hash, MessageSquare, Sparkles } from "lucide-react-native";
 import { useT } from "../i18n/provider";
+import { useSkinStyles, type SkinRoles } from "../ui/skin";
 import { AppText } from "../ui/text";
 import { color } from "../ui/tokens";
 
@@ -28,6 +29,7 @@ export function HomeTabBar({
   const { height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const compact = height <= 600;
+  const skinStyle = useSkinStyles(tabSkin);
   return (
     <View style={[styles.bar, { paddingBottom: Math.min(insets.bottom, 34) }]}>
       {state.routes.map((route, index) => {
@@ -39,7 +41,7 @@ export function HomeTabBar({
             key={route.key}
             accessibilityRole="button"
             onPress={() => navigation.navigate(route.name)}
-            style={[styles.tab, active ? styles.active : null, index < state.routes.length - 1 ? styles.divider : null]}
+            style={[styles.tab, active ? skinStyle.active : null, index < state.routes.length - 1 ? styles.divider : null]}
           >
             {compact || !Icon ? null : <Icon color={color.ink} size={18} />}
             <AppText style={styles.label}>{t(LABELS[name])}</AppText>
@@ -58,7 +60,12 @@ const styles = StyleSheet.create({
     flexDirection: "row",
   },
   tab: { alignItems: "center", flex: 1, gap: 2, justifyContent: "center", paddingVertical: 8 },
-  active: { backgroundColor: color.yellow },
   divider: { borderRightColor: color.border, borderRightWidth: 2 },
   label: { color: color.ink, fontSize: 10, fontWeight: "700", letterSpacing: 0.6 },
 });
+
+function tabSkin(skin: SkinRoles) {
+  return StyleSheet.create({
+    active: { backgroundColor: skin.signal },
+  });
+}

@@ -12,6 +12,7 @@ import { SessionProvider, useSession } from "../src/state/session";
 import { useRaftStore } from "../src/state/store";
 import { AppText } from "../src/ui/text";
 import { ConnectionBanner } from "../src/ui/ConnectionBanner";
+import { useSkin } from "../src/ui/skin";
 import { colors } from "../src/ui/theme";
 import { color } from "../src/ui/tokens";
 
@@ -43,10 +44,11 @@ function AccountNotice() {
   const session = useSession();
   const t = useT();
   const [sending, setSending] = useState(false);
+  const skin = useSkin();
   if (!notice) return null;
   const profile = notice === "profile-setup";
   return (
-    <View style={{ backgroundColor: color.yellow, paddingHorizontal: 16, paddingVertical: 10 }}>
+    <View style={{ backgroundColor: skin.chrome, paddingHorizontal: 16, paddingVertical: 10 }}>
       <AppText style={{ color: color.ink }}>
         {profile ? t("mobile.account.profile") : t("mobile.account.verify")}
       </AppText>
@@ -66,12 +68,13 @@ function AccountNotice() {
 
 function AppStack() {
   const t = useT();
+  const skin = useSkin();
   return (
     <Stack
       screenOptions={{
         headerShadowVisible: false,
         headerTintColor: colors.accent,
-        headerStyle: { backgroundColor: color.yellow },
+        headerStyle: { backgroundColor: skin.chrome },
         headerTitleStyle: { fontFamily: "SpaceGrotesk-700" },
         contentStyle: { backgroundColor: colors.bg },
       }}

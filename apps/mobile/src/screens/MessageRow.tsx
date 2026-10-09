@@ -9,6 +9,7 @@ import { useRaftStore } from "../state/store";
 import { AppText } from "../ui/text";
 import { RichText } from "../ui/richText";
 import { HardShadow } from "../ui/shadow";
+import { useSkinStyles, type SkinRoles } from "../ui/skin";
 import { color, fontSize, radius, shadowOffset } from "../ui/tokens";
 import type { MessageGroupState } from "./messageGrouping";
 import { agentHasRead, type PeerRead } from "./readReceipt";
@@ -114,6 +115,7 @@ export const MessageRow = memo(function MessageRow({
   replyTime?: (createdAt: string) => string;
   highlighted?: boolean;
 }) {
+  const skinStyle = useSkinStyles(messageSkin);
   const [tall, setTall] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const system = message.messageType === "system";
@@ -220,7 +222,7 @@ export const MessageRow = memo(function MessageRow({
             })}
             <View style={styles.footer}>
               {linkedTask ? (
-                <View style={[styles.capsule, styles.taskChip]}>
+                <View style={[styles.capsule, styles.taskChip, skinStyle.taskChip]}>
                   <AppText style={styles.capsuleText}>{linkedTask.claimedByName ? `task #${linkedTask.taskNumber} @${linkedTask.claimedByName}` : `task #${linkedTask.taskNumber}`}</AppText>
                 </View>
               ) : null}
@@ -414,7 +416,7 @@ const styles = StyleSheet.create({
   footer: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 6 },
   capsule: { alignItems: "center", borderRadius: radius.chip, height: 20, justifyContent: "center", paddingHorizontal: 6 },
   capsuleText: { color: color.ink, fontSize: 12, fontWeight: "700" },
-  taskChip: { backgroundColor: color.yellowSoft, borderColor: color.border, borderWidth: 1 },
+  taskChip: { borderColor: color.border, borderWidth: 1 },
   saved: { backgroundColor: color.orangeSoft, borderColor: color.border, borderWidth: 1 },
   reaction: { backgroundColor: color.previewSurface },
   mine: { backgroundColor: color.pinkSoft },
@@ -429,3 +431,9 @@ const styles = StyleSheet.create({
   retryRow: { flexDirection: "row", gap: 12, marginTop: 4 },
   retry: { color: color.red, fontWeight: "700" },
 });
+
+function messageSkin(skin: SkinRoles) {
+  return StyleSheet.create({
+    taskChip: { backgroundColor: skin.signalSoft },
+  });
+}

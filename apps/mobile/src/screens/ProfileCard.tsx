@@ -1,6 +1,7 @@
 import { Modal, Pressable, StyleSheet } from "react-native";
 import { Avatar } from "../ui/Avatar";
 import { AppText } from "../ui/text";
+import { useSkinStyles, type SkinRoles } from "../ui/skin";
 import { color } from "../ui/tokens";
 
 export function ProfileCard({
@@ -20,6 +21,7 @@ export function ProfileCard({
   onClose: () => void;
   onMessage: () => void;
 }) {
+  const skinStyle = useSkinStyles(profileSkin);
   return (
     <Modal animationType="fade" onRequestClose={onClose} transparent visible>
       <Pressable onPress={onClose} style={styles.scrim}>
@@ -27,7 +29,7 @@ export function ProfileCard({
           <Avatar avatarUrl={avatarUrl} kind={kind} name={name} size={64} />
           <AppText style={styles.name}>{name}</AppText>
           {description ? <AppText style={styles.body}>{description}</AppText> : null}
-          <Pressable onPress={onMessage} style={styles.button}>
+          <Pressable onPress={onMessage} style={[styles.button, skinStyle.button]}>
             <AppText style={styles.buttonText}>{dmLabel}</AppText>
           </Pressable>
         </Pressable>
@@ -41,6 +43,12 @@ const styles = StyleSheet.create({
   card: { alignItems: "center", backgroundColor: color.page, borderColor: color.border, borderWidth: 2, gap: 12, padding: 24, width: "100%" },
   name: { color: color.ink, fontSize: 18, fontWeight: "700" },
   body: { color: color.mutedStrong, fontSize: 14, textAlign: "center" },
-  button: { backgroundColor: color.yellow, borderColor: color.border, borderWidth: 2, paddingHorizontal: 16, paddingVertical: 10 },
+  button: { borderColor: color.border, borderWidth: 2, paddingHorizontal: 16, paddingVertical: 10 },
   buttonText: { color: color.ink, fontSize: 14, fontWeight: "700" },
 });
+
+function profileSkin(skin: SkinRoles) {
+  return StyleSheet.create({
+    button: { backgroundColor: skin.signal },
+  });
+}

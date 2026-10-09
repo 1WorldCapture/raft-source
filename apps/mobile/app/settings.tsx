@@ -9,6 +9,7 @@ import { userLabel } from "../src/model/messages";
 import { useSession } from "../src/state/session";
 import { PanelHeader } from "../src/ui/PanelHeader";
 import { AppText } from "../src/ui/text";
+import { useSkinStyles, type SkinRoles } from "../src/ui/skin";
 import { color, fontSize } from "../src/ui/tokens";
 
 const FONT_SIZES = [
@@ -21,6 +22,7 @@ export default function SettingsScreen() {
   const session = useSession();
   const router = useRouter();
   const t = useT();
+  const skinStyle = useSkinStyles(choiceSkin);
   const [error, setError] = useState<string | null>(null);
   const font = session.user?.preferredMessageBodyFontSize || "md";
   const language = resolveLocale(session.user?.displayLanguage, getLocales()[0]?.languageTag ?? null);
@@ -44,17 +46,17 @@ export default function SettingsScreen() {
       <AppText style={styles.section}>{t("settings.appearance.fontSizeAria")}</AppText>
       <View style={styles.choices}>
         {FONT_SIZES.map((item) => (
-          <Pressable key={item.id} onPress={() => void save({ preferredMessageBodyFontSize: item.id })} style={[styles.choice, font === item.id ? styles.current : null]}>
+          <Pressable key={item.id} onPress={() => void save({ preferredMessageBodyFontSize: item.id })} style={[styles.choice, font === item.id ? skinStyle.current : null]}>
             <AppText style={styles.choiceLabel}>{t(item.label)}</AppText>
           </Pressable>
         ))}
       </View>
       <AppText style={styles.section}>{t("settings.language.sectionLabel")}</AppText>
       <View style={styles.choices}>
-        <Pressable onPress={() => void save({ displayLanguage: "en" })} style={[styles.choice, language === "en" ? styles.current : null]}>
+        <Pressable onPress={() => void save({ displayLanguage: "en" })} style={[styles.choice, language === "en" ? skinStyle.current : null]}>
           <AppText style={styles.choiceLabel}>{t("mobile.settings.english")}</AppText>
         </Pressable>
-        <Pressable onPress={() => void save({ displayLanguage: "zh-cn" })} style={[styles.choice, language === "zh-cn" ? styles.current : null]}>
+        <Pressable onPress={() => void save({ displayLanguage: "zh-cn" })} style={[styles.choice, language === "zh-cn" ? skinStyle.current : null]}>
           <AppText style={styles.choiceLabel}>{t("mobile.settings.chinese")}</AppText>
         </Pressable>
       </View>
@@ -76,8 +78,13 @@ const styles = StyleSheet.create({
   section: { ...fontSize.group, color: color.ink, fontWeight: "700", letterSpacing: 0.8, paddingHorizontal: 16, paddingTop: 20, textTransform: "uppercase" },
   choices: { flexDirection: "row", gap: 8, paddingHorizontal: 16, paddingTop: 8 },
   choice: { borderColor: color.border, borderWidth: 2, paddingHorizontal: 12, paddingVertical: 8 },
-  current: { backgroundColor: color.yellow },
   choiceLabel: { ...fontSize.list, color: color.ink, fontWeight: "700" },
   error: { color: color.red, paddingHorizontal: 16, paddingTop: 12 },
   logout: { alignSelf: "flex-start", borderColor: color.border, borderWidth: 2, marginHorizontal: 16, marginTop: 24, paddingHorizontal: 12, paddingVertical: 8 },
 });
+
+function choiceSkin(skin: SkinRoles) {
+  return StyleSheet.create({
+    current: { backgroundColor: skin.signal },
+  });
+}

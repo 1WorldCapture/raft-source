@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ArrowLeft } from "lucide-react-native";
 import { HardShadow } from "./shadow";
 import { AppText } from "./text";
+import { useSkin } from "./skin";
 import { border, color, pressShift, shadowOffset, size } from "./tokens";
 
 /** Mirrors web `PanelHeader`: white bar with a 2px bottom rule; tab roots use the yellow chrome. */
@@ -30,10 +31,11 @@ export function PanelHeader({
 }) {
   const { height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
+  const skin = useSkin();
   const top = safeArea ? insets.top : 0;
   const bar = height <= 600 ? size.headerCompact : size.header;
   return (
-    <View style={[styles.bar, { backgroundColor: tone === "yellow" ? color.yellow : color.page, height: bar + top, paddingTop: top }]}>
+    <View style={[styles.bar, { backgroundColor: tone === "yellow" ? skin.chrome : color.page, height: bar + top, paddingTop: top }]}>
       {onBack ? (
         <HeaderIconButton accessibilityLabel="Back" onPress={onBack}>
           <ArrowLeft color={color.ink} size={16} strokeWidth={2.5} />
@@ -50,8 +52,9 @@ export function PanelHeader({
 }
 
 /** Web `size-icon-header` slot: 36px square, 2px black border, yellow fill by default. */
-export function HeaderIconSlot({ children, fill = color.yellow }: { children: ReactNode; fill?: string }) {
-  return <View style={[styles.slot, { backgroundColor: fill }]}>{children}</View>;
+export function HeaderIconSlot({ children, fill }: { children: ReactNode; fill?: string }) {
+  const skin = useSkin();
+  return <View style={[styles.slot, { backgroundColor: fill ?? skin.chrome }]}>{children}</View>;
 }
 
 /** Bordered 36px header button with the 2px hard shadow and press shift used on web. */
