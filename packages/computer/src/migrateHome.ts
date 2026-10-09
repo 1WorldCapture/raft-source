@@ -267,6 +267,8 @@ export interface MigratePreflight {
   desiredState: "running" | "stopped";
   agentDirs: number;
   serverDirs: number;
+  /** Real attachments — gates whether the start step can run the service. */
+  attachments: string[];
   alias: { path: string; currentTarget: string } | null;
   homeEnv: { path: string; content: string } | null;
   sourceCarriers: SourceCarrierInfo[];
@@ -367,6 +369,11 @@ export async function preflightMigrateHome(
   const serviceWasRunning = pid !== null && isProcessAlive(pid);
   const agentDirs = await countDirs(path.join(fromReal, "agents"));
   const serverDirs = await countDirs(path.join(fromReal, "computer", "servers"));
+  // Real attachments (parseable runner.state.json), not just directory
+  // counts: `start` refuses to run a service with zero attachments
+  // (NO_ATTACHMENT), so a fresh-install home must converge-only.
+  const { listAttachedServerIds } = await import("./serverState.js");
+  const attachments = await listAttachedServerIds(fromReal);
 
   // Login items pointing at the source home (CLI carrier or desktop item):
   // booting these out BEFORE the stop is what keeps launchd (KeepAlive /
@@ -383,6 +390,7 @@ export async function preflightMigrateHome(
     desiredState,
     agentDirs,
     serverDirs,
+    attachments,
     aliasRepoint: alias !== null,
     homeEnvRemoval: homeEnv !== null,
     sourceCarriers: sourceCarriers.map((c) => c.label),
@@ -404,6 +412,7 @@ export async function preflightMigrateHome(
     desiredState,
     agentDirs,
     serverDirs,
+    attachments,
     alias,
     homeEnv,
     sourceCarriers,
@@ -446,8 +455,22 @@ export async function migrateHome(
       ["sessions", "planned", { note: "rename ~/.claude/projects dirs whose encoded name starts with the old home" }],
       ["home-env", pre.homeEnv ? "planned" : "skipped", pre.homeEnv ? { path: pre.homeEnv.path } : { reason: "no home-env LaunchAgent" }],
       ["backup", pre.sourceCarriers.length > 0 || pre.homeEnv ? "planned" : "skipped", { dir: "<to>/computer/migrate-backup" }],
-      ["start", pre.desiredState === "running" ? "planned" : "skipped", pre.desiredState === "running" ? undefined : { reason: 'desiredState is "stopped"; the login item is converged but the service stays stopped' }],
-      ["self-check", pre.desiredState === "running" ? "planned" : "skipped", pre.desiredState === "running" ? { agentDirs: pre.agentDirs, serverDirs: pre.serverDirs } : undefined],
+      [
+        "start",
+        pre.desiredState === "running" && pre.attachments.length > 0 ? "planned" : "skipped",
+        pre.desiredState !== "running"
+          ? { reason: 'desiredState is "stopped"; the login item is converged but the service stays stopped' }
+          : pre.attachments.length === 0
+            ? { reason: "no server attachments — the login item is converged but there is nothing to start" }
+            : undefined,
+      ],
+      [
+        "self-check",
+        pre.desiredState === "running" && pre.attachments.length > 0 ? "planned" : "skipped",
+        pre.desiredState === "running" && pre.attachments.length > 0
+          ? { agentDirs: pre.agentDirs, serverDirs: pre.serverDirs, attachments: pre.attachments.length }
+          : undefined,
+      ],
     ];
     for (const [step, status, detail] of planned) {
       record({ step, status, detail });
@@ -737,10 +760,14 @@ export async function migrateHome(
   }
 
   // Step 8 — start standalone at the new home (or converge the login item
-  // only, preserving a stopped-by-user service). The undo entry is journalled
-  // BEFORE the action: a start that fails halfway can still leave a process
-  // at the target home, and the rollback must stop it before the move back.
-  if (pre.desiredState === "running") {
+  // only, preserving a stopped-by-user service, or when the home has zero
+  // attachments — `start` refuses to run a service with nothing attached, so
+  // a fresh-install home converges the carrier and reports "down"). The undo
+  // entry is journalled BEFORE the action: a start that fails halfway can
+  // still leave a process at the target home, and the rollback must stop it
+  // before the move back.
+  const shouldStartService = pre.desiredState === "running" && pre.attachments.length > 0;
+  if (shouldStartService) {
     if (
       !(await runStep("start", async () => {
         journal.push({
@@ -761,6 +788,10 @@ export async function migrateHome(
       return rollbackAndFinish();
     }
   } else {
+    const reason =
+      pre.desiredState !== "running"
+        ? 'desiredState is "stopped"'
+        : "no server attachments — nothing to start";
     if (
       !(await runStep("start", async () => {
         journal.push({
@@ -774,15 +805,16 @@ export async function migrateHome(
           },
         });
         await convergeCarrierAt(pre.to, "enabled");
-        return { convergedOnly: true, reason: 'desiredState is "stopped"' };
+        return { convergedOnly: true, reason };
       }))
     ) {
       return rollbackAndFinish();
     }
   }
 
-  // Step 9 — self-check (only meaningful when the service should be running).
-  if (pre.desiredState === "running") {
+  // Step 9 — self-check (only meaningful when the service should be running
+  // and there is something to run).
+  if (shouldStartService) {
     if (
       !(await runStep("self-check", async () => {
         const timeoutMs = deps.selfCheckTimeoutMs ?? 120_000;
@@ -809,10 +841,21 @@ export async function migrateHome(
       return rollbackAndFinish();
     }
   } else {
-    record({ step: "self-check", status: "skipped", detail: { reason: 'desiredState is "stopped"' } });
+    record({
+      step: "self-check",
+      status: "skipped",
+      detail: {
+        reason: pre.desiredState !== "running" ? 'desiredState is "stopped"' : "no server attachments",
+      },
+    });
   }
 
-  return finish("success", pre.desiredState === "running" ? "running" : "stopped-by-user", null);
+  const successServiceState: MigrateResultFile["serviceState"] = shouldStartService
+    ? "running"
+    : pre.desiredState === "stopped"
+      ? "stopped-by-user"
+      : "down";
+  return finish("success", successServiceState, null);
 
   // Rolled into a function so every failure site shares one rollback path.
   async function rollbackAndFinish(): Promise<MigrateHomeRun> {
@@ -834,6 +877,15 @@ export async function migrateHome(
         serviceState = "running";
       } catch (error) {
         undoErrors.push(`restart source service: ${(error as Error).message}`);
+        // A failed restart can still leave the service up — start times out
+        // waiting for daemon readiness AFTER the process spawned (seen live
+        // in drill 2). Trust the pidfile, not the exit code.
+        try {
+          const pid = await readPidfileAt(servicePidPath(pre.from));
+          if (pid !== null && isProcessAlive(pid)) serviceState = "running";
+        } catch {
+          /* keep "down" */
+        }
       }
     }
     const rollbackOk = undoErrors.length === 0;
@@ -894,9 +946,19 @@ export async function runMigrateHomeCommand(
       const savedSlock = process.env.SLOCK_HOME;
       process.env.RAFT_HOME = home;
       process.env.SLOCK_HOME = home;
+      // NDJSON purity: runStart's human info() lines go to stdout, which in
+      // --json mode must carry events only. Route stdout to stderr for the
+      // duration of the start (no event is emitted inside this window) so
+      // Desktop's line parser never sees a non-JSON line.
+      const origWrite = process.stdout.write.bind(process.stdout);
+      if (opts.json) {
+        process.stdout.write = ((chunk: string | Uint8Array) =>
+          process.stderr.write(chunk)) as typeof process.stdout.write;
+      }
       try {
         await runStart({ hostLifecycleOwner: "cli" });
       } finally {
+        if (opts.json) process.stdout.write = origWrite;
         if (savedRaft === undefined) delete process.env.RAFT_HOME;
         else process.env.RAFT_HOME = savedRaft;
         if (savedSlock === undefined) delete process.env.SLOCK_HOME;
@@ -904,8 +966,15 @@ export async function runMigrateHomeCommand(
       }
     },
     convergeCarrierAt: async (home, desired) => {
-      const { convergeCliHostLifecycle } = await import("./macosLoginCarrier.js");
-      await convergeCliHostLifecycle(home, desired);
+      const { convergeCliHostLifecycle, resolveStableDispatcherPath } = await import("./macosLoginCarrier.js");
+      // resolveMacosContext refuses an unbound dispatcher on darwin; fill it
+      // the same way refreshCliLoginCarrierIfOwned does (honors the explicit
+      // RAFT_COMPUTER_DISPATCHER_PATH override, else the current binary).
+      const hostDeps: import("./macosLoginCarrier.js").MacosHostLifecycleDeps = {};
+      if (process.platform === "darwin" && hostDeps.dispatcherPath === undefined) {
+        hostDeps.dispatcherPath = resolveStableDispatcherPath(home);
+      }
+      await convergeCliHostLifecycle(home, desired, hostDeps);
     },
     statusAt: async (home) => {
       const { createComputerApi } = await import("./lib/api.js");

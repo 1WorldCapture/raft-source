@@ -1,8 +1,8 @@
 {
   "name": "@botiverse/raft-computer",
-  "version": "1.0.29",
+  "version": "1.0.30",
   "license": "FSL-1.1-ALv2",
-  "description": "Canonical Raft Computer — standalone human/local-machine control-plane CLI (login + attach); distinct from the agent-facing @botiverse/raft CLI.",
+  "description": "Canonical Raft Computer \u2014 standalone human/local-machine control-plane CLI (login + attach); distinct from the agent-facing @botiverse/raft CLI.",
   "type": "module",
   "bin": {
     "raft-computer": "dist/raft-computer.js"
