@@ -8,8 +8,8 @@ function firstParam(value: string | string[] | undefined): string | undefined {
 }
 
 export default function MessageScreen() {
-  const { channelId, name, targetMessageId } = useLocalSearchParams<{ channelId: string; name?: string; targetMessageId?: string }>();
+  const { channelId, name, targetMessageId, bubbles } = useLocalSearchParams<{ channelId: string; name?: string; targetMessageId?: string; bubbles?: string }>();
   const t = useT();
   if (!channelId) return null;
-  return <MessagePane channelId={channelId} targetMessageId={firstParam(targetMessageId)} title={name || t("mobile.messages.title")} />;
+  return <MessagePane channelId={channelId} direct={firstParam(bubbles) === "1"} targetMessageId={firstParam(targetMessageId)} title={name || t("mobile.messages.title")} />;
 }

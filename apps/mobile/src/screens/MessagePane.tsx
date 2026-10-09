@@ -161,6 +161,7 @@ export function MessagePane({
   parentMessageId,
   targetMessageId,
   embedded,
+  direct,
   listHeader,
 }: {
   channelId: string;
@@ -171,6 +172,8 @@ export function MessagePane({
   targetMessageId?: string;
   /** Task detail draws its own bar and keeps this pane as the discussion only. */
   embedded?: boolean;
+  /** This pane is a one-to-one conversation even before channel meta arrives. */
+  direct?: boolean;
   /** Task head, rendered above the replies in the same list. */
   listHeader?: ReactNode;
 }) {
@@ -230,6 +233,7 @@ export function MessagePane({
   const [stickyAt, setStickyAt] = useState<string | null>(null);
   const [collapseLong, setCollapseLong] = useState(true);
   const [dm, setDm] = useState(false);
+  const listedDm = useRaftStore((state) => state.conversations.some((entry) => entry.channel.id === channelId && entry.channel.type === "dm"));
   const [peers, setPeers] = useState<PeerRead[]>([]);
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
   const [tasksByMessage, setTasksByMessage] = useState<Map<string, LinkedTaskChip>>(new Map());
@@ -239,6 +243,7 @@ export function MessagePane({
   const [downloadingAttachmentId, setDownloadingAttachmentId] = useState<string | null>(null);
   const downloadingRef = useRef<string | null>(null);
   const [meta, setMeta] = useState<ChannelMeta | null>(null);
+  const bubbles = !thread && (direct === true || listedDm || dm || meta?.type === "dm");
   const [followedIds, setFollowedIds] = useState<Set<string>>(new Set());
   const [threadByParent, setThreadByParent] = useState<Record<string, string>>({});
   const [menu, setMenu] = useState<{ messageId: string; x: number; y: number; openedAt: number; reactionsOnly?: boolean } | null>(null);
@@ -419,7 +424,11 @@ export function MessagePane({
       const scope = runtime.scopeFor(sessionRef.current.serverId ?? "");
       if (scope !== null) {
         const row = runtime.repo.getChannelsSync(scope).find((channel) => channel.id === settingsChannelId);
-        if (row && !cancelled) setMeta(parseChannelMeta(row.raw));
+        if (row && !cancelled) {
+          const parsed = parseChannelMeta(row.raw);
+          setMeta(parsed);
+          if (!thread && parsed?.type === "dm") setDm(true);
+        }
       }
     } catch {
       // Cache unavailable — meta comes from the network below.
@@ -1462,7 +1471,7 @@ export function MessagePane({
       const id = isRecord(data) && typeof data.id === "string" ? data.id : null;
       if (!id) throw new Error("missing");
       setProfile(null);
-      router.push({ pathname: "/messages/[channelId]", params: { channelId: id, name: senderLabel(profile) } });
+      router.push({ pathname: "/messages/[channelId]", params: { channelId: id, name: senderLabel(profile), bubbles: "1" } });
     } catch (caught) {
       if (!(caught instanceof StaleRequestError)) setError(t("mobile.messages.actionFailed"));
     }
@@ -1617,6 +1626,7 @@ export function MessagePane({
                 deleteLabel={t("mobile.messages.delete")}
                 downloadingAttachmentId={downloadingAttachmentId}
                 downloadingLabel={t("mobile.attachments.downloading")}
+                bubbles={bubbles}
                 group={group}
                 linkedTask={tasksByMessage.get(item.id)}
                 message={item}

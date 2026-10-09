@@ -109,7 +109,7 @@ function PmConversation({ agentId, dmChannelId, title }: { agentId: string; dmCh
 
   if (error) return <ScreenMessage title={t("mobile.pm.pickFailed")} body={error} />;
   if (!channelId) return <LoadingScreen />;
-  return <MessagePane channelId={channelId} embedded title={title} />;
+  return <MessagePane channelId={channelId} direct embedded title={title} />;
 }
 
 function PmSetupGuide({ onChanged }: { onChanged: () => void }) {

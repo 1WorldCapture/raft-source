@@ -93,7 +93,7 @@ export default function DmsScreen() {
               hasDraft={channelHasDraft(item.channel.id)}
               hasMention={channelUnread[item.channel.id]?.hasMention === true}
               onLongPress={() => markRead(item.channel)}
-              onPress={() => router.push({ pathname: "/messages/[channelId]", params: { channelId: item.channel.id, name: channelLabel(item.channel) } })}
+              onPress={() => router.push({ pathname: "/messages/[channelId]", params: { channelId: item.channel.id, name: channelLabel(item.channel), bubbles: "1" } })}
               preview={item.preview}
               timeText={formatRelativeTime(item.channel.lastMessageAt, timeStrings)}
               unreadCount={conversationUnreadCount(item.channel.id, channelUnread, liveUnread)}

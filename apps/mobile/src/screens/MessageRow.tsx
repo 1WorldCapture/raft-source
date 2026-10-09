@@ -11,6 +11,7 @@ import { RichText } from "../ui/richText";
 import { HardShadow } from "../ui/shadow";
 import { useSkinStyles, type SkinRoles } from "../ui/skin";
 import { color, fontSize, radius, shadowOffset } from "../ui/tokens";
+import { isOwnBubble } from "./bubbleSide";
 import type { MessageGroupState } from "./messageGrouping";
 import { agentHasRead, type PeerRead } from "./readReceipt";
 
@@ -27,6 +28,7 @@ const COLLAPSE_AT = 320;
 export const MessageRow = memo(function MessageRow({
   message,
   group,
+  bubbles,
   timeLabel,
   dayLabel,
   bodyFontSize,
@@ -71,6 +73,8 @@ export const MessageRow = memo(function MessageRow({
 }: {
   message: RaftMessage;
   group: MessageGroupState;
+  /** One-to-one layout. Channels and threads leave this off. */
+  bubbles?: boolean;
   timeLabel: string;
   dayLabel: string;
   bodyFontSize: number;
@@ -122,7 +126,9 @@ export const MessageRow = memo(function MessageRow({
   const images = (message.attachments ?? []).filter(isImage);
   const files = (message.attachments ?? []).filter((attachment) => !isImage(attachment));
   const collapsed = collapseLong && tall && !expanded;
-  const ownMessage = Boolean(currentUserId && message.senderId === currentUserId && message.senderType === "user");
+  const ownMessage = isOwnBubble(message, currentUserId);
+  const own = Boolean(bubbles) && ownMessage;
+  const failed = message.pending === "failed";
   return (
     <JumpHighlight active={highlighted === true}>
     <View>
@@ -140,7 +146,7 @@ export const MessageRow = memo(function MessageRow({
           <AppText style={styles.system}>{timeLabel ? `${timeLabel} ${message.content}` : message.content}</AppText>
         )
       ) : (
-        <View style={[styles.row, message.pending === "failed" ? styles.failed : null]}>
+        <View style={[styles.row, own ? styles.rowReverse : null, !bubbles && failed ? styles.failed : null]}>
           <View style={styles.avatar}>
             {group.showAvatar ? (
               <Pressable
@@ -152,11 +158,12 @@ export const MessageRow = memo(function MessageRow({
               </Pressable>
             ) : null}
           </View>
+          <BubbleShell enabled={Boolean(bubbles)}>
           <Pressable
             delayLongPress={500}
             onLongPress={(event) => onLongPressMessage?.(message.id, event.nativeEvent.pageX, event.nativeEvent.pageY)}
             onPress={() => onPressMessage?.(message.id)}
-            style={styles.body}
+            style={bubbles ? [styles.bubble, own ? skinStyle.ownBubble : styles.bubbleOther, failed ? styles.failedBubble : null] : styles.body}
           >
             {group.showAvatar ? (
               <View>
@@ -278,12 +285,18 @@ export const MessageRow = memo(function MessageRow({
               </View>
             ) : null}
           </Pressable>
+          </BubbleShell>
         </View>
       )}
     </View>
     </JumpHighlight>
   );
 });
+
+function BubbleShell({ enabled, children }: { enabled: boolean; children: ReactNode }) {
+  if (!enabled) return children;
+  return <HardShadow offset={shadowOffset.sm} style={styles.bubbleLimit}>{children}</HardShadow>;
+}
 
 function JumpHighlight({ active, children }: { active: boolean; children: ReactNode }) {
   const opacity = useRef(new Animated.Value(0)).current;
@@ -357,10 +370,10 @@ function AttachmentImage({
   const ratio = attachment.width && attachment.height ? attachment.height / attachment.width : 0.75;
   const height = Math.min(Math.round(width * ratio), 320);
   if (!uri || failed) {
-    return <View style={[styles.imageFrame, styles.imagePlaceholder, { width, height }]}><AppText numberOfLines={2} style={styles.file}>{attachment.filename}</AppText></View>;
+    return <View style={[styles.imageFrame, styles.imagePlaceholder, { width, maxWidth: "100%", height }]}><AppText numberOfLines={2} style={styles.file}>{attachment.filename}</AppText></View>;
   }
   return (
-    <View style={[styles.imageFrame, { width, height }]}>
+    <View style={[styles.imageFrame, { width, maxWidth: "100%", height }]}>
       <Image
         contentFit="cover"
         onError={() => {
@@ -394,6 +407,11 @@ const styles = StyleSheet.create({
   dividerLabel: { ...fontSize.date, color: color.mutedStrong, fontWeight: "700", letterSpacing: 0.8, textAlign: "center", textTransform: "uppercase" },
   system: { ...fontSize.time, color: color.muted, fontFamily: "mono", paddingVertical: 6, textAlign: "center" },
   row: { flexDirection: "row", gap: 12, paddingHorizontal: 8, paddingVertical: 4 },
+  rowReverse: { flexDirection: "row-reverse" },
+  bubbleLimit: { flexShrink: 1, maxWidth: "75%" },
+  bubble: { borderColor: color.border, borderWidth: 2, paddingHorizontal: 10, paddingVertical: 6 },
+  bubbleOther: { backgroundColor: color.white },
+  failedBubble: { borderColor: color.red },
   highlight: { bottom: 0, left: 0, position: "absolute", right: 0, top: 0 },
   highlightShadow: { flex: 1 },
   highlightFace: { backgroundColor: color.cyanHighlight, borderColor: color.border, borderWidth: 2, flex: 1 },
@@ -435,5 +453,6 @@ const styles = StyleSheet.create({
 function messageSkin(skin: SkinRoles) {
   return StyleSheet.create({
     taskChip: { backgroundColor: skin.signalSoft },
+    ownBubble: { backgroundColor: skin.signalPale },
   });
 }
