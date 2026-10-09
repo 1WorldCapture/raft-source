@@ -1,8 +1,9 @@
 import { Linking, ScrollView, Text, View, type StyleProp, type TextStyle } from "react-native";
 import { inlineTokens, type InlineToken } from "../model/inlineTokens";
-import { markdownPieces, type MarkdownPiece } from "../model/markdown";
+import { inlinePieces, markdownPieces, type MarkdownPiece } from "../model/markdown";
 import type { MessageMention } from "../model/messages";
 import { latinFamily } from "./fonts";
+import { useSkin, type SkinRoles } from "./skin";
 import { AppText } from "./text";
 import { color } from "./tokens";
 
@@ -10,7 +11,7 @@ type Block =
   | { kind: "paragraph"; pieces: MarkdownPiece[] }
   | { kind: "heading"; level: number; text: string }
   | { kind: "quote"; text: string }
-  | { kind: "list"; text: string }
+  | { kind: "list"; text: string; marker: string; indent: number }
   | { kind: "codeBlock"; text: string };
 
 export function RichText({
@@ -28,6 +29,7 @@ export function RichText({
   lineHeight?: number;
   agentRead?: (agentId: string) => boolean | null;
 }) {
+  const skin = useSkin();
   const blocks = blockPieces(markdownPieces(content));
   return (
     <View>
@@ -43,25 +45,25 @@ export function RichText({
           const scale = block.level === 1 ? 1.286 : block.level === 2 ? 1.15 : 1.08;
           return (
             <AppText key={index} style={{ color: color.ink, fontSize: fontSize * scale, fontWeight: "700", lineHeight: lineHeight * scale, marginBottom: 2, marginTop: 4 }}>
-              {tokens(block.text, mentions, currentUserId, agentRead, fontSize)}
+              {inlineBody(block.text, mentions, currentUserId, agentRead, fontSize, skin)}
             </AppText>
           );
         }
         if (block.kind === "quote") {
           return (
             <View key={index} style={{ borderLeftColor: color.quoteBorder, borderLeftWidth: 2, marginVertical: 2, paddingLeft: 12 }}>
-              <AppText style={{ color: color.mutedStrong, fontSize, fontStyle: "italic", lineHeight }}>{tokens(block.text, mentions, currentUserId, agentRead, fontSize)}</AppText>
+              <AppText style={{ color: color.mutedStrong, fontSize, fontStyle: "italic", lineHeight }}>{inlineBody(block.text, mentions, currentUserId, agentRead, fontSize, skin)}</AppText>
             </View>
           );
         }
         if (block.kind === "list") {
           return (
-            <AppText key={index} style={{ color: color.ink, fontSize, lineHeight }}>{`• `}{tokens(block.text, mentions, currentUserId, agentRead, fontSize)}</AppText>
+            <AppText key={index} style={{ color: color.ink, fontSize, lineHeight, marginLeft: block.indent * 14 }}>{`${block.marker} `}{inlineBody(block.text, mentions, currentUserId, agentRead, fontSize, skin)}</AppText>
           );
         }
         return (
           <AppText key={index} style={{ color: color.ink, fontSize, lineHeight }}>
-            {block.pieces.map((piece, pieceIndex) => inlinePiece(piece, pieceIndex, mentions, currentUserId, agentRead, fontSize))}
+            {block.pieces.map((piece, pieceIndex) => inlinePiece(piece, pieceIndex, mentions, currentUserId, agentRead, fontSize, skin))}
           </AppText>
         );
       })}
@@ -81,13 +83,15 @@ export function InlineRichText({
   style?: StyleProp<TextStyle>;
   fontSize?: number;
 }) {
+  const skin = useSkin();
   return (
     <AppText numberOfLines={numberOfLines} style={style}>
       {markdownPieces(content).map((piece, index) => {
-        if (piece.type === "heading" || piece.type === "quote" || piece.type === "list" || piece.type === "codeBlock") {
-          return <Text key={index}>{piece.text}</Text>;
+        if (piece.type === "codeBlock") return <Text key={index}>{piece.text}</Text>;
+        if (piece.type === "heading" || piece.type === "quote" || piece.type === "list") {
+          return <Text key={index}>{inlineBody(piece.text, undefined, undefined, undefined, fontSize, skin)}</Text>;
         }
-        return inlinePiece(piece, index, undefined, undefined, undefined, fontSize);
+        return inlinePiece(piece, index, undefined, undefined, undefined, fontSize, skin);
       })}
     </AppText>
   );
@@ -100,8 +104,15 @@ function inlinePiece(
   currentUserId: string | undefined,
   agentRead: ((agentId: string) => boolean | null) | undefined,
   fontSize: number,
+  skin: SkinRoles,
 ) {
-  if (piece.type === "bold") return <Text key={index} style={{ fontFamily: latinFamily("700"), fontWeight: "700" }}>{tokens(piece.text, mentions, currentUserId, agentRead, fontSize)}</Text>;
+  if (piece.type === "bold") {
+    return (
+      <Text key={index} style={{ fontFamily: latinFamily("700"), fontWeight: "700" }}>
+        {piece.children.map((child, childIndex) => inlinePiece(child, childIndex, mentions, currentUserId, agentRead, fontSize, skin))}
+      </Text>
+    );
+  }
   if (piece.type === "code") {
     return <Text key={index} style={{ backgroundColor: color.inlineCode, fontFamily: "SpaceMono-400", fontSize: fontSize * 0.875 }}>{piece.text}</Text>;
   }
@@ -118,8 +129,20 @@ function inlinePiece(
       </Text>
     );
   }
-  if (piece.type === "text") return <Text key={index} style={{ fontFamily: latinFamily() }}>{tokens(piece.text, mentions, currentUserId, agentRead, fontSize)}</Text>;
+  if (piece.type === "text") return <Text key={index} style={{ fontFamily: latinFamily() }}>{tokens(piece.text, mentions, currentUserId, agentRead, fontSize, skin)}</Text>;
   return null;
+}
+
+/** List / heading / quote bodies carry inline markdown (bold, code, links) too. */
+function inlineBody(
+  text: string,
+  mentions: MessageMention[] | undefined,
+  currentUserId: string | undefined,
+  agentRead: ((agentId: string) => boolean | null) | undefined,
+  fontSize: number,
+  skin: SkinRoles,
+) {
+  return inlinePieces(text).map((piece, index) => inlinePiece(piece, index, mentions, currentUserId, agentRead, fontSize, skin));
 }
 
 function tokens(
@@ -128,8 +151,9 @@ function tokens(
   currentUserId: string | undefined,
   agentRead: ((agentId: string) => boolean | null) | undefined,
   fontSize: number,
+  skin: SkinRoles,
 ) {
-  return inlineTokens(text, mentions, currentUserId).map((token, index) => chip(token, index, agentRead, fontSize));
+  return inlineTokens(text, mentions, currentUserId).map((token, index) => chip(token, index, agentRead, fontSize, skin));
 }
 
 function chip(
@@ -137,17 +161,18 @@ function chip(
   index: number,
   agentRead: ((agentId: string) => boolean | null) | undefined,
   fontSize: number,
+  skin: SkinRoles,
 ) {
   if (token.kind === "text") return <Text key={index} style={{ fontFamily: latinFamily() }}>{token.text}</Text>;
   const read = token.kind === "mention" && token.type === "agent" ? agentRead?.(token.id ?? "") : null;
   const background = token.kind === "mention" && token.self
-    ? color.yellow
+    ? skin.signal
     : token.kind === "channel"
       ? color.pinkChip
       : token.kind === "thread"
         ? color.cyanSoft
         : token.kind === "task"
-          ? color.yellowSoft
+          ? skin.signalSoft
           : undefined;
   const bordered = background !== undefined;
   return (
@@ -188,7 +213,12 @@ function blockPieces(pieces: MarkdownPiece[]): Block[] {
       blocks.push({ kind: "heading", level: piece.level, text: piece.text });
       continue;
     }
-    if (piece.type === "quote" || piece.type === "list" || piece.type === "codeBlock") {
+    if (piece.type === "list") {
+      flush();
+      blocks.push({ kind: "list", text: piece.text, marker: piece.marker, indent: piece.indent });
+      continue;
+    }
+    if (piece.type === "quote" || piece.type === "codeBlock") {
       flush();
       blocks.push({ kind: piece.type, text: piece.text });
       continue;

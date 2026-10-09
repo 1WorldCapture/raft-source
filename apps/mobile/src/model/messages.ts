@@ -9,6 +9,11 @@ export interface RaftUser {
   preferredMessageBodyFontSize?: string | null;
   preferredTimeFormat?: string | null;
   preferredTimezone?: string | null;
+  /**
+   * Account skin. Missing means this payload did not say (cached user, or a
+   * server from before preferredSkin). Null means the account has none.
+   */
+  preferredSkin?: string | null;
 }
 
 export interface MessageMention {
@@ -148,7 +153,15 @@ export function parseUser(value: unknown): RaftUser | null {
     preferredMessageBodyFontSize: typeof value.preferredMessageBodyFontSize === "string" ? value.preferredMessageBodyFontSize : null,
     preferredTimeFormat: typeof value.preferredTimeFormat === "string" ? value.preferredTimeFormat : null,
     preferredTimezone: typeof value.preferredTimezone === "string" ? value.preferredTimezone : null,
+    preferredSkin: preferredSkinFrom(value),
   };
+}
+
+function preferredSkinFrom(value: Record<string, unknown>): string | null | undefined {
+  if (!Object.prototype.hasOwnProperty.call(value, "preferredSkin")) return undefined;
+  if (typeof value.preferredSkin !== "string") return null;
+  const trimmed = value.preferredSkin.trim();
+  return trimmed ? trimmed : null;
 }
 
 export function userLabel(user: RaftUser | null): string {

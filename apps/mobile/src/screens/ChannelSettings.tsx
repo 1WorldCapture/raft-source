@@ -1,5 +1,6 @@
 import { Pressable, StyleSheet, View } from "react-native";
 import { AppText } from "../ui/text";
+import { useSkinStyles, type SkinRoles } from "../ui/skin";
 import { color } from "../ui/tokens";
 import type { ChannelMeta } from "./channelMeta";
 
@@ -28,10 +29,11 @@ export function ChannelSettings({
   onCollapse: (collapse: boolean) => void;
   onLeave: () => void;
 }) {
+  const skinStyle = useSkinStyles(channelSkin);
   const visibility = meta.visibility === "private" ? "private" : meta.visibility === "joint" ? "joint" : "public";
   return (
     <View style={styles.block}>
-      <AppText style={styles.tag}>{visibilityLabel || visibility}</AppText>
+      <AppText style={[styles.tag, skinStyle.tag]}>{visibilityLabel || visibility}</AppText>
       {meta.description ? <AppText style={styles.body}>{meta.description}</AppText> : null}
       <AppText style={styles.section}>{memberLabel}</AppText>
       {members.map((name, index) => <AppText key={`${name}-${index}`} style={styles.body}>{name}</AppText>)}
@@ -47,22 +49,29 @@ export function ChannelSettings({
 }
 
 function Toggle({ label, on, onPress }: { label: string; on: boolean; onPress: () => void }) {
+  const skinStyle = useSkinStyles(channelSkin);
   return (
     <Pressable onPress={onPress} style={styles.toggle}>
       <AppText style={styles.body}>{label}</AppText>
-      <View style={[styles.box, on ? styles.on : null]} />
+      <View style={[styles.box, on ? skinStyle.on : null]} />
     </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
   block: { gap: 12 },
-  tag: { alignSelf: "flex-start", backgroundColor: color.yellow, borderColor: color.border, borderWidth: 2, color: color.ink, fontSize: 12, fontWeight: "700", paddingHorizontal: 8, paddingVertical: 4, textTransform: "uppercase" },
+  tag: { alignSelf: "flex-start", borderColor: color.border, borderWidth: 2, color: color.ink, fontSize: 12, fontWeight: "700", paddingHorizontal: 8, paddingVertical: 4, textTransform: "uppercase" },
   body: { color: color.ink, fontSize: 14 },
   section: { color: color.ink, fontSize: 12, fontWeight: "700", letterSpacing: 0.8, textTransform: "uppercase" },
   toggle: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
   box: { borderColor: color.border, borderWidth: 2, height: 18, width: 18 },
-  on: { backgroundColor: color.yellow },
   leave: { alignSelf: "flex-start", borderColor: color.border, borderWidth: 2, marginTop: 8, paddingHorizontal: 12, paddingVertical: 8 },
   leaveText: { color: color.red, fontSize: 14, fontWeight: "700" },
 });
+
+function channelSkin(skin: SkinRoles) {
+  return StyleSheet.create({
+    tag: { backgroundColor: skin.signal },
+    on: { backgroundColor: skin.signal },
+  });
+}

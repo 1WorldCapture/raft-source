@@ -14,7 +14,10 @@
 // everything below is served offline from ./downloads):
 //   node scripts/build-release-artifacts.mjs --out deploy/docker/downloads \
 //     [--platforms darwin-arm64,darwin-x64,linux-x64] [--force] \
-//     [--desktop-origin https://raft.internal.example:18443] [--only desktop]
+//     [--desktop-origin https://raft.internal.example:18443] [--only desktop] \
+//     [--desktop-arch arm64|all] [--desktop-formats zip[,dmg]]
+// Desktop defaults: macOS arm64, dmg+zip (see desktopTargets.mjs; the dmg stays
+// while installed apps <= 0.1.6 still need it to show an update prompt).
 // --only desktop re-runs ONLY the desktop step (per-customer re-bake of the
 // origin): it skips the Computer/CLI/daemon builds and leaves the existing
 // downloads tree untouched except for <out>/desktop. Needs a macOS host.
@@ -33,6 +36,7 @@
 import { execFileSync } from "node:child_process";
 import { readFile, rm } from "node:fs/promises";
 import path from "node:path";
+import { resolveDesktopTargets } from "./desktopTargets.mjs";
 
 function parseArgs(argv) {
   const args = {};
@@ -87,6 +91,7 @@ async function main() {
   if (!outDir) throw new Error("--out <dir> is required (e.g. deploy/docker/downloads)");
   const platforms = (args.platforms ?? DEFAULT_PLATFORMS.join(",")).split(",").map((p) => p.trim()).filter(Boolean);
   const only = parseOnly(args.only);
+  const desktopTargets = resolveDesktopTargets({ arch: args["desktop-arch"], formats: args["desktop-formats"] });
   const onlyDesktop = only === "desktop";
   const repoRoot = path.resolve(import.meta.dirname, "..");
   if (onlyDesktop && process.platform !== "darwin") {
@@ -218,7 +223,7 @@ async function main() {
     // the renderer and the main-process __RAFT_DESKTOP_API_ORIGIN__ define,
     // which disables the official updater (isOfficialApiBuild=false) — an
     // app installed from this tree talks to THIS server from first launch.
-    run("pnpm", ["--filter", "@botiverse/raft-desktop-electron", "dist:mac"], {
+    run("pnpm", ["--filter", "@botiverse/raft-desktop-electron", desktopTargets.script, ...desktopTargets.builderArgs], {
       cwd: repoRoot,
       env: { ...process.env, CSC_IDENTITY_AUTO_DISCOVERY: "false", VITE_API_URL: desktopOrigin },
     });
@@ -240,6 +245,8 @@ async function main() {
       "--embedded-computer", embedded.computer,
       "--embedded-cli", embedded.cli,
       "--embedded-daemon", embedded.daemon,
+      "--arches", desktopTargets.arches.join(","),
+      "--formats", desktopTargets.formats.join(","),
       "--out", path.join(outDir, "desktop"),
     ], { cwd: repoRoot });
   }

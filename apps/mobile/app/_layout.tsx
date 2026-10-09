@@ -4,7 +4,7 @@ import { Stack, useRouter, useSegments } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useFonts } from "expo-font";
 import * as SplashScreen from "expo-splash-screen";
-import { Pressable, View } from "react-native";
+import { Platform, Pressable, StatusBar as NativeStatusBar, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { LocaleProvider, useT } from "../src/i18n/provider";
 import { fontAssets } from "../src/ui/fonts";
@@ -12,10 +12,21 @@ import { SessionProvider, useSession } from "../src/state/session";
 import { useRaftStore } from "../src/state/store";
 import { AppText } from "../src/ui/text";
 import { ConnectionBanner } from "../src/ui/ConnectionBanner";
+import { MobileSkinSync } from "../src/ui/MobileSkinSync";
+import { useSkin } from "../src/ui/skin";
 import { colors } from "../src/ui/theme";
 import { color } from "../src/ui/tokens";
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
+
+function SkinStatusBar() {
+  const skin = useSkin();
+  useEffect(() => {
+    if (Platform.OS !== "android") return;
+    NativeStatusBar.setBackgroundColor(skin.chrome);
+  }, [skin.chrome]);
+  return <StatusBar style="dark" />;
+}
 
 function SessionRedirect() {
   const session = useSession();
@@ -43,10 +54,11 @@ function AccountNotice() {
   const session = useSession();
   const t = useT();
   const [sending, setSending] = useState(false);
+  const skin = useSkin();
   if (!notice) return null;
   const profile = notice === "profile-setup";
   return (
-    <View style={{ backgroundColor: color.yellow, paddingHorizontal: 16, paddingVertical: 10 }}>
+    <View style={{ backgroundColor: skin.chrome, paddingHorizontal: 16, paddingVertical: 10 }}>
       <AppText style={{ color: color.ink }}>
         {profile ? t("mobile.account.profile") : t("mobile.account.verify")}
       </AppText>
@@ -66,12 +78,13 @@ function AccountNotice() {
 
 function AppStack() {
   const t = useT();
+  const skin = useSkin();
   return (
     <Stack
       screenOptions={{
         headerShadowVisible: false,
         headerTintColor: colors.accent,
-        headerStyle: { backgroundColor: color.yellow },
+        headerStyle: { backgroundColor: skin.chrome },
         headerTitleStyle: { fontFamily: "SpaceGrotesk-700" },
         contentStyle: { backgroundColor: colors.bg },
       }}
@@ -105,7 +118,8 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SessionProvider>
         <LocaleProvider>
-          <StatusBar style="dark" />
+          <MobileSkinSync />
+          <SkinStatusBar />
           <SessionRedirect />
           <AccountNotice />
           <ConnectionBanner>

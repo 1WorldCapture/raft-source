@@ -3,6 +3,7 @@ import { Animated, Image, StyleSheet, View } from "react-native";
 import { User } from "lucide-react-native";
 import { pixelColor, resolvePixel } from "./pixelAvatar";
 import { AppText } from "./text";
+import { useSkin } from "./skin";
 import { border, color, radius } from "./tokens";
 
 export function Avatar({
@@ -25,6 +26,7 @@ export function Avatar({
   // Photo avatars depend on the network; offline (or a dead url) the Image
   // fails silently — fall back to the letter instead of an empty box. A new
   // url on a recycled row resets the failure (#desktop-data-cache task #3).
+  const skin = useSkin();
   const [photoFailed, setPhotoFailed] = useState(false);
   useEffect(() => setPhotoFailed(false), [avatarUrl]);
   const photo = !pixel && !photoFailed && avatarUrl && /^https?:\/\//.test(avatarUrl) ? avatarUrl : null;
@@ -44,15 +46,15 @@ export function Avatar({
         ) : kind === "human" ? (
           <User color={color.ink} size={Math.round(size * 0.5)} strokeWidth={2.25} />
         ) : (
-          <AppText style={[styles.letter, { color: kind === "server" ? color.yellow : color.ink, fontSize: size * 0.42 }]}>{letter}</AppText>
+          <AppText style={[styles.letter, { color: kind === "server" ? skin.signal : color.ink, fontSize: size * 0.42 }]}>{letter}</AppText>
         )}
       </View>
-      {status ? <StatusDot status={status} /> : null}
+      {status ? <StatusDot status={status} busyColor={skin.signal} /> : null}
     </View>
   );
 }
 
-function StatusDot({ status }: { status: "online" | "busy" | "error" | "offline" }) {
+function StatusDot({ status, busyColor }: { status: "online" | "busy" | "error" | "offline"; busyColor: string }) {
   const opacity = useRef(new Animated.Value(1)).current;
   useEffect(() => {
     if (status !== "busy") return;
@@ -65,12 +67,12 @@ function StatusDot({ status }: { status: "online" | "busy" | "error" | "offline"
     loop.start();
     return () => loop.stop();
   }, [opacity, status]);
-  return <Animated.View style={[styles.status, { backgroundColor: statusColor(status), opacity: status === "busy" ? opacity : 1 }]} />;
+  return <Animated.View style={[styles.status, { backgroundColor: statusColor(status, busyColor), opacity: status === "busy" ? opacity : 1 }]} />;
 }
 
-function statusColor(status: "online" | "busy" | "error" | "offline"): string {
+function statusColor(status: "online" | "busy" | "error" | "offline", busyColor: string): string {
   if (status === "online") return color.lime;
-  if (status === "busy") return color.yellow;
+  if (status === "busy") return busyColor;
   if (status === "error") return color.orange;
   return color.stone;
 }

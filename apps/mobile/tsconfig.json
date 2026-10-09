@@ -14,7 +14,9 @@
       "@botiverse/raft-shared/src/cacheRepoContract.ts": ["../../packages/shared/src/cacheRepoContract.ts"],
       "@botiverse/raft-shared/src/cacheSync.ts": ["../../packages/shared/src/cacheSync.ts"],
       "@botiverse/raft-shared/src/cacheBoot.ts": ["../../packages/shared/src/cacheBoot.ts"],
-      "@botiverse/raft-shared/src/cacheReconcile.ts": ["../../packages/shared/src/cacheReconcile.ts"]
+      "@botiverse/raft-shared/src/cacheReconcile.ts": ["../../packages/shared/src/cacheReconcile.ts"],
+      "@botiverse/raft-shared/src/skins.ts": ["../../packages/shared/src/skins.ts"],
+      "@botiverse/raft-shared/src/skinSync.ts": ["../../packages/shared/src/skinSync.ts"]
     }
   },
   "include": [

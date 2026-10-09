@@ -89,6 +89,8 @@ export interface User {
   preferredTranslationDisplay: "translated" | "original" | "bilingual";
   preferredTimeFormat: "12h" | "24h" | null;
   preferredMessageBodyFontSize: "sm" | "md" | "lg" | null;
+  /** Cross-device skin id; null/absent = not chosen on any device yet. */
+  preferredSkin?: string | null;
   referralSource: string | null;
   referralSourceOther: string | null;
   referralSourceSkippedAt: string | null;
@@ -141,6 +143,7 @@ interface AuthState {
     preferredTranslationMode?: "auto" | "manual" | "off";
     preferredTranslationDisplay?: "translated" | "original" | "bilingual";
     preferredTimeFormat?: "12h" | "24h" | null;
+    preferredSkin?: string | null;
     referralSource?: string | null;
     referralSourceOther?: string | null;
     referralSourceSkipped?: boolean;

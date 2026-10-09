@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 import { HardShadow } from "./shadow";
 import { AppText } from "./text";
+import { useSkin } from "./skin";
 import { border, color, pressShift, shadowOffset } from "./tokens";
 
 export function BrutalButton({
@@ -16,8 +17,9 @@ export function BrutalButton({
   tone?: "pink" | "yellow" | "plain";
 }) {
   const [pressed, setPressed] = useState(false);
+  const skin = useSkin();
   const offset = pressed ? shadowOffset.pressed : shadowOffset.md;
-  const background = tone === "yellow" ? color.yellow : tone === "plain" ? color.page : color.pink;
+  const background = tone === "yellow" ? skin.signal : tone === "plain" ? color.page : color.pink;
   return (
     <Pressable
       accessibilityRole="button"

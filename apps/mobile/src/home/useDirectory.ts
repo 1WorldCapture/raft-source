@@ -8,9 +8,8 @@ import { parseChannelUnread, parseChannels } from "../model/messages";
 import { useSession } from "../state/session";
 import type { RaftServer } from "../model/messages";
 import { useRaftStore } from "../state/store";
-import { serversFromCacheValue } from "./serverRailCache";
+import { applyCachedServerRail } from "./serverRailCache";
 import { setCurrentServerRole } from "./serverRole";
-import { useServerRailStore } from "./serverRailStore";
 import { useServerRail } from "./useServerRail";
 
 // Directory bumps (socket catch-up, a live message for a never-listed channel)
@@ -130,11 +129,9 @@ export function useDirectory(): DirectoryState {
       // Server-rail seed (#desktop-data-cache task #1): same fast path for the
       // rail and the header title — an offline cold start paints the cached
       // server list; the loadServers call below overwrites it wholesale (and
-      // drops removed servers) once the network answers.
-      if (scope !== null && useServerRailStore.getState().servers.length === 0) {
-        const servers = serversFromCacheValue(runtime.repo.getKv(scope, "serverList"));
-        if (servers.length > 0) useServerRailStore.setState({ servers });
-      }
+      // drops removed servers) once the network answers. getKv is async and
+      // would hand serversFromCacheValue a Promise, so this read is sync.
+      if (scope !== null) applyCachedServerRail(seedServerId);
     } catch {
       // Cache unavailable or not yet initialized.
     }

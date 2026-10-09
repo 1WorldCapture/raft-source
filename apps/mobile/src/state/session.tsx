@@ -22,6 +22,8 @@ import { BUNDLED_SERVER_ORIGIN } from "../session/origin";
 import { shouldApplyServerResponse, shouldCommitTokens, shouldMarkVisibleRead, catchUpPlan, releaseFocus } from "./sessionPolicy";
 import { useRaftStore } from "./store";
 import { useServerRailStore } from "../home/serverRailStore";
+import { resetCachedServerRailSeed, seedCachedServerRail } from "../home/serverRailCache";
+import { resetCurrentServerRole } from "../home/serverRole";
 import { getCacheRuntime, initCacheRuntime } from "../cache/runtime";
 import { cancelCacheSync, refreshOverlayIntoStore } from "../cache/cacheSyncRuntime";
 import { useOfflineStore } from "../cache/cacheCleanup";
@@ -55,6 +57,8 @@ interface Snapshot {
   installationId: string | null;
   user: RaftUser | null;
   serverId: string | null;
+  /** True after login or a successful GET /auth/me this session. The cached user is not enough to sync. */
+  profileSynced: boolean;
 }
 
 interface LoginResult {
@@ -69,12 +73,15 @@ export interface SessionApi {
   user: RaftUser | null;
   serverId: string | null;
   signedIn: boolean;
+  /** The signed-in user came from the server this session, so preferredSkin is authoritative. */
+  profileSynced: boolean;
   client: ApiClient;
   setOrigin: (origin: string) => Promise<void>;
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   selectServer: (serverId: string) => Promise<void>;
-  updateProfile: (fields: { displayLanguage?: string; preferredMessageBodyFontSize?: "sm" | "md" | "lg" }) => Promise<void>;
+  updateProfile: (fields: { displayLanguage?: string; preferredMessageBodyFontSize?: "sm" | "md" | "lg"; preferredSkin?: string }) => Promise<void>;
+  refreshAccount: () => Promise<void>;
   resendVerification: () => Promise<void>;
   markRead: (channelId: string, seq: number) => Promise<void>;
   joinThread: (threadChannelId: string) => void;
@@ -105,6 +112,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     installationId: null,
     user: null,
     serverId: null,
+    profileSynced: false,
   });
   const [snapshot, setSnapshotState] = useState(snapshotRef.current);
   const focusedRef = useRef<string | null>(null);
@@ -141,6 +149,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         preferredMessageBodyFontSize: user.preferredMessageBodyFontSize,
         preferredTimeFormat: user.preferredTimeFormat,
         preferredTimezone: user.preferredTimezone,
+        ...(user.preferredSkin !== undefined ? { preferredSkin: user.preferredSkin } : {}),
       })) : Promise.resolve(),
     ]);
   }
@@ -153,8 +162,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   function clearAuth() {
     authEpoch.current += 1;
     bumpServerEpoch();
-    apply({ accessToken: null, refreshToken: null, user: null, serverId: null });
+    apply({ accessToken: null, refreshToken: null, user: null, serverId: null, profileSynced: false });
     useRaftStore.getState().clearServerData();
+    resetCachedServerRailSeed();
+    resetCurrentServerRole();
     useServerRailStore.getState().reset();
     useRaftStore.getState().setNotice(null);
     void persistTokens(null);
@@ -199,6 +210,16 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       void useServerRailStore.getState().refreshBadges(client).catch(() => {});
     }, BADGE_REFRESH_DEBOUNCE_MS);
   }, [client]);
+
+  async function refreshAccount() {
+    const me = parseUser(await client.get("/auth/me"));
+    if (!me) throw new Error("Account did not return a user");
+    const snap = snapshotRef.current;
+    if (!snap.accessToken || !snap.refreshToken) return;
+    await persistTokens({ accessToken: snap.accessToken, refreshToken: snap.refreshToken }, me);
+    if (!snapshotRef.current.accessToken) return;
+    apply({ user: me, profileSynced: true });
+  }
 
   const realtime = useMemo(() => createRealtime({
     getOrigin: () => snapshotRef.current.origin,
@@ -351,16 +372,23 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     const timer = setTimeout(() => {
       void (async () => {
         try {
-          const storedOrigin = await SecureStore.getItemAsync(ORIGIN);
+          const [storedOrigin, storedAccess, storedRefresh, storedUser, storedServer, storedInstallation] = await Promise.all([
+            SecureStore.getItemAsync(ORIGIN),
+            SecureStore.getItemAsync(ACCESS),
+            SecureStore.getItemAsync(REFRESH),
+            SecureStore.getItemAsync(USER),
+            SecureStore.getItemAsync(SERVER),
+            SecureStore.getItemAsync(INSTALLATION),
+          ]);
           const origin = BUNDLED_SERVER_ORIGIN;
           if (!origin) {
             if (!cancelled) apply({ origin: null, ready: true });
             return;
           }
-          let accessToken = await SecureStore.getItemAsync(ACCESS);
-          let refreshToken = await SecureStore.getItemAsync(REFRESH);
-          let userJson = await SecureStore.getItemAsync(USER);
-          let serverId = await SecureStore.getItemAsync(SERVER);
+          let accessToken = storedAccess;
+          let refreshToken = storedRefresh;
+          let userJson = storedUser;
+          let serverId = storedServer;
           if (storedOrigin !== origin) {
             void SecureStore.setItemAsync(ORIGIN, origin);
             if (storedOrigin) {
@@ -372,7 +400,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
               void SecureStore.deleteItemAsync(SERVER);
             }
           }
-          const storedInstallation = await SecureStore.getItemAsync(INSTALLATION);
           let installationId = storedInstallation && /^ari_[0-9a-f]{32}$/.test(storedInstallation)
             ? storedInstallation
             : createInstallationId();
@@ -391,14 +418,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           }
           if (!accessToken) return;
           try {
-            const me = parseUser(await client.get("/auth/me"));
-            if (me) apply({ user: me });
+            await refreshAccount();
           } catch (error) {
             if (error instanceof ApiError && error.status === 401 && snapshotRef.current.refreshToken) {
               try {
                 await client.refreshTokens();
-                const me = parseUser(await client.get("/auth/me"));
-                if (me) apply({ user: me });
+                await refreshAccount();
               } catch (refreshError) {
                 if (shouldLogoutAfterRefresh(refreshError)) clearAuth();
               }
@@ -484,6 +509,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     user: snapshot.user,
     serverId: snapshot.serverId,
     signedIn: Boolean(snapshot.accessToken && snapshot.refreshToken),
+    profileSynced: snapshot.profileSynced,
     client,
     setOrigin: async (origin: string) => {
       const changed = origin !== snapshotRef.current.origin;
@@ -506,7 +532,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       const user = parseUser(data.user);
       if (!user || !data.accessToken || !data.refreshToken) throw new Error("Login did not return a session");
       await persistTokens({ accessToken: data.accessToken, refreshToken: data.refreshToken }, user);
-      apply({ accessToken: data.accessToken, refreshToken: data.refreshToken, user });
+      apply({ accessToken: data.accessToken, refreshToken: data.refreshToken, user, profileSynced: true });
       useRaftStore.getState().setNotice(null);
     },
     logout: async () => {
@@ -537,8 +563,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         ? { accessToken: snapshotRef.current.accessToken, refreshToken: snapshotRef.current.refreshToken }
         : null;
       if (tokens) await persistTokens(tokens, user);
-      apply({ user });
+      apply({ user, profileSynced: true });
     },
+    refreshAccount,
     selectServer: async (serverId: string) => {
       if (snapshotRef.current.serverId !== serverId) {
         bumpServerEpoch();
@@ -580,6 +607,20 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     },
   }), [client, realtime, snapshot]);
   markReadRef.current = api.markRead;
+
+  if (snapshot.ready && snapshot.origin && snapshot.user && snapshot.serverId) {
+    try {
+      ensureCacheRuntime();
+      seedCachedServerRail({
+        ready: snapshot.ready,
+        origin: snapshot.origin,
+        userId: snapshot.user.id,
+        serverId: snapshot.serverId,
+      });
+    } catch {
+      // Cache unavailable — the screens fall back to the network.
+    }
+  }
 
   return <SessionContext.Provider value={api}>{children}</SessionContext.Provider>;
 }

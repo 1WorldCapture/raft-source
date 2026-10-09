@@ -8,6 +8,7 @@ import { useRaftStore } from "../../src/state/store";
 import { useSession } from "../../src/state/session";
 import { LoadingScreen, ScreenMessage } from "../../src/ui/screen";
 import { AppText } from "../../src/ui/text";
+import { useSkinStyles, type SkinRoles } from "../../src/ui/skin";
 import { colors, space } from "../../src/ui/theme";
 
 function visibleChannels(channels: RaftChannel[]): RaftChannel[] {
@@ -28,6 +29,7 @@ export default function ChannelsScreen() {
   const channelUnread = useRaftStore((state) => state.channelUnread);
   const liveUnread = useRaftStore((state) => state.liveUnread);
   const t = useT();
+  const skinStyle = useSkinStyles(mentionSkin);
 
   useLayoutEffect(() => {
     navigation.setOptions({ title: name || t("mobile.channels.title") });
@@ -98,7 +100,7 @@ export default function ChannelsScreen() {
               {item.peerAvatarUrl ? <Image source={{ uri: item.peerAvatarUrl }} style={styles.avatar} /> : <AppText style={styles.hash}>{item.type === "dm" ? "@" : "#"}</AppText>}
               <AppText style={styles.name}>{channelLabel(item)}{item.peerType === "agent" ? " · Agent" : ""}</AppText>
               {showBadge ? (
-                <View style={[styles.badge, summary?.hasMention && styles.mentionBadge]}>
+                <View style={[styles.badge, summary?.hasMention && skinStyle.mentionBadge]}>
                   <AppText style={styles.badgeText}>{count > 0 ? (count > 99 ? "99+" : String(count)) : "@"}</AppText>
                 </View>
               ) : null}
@@ -133,7 +135,6 @@ const styles = StyleSheet.create({
   },
   hash: { color: colors.muted, fontSize: 16, width: 16 },
   avatar: { borderRadius: 12, height: 24, width: 24 },
-  mentionBadge: { backgroundColor: colors.accentSoft },
   name: { color: colors.ink, flex: 1, fontSize: 16 },
   badge: {
     backgroundColor: colors.accent,
@@ -146,3 +147,9 @@ const styles = StyleSheet.create({
   emptyWrap: { flex: 1, justifyContent: "center" },
   empty: { color: colors.muted, textAlign: "center" },
 });
+
+function mentionSkin(skin: SkinRoles) {
+  return StyleSheet.create({
+    mentionBadge: { backgroundColor: skin.signal },
+  });
+}

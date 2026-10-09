@@ -6,13 +6,14 @@
 // Run: node --test scripts/build-desktop-feed.test.mjs
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-import { buildDesktopFeed, latestMacYml } from "./build-desktop-feed.mjs";
+import { buildDesktopFeed, findReleaseArtifact, isDirectRun, latestMacYml, verifyFeedTree } from "./build-desktop-feed.mjs";
 
 const scriptDir = join(tmpdir(), "build-desktop-feed-");
 
@@ -47,6 +48,7 @@ test("feed tree: version-prefixed dual-arch yml + same-commit manifest", async (
     releaseDir,
     outDir,
     version: "0.2.0",
+    arches: ["arm64", "x64"], // legacy dual-arch (--desktop-arch all)
     commit: "abc123def456",
     origin: "https://raft.internal.example:18443",
     embedded: { computer: "1.0.29", cli: "0.0.24-zcode.1", daemon: "1.0.26" },
@@ -110,4 +112,119 @@ test("latestMacYml shape matches what the app's checker parses (contract pin)", 
     "  - url: 1.2.3/a-arm64.zip\n" +
     "    sha512: BBB=\n" +
     "    size: 2\n");
+});
+
+test("isDirectRun matches paths containing spaces and other URL-encoded characters", () => {
+  const file = "/tmp/dir with space/#hash/build-desktop-feed.mjs";
+  const url = new URL(`file://${encodeURI(file).replace("#", "%23")}`).href;
+  assert.equal(isDirectRun(url, file), true);
+  assert.equal(isDirectRun(url, "/tmp/other.mjs"), false);
+  assert.equal(isDirectRun(url, undefined), false);
+});
+
+test("the CLI really runs from a directory whose name contains a space", () => {
+  const root = mkdtempSync(join(tmpdir(), "feed cli "));
+  try {
+    const copy = join(root, "build-desktop-feed.mjs");
+    copyFileSync(fileURLToPath(new URL("./build-desktop-feed.mjs", import.meta.url)), copy);
+    // No arguments: a running CLI must fail loudly (non-zero), not exit 0 silently.
+    const result = spawnSync(process.execPath, [copy], { encoding: "utf8" });
+    assert.notEqual(result.status, 0, `stdout=${result.stdout} stderr=${result.stderr}`);
+    assert.match(result.stderr, /\[desktop-feed\]/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("buildDesktopFeed defaults to arm64 dmg+zip and lists only what it ships", async () => {
+  const dir = mkdtempSync(scriptDir);
+  try {
+    const releaseDir = join(dir, "release");
+    const outDir = join(dir, "out");
+    mkdirSync(releaseDir);
+    writeReleaseArtifacts(releaseDir, "0.3.0");
+    const manifest = await buildDesktopFeed({
+      releaseDir, outDir, version: "0.3.0", commit: "a".repeat(40), origin: "https://raft.example",
+      embedded: { computer: "1.0.0", cli: "1.0.0", daemon: "1.0.0" },
+    });
+    assert.deepEqual(manifest.files.map((f) => f.name), ["Raft-Desktop-0.3.0-arm64.dmg", "Raft-Desktop-0.3.0-arm64.zip"]);
+    const yml = readFileSync(join(outDir, "latest-mac.yml"), "utf8");
+    assert.doesNotMatch(yml, /x64/);
+    assert.match(yml, /0\.3\.0\/Raft-Desktop-0\.3\.0-arm64\.dmg/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("buildDesktopFeed with formats=zip skips the dmg entirely (feed, manifest and tree)", async () => {
+  const dir = mkdtempSync(scriptDir);
+  try {
+    const releaseDir = join(dir, "release");
+    const outDir = join(dir, "out");
+    mkdirSync(releaseDir);
+    writeFileSync(join(releaseDir, "Raft-Desktop-0.3.0-arm64.zip"), "zip-only\n"); // no dmg exists at all
+    const manifest = await buildDesktopFeed({
+      releaseDir, outDir, version: "0.3.0", commit: "b".repeat(40), origin: "https://raft.example",
+      embedded: { computer: "1.0.0", cli: "1.0.0", daemon: "1.0.0" },
+      arches: ["arm64"], formats: ["zip"],
+    });
+    assert.deepEqual(manifest.files.map((f) => f.name), ["Raft-Desktop-0.3.0-arm64.zip"]);
+    const yml = readFileSync(join(outDir, "latest-mac.yml"), "utf8");
+    assert.doesNotMatch(yml, /dmg|x64/);
+    assert.equal(yml.match(/url:/g).length, 1);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("verifyFeedTree rejects a url that differs from the file name only by case", async () => {
+  const dir = mkdtempSync(scriptDir);
+  try {
+    mkdirSync(join(dir, "0.3.0"));
+    writeFileSync(join(dir, "0.3.0", "raft-desktop-0.3.0-arm64.zip"), "x");
+    await assert.rejects(
+      verifyFeedTree(dir, "0.3.0", [{ url: "0.3.0/Raft-Desktop-0.3.0-arm64.zip", sha512: "s", size: 1 }], [{ name: "Raft-Desktop-0.3.0-arm64.zip", sha256: "h", size: 1 }]),
+      /no file with exactly that name[\s\S]*manifest file Raft-Desktop-0\.3\.0-arm64\.zip is missing/,
+    );
+    writeFileSync(join(dir, "0.3.0", "Raft-Desktop-0.3.0-arm64.zip"), "x");
+    await verifyFeedTree(dir, "0.3.0", [{ url: "0.3.0/Raft-Desktop-0.3.0-arm64.zip", sha512: "s", size: 1 }], [{ name: "Raft-Desktop-0.3.0-arm64.zip", sha256: "h", size: 1 }]);
+    // Path tricks never count as present.
+    await assert.rejects(verifyFeedTree(dir, "0.3.0", [{ url: "0.3.0/../x.zip", sha512: "s", size: 1 }], []), /no file with exactly that name/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("findReleaseArtifact: exact name, case-only mismatch (warns), and missing (lists the directory)", async () => {
+  const dir = mkdtempSync(scriptDir);
+  try {
+    writeFileSync(join(dir, "raft-desktop-0.3.0-arm64.zip"), "x");
+    const warnings = [];
+    const found = await findReleaseArtifact(dir, "Raft-Desktop-0.3.0-arm64.zip", (m) => warnings.push(m));
+    assert.equal(found, join(dir, "raft-desktop-0.3.0-arm64.zip"));
+    assert.equal(warnings.length, 1);
+    writeFileSync(join(dir, "Raft-Desktop-0.3.0-arm64.dmg"), "y");
+    assert.equal(await findReleaseArtifact(dir, "Raft-Desktop-0.3.0-arm64.dmg", () => assert.fail("no warning for exact")), join(dir, "Raft-Desktop-0.3.0-arm64.dmg"));
+    await assert.rejects(findReleaseArtifact(dir, "Raft-Desktop-9.9.9-arm64.zip"), /not found[\s\S]*raft-desktop-0\.3\.0-arm64\.zip/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("buildDesktopFeed publishes a lowercase electron-builder output under the canonical (yml) name", async () => {
+  const dir = mkdtempSync(scriptDir);
+  try {
+    const releaseDir = join(dir, "release");
+    const outDir = join(dir, "out");
+    mkdirSync(releaseDir);
+    writeFileSync(join(releaseDir, "raft-desktop-0.3.0-arm64.zip"), "zip\n");
+    const manifest = await buildDesktopFeed({
+      releaseDir, outDir, version: "0.3.0", commit: "c".repeat(40), origin: "https://raft.example",
+      embedded: { computer: "1.0.0", cli: "1.0.0", daemon: "1.0.0" }, formats: ["zip"],
+    });
+    assert.deepEqual(manifest.files.map((f) => f.name), ["Raft-Desktop-0.3.0-arm64.zip"]);
+    assert.deepEqual(readdirSync(join(outDir, "0.3.0")), ["Raft-Desktop-0.3.0-arm64.zip"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

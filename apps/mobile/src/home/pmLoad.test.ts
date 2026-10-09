@@ -7,7 +7,7 @@ import {
   shouldStopWaitingForSession,
 } from "./pmLoad.ts";
 
-const loadFailed = "Couldn't load channels";
+const loadFailed = "Couldn't load";
 
 test("the session wait matches the five second timer", () => {
   assert.equal(SESSION_READY_WAIT_MS, 5_000);

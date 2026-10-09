@@ -45,6 +45,7 @@ function toPublicUser(user: {
   preferredTranslationDisplay?: "translated" | "original" | "bilingual" | null;
   preferredTimeFormat?: "12h" | "24h" | null;
   preferredMessageBodyFontSize?: "sm" | "md" | "lg" | null;
+  preferredSkin?: string | null;
   referralSource?: string | null;
   referralSourceOther?: string | null;
   referralSourceSkippedAt?: Date | null;
@@ -81,6 +82,7 @@ function toPublicUser(user: {
     preferredTranslationDisplay: user.preferredTranslationDisplay ?? "translated",
     preferredTimeFormat: user.preferredTimeFormat ?? null,
     preferredMessageBodyFontSize: user.preferredMessageBodyFontSize ?? null,
+    preferredSkin: user.preferredSkin ?? null,
     referralSource: user.referralSource ?? null,
     referralSourceOther: user.referralSourceOther ?? null,
     referralSourceSkippedAt: user.referralSourceSkippedAt ?? null,
@@ -508,6 +510,7 @@ export async function getUser(userId: string) {
     preferredTranslationDisplay: users.preferredTranslationDisplay,
     preferredTimeFormat: users.preferredTimeFormat,
     preferredMessageBodyFontSize: users.preferredMessageBodyFontSize,
+    preferredSkin: users.preferredSkin,
     referralSource: users.referralSource,
     referralSourceOther: users.referralSourceOther,
     referralSourceSkippedAt: users.referralSourceSkippedAt,
@@ -545,6 +548,7 @@ export async function getUserByEmail(email: string) {
     preferredTranslationDisplay: users.preferredTranslationDisplay,
     preferredTimeFormat: users.preferredTimeFormat,
     preferredMessageBodyFontSize: users.preferredMessageBodyFontSize,
+    preferredSkin: users.preferredSkin,
     referralSource: users.referralSource,
     referralSourceOther: users.referralSourceOther,
     referralSourceSkippedAt: users.referralSourceSkippedAt,
@@ -572,6 +576,7 @@ export async function updateUser(userId: string, fields: {
   preferredTranslationDisplay?: "translated" | "original" | "bilingual";
   preferredTimeFormat?: "12h" | "24h" | null;
   preferredMessageBodyFontSize?: "sm" | "md" | "lg" | null;
+  preferredSkin?: string | null;
   referralSource?: string | null;
   referralSourceOther?: string | null;
   referralSourceSkippedAt?: Date | null;
@@ -710,6 +715,7 @@ async function getPublicUserByIdTx(database: DatabaseExecutor, userId: string) {
     preferredTranslationDisplay: users.preferredTranslationDisplay,
     preferredTimeFormat: users.preferredTimeFormat,
     preferredMessageBodyFontSize: users.preferredMessageBodyFontSize,
+    preferredSkin: users.preferredSkin,
     referralSource: users.referralSource,
     referralSourceOther: users.referralSourceOther,
     referralSourceSkippedAt: users.referralSourceSkippedAt,

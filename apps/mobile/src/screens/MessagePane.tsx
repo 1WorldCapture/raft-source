@@ -29,12 +29,16 @@ import {
   advanceContextWindow,
   applyContextWindow,
   appendNewerPage,
+  applyMemoryCap,
   forgetContextWindow,
   JUMP_VIEW_POSITION,
   parseMessageContext,
   recallContextWindow,
   rememberContextWindow,
+  shouldFollowTail,
   shouldRequestContext,
+  TAIL_FOLLOW_OFFSET,
+  TAIL_LIMIT,
   visibleInWindow,
 } from "../model/messageWindow";
 import {
@@ -61,6 +65,7 @@ import { useSession } from "../state/session";
 import { useRaftStore } from "../state/store";
 import { colors, space } from "../ui/theme";
 import { AppText } from "../ui/text";
+import { useSkinStyles, type SkinRoles } from "../ui/skin";
 import { bodyFont, color, shadowOffset } from "../ui/tokens";
 import { Avatar } from "../ui/Avatar";
 import { collectSenderDirectory, senderDirectoryStep } from "./senderAvatars";
@@ -86,7 +91,7 @@ import { claimReaction, releaseReaction, threadMenuActions } from "./interaction
 import { copyText, tapFeedback } from "./messageFeedback";
 import { dmReadByPeer, parsePeerReads, type PeerRead } from "./readReceipt";
 
-const PAGE = 50;
+const PAGE = TAIL_LIMIT;
 
 /** Raw enriched message → cache row shape (boot.rawPageForCache input). */
 function messageToCacheRow(item: unknown) {
@@ -170,6 +175,7 @@ export function MessagePane({
   listHeader?: ReactNode;
 }) {
   const session = useSession();
+  const skinStyle = useSkinStyles(paneSkin);
   const insets = useSafeAreaInsets();
   const sessionRef = useRef(session);
   sessionRef.current = session;
@@ -217,6 +223,10 @@ export function MessagePane({
   const [memberCache, setMemberCache] = useState<MentionCandidate[] | null>(null);
   const [unseen, setUnseen] = useState(0);
   const [showBack, setShowBack] = useState(false);
+  const [detachedFromTail, setDetachedFromTail] = useState(false);
+  const detachedRef = useRef(false);
+  detachedRef.current = detachedFromTail;
+  const suppressOlderAtTail = useRef(false);
   const [stickyAt, setStickyAt] = useState<string | null>(null);
   const [collapseLong, setCollapseLong] = useState(true);
   const [dm, setDm] = useState(false);
@@ -314,6 +324,9 @@ export function MessagePane({
     setCollapseLong(true);
     setOpenSystems(new Set());
     setUnseen(0);
+    setDetachedFromTail(false);
+    detachedRef.current = false;
+    suppressOlderAtTail.current = false;
     setUploads([]);
     setChannelHits([]);
     setStickyAt(null);
@@ -326,7 +339,7 @@ export function MessagePane({
     }
     const savedOffset = scrollOffsets.get(channelId) ?? 0;
     lastOffset.current = savedOffset;
-    nearBottom.current = savedOffset < 100;
+    nearBottom.current = shouldFollowTail(savedOffset, true);
     const frame = requestAnimationFrame(() => listRef.current?.scrollToOffset({ offset: savedOffset, animated: false }));
     return () => {
       cancelAnimationFrame(frame);
@@ -377,6 +390,22 @@ export function MessagePane({
     if (nearBottom.current) setUnseen((count) => (count === 0 ? count : 0));
     else setUnseen((count) => count + added);
   }, [visibleMessages, userId]);
+
+  useEffect(() => {
+    if (hasNewer || targetMessageId) return;
+    const follow = nearBottom.current && !detachedRef.current;
+    const capped = applyMemoryCap(messages, follow);
+    if (follow) {
+      if (!capped.droppedOlder) return;
+      suppressOlderAtTail.current = true;
+      useRaftStore.getState().setChannelMessages(channelId, capped.messages);
+      setHasMore(true);
+      return;
+    }
+    if (!capped.droppedTail) return;
+    useRaftStore.getState().setChannelMessages(channelId, capped.messages);
+    setDetachedFromTail(true);
+  }, [messages, channelId, hasNewer, targetMessageId]);
 
   useEffect(() => {
     if (!settingsChannelId || settingsChannelId === "pending-thread") return;
@@ -438,7 +467,9 @@ export function MessagePane({
     }).catch(() => undefined);
   }, [channelId, messages]);
 
-  useEffect(() => {
+  // Layout, not a passive effect: the synchronous cache seed has to land
+  // before paint, or a cold start flashes the spinner over a full history.
+  useLayoutEffect(() => {
     let cancelled = false;
     if (channelId === "pending-thread") {
       setLoading(false);
@@ -551,6 +582,15 @@ export function MessagePane({
           // follow-up known-issue fix).
           setHasNewer(drained.hitCap);
           setWindowCeiling(drained.hitCap ? drained.lastSeq : null);
+          if (!drained.hitCap) {
+            const bucket = useRaftStore.getState().messagesByChannel[channelId] ?? [];
+            const capped = applyMemoryCap(bucket, true);
+            if (capped.droppedOlder) {
+              suppressOlderAtTail.current = true;
+              useRaftStore.getState().setChannelMessages(channelId, capped.messages);
+              setHasMore(true);
+            }
+          }
           const seq = maxSeq(useRaftStore.getState().messagesByChannel[channelId] ?? []);
           if (seq > 0) void sessionRef.current.markRead(channelId, seq);
           // Review fix #4: the pane showed cached (possibly stale) dynamic
@@ -570,8 +610,14 @@ export function MessagePane({
           forgetContextWindow(channelId);
           if (missingTarget) useRaftStore.getState().setChannelMessages(channelId, page);
           else useRaftStore.getState().upsertMessages(page);
+          const bucket = useRaftStore.getState().messagesByChannel[channelId] ?? [];
+          const capped = missingTarget ? null : applyMemoryCap(bucket, true);
+          if (capped?.droppedOlder) {
+            suppressOlderAtTail.current = true;
+            useRaftStore.getState().setChannelMessages(channelId, capped.messages);
+          }
           useRaftStore.getState().setThreadSummaries(parseThreadSummaries(data));
-          setHasMore(page.length >= PAGE);
+          setHasMore(page.length >= PAGE || Boolean(capped?.droppedOlder));
           setHasNewer(false);
           setWindowCeiling(null);
           setLimited(historyLimited(data));
@@ -588,8 +634,7 @@ export function MessagePane({
           setShowBack(false);
           setTimeout(() => {
             if (cancelled) return;
-            if (embedded) listRef.current?.scrollToEnd({ animated: false });
-            else listRef.current?.scrollToOffset({ offset: 0, animated: false });
+            listRef.current?.scrollToOffset({ offset: 0, animated: false });
           }, 50);
         }
       } catch (caught) {
@@ -606,6 +651,7 @@ export function MessagePane({
 
   async function loadOlder() {
     if (!hasMore || loadingOlder) return;
+    if (suppressOlderAtTail.current && nearBottom.current && !detachedRef.current) return;
     const before = minSeq(visibleMessages);
     if (before === null) return;
     setLoadingOlder(true);
@@ -613,6 +659,14 @@ export function MessagePane({
       const data = await sessionRef.current.client.get<unknown>(`/messages/channel/${channelId}?limit=${PAGE}&before=${before}`);
       const page = parseMessagePage(data);
       useRaftStore.getState().upsertMessages(page);
+      if (!hasNewerRef.current) {
+        const bucket = useRaftStore.getState().messagesByChannel[channelId] ?? [];
+        const capped = applyMemoryCap(bucket, false);
+        if (capped.droppedTail) {
+          useRaftStore.getState().setChannelMessages(channelId, capped.messages);
+          setDetachedFromTail(true);
+        }
+      }
       setHasMore(page.length >= PAGE);
       setLimited((current) => current || historyLimited(data));
       // History pages extend the cached coverage downwards (#2).
@@ -665,6 +719,8 @@ export function MessagePane({
     setWindowCeiling(null);
     setHighlightedId(null);
     nearBottom.current = true;
+    detachedRef.current = false;
+    setDetachedFromTail(false);
     setUnseen(0);
     setShowBack(false);
     try {
@@ -681,8 +737,7 @@ export function MessagePane({
       setError(sendError(caught, t));
     }
     requestAnimationFrame(() => {
-      if (embedded) listRef.current?.scrollToEnd({ animated: true });
-      else listRef.current?.scrollToOffset({ offset: 0, animated: true });
+      listRef.current?.scrollToOffset({ offset: 0, animated: true });
     });
   }
 
@@ -911,13 +966,14 @@ export function MessagePane({
         return { id, filename: previous?.filename ?? pending?.name ?? id, mimeType: previous?.mimeType ?? pending?.mimeType };
       }),
     };
-    if (hasNewerRef.current) await returnToLatest();
+    if (hasNewerRef.current || detachedRef.current) await returnToLatest();
     useRaftStore.getState().upsertMessages([optimistic]);
     nearBottom.current = true;
+    detachedRef.current = false;
+    setDetachedFromTail(false);
     setUnseen(0);
     requestAnimationFrame(() => {
-      if (embedded) listRef.current?.scrollToEnd({ animated: true });
-      else listRef.current?.scrollToOffset({ offset: 0, animated: true });
+      listRef.current?.scrollToOffset({ offset: 0, animated: true });
     });
     if (!existing) {
       setDraft("");
@@ -1484,13 +1540,13 @@ export function MessagePane({
       <View style={styles.timeline}>
         <FlatList
           ref={listRef}
-          data={embedded ? visibleMessages : reversed}
-          inverted={!embedded}
+          data={reversed}
+          inverted
           keyExtractor={(item) => item.id}
-          maintainVisibleContentPosition={embedded ? undefined : hasNewer
-            ? { minIndexForVisible: 0 }
-            : { minIndexForVisible: 0, autoscrollToTopThreshold: 100 }}
-          onEndReached={embedded ? undefined : () => void loadOlder()}
+          maintainVisibleContentPosition={!hasNewer && !detachedFromTail
+            ? { minIndexForVisible: 0, autoscrollToTopThreshold: TAIL_FOLLOW_OFFSET }
+            : { minIndexForVisible: 0 }}
+          onEndReached={() => void loadOlder()}
           onEndReachedThreshold={0.3}
           onScrollToIndexFailed={(info) => {
             listRef.current?.scrollToOffset({ offset: Math.max(0, info.averageItemLength * info.index), animated: false });
@@ -1500,41 +1556,47 @@ export function MessagePane({
           }}
           onScroll={(event: NativeSyntheticEvent<NativeScrollEvent>) => {
             const offset = event.nativeEvent.contentOffset.y;
-            if (embedded) {
-              if (offset < 48) void loadOlder();
-              return;
-            }
             lastOffset.current = offset;
-            const atTail = !hasNewerRef.current && offset < 100;
+            const tailInMemory = !detachedRef.current && !hasNewerRef.current;
+            const atTail = shouldFollowTail(offset, tailInMemory);
             nearBottom.current = atTail;
-            const back = hasNewerRef.current || offset >= 100;
+            const back = !atTail;
             setShowBack((current) => current === back ? current : back);
-            if (atTail) setUnseen((count) => (count === 0 ? count : 0));
+            if (!atTail) suppressOlderAtTail.current = false;
+            if (atTail) {
+              setUnseen((count) => (count === 0 ? count : 0));
+              const bucket = useRaftStore.getState().messagesByChannel[channelId] ?? [];
+              const capped = applyMemoryCap(bucket, true);
+              if (capped.droppedOlder) {
+                suppressOlderAtTail.current = true;
+                useRaftStore.getState().setChannelMessages(channelId, capped.messages);
+                setHasMore(true);
+              }
+            }
             if (hasNewerRef.current && offset < 160 && (!focusMessageId || jumpedRef.current === focusMessageId)) void loadNewer();
           }}
           onViewableItemsChanged={onViewableItemsChanged}
           scrollEventThrottle={32}
           viewabilityConfig={viewabilityConfig}
           contentContainerStyle={embedded ? styles.embeddedList : styles.list}
-          ListHeaderComponent={embedded ? (
+          ListHeaderComponent={loadingNewer ? <ActivityIndicator color={colors.accent} /> : null}
+          ListFooterComponent={listHeader || loadingOlder || limited || (!hasMore && messages.length > 0) ? (
             <View>
               {listHeader}
-              {loadingOlder ? <ActivityIndicator color={colors.accent} /> : null}
-              {!hasMore && messages.length > 0 ? (
-                <View style={styles.threadStart}>
+              {loadingOlder ? <ActivityIndicator color={colors.accent} /> : limited ? (
+                <AppText style={styles.note}>{t("mobile.messages.historyLimited")}</AppText>
+              ) : !hasMore && messages.length > 0 ? (
+                embedded && thread ? (
+                  <View style={styles.threadStart}>
+                    <AppText style={styles.note}>{t("message.historyTop.beginningOfReplies")}</AppText>
+                    <AppText style={styles.note}>{t("message.inlineThreadReplies.replyCount", { count: messages.length })}</AppText>
+                  </View>
+                ) : (
                   <AppText style={styles.note}>{t(thread ? "message.historyTop.beginningOfReplies" : "message.historyTop.beginningOfMessages")}</AppText>
-                  {thread ? <AppText style={styles.note}>{t("message.inlineThreadReplies.replyCount", { count: messages.length })}</AppText> : null}
-                </View>
+                )
               ) : null}
             </View>
-          ) : loadingNewer ? <ActivityIndicator color={colors.accent} /> : null}
-          ListFooterComponent={embedded ? (loadingNewer ? <ActivityIndicator color={colors.accent} /> : null) : loadingOlder
-            ? <ActivityIndicator color={colors.accent} />
-            : limited
-              ? <AppText style={styles.note}>{t("mobile.messages.historyLimited")}</AppText>
-              : !hasMore && messages.length > 0
-                ? <AppText style={styles.note}>{t(thread ? "message.historyTop.beginningOfReplies" : "message.historyTop.beginningOfMessages")}</AppText>
-                : null}
+          ) : null}
           ListEmptyComponent={<AppText style={styles.note}>{t("mobile.messages.empty")}</AppText>}
           renderItem={({ item }) => {
             if (hiddenSystems.has(item.id)) return null;
@@ -1598,10 +1660,10 @@ export function MessagePane({
             <AppText style={styles.stickyText}>{formatDayLabel(stickyAt, timeOptions)}</AppText>
           </View>
         ) : null}
-        {!embedded && (showBack || hasNewer || unseen > 0) ? (
+        {(showBack || hasNewer || unseen > 0 || detachedFromTail) ? (
           <Pressable
             onPress={() => {
-              if (hasNewerRef.current) {
+              if (hasNewerRef.current || detachedRef.current) {
                 void returnToLatest();
                 return;
               }
@@ -1609,7 +1671,7 @@ export function MessagePane({
               setUnseen(0);
               listRef.current?.scrollToOffset({ offset: 0, animated: true });
             }}
-            style={styles.jump}
+            style={[styles.jump, skinStyle.jump]}
           >
             <AppText style={styles.jumpText}>{hasNewer || unseen === 0
               ? t("message.chatPanel.backToBottom")
@@ -1673,7 +1735,7 @@ export function MessagePane({
               <Pressable accessibilityRole="checkbox" accessibilityState={{ checked: asTask }} onPress={() => { setAsTask((current) => !current); focusComposer(); }} style={styles.taskToggle}>
                 <ListChecks color={color.ink} size={16} />
                 <AppText style={styles.taskLabel}>{t("message.composer.asTask")}</AppText>
-                <View style={[styles.box, asTask ? styles.boxOn : null]} />
+                <View style={[styles.box, asTask ? skinStyle.boxOn : null]} />
               </Pressable>
             )}
           </View>
@@ -1836,7 +1898,7 @@ const styles = StyleSheet.create({
   timeline: { flex: 1 },
   sticky: { alignSelf: "center", backgroundColor: color.white, borderColor: color.border, borderWidth: 2, paddingHorizontal: 10, paddingVertical: 3, position: "absolute", top: 6, zIndex: 2 },
   stickyText: { color: color.ink, fontSize: 10, fontWeight: "700", letterSpacing: 0.8, textTransform: "uppercase" },
-  jump: { alignSelf: "center", backgroundColor: color.yellow, borderColor: color.border, borderWidth: 2, bottom: 12, paddingHorizontal: 12, paddingVertical: 6, position: "absolute" },
+  jump: { alignSelf: "center", borderColor: color.border, borderWidth: 2, bottom: 12, paddingHorizontal: 12, paddingVertical: 6, position: "absolute" },
   jumpText: { color: color.ink, fontSize: 13, fontWeight: "700" },
   headerAction: { alignItems: "center", justifyContent: "center", minHeight: 32, paddingHorizontal: 4 },
   headerActionText: { color: color.ink, fontSize: 12, fontWeight: "700" },
@@ -1862,7 +1924,6 @@ const styles = StyleSheet.create({
   taskToggle: { alignItems: "center", flexDirection: "row", gap: 6 },
   taskLabel: { color: color.ink, fontSize: 12, fontWeight: "700" },
   box: { borderColor: color.border, borderWidth: 2, height: 16, width: 16 },
-  boxOn: { backgroundColor: color.yellow },
   send: { alignItems: "center", backgroundColor: color.pink, borderColor: color.border, borderWidth: 2, height: 32, justifyContent: "center", width: 36 },
   sendDisabled: { backgroundColor: color.pinkPale, borderColor: color.muted, marginBottom: shadowOffset.sm, marginRight: shadowOffset.sm },
   toolFace: { alignItems: "center", backgroundColor: color.page, borderColor: color.border, borderWidth: 2, height: 30, justifyContent: "center", width: 30 },
@@ -1874,3 +1935,10 @@ const styles = StyleSheet.create({
   uploadName: { color: color.ink, flex: 1, fontSize: 13 },
   uploadAction: { color: color.ink, fontSize: 13, fontWeight: "700" },
 });
+
+function paneSkin(skin: SkinRoles) {
+  return StyleSheet.create({
+    jump: { backgroundColor: skin.signal },
+    boxOn: { backgroundColor: skin.signal },
+  });
+}

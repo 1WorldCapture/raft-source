@@ -23,16 +23,18 @@
 // Usage (normally invoked by build-release-artifacts.mjs, macOS only):
 //   node scripts/build-desktop-feed.mjs --release-dir <dir> --version <v> \
 //     --commit <sha> --embedded-computer <v> --embedded-cli <v> \
-//     --embedded-daemon <v> --out <downloads>/desktop
+//     --embedded-daemon <v> --out <downloads>/desktop \
+//     [--arches arm64[,x64]] [--formats zip[,dmg]]   (default: arm64, dmg+zip)
 
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { copyFile, mkdir, stat, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
+import { fileURLToPath } from "node:url";
 
-const ARCHES = ["arm64", "x64"];
-const FORMATS = ["dmg", "zip"];
+const DEFAULT_ARCHES = ["arm64"];
+const DEFAULT_FORMATS = ["dmg", "zip"];
 
 function parseArgs(argv) {
   const args = {};
@@ -85,17 +87,63 @@ export function desktopManifest(version, commit, origin, embedded, files) {
   };
 }
 
+/**
+ * Locate an electron-builder artifact by its canonical name. macOS file
+ * systems are case-insensitive, so a plain stat() would "find" a lowercase
+ * file for an uppercase name; list the directory and compare exactly. A
+ * case-only mismatch is accepted (the copy is written under the canonical
+ * name, which is what latest-mac.yml references) with a warning; anything else
+ * fails with the directory listing.
+ */
+export async function findReleaseArtifact(releaseDir, name, warn = console.warn) {
+  const entries = await readdir(releaseDir);
+  if (entries.includes(name)) return path.join(releaseDir, name);
+  const folded = entries.find((entry) => entry.toLowerCase() === name.toLowerCase());
+  if (folded) {
+    warn(`[desktop-feed] release dir has "${folded}" but the feed expects "${name}"; publishing under the expected name`);
+    return path.join(releaseDir, folded);
+  }
+  throw new Error(`artifact ${name} not found in ${releaseDir} (found: ${entries.join(", ") || "nothing"})`);
+}
+
+/**
+ * The served tree must match latest-mac.yml and manifest.json byte-for-byte in
+ * NAME: nginx is case-sensitive, so a url that differs from the file name only
+ * by case is a 404. Lists the version directory (exact names) and checks every
+ * yml url and manifest entry exists there with the recorded size.
+ */
+export async function verifyFeedTree(outDir, version, ymlFiles, manifestFiles) {
+  const versionDir = path.join(outDir, version);
+  const present = new Set(await readdir(versionDir));
+  const problems = [];
+  for (const file of ymlFiles) {
+    const prefix = `${version}/`;
+    const base = file.url.startsWith(prefix) ? file.url.slice(prefix.length) : null;
+    if (base === null || base.includes("/") || !present.has(base)) {
+      problems.push(`latest-mac.yml url ${file.url} has no file with exactly that name in ${versionDir}`);
+    }
+  }
+  for (const file of manifestFiles) {
+    if (!present.has(file.name)) problems.push(`manifest file ${file.name} is missing from ${versionDir}`);
+  }
+  if (problems.length > 0) throw new Error(`desktop feed tree is inconsistent:\n  ${problems.join("\n  ")}`);
+}
+
 export async function buildDesktopFeed(deps) {
   const { releaseDir, outDir, version, commit, origin, embedded } = deps;
+  // Only the artifacts that were actually built and are shipped: the feed and
+  // manifest must never list a file the server does not carry.
+  const arches = deps.arches ?? DEFAULT_ARCHES;
+  const formats = deps.formats ?? DEFAULT_FORMATS;
   const versionDir = path.join(outDir, version);
   await mkdir(versionDir, { recursive: true });
 
   const ymlFiles = [];
   const manifestFiles = [];
-  for (const arch of ARCHES) {
-    for (const format of FORMATS) {
+  for (const arch of arches) {
+    for (const format of formats) {
       const name = `Raft-Desktop-${version}-${arch}.${format}`;
-      const source = path.join(releaseDir, name);
+      const source = await findReleaseArtifact(releaseDir, name);
       const size = (await stat(source)).size;
       await copyFile(source, path.join(versionDir, name));
       ymlFiles.push({
@@ -112,6 +160,7 @@ export async function buildDesktopFeed(deps) {
   await writeFile(path.join(outDir, "latest-mac.yml"), latestMacYml(version, ymlFiles), "utf8");
   const manifest = desktopManifest(version, commit, origin, embedded, manifestFiles);
   await writeFile(path.join(outDir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+  await verifyFeedTree(outDir, version, ymlFiles, manifestFiles);
   return manifest;
 }
 
@@ -127,12 +176,23 @@ async function main() {
     commit: args.commit,
     origin: args.origin,
     embedded: { computer: args["embedded-computer"], cli: args["embedded-cli"], daemon: args["embedded-daemon"] },
+    ...(args.arches ? { arches: args.arches.split(",").filter(Boolean) } : {}),
+    ...(args.formats ? { formats: args.formats.split(",").filter(Boolean) } : {}),
   });
   console.log(`[desktop-feed] wrote ${args.out}: version ${manifest.version}, ${manifest.files.length} files, commit ${manifest.commit.slice(0, 8)}`);
 }
 
+/**
+ * True when this module is the process entry point. Compares filesystem paths
+ * (fileURLToPath decodes %20 etc.); a raw URL pathname never matches argv[1]
+ * in a directory whose name has a space, and the CLI would silently do nothing.
+ */
+export function isDirectRun(moduleUrl, argv1) {
+  return Boolean(argv1) && path.resolve(argv1) === path.resolve(fileURLToPath(moduleUrl));
+}
+
 // CLI entry only when run directly; tests import the helpers.
-if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname)) {
+if (isDirectRun(import.meta.url, process.argv[1])) {
   main().catch((err) => {
     console.error(`[desktop-feed] ${err.message}`);
     process.exit(1);

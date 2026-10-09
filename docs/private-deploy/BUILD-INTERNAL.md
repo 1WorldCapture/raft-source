@@ -9,7 +9,7 @@
 1. **Linux（xai）**：linux-x64 Computer、CLI、daemon、downloads 树和 manifests；用 rcodesign 构建 darwin-arm64/x64 Computer；cursor-sdk 的 darwin 资产。
 2. **服务器**：private 模式的 server/web 镜像（入库脚本 `ops/docker/build-release.sh <full-sha> <branch>` 一键完成：frozen install→双镜像（tag `<branch>-<sha>`）→linux-x64 downloads 产物，自写 pidfile+分步日志），`docker save` 成 tar，记录 sha256 和大小；**自有生产发版走 deploy 分支并打 `v0.1.x` annotated tag**（客户交付包仍按本手册三路构建）。
    **版本标签规矩（发版追溯）**：每次生产发版完成后，在 deploy 分支对应的 commit 上打 annotated tag 并推送：`git tag -a v0.1.x -m "release v0.1.x" <sha> && git push origin v0.1.x`。历史映射：`v0.1.0`=`e4a40e8`、`v0.1.1`=`b5f7fdd`、`v0.1.2`=`0391e80`、`v0.1.3`=`d574ce4`。客户交付的 DELIVERY.md 只写「发行版号+构建 commit」这类可核对信息，不出现我们的仓库与分支操作。
-3. **Mac**：`--only desktop`，产出 Desktop 的 arm64/x64 dmg/zip、`latest-mac.yml`、desktop manifest，传走后立即清理（峰值约 10–11GB）。
+3. **Mac**：`--only desktop`，产出 Desktop 的 macOS arm64 dmg+zip（默认；见下）、`latest-mac.yml`、desktop manifest，传走后立即清理（峰值约 10–11GB）。
 4. **汇总**：在服务器组装发行包，整包重算 sha256，与各方清单逐项比对；所有 manifest 的 commit 必须一致。
 5. 全新安装复验：downloads 树整体重建（desktop/ 只留当前版本）、断网安装、完整用户流程、首次检查更新不提示。
 
@@ -51,7 +51,7 @@ Desktop 安装包在构建时烘焙服务器地址（`--desktop-origin`，写入
    node scripts/build-release-artifacts.mjs --out <发行包 downloads 目录> --only desktop \
      --desktop-origin https://<客户 SERVER_URL>
    ```
-   `--desktop-origin` 必须是裸 https 根地址（脚本校验）。`--only desktop` 只重打 `desktop/`（dmg/zip 的 arm64+x64、`latest-mac.yml`、desktop manifest），不重建其他产物，manifest 的 commit 不变。
+   `--desktop-origin` 必须是裸 https 根地址（脚本校验）。`--only desktop` 只重打 `desktop/`（默认只出 macOS arm64 的 dmg+zip，`latest-mac.yml` 和 manifest 只列实际产出的文件；`--desktop-arch arm64|all`、`--desktop-formats zip[,dmg]` 可调，默认 `arm64` / `zip,dmg`。已装的 <=0.1.6 只认 dmg 才弹更新提示，所以暂不要去掉 dmg；等旧版都升级后把 `scripts/desktopTargets.mjs` 的 `DEFAULT_FORMATS` 改成 `zip`；`latest-mac.yml`、desktop manifest），不重建其他产物，manifest 的 commit 不变。
 3. 验收：desktop manifest 的 `origin` = 客户地址；app 内更新检查与下载入口均指向该地址（检测逻辑为 detect-only，点更新=打开下载页，不自动安装）。
 4. 本次候选版 Desktop 使用 18443 的 origin（`https://raft.tailf3efbe.ts.net:18443`），**仅供 IT 复验，不进客户交付包**；交付文档注明「Desktop 按客户重打，样例 origin 仅供复验」。
 

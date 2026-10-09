@@ -34,6 +34,7 @@ import { DesktopNativeBridge } from "./desktop/DesktopNativeBridge";
 import { DesktopTopBar } from "./desktop/DesktopTopBar";
 import { DesktopSelfComputerMount } from "./desktop/computer/DesktopSelfComputerMount";
 import { DesktopOnboardingComputerMount } from "./desktop/computer/DesktopOnboardingComputerMount";
+import { DesktopSkinSync } from "./desktop/DesktopSkinSync";
 import { initSkin } from "./desktop/skins";
 import { installDesktopOAuth } from "./desktop/desktopOAuth";
 // Typography as a JS-graph css module so the bundler rewrites the font urls
@@ -69,6 +70,8 @@ function DesktopShell({ children }: { children: ReactNode }) {
       {/* Turns onboarding's "connect a computer" CLI step into a one-click Enable
           (desktop bundles the binary + has the session); inert off the step. */}
       <DesktopOnboardingComputerMount />
+      {/* Syncs the skin with the account's preferredSkin (first paint stays local). */}
+      <DesktopSkinSync />
     </div>
   );
 }
