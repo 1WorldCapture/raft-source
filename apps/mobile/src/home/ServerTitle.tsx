@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Modal, Pressable, ScrollView, StyleSheet, View, type LayoutChangeEvent } from "react-native";
-import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import { Gesture, GestureDetector, GestureHandlerRootView } from "react-native-gesture-handler";
 import { Check, ChevronDown } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import { useT } from "../i18n/provider";
@@ -29,6 +29,7 @@ export function ServerTitle({ subtitle, menuTop }: { subtitle?: string; menuTop:
   const { servers, serverUnread, current, switchServer, loadServers } = useServerRail();
   const [open, setOpen] = useState(false);
   const [drag, setDrag] = useState<Drag | null>(null);
+  const dragRef = useRef<Drag | null>(null);
   const slotLayouts = useRef<Record<string, { y: number; height: number }>>({});
   const skipPress = useRef(false);
   const displayServers = drag ? drag.order : servers;
@@ -48,7 +49,9 @@ export function ServerTitle({ subtitle, menuTop }: { subtitle?: string; menuTop:
 
   const beginDrag = useCallback((id: string) => {
     skipPress.current = true;
-    setDrag({ id, order: servers, dy: 0, startY: slotLayouts.current[id]?.y ?? 0 });
+    const next = { id, order: servers, dy: 0, startY: slotLayouts.current[id]?.y ?? 0 };
+    dragRef.current = next;
+    setDrag(next);
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
   }, [servers]);
 
@@ -67,7 +70,11 @@ export function ServerTitle({ subtitle, menuTop }: { subtitle?: string; menuTop:
       });
       const picked = layout ? nearestSlotIndex(measured, currentDrag.startY + layout.height / 2 + dy) : -1;
       const to = picked < 0 ? from : measured[picked]?.index ?? from;
-      if (to < 0 || to === from) return { ...currentDrag, dy };
+      if (to < 0 || to === from) {
+        const next = { ...currentDrag, dy };
+        dragRef.current = next;
+        return next;
+      }
       const orderIds = moveServerIds(currentDrag.order.map((server) => server.id), from, to);
       const byId = new Map(currentDrag.order.map((server) => [server.id, server]));
       const order = orderIds.flatMap((serverId) => {
@@ -75,20 +82,23 @@ export function ServerTitle({ subtitle, menuTop }: { subtitle?: string; menuTop:
         return server ? [server] : [];
       });
       void Haptics.selectionAsync().catch(() => {});
-      return { ...currentDrag, dy, order };
+      const next = { ...currentDrag, dy, order };
+      dragRef.current = next;
+      return next;
     });
   }, []);
 
   const endDrag = useCallback(() => {
-    setDrag((currentDrag) => {
-      if (!currentDrag) return null;
+    const currentDrag = dragRef.current;
+    dragRef.current = null;
+    setDrag(null);
+    if (currentDrag) {
       const originalIds = servers.map((server) => server.id);
       const finalIds = currentDrag.order.map((server) => server.id);
       if (finalIds.join("\n") !== originalIds.join("\n")) {
         void useServerRailStore.getState().reorderServers(session.client, finalIds);
       }
-      return null;
-    });
+    }
     // A long-press release can still emit the row's press. Ignore that press,
     // then allow the next short tap to switch servers.
     setTimeout(() => {
@@ -121,6 +131,7 @@ export function ServerTitle({ subtitle, menuTop }: { subtitle?: string; menuTop:
       ) : title}
       {subtitle ? <AppText numberOfLines={1} style={styles.subtitle}>{subtitle}</AppText> : null}
       <Modal animationType="fade" onRequestClose={() => setOpen(false)} statusBarTranslucent transparent visible={open}>
+        <GestureHandlerRootView style={styles.modalRoot}>
         <Pressable accessibilityLabel={t("search.back")} onPress={() => setOpen(false)} style={styles.scrim} />
         <View pointerEvents="box-none" style={[styles.sheetWrap, { top: menuTop }]}>
           <View style={styles.panel}>
@@ -146,6 +157,7 @@ export function ServerTitle({ subtitle, menuTop }: { subtitle?: string; menuTop:
             </ScrollView>
           </View>
         </View>
+        </GestureHandlerRootView>
       </Modal>
     </View>
   );
@@ -219,6 +231,7 @@ const styles = StyleSheet.create({
     height: 10,
     width: 10,
   },
+  modalRoot: { flex: 1 },
   scrim: { backgroundColor: "rgba(0,0,0,0.25)", bottom: 0, left: 0, position: "absolute", right: 0, top: 0 },
   sheetWrap: { left: 0, position: "absolute", right: 0 },
   panel: {
