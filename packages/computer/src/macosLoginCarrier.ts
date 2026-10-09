@@ -243,6 +243,14 @@ export function buildMacosLoginCarrierSpec(
     "    <dict>",
     "      <key>PATH</key>",
     `      <string>${xmlEscape(launchdPath(userHome))}</string>`,
+    // Self-contained home env (#computer-extract pitfall A): the login item
+    // must never depend on `launchctl setenv` ordering against home-env
+    // plists. ProgramArguments already pins --slock-home; these two make
+    // every child that reads env instead of the flag agree on the home too.
+    "      <key>RAFT_HOME</key>",
+    `      <string>${xmlEscape(slockHome)}</string>`,
+    "      <key>SLOCK_HOME</key>",
+    `      <string>${xmlEscape(slockHome)}</string>`,
     "    </dict>",
     "    <key>RunAtLoad</key>",
     "    <true/>",

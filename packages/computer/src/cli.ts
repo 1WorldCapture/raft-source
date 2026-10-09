@@ -815,6 +815,18 @@ program
   .action(withCliExit(async (opts: { slockHome?: string; raftHome?: string; osSupervised?: string }) => {
     const home = opts.slockHome ?? opts.raftHome;
     if (home) process.env.SLOCK_HOME = home;
+    // Persistent user intent gate (#computer-extract, PM decision
+    // 2026-10-09): a user-stopped Computer stays stopped across logins and
+    // reboots. The LaunchAgent's RunAtLoad lands here; honour the recorded
+    // intent BEFORE any socket/pid work and exit 0 so launchd does not
+    // relaunch-thrash. Absent file reads as "running" (pre-extract
+    // behaviour) — see desiredState.ts.
+    if (home !== undefined) {
+      const { readDesiredState } = await import("./desiredState.js");
+      if ((await readDesiredState(home)) === "stopped") {
+        process.exit(0);
+      }
+    }
     if (opts.osSupervised) {
       const kinds: OsSupervisorKind[] = ["launchd-user", "systemd-user", "windows-task"];
       if (!kinds.includes(opts.osSupervised as OsSupervisorKind)) {
