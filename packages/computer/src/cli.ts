@@ -54,6 +54,7 @@ import { runCursorSdkLogin, runCursorSdkLogout, runCursorSdkStatus } from "./cur
 import { runAttach } from "./attach.js";
 import { runSetup } from "./setup.js";
 import { formatStatusReport } from "./status.js";
+import { projectStatusJson } from "./statusJson.js";
 import { runRunnersList, runRunnersStop } from "./runners.js";
 import { runStart, runStop } from "./startStop.js";
 import { runResident, runService, isSeaBinary, OS_SUPERVISOR_KIND_ENV_VAR, RESIDENT_CLI_PATH_ENV_VAR } from "./service.js";
@@ -466,11 +467,17 @@ program
 program
   .command("status")
   .description("Show whether Raft Computer is logged in, running, and connected to servers.")
-  .action(withCliExit(async () => {
+  .option("--json", "machine-readable projection (Desktop ComputerController contract, interface v1)")
+  .action(withCliExit(async (opts: { json?: boolean }) => {
     const slockHome = resolveRaftHome();
     const api = createComputerApi(slockHome);
+    const report = await api.getStatus();
+    if (opts.json) {
+      process.stdout.write(`${JSON.stringify(await projectStatusJson(report), null, 2)}\n`);
+      return;
+    }
     await present(async () => {
-      formatStatusReport(await api.getStatus());
+      formatStatusReport(report);
     });
   }));
 
