@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import { useAuthStore } from "@web/store/authStore";
 import { SKINS, adoptSyncedSkin, currentSkinId, explicitSkinId, onUserSkinChange } from "./skins";
-import { createSkinSync } from "./skinSync";
+import { createSkinSync } from "@botiverse/raft-shared/src/skinSync.ts";
 
 const PENDING_KEY = "raft-desktop-skin-pending";
 
