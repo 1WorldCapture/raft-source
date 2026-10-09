@@ -33,6 +33,8 @@ func buildChat(handle *sql.DB, channels *channel.Store, root *keys.Root) (*chatS
 	}
 	messages := message.NewStoreWithOptions(handle, channels, message.Options{CursorSecret: cursorKey})
 	states := readstate.NewStore(handle, channels)
+	// B freezes the real delivery planner and agent principal validator
+	// inside NewService. Callers do not inject a second pair.
 	messagingSvc, err := messaging.NewService(channels, messages, states)
 	if err != nil {
 		return nil, err

@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 
 	"raft.local/server-go/internal/agent"
 	"raft.local/server-go/internal/computer"
@@ -26,15 +27,40 @@ type Coordinator struct {
 	service  *agent.Service
 	broker   *runtimecatalog.Broker
 	validate ValidatePrincipal
+	// receipts (M5, optional) receives authenticated delivery receipts; nil
+	// leaves the pre-M5 frame routing exactly as it was.
+	receipts DeliveryReceiptSink
+	logger   *slog.Logger
 }
 
 // NewCoordinator rejects incomplete wiring instead of admitting a partially
-// initialized public struct whose dependencies can later be replaced.
+// initialized public struct whose dependencies can later be replaced. The
+// M3 constructor is unchanged; M5 wiring uses NewCoordinatorWithOptions.
 func NewCoordinator(service *agent.Service, broker *runtimecatalog.Broker, validate ValidatePrincipal) (*Coordinator, error) {
+	return NewCoordinatorWithOptions(service, broker, validate, Options{})
+}
+
+// Options carries the optional M5 dependencies. Zero values keep the exact
+// pre-M5 behavior.
+type Options struct {
+	// Receipts is A's delivery store receipt contract. Nil disables receipt
+	// routing (frames flow to the lifecycle switch as before).
+	Receipts DeliveryReceiptSink
+	// Logger defaults to slog.Default().
+	Logger *slog.Logger
+}
+
+// NewCoordinatorWithOptions is the M5 assembly: the receipt sink is bound at
+// construction and can never be replaced later.
+func NewCoordinatorWithOptions(service *agent.Service, broker *runtimecatalog.Broker, validate ValidatePrincipal, opts Options) (*Coordinator, error) {
 	if service == nil || broker == nil || validate == nil {
 		return nil, errors.New("machinecontrol: service, broker and principal validator are required")
 	}
-	return &Coordinator{service: service, broker: broker, validate: validate}, nil
+	logger := opts.Logger
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &Coordinator{service: service, broker: broker, validate: validate, receipts: opts.Receipts, logger: logger}, nil
 }
 
 // OnReady persists the ready facts (delegated) and notifies the agent
@@ -47,7 +73,9 @@ func (c *Coordinator) OnReady(ctx context.Context, principal computer.Principal,
 }
 
 // OnMessage routes a daemon frame through the runtime-catalog broker first;
-// unhandled frames go to the agent lifecycle service.
+// then (when the receipt sink is wired) the authenticated delivery receipts
+// go to the delivery domain's facts; unhandled frames go to the agent
+// lifecycle service. Routing order is fixed at assembly.
 func (c *Coordinator) OnMessage(ctx context.Context, principal computer.Principal, raw json.RawMessage) error {
 	if err := c.validate(ctx, principal); err != nil {
 		return err
@@ -55,6 +83,12 @@ func (c *Coordinator) OnMessage(ctx context.Context, principal computer.Principa
 	handled, err := c.broker.OnMachineMessage(ctx, principal, raw)
 	if handled || err != nil {
 		return err
+	}
+	if c.receipts != nil {
+		handled, err := c.dispatchReceipt(ctx, principal, raw)
+		if handled || err != nil {
+			return err
+		}
 	}
 	return c.service.OnMessage(ctx, principal, raw)
 }

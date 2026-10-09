@@ -74,6 +74,10 @@ func Manifest() []routeManifestEntry {
 		"GET /api/servers/{id}/join-links", "POST /api/servers/{id}/join-links", "DELETE /api/servers/{id}/join-links/{linkId}",
 		"GET /api/servers/{id}/invites", "POST /api/servers/{id}/invites", "DELETE /api/servers/{id}/invites/{inviteId}")
 	add("humanapi", "human", rvp, management, "none", "501 office overview; gates first", "mount", "", "GET /api/servers/{id}/agent-overview")
+	const agreementManagement = management + "; RequireAgreementManagement owner/admin"
+	add("humanapi", "human", rvp, agreementManagement, "none", "501 pre-join agreement; gates first", "mount", "",
+		"GET /api/servers/{id}/agreement", "PUT /api/servers/{id}/agreement")
+	add("humanapi", "human", rvp, agreementManagement, "none", gatesFirst405, "mount", "GET, PUT", "* /api/servers/{id}/agreement")
 	add("humanapi", "human", rvp, "user-scoped", "none", gatesFirst405, "mount", "GET, POST", "* /api/servers", "* /api/servers/{$}")
 	add("humanapi", "human", rvp, "RequireServerScope except literal order and unread-summary", "none",
 		"405; order Allow=GET, PATCH; unread-summary Allow=GET; other ids Allow=GET, PATCH", "mount", "", "* /api/servers/{id}")
@@ -196,6 +200,18 @@ func Manifest() []routeManifestEntry {
 		"GET /internal/agent-api", "GET /internal/agent-api/{$}")
 	add("agentapi", "agent-key", "agent-key", "credential workspace; server capability and optional active-capabilities header", "none", "implemented server directory", "mount", "", "GET /internal/agent-api/server")
 	add("agentapi", "agent-key", "agent-key", "credential workspace; channels capability and optional active-capabilities header", "none", "implemented channel members", "mount", "", "GET /internal/agent-api/channel-members")
+	add("agentapi", "agent-key", "agent-key", "credential workspace; send capability and optional active-capabilities header", "none", "implemented agent send", "mount", "",
+		"POST /internal/agent-api/send", "POST /internal/agent-api/v2/send", "POST /internal/agent-api/resolve-channel")
+	add("agentapi", "agent-key", "agent-key", "credential workspace; send capability and optional active-capabilities header", "none", "405 after agent proof and send capability", "mount", "POST",
+		"* /internal/agent-api/send", "* /internal/agent-api/v2/send", "* /internal/agent-api/resolve-channel")
+	add("agentapi", "agent-key", "agent-key", "credential workspace; read capability and optional active-capabilities header", "none", "implemented agent inbox and history", "mount", "",
+		"GET /internal/agent-api/events", "GET /internal/agent-api/events/claim", "GET /internal/agent-api/history")
+	add("agentapi", "agent-key", "agent-key", "credential workspace; read capability and optional active-capabilities header", "none", "405 after agent proof and read capability", "mount", "GET",
+		"* /internal/agent-api/events", "* /internal/agent-api/events/claim", "* /internal/agent-api/history")
+	add("agentapi", "agent-key", "agent-key", "credential workspace; read capability and optional active-capabilities header", "none", "implemented agent claim ack", "mount", "",
+		"POST /internal/agent-api/events/ack")
+	add("agentapi", "agent-key", "agent-key", "credential workspace; read capability and optional active-capabilities header", "none", "405 after agent proof and read capability", "mount", "POST",
+		"* /internal/agent-api/events/ack")
 	add("agentapi", "public", "none", "none", "none", "401 unregistered method; no credential check", "mount", "", "* /internal/agent-api")
 	add("agentapi", "agent-key", "agent-family-dispatch", "credential workspace for known family", "none",
 		"known family 501 after auth; unknown family 401 unregistered", "mount", "", "* /internal/agent-api/{rest...}")

@@ -162,8 +162,12 @@ func (h *Handlers) UnregisteredAgentAPI(w http.ResponseWriter, r *http.Request) 
 
 // deferredAgentAPIFamilies are the first path segments registered in the TS
 // agent-api policy for slices this server does not serve yet (messages,
-// tasks, wiki, reminders, and the rest). A hit authenticates, then 501.
-// A segment outside this set is unregistered even when the key is valid.
+// tasks, wiki, reminders, and the rest) plus the M5 families whose exact
+// method routes (send/v2/send, events/claim/ack, history, resolve-channel)
+// are only mounted when their ports are wired in NewHandlers. A hit on a
+// deferred route authenticates, then answers 501; a wrong method on a wired
+// route also lands here. A segment outside this set is unregistered even
+// when the key is valid.
 var deferredAgentAPIFamilies = map[string]bool{
 	"feedback-locators": true, "events": true, "history": true, "knowledge": true,
 	"wiki": true, "mcp": true, "send": true, "v2": true, "send-receipts": true,

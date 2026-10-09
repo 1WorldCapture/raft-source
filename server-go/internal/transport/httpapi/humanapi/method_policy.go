@@ -55,6 +55,8 @@ func RegisterWorkspaceMethodFallbacks(mux *http.ServeMux, servers *ServersHandle
 		}
 		mux.Handle("/api/servers/{id}/"+spec.path, gate(servers.RequireServerScope(handler)))
 	}
+	mux.Handle("/api/servers/{id}/agreement",
+		gate(servers.RequireServerScope(servers.DenyGuests(servers.RequireAgreementManagement(reject(http.MethodGet, http.MethodPut))))))
 	for _, nested := range []struct {
 		path    string
 		methods []string

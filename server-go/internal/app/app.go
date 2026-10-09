@@ -13,12 +13,16 @@ import (
 	"sync"
 	"time"
 
+	"raft.local/server-go/internal/application/agentconversation"
+	"raft.local/server-go/internal/application/agentdelivery"
+	"raft.local/server-go/internal/application/onboarding"
 	"raft.local/server-go/internal/auth"
 	"raft.local/server-go/internal/platform/clock"
 	"raft.local/server-go/internal/platform/config"
 	"raft.local/server-go/internal/platform/db"
 	"raft.local/server-go/internal/platform/keys"
 	"raft.local/server-go/internal/platform/mail"
+	"raft.local/server-go/internal/transport/httpapi/agentapi"
 	"raft.local/server-go/internal/transport/httpapi/authn"
 	"raft.local/server-go/internal/transport/httpapi/humanapi"
 	"raft.local/server-go/internal/workspace"
@@ -42,9 +46,11 @@ type App struct {
 	serversHandlers *humanapi.ServersHandlers
 	inviteHandlers  *humanapi.InviteHandlers
 
-	control  *controlPlane
-	chat     *chatServices
-	realtime *realtimeRuntime
+	control       *controlPlane
+	chat          *chatServices
+	realtime      *realtimeRuntime
+	dispatcher    *agentdelivery.Dispatcher
+	agentHandlers *agentapi.Handlers
 
 	closeOnce sync.Once
 	closeErr  error
@@ -80,9 +86,13 @@ func Build(opts Options) (*App, error) {
 	assembled := false
 	var realtime *realtimeRuntime
 	var control *controlPlane
+	var dispatcher *agentdelivery.Dispatcher
 	defer func() {
 		if assembled {
 			return
+		}
+		if dispatcher != nil {
+			_ = dispatcher.Close()
 		}
 		if realtime != nil {
 			_ = realtime.Close()
@@ -154,6 +164,32 @@ func Build(opts Options) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
+	reads, err := agentconversation.NewService(control.agents, chat.channels, chat.messages)
+	if err != nil {
+		return nil, err
+	}
+	briefings, err := onboarding.NewService(workspaceStore, control.channels, control.deliveries)
+	if err != nil {
+		return nil, err
+	}
+	deliverySvc, err := agentdelivery.NewService(control.deliveries, control.service, control.agents, reads, briefings, logger)
+	if err != nil {
+		return nil, err
+	}
+	dispatcher, err = agentdelivery.NewDispatcher(deliverySvc, admittedHub{hub: control.machines}, agentapi.DeliveryEncoder{}, logger)
+	if err != nil {
+		return nil, err
+	}
+	agentAdapter, err := agentapi.NewDomainAdapter(chat.messaging, reads, deliverySvc)
+	if err != nil {
+		return nil, err
+	}
+	agentHandlers, err := agentapi.NewHandlers(control.agents, agentapi.Dependencies{
+		Send: agentAdapter, Targets: agentAdapter, History: agentAdapter, Events: agentAdapter,
+	})
+	if err != nil {
+		return nil, err
+	}
 
 	app := &App{
 		Config: cfg, DB: handle,
@@ -161,6 +197,7 @@ func Build(opts Options) (*App, error) {
 		mailer: mailer, maintenance: auth.NewMaintenanceService(sessions, authStore),
 		workspaceStore: workspaceStore,
 		control:        control, chat: chat,
+		dispatcher: dispatcher, agentHandlers: agentHandlers,
 	}
 	app.serversHandlers = &humanapi.ServersHandlers{
 		Store: workspaceStore, Now: wsClock.Now,
@@ -181,6 +218,7 @@ func Build(opts Options) (*App, error) {
 		return nil, err
 	}
 	app.realtime = realtime
+	dispatcher.Start(context.Background())
 
 	app.Handler = app.buildHTTP(realtime.Handler(), logger)
 

@@ -106,7 +106,7 @@ func TestServerAvatarDatabaseFailureIsNotFakeSuccess(t *testing.T) {
 	// Inject a workspace-update failure (isolated SQLite trigger, the
 	// established failure-injection pattern). The file may be published, but
 	// the rec must never claim success nor persist a stale reference.
-	if _, err := e.App.DB.Exec(`CREATE TRIGGER reject_avatar_update BEFORE UPDATE OF avatar_url ON workspaces
+	if _, err := e.ExecFixture(`CREATE TRIGGER reject_avatar_update BEFORE UPDATE OF avatar_url ON workspaces
 		BEGIN SELECT RAISE(ABORT, 'injected avatar failure'); END`); err != nil {
 		t.Fatal(err)
 	}

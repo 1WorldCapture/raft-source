@@ -268,22 +268,36 @@ func TestM4CreateAndListDMs(t *testing.T) {
 		}
 	})
 
-	t.Run("agent branch is validated then honestly refused", func(t *testing.T) {
+	t.Run("agent branch validates identity and preserves typed canonical pair", func(t *testing.T) {
 		res := m.Serve("POST", "/api/channels/dm", map[string]any{"agentId": "agent-does-not-exist"}, ownerToken, ws)
 		if res.Status != http.StatusNotFound || res.Body["error"] != "Agent not found in this server" {
 			t.Fatalf("missing agent: %d %v", res.Status, res.Body)
 		}
-		if _, err := m.env.App.DB.Exec(`INSERT INTO agents (id, workspace_id, name, status, runtime, created_at, updated_at)
-			VALUES ('agent-live', ?, 'clara', 'active', 'claude', 1, 1)`, ws); err != nil {
+		if err := platformdb.WithWriteTx(context.Background(), m.env.App.DB, func(tx *sql.Tx) error {
+			_, err := tx.Exec(`INSERT INTO agents (id, workspace_id, name, status, runtime, created_at, updated_at)
+				VALUES ('agent-live', ?, 'clara', 'active', 'claude', 1, 1)`, ws)
+			return err
+		}); err != nil {
 			t.Fatal(err)
 		}
 		res = m.Serve("POST", "/api/channels/dm", map[string]any{"agentId": "agent-live"}, ownerToken, ws)
-		if res.Status != http.StatusNotImplemented || res.Body["code"] != "feature_not_implemented" {
-			t.Fatalf("agent dm: %d %v", res.Status, res.Body)
+		if res.Status != http.StatusOK || res.Body["peerType"] != "agent" || res.Body["peerId"] != "agent-live" {
+			t.Fatalf("typed Agent DM: %d %v", res.Status, res.Body)
+		}
+		dmID, _ := res.Body["id"].(string)
+		if dmID == "" {
+			t.Fatal("Agent DM has no canonical channel ID")
+		}
+		repeat := m.Serve("POST", "/api/channels/dm", map[string]any{"agentId": "agent-live"}, ownerToken, ws)
+		if repeat.Status != http.StatusOK || repeat.Body["id"] != dmID {
+			t.Fatalf("Agent DM create must be idempotent: %d %v", repeat.Status, repeat.Body)
 		}
 		var channels int
-		if err := m.env.App.DB.QueryRow(`SELECT COUNT(*) FROM channels WHERE type = 'dm' AND name = 'clara'`).Scan(&channels); err != nil || channels != 0 {
-			t.Fatalf("agent dm leaked a channel: %d", channels)
+		if err := m.env.App.DB.QueryRow(`SELECT COUNT(*) FROM channels WHERE workspace_id = ? AND type = 'dm' AND name = 'clara'`, ws).Scan(&channels); err != nil || channels != 1 {
+			t.Fatalf("Agent DM must create exactly one channel: count=%d error=%v", channels, err)
+		}
+		if err := m.env.App.DB.QueryRow(`SELECT COUNT(*) FROM direct_messages WHERE channel_id = ?`, dmID).Scan(&channels); err != nil || channels != 0 {
+			t.Fatalf("Agent identity must not enter the human-only pair table: count=%d error=%v", channels, err)
 		}
 	})
 

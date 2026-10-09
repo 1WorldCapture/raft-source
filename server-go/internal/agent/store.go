@@ -685,17 +685,82 @@ func (s *Store) ResetAgentSession(ctx context.Context, agentID string) error {
 	})
 }
 
-// AssignMachine binds (nil unbinds) the machine. The machine must belong to
-// the workspace; the caller validates.
+// AssignMachine binds (nil unbinds) the machine inside one authority-fenced
+// write. The agent, workspace and target machine are re-read in that
+// transaction. Every open launch that is not on the resulting machine is
+// superseded, including when the agent row already names that machine, so a
+// previous generation cannot be dispatched there and cannot block a later
+// start. Launches already on that machine stay. agents.session_id is left
+// in place: it is the resume pointer, not a dispatch credential, and this
+// method does not invent a replacement.
 func (s *Store) AssignMachine(ctx context.Context, workspaceID, agentID string, machineID *string) error {
-	_, err := s.db.ExecContext(ctx, `
-		UPDATE agents SET machine_id = ?, updated_at = ?
-		WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
-		machineID, s.now(), agentID, workspaceID)
-	if err != nil {
-		return fmt.Errorf("assign machine: %w", err)
+	var next *string
+	if machineID != nil {
+		trimmed := strings.TrimSpace(*machineID)
+		if trimmed != "" {
+			next = &trimmed
+		}
 	}
-	return nil
+	return s.withTx(ctx, func(tx *sql.Tx) error {
+		var rowWorkspace, runtime string
+		var deleted sql.NullInt64
+		var workspaceDeleted sql.NullInt64
+		err := tx.QueryRowContext(ctx, `
+			SELECT a.workspace_id, a.runtime, a.deleted_at, w.deleted_at
+			FROM agents a LEFT JOIN workspaces w ON w.id = a.workspace_id
+			WHERE a.id = ?`, agentID).
+			Scan(&rowWorkspace, &runtime, &deleted, &workspaceDeleted)
+		if errors.Is(err, sql.ErrNoRows) || (err == nil && (deleted.Valid || rowWorkspace != workspaceID)) {
+			return ErrAgentNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("assign machine: read agent: %w", err)
+		}
+		if workspaceDeleted.Valid {
+			return errf(409, "server_gone", "Server no longer exists")
+		}
+		if next != nil {
+			if IsExternalAgentRuntime(runtime) {
+				return errf(400, "", "External agents cannot be assigned to a Computer")
+			}
+			var machineWorkspace string
+			err = tx.QueryRowContext(ctx, `
+				SELECT workspace_id FROM machines WHERE id = ?`, *next).Scan(&machineWorkspace)
+			if errors.Is(err, sql.ErrNoRows) || (err == nil && machineWorkspace != workspaceID) {
+				return errf(400, "", "Machine not found in this server")
+			}
+			if err != nil {
+				return fmt.Errorf("assign machine: read machine: %w", err)
+			}
+		}
+		now := s.now()
+		// Reconcile launches to the post-assignment machine even when the
+		// agent row already shows that machine. A same-machine call keeps
+		// launches on that machine and still drops every other generation.
+		launchSQL := `
+			UPDATE agent_launches
+			SET state = ?, terminal_code = ?, revision = revision + 1, updated_at = ?
+			WHERE workspace_id = ? AND agent_id = ?
+			  AND state IN (?, ?, ?)`
+		launchArgs := []any{
+			LaunchStateSuperseded, "machine_changed", now, workspaceID, agentID,
+			LaunchStateReserved, LaunchStateDispatched, LaunchStateAcked,
+		}
+		if next != nil {
+			launchSQL += ` AND machine_id != ?`
+			launchArgs = append(launchArgs, *next)
+		}
+		if _, err := tx.ExecContext(ctx, launchSQL, launchArgs...); err != nil {
+			return fmt.Errorf("assign machine: terminate launches: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE agents SET machine_id = ?, updated_at = ?
+			WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
+			next, now, agentID, workspaceID); err != nil {
+			return fmt.Errorf("assign machine: %w", err)
+		}
+		return nil
+	})
 }
 
 // UpdateAgentMemberRole ports updateAgentMemberRole (admin/member).

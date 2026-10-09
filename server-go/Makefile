@@ -4,13 +4,13 @@ BUILD_TIME ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 
 .PHONY: check architecture-check fmt-check vet test race test-reference test-m4-reference \
         test-m4-wire test-http test-http-all test-m4-backend test-m4-realtime \
-        test-m4-upgrade test-stabilization-rollback test-client-contracts build cross-build vuln
+        test-m4-upgrade test-m5-upgrade test-m5-original-clients test-stabilization-rollback test-client-contracts build cross-build vuln
 
 # Backend only: no browser, frontend build, TS server, Postgres or Redis.
 # `make check` is the honest backend gate: formatting, vet, unit + race tests,
 # the frozen original-protocol reference suites (M2 workspaces + M4 messaging)
 # including freshly collected Go wire against the original reducers/schema,
-# and the full HTTP acceptance run — M1 through M4, including both frozen
+# and the full HTTP acceptance run — M1 through M5, including the frozen
 # upgrade matrices — plus a release build. It proves backend behavior only;
 # UI/product sign-off is tracked separately and no target here claims it. The
 # reported build stage stays whatever internal/platform/buildinfo encodes.
@@ -84,8 +84,20 @@ test-m4-realtime:
 test-m4-upgrade:
 	RAFT_GO_TEST_SUITE=m4-upgrade $(NODE) tests/acceptance/run.mjs
 
-# Actual current binary -> frozen M4 rollback, including original cold-backup
-# recovery, persisted views and route/auth probes. Also included in SUITE=all.
+# Real frozen M4 -> current M5 upgrade and schema refusal / cold-backup restore.
+# Pending delivery persistence is also covered by the database test suite.
+test-m5-upgrade:
+	RAFT_GO_TEST_SUITE=m5-upgrade $(NODE) tests/acceptance/run.mjs
+
+# Unmodified original CLI + DaemonCore against the real Go HTTP/WS dispatcher.
+# The model/provider boundary is a labelled local deterministic fixture; this
+# is backend/client-protocol evidence, not browser or live-model sign-off.
+test-m5-original-clients:
+	RAFT_GO_TEST_SUITE=m5-original-clients $(NODE) tests/acceptance/run.mjs
+
+# Historical refactor views and route/auth probes, retained across the additive
+# M5 migration: old binary refusal and writable cold-backup recovery.
+# Also included in SUITE=all.
 test-stabilization-rollback:
 	RAFT_GO_TEST_SUITE=stabilization-rollback $(NODE) tests/acceptance/run.mjs
 

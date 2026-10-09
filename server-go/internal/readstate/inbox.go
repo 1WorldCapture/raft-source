@@ -172,13 +172,13 @@ const chatEligibilityPredicate = ` (
 ) `
 
 // channelParentAccessPredicate answers "is the parent channel readable for
-// this user": public channels workspace-wide, private channels and human DMs
+// this user": public channels workspace-wide, private channels and typed DMs
 // by roster/pair membership.
 const channelParentAccessPredicate = ` (
 	pc.type = 'channel'
 	OR EXISTS (SELECT 1 FROM channel_humans pch
 	           WHERE pch.channel_id = pc.id AND pch.user_id = ?)
-	OR EXISTS (SELECT 1 FROM direct_messages pdm
+	OR EXISTS (SELECT 1 FROM ` + humanDMParticipantsSQL + ` pdm
 	           WHERE pdm.workspace_id = pc.workspace_id
 	             AND pdm.channel_id = pc.id
 	             AND (pdm.user_low = ? OR pdm.user_high = ?))
@@ -495,7 +495,7 @@ func loadChatCandidates(ctx context.Context, ex Executor, workspaceID, userID st
 		    OR c.system_kind = 'announcement'
 		    OR EXISTS (SELECT 1 FROM channel_humans ch
 		               WHERE ch.channel_id = c.id AND ch.user_id = ?)
-		    OR EXISTS (SELECT 1 FROM direct_messages dm
+		    OR EXISTS (SELECT 1 FROM `+humanDMParticipantsSQL+` dm
 		               WHERE dm.workspace_id = c.workspace_id AND dm.channel_id = c.id
 		                 AND (dm.user_low = ? OR dm.user_high = ?))
 		  )
@@ -550,7 +550,7 @@ func loadThreadCandidates(ctx context.Context, ex Executor, workspaceID, userID 
 		    pc.type = 'channel'
 		    OR EXISTS (SELECT 1 FROM channel_humans pch
 		               WHERE pch.channel_id = pc.id AND pch.user_id = ?1)
-		    OR EXISTS (SELECT 1 FROM direct_messages pdm
+		    OR EXISTS (SELECT 1 FROM ` + humanDMParticipantsSQL + ` pdm
 		               WHERE pdm.workspace_id = pc.workspace_id AND pdm.channel_id = pc.id
 		                 AND (pdm.user_low = ?1 OR pdm.user_high = ?1))
 		  )

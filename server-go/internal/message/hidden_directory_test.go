@@ -32,9 +32,8 @@ func TestReactionActorsHiddenDirectoryPolicy(t *testing.T) {
 		VALUES (?, ?, 'all', 'channel', 'all', ?)`, all, txWS, now); err != nil {
 		t.Fatal(err)
 	}
-	// The landed posting policy requires roster rows even on the implicit
-	// #all roster; actor visibility still resolves the implicit roster.
-	f.joinRoster(all, txAlice, txBob, txCara)
+	// System-channel posting and directory projection both use implicit
+	// workspace membership; do not seed artificial channel roster rows.
 	msg := f.sendMsg(t, all, "root")
 	if _, err := f.store.AddReaction(context.Background(), NewClaims(claimsFor(txAlice, txFamAlice)), txWS, msg.ID, "👍"); err != nil {
 		t.Fatal(err)

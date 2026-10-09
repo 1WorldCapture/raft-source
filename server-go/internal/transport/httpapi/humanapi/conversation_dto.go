@@ -12,9 +12,10 @@ import (
 	"raft.local/server-go/internal/channel"
 )
 
-// dmChannelWire is the DM row of GET /api/channels/dm and POST /api/channels/dm
-// (unified peer model; peerType stays "user" — the agent branch is refused
-// before creation).
+// dmChannelWire is the DM row of GET /api/channels/dm and POST /api/channels/dm.
+// peerType is the directory fact ("user" or "agent"). An empty fact stays
+// "user" so older human rows keep their wire value. Agent peers have no
+// gravatar.
 type dmChannelWire struct {
 	ID               string        `json:"id"`
 	ServerID         string        `json:"serverId"`
@@ -58,6 +59,14 @@ func dmChannelWireView(serverID string, v channel.DMView, readState json.RawMess
 		PeerDescription:  v.PeerDescription,
 		PeerGravatarHash: v.PeerGravatarHash,
 		PeerAvatarURL:    v.PeerAvatarURL,
+	}
+	peerType := v.PeerType
+	if peerType == "" {
+		peerType = "user"
+	}
+	out.PeerType = peerType
+	if peerType == "agent" {
+		out.PeerGravatarHash = ""
 	}
 	if v.LastMessageAt != nil {
 		out.LastMessageAt = &milliTimeDTO{time.UnixMilli(*v.LastMessageAt).UTC()}

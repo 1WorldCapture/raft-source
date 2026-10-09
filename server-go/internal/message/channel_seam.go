@@ -90,6 +90,62 @@ func (s *Store) authorizePost(ctx context.Context, ex channelExecutor, workspace
 	return conv, nil
 }
 
+// authorizeAgentPost returns the AGENT posting authorization for a write
+// path through the channel worker's locked agent conversation API (real
+// channel_agents / implicit-membership facts; a human claim is never
+// forged). Refusals keep the same legacy sentences the transport renders.
+func (s *Store) authorizeAgentPost(ctx context.Context, ex channelExecutor, workspaceID, channelID, agentID string) (*channel.Conversation, error) {
+	conv, err := s.channels.AuthorizeAgentConversationTx(ctx, ex, workspaceID, channelID, agentID, true)
+	if err != nil {
+		normalized := normalizeChannelError(err)
+		if member, ok := normalized.(*ErrNotChannelMember); ok {
+			member.Action = "send messages"
+			return nil, member
+		}
+		if errors.Is(normalized, ErrConversationDenied) {
+			return nil, ErrChannelNotFound
+		}
+		return nil, normalized
+	}
+	return conv, nil
+}
+
+// authorizeAgentMentionTarget enforces the M5 receipt policy for one typed
+// agent mention: the recipient must hold read+reply authority over the
+// conversation (posting), so an undeliverable target rejects the whole send
+// with the explicit invalid-target sentence instead of a silent drop. A
+// denial is a request failure; anything else is infrastructure.
+func (s *Store) authorizeAgentMentionTarget(ctx context.Context, ex channelExecutor, workspaceID, channelID, agentID string) error {
+	_, err := s.channels.AuthorizeAgentConversationTx(ctx, ex, workspaceID, channelID, agentID, true)
+	if err != nil {
+		normalized := normalizeChannelError(err)
+		switch {
+		case errors.Is(normalized, ErrConversationDenied),
+			errors.Is(normalized, ErrNotServerMember),
+			errors.Is(normalized, ErrChannelNotFound),
+			errors.Is(normalized, ErrChannelArchived):
+			return &InvalidInput{Reason: "Mention target cannot receive messages in this conversation"}
+		default:
+			if _, ok := normalized.(*ErrNotChannelMember); ok {
+				return &InvalidInput{Reason: "Mention target cannot receive messages in this conversation"}
+			}
+			return normalized
+		}
+	}
+	return nil
+}
+
+// authorizeAgentRead returns the base content authorization for an AGENT
+// read path (history/context of the M5 agent surfaces). Follow rows never
+// grant this.
+func (s *Store) authorizeAgentRead(ctx context.Context, ex channelExecutor, workspaceID, channelID, agentID string) (*channel.Conversation, error) {
+	conv, err := s.channels.AuthorizeAgentConversationTx(ctx, ex, workspaceID, channelID, agentID, false)
+	if err != nil {
+		return nil, normalizeChannelError(err)
+	}
+	return conv, nil
+}
+
 // syncAudience reports whether channelID belongs in this user's message
 // stream: base content read PLUS the active thread-follow interest. Only
 // sync/resume consult this; history/context never do.

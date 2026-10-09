@@ -1,0 +1,30 @@
+{
+  "manifestVersion": 1,
+  "kind": "raft.client-migration-additions",
+  "title": "冻结集之后的新增迁移精确索引(M5 起)",
+  "frozenThrough": "0013_activity_mute_epochs.sql",
+  "frozenBaselineCommit": "6ffc168dd7025a2d5f61416347ecc9937853c3ad",
+  "expectedCount": 2,
+  "notes": [
+    "本文件是 manifest.json(migrations 段,冻结 0001-0013)之后的显式增量索引:每个新增迁移文件必须在此逐条登记精确文件名、sha256 与字节数;checker 将『冻结集 ∪ 本文件』与 migrations 目录做双向精确清点,不允许任何通配、区间或『未来文件自动放行』。",
+    "frozenThrough 必须始终等于 manifest.json migrations.files 的最后一项;增量文件名必须按字典序严格排在其后(即编号 >= 0014),且不得与冻结集重复。manifest.json 本身永不列出新迁移。",
+    "新增迁移产生于 M5 交付(m5-execution-lock.md worker A/Delivery),因此不参与 manifest.json 的 git 基线 blob 比对(6ffc168 早于任何 0014+;冻结 0001-0013 的三方比对不受影响)。每个条目以 introducedBy 指向其 schema 契约文档,登记与哈希更新是评审后的人工动作,checker 只读不写。",
+    "expectedCount 是 files 的精确长度;目录中任何既不在冻结 manifest 又不在本文件的 .sql 都使 checker 失败(错误码 migration-inventory),这是防止夹带未评审迁移的故意设计。"
+  ],
+  "files": [
+    {
+      "file": "0014_delivery.sql",
+      "sha256": "3a86db7305ae0a3e48ae23d0ec02126501c87b8a8f7e81b75bd546f8cfe02319",
+      "bytes": 11078,
+      "introducedBy": "docs/m5-delivery-worker-contract.md",
+      "capability": "M5 delivery: message_agent_mentions/agent_deliveries/agent_delivery_claims/agent_delivery_attempts/agent_launches/agent_direct_messages + 复合唯一索引(A 冻结)"
+    },
+    {
+      "file": "0015_launch_session.sql",
+      "sha256": "58ba9791d8ea684877dace3ebf813aa8564e051254ab8b4bcbeb8d1c29441353",
+      "bytes": 567,
+      "introducedBy": "docs/m5-launch-session-closeout.md",
+      "capability": "M5 current identity: nullable per-launch confirmed_session_id written only by authenticated current-launch session reports; preserved resume session is not backfilled"
+    }
+  ]
+}

@@ -2,7 +2,7 @@
 // Node is only a test runner dependency. Never starts Web UI or the TS server.
 //
 // Suite selection: RAFT_GO_TEST_SUITE=all (default) runs every milestone
-// suite, M1 through M4, in one fresh-process-per-suite pass over one
+// suite, M1 through M5, in one fresh-process-per-suite pass over one
 // disposable database. The M4 process suites fail loudly (never skip) when a
 // backend surface is not wired yet; run them selectively with
 // RAFT_GO_TEST_SUITE=m4-backend | m4-realtime | m4-upgrade | stabilization-rollback (see the Makefile
@@ -32,6 +32,7 @@ import { verifyM3CreationReadModels } from './m3-creation-read-models.mjs';
 import { verifyM4Backend } from './m4-backend.mjs';
 import { verifyM3ToM4Upgrade } from './m3-to-m4-upgrade.mjs';
 import { verifyStabilizationRollback } from './stabilization-rollback.mjs';
+import { verifyM4ToM5Upgrade } from './m5-upgrade.mjs';
 // verifyM4Realtime is imported lazily inside its suite branch: that suite
 // drives the repository's locked original socket.io-client from the
 // repo-root pnpm store, and the M1-M3 selections must not depend on the
@@ -45,7 +46,7 @@ let logs = '';
 const selectedSuite = process.env.RAFT_GO_TEST_SUITE ?? 'all';
 const knownSuites = ['all', 'computer', 'daemon', 'agents', 'channels', 'invitations',
   'persistence', 'upgrade', 'm4-upgrade', 'original-clients', 'creation-read-models',
-  'm4-backend', 'm4-realtime', 'stabilization-rollback'];
+  'm4-backend', 'm4-realtime', 'stabilization-rollback', 'm5-upgrade', 'm5-original-clients'];
 if (!knownSuites.includes(selectedSuite)) {
   throw new Error(`Unknown RAFT_GO_TEST_SUITE; use one of: ${knownSuites.join('/')}`);
 }
@@ -185,6 +186,27 @@ try {
     });
     await stop();
   }
+  if (selectedSuite === 'all' || selectedSuite === 'm5-original-clients') {
+    // Execute the unmodified original CLI and Daemon against this actual Go
+    // dispatcher. Only the external provider boundary is deterministic;
+    // an unwired server or missing receipt/reply fails the full gate.
+    const { verifyM5OriginalClients } = await import('./m5-original-clients/index.mjs');
+    // A real spawned Agent uses config.serverUrl from the canonical Web
+    // origin. This isolated process has no reverse proxy on 5175: advertise
+    // its own dynamic origin rather than contacting any existing dev UI.
+    const previousWebOrigin = env.RAFT_GO_WEB_ORIGIN;
+    env.RAFT_GO_WEB_ORIGIN = origin;
+    try {
+      await start();
+      await verifyM5OriginalClients({
+        origin, data,
+        capture: ({ text }) => { logs = (logs + text).slice(-1024 * 1024); },
+      });
+      await stop();
+    } finally {
+      env.RAFT_GO_WEB_ORIGIN = previousWebOrigin;
+    }
+  }
   if (selectedSuite === 'all' || selectedSuite === 'persistence') {
     await start();
     await verifyM3Persistence({ origin, data, start, stop });
@@ -205,6 +227,9 @@ try {
     // frozen M4 binary. baselineOnly is strictly a standalone harness check,
     // never an option here. This suite owns its own cold copies and children.
     await verifyStabilizationRollback({ executable, capture });
+  }
+  if (selectedSuite === 'all' || selectedSuite === 'm5-upgrade') {
+    await verifyM4ToM5Upgrade({ executable, capture });
   }
   if (/[?&](verify|reset)=|Bearer\s+[A-Za-z0-9._-]{20,}|eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\./.test(logs)) {
     throw new Error('Server emitted credential-like material to logs');

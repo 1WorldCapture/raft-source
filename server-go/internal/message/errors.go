@@ -106,3 +106,12 @@ type MentionBindingConflict struct{ Handle string }
 func (e *MentionBindingConflict) Error() string {
 	return "Mention @" + e.Handle + " is bound to more than one actor. Select exactly one actor id and type."
 }
+
+// AsMentionBindingConflict extracts the typed binding failure, or nil.
+func AsMentionBindingConflict(err error) *MentionBindingConflict {
+	var e *MentionBindingConflict
+	if errors.As(err, &e) {
+		return e
+	}
+	return nil
+}

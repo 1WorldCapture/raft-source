@@ -250,7 +250,9 @@ func TestM4MessageSendValidationAndUnsupportedEffects(t *testing.T) {
 		{"mentions-bad-type", map[string]any{"channelId": m.chanID, "content": "x", "mentions": []map[string]any{{"type": "computer", "id": m.memberID, "name": "x"}}}, 400, "Invalid mentions payload"},
 		{"as-task", map[string]any{"channelId": m.chanID, "content": "x", "asTask": true}, 501, "Tasks are not enabled in this server stage"},
 		{"attachments", map[string]any{"channelId": m.chanID, "content": "x", "attachmentIds": []string{"dddddddd-dddd-4ddd-8ddd-dddddddddddd"}}, 501, "Attachments are not enabled in this server stage"},
-		{"agent-mention", map[string]any{"channelId": m.chanID, "content": "x", "mentions": []map[string]any{{"type": "agent", "id": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", "name": "bot"}}}, 501, "Agent mentions are not enabled in this server stage"},
+		// Typed Agent mentions are enabled; an unknown directory identity is
+		// still rejected atomically, not reclassified as an unavailable feature.
+		{"unknown-agent-mention", map[string]any{"channelId": m.chanID, "content": "x", "mentions": []map[string]any{{"type": "agent", "id": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", "name": "bot"}}}, 400, "Mention @bot is not an agent of this workspace"},
 	}
 	for _, tc := range cases {
 		res := m.Serve("POST", "/api/v2/messages", tc.body, m.ownerTok)
@@ -268,6 +270,12 @@ func TestM4MessageSendValidationAndUnsupportedEffects(t *testing.T) {
 	_ = m.env.App.DB.QueryRow(`SELECT COUNT(*) FROM messages`).Scan(&count)
 	if count != 0 {
 		t.Fatalf("rejected sends must not persist: %d", count)
+	}
+	if err := m.env.App.DB.QueryRow(`SELECT COUNT(*) FROM agent_deliveries`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("rejected sends must not leave durable Agent recipients: %d", count)
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 
 	"raft.local/server-go/internal/auth"
 	"raft.local/server-go/internal/channel"
@@ -16,7 +17,7 @@ import (
 
 // CreateInput is the locked cross-module creation input. AttachmentIDs and
 // AsTask exist only so unsupported effects can be REJECTED before commit with
-// the exact 501 body; they are never persisted in M4.
+// the exact 501 body; they are never persisted.
 type CreateInput struct {
 	ChannelID     string
 	Content       string
@@ -30,31 +31,95 @@ type CreateInput struct {
 // facts projected for the sender response. ThreadReply reports that this was
 // a NEW reply into a thread channel (the application use case pairs it with
 // the author's own read advance in the same transaction); a randomId replay
-// or a non-thread message never sets it.
+// or a non-thread message never sets it. RootChannelID is the root
+// conversation that owns membership (equal to the channel for non-threads);
+// the M5 send use case uses it to resolve the canonical Agent-DM receipt
+// participant. Mentions may carry Type "user" and (M5) "agent".
 type CreateResult struct {
-	Message     *Message
-	Replayed    bool
-	ThreadReply bool
-	Mentions    []Mention
+	Message       *Message
+	Replayed      bool
+	ThreadReply   bool
+	Mentions      []Mention
+	RootChannelID string
 }
 
-// CreateMessageTx is the transaction-bound creation STEP: identity
-// revalidation, shape validation, posting authority, random-id idempotency,
-// mention resolution, the message fact and the thread auto-follows — and
-// NOTHING else. It is orchestrated by application/messaging, which pairs a
-// NEW thread reply's read advance with the publication intents in the
-// original pipeline order (follows -> read advance -> publications). It is
-// never a complete human send on its own.
+// AgentMentionIDs returns the sorted, de-duplicated agent recipient targets
+// of this creation (empty when none). The application send use case passes
+// exactly these to the same-transaction delivery planner.
+func (r *CreateResult) AgentMentionIDs() []string {
+	if r == nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	ids := []string{}
+	for _, m := range r.Mentions {
+		if m.Type == "agent" && !seen[m.ID] {
+			seen[m.ID] = true
+			ids = append(ids, m.ID)
+		}
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+// mentionScope selects which typed mention targets one sender may address.
+type mentionScope int
+
+const (
+	// mentionScopeHuman: human sender. Agent-typed targets are resolved
+	// against the live directory and persisted in message_agent_mentions.
+	mentionScopeHuman mentionScope = iota
+	// mentionScopeAgent: agent sender — human targets only. Agent-to-agent
+	// mentions (including self) are refused before any write.
+	mentionScopeAgent
+)
+
+// CreateMessageTx is the transaction-bound creation step for a human sender:
+// identity revalidation, shape validation, posting authority, random-id
+// idempotency, mention resolution (human and typed agent targets), the
+// message fact and the thread auto-follows. Typed agent mentions are
+// resolved against the live agent directory and the recipient's read+reply
+// authority on the root conversation, then persisted in
+// message_agent_mentions. Human targets stay in message_mentions. Any
+// illegal target rejects the whole write before the message insert.
 func (s *Store) CreateMessageTx(ctx context.Context, tx *sql.Tx, claims auth.AccessTokenClaims, workspaceID string, input CreateInput) (*CreateResult, error) {
-	if err := s.validateHuman(ctx, tx, claims); err != nil {
+	return s.createMessageTx(ctx, tx, "user", claims.Subject, workspaceID, input, mentionScopeHuman, claims)
+}
+
+// CreateAgentMessageTx is the transaction-bound creation STEP for an AGENT
+// sender: agent conversation posting authority (real channel_agents /
+// implicit-membership facts, never a human claim), agent-scoped random-id
+// idempotency, human mention resolution, the sender_type='agent' message
+// fact and the thread auto-follows for mentioned humans. The agent sender
+// itself has no follow/read facts, and NO agent delivery intent is planned
+// here — agent replies never cascade to other agents. The application use
+// case owns the principal revalidation and the publication intents.
+func (s *Store) CreateAgentMessageTx(ctx context.Context, tx *sql.Tx, agentID, workspaceID string, input CreateInput) (*CreateResult, error) {
+	return s.createMessageTx(ctx, tx, "agent", agentID, workspaceID, input, mentionScopeAgent, auth.AccessTokenClaims{})
+}
+
+// createMessageTx is the shared creation engine. It never opens a
+// transaction of its own and never decides publication/read policy.
+func (s *Store) createMessageTx(ctx context.Context, tx *sql.Tx, senderType, senderID, workspaceID string, input CreateInput, scope mentionScope, claims auth.AccessTokenClaims) (*CreateResult, error) {
+	if err := validateCreateShape(input, scope); err != nil {
 		return nil, err
 	}
-	if err := validateCreateShape(input); err != nil {
-		return nil, err
-	}
-	conv, err := s.authorizePost(ctx, tx, workspaceID, input.ChannelID, claims.Subject, "send messages")
-	if err != nil {
-		return nil, err
+	var conv *channel.Conversation
+	if senderType == "user" {
+		if err := s.validateHuman(ctx, tx, claims); err != nil {
+			return nil, err
+		}
+		authorized, err := s.authorizePost(ctx, tx, workspaceID, input.ChannelID, senderID, "send messages")
+		if err != nil {
+			return nil, err
+		}
+		conv = authorized
+	} else {
+		authorized, err := s.authorizeAgentPost(ctx, tx, workspaceID, input.ChannelID, senderID)
+		if err != nil {
+			return nil, err
+		}
+		conv = authorized
 	}
 	if conv.Channel == nil {
 		return nil, fmt.Errorf("conversation without channel")
@@ -65,13 +130,13 @@ func (s *Store) CreateMessageTx(ctx context.Context, tx *sql.Tx, claims auth.Acc
 	// revalidate the current authorization (done above) and the request
 	// digest before returning the original message.
 	if input.RandomID != nil && *input.RandomID != "" {
-		existing, err := s.lookupByRandomID(ctx, tx, claims.Subject, *input.RandomID)
+		existing, err := s.lookupByRandomID(ctx, tx, senderType, senderID, *input.RandomID)
 		if err != nil {
 			return nil, err
 		}
 		if existing != nil {
 			if existing.WorkspaceID != workspaceID || existing.ChannelID != input.ChannelID ||
-				existing.RequestDigest != requestDigest(workspaceID, input.ChannelID, "user", claims.Subject, input.Content, mentionIdentities(input.Mentions)) {
+				existing.RequestDigest != requestDigest(workspaceID, input.ChannelID, senderType, senderID, input.Content, mentionIdentities(input.Mentions)) {
 				return nil, &RandomIDConflict{Reason: "randomId has already been used for a different message"}
 			}
 			mentions, err := s.mentionsOf(ctx, tx, existing.ID)
@@ -82,19 +147,19 @@ func (s *Store) CreateMessageTx(ctx context.Context, tx *sql.Tx, claims auth.Acc
 		}
 	}
 
-	resolved, err := s.resolveMentions(ctx, tx, workspaceID, conv, input.Mentions)
+	resolved, err := s.resolveMentions(ctx, tx, workspaceID, conv, input.Mentions, scope == mentionScopeHuman)
 	if err != nil {
 		return nil, err
 	}
 
-	digest := requestDigest(workspaceID, input.ChannelID, "user", claims.Subject, input.Content, mentionIdentities(resolved))
+	digest := requestDigest(workspaceID, input.ChannelID, senderType, senderID, input.Content, mentionIdentities(resolved.combined()))
 	id := auth.NewUUID()
 	now := s.now().UnixMilli()
 	res, err := tx.ExecContext(ctx, `INSERT INTO messages
 		(id, workspace_id, channel_id, sender_type, sender_id, content, message_type,
 		 random_id, request_digest, thread_id, revision, created_at)
-		VALUES (?,?,?, 'user', ?, ?, 'chat', ?, ?, NULL, 1, ?)`,
-		id, workspaceID, input.ChannelID, claims.Subject, input.Content,
+		VALUES (?,?,?,?,?,?,'chat',?,?,NULL,1,?)`,
+		id, workspaceID, input.ChannelID, senderType, senderID, input.Content,
 		nullableString(input.RandomID), digest, now)
 	if err != nil {
 		return nil, fmt.Errorf("insert message: %w", err)
@@ -107,33 +172,41 @@ func (s *Store) CreateMessageTx(ctx context.Context, tx *sql.Tx, claims auth.Acc
 		return nil, fmt.Errorf("seq %d is outside the safe-integer range", seq)
 	}
 
-	for _, m := range resolved {
+	for _, m := range resolved.users {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO message_mentions (message_id, user_id, workspace_id)
 			VALUES (?,?,?)`, id, m.ID, workspaceID); err != nil {
 			return nil, fmt.Errorf("insert mention: %w", err)
 		}
 	}
+	for _, m := range resolved.agents {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO message_agent_mentions
+			(message_id, workspace_id, agent_id, handle_at_send, created_at)
+			VALUES (?,?,?,?,?)`, id, workspaceID, m.ID, m.Name, now); err != nil {
+			return nil, fmt.Errorf("insert agent mention: %w", err)
+		}
+	}
 
 	msg := &Message{
 		Seq: seq, ID: id, WorkspaceID: workspaceID, ChannelID: input.ChannelID,
-		SenderType: "user", SenderID: claims.Subject, Content: input.Content,
+		SenderType: senderType, SenderID: senderID, Content: input.Content,
 		MessageType: "chat", RandomID: input.RandomID,
 		RequestDigest: digest, Revision: 1, CreatedAtUnix: now,
 	}
 	msg.CreatedAt = s.now().UTC()
 
-	// Automatic thread interest per the TS fixture: the reply sender follows
-	// the thread (reactivating an explicit unfollow), and each mentioned
-	// human in a thread is (re)activated. Follow facts are channel-owned.
-	// The author's read-latest advances in the SAME transaction through the
-	// injected readstate hook — a rollback can never leave a phantom read or
-	// a reply without its required read effect.
+	// Automatic thread interest per the TS fixture: a HUMAN reply sender
+	// follows the thread (reactivating an explicit unfollow), and each
+	// mentioned human in a thread is (re)activated. An agent sender has no
+	// follow facts; the mentioned humans keep theirs. Follow facts are
+	// channel-owned.
 	if conv.Channel.Type == channel.TypeThread {
-		if err := s.setThreadFollow(ctx, tx, workspaceID, conv.Channel.ID, claims.Subject); err != nil {
-			return nil, err
+		if senderType == "user" {
+			if err := s.setThreadFollow(ctx, tx, workspaceID, conv.Channel.ID, senderID); err != nil {
+				return nil, err
+			}
 		}
-		for _, m := range resolved {
-			if m.ID == claims.Subject {
+		for _, m := range resolved.users {
+			if senderType == "user" && m.ID == senderID {
 				continue
 			}
 			if err := s.setThreadFollow(ctx, tx, workspaceID, conv.Channel.ID, m.ID); err != nil {
@@ -142,7 +215,12 @@ func (s *Store) CreateMessageTx(ctx context.Context, tx *sql.Tx, claims auth.Acc
 		}
 	}
 
-	return &CreateResult{Message: msg, ThreadReply: conv.Channel.Type == channel.TypeThread, Mentions: resolved}, nil
+	return &CreateResult{
+		Message:       msg,
+		ThreadReply:   conv.Channel.Type == channel.TypeThread,
+		Mentions:      resolved.combined(),
+		RootChannelID: conv.Root.ID,
+	}, nil
 }
 
 // RecordSendPublicationsTx records the durable broadcast intents for one
@@ -167,16 +245,22 @@ func (s *Store) RecordSendPublicationsTx(ctx context.Context, tx *sql.Tx, worksp
 
 // validateCreateShape reproduces the TS parse/validation order so error
 // precedence matches the original handlers: body shape, randomId, mentions
-// payload, required fields, content bounds; then the M4 unsupported-effect
-// rejections that must fire before any authorization or write.
-func validateCreateShape(input CreateInput) error {
+// payload, required fields, content bounds; then the disabled-effect
+// rejections that must fire before any authorization or write. An agent
+// sender's agent-typed mention is refused here. A human sender's agent-typed
+// mention continues into directory and receipt-authority resolution.
+func validateCreateShape(input CreateInput, scope mentionScope) error {
 	if !isUUID(input.ChannelID) {
 		return &InvalidInput{Reason: "Invalid message request body"}
 	}
 	if input.RandomID != nil {
 		rid := *input.RandomID
-		if rid == "" || utf16Length(rid) > MaxRandomIDLength {
-			return &InvalidInput{Reason: "randomId must be a non-empty string with at most 128 characters"}
+		maxLen := MaxRandomIDLength
+		if scope == mentionScopeAgent {
+			maxLen = MaxAgentRandomIDLength
+		}
+		if rid == "" || utf16Length(rid) > maxLen {
+			return &InvalidInput{Reason: fmt.Sprintf("randomId must be a non-empty string with at most %d characters", maxLen)}
 		}
 	}
 	if err := validateMentionShapes(input.Mentions); err != nil {
@@ -191,11 +275,14 @@ func validateCreateShape(input CreateInput) error {
 	if utf16Length(input.Content) > MaxContentCodeUnits {
 		return &InvalidInput{Reason: "Message content exceeds maximum length of 32000 characters"}
 	}
-	// M4 disabled effects are rejected only after the legacy 400 precedence is
+	// Disabled effects are rejected only after the legacy 400 precedence is
 	// exhausted, and always BEFORE authorization and the write.
 	for _, m := range input.Mentions {
-		if m.Type == "agent" {
-			return &UnsupportedEffect{Reason: "Agent mentions are not enabled in this server stage"}
+		if m.Type != "agent" {
+			continue
+		}
+		if scope == mentionScopeAgent {
+			return &UnsupportedEffect{Reason: "Agent mentions of other agents are not enabled in this server stage"}
 		}
 	}
 	if len(input.AttachmentIDs) > 0 {
@@ -209,8 +296,9 @@ func validateCreateShape(input CreateInput) error {
 
 // validateMentionShapes mirrors parseStructuredMentions: type user|agent,
 // UUID id, non-blank name <=128 units, de-duplicated by type:id:name.
-// Agent-typed entries then hit the explicit 501 (whole write rejected, no
-// partial acceptance).
+// An agent sender's agent-typed entries are refused by validateCreateShape
+// before this returns; a human sender's agent-typed entries are resolved
+// later and an illegal target rejects the whole write.
 func validateMentionShapes(mentions []Mention) error {
 	seen := map[string]bool{}
 	for _, m := range mentions {
@@ -233,14 +321,36 @@ func validateMentionShapes(mentions []Mention) error {
 	return nil
 }
 
-// resolveMentions verifies each structured user mention against the live
-// directory inside the transaction: the target must be a current workspace
-// member, must be able to READ this conversation, and the claimed handle must
-// equal the directory handle so a client cannot render @someone-else. The
-// persisted name is always the directory projection.
-func (s *Store) resolveMentions(ctx context.Context, ex channelExecutor, workspaceID string, conv *channel.Conversation, mentions []Mention) ([]Mention, error) {
+// resolvedMentions is the split outcome of mention resolution: the human
+// targets (message_mentions) and the M5 typed agent targets
+// (message_agent_mentions).
+type resolvedMentions struct {
+	users  []Mention
+	agents []Mention
+}
+
+func (r *resolvedMentions) combined() []Mention {
+	out := make([]Mention, 0, len(r.users)+len(r.agents))
+	out = append(out, r.users...)
+	out = append(out, r.agents...)
+	return out
+}
+
+// resolveMentions verifies each structured mention against the live
+// directories inside the transaction. Human targets must be current
+// workspace members able to READ this conversation with a handle equal to
+// the directory handle. Agent targets (M5 human scope only) must be live
+// agents of this workspace whose stored handle matches, and the recipient
+// must hold READ+REPLY authority over the conversation root — an explicit
+// mention is a receipt promise, so an undeliverable target rejects the whole
+// write instead of being silently dropped. One handle bound to two actors
+// (across either type) is the TS v2 binding conflict; duplicates by target
+// id are silently merged like TS. The persisted name is always the directory
+// projection; deterministic order is by handle.
+func (s *Store) resolveMentions(ctx context.Context, ex channelExecutor, workspaceID string, conv *channel.Conversation, mentions []Mention, resolveAgents bool) (*resolvedMentions, error) {
+	out := &resolvedMentions{}
 	if len(mentions) == 0 {
-		return nil, nil
+		return out, nil
 	}
 	byHandle := map[string]Mention{}
 	bound := map[string]string{} // handle -> type:id
@@ -252,16 +362,49 @@ func (s *Store) resolveMentions(ctx context.Context, ex channelExecutor, workspa
 		bound[handle] = m.Type + ":" + m.ID
 		byHandle[handle] = m
 	}
-	var resolved []Mention
-	seenTarget := map[string]bool{}
 	// Deterministic order: by handle.
 	handles := make([]string, 0, len(byHandle))
 	for h := range byHandle {
 		handles = append(handles, h)
 	}
 	sort.Strings(handles)
+	seenUser := map[string]bool{}
+	seenAgent := map[string]bool{}
 	for _, handle := range handles {
 		m := byHandle[handle]
+		if m.Type == "agent" {
+			if !resolveAgents {
+				// Shape validation already refused an agent sender. This is
+				// the defense if a mention still reaches resolution.
+				return nil, &UnsupportedEffect{Reason: "Agent mentions of other agents are not enabled in this server stage"}
+			}
+			if seenAgent[m.ID] {
+				continue
+			}
+			var name string
+			err := ex.QueryRowContext(ctx, `SELECT name FROM agents
+				WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`, m.ID, workspaceID).Scan(&name)
+			if err == sql.ErrNoRows {
+				return nil, &InvalidInput{Reason: fmt.Sprintf("Mention @%s is not an agent of this workspace", handle)}
+			}
+			if err != nil {
+				return nil, fmt.Errorf("agent mention directory lookup: %w", err)
+			}
+			if name != handle {
+				return nil, &InvalidInput{Reason: fmt.Sprintf("Mention @%s does not match the agent directory", handle)}
+			}
+			// Receipt eligibility: the recipient must be able to read AND
+			// reply in this conversation (the original agent posting rule).
+			if err := s.authorizeAgentMentionTarget(ctx, ex, workspaceID, conv.Channel.ID, m.ID); err != nil {
+				return nil, err
+			}
+			seenAgent[m.ID] = true
+			out.agents = append(out.agents, Mention{Type: "agent", ID: m.ID, Name: name})
+			continue
+		}
+		if seenUser[m.ID] {
+			continue
+		}
 		var name string
 		var displayName, description sql.NullString
 		err := ex.QueryRowContext(ctx, `SELECT u.name, u.display_name, u.description
@@ -279,9 +422,6 @@ func (s *Store) resolveMentions(ctx context.Context, ex channelExecutor, workspa
 		}
 		// Same handle bound to two different actors is the TS v2 binding
 		// conflict; duplicates by target id are silently merged like TS.
-		if seenTarget[m.Type+":"+m.ID] {
-			continue
-		}
 		// Read authority for the mentioned user over THIS conversation.
 		if _, err := s.authorizeRead(ctx, ex, workspaceID, conv.Channel.ID, m.ID); err != nil {
 			if errors.Is(err, ErrConversationDenied) {
@@ -289,18 +429,18 @@ func (s *Store) resolveMentions(ctx context.Context, ex channelExecutor, workspa
 			}
 			return nil, err
 		}
-		seenTarget[m.Type+":"+m.ID] = true
-		resolved = append(resolved, Mention{Type: "user", ID: m.ID, Name: name})
+		seenUser[m.ID] = true
+		out.users = append(out.users, Mention{Type: "user", ID: m.ID, Name: name})
 	}
-	return resolved, nil
+	return out, nil
 }
 
 // lookupByRandomID finds the sender's earlier commit of the same random key.
 // The uniqueness scope is (sender_type, sender_id, random_id) across all
 // workspaces, exactly like the TS partial unique index.
-func (s *Store) lookupByRandomID(ctx context.Context, ex channel.Executor, senderID, randomID string) (*Message, error) {
+func (s *Store) lookupByRandomID(ctx context.Context, ex channelExecutor, senderType, senderID, randomID string) (*Message, error) {
 	row := ex.QueryRowContext(ctx, `SELECT `+messageColumns+` FROM messages m
-		WHERE m.sender_type = 'user' AND m.sender_id = ? AND m.random_id = ? LIMIT 1`, senderID, randomID)
+		WHERE m.sender_type = ? AND m.sender_id = ? AND m.random_id = ? LIMIT 1`, senderType, senderID, randomID)
 	msg, err := scanMessage(row)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -311,9 +451,19 @@ func (s *Store) lookupByRandomID(ctx context.Context, ex channel.Executor, sende
 	return msg, nil
 }
 
-// mentionsOf loads the persisted mention facts of one message in insertion
-// order (message_mentions has no created_at; order by rowid).
+// mentionsOf loads the persisted mention facts of one message: human rows
+// and typed agent rows, users first (each in insertion order).
 func (s *Store) mentionsOf(ctx context.Context, ex channel.Executor, messageID string) ([]Mention, error) {
+	out, err := s.mentionsOfTx(ctx, ex, messageID)
+	if err != nil {
+		return nil, err
+	}
+	return out.combined(), nil
+}
+
+// mentionsOfTx loads the split mention facts of one message.
+func (s *Store) mentionsOfTx(ctx context.Context, ex channel.Executor, messageID string) (*resolvedMentions, error) {
+	out := &resolvedMentions{}
 	rows, err := ex.QueryContext(ctx, `SELECT mm.user_id, u.name FROM message_mentions mm
 		JOIN users u ON u.id = mm.user_id
 		WHERE mm.message_id = ? ORDER BY mm.rowid`, messageID)
@@ -321,16 +471,44 @@ func (s *Store) mentionsOf(ctx context.Context, ex channel.Executor, messageID s
 		return nil, fmt.Errorf("mention read: %w", err)
 	}
 	defer rows.Close()
-	var out []Mention
 	for rows.Next() {
 		var m Mention
 		if err := rows.Scan(&m.ID, &m.Name); err != nil {
 			return nil, err
 		}
 		m.Type = "user"
-		out = append(out, m)
+		out.users = append(out.users, m)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	agentRows, err := ex.QueryContext(ctx, `SELECT agent_id, handle_at_send FROM message_agent_mentions
+		WHERE message_id = ? ORDER BY rowid`, messageID)
+	if err != nil {
+		// A pre-0014 schema has no agent fact table; with the M4 scope no
+		// agent mention can exist, so the read degrades to the human facts
+		// instead of failing every human replay.
+		if isMissingTable(err) {
+			return out, nil
+		}
+		return nil, fmt.Errorf("agent mention read: %w", err)
+	}
+	defer agentRows.Close()
+	for agentRows.Next() {
+		var m Mention
+		if err := agentRows.Scan(&m.ID, &m.Name); err != nil {
+			return nil, err
+		}
+		m.Type = "agent"
+		out.agents = append(out.agents, m)
+	}
+	return out, agentRows.Err()
+}
+
+// isMissingTable answers a SQLite "no such table" driver error (a pre-0014
+// schema simply has no agent mention facts).
+func isMissingTable(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "no such table")
 }
 
 // requestDigest is the replay fingerprint: workspace, channel, sender

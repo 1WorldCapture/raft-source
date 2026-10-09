@@ -231,7 +231,9 @@ pending handshake、已建立连接、待发队列、resume 任务都必须受�
 
 Activity mute 是本人的展示/通知偏好，不删除消息、不撤销频道权限、不停止 Agent，也不能伪造“已读”。本期实现它的真实持久化与 `notification_prefs:updated` 的正确作用域；强制数据库故障时应报真实错误，而不是仍显示“未启用”。
 
-`/api/servers/unread-summary` 的 no-ID 路由必须排在动态 workspace 解析之前，按用户实际 membership 聚合；不能再次被 `:id` 当 workspace 读成 404。`#all`/Activity 不可作为普通会话随意写入；人类消息只能写到明确的原始 conversation scope。
+`/api/servers/unread-summary` 的 no-ID 路由必须排在动态 workspace 解析之前，按用户实际 membership 聚合；不能再次被 `:id` 当 workspace 读成 404。Activity/Inbox 是聚合视图，不是可写 conversation scope；人类消息只能写到明确的真实频道、DM 或线程。
+
+**M5 前置 UI 回归修正（2026-10-08，America/Los_Angeles）：** 上一版将 `#all` 与 Activity 并列为不可写聚合面，错误地收紧了原客户端契约。启用状态下的真实系统频道 `#all`/`#announcement` 采用工作空间隐式成员制：符合现有账号/成员门禁的 owner/admin/member 不需要物理 roster 行即可发帖，不要求用户显式 join，也不回填虚假成员行。隐藏的 `#all`、归档/删除频道、非空间成员和被现有 guest 策略拒绝的主体仍不可写；普通公开/私有频道的显式加入要求、DM 参与者限制和线程继承根会话权限保持不变。`joined: true`、成员投影和发帖授权必须表达同一事实；这里不是引入“只有管理员可发公告”的新策略。具体修复和验收状态以 `m5-ui-feedback-triage.md` 及 M5 交接记录为准。
 
 Activity/Inbox 的人类子集与纯频道聊天分别签收：频道聊天先通过并不意味着 Inbox、Done、Agent 任务流或 Office 都通过。本方案明确把 human snapshot/difference、active/done/unfollowed 列表、本人 read-all、频道/线程 done/undone 纳入 P5；逐端点范围、状态表、frontier 错误、增量 epoch/watermark 与降级行为见 **`m4-activity-readstate-contract.md`**。任务/Agent 卡片、联合频道及全文搜索不随此引入；Inbox 自身的 q 列表筛选是原壳层必需的读取，不等于实现全局消息搜索。禁止总是返回空集合“降噪”。
 

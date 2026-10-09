@@ -11,7 +11,6 @@ import (
 	"raft.local/server-go/internal/agent"
 	"raft.local/server-go/internal/computer"
 	"raft.local/server-go/internal/transport/httpapi"
-	"raft.local/server-go/internal/transport/httpapi/agentapi"
 	"raft.local/server-go/internal/transport/httpapi/computerapi"
 	"raft.local/server-go/internal/transport/httpapi/httpx"
 	"raft.local/server-go/internal/transport/httpapi/humanapi"
@@ -85,7 +84,7 @@ func (a *App) buildHTTP(socketIO http.Handler, logger *slog.Logger) http.Handler
 			AvatarDir:      avatarDir,
 			RuntimeCatalog: control.broker,
 		},
-		AgentAPI: &agentapi.Handlers{Store: control.agents},
+		AgentAPI: a.agentHandlers,
 		Catalog: &humanapi.RuntimeCatalogHandlers{
 			Store: control.catalog, Broker: control.broker,
 		},
@@ -108,5 +107,21 @@ func (a *App) internalRouteRegistry() []computer.InternalRouteEntry {
 	}
 	routes = append(routes, computerapi.RunnerRouteManifest()...)
 	routes = append(routes, agent.IdentityInternalRoutes()...)
+	routes = append(routes, agentMessageRoutes()...)
 	return routes
+}
+
+// agentMessageRoutes is the M5 Agent CLI surface reflected by computer
+// preflight. These rows exist only because the ports are wired above.
+func agentMessageRoutes() []computer.InternalRouteEntry {
+	const principal = "sk_agent"
+	return []computer.InternalRouteEntry{
+		{Method: http.MethodPost, Path: "/internal/agent-api/send", Principal: principal},
+		{Method: http.MethodPost, Path: "/internal/agent-api/v2/send", Principal: principal},
+		{Method: http.MethodPost, Path: "/internal/agent-api/resolve-channel", Principal: principal},
+		{Method: http.MethodGet, Path: "/internal/agent-api/events", Principal: principal},
+		{Method: http.MethodGet, Path: "/internal/agent-api/events/claim", Principal: principal},
+		{Method: http.MethodPost, Path: "/internal/agent-api/events/ack", Principal: principal},
+		{Method: http.MethodGet, Path: "/internal/agent-api/history", Principal: principal},
+	}
 }

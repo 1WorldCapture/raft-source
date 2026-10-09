@@ -119,10 +119,10 @@ func TestCreateRejectsUnsupportedEffectsBeforeCommit(t *testing.T) {
 		ChannelID: txGeneral, Content: "x",
 		Mentions: []Mention{{Type: "agent", ID: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", Name: "bot"}},
 	})
-	if u := AsUnsupportedEffect(err); u == nil {
-		t.Fatalf("agent mention must be rejected (no partial accept), got %v", err)
+	if inv := AsInvalidInput(err); inv == nil || !strings.Contains(inv.Reason, "is not an agent of this workspace") {
+		t.Fatalf("unknown agent mention must reject the whole write, got %v", err)
 	}
-	// Mixed user+agent mentions reject the whole write too.
+	// Mixed user+unknown-agent mentions reject the whole write too.
 	_, err = f.sendClaims(claimsFor(txAlice, txFamAlice), CreateInput{
 		ChannelID: txGeneral, Content: "x",
 		Mentions: []Mention{
@@ -130,8 +130,8 @@ func TestCreateRejectsUnsupportedEffectsBeforeCommit(t *testing.T) {
 			{Type: "agent", ID: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", Name: "bot"},
 		},
 	})
-	if u := AsUnsupportedEffect(err); u == nil {
-		t.Fatalf("mixed mentions must be rejected, got %v", err)
+	if inv := AsInvalidInput(err); inv == nil || !strings.Contains(inv.Reason, "is not an agent of this workspace") {
+		t.Fatalf("mixed mentions must reject the whole write, got %v", err)
 	}
 	var count int
 	_ = f.db.QueryRow(`SELECT COUNT(*) FROM messages`).Scan(&count)

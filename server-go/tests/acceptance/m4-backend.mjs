@@ -445,15 +445,18 @@ export async function verifyM4Backend({ origin, data, start, stop, capture, exec
     assert.equal(entry.hasMention, true, 'unread summary entry reports hasMention');
     assert.equal(entry.hasAnyMention, true, 'unread summary entry reports hasAnyMention');
 
-    // Agent structured mentions require agent behavior: the whole write is
-    // rejected 501 before commit, never partially accepted.
+    // M5 implements Agent mentions. This Agent has not joined the ordinary
+    // public channel, so its lack of reply authority still rejects the
+    // entire write. Preserve the M4 atomic-rejection assertion, not its
+    // obsolete feature-not-implemented status.
     const pubRowsBefore = (await history(asAlice, pub.id, '?limit=200')).data.messages.length;
     const agentMention = await send(asAlice, {
       channelId: pub.id, content: 'hey relay',
       mentions: [{ type: 'agent', id: agent.data.id, name: 'm4-relay' }],
     });
-    expectStatus(agentMention, 501, 'agent mention rejected as not implemented');
-    assert.equal(agentMention.data?.code, 'feature_not_implemented', 'agent mention 501 code');
+    expectStatus(agentMention, 400, 'agent mention without reply authority is rejected');
+    assert.equal(agentMention.data?.error, 'Mention target cannot receive messages in this conversation',
+      'Agent mention rejection reflects current conversation authority');
     const mixed = await send(asAlice, {
       channelId: pub.id, content: 'mixed mention',
       mentions: [
@@ -461,7 +464,9 @@ export async function verifyM4Backend({ origin, data, start, stop, capture, exec
         { type: 'agent', id: agent.data.id, name: 'm4-relay' },
       ],
     });
-    expectStatus(mixed, 501, 'mixed user+agent mention is rejected whole');
+    expectStatus(mixed, 400, 'mixed user+unauthorized-agent mention is rejected whole');
+    assert.equal(mixed.data?.error, 'Mention target cannot receive messages in this conversation',
+      'mixed mentions preserve the same invalid-recipient refusal');
     assert.equal((await history(asAlice, pub.id, '?limit=200')).data.messages.length, pubRowsBefore,
       'no partial row survived the rejected agent mentions');
 
@@ -512,16 +517,29 @@ export async function verifyM4Backend({ origin, data, start, stop, capture, exec
     assert.deepEqual(dmAliceBob.readState, { kind: 'absent' }, 'fresh DM creator frontier');
     assert.deepEqual(fromBob.data.readState, { kind: 'absent' }, 'fresh peer frontier');
 
-    // Agent DM branch: valid agentId shape -> explicit 501, no session row
-    // (compat contract §2 POST /channels/dm decision).
+    // M5 replaces the former Agent-DM 501 with a participant-scoped,
+    // canonical Agent conversation. Human-pair contracts above stay intact.
     const dmListBefore = await request('/api/channels/dm', asAlice);
     expectStatus(dmListBefore, 200, 'DM list before agent branch');
     const agentDm = await request('/api/channels/dm', { method: 'POST', ...asAlice, body: { agentId: agent.data.id } });
-    expectStatus(agentDm, 501, 'agent DM is not implemented');
-    assert.equal(agentDm.data?.code, 'feature_not_implemented', 'agent DM 501 code');
+    expectStatus(agentDm, 200, 'Agent DM is implemented');
+    assert.equal(agentDm.data.peerType, 'agent', 'Agent DM uses the Agent peer union');
+    assert.equal(agentDm.data.peerId, agent.data.id, 'Agent DM keeps the real peer identity');
+    const agentDmAgain = await request('/api/channels/dm', { method: 'POST', ...asAlice, body: { agentId: agent.data.id } });
+    expectStatus(agentDmAgain, 200, 'Agent DM re-open');
+    assert.equal(agentDmAgain.data.id, agentDm.data.id, 'Agent DM pair is canonical');
     const dmListAfter = await request('/api/channels/dm', asAlice);
     expectStatus(dmListAfter, 200, 'DM list after agent branch');
-    assert.equal(dmListAfter.data.length, dmListBefore.data.length, 'the 501 created no conversation');
+    assert.equal(dmListAfter.data.length, dmListBefore.data.length + 1, 'one Agent conversation is created');
+    assert.equal(dmListAfter.data.find(dm => dm.id === agentDm.data.id)?.peerType, 'agent',
+      'Agent peer shape survives DM listing');
+    expectStatus(await history(asBob, agentDm.data.id), 404, 'unrelated human cannot read the Agent DM');
+    const invalidAgentDm = await request('/api/channels/dm', {
+      method: 'POST', ...asAlice, body: { agentId: 'ffffffff-ffff-4fff-8fff-ffffffffffff' },
+    });
+    expectStatus(invalidAgentDm, 404, 'unknown Agent target is rejected');
+    assert.equal((await request('/api/channels/dm', asAlice)).data.length, dmListAfter.data.length,
+      'an invalid Agent target never creates a conversation');
 
     // A workspace outsider cannot become a DM target (channels.ts:724-729).
     const outsider = await request('/api/channels/dm', { method: 'POST', ...asAlice, body: { userId: stranger.user.id } });

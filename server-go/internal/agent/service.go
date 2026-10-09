@@ -19,18 +19,30 @@ type Service struct {
 	deviceAuthEnabled bool
 	logger            *slog.Logger
 
+	// launches is the M5 persistent launch/start-dispatch store. Nil (the
+	// pre-0014 build) keeps the exact M3 behavior: the in-memory fence in
+	// launch_fence.go and no durable start facts. It is bound at
+	// construction and never replaced.
+	launches *LaunchStore
+
 	launchMu sync.Mutex
 	launchID map[string]string
 }
 
 // ServiceOptions injects the machine gateway (the MACHINEWS hub or a test
 // double), the server URL embedded in agent:start configs, the frozen
-// device-login gate and a logger. The gateway is fixed at assembly time.
+// device-login gate, a logger and — for the M5 lifecycle paths — the
+// persistent launch store. The gateway and launch store are fixed at
+// assembly time.
 type ServiceOptions struct {
 	Gateway           Gateway
 	ServerURL         string
 	DeviceAuthEnabled bool
 	Logger            *slog.Logger
+	// Launches enables the M5 persistent startDispatch/launch paths. Nil
+	// leaves M3 semantics untouched and makes the M5 entry points fail with
+	// ErrLaunchPersistenceUnavailable instead of silently degrading.
+	Launches *LaunchStore
 }
 
 // NewService builds the lifecycle service.
@@ -45,6 +57,7 @@ func NewService(store *Store, opts ServiceOptions) *Service {
 		serverURL:         opts.ServerURL,
 		deviceAuthEnabled: opts.DeviceAuthEnabled,
 		logger:            logger,
+		launches:          opts.Launches,
 		launchID:          map[string]string{},
 	}
 }
@@ -62,6 +75,14 @@ const (
 // Start ports agentOrchestrator.startAgent for the manual route: validate,
 // dispatch agent:start to the live machine, then persist active. The status
 // write happens only after a successful dispatch, mirroring the TS order.
+//
+// M5 convergence: when the persistent launch store is wired, the manual
+// start and the delivery-driven start share ONE path — the durable
+// reservation in EnsureStartLaunch. There is no separate in-memory M5
+// expectation competing with the M3 fence: the reserved launch IS the
+// fence, the daemon-visible dispatch id is deduplicated by the reservation,
+// and late lifecycle frames are fenced by the persisted launch. The M3
+// in-memory fence remains only for pre-0014 builds (Launches == nil).
 func (s *Service) Start(ctx context.Context, a *Agent) error {
 	if IsExternalAgentRuntime(a.Runtime) {
 		return errf(400, "", "External agents do not use Raft-managed runtime lifecycle")
@@ -75,6 +96,25 @@ func (s *Service) Start(ctx context.Context, a *Agent) error {
 	}
 	if !s.gateway.IsOnline(machineID) {
 		return errf(409, "machine_offline", "Machine offline. Please start your local daemon.")
+	}
+	if s.launches != nil {
+		// One path with the delivery-driven start: reserve (live re-read
+		// inside the transaction refuses stopped/moved/deleted agents),
+		// dispatch first-time launches, then the same M3 status projection.
+		launch, fresh, err := s.reserveLaunchForRestart(ctx, a, machineID)
+		if err != nil {
+			return err
+		}
+		if launch.State == LaunchStateReserved {
+			// Same client-visible failure as the M3 path: a send that does
+			// not land is daemon_timeout, and the agent is not marked active.
+			// The reservation stays so a retry resends the same dispatch id.
+			// RecoverPendingStarts still owes a resend for a non-stopped agent.
+			if err := s.sendStartDispatch(ctx, fresh, machineID, launch); err != nil {
+				return errf(504, "daemon_timeout", "Machine request timed out")
+			}
+		}
+		return s.store.UpdateAgentStatus(ctx, a.ID, StatusActive, nil)
 	}
 	machine, err := s.store.GetMachine(ctx, a.WorkspaceID, machineID)
 	if err != nil {
@@ -112,17 +152,33 @@ func (s *Service) Stop(ctx context.Context, a *Agent) error {
 				"machine_id", a.MachineID.String, "error", err.Error())
 		}
 	}
+	// M5: a manual stop terminates the persistent launch identity too, so a
+	// late daemon frame cannot extend a stopped agent's launch.
+	if s.launches != nil {
+		if _, err := s.launches.TerminateAgentLaunches(ctx, a.WorkspaceID, a.ID, "",
+			LaunchStateCancelled, "stopped"); err != nil {
+			return err
+		}
+	}
 	return s.store.UpdateAgentStatus(ctx, a.ID, StatusStopped, nil)
 }
 
 // StopInternal is the internal-reason stop (reset/delete pre-step): the
 // persisted projection is inactive, and the stopped guard keeps a manual
-// stop intact.
+// stop intact. With the M5 launch store present, every active launch of the
+// agent is superseded in the same step so a late daemon frame cannot extend
+// a stopped agent's launch identity.
 func (s *Service) StopInternal(ctx context.Context, a *Agent) error {
 	if s.gateway != nil && a.MachineID.Valid && a.MachineID.String != "" {
 		if err := s.gateway.Send(ctx, a.MachineID.String, NewStopCommand(a.ID)); err != nil {
 			s.logger.Warn("agent internal stop dispatch failed", "agent_id", a.ID,
 				"machine_id", a.MachineID.String, "error", err.Error())
+		}
+	}
+	if s.launches != nil {
+		if _, err := s.launches.TerminateAgentLaunches(ctx, a.WorkspaceID, a.ID, "",
+			LaunchStateCancelled, "stopped"); err != nil {
+			return err
 		}
 	}
 	return s.store.UpdateAgentStatus(ctx, a.ID, StatusInactive, nil)

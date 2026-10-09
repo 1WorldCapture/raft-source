@@ -17,6 +17,7 @@ package acceptance
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -27,9 +28,43 @@ import (
 	"testing"
 
 	"raft.local/server-go/internal/auth"
+	platformdb "raft.local/server-go/internal/platform/db"
 	"raft.local/server-go/internal/platform/mail"
 	"raft.local/server-go/tests/testkit"
 )
+
+// Fixture and fault-injection writes share the app's authority/write fence.
+// The assembled app also runs the delivery pump; raw autocommit DDL can race
+// its transactions and fail before the intended HTTP failure window is armed.
+// This changes only test setup serialization, never the fault or assertions.
+func stabExec(env *testkit.TestEnv, query string, args ...any) (sql.Result, error) {
+	ctx := context.Background()
+	var result sql.Result
+	err := platformdb.WithWriteTx(ctx, env.App.DB, func(tx *sql.Tx) error {
+		var err error
+		result, err = tx.ExecContext(ctx, query, args...)
+		return err
+	})
+	return result, err
+}
+
+// Schema fault swaps must be atomic and use one connection. Splitting a
+// DROP VIEW / ALTER TABLE restore across pooled transactions exposes an
+// intermediate schema to background readers and can leave the next DDL
+// preparation consulting the old view name. This helper changes only test
+// setup/teardown; the conditional late-failure view and rollback assertions
+// remain unchanged.
+func stabExecDDL(env *testkit.TestEnv, statements ...string) error {
+	ctx := context.Background()
+	return platformdb.WithWriteTx(ctx, env.App.DB, func(tx *sql.Tx) error {
+		for _, statement := range statements {
+			if _, err := tx.ExecContext(ctx, statement); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
 
 type stabResponse struct {
 	Status int
@@ -159,7 +194,7 @@ func stabWorkspace(t *testing.T, env *testkit.TestEnv, ownerToken, memberID stri
 		{`INSERT INTO workspace_member_setup (workspace_id, user_id, status, completion_reason, contract_version) VALUES (?,?,'not_started',NULL,'onboarding-setup-v2')`, []any{ws, memberID}},
 		{`INSERT INTO workspace_member_preferences (workspace_id, user_id) VALUES (?,?)`, []any{ws, memberID}},
 	} {
-		if _, err := env.App.DB.Exec(stmt.sql, stmt.args...); err != nil {
+		if _, err := stabExec(env, stmt.sql, stmt.args...); err != nil {
 			t.Fatalf("seed member row: %v", err)
 		}
 	}
@@ -312,7 +347,7 @@ func stabArmReadFailure(t *testing.T, env *testkit.TestEnv, userID string, requi
 	// for a MISSING prerequisite would also produce 500 and let a reordered,
 	// too-early fault pass vacuously. Missing earlier facts must skip this
 	// trigger so the request succeeds and the expected-500 assertion FAILS.
-	_, err := env.App.DB.Exec(fmt.Sprintf(`CREATE TRIGGER stab_fail_read_insert
+	_, err := stabExec(env, fmt.Sprintf(`CREATE TRIGGER stab_fail_read_insert
 		BEFORE INSERT ON user_channel_read_states
 		WHEN NEW.user_id='%s'
 			AND EXISTS (SELECT 1 FROM channels WHERE id=NEW.channel_id AND type='thread')
@@ -329,7 +364,7 @@ func stabArmReadFailure(t *testing.T, env *testkit.TestEnv, userID string, requi
 
 func stabDisarmReadFailure(t *testing.T, env *testkit.TestEnv) {
 	t.Helper()
-	if _, err := env.App.DB.Exec(`DROP TRIGGER IF EXISTS stab_fail_read_insert`); err != nil {
+	if _, err := stabExec(env, `DROP TRIGGER IF EXISTS stab_fail_read_insert`); err != nil {
 		t.Fatalf("disarm read failure: %v", err)
 	}
 }
@@ -357,7 +392,7 @@ func newStabFixture(t *testing.T, name string) *stabFixture {
 	// Explicit roster rows keep the fixture independent of implicit
 	// membership semantics for posts and thread creation.
 	for _, uid := range []string{ownerID, memberID} {
-		if _, err := env.App.DB.Exec(`INSERT OR IGNORE INTO channel_humans (channel_id, user_id, role, joined_at) VALUES (?,?, 'member', 1)`, channelID, uid); err != nil {
+		if _, err := stabExec(env, `INSERT OR IGNORE INTO channel_humans (channel_id, user_id, role, joined_at) VALUES (?,?, 'member', 1)`, channelID, uid); err != nil {
 			t.Fatalf("seed channel_humans: %v", err)
 		}
 	}
@@ -540,9 +575,6 @@ func TestStabilizationDMProjectionFailureHTTP(t *testing.T) {
 	// its pair/channel/participant facts exist. The real SQLite JSON function
 	// errors when that row's frontier is projected. Unlike a missing column,
 	// this fault cannot fire during a pre-write probe of the same view.
-	if _, err := f.env.App.DB.Exec(`ALTER TABLE user_channel_read_states RENAME TO stab_read_states_before_fault`); err != nil {
-		t.Fatalf("arm DM projection failure: %v", err)
-	}
 	quote := func(value string) string { return "'" + strings.ReplaceAll(value, "'", "''") + "'" }
 	view := fmt.Sprintf(`CREATE VIEW user_channel_read_states AS
 		SELECT workspace_id, user_id, channel_id, last_read_seq, read_state_version, updated_at
@@ -555,8 +587,9 @@ func TestStabilizationDMProjectionFailureHTTP(t *testing.T) {
 			AND EXISTS (SELECT 1 FROM channel_humans WHERE channel_id=d.channel_id AND user_id=%s)
 			AND EXISTS (SELECT 1 FROM channel_humans WHERE channel_id=d.channel_id AND user_id=%s)`,
 		quote(f.ownerID), quote(f.ws), quote(f.ownerID), quote(f.memberID), quote(f.memberID), quote(f.ownerID), quote(f.ownerID), quote(f.memberID))
-	if _, err := f.env.App.DB.Exec(view); err != nil {
-		t.Fatalf("install conditional projection view: %v", err)
+	if err := stabExecDDL(f.env,
+		`ALTER TABLE user_channel_read_states RENAME TO stab_read_states_before_fault`, view); err != nil {
+		t.Fatalf("install conditional projection view atomically: %v", err)
 	}
 	// The exact same reader is healthy before the new DM exists.
 	rows, err := f.env.App.DB.Query(`SELECT last_read_seq, read_state_version FROM user_channel_read_states WHERE workspace_id=? AND user_id=?`, f.ws, f.ownerID)
@@ -596,11 +629,10 @@ func TestStabilizationDMProjectionFailureHTTP(t *testing.T) {
 	}
 
 	// Recovery: with the original table restored, the same request succeeds.
-	if _, err := f.env.App.DB.Exec(`DROP VIEW user_channel_read_states`); err != nil {
-		t.Fatalf("remove conditional projection view: %v", err)
-	}
-	if _, err := f.env.App.DB.Exec(`ALTER TABLE stab_read_states_before_fault RENAME TO user_channel_read_states`); err != nil {
-		t.Fatalf("restore original readstate table: %v", err)
+	if err := stabExecDDL(f.env,
+		`DROP VIEW user_channel_read_states`,
+		`ALTER TABLE stab_read_states_before_fault RENAME TO user_channel_read_states`); err != nil {
+		t.Fatalf("restore original readstate table atomically: %v", err)
 	}
 	recovered := stabScoped(t, f.env, "POST", "/api/channels/dm", map[string]any{
 		"userId": f.memberID,

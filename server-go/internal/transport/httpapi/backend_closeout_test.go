@@ -10,7 +10,7 @@ import (
 func TestDeletedAccountStillReturnsAuthoritative401(t *testing.T) {
 	e := testkit.NewTestEnv(t)
 	id, access, _ := e.RegisterOK("deleted-account@example.test")
-	if _, err := e.App.DB.Exec(`DELETE FROM users WHERE id = ?`, id); err != nil {
+	if _, err := e.ExecFixture(`DELETE FROM users WHERE id = ?`, id); err != nil {
 		t.Fatal(err)
 	}
 	if result := e.Do("GET", "/api/auth/me", nil, access); result.Status != http.StatusUnauthorized {
@@ -21,7 +21,7 @@ func TestDeletedAccountStillReturnsAuthoritative401(t *testing.T) {
 func TestProfileWriteFailureDoesNotInvalidateTheSession(t *testing.T) {
 	e := testkit.NewTestEnv(t)
 	_, access, _ := e.RegisterOK("profile-write-failure@example.test")
-	if _, err := e.App.DB.Exec(`CREATE TRIGGER reject_profile_update BEFORE UPDATE OF display_name ON users
+	if _, err := e.ExecFixture(`CREATE TRIGGER reject_profile_update BEFORE UPDATE OF display_name ON users
 		BEGIN SELECT RAISE(ABORT, 'injected profile write failure'); END`); err != nil {
 		t.Fatal(err)
 	}

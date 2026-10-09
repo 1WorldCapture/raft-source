@@ -121,12 +121,12 @@ func membershipRoleTx(ctx context.Context, ex Queryer, workspaceID, userID strin
 	return role, nil
 }
 
-// isDMParticipantTx reports the 0010 direct_messages roster membership
-// (both participants of a human pair, including self-DM).
+// isDMParticipantTx reports a human's membership in a canonical human-human
+// or human-Agent DM. It never treats workspace membership as DM admission.
 func isDMParticipantTx(ctx context.Context, ex Queryer, workspaceID, channelID, userID string) (bool, error) {
 	var one int
 	err := ex.QueryRowContext(ctx, `
-		SELECT 1 FROM direct_messages
+		SELECT 1 FROM `+humanDMParticipantsSQL+`
 		WHERE workspace_id = ? AND channel_id = ?
 		  AND (user_low = ? OR user_high = ?)`,
 		workspaceID, channelID, userID, userID).Scan(&one)
@@ -257,7 +257,7 @@ func (s *Store) hasPriorChannelRelationshipTx(ctx context.Context, ex Queryer, w
 		            WHERE workspace_id = ? AND user_id = ? AND channel_id = ?)
 		 OR EXISTS (SELECT 1 FROM channel_humans
 		            WHERE channel_id = ? AND user_id = ?)
-		 OR EXISTS (SELECT 1 FROM direct_messages
+		 OR EXISTS (SELECT 1 FROM `+humanDMParticipantsSQL+`
 		            WHERE workspace_id = ? AND channel_id = ?
 		              AND (user_low = ? OR user_high = ?))`,
 		workspaceID, userID, channelID,

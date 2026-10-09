@@ -31,7 +31,9 @@ func (s *Service) ListDMs(ctx context.Context, claims auth.AccessTokenClaims, wo
 		if err := auth.ValidateHumanTx(ctx, ex, claims, now()); err != nil {
 			return err
 		}
-		views, err := s.channels.ListDMsTx(ctx, ex, workspaceID, actor)
+		// Human-human rows and canonical human-Agent rows share one list.
+		// Each row carries its true peer type.
+		views, err := s.channels.ListDMsWithAgentsTx(ctx, ex, workspaceID, actor)
 		if err != nil {
 			return err
 		}
@@ -51,10 +53,12 @@ func (s *Service) ListDMs(ctx context.Context, claims auth.AccessTokenClaims, wo
 	return out, nil
 }
 
-// CreateDM ensures the DM with the target human (or the caller's self-DM).
-// The {agentId} branch validates the target then refuses with the honest
-// 501 before any mutation; the hidden human directory reads unknown targets
-// as absent unless an existing conversation still resolves.
+// CreateDM ensures the DM with the target human (or the caller's self-DM)
+// or the canonical human-Agent DM. The hidden human directory reads unknown
+// human targets as absent unless an existing conversation still resolves.
+// An unknown agent target is not found; a live workspace agent opens (or
+// reopens) the typed pair. ErrAgentDMNotImplemented remains for adapters
+// that still switch on it; this path no longer returns it.
 func (s *Service) CreateDM(ctx context.Context, claims auth.AccessTokenClaims, workspaceID, actor, targetUserID, agentID string, agentBranch, userBranch bool) (*DMRow, error) {
 	if actor != claims.Subject {
 		return nil, auth.ErrTokenInvalid
@@ -65,8 +69,6 @@ func (s *Service) CreateDM(ctx context.Context, claims auth.AccessTokenClaims, w
 			return err
 		}
 		if agentBranch {
-			// Shape and identity are validated; verify the target exists in
-			// this workspace, then refuse honestly without creating anything.
 			exists, err := s.channels.AgentExistsInWorkspace(ctx, tx, agentID, workspaceID)
 			if err != nil {
 				return err
@@ -74,7 +76,25 @@ func (s *Service) CreateDM(ctx context.Context, claims auth.AccessTokenClaims, w
 			if !exists {
 				return ErrAgentDMTargetNotFound
 			}
-			return ErrAgentDMNotImplemented
+			channelRow, err := s.channels.EnsureAgentDMTx(ctx, tx, workspaceID, actor, agentID)
+			if err != nil {
+				if de := channel.AsDomainError(err); de != nil && de.Message == channel.AgentDMTargetNotMemberMessage {
+					return ErrAgentDMTargetNotFound
+				}
+				return err
+			}
+			// dm:new intents for real creation/revive are emitted by
+			// EnsureAgentDMTx on this same transaction.
+			view, err := s.dmViewFor(ctx, tx, workspaceID, actor, channelRow.ID)
+			if err != nil {
+				return err
+			}
+			readState, err := s.dmReadState(ctx, tx, workspaceID, actor, view.Channel.ID)
+			if err != nil {
+				return err
+			}
+			result = &DMRow{View: *view, ReadState: readState}
+			return nil
 		}
 		targetID := targetUserID
 		// Hidden human directory: unknown targets read as absent, but an
@@ -118,9 +138,9 @@ func (s *Service) CreateDM(ctx context.Context, claims auth.AccessTokenClaims, w
 }
 
 // dmViewFor resolves the peer projection of one DM channel inside the
-// caller's transaction (listDMChannels' single-row shape).
+// caller's transaction. Agent-peer rows carry PeerType "agent".
 func (s *Service) dmViewFor(ctx context.Context, ex channel.Executor, workspaceID, actor, channelID string) (*channel.DMView, error) {
-	views, err := s.channels.ListDMsTx(ctx, ex, workspaceID, actor)
+	views, err := s.channels.ListDMsWithAgentsTx(ctx, ex, workspaceID, actor)
 	if err != nil {
 		return nil, err
 	}

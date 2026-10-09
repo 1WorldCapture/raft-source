@@ -300,7 +300,7 @@ func TestPatchOnboardingSettingsIsAtomic(t *testing.T) {
 	// A combined manager+preference PATCH whose preference write fails must
 	// not leave the manager half applied (the approved single-transaction
 	// improvement over the legacy two-write path).
-	if _, err := e.App.DB.Exec(`CREATE TRIGGER reject_pref_update BEFORE UPDATE OF setup_modal_reminder_opt_out ON workspace_member_preferences
+	if _, err := e.ExecFixture(`CREATE TRIGGER reject_pref_update BEFORE UPDATE OF setup_modal_reminder_opt_out ON workspace_member_preferences
 		BEGIN SELECT RAISE(ABORT, 'injected preference failure'); END`); err != nil {
 		t.Fatal(err)
 	}

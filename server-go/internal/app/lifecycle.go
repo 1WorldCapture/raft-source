@@ -42,8 +42,11 @@ func (a *App) StartMaintenance(ctx context.Context, logger *slog.Logger) func() 
 // Concurrent callers observe the same completed shutdown.
 func (a *App) Close() error {
 	a.closeOnce.Do(func() {
+		if a.dispatcher != nil {
+			a.closeErr = a.dispatcher.Close()
+		}
 		if a.realtime != nil {
-			a.closeErr = a.realtime.Close()
+			a.closeErr = errors.Join(a.closeErr, a.realtime.Close())
 		}
 		if a.control != nil {
 			a.closeErr = errors.Join(a.closeErr, a.control.Close())

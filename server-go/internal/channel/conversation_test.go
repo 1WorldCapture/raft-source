@@ -1040,7 +1040,7 @@ func TestDMPublicationAndHiddenPeer(t *testing.T) {
 	})
 }
 
-func TestPostingScopeRestrictsImplicitMembershipChannels(t *testing.T) {
+func TestPostingScopeHonorsImplicitMembershipChannels(t *testing.T) {
 	f := newFixture(t)
 	// Enabled #all: a real channel row with implicit server membership.
 	if _, err := f.db.Exec(`INSERT INTO channels (id, workspace_id, name, type, system_kind, created_at)
@@ -1056,9 +1056,23 @@ func TestPostingScopeRestrictsImplicitMembershipChannels(t *testing.T) {
 		if err != nil || conv.Root.ID != id {
 			t.Fatalf("read %s: %+v %v", id, conv, err)
 		}
-		de := f.authorizeErr(fxWS, id, fxMember, true)
-		if de == nil || de.Code != CodeForbidden || de.Message != postJoinRequiredMessage {
-			t.Fatalf("post %s: %+v", id, de)
+		for _, actor := range []string{fxOwner, fxMember} {
+			if _, err := f.store.AuthorizeConversationTx(f.ctx(), f.db, fxWS, id, actor, true); err != nil {
+				t.Fatalf("implicit post %s by %s: %v", id, actor, err)
+			}
+		}
+		if de := f.authorizeErr(fxWS, id, fxGuest, true); de == nil || de.Code != CodeForbidden {
+			t.Fatalf("implicit membership must not enable guests: %+v", de)
+		}
+		var roster int
+		if err := f.db.QueryRow(`SELECT COUNT(*) FROM channel_humans WHERE channel_id = ?`, id).Scan(&roster); err != nil || roster != 0 {
+			t.Fatalf("implicit posting must not fabricate roster rows: count=%d err=%v", roster, err)
+		}
+		if _, err := f.db.Exec(`UPDATE channels SET archived_at = ? WHERE id = ?`, f.clock.T.UnixMilli(), id); err != nil {
+			t.Fatal(err)
+		}
+		if de := f.authorizeErr(fxWS, id, fxMember, true); de == nil || de.Code != CodeConflict {
+			t.Fatalf("archived implicit channel must remain unwritable: %+v", de)
 		}
 	}
 	// An explicitly joined channel still posts with its roster row.

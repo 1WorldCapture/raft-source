@@ -247,9 +247,13 @@ func (s *Store) userName(ctx context.Context, ex Executor, userID string) (strin
 }
 
 // DMView is one human DM of the list projection: the channel row plus its
-// resolved peer and last-message activity (a shared message fact).
+// resolved peer and last-message activity (a shared message fact). PeerType
+// is the honest actor kind of the peer — "user" for human-human pairs,
+// "agent" for the M5 human-Agent pairs; an agent peer is never projected as
+// a user (its identity comes from the agents table and carries no gravatar).
 type DMView struct {
 	Channel          Channel
+	PeerType         string // "user" | "agent" ("" reads as "user" downstream)
 	PeerID           string
 	PeerName         string
 	PeerDisplayName  *string
@@ -292,6 +296,7 @@ func scanDMView(scanner interface{ Scan(dest ...any) error }) (*DMView, error) {
 		v.PeerAvatarURL = &peerAvatar.String
 	}
 	v.PeerGravatarHash = gravatarHash(peerEmail.String)
+	v.PeerType = "user"
 	if lastMessageAt.Valid {
 		millis := lastMessageAt.Int64
 		v.LastMessageAt = &millis
@@ -342,7 +347,14 @@ func (s *Store) ListDMsTx(ctx context.Context, ex Executor, workspaceID, userID 
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	// Most recent message first; DMs without messages keep creation order.
+	sortDMViewsByLastMessage(views)
+	return views, nil
+}
+
+// sortDMViewsByLastMessage orders DM rows most-recent-message first; DMs
+// without messages keep creation order. Shared by the human-only and the
+// unified (human + agent peer) list projections.
+func sortDMViewsByLastMessage(views []DMView) {
 	sort.SliceStable(views, func(i, j int) bool {
 		a, b := views[i].LastMessageAt, views[j].LastMessageAt
 		switch {
@@ -359,7 +371,6 @@ func (s *Store) ListDMsTx(ctx context.Context, ex Executor, workspaceID, userID 
 			return views[i].Channel.CreatedAt.Before(views[j].Channel.CreatedAt)
 		}
 	})
-	return views, nil
 }
 
 // LookupDMTx resolves the live channel of an existing canonical pair without

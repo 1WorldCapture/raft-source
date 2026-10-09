@@ -172,7 +172,7 @@ func (s *Store) unreadCountsInSnapshot(ctx context.Context, ex Executor, claims 
 		        c.type = 'channel'
 		        OR EXISTS (SELECT 1 FROM channel_humans ch
 		                   WHERE ch.channel_id = c.id AND ch.user_id = ?1)
-		        OR EXISTS (SELECT 1 FROM direct_messages dm
+		        OR EXISTS (SELECT 1 FROM `+humanDMParticipantsSQL+` dm
 		                   WHERE dm.workspace_id = c.workspace_id AND dm.channel_id = c.id
 		                 AND (dm.user_low = ?1 OR dm.user_high = ?1))
 		      )
@@ -195,7 +195,7 @@ func (s *Store) unreadCountsInSnapshot(ctx context.Context, ex Executor, claims 
 		        pc.type = 'channel'
 		        OR EXISTS (SELECT 1 FROM channel_humans pch
 		                   WHERE pch.channel_id = pc.id AND pch.user_id = ?1)
-		        OR EXISTS (SELECT 1 FROM direct_messages pdm
+		        OR EXISTS (SELECT 1 FROM `+humanDMParticipantsSQL+` pdm
 		                   WHERE pdm.workspace_id = pc.workspace_id AND pdm.channel_id = pc.id
 		                 AND (pdm.user_low = ?1 OR pdm.user_high = ?1))
 		      )
@@ -331,7 +331,7 @@ const sidebarUnreadQuery = `
 	        OR ch.system_kind = 'announcement'
 	        OR EXISTS (SELECT 1 FROM channel_humans chh
 	                   WHERE chh.channel_id = ch.id AND chh.user_id = ?1)
-	        OR EXISTS (SELECT 1 FROM direct_messages dm
+	        OR EXISTS (SELECT 1 FROM ` + humanDMParticipantsSQL + ` dm
 	                   WHERE dm.workspace_id = ch.workspace_id
 	                 AND dm.channel_id = ch.id
 	                 AND (dm.user_low = ?1 OR dm.user_high = ?1))
@@ -382,7 +382,7 @@ func (s *Store) activityUnreadForWorkspace(ctx context.Context, ex Executor, cla
 		        OR c.system_kind = 'announcement'
 		        OR EXISTS (SELECT 1 FROM channel_humans chh
 		                   WHERE chh.channel_id = c.id AND chh.user_id = ?1)
-		        OR EXISTS (SELECT 1 FROM direct_messages dmq
+		        OR EXISTS (SELECT 1 FROM `+humanDMParticipantsSQL+` dmq
 		                   WHERE dmq.workspace_id = c.workspace_id
 		                 AND dmq.channel_id = c.id
 		                 AND (dmq.user_low = ?1 OR dmq.user_high = ?1))

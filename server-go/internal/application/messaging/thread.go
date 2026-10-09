@@ -16,9 +16,12 @@ var (
 	// ErrChannelMissingOrForeign: the addressed channel does not exist or
 	// belongs to another workspace (the exits answer the byte-stable 404).
 	ErrChannelMissingOrForeign = errors.New("channel missing or foreign")
-	// ErrAgentDMTargetNotFound / ErrAgentDMNotImplemented: the {agentId} DM
-	// branch's 404 / honest 501.
+	// ErrAgentDMTargetNotFound: the {agentId} branch's 404 when the agent is
+	// not a live member of the workspace.
 	ErrAgentDMTargetNotFound = errors.New("agent dm target missing")
+	// ErrAgentDMNotImplemented is retained so existing HTTP adapters keep
+	// compiling. CreateDM no longer returns it: a live workspace agent opens
+	// the canonical human-Agent DM.
 	ErrAgentDMNotImplemented = errors.New("agent dm not implemented")
 	// ErrDMTargetNotFound: the hidden-directory 404.
 	ErrDMTargetNotFound = errors.New("dm target missing")

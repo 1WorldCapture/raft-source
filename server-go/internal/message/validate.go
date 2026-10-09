@@ -11,7 +11,11 @@ import (
 const (
 	MaxContentCodeUnits = 32_000
 	MaxRandomIDLength   = 128
-	MaxMentionNameLen   = 128
+	// MaxAgentRandomIDLength is the original agent send idempotencyKey bound
+	// (agentApiMessageContract: trim 1–256). The agent send path accepts keys
+	// up to this length; the human randomId keeps its 128-unit legacy bound.
+	MaxAgentRandomIDLength = 256
+	MaxMentionNameLen      = 128
 )
 
 // utf16Length returns the number of UTF-16 code units in s (JavaScript

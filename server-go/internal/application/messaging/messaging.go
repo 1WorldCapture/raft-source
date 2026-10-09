@@ -14,8 +14,10 @@ import (
 	"database/sql"
 	"errors"
 
+	"raft.local/server-go/internal/agent"
 	"raft.local/server-go/internal/auth"
 	"raft.local/server-go/internal/channel"
+	"raft.local/server-go/internal/delivery"
 	"raft.local/server-go/internal/message"
 	platformdb "raft.local/server-go/internal/platform/db"
 	"raft.local/server-go/internal/readstate"
@@ -29,9 +31,17 @@ type Service struct {
 	channels  *channel.Store
 	messages  *message.Store
 	readstate *readstate.Store
+	// delivery and principals are frozen at construction from the same
+	// database: A's real delivery.Store and C's real agent.Store. There is
+	// no nil, no-op, or post-construction replacement.
+	delivery   DeliveryPlanner
+	principals AgentPrincipalValidator
 }
 
-// NewService validates the required fact owners at construction time.
+// NewService validates the required fact owners and freezes the real
+// delivery planner and agent principal validator on that same database.
+// The signature stays the three fact owners so existing callers keep
+// compiling; both M5 dependencies are constructed here, not injected later.
 func NewService(channels *channel.Store, messages *message.Store, readstate *readstate.Store) (*Service, error) {
 	if channels == nil || messages == nil || readstate == nil {
 		return nil, errors.New("messaging: channels, messages and readstate fact owners are required")
@@ -39,7 +49,14 @@ func NewService(channels *channel.Store, messages *message.Store, readstate *rea
 	if channels.DB() == nil || messages.DB() != channels.DB() || readstate.DB() != channels.DB() {
 		return nil, errors.New("messaging: fact owners must share one application database")
 	}
-	return &Service{channels: channels, messages: messages, readstate: readstate}, nil
+	handle := channels.DB()
+	return &Service{
+		channels:   channels,
+		messages:   messages,
+		readstate:  readstate,
+		delivery:   delivery.NewStore(handle),
+		principals: agent.NewStore(handle, agent.StoreOptions{}),
+	}, nil
 }
 
 // SendHuman is the ONLY complete human send entry: identity revalidation,
@@ -73,6 +90,16 @@ func (s *Service) sendHumanTx(ctx context.Context, tx *sql.Tx, claims auth.Acces
 	created, err := s.messages.CreateMessageTx(ctx, tx, claims, workspaceID, input)
 	if err != nil {
 		return nil, err
+	}
+	// The mandatory receipt intents join the same commit right after the
+	// message and mention facts (resolved agent mentions, plus the canonical
+	// human-Agent DM peer through the frozen implicit-receipt rule). A replay
+	// records nothing; a planning failure rolls the whole send back — no
+	// message can commit without its required receipt intents.
+	if !created.Replayed {
+		if err := s.planAgentDeliveriesTx(ctx, tx, workspaceID, created); err != nil {
+			return nil, err
+		}
 	}
 	// A NEW human thread reply advances the REPLIER's own read frontier in
 	// the same commit; a replay (Replayed=true, ThreadReply=false) never

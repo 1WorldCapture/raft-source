@@ -1,7 +1,9 @@
-// Schema-preserving architecture-refactor acceptance: a FROZEN M4 binary
-// creates real data, the new binary reads and extends its cold copy, and the
-// same old binary reads/writes the result. No UI, no SQL fixture seeding,
-// no access to existing data directories or running instances.
+// Historical architecture-refactor contract, retained across the additive M5
+// schema: a FROZEN M4 binary creates real data, the current binary preserves
+// and extends its cold copy. The old binary must now REFUSE the upgraded
+// schema; its matching original cold backup restores a writable old instance.
+// --baseline-only still checks the original same-schema roundtrip against
+// the frozen binary itself. No UI, SQL fixture seeding or live data access.
 //
 // Standalone: node tests/acceptance/stabilization-rollback.mjs
 // Harness self-check ONLY: append --baseline-only (old vs old; not new-code
@@ -193,7 +195,7 @@ async function routeObservations(request, world) {
     ['agent unknown unauthenticated', '/internal/agent-api/not-registered', {}],
     ['agent unknown authenticated', '/internal/agent-api/not-registered', { token: agentKey }],
     ['agent wrong method', '/internal/agent-api', { token: agentKey, method: 'POST', body: {} }],
-    ['agent known deferred family', '/internal/agent-api/history', { token: agentKey }],
+    ['agent known deferred family', '/internal/agent-api/tasks', { token: agentKey }],
     ['computer unknown unauthenticated', '/internal/computer/not-registered', { method: 'POST', body: {} }],
     ['computer unknown authenticated', '/internal/computer/not-registered', { token: computerKey, method: 'POST', body: {} }],
     ['workspace auth before method', `/api/servers/${workspace.id}/settings`, { method: 'DELETE' }],
@@ -416,30 +418,50 @@ export async function verifyStabilizationRollback({ executable, capture = captur
     const routesAfter = await routeObservations(request, world);
     await stop(); child = undefined;
 
-    await start(oldBinary, workingData);
-    await assertIdentityAndCursor(request, world);
-    assert.deepEqual(await observableState(request, world), after, 'old M4 binary reads all new-binary writes without schema downgrade');
-    assert.deepEqual(await routeObservations(request, world), routesAfter, 'route/auth contracts remain stable after rollback');
-    const replayNew = await request('/api/v2/messages', { ...world.asMember, method: 'POST', body: newBody });
-    expectStatus(replayNew, 200, 'old binary recognizes the new binary idempotency digest');
-    assert.equal(replayNew.data.message.id, added.data.message.id, 'old binary does not duplicate the new reply');
-    assert.deepEqual(await observableState(request, world), after, 'rollback replay preserves read/follow/message state');
-    const oldWrite = await request('/api/v2/messages', {
-      ...world.asOwner, method: 'POST', body: { channelId: world.dmId, content: 'old binary continues writing after rollback', randomId: 'architecture-rollback-final' },
-    });
-    expectStatus(oldWrite, 200, 'old binary can continue writing, not merely open the new data');
-    await stop(); child = undefined;
-    // Verify the independent original cold backup too: rollback on the
-    // extended database above does not by itself validate this restore path.
+    if (baselineOnly) {
+      // Preserve the original zero-schema-change harness self-check. It is
+      // deliberately NOT evidence that an old program can read M5 tables.
+      await start(oldBinary, workingData);
+      await assertIdentityAndCursor(request, world);
+      assert.deepEqual(await observableState(request, world), after, 'same-schema baseline roundtrip preserves all writes');
+      assert.deepEqual(await routeObservations(request, world), routesAfter, 'baseline route/auth roundtrip');
+      const replayNew = await request('/api/v2/messages', { ...world.asMember, method: 'POST', body: newBody });
+      expectStatus(replayNew, 200, 'baseline recognizes its persisted idempotency digest');
+      assert.equal(replayNew.data.message.id, added.data.message.id, 'baseline replay does not duplicate the reply');
+      assert.deepEqual(await observableState(request, world), after, 'baseline replay preserves read/follow/message state');
+      await stop(); child = undefined;
+    } else {
+      const refused = await capture(oldBinary, [], {
+        cwd: dir, env: { ...env, RAFT_GO_DATA_DIR: workingData }, timeout: 15000,
+      });
+      assert.notEqual(refused.code, 0, 'frozen M4 must refuse the additive M5 schema');
+      assert.match(refused.stdout + refused.stderr, /schema version.*newer than this binary/,
+        'old binary refuses for the explicit schema guard, not an unrelated failure');
+      assert.ok(!leakPattern.test(refused.stdout + refused.stderr), 'schema refusal does not log credentials');
+      // A failed downgrade attempt must not damage the current schema or data.
+      await start(executable, workingData);
+      await assertIdentityAndCursor(request, world);
+      assert.deepEqual(await observableState(request, world), after, 'M5 remains intact after old-binary refusal');
+      assert.deepEqual(await routeObservations(request, world), routesAfter, 'M5 routes remain intact after refusal');
+      await stop(); child = undefined;
+    }
+    // Only the original cold backup can restore the old program after an
+    // additive migration; prove both original views and continued writes.
     await start(oldBinary, backup);
     await assertIdentityAndCursor(request, world);
     assert.deepEqual(await observableState(request, world), before, 'the original cold backup restores the original eleven HTTP views');
     assert.deepEqual(await routeObservations(request, world), routesBefore, 'cold backup preserves route/auth contracts');
+    const oldWriteBody = { channelId: world.dmId, content: 'old binary continues writing after cold-backup restore', randomId: 'architecture-rollback-final' };
+    const oldWrite = await request('/api/v2/messages', { ...world.asOwner, method: 'POST', body: oldWriteBody });
+    expectStatus(oldWrite, 200, 'restored old binary can continue writing, not merely open the backup');
+    const oldReplay = await request('/api/v2/messages', { ...world.asOwner, method: 'POST', body: oldWriteBody });
+    expectStatus(oldReplay, 200, 'restored old binary preserves send idempotency');
+    assert.equal(oldReplay.data.message.id, oldWrite.data.message.id, 'restored retry does not duplicate a message');
     await stop(); child = undefined;
     assert.ok(!leakedCredential, 'owned processes did not log credentials');
     console.log(baselineOnly
       ? 'PASS stabilization rollback HARNESS SELF-CHECK (frozen baseline vs itself; not evidence for refactored code)'
-      : 'PASS frozen M4 -> refactored binary -> frozen M4: eleven persisted HTTP views, signed cursor/credentials, 33 route/auth probes, cold-backup restore and continued writes');
+      : 'PASS frozen M4 -> current M5: eleven persisted HTTP views, signed cursor/credentials, 33 route/auth probes, old-schema refusal and writable cold-backup restore');
   } catch (error) {
     primaryFailure = error;
     throw error;

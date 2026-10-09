@@ -14,11 +14,12 @@ import (
 )
 
 // OnReady reconciles agents bound to this machine with the daemon's
-// runningAgents list, then drains durable purge intents. A stopped agent
-// that the daemon still reports running receives a real agent:stop. An
-// agent missing from the list keeps its persisted status (TS
-// mark-wakeable-not-running does not demote active). A stale or revoked
-// principal mutates nothing and sends nothing.
+// runningAgents list, then drains durable purge intents, then (M5) re-sends
+// the machine's unconfirmed persistent start dispatches — the offline
+// wake/recovery entry. A stopped agent that the daemon still reports running
+// receives a real agent:stop. An agent missing from the list keeps its
+// persisted status (TS mark-wakeable-not-running does not demote active). A
+// stale or revoked principal mutates nothing and sends nothing.
 func (s *Service) OnReady(ctx context.Context, p computer.Principal, raw json.RawMessage) error {
 	var frame struct {
 		RunningAgents []string `json:"runningAgents"`
@@ -33,13 +34,26 @@ func (s *Service) OnReady(ctx context.Context, p computer.Principal, raw json.Ra
 		return err
 	}
 	s.sendStops(ctx, p, stops)
-	return s.sendPendingPurges(ctx, p)
+	if err := s.sendPendingPurges(ctx, p); err != nil {
+		return err
+	}
+	if err := s.RecoverPendingStarts(ctx, p.MachineID); err != nil {
+		// Recovery is the durable-wake path; a failure is logged and retried
+		// by the next ready/scan — never fatal to the connection.
+		s.logger.Warn("pending start recovery failed", "machine_id", p.MachineID,
+			"error", err.Error())
+	}
+	return nil
 }
 
-// OnMessage accepts the M3 lifecycle frames that belong to this machine.
-// agent:status, agent:session, agent:session:invalidate and
-// agent:purge:result update identity state only when the agent is currently
-// bound here. Every other type returns without a write.
+// OnMessage accepts the M3 lifecycle frames plus the M5 start/session
+// receipts that belong to this machine. agent:status, agent:session,
+// agent:session:invalidate and agent:purge:result update identity state only
+// when the agent is currently bound here; with the launch store wired,
+// session frames are additionally fenced by the DURABLE current launch
+// (agent:start:ack records the reported queue state; agent:deliver:ack /
+// delivery transitions are routed by the machine-control coordinator, not
+// here). Every other type returns without a write.
 func (s *Service) OnMessage(ctx context.Context, p computer.Principal, raw json.RawMessage) error {
 	var frame struct {
 		Type      string  `json:"type"`
@@ -59,15 +73,36 @@ func (s *Service) OnMessage(ctx context.Context, p computer.Principal, raw json.
 		}
 		return s.applyDaemonStatus(ctx, p, frame.AgentID, frame.Status)
 	case "agent:session":
+		if s.launches != nil {
+			handled, err := s.applyFencedSession(ctx, p, frame.AgentID, frame.LaunchID, frame.SessionID)
+			if handled || err != nil {
+				return err
+			}
+		}
 		if !s.acceptLaunch(frame.AgentID, frame.LaunchID) {
 			return nil
 		}
 		return s.applyDaemonSession(ctx, p, frame.AgentID, frame.SessionID)
 	case "agent:session:invalidate":
+		if s.launches != nil {
+			handled, err := s.invalidateFencedSession(ctx, p, frame.AgentID, frame.LaunchID, frame.SessionID)
+			if handled || err != nil {
+				return err
+			}
+		}
 		if !s.acceptLaunch(frame.AgentID, frame.LaunchID) {
 			return nil
 		}
 		return s.invalidateDaemonSession(ctx, p, frame.AgentID, frame.SessionID)
+	case "agent:start:ack":
+		if s.launches == nil {
+			return nil
+		}
+		parsed := ParseReceiptFrame(raw)
+		if parsed.Kind != "start_ack" {
+			return nil
+		}
+		return s.applyStartAck(ctx, p, parsed.StartAck)
 	case "agent:purge:result":
 		return s.applyDaemonPurge(ctx, p, frame.AgentID, frame.Outcome)
 	default:

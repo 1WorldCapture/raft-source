@@ -15,6 +15,7 @@ import (
 	"raft.local/server-go/internal/auth"
 	"raft.local/server-go/internal/channel"
 	"raft.local/server-go/internal/computer"
+	"raft.local/server-go/internal/delivery"
 	"raft.local/server-go/internal/platform/clock"
 	"raft.local/server-go/internal/platform/config"
 	"raft.local/server-go/internal/runtimecatalog"
@@ -26,14 +27,16 @@ import (
 // channel and live connection services share the application's SQLite DB;
 // no TS service, Redis, background LLM or second machine catalog is involved.
 type controlPlane struct {
-	machines  *machinews.Hub
-	computers *computer.Store
-	agents    *agent.Store
-	service   *agent.Service
-	channels  *channel.Store
-	runners   *agent.RunnerAccess
-	catalog   *runtimecatalog.Store
-	broker    *runtimecatalog.Broker
+	machines   *machinews.Hub
+	computers  *computer.Store
+	agents     *agent.Store
+	service    *agent.Service
+	launches   *agent.LaunchStore
+	deliveries *delivery.Store
+	channels   *channel.Store
+	runners    *agent.RunnerAccess
+	catalog    *runtimecatalog.Store
+	broker     *runtimecatalog.Broker
 
 	cfg      *config.Config
 	sessions *auth.SessionService
@@ -63,8 +66,14 @@ func buildControl(db *sql.DB, cfg *config.Config, sessions *auth.SessionService,
 	if err != nil {
 		return nil, err
 	}
+	launches, err := agent.NewLaunchStore(db, clk)
+	if err != nil {
+		return nil, err
+	}
+	deliveries := delivery.NewStore(db)
 	m := &controlPlane{
 		computers: computers, agents: store, runners: runners,
+		launches: launches, deliveries: deliveries,
 		channels: channel.NewStoreWithOptions(db, channel.Options{Clock: clk}),
 		catalog:  runtimecatalog.NewStore(db), cfg: cfg, sessions: sessions, signer: signer,
 	}
@@ -109,8 +118,12 @@ func buildControl(db *sql.DB, cfg *config.Config, sessions *auth.SessionService,
 	m.service = agent.NewService(store, agent.ServiceOptions{
 		Gateway: hub, ServerURL: configuredControlPlaneURL(cfg).String(),
 		DeviceAuthEnabled: cfg.Computer.DeviceLoginEnabled, Logger: logger,
+		Launches: launches,
 	})
-	coordinator, err = machinecontrol.NewCoordinator(m.service, m.broker, computers.ValidatePrincipal)
+	coordinator, err = machinecontrol.NewCoordinatorWithOptions(m.service, m.broker, computers.ValidatePrincipal, machinecontrol.Options{
+		Receipts: machinecontrol.NewDeliveryReceiptAdapterWithIdentity(deliveries, logger, m.service.CurrentControlIdentity),
+		Logger:   logger,
+	})
 	if err != nil {
 		return nil, errors.Join(err, m.Close())
 	}

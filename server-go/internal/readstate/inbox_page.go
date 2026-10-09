@@ -484,7 +484,7 @@ func (s *Store) DoneInboxItems(ctx context.Context, claims auth.AccessTokenClaim
 			  AND (c.type = 'channel'
 			       OR EXISTS (SELECT 1 FROM channel_humans ch
 			                  WHERE ch.channel_id = c.id AND ch.user_id = ?)
-			       OR EXISTS (SELECT 1 FROM direct_messages dm
+			       OR EXISTS (SELECT 1 FROM `+humanDMParticipantsSQL+` dm
 			                  WHERE dm.workspace_id = c.workspace_id AND dm.channel_id = c.id
 			            AND (dm.user_low = ? OR dm.user_high = ?)))
 			ORDER BY d.done_at DESC, c.id DESC`,

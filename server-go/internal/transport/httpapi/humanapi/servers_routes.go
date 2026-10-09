@@ -63,5 +63,11 @@ func RegisterServerRoutes(mux *http.ServeMux, servers *ServersHandlers, invites 
 		mux.Handle("DELETE /api/servers/{id}/invites/{inviteId}", gateWrap(scope(guestFree(invites.RevokeInvite))))
 	}
 	mux.Handle("GET /api/servers/{id}/agent-overview", gateWrap(scope(guestFree(httpx.NotImplemented("Office overview is not enabled in this server stage")))))
+	// The unchanged Administration UI displays the server error verbatim.
+	// Keep this known capability distinct from unknown-path 404s, and retain
+	// the original owner/admin policy for both reads and writes.
+	agreement := servers.RequireAgreementManagement(httpx.NotImplemented("Pre-join agreements are not enabled in this server stage"))
+	mux.Handle("GET /api/servers/{id}/agreement", gateWrap(scope(guestFree(agreement))))
+	mux.Handle("PUT /api/servers/{id}/agreement", gateWrap(scope(guestFree(agreement))))
 	RegisterWorkspaceMethodFallbacks(mux, servers, gateWrap)
 }

@@ -15,6 +15,14 @@
 //   * migration hash invariants 0001-0013: exactly the manifest's files in
 //     internal/platform/db/migrations, hashes matching manifest AND the git
 //     baseline commit (design §10: zero schema changes this refactor);
+//   * explicit additive migration index: contracts/client/migration-additions.json
+//     lists the exact files allowed BEYOND the frozen set (bare filename +
+//     sha256 + bytes + contract-doc provenance each). The frozen set UNION the
+//     additions must equal the on-disk inventory exactly - no wildcard, no
+//     auto-accept of future migrations, nothing may sort at or before the
+//     frozen tail without belonging to it. Additions are NOT git-baseline
+//     checked: they postdate the frozen baseline commit by design, so the
+//     additions manifest itself is their authority (M5 worker F).
 //   * every immutable fixture hash is also compared against its blob at the
 //     manifest's baselineCommit.
 //
@@ -26,8 +34,9 @@
 //
 // Usage:
 //   node tests/acceptance/client-contracts.mjs [--manifest PATH]
-//        [--no-self-test | --self-test-only]
+//        [--additions PATH] [--no-self-test | --self-test-only]
 //        [RAFT_CLIENT_CONTRACTS_MANIFEST=<path> env override]
+//        [RAFT_CLIENT_MIGRATION_ADDITIONS=<path> env override]
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -43,6 +52,9 @@ const sha256 = (buf) => createHash('sha256').update(buf).digest('hex');
 const HEX64 = /^[0-9a-f]{64}$/;
 const HEX40 = /^[0-9a-f]{40}$/;
 const M4_FROZEN_BASELINE = 'bc65213b377a992c381e809c72ba50ca9af367fd';
+// Migration filenames are bare NNNN_lower_snake.sql entries of the single
+// migrations directory; anything else in the additions index is a path hazard.
+const MIGRATION_NAME_RE = /^[0-9]{4}_[a-z0-9_]+\.sql$/;
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const serverGoRoot = path.resolve(here, '../..');
@@ -153,7 +165,7 @@ async function walkFiles(rootDir, relDir, out, err, code) {
 export async function verifyIndex(manifest, opts) {
   const errors = [];
   const err = (code, detail) => errors.push({ code, detail });
-  const { rootDir, useGitBaseline = false, crossCheckPins = false } = opts;
+  const { rootDir, useGitBaseline = false, crossCheckPins = false, additions = null } = opts;
 
   // -- manifest shape
   if (manifest?.manifestVersion !== 1) err('manifest-shape', `manifestVersion=${JSON.stringify(manifest?.manifestVersion)} !== 1`);
@@ -244,17 +256,68 @@ export async function verifyIndex(manifest, opts) {
   for (const f of onDisk) if (!indexed.has(f)) err('unindexed-artifact', `${f} exists under a frozen root but is not indexed (index and disk must match 1:1)`);
   for (const p of indexed) if (!onDisk.includes(p)) err('missing-artifact', `indexed path ${p} not found under the frozen roots`);
 
-  // -- migration hash invariants
+  // -- migration hash invariants + the explicit additive migration index.
+  // The frozen set (0001-0013) is compared against the manifest AND the git
+  // baseline; a NEWER migration may exist on disk only as an exact,
+  // hash-pinned entry of migration-additions.json. There is deliberately no
+  // wildcard: a file named by neither index is an error, never an accepted
+  // silently-tolerated extra (m5-execution-lock.md worker F).
   if (!errors.some((e) => e.code === 'manifest-shape')) {
     const migAbs = path.resolve(rootDir, mig.dir);
-    const diskFiles = (await readdir(migAbs).catch(() => null)) ?? null;
+    const frozenNames = new Set(mig.files.map((f) => f.file));
+    const lastFrozen = mig.files.at(-1)?.file;
+
+    // Validate the additions document first: shape, provenance, ordering and
+    // overlap with the frozen set are judged before any disk comparison.
+    const additionSet = new Set();
+    if (additions === null) {
+      err('additions-shape', 'migration-additions.json was not supplied to verifyIndex; the additive migration index is mandatory (pass the parsed document, or {missing:true} to assert its presence)');
+    } else if (additions?.missing === true) {
+      err('additions-shape', 'contracts/client/migration-additions.json is missing; the additive migration index is part of the frozen contract, not an optional file');
+    } else {
+      if (additions?.manifestVersion !== 1) err('additions-shape', `manifestVersion=${JSON.stringify(additions?.manifestVersion)} !== 1`);
+      if (additions?.kind !== 'raft.client-migration-additions') err('additions-shape', `kind=${JSON.stringify(additions?.kind)} !== "raft.client-migration-additions"`);
+      if (additions?.frozenThrough !== lastFrozen) err('additions-shape', `frozenThrough=${JSON.stringify(additions?.frozenThrough)} must equal the frozen manifest's last migration ${JSON.stringify(lastFrozen)}`);
+      if (!Array.isArray(additions?.files) || !Number.isInteger(additions?.expectedCount)) {
+        err('additions-shape', 'migration-additions files/expectedCount malformed');
+      } else if (additions.files.length !== additions.expectedCount) {
+        err('additions-shape', `expectedCount=${additions.expectedCount} but ${additions.files.length} addition files listed`);
+      }
+      let prevAddition = null;
+      for (const f of Array.isArray(additions?.files) ? additions.files : []) {
+        const name = f?.file;
+        if (typeof name !== 'string' || name === '' || path.isAbsolute(name) || name.includes('/') || name.includes('\\') || name.includes('\0') || !MIGRATION_NAME_RE.test(name)) {
+          err('additions-path-escape', `addition ${JSON.stringify(name)}: must be a bare migration filename (NNNN_lower_snake.sql) resolved inside ${mig.dir}`);
+          continue;
+        }
+        if (additionSet.has(name)) err('additions-duplicate', `${name} listed twice in migration-additions.json`);
+        else additionSet.add(name);
+        if (frozenNames.has(name)) err('additions-frozen-overlap', `${name} already belongs to the frozen manifest; additions must be strictly newer files`);
+        if (lastFrozen !== undefined && !(name > lastFrozen)) err('additions-shape', `addition ${name} must sort strictly after the frozen tail ${lastFrozen}`);
+        if (prevAddition !== null && !(name > prevAddition)) err('additions-shape', `additions must be listed in strictly increasing filename order (${name} after ${prevAddition})`);
+        prevAddition = name;
+        if (typeof f?.sha256 !== 'string' || !HEX64.test(f.sha256) || !Number.isInteger(f?.bytes) || f.bytes <= 0) { err('additions-shape', `addition ${name}: sha256/bytes malformed`); continue; }
+        if (typeof f?.introducedBy !== 'string' || f.introducedBy === '') err('additions-shape', `addition ${name}: introducedBy (the owning delivery contract doc) is required`);
+      }
+    }
+
+    const diskEntries = await readdir(migAbs, { withFileTypes: true }).catch(() => null);
+    // db.go embeds migrations/*.sql, not every tooling directory beside the
+    // migrations. Non-matching real directories (for example .claude) cannot
+    // affect that embedded set. Retain ALL top-level files/symlinks and any
+    // directory matching *.sql in the strict inventory; a symlink or a .sql
+    // directory is never an acceptable replacement for a registered file.
+    const inventoryEntries = diskEntries?.filter((entry) => !entry.isDirectory() || entry.name.endsWith('.sql')) ?? null;
+    const diskFiles = inventoryEntries?.map((entry) => entry.name) ?? null;
     if (diskFiles === null) err('migration-inventory', `${mig.dir}: cannot list`);
     else {
-      const wanted = new Set(mig.files.map((f) => f.file));
-      for (const name of diskFiles) if (!wanted.has(name)) err('migration-inventory', `${mig.dir}/${name} on disk but not in manifest (0001-0013 is the frozen set)`);
+      const allowed = new Set([...frozenNames, ...additionSet]);
+      for (const entry of inventoryEntries) if (!entry.isFile()) err('migration-inventory', `${mig.dir}/${entry.name} must be a regular migration file, not a symlink or directory`);
+      for (const name of diskFiles) if (!allowed.has(name)) err('migration-inventory', `${mig.dir}/${name} on disk but named by neither the frozen manifest (0001-0013) nor migration-additions.json; register the exact addition or remove the file`);
       for (const f of mig.files) if (!diskFiles.includes(f.file)) err('migration-inventory', `${mig.dir}/${f.file} in manifest but missing on disk`);
-      if (mig.files.length !== mig.expectedCount) err('migration-inventory', `expectedCount=${mig.expectedCount} but ${mig.files.length} files listed`);
-      if (diskFiles.length !== mig.expectedCount) err('migration-inventory', `${diskFiles.length} files on disk, expected ${mig.expectedCount}`);
+      for (const name of additionSet) if (!diskFiles.includes(name)) err('migration-inventory', `${mig.dir}/${name} registered in migration-additions.json but missing on disk`);
+      if (mig.files.length !== mig.expectedCount) err('migration-inventory', `expectedCount=${mig.expectedCount} but ${mig.files.length} frozen files listed`);
+      if (diskFiles.length !== mig.expectedCount + additionSet.size) err('migration-inventory', `${diskFiles.length} files on disk, expected exactly ${mig.expectedCount} frozen + ${additionSet.size} registered additions (no wildcard)`);
       for (const f of mig.files) {
         if (!HEX64.test(String(f.sha256))) { err('manifest-shape', `migration ${f.file}: sha256 malformed`); continue; }
         const buf = await readFile(path.join(migAbs, f.file)).catch(() => null);
@@ -264,6 +327,16 @@ export async function verifyIndex(manifest, opts) {
         if (f.file === '0011_readstate_activity.sql' && !buf.toString('utf8').includes('contracts/m4-readstate-schema.sql')) {
           err('migration-provenance', '0011 no longer cites its reviewed draft source contracts/m4-readstate-schema.sql');
         }
+      }
+      const additionsByName = new Map((Array.isArray(additions?.files) ? additions.files : []).map((f) => [f?.file, f]));
+      for (const name of additionSet) {
+        const entry = additionsByName.get(name);
+        if (!entry) continue;
+        const buf = await readFile(path.join(migAbs, name)).catch(() => null);
+        if (buf === null) continue; // absence already reported as inventory drift
+        const actual = sha256(buf);
+        if (actual !== entry.sha256) err('migration-hash-drift', `${mig.dir}/${name} sha256 ${actual} != migration-additions ${entry.sha256}`);
+        if (entry.bytes !== buf.length) err('migration-hash-drift', `${mig.dir}/${name} size ${buf.length} != migration-additions bytes ${entry.bytes}`);
       }
     }
   }
@@ -282,6 +355,9 @@ export async function verifyIndex(manifest, opts) {
       err('baseline-unavailable', `git baseline ${manifest.baselineCommit} not usable from ${rootDir} (${e.message.split('\n')[0]})`);
     }
     if (repoRoot) {
+      // Frozen-only by design: additions postdate the baseline commit, so no
+      // blob can exist for them there; their authority is the additions
+      // manifest compared above, never this git comparison.
       const targets = [
         ...manifest.entries.map((e) => e.path),
         ...mig.files.map((f) => `${mig.dir}/${f.file}`),
@@ -347,10 +423,25 @@ async function buildTemplate(serverRoot, manifestPath) {
 async function runSelfTest(serverRoot, manifestPath) {
   const { tmp: templateDir } = await buildTemplate(serverRoot, manifestPath);
   const templateManifest = JSON.parse(await readFile(path.join(templateDir, 'contracts/client/manifest.json'), 'utf8'));
+  const templateAdditions = JSON.parse(await readFile(path.join(templateDir, 'contracts/client/migration-additions.json'), 'utf8'));
   const cases = [];
 
   const makeCase = (name, expectedCode, mutate) => cases.push({ name, expectedCode, mutate });
   const writeManifest = async (root, m) => writeFile(path.join(root, 'contracts/client/manifest.json'), `${JSON.stringify(m, null, 2)}\n`);
+  const writeAdditions = async (root, doc) => writeFile(path.join(root, 'contracts/client/migration-additions.json'), `${JSON.stringify(doc, null, 2)}\n`);
+  const migrationDir = (root) => path.join(root, 'internal/platform/db/migrations');
+  const ADDITION_SQL = '-- selftest synthetic addition (throwaway workspace only)\nCREATE TABLE m5_selftest_addition_marker(i INTEGER PRIMARY KEY);\n';
+  // Only the synthetic throwaway fixture follows the latest registered
+  // migration number. The production inventory remains explicitly pinned;
+  // no real unregistered migration is admitted by this selftest helper.
+  const lastMigration = templateAdditions.files.at(-1)?.file ?? templateAdditions.frozenThrough;
+  const ADDITION_FILE = `${String(Number(lastMigration.split('_')[0]) + 1).padStart(4, '0')}_selftest_addition.sql`;
+  const registeredAdditionsDoc = (body = ADDITION_SQL, name = ADDITION_FILE) => {
+    const doc = structuredClone(templateAdditions);
+    doc.files.push({ file: name, sha256: sha256(Buffer.from(body)), bytes: body.length, introducedBy: 'docs/m5-upgrade-worker-selftest-provenance.md' });
+    doc.expectedCount = doc.files.length;
+    return doc;
+  };
 
   makeCase('pristine-copy-passes', null, async (root) => writeManifest(root, templateManifest));
   makeCase('artifact-byte-drift', 'hash-drift', async (root) => {
@@ -448,10 +539,82 @@ async function runSelfTest(serverRoot, manifestPath) {
     await writeFile(p, `${await readFile(p, 'utf8')}-- tampered\n`);
   });
   makeCase('migration-extra-file', 'migration-inventory', async (root) => {
-    writeFile(path.join(root, 'internal/platform/db/migrations/0014_sneaky.sql'), 'CREATE TABLE x(i);\n');
+    await writeFile(path.join(root, 'internal/platform/db/migrations/0014_sneaky.sql'), 'CREATE TABLE x(i);\n');
+  });
+  makeCase('migration-tool-directory-not-embedded', null, async (root) => {
+    const metadata = path.join(migrationDir(root), 'tool-state');
+    await mkdir(metadata);
+    await writeFile(path.join(metadata, 'metadata.json'), '{}\n');
+    await writeFile(path.join(metadata, '0015_not_embedded.sql'), 'CREATE TABLE not_embedded(i);\n');
+  });
+  makeCase('migration-unindexed-non-sql-file', 'migration-inventory', async (root) => {
+    await writeFile(path.join(migrationDir(root), 'unindexed-notes.txt'), 'not a registered migration\n');
+  });
+  makeCase('migration-sql-directory', 'migration-inventory', async (root) => {
+    const nested = path.join(migrationDir(root), '0015_nested.sql');
+    await mkdir(nested);
+    await writeFile(path.join(nested, 'payload.sql'), 'CREATE TABLE nested(i);\n');
+  });
+  makeCase('migration-symlink-same-bytes', 'migration-inventory', async (root) => {
+    const original = path.join(migrationDir(root), templateManifest.migrations.files[0].file);
+    const outside = path.join(root, 'outside-migration.sql');
+    await writeFile(outside, await readFile(original));
+    await rm(original);
+    await symlink(outside, original);
   });
   makeCase('migration-removed', 'migration-inventory', async (root) => {
     await rm(path.join(root, 'internal/platform/db/migrations/0013_activity_mute_epochs.sql'));
+  });
+
+  // ---- explicit additive migration index (migration-additions.json) ------
+  // Every case synthesizes its addition inside the throwaway workspace; none
+  // of these filenames may ever exist in the real tree.
+  makeCase('additions-registered-passes', null, async (root) => {
+    await writeFile(path.join(migrationDir(root), ADDITION_FILE), ADDITION_SQL);
+    await writeAdditions(root, registeredAdditionsDoc());
+  });
+  makeCase('additions-tampered', 'migration-hash-drift', async (root) => {
+    await writeFile(path.join(migrationDir(root), ADDITION_FILE), ADDITION_SQL);
+    await writeAdditions(root, registeredAdditionsDoc());
+    await writeFile(path.join(migrationDir(root), ADDITION_FILE), `${ADDITION_SQL}-- tampered after registration\n`);
+  });
+  makeCase('additions-unregistered-extra', 'migration-inventory', async (root) => {
+    await writeFile(path.join(migrationDir(root), '0015_sneaky.sql'), 'CREATE TABLE sneaky(i);\n');
+  });
+  makeCase('additions-registered-removed', 'migration-inventory', async (root) => {
+    await writeAdditions(root, registeredAdditionsDoc());
+  });
+  makeCase('additions-path-escape', 'additions-path-escape', async (root) => {
+    await writeAdditions(root, registeredAdditionsDoc('CREATE TABLE outside(i);\n', '../outside-migrations.sql'));
+  });
+  makeCase('additions-path-subdir', 'additions-path-escape', async (root) => {
+    await writeAdditions(root, registeredAdditionsDoc('CREATE TABLE nested(i);\n', 'nested/0014_x.sql'));
+  });
+  makeCase('additions-duplicate', 'additions-duplicate', async (root) => {
+    await writeFile(path.join(migrationDir(root), ADDITION_FILE), ADDITION_SQL);
+    const doc = registeredAdditionsDoc();
+    doc.files.push(structuredClone(doc.files[doc.files.length - 1]));
+    doc.expectedCount = doc.files.length;
+    await writeAdditions(root, doc);
+  });
+  makeCase('additions-frozen-overlap', 'additions-frozen-overlap', async (root) => {
+    const doc = structuredClone(templateAdditions);
+    doc.expectedCount = 1;
+    doc.files.push({ ...templateManifest.migrations.files[0], introducedBy: 'docs/overlap-attempt.md' });
+    await writeAdditions(root, doc);
+  });
+  makeCase('additions-shape-bad-hash', 'additions-shape', async (root) => {
+    await writeFile(path.join(migrationDir(root), ADDITION_FILE), ADDITION_SQL);
+    const doc = registeredAdditionsDoc();
+    doc.files[0].sha256 = 'not-hex';
+    await writeAdditions(root, doc);
+  });
+  makeCase('additions-shape-misordered', 'additions-shape', async (root) => {
+    await writeFile(path.join(migrationDir(root), '0009_early_addition.sql'), 'CREATE TABLE early(i);\n');
+    await writeAdditions(root, registeredAdditionsDoc('CREATE TABLE early(i);\n', '0009_early_addition.sql'));
+  });
+  makeCase('additions-manifest-deleted', 'additions-shape', async (root) => {
+    await rm(path.join(root, 'contracts/client/migration-additions.json'));
   });
 
   let pass = 0;
@@ -462,7 +625,13 @@ async function runSelfTest(serverRoot, manifestPath) {
       await cp(templateDir, root, { recursive: true });
       await c.mutate(root);
       const manifest = JSON.parse(await readFile(path.join(root, 'contracts/client/manifest.json'), 'utf8'));
-      const result = await verifyIndex(manifest, { rootDir: root, useGitBaseline: false, crossCheckPins: false });
+      let additionsDoc;
+      try {
+        additionsDoc = JSON.parse(await readFile(path.join(root, 'contracts/client/migration-additions.json'), 'utf8'));
+      } catch {
+        additionsDoc = { missing: true };
+      }
+      const result = await verifyIndex(manifest, { rootDir: root, useGitBaseline: false, crossCheckPins: false, additions: additionsDoc });
       if (c.expectedCode === null) {
         if (result.ok) { pass += 1; process.stdout.write(`  ok  selftest ${c.name} -> pass as expected\n`); } else { failures.push(`${c.name}: expected clean pass, got ${JSON.stringify(result.errors)}`); }
       } else if (!result.ok && result.errors.some((e) => e.code === c.expectedCode)) {
@@ -488,7 +657,7 @@ async function runSelfTest(serverRoot, manifestPath) {
     const m = JSON.parse(await readFile(path.join(root, 'contracts/client/manifest.json'), 'utf8'));
     m.baselineCommit = commit;
     await writeManifest(root, m);
-    let result = await verifyIndex(m, { rootDir: root, useGitBaseline: true });
+    let result = await verifyIndex(m, { rootDir: root, useGitBaseline: true, additions: templateAdditions });
     if (!result.ok) {
       failures.push(`git-baseline-pristine: expected pass, got ${JSON.stringify(result.errors)}`);
     } else {
@@ -520,6 +689,12 @@ async function main() {
     : process.env.RAFT_CLIENT_CONTRACTS_MANIFEST
       ? path.resolve(process.env.RAFT_CLIENT_CONTRACTS_MANIFEST)
       : path.join(serverGoRoot, 'contracts/client/manifest.json');
+  const additionsIdx = args.indexOf('--additions');
+  const additionsPath = additionsIdx !== -1
+    ? path.resolve(args[additionsIdx + 1])
+    : process.env.RAFT_CLIENT_MIGRATION_ADDITIONS
+      ? path.resolve(process.env.RAFT_CLIENT_MIGRATION_ADDITIONS)
+      : path.join(serverGoRoot, 'contracts/client/migration-additions.json');
   const wantSelfTest = !args.includes('--no-self-test');
   const selfTestOnly = args.includes('--self-test-only');
 
@@ -541,15 +716,24 @@ async function main() {
     process.exitCode = 1;
     return;
   }
+  let additions;
+  try {
+    additions = JSON.parse(await readFile(additionsPath, 'utf8'));
+  } catch (e) {
+    process.stderr.write(`FAIL client-contracts: migration additions index unreadable: ${additionsPath} (${e.message})\n`);
+    process.exitCode = 1;
+    return;
+  }
   const result = await verifyIndex(manifest, {
     rootDir: serverGoRoot,
     useGitBaseline: true,
     crossCheckPins: true,
+    additions,
   });
   if (result.ok) {
     process.stdout.write(
-      `PASS client-contracts: ${manifest.entries.length} frozen fixtures + ${manifest.migrations.files.length} migrations verified`
-      + ` (hash/inventory/schema/consumers/pins/git-baseline vs ${manifest.baselineCommit.slice(0, 7)}); read-only run, no golden regenerated\n`,
+      `PASS client-contracts: ${manifest.entries.length} frozen fixtures + ${manifest.migrations.files.length} frozen migrations + ${additions.files?.length ?? 0} registered additions verified`
+      + ` (hash/inventory/schema/consumers/pins/git-baseline vs ${manifest.baselineCommit.slice(0, 7)} for the frozen set; additions hash-pinned by migration-additions.json); read-only run, no golden regenerated\n`,
     );
   } else {
     for (const { code, detail } of result.errors) process.stderr.write(`  FAIL [${code}] ${detail}\n`);

@@ -75,6 +75,48 @@ func (s *Store) userDirectory(ctx context.Context, ex dbExecutor, ids map[string
 	return out, rows.Err()
 }
 
+// agentDirectoryProfile is the directory projection for agent senders.
+type agentDirectoryProfile struct {
+	Handle      string
+	Name        string
+	Description *string
+}
+
+// agentDirectory loads the minimal directory projection for the given agent
+// ids (name/displayName/description). The agents row stays readable after a
+// soft delete so committed history keeps rendering the real identity behind
+// the stable id (the tombstone display is a presenter decision).
+func (s *Store) agentDirectory(ctx context.Context, ex dbExecutor, ids map[string]bool) (map[string]agentDirectoryProfile, error) {
+	out := map[string]agentDirectoryProfile{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	args := make([]any, 0, len(ids))
+	for id := range ids {
+		args = append(args, id)
+	}
+	rows, err := ex.QueryContext(ctx, `SELECT id, name, display_name, description FROM agents
+		WHERE id IN (`+placeholders(len(ids))+`)`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("agent directory lookup: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, name string
+		var displayName, description *string
+		if err := rows.Scan(&id, &name, &displayName, &description); err != nil {
+			return nil, err
+		}
+		profile := agentDirectoryProfile{Handle: name, Name: name}
+		if displayName != nil && *displayName != "" {
+			profile.Name = *displayName
+		}
+		profile.Description = description
+		out[id] = profile
+	}
+	return out, rows.Err()
+}
+
 // membershipStatuses resolves the senderMembershipStatus fact for user
 // senders: "active" while the sender still belongs to the message's
 // workspace, "removed" otherwise (the Go schema keeps no departure-reason
@@ -167,7 +209,9 @@ func (s *Store) reactionsForMessages(ctx context.Context, ex dbExecutor, message
 	return out, nil
 }
 
-// mentionsForMessages loads mention facts per message in insertion order.
+// mentionsForMessages loads the mention facts per message: human rows first
+// (insertion order), then the typed agent rows with the handle persisted at
+// send time. A pre-0014 schema has no agent facts at all.
 func (s *Store) mentionsForMessages(ctx context.Context, ex dbExecutor, messageIDs []string) (map[string][]Mention, error) {
 	out := map[string][]Mention{}
 	if len(messageIDs) == 0 {
@@ -190,7 +234,32 @@ func (s *Store) mentionsForMessages(ctx context.Context, ex dbExecutor, messageI
 		m.Type = "user"
 		out[messageID] = append(out[messageID], m)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+
+	agentRows, err := ex.QueryContext(ctx, `SELECT message_id, agent_id, handle_at_send
+		FROM message_agent_mentions
+		WHERE message_id IN (`+placeholders(len(messageIDs))+`)
+		ORDER BY rowid`, anyStrings(messageIDs)...)
+	if err != nil {
+		if isMissingTable(err) {
+			return out, nil
+		}
+		return nil, fmt.Errorf("agent mention read: %w", err)
+	}
+	defer agentRows.Close()
+	for agentRows.Next() {
+		var messageID string
+		var m Mention
+		if err := agentRows.Scan(&messageID, &m.ID, &m.Name); err != nil {
+			return nil, err
+		}
+		m.Type = "agent"
+		out[messageID] = append(out[messageID], m)
+	}
+	return out, agentRows.Err()
 }
 
 // ProjectMessages builds the enriched fact list for one snapshot read (the
@@ -202,15 +271,22 @@ func (s *Store) ProjectMessages(ctx context.Context, ex dbExecutor, workspaceID 
 		return []*Projection{}, nil
 	}
 	senderIDs := map[string]bool{}
+	agentSenderIDs := map[string]bool{}
 	for _, m := range msgs {
 		switch {
 		case m.SenderType == "user" && m.MessageType != "system":
 			senderIDs[m.SenderID] = true
+		case m.SenderType == "agent" && m.MessageType != "system":
+			agentSenderIDs[m.SenderID] = true
 		case m.MessageType == "system" || m.SenderID == "system":
 			// "System" label, exactly like the TS nameMap seed.
 		}
 	}
 	profiles, err := s.userDirectory(ctx, ex, senderIDs)
+	if err != nil {
+		return nil, err
+	}
+	agentProfiles, err := s.agentDirectory(ctx, ex, agentSenderIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -243,6 +319,11 @@ func (s *Store) ProjectMessages(ctx context.Context, ex dbExecutor, workspaceID 
 			proj.SenderName = prof.Name
 			proj.SenderHandle = prof.Handle
 			proj.SenderDescription = prof.Description
+		} else if prof, ok := agentProfiles[m.SenderID]; ok {
+			proj.SenderDirectoryKnown = true
+			proj.SenderName = prof.Name
+			proj.SenderHandle = prof.Handle
+			proj.SenderDescription = prof.Description
 		}
 		if m.SenderType == "user" && m.MessageType != "system" {
 			status := statuses[m.SenderID]
@@ -259,11 +340,24 @@ func (s *Store) ProjectMessages(ctx context.Context, ex dbExecutor, workspaceID 
 // the send surface is a presenter decision (the sender passed the posting
 // authorization inside the same transaction that committed the row).
 func (s *Store) SendResponseMessage(ctx context.Context, ex dbExecutor, msg *Message, mentions []Mention) (*Projection, error) {
+	proj := &Projection{Message: *msg, Mentions: mentions}
+	if msg.SenderType == "agent" {
+		profile, err := s.agentDirectory(ctx, ex, map[string]bool{msg.SenderID: true})
+		if err != nil {
+			return nil, err
+		}
+		if prof, ok := profile[msg.SenderID]; ok {
+			proj.SenderDirectoryKnown = true
+			proj.SenderName = prof.Name
+			proj.SenderHandle = prof.Handle
+			proj.SenderDescription = prof.Description
+		}
+		return proj, nil
+	}
 	profile, err := s.userDirectory(ctx, ex, map[string]bool{msg.SenderID: true})
 	if err != nil {
 		return nil, err
 	}
-	proj := &Projection{Message: *msg, Mentions: mentions}
 	if prof, ok := profile[msg.SenderID]; ok {
 		proj.SenderDirectoryKnown = true
 		proj.SenderName = prof.Name

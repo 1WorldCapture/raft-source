@@ -37,8 +37,8 @@ const ThreadChainDepthLimit = 8
 
 // AuthorizeConversationTx resolves the base content policy for one viewer.
 // posting=false answers "may read the content"; posting=true additionally
-// enforces the posting policy (real membership on the root conversation,
-// thread inheritance, non-archived root and channel, system restrictions).
+// enforces the posting policy (explicit or system-channel implicit membership
+// on the root, thread inheritance, non-archived root and channel).
 //
 // Failure modes (typed DomainError for transport mapping):
 //   - missing workspace membership          → FORBIDDEN NotServerMemberMessage
@@ -146,24 +146,13 @@ func canReadRoot(role string, root *Channel, member bool) bool {
 	}
 }
 
-// canPostRoot decides the M4 human posting policy on one root conversation:
-// a REAL channel_humans roster row is required for every type. This is a
-// deliberate, fail-closed M4 scope restriction of the original TS rule
-// (channelService.canUserPostToChannel:5979 allowed implicit-membership
-// channels — enabled #all and #announcement — to any server member via
-// hasImplicitServerMembership → isServerHumanMember, and the original web
-// composer had no gate). The approved M4 design overrides it:
-//   - phase-4-messaging §9: "#all/Activity must not be written to freely as
-//     ordinary conversations; human messages may only be written to explicit
-//     original conversation scopes" — an implicit-membership channel is not
-//     an explicitly joined scope;
-//   - m4-execution-lock: "Posting requires real channel membership ... and
-//     system-channel restrictions";
-//   - the approved two-account loop (m4-implementation-coordination §6) chats
-//     in a public channel the accounts actually join.
-//
-// #all/#announcement never carry roster rows (their audience is derived), so
-// ordinary human posting there is refused rather than silently expanded.
+// canPostRoot shares the directory's implicit-membership rule with posting.
+// An enabled #all or #announcement is a real conversation, not the Activity
+// aggregation. Eligible workspace humans need no channel_humans row there;
+// ordinary channels and DMs still require the explicit root roster. The
+// caller has already established a current eligible workspace membership.
+// This restores the original TS contract and avoids joined=true channels
+// whose unchanged UI offers no Join action yet cannot send.
 func canPostRoot(role string, root *Channel, member bool) bool {
 	if role == RoleGuest {
 		return false // frozen disabled guest gate
@@ -171,7 +160,7 @@ func canPostRoot(role string, root *Channel, member bool) bool {
 	if IsAllSystemChannel(root) && !IsEnabledAllChannel(root) {
 		return false
 	}
-	return member
+	return HasImplicitServerMembership(root) || member
 }
 
 // threadRootChannel resolves the channel holding the parent message of a
