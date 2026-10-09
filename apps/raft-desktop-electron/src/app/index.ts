@@ -47,6 +47,7 @@ import { defaultBinaryPath, defaultStandaloneHome, readHostMode, type ComputerHo
 import { createStandaloneCli } from "./standalone/cli.js";
 import { resolveBundledComputer } from "./standalone/bundled.js";
 import { StandaloneComputerHost, type StandaloneUiState } from "./standalone/standaloneHost.js";
+import { createMigrationController, registerMigrationIpc } from "./standalone/migrationIpc.js";
 import { registerEmbeddedStubs, registerHostModeIpc, registerStandaloneIpc } from "./standalone/ipc.js";
 import { resolveBundledCursorSdkAssets } from "./cursorSdkAssets.js";
 import { installStatusMonitorLifecycle } from "../main/statusMonitorLifecycle.js";
@@ -904,6 +905,28 @@ if (headlessMode?.mode === "__service") {
       computerHost = new ComputerHost({ configuredOrigin: serverOriginConfig.current() });
       await computerHost.restoreSelection();
       registerComputerIpc(computerHost);
+      // One-click move of this app-hosted Computer to an independent raft-computer (needs the Computer bundled in
+      // this app; hidden otherwise). Nothing runs until the user starts it from the migration dialog.
+      if (process.platform !== "win32") {
+        const embeddedHost = computerHost;
+        registerMigrationIpc(ipcMain, createMigrationController({
+          bundled: resolveBundledComputer({ isPackaged: app.isPackaged, resourcesPath: process.resourcesPath }),
+          binaryTarget: defaultBinaryPath(),
+          getFromHome: async () => embeddedHost.slockHome,
+          userDataDir: app.getPath("userData"),
+          publish: (state) => {
+            for (const win of BrowserWindow.getAllWindows()) {
+              if (!win.isDestroyed()) win.webContents.send("migration:state-update", state);
+            }
+          },
+          switchToStandalone: () => {
+            // The Computer now lives elsewhere and is not ours to stop: forget the embedded host so the quit flow
+            // has nothing to stop, then restart into standalone mode (computer-host.json is already written).
+            computerHost = null;
+            setTimeout(() => { app.relaunch(); app.exit(0); }, 4_000);
+          },
+        }));
+      }
       // Read-only mode observes + surfaces an already-installed Computer (the
       // "adopt" path) but does NOT converge host lifecycle — no launch-at-login
       // mutation, no service spawn. Safe to run on a machine already hosting a
