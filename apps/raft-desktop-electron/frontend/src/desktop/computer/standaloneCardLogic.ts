@@ -55,6 +55,10 @@ export function deriveStandaloneCard(state: StandaloneState | null): StandaloneC
     case "stopped_by_user":
       return { tone: "idle", title: "Stopped", detail: "You stopped this Computer. Its agents stay offline until you start it.", version, actions: [act("start", "Start", true), ...upgrade] };
     case "stopped":
+      // Fresh install: nothing is attached yet, so "stopped unexpectedly" would be untrue; say what is missing.
+      if (state.status && state.status.servers.length === 0 && !state.error) {
+        return { tone: "idle", title: "Not connected", detail: "No server is connected to this Computer yet. In a terminal, run: raft-computer setup /<your-server>", version, actions: [act("refresh", "Check again", true), ...upgrade] };
+      }
       return { tone: "warn", title: "Not running", detail: state.error || "The Computer stopped unexpectedly.", version, actions: [act("start", "Start", true), ...upgrade] };
     case "starting":
       return { tone: "warn", title: "Starting…", detail: null, version, actions: [] };
