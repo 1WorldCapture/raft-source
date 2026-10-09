@@ -16,6 +16,7 @@ import { useSession } from "../../src/state/session";
 import { useRaftStore } from "../../src/state/store";
 import { AppText } from "../../src/ui/text";
 import { ScreenMessage } from "../../src/ui/screen";
+import { useSkinStyles, type SkinRoles } from "../../src/ui/skin";
 import { border, color, fontSize } from "../../src/ui/tokens";
 
 /**
@@ -34,6 +35,7 @@ export default function DmsScreen() {
   const conversations = useRaftStore((state) => state.conversations);
   const channelUnread = useRaftStore((state) => state.channelUnread);
   const liveUnread = useRaftStore((state) => state.liveUnread);
+  const skinStyle = useSkinStyles(unreadSkin);
   const [unreadOnly, setUnreadOnly] = useState(false);
 
   const pmAgentId = pmState?.pm?.agentId ?? null;
@@ -69,7 +71,7 @@ export default function DmsScreen() {
             <Pressable
               accessibilityRole="button"
               onPress={() => setUnreadOnly((value) => !value)}
-              style={[styles.unreadToggle, unreadOnly ? styles.unreadToggleActive : null]}
+              style={[styles.unreadToggle, unreadOnly ? skinStyle.unreadToggleActive : null]}
             >
               <AppText style={styles.unreadToggleLabel}>
                 {unreadDms.length > 0
@@ -117,8 +119,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 4,
   },
-  unreadToggleActive: { backgroundColor: color.yellow },
   unreadToggleLabel: { ...fontSize.group, color: color.ink, fontWeight: "700", textTransform: "uppercase", letterSpacing: 1.2 },
   listContent: { paddingBottom: 16 },
   empty: { ...fontSize.list, color: color.muted, padding: 16 },
 });
+
+function unreadSkin(skin: SkinRoles) {
+  return StyleSheet.create({
+    unreadToggleActive: { backgroundColor: skin.signal },
+  });
+}

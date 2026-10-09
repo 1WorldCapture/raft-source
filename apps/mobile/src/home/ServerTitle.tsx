@@ -5,6 +5,7 @@ import { Check, ChevronDown } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import { useT } from "../i18n/provider";
 import type { RaftServer } from "../model/messages";
+import { useSkinStyles, type SkinRoles } from "../ui/skin";
 import { useSession } from "../state/session";
 import { AppText } from "../ui/text";
 import { border, color } from "../ui/tokens";
@@ -186,6 +187,7 @@ function ServerRow({
   onDragEnd: () => void;
   onLayout: (event: LayoutChangeEvent) => void;
 }) {
+  const skinStyle = useSkinStyles(serverSkin);
   const id = item.id;
   const beginRef = useRef(onBeginDrag);
   const moveRef = useRef(onDragMove);
@@ -208,7 +210,7 @@ function ServerRow({
         onPress={() => onPress(id)}
         style={[styles.item, dragging ? styles.lifted : null, dragging ? { transform: [{ translateY: dragDy }] } : null]}
       >
-        <View style={[styles.tile, item.current ? styles.tileCurrent : null]}>
+        <View style={[styles.tile, item.current ? skinStyle.tileCurrent : null]}>
           <AppText style={styles.initial}>{item.initial}</AppText>
         </View>
         <AppText numberOfLines={1} style={styles.itemName}>{item.name}</AppText>
@@ -254,7 +256,12 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     width: 36,
   },
-  tileCurrent: { backgroundColor: color.yellow },
   initial: { color: color.ink, fontSize: 16, fontWeight: "700", lineHeight: 20 },
   itemName: { color: color.ink, flex: 1, fontSize: 16, fontWeight: "700" },
 });
+
+function serverSkin(skin: SkinRoles) {
+  return StyleSheet.create({
+    tileCurrent: { backgroundColor: skin.signal },
+  });
+}

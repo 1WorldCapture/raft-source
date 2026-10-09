@@ -5,6 +5,7 @@ import type { AppMessageId } from "../i18n/catalog";
 import { useT } from "../i18n/provider";
 import { HardShadow } from "../ui/shadow";
 import { AppText } from "../ui/text";
+import { useSkinStyles, type SkinRoles } from "../ui/skin";
 import { border, color, shadowOffset } from "../ui/tokens";
 import {
   matchingChoices,
@@ -34,9 +35,10 @@ export function TaskFilterChip({
   count: number;
   onPress: () => void;
 }) {
+  const skinStyle = useSkinStyles(taskSkin);
   const selected = count > 0;
   const face = (
-    <Pressable accessibilityRole="button" onPress={onPress} style={[styles.chip, selected ? styles.chipOn : styles.chipOff]}>
+    <Pressable accessibilityRole="button" onPress={onPress} style={[styles.chip, selected ? skinStyle.chipOn : styles.chipOff]}>
       {icon === "channel" ? <Hash color={selected ? color.ink : color.inkLabel} size={14} strokeWidth={2.5} /> : null}
       {icon === "creator" ? <UserCircle2 color={selected ? color.ink : color.inkLabel} size={14} strokeWidth={2.5} /> : null}
       {icon === "assignee" ? <User color={selected ? color.ink : color.inkLabel} size={14} strokeWidth={2.5} /> : null}
@@ -230,9 +232,10 @@ export function FilterSheet({
 }
 
 function ChoiceRow({ choice, selected, onPress }: { choice: FilterChoice; selected: boolean; onPress: () => void }) {
+  const skinStyle = useSkinStyles(taskSkin);
   return (
     <Pressable accessibilityRole="button" accessibilityState={{ selected }} onPress={onPress} style={styles.choice}>
-      <View style={[styles.box, selected ? styles.boxOn : null]}>{selected ? <Check color={color.ink} size={12} strokeWidth={3} /> : null}</View>
+      <View style={[styles.box, selected ? skinStyle.boxOn : null]}>{selected ? <Check color={color.ink} size={12} strokeWidth={3} /> : null}</View>
       <AppText style={[styles.choiceLabel, choice.italic ? styles.italic : null]}>{choice.label}</AppText>
     </Pressable>
   );
@@ -289,7 +292,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
   },
-  chipOn: { backgroundColor: color.yellow, borderColor: color.border },
   chipOff: { backgroundColor: color.page, borderColor: color.borderSoft },
   chipText: { color: color.ink, fontSize: 12, fontWeight: "700", lineHeight: 16 },
   chipTextOff: { color: color.inkLabel },
@@ -348,7 +350,6 @@ const styles = StyleSheet.create({
   emptySearch: { color: color.muted, fontSize: 14, lineHeight: 20, paddingVertical: 12 },
   choice: { alignItems: "center", flexDirection: "row", gap: 10, paddingVertical: 10 },
   box: { alignItems: "center", borderColor: color.border, borderWidth: border.strong, height: 20, justifyContent: "center", width: 20 },
-  boxOn: { backgroundColor: color.yellow },
   choiceLabel: { color: color.ink, flex: 1, fontSize: 14, lineHeight: 20 },
   italic: { fontStyle: "italic" },
   menu: { backgroundColor: color.page, borderColor: color.border, borderTopWidth: border.strong, paddingBottom: 24, paddingHorizontal: 16, paddingTop: 8 },
@@ -356,3 +357,10 @@ const styles = StyleSheet.create({
   menuSwatch: { alignItems: "center", borderColor: color.border, borderWidth: border.hairline, height: 22, justifyContent: "center", width: 22 },
   menuLabel: { color: color.ink, flex: 1, fontSize: 14, fontWeight: "700", lineHeight: 20 },
 });
+
+function taskSkin(skin: SkinRoles) {
+  return StyleSheet.create({
+    chipOn: { backgroundColor: skin.signal, borderColor: color.border },
+    boxOn: { backgroundColor: skin.signal },
+  });
+}

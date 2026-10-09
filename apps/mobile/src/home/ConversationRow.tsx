@@ -7,6 +7,7 @@ import { Avatar } from "../ui/Avatar";
 import { Badge, MentionMark } from "../ui/Badge";
 import { HardShadow } from "../ui/shadow";
 import { AppText } from "../ui/text";
+import { useSkinStyles, type SkinRoles } from "../ui/skin";
 import { border, color, fontSize, pressShift, shadowOffset } from "../ui/tokens";
 import { conversationSummaryStrings, formatConversationSummary } from "./conversationPreview";
 
@@ -48,6 +49,7 @@ export function ConversationRow({
   onLongPress?: () => void;
 }) {
   const t = useT();
+  const skinStyle = useSkinStyles(rowSkin);
   const dm = channel.type === "dm";
   const agentPeer = dm && channel.peerType === "agent";
   const summary = formatConversationSummary(preview, conversationSummaryStrings(t))
@@ -59,7 +61,7 @@ export function ConversationRow({
     <Pressable delayLongPress={500} onLongPress={onLongPress} onPress={onPress} style={[styles.outer, compact ? styles.outerCompact : null]}>
       {({ pressed }) => (
         <HardShadow offset={pressed ? shadowOffset.pressed : shadowOffset.sm} style={pressed ? styles.pressedShift : null}>
-          <View style={[styles.card, compact ? styles.cardCompact : null, unread ? styles.cardUnread : null]}>
+          <View style={[styles.card, compact ? styles.cardCompact : null, unread ? skinStyle.cardUnread : null]}>
             {dm ? (
               <Avatar
                 avatarUrl={agentPeer ? (presence?.avatarUrl ?? channel.peerAvatarUrl) : channel.peerAvatarUrl}
@@ -119,7 +121,6 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   cardCompact: { gap: 8, minHeight: 56, paddingHorizontal: 8, paddingVertical: 6 },
-  cardUnread: { backgroundColor: color.yellowPale },
   iconBox: {
     alignItems: "center",
     backgroundColor: color.mutedFill,
@@ -142,3 +143,9 @@ const styles = StyleSheet.create({
   summarySystem: { color: color.inkSoft, fontWeight: "400" },
   marks: { alignItems: "center", flexDirection: "row", flexShrink: 0, gap: 4 },
 });
+
+function rowSkin(skin: SkinRoles) {
+  return StyleSheet.create({
+    cardUnread: { backgroundColor: skin.signalPale },
+  });
+}
