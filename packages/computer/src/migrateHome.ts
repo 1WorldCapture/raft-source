@@ -66,6 +66,9 @@ export interface MigrateBackupEntry {
 export interface MigrateResultFile {
   schemaVersion: 1;
   result: MigrateOutcome;
+  /** "move" = the home was renamed into place; "in-place" = from==to and the
+   *  migration only took the lifecycle over (no data moved). */
+  mode: "move" | "in-place";
   from: string;
   to: string;
   startedAt: string;
@@ -236,6 +239,8 @@ export interface MigrateHomeRun {
   /** apply: success | rolled_back | failed; dry-run: planned | blocked. */
   outcome: MigrateOutcome | "planned" | "blocked";
   blocked: boolean;
+  /** "move" | "in-place" — present on dry-run lines too (Desktop contract). */
+  mode: "move" | "in-place";
   result: MigrateResultFile | null;
 }
 
@@ -282,6 +287,9 @@ async function readLinkOrNull(p: string): Promise<string | null> {
 export interface MigratePreflight {
   from: string;
   to: string;
+  /** "in-place" when from and to resolve to the same directory (a fresh
+   *  machine whose embedded home already IS ~/.slock) — takeover only. */
+  mode: "move" | "in-place";
   blockers: string[];
   warnings: string[];
   serviceWasRunning: boolean;
@@ -325,36 +333,47 @@ export async function preflightMigrateHome(
     blockers.push(`source home not found: ${from}`);
   }
 
-  // Source and target must be distinct (and neither nested in the other —
-  // moving a directory into itself is undefined across the rename).
-  if (fromReal === to || to === path.dirname(fromReal) || fromReal.startsWith(`${to}${path.sep}`) || to.startsWith(`${fromReal}${path.sep}`)) {
-    blockers.push(`source and target must be distinct, non-nested paths (from=${fromReal}, to=${to})`);
-  }
-
-  // Target must be absent or an EMPTY directory — never merge, never overwrite.
-  let targetWasEmptyDir = false;
+  // from == to is the IN-PLACE shape (PM decision 2026-10-09: a fresh
+  // machine whose embedded home already IS ~/.slock needs a takeover, not a
+  // move). Anything else must be distinct and non-nested — moving a
+  // directory into itself is undefined across the rename.
+  let toReal: string | null = null;
   try {
-    const entries = await fs.readdir(to);
-    if (entries.length > 0) {
-      blockers.push(`target exists and is not empty: ${to}`);
-    } else {
-      targetWasEmptyDir = true;
-    }
+    toReal = await fs.realpath(to);
   } catch {
-    /* absent — fine */
+    /* target absent — move mode */
   }
-  if (!targetWasEmptyDir && blockers.length === 0 && (await pathExists(to))) {
-    blockers.push(`target exists and is not a directory: ${to}`);
-  }
-
-  // Same filesystem only: the move is a rename, never a 30GB copy.
-  try {
-    const [srcDev, dstDev] = await Promise.all([deviceOf(fromReal), deviceOf(path.dirname(to))]);
-    if (srcDev !== dstDev) {
-      blockers.push(`target is on a different filesystem (${fromReal} dev=${srcDev}, ${path.dirname(to)} dev=${dstDev}); mv-only migration refuses to copy`);
+  const inPlace = toReal !== null && toReal === fromReal;
+  if (!inPlace) {
+    if (to === path.dirname(fromReal) || fromReal.startsWith(`${to}${path.sep}`) || to.startsWith(`${fromReal}${path.sep}`)) {
+      blockers.push(`source and target must be distinct, non-nested paths (from=${fromReal}, to=${to})`);
     }
-  } catch (error) {
-    blockers.push(`cannot compare filesystems: ${(error as Error).message}`);
+
+    // Target must be absent or an EMPTY directory — never merge, never overwrite.
+    let targetWasEmptyDir = false;
+    try {
+      const entries = await fs.readdir(to);
+      if (entries.length > 0) {
+        blockers.push(`target exists and is not empty: ${to}`);
+      } else {
+        targetWasEmptyDir = true;
+      }
+    } catch {
+      /* absent — fine */
+    }
+    if (!targetWasEmptyDir && blockers.length === 0 && (await pathExists(to))) {
+      blockers.push(`target exists and is not a directory: ${to}`);
+    }
+
+    // Same filesystem only: the move is a rename, never a 30GB copy.
+    try {
+      const [srcDev, dstDev] = await Promise.all([deviceOf(fromReal), deviceOf(path.dirname(to))]);
+      if (srcDev !== dstDev) {
+        blockers.push(`target is on a different filesystem (${fromReal} dev=${srcDev}, ${path.dirname(to)} dev=${dstDev}); mv-only migration refuses to copy`);
+      }
+    } catch (error) {
+      blockers.push(`cannot compare filesystems: ${(error as Error).message}`);
+    }
   }
 
   // The ~/.slock-raft alias: repoint only if it is a symlink into the source.
@@ -407,6 +426,7 @@ export async function preflightMigrateHome(
   const plan: Record<string, unknown> = {
     from: fromReal,
     to,
+    mode: inPlace ? "in-place" : "move",
     serviceWasRunning,
     desiredState,
     agentDirs,
@@ -427,6 +447,7 @@ export async function preflightMigrateHome(
   return {
     from: fromReal,
     to,
+    mode: inPlace ? "in-place" : "move",
     blockers,
     warnings,
     serviceWasRunning,
@@ -462,6 +483,7 @@ export async function migrateHome(
 
   // ---- dry-run: the preflight above IS the run; emit the plan as steps ----
   if (!opts.apply) {
+    const inPlace = pre.mode === "in-place";
     const planned: Array<[MigrateStep, MigrateStepStatus, Record<string, unknown> | undefined]> = [
       [
         "source-carrier",
@@ -471,9 +493,15 @@ export async function migrateHome(
           : { reason: "no login items point at the source home" },
       ],
       ["stop", pre.serviceWasRunning ? "planned" : "skipped", pre.serviceWasRunning ? undefined : { reason: "service not running" }],
-      ["move", "planned", { from: pre.from, to: pre.to }],
-      ["alias", pre.alias ? "planned" : "skipped", pre.alias ? { path: pre.alias.path, currentTarget: pre.alias.currentTarget } : { reason: "no ~/.slock-raft symlink into the source home" }],
-      ["sessions", "planned", { note: "rename ~/.claude/projects dirs whose encoded name starts with the old home" }],
+      // In-place mode moves nothing: no move, no alias repoint, no session
+      // renames — only the lifecycle takeover.
+      ...(!inPlace
+        ? ([
+            ["move", "planned", { from: pre.from, to: pre.to }],
+            ["alias", pre.alias ? "planned" : "skipped", pre.alias ? { path: pre.alias.path, currentTarget: pre.alias.currentTarget } : { reason: "no ~/.slock-raft symlink into the source home" }],
+            ["sessions", "planned", { note: "rename ~/.claude/projects dirs whose encoded name starts with the old home" }],
+          ] as Array<[MigrateStep, MigrateStepStatus, Record<string, unknown> | undefined]>)
+        : []),
       ["home-env", pre.homeEnv ? "planned" : "skipped", pre.homeEnv ? { path: pre.homeEnv.path } : { reason: "no home-env LaunchAgent" }],
       ["backup", pre.sourceCarriers.length > 0 || pre.homeEnv ? "planned" : "skipped", { dir: "<to>/computer/migrate-backup" }],
       [
@@ -496,12 +524,12 @@ export async function migrateHome(
     for (const [step, status, detail] of planned) {
       record({ step, status, detail });
     }
-    return { outcome: pre.blockers.length > 0 ? "blocked" : "planned", blocked: pre.blockers.length > 0, result: null };
+    return { outcome: pre.blockers.length > 0 ? "blocked" : "planned", blocked: pre.blockers.length > 0, mode: pre.mode, result: null };
   }
 
   // ---- apply: blockers abort before ANY mutation (and write no result file) ----
   if (pre.blockers.length > 0) {
-    return { outcome: "blocked", blocked: true, result: null };
+    return { outcome: "blocked", blocked: true, mode: pre.mode, result: null };
   }
 
   // ---- apply ----
@@ -533,6 +561,7 @@ export async function migrateHome(
     const file: MigrateResultFile = {
       schemaVersion: 1,
       result,
+      mode: pre.mode,
       from: pre.from,
       to: pre.to,
       startedAt,
@@ -556,7 +585,7 @@ export async function migrateHome(
         /* try the other home; if both fail the summary still returns */
       }
     }
-    return { outcome: result, blocked: false, result: file };
+    return { outcome: result, blocked: false, mode: pre.mode, result: file };
   };
 
   // Step 1 — retire the source home's login items (BEFORE the stop: a
@@ -607,7 +636,8 @@ export async function migrateHome(
   }
 
   // Step 3 — the move itself: rename (atomic on the same filesystem).
-  if (
+  // Skipped entirely in in-place mode: from==to means nothing moves.
+  if (pre.mode !== "in-place" &&
     !(await runStep("move", async () => {
       await fs.mkdir(path.dirname(pre.to), { recursive: true });
       // Absent-and-empty target: POSIX rename(2) handles an empty dir target
@@ -658,8 +688,9 @@ export async function migrateHome(
     return rollbackAndFinish();
   }
 
-  // Step 4 — repoint the ~/.slock-raft alias at the new home.
-  if (pre.alias) {
+  // Step 4 — repoint the ~/.slock-raft alias at the new home (move mode
+  // only; in-place the alias already resolves to the right directory).
+  if (pre.mode !== "in-place" && pre.alias) {
     if (
       !(await runStep("alias", async () => {
         await fs.unlink(pre.alias!.path);
@@ -680,13 +711,14 @@ export async function migrateHome(
     record({ step: "alias", status: "skipped", detail: { reason: "no ~/.slock-raft symlink into the source home" } });
   }
 
-  // Step 5 — session continuity: Claude Code keys ~/.claude/projects dirs by
+  // Step 5 — session continuity (move mode only — in-place never changes
+  // any path, so every project dir keeps matching): Claude Code keys ~/.claude/projects dirs by
   // the agent cwd's encoded name, so after the move every project dir under
   // the old home would stop matching and agents would lose their session
   // history. The encoding is per-character (see encodeProjectDirName), so a
   // prefix rename of the encoded names carries the whole subtree over.
   // Codex/Gemini session stores are NOT handled here (separate layouts).
-  {
+  if (pre.mode !== "in-place") {
     const projectsDir = (deps.claudeProjectsDir ?? defaultClaudeProjectsDir)(homeDir);
     if (await pathExists(projectsDir)) {
       if (
@@ -824,6 +856,34 @@ export async function migrateHome(
   // still leave a process at the target home, and the rollback must stop it
   // before the move back.
   const shouldStartService = pre.desiredState === "running" && pre.attachments.length > 0;
+  // In-place takeover (PM decision 2026-10-09): from==to, so the CLI must
+  // take the lifecycle over from the embedded app at the SAME home. A
+  // lifecycle owner record still naming owner "app" makes the CLI converge
+  // refuse to take over, so it is removed first (byte-captured; rollback
+  // restores it verbatim — the old carrier's plist is restored by the
+  // source-carrier undo, giving the byte-level rollback PM asked for).
+  const takeOverLifecycle = async (): Promise<boolean> => {
+    if (pre.mode !== "in-place") return false;
+    const markerFile = path.join(pre.to, "computer", "host-lifecycle-owner.json");
+    let content: string;
+    try {
+      content = await fs.readFile(markerFile, "utf8");
+    } catch {
+      return false; // no owner record — nothing to take over from
+    }
+    // A failed rm throws here, failing the start step into rollback — a
+    // record still on disk is never treated as taken over.
+    await fs.rm(markerFile, { force: true });
+    const captured = content;
+    journal.push({
+      label: "restore in-place lifecycle owner record",
+      undo: async () => {
+        await fs.mkdir(path.dirname(markerFile), { recursive: true });
+        await fs.writeFile(markerFile, captured, "utf8");
+      },
+    });
+    return true;
+  }
   if (shouldStartService) {
     if (
       !(await runStep("start", async () => {
@@ -838,8 +898,9 @@ export async function migrateHome(
             }
           },
         });
+        const tookOver = await takeOverLifecycle();
         await startServiceAt(pre.to);
-        return { home: pre.to };
+        return { home: pre.to, mode: pre.mode, lifecycleTakeover: tookOver };
       }))
     ) {
       return rollbackAndFinish();
@@ -861,8 +922,9 @@ export async function migrateHome(
             }
           },
         });
+        const tookOver = await takeOverLifecycle();
         await convergeCarrierAt(pre.to, "enabled");
-        return { convergedOnly: true, reason };
+        return { convergedOnly: true, reason, mode: pre.mode, lifecycleTakeover: tookOver };
       }))
     ) {
       return rollbackAndFinish();
@@ -1059,7 +1121,7 @@ export async function runMigrateHomeCommand(
   const run = await migrateHome({ from: opts.from, to: opts.to, apply: !!opts.apply }, deps, emit);
 
   if (opts.json) {
-    const finalLine = run.result ?? { dryRun: true, outcome: run.outcome, blocked: run.blocked };
+    const finalLine = run.result ?? { dryRun: true, outcome: run.outcome, blocked: run.blocked, mode: run.mode };
     process.stdout.write(`${JSON.stringify(finalLine)}\n`);
   } else if (run.outcome === "planned") {
     info("Dry-run OK — re-run with --apply to perform the migration.");
