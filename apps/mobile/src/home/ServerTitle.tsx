@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Modal, Pressable, ScrollView, StyleSheet, View, type LayoutChangeEvent } from "react-native";
+import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, View, type LayoutChangeEvent } from "react-native";
 import { Gesture, GestureDetector, GestureHandlerRootView } from "react-native-gesture-handler";
 import { Check, ChevronDown } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
@@ -11,6 +11,7 @@ import { border, color } from "../ui/tokens";
 import { clampDragDelta, DRAG_ACTIVATE_MS, moveServerIds, nearestSlotIndex } from "./serverDrag";
 import { buildServerMenu, type ServerMenuItem } from "./serverMenu";
 import { useServerRailStore } from "./serverRailStore";
+import { useServerRailResolved } from "./serverRailReady";
 import { useServerRail } from "./useServerRail";
 
 /**
@@ -23,10 +24,11 @@ import { useServerRail } from "./useServerRail";
  * is no ▾ and the title is not tappable. A small dot next to ▾ says another
  * server has unread.
  */
-export function ServerTitle({ subtitle, menuTop }: { subtitle?: string; menuTop: number }) {
+export function ServerTitle({ menuTop }: { menuTop: number }) {
   const t = useT();
   const session = useSession();
   const { servers, serverUnread, current, switchServer, loadServers } = useServerRail();
+  const railResolved = useServerRailResolved();
   const [open, setOpen] = useState(false);
   const [drag, setDrag] = useState<Drag | null>(null);
   const dragRef = useRef<Drag | null>(null);
@@ -114,9 +116,10 @@ export function ServerTitle({ subtitle, menuTop }: { subtitle?: string; menuTop:
   }, [servers, switchServer]);
 
   const name = current?.name || t("mobile.servers.title");
+  const titlePending = !railResolved && !current;
   const title = (
     <View style={styles.titleRow}>
-      <AppText numberOfLines={1} style={styles.title}>{name}</AppText>
+      {titlePending ? <ActivityIndicator color={color.ink} /> : <AppText numberOfLines={1} style={styles.title}>{name}</AppText>}
       {menu.switchable ? <ChevronDown color={color.ink} size={18} /> : null}
       {menu.switchable && menu.otherUnread ? <View style={styles.dot} /> : null}
     </View>
@@ -129,7 +132,6 @@ export function ServerTitle({ subtitle, menuTop }: { subtitle?: string; menuTop:
           {title}
         </Pressable>
       ) : title}
-      {subtitle ? <AppText numberOfLines={1} style={styles.subtitle}>{subtitle}</AppText> : null}
       <Modal animationType="fade" onRequestClose={() => setOpen(false)} statusBarTranslucent transparent visible={open}>
         <GestureHandlerRootView style={styles.modalRoot}>
         <Pressable accessibilityLabel={t("search.back")} onPress={() => setOpen(false)} style={styles.scrim} />
@@ -222,7 +224,6 @@ const styles = StyleSheet.create({
   press: { minHeight: 40, justifyContent: "center" },
   titleRow: { alignItems: "center", flexDirection: "row", gap: 4 },
   title: { color: color.ink, flexShrink: 1, fontSize: 20, fontWeight: "700", lineHeight: 24 },
-  subtitle: { color: color.mutedStrong, fontSize: 13, lineHeight: 16 },
   dot: {
     backgroundColor: color.pink,
     borderColor: color.border,

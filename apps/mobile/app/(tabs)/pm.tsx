@@ -11,9 +11,9 @@ import { color, fontSize } from "../../src/ui/tokens";
 import { TabHeader } from "../../src/home/TabHeader";
 import { useDirectory } from "../../src/home/useDirectory";
 import { useServerRail } from "../../src/home/useServerRail";
-import { useServerRole } from "../../src/home/serverRole";
+import { useServerRole, useServerRoleKnown } from "../../src/home/serverRole";
 import { useServerPm } from "../../src/home/useServerPm";
-import { canSetPm, parsePmAgentChoices, type PmAgentChoice } from "../../src/home/pmState";
+import { parsePmAgentChoices, selectPmBody, type PmAgentChoice } from "../../src/home/pmState";
 import { closeChoosePm, useChoosePm } from "../../src/home/choosePm";
 
 /**
@@ -26,28 +26,29 @@ export default function PmScreen() {
   const { current } = useServerRail();
   useDirectory();
   const roleFromStore = useServerRole();
+  const roleKnown = useServerRoleKnown() || current?.role != null;
   const role = current?.role ?? roleFromStore;
   const { state, loading, error, reload } = useServerPm(current?.slug ?? null);
   const choosing = useChoosePm();
-  const manager = canSetPm(role);
+  const kind = selectPmBody({ role, roleKnown, loading, error, state, choosing });
 
   useEffect(() => {
     if (state?.pm) closeChoosePm();
   }, [state?.pm]);
 
   let body;
-  if (loading && !state) {
+  if (kind === "loading") {
     body = <View style={styles.centered}><ActivityIndicator color={color.ink} /></View>;
-  } else if (error && !state) {
+  } else if (kind === "error") {
     const failed = t("mobile.pm.loadFailed");
     body = (
       <View style={styles.centered}>
         <AppText style={styles.guideTitle}>{failed}</AppText>
-        {error !== failed ? <AppText style={styles.guideBody}>{error}</AppText> : null}
+        {error && error !== failed ? <AppText style={styles.guideBody}>{error}</AppText> : null}
         <PrimaryButton label={t("mobile.preview.retry")} onPress={() => void reload()} />
       </View>
     );
-  } else if (state?.pm) {
+  } else if (kind === "conversation" && state?.pm) {
     body = (
       <PmConversation
         agentId={state.pm.agentId}
@@ -55,23 +56,21 @@ export default function PmScreen() {
         title={state.pm.displayName || state.pm.name}
       />
     );
-  } else if (manager && (state?.setup === "unset" || choosing)) {
+  } else if (kind === "setup") {
     body = <PmSetupGuide onChanged={() => { closeChoosePm(); void reload(); }} />;
-  } else if (manager && state?.autoProvision) {
+  } else if (kind === "enable") {
     body = <ScreenMessage title={t("mobile.pm.enableTitle")} body={t("mobile.pm.enableBody")} />;
-  } else if (manager) {
+  } else if (kind === "pickLater") {
     body = <ScreenMessage title={t("mobile.pm.pickLaterTitle")} body={t("mobile.pm.pickLaterBody")} />;
-  } else if (state?.autoProvision) {
+  } else if (kind === "wait") {
     body = <ScreenMessage title={t("mobile.pm.waitTitle")} body={t("mobile.pm.waitBody")} />;
   } else {
     body = <ScreenMessage title={t("mobile.pm.waitPickTitle")} body={t("mobile.pm.waitPickBody")} />;
   }
 
-  const subtitle = state?.pm ? (state.pm.displayName || state.pm.name) : undefined;
-
   return (
     <View style={styles.page}>
-      <TabHeader subtitle={subtitle} />
+      <TabHeader />
       <View style={styles.body}>{body}</View>
     </View>
   );

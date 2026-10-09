@@ -465,7 +465,9 @@ export function MessagePane({
     }).catch(() => undefined);
   }, [channelId, messages]);
 
-  useEffect(() => {
+  // Layout, not a passive effect: the synchronous cache seed has to land
+  // before paint, or a cold start flashes the spinner over a full history.
+  useLayoutEffect(() => {
     let cancelled = false;
     if (channelId === "pending-thread") {
       setLoading(false);

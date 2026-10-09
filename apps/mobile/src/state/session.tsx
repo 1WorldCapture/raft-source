@@ -22,6 +22,8 @@ import { BUNDLED_SERVER_ORIGIN } from "../session/origin";
 import { shouldApplyServerResponse, shouldCommitTokens, shouldMarkVisibleRead, catchUpPlan, releaseFocus } from "./sessionPolicy";
 import { useRaftStore } from "./store";
 import { useServerRailStore } from "../home/serverRailStore";
+import { resetCachedServerRailSeed, seedCachedServerRail } from "../home/serverRailCache";
+import { resetCurrentServerRole } from "../home/serverRole";
 import { getCacheRuntime, initCacheRuntime } from "../cache/runtime";
 import { cancelCacheSync, refreshOverlayIntoStore } from "../cache/cacheSyncRuntime";
 import { useOfflineStore } from "../cache/cacheCleanup";
@@ -155,6 +157,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     bumpServerEpoch();
     apply({ accessToken: null, refreshToken: null, user: null, serverId: null });
     useRaftStore.getState().clearServerData();
+    resetCachedServerRailSeed();
+    resetCurrentServerRole();
     useServerRailStore.getState().reset();
     useRaftStore.getState().setNotice(null);
     void persistTokens(null);
@@ -351,16 +355,23 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     const timer = setTimeout(() => {
       void (async () => {
         try {
-          const storedOrigin = await SecureStore.getItemAsync(ORIGIN);
+          const [storedOrigin, storedAccess, storedRefresh, storedUser, storedServer, storedInstallation] = await Promise.all([
+            SecureStore.getItemAsync(ORIGIN),
+            SecureStore.getItemAsync(ACCESS),
+            SecureStore.getItemAsync(REFRESH),
+            SecureStore.getItemAsync(USER),
+            SecureStore.getItemAsync(SERVER),
+            SecureStore.getItemAsync(INSTALLATION),
+          ]);
           const origin = BUNDLED_SERVER_ORIGIN;
           if (!origin) {
             if (!cancelled) apply({ origin: null, ready: true });
             return;
           }
-          let accessToken = await SecureStore.getItemAsync(ACCESS);
-          let refreshToken = await SecureStore.getItemAsync(REFRESH);
-          let userJson = await SecureStore.getItemAsync(USER);
-          let serverId = await SecureStore.getItemAsync(SERVER);
+          let accessToken = storedAccess;
+          let refreshToken = storedRefresh;
+          let userJson = storedUser;
+          let serverId = storedServer;
           if (storedOrigin !== origin) {
             void SecureStore.setItemAsync(ORIGIN, origin);
             if (storedOrigin) {
@@ -372,7 +383,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
               void SecureStore.deleteItemAsync(SERVER);
             }
           }
-          const storedInstallation = await SecureStore.getItemAsync(INSTALLATION);
           let installationId = storedInstallation && /^ari_[0-9a-f]{32}$/.test(storedInstallation)
             ? storedInstallation
             : createInstallationId();
@@ -580,6 +590,20 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     },
   }), [client, realtime, snapshot]);
   markReadRef.current = api.markRead;
+
+  if (snapshot.ready && snapshot.origin && snapshot.user && snapshot.serverId) {
+    try {
+      ensureCacheRuntime();
+      seedCachedServerRail({
+        ready: snapshot.ready,
+        origin: snapshot.origin,
+        userId: snapshot.user.id,
+        serverId: snapshot.serverId,
+      });
+    } catch {
+      // Cache unavailable — the screens fall back to the network.
+    }
+  }
 
   return <SessionContext.Provider value={api}>{children}</SessionContext.Provider>;
 }

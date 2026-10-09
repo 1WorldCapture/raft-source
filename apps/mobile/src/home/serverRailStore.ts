@@ -9,6 +9,7 @@ import { create } from "zustand";
 import { activityUnreadByServer } from "../activity/model";
 import { getCacheRuntime } from "../cache/runtime";
 import { isRecord, parseServers, parseUnreadSummary, type RaftServer } from "../model/messages";
+import { markServerRailResolved, resetServerRailResolved } from "./serverRailReady";
 
 /** Minimal client surface the store needs (session.client satisfies it). */
 export interface ServerRailClient {
@@ -130,6 +131,7 @@ export const useServerRailStore = create<ServerRailState>((set, get) => ({
       serverUnread: parseUnreadSummary(unreadData),
       activityUnread: activityUnreadByServer(unreadData),
     });
+    markServerRailResolved();
     persistServersToCache(next);
     return { stale: false, server: next.find((server) => server.id === preferredId) ?? next[0] ?? null };
   },
@@ -172,5 +174,8 @@ export const useServerRailStore = create<ServerRailState>((set, get) => ({
     }
   },
 
-  reset: () => set({ servers: [], serverUnread: {}, activityUnread: {}, loadTicket: 0, badgeTicket: 0 }),
+  reset: () => {
+    resetServerRailResolved();
+    set({ servers: [], serverUnread: {}, activityUnread: {}, loadTicket: 0, badgeTicket: 0 });
+  },
 }));
