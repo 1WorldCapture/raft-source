@@ -1,14 +1,16 @@
 export type MarkdownPiece =
   | { type: "text"; text: string }
-  | { type: "bold"; text: string }
+  | { type: "bold"; text: string; children: MarkdownPiece[] }
   | { type: "code"; text: string }
   | { type: "codeBlock"; text: string }
   | { type: "link"; text: string; url: string }
-  | { type: "list"; text: string }
+  | { type: "list"; text: string; marker: string; indent: number }
   | { type: "heading"; level: number; text: string }
   | { type: "quote"; text: string };
 
-const INLINE = /(\*\*([^*]+)\*\*|`([^`]+)`|\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)|(https?:\/\/[^\s]+))/g;
+// Bold: `**` + non-space ... non-space + `**`; the text may contain single `*`,
+// code spans and links (rendered by recursing into `children`).
+const INLINE = /(\*\*(\S(?:.*?\S)?)\*\*|`([^`]+)`|\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)|(https?:\/\/[^\s]+))/g;
 
 /** Small subset: fenced code, lists, bold, inline code, and links. */
 export function markdownPieces(content: string): MarkdownPiece[] {
@@ -32,9 +34,11 @@ export function markdownPieces(content: string): MarkdownPiece[] {
         pieces.push({ type: "quote", text: quote[1] ?? "" });
         continue;
       }
-      const list = /^(?:[-*]|\d+\.)\s+(.*)$/.exec(line);
+      const list = /^(\s*)([-*+]|\d+[.)])\s+(.*)$/.exec(line);
       if (list) {
-        pieces.push({ type: "list", text: list[1] ?? "" });
+        const marker = /^\d/.test(list[2] ?? "") ? (list[2] ?? "") : "•";
+        const spaces = (list[1] ?? "").replace(/\t/g, "    ").length;
+        pieces.push({ type: "list", text: list[3] ?? "", marker, indent: Math.min(4, Math.floor(spaces / 2)) });
         continue;
       }
       pieces.push(...inlinePieces(line));
@@ -47,13 +51,14 @@ export function markdownPieces(content: string): MarkdownPiece[] {
   return pieces.filter((piece) => piece.text.length > 0 || piece.type !== "text");
 }
 
-function inlinePieces(line: string): MarkdownPiece[] {
+/** Inline pieces of one line of text (also used for list, heading and quote bodies). */
+export function inlinePieces(line: string): MarkdownPiece[] {
   const pieces: MarkdownPiece[] = [];
   let cursor = 0;
   for (const match of line.matchAll(INLINE)) {
     const start = match.index ?? 0;
     if (start > cursor) pieces.push({ type: "text", text: line.slice(cursor, start) });
-    if (match[2]) pieces.push({ type: "bold", text: match[2] });
+    if (match[2]) pieces.push({ type: "bold", text: match[2], children: inlinePieces(match[2]) });
     else if (match[3]) pieces.push({ type: "code", text: match[3] });
     else if (match[4] && match[5]) pieces.push({ type: "link", text: match[4], url: match[5] });
     else if (match[6]) pieces.push({ type: "link", text: match[6], url: match[6] });

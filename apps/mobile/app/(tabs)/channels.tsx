@@ -6,7 +6,6 @@ import { TabHeader } from "../../src/home/TabHeader";
 import { channelHasDraft } from "../../src/home/drafts";
 import { conversationUnreadCount, filterUnreadConversations } from "../../src/home/conversations";
 import { useDirectory } from "../../src/home/useDirectory";
-import { useServerRail } from "../../src/home/useServerRail";
 import { formatRelativeTime, relativeTimeStrings } from "../../src/tasks/relativeTime";
 import { useT } from "../../src/i18n/provider";
 import { channelLabel, type RaftChannel } from "../../src/model/messages";
@@ -27,7 +26,6 @@ export default function ChannelsScreen() {
   const t = useT();
   const { height } = useWindowDimensions();
   const compact = height <= 600;
-  const { current } = useServerRail();
   const { loading, error, reload } = useDirectory();
   const conversations = useRaftStore((state) => state.conversations);
   const channelUnread = useRaftStore((state) => state.channelUnread);
@@ -51,7 +49,7 @@ export default function ChannelsScreen() {
 
   return (
     <View style={styles.page}>
-      <TabHeader title={t("mobile.tabs.channels") + (current ? ` · ${current.name}` : "")} />
+      <TabHeader />
       {loading && channels.length === 0 ? (
         <View style={styles.centered}><ActivityIndicator color={color.ink} /></View>
       ) : error && channels.length === 0 ? (

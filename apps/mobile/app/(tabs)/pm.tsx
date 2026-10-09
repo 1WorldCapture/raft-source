@@ -8,7 +8,6 @@ import { useSession } from "../../src/state/session";
 import { AppText } from "../../src/ui/text";
 import { LoadingScreen, PrimaryButton, ScreenMessage } from "../../src/ui/screen";
 import { color, fontSize } from "../../src/ui/tokens";
-import { RailLayout } from "../../src/home/RailLayout";
 import { TabHeader } from "../../src/home/TabHeader";
 import { useDirectory } from "../../src/home/useDirectory";
 import { useServerRail } from "../../src/home/useServerRail";
@@ -68,16 +67,12 @@ export default function PmScreen() {
     body = <ScreenMessage title={t("mobile.pm.waitPickTitle")} body={t("mobile.pm.waitPickBody")} />;
   }
 
-  const title = state?.pm
-    ? (state.pm.displayName || state.pm.name)
-    : (current?.name || t("mobile.servers.title"));
+  const subtitle = state?.pm ? (state.pm.displayName || state.pm.name) : undefined;
 
   return (
     <View style={styles.page}>
-      <TabHeader title={title} />
-      <RailLayout>
-        {body}
-      </RailLayout>
+      <TabHeader subtitle={subtitle} />
+      <View style={styles.body}>{body}</View>
     </View>
   );
 }
@@ -199,6 +194,7 @@ function PmSetupGuide({ onChanged }: { onChanged: () => void }) {
 
 const styles = StyleSheet.create({
   page: { backgroundColor: color.page, flex: 1 },
+  body: { flex: 1 },
   centered: { alignItems: "center", flex: 1, justifyContent: "center" },
   guide: { flex: 1, gap: 12, padding: 16 },
   guideTitle: { color: color.ink, fontSize: 18, fontWeight: "700" },
