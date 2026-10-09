@@ -32,6 +32,7 @@ import { useServerStore } from "@web/store/serverStore";
 import { RUNTIME_API_ORIGIN } from "@web/desktopRuntimeEnvironment";
 import Button from "@web/components/ui/Button";
 import { getComputerBridge } from "./useSelfComputer";
+import { useHostMode } from "./useStandaloneComputer";
 import { syncOnboardingEnableHost } from "./onboardingEnableDom";
 
 /** Turn a raw enable error (incl. Electron IPC strings) into one short line. */
@@ -105,7 +106,10 @@ function OnboardingEnableComputer() {
 export function DesktopOnboardingComputerMount() {
   const bridge = getComputerBridge();
   const currentServer = useServerStore((s) => s.current);
-  const active = !!bridge && !!currentServer;
+  // Standalone mode: this app does not host the Computer, so the one-click Enable cannot work; leave
+  // the step's own CLI guide visible (the machine's independent Computer is attached through the CLI).
+  const standalone = useHostMode()?.mode === "standalone";
+  const active = !!bridge && !!currentServer && !standalone;
   const [host, setHost] = useState<HTMLElement | null>(null);
 
   // Hide the CLI command guide + terminal instructions on desktop by hiding every

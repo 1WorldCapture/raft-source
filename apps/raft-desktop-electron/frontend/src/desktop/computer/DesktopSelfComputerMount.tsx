@@ -15,8 +15,10 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRailMode } from "@web/hooks/useSidebarTab";
+import StandaloneComputerCard from "./StandaloneComputerCard";
 import ThisComputerCard from "./ThisComputerCard";
 import { getComputerBridge, useSelfMachine } from "./useSelfComputer";
+import { useHostMode } from "./useStandaloneComputer";
 
 const SCROLL_SURFACE = '[data-testid="sidebar-scroll-surface"]';
 const COMPUTER_ROW = '[data-testid^="computer-list-item-"]';
@@ -25,8 +27,11 @@ export function DesktopSelfComputerMount() {
   const bridge = getComputerBridge();
   const { railMode } = useRailMode();
   const active = !!bridge && railMode === "computers";
+  // Standalone mode: the machine's Computer is an independent raft-computer, shown by StandaloneComputerCard.
+  const standalone = useHostMode()?.mode === "standalone";
   const self = useSelfMachine();
-  const selfId = self?.id ?? null;
+  // The standalone card does not stand in for a machine row (it carries no machine id), so keep the row.
+  const selfId = standalone ? null : self?.id ?? null;
   const [host, setHost] = useState<HTMLElement | null>(null);
 
   // Maintain the portal host at the top of the reused computers list.
@@ -85,5 +90,5 @@ export function DesktopSelfComputerMount() {
     return () => style.remove();
   }, [active, selfId]);
 
-  return host ? createPortal(<ThisComputerCard />, host) : null;
+  return host ? createPortal(standalone ? <StandaloneComputerCard /> : <ThisComputerCard />, host) : null;
 }
