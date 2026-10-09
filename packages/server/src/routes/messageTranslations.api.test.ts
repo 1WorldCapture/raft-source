@@ -318,6 +318,42 @@ test("PATCH /api/auth/me updates account display preferences", async ({ app }) =
   assert.equal(invalidTimeFormatRes.status, 400);
 });
 
+test("PATCH /api/auth/me stores a preferred skin, validates the id, and clears it with null", async ({ app }) => {
+  const user = await seedUser("preferred-skin@slock.test", "preferred-skin");
+  const token = await tokenForHuman(user.email);
+  const patch = (body: unknown) => fetch(`${app.baseUrl}/api/auth/me`, {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const me = async () => (await (await fetch(`${app.baseUrl}/api/auth/me`, { headers: { Authorization: `Bearer ${token}` } })).json()) as { preferredSkin: string | null; preferredMessageBodyFontSize: string | null };
+
+  assert.equal((await me()).preferredSkin, null, "new users have no preference yet");
+
+  const set = await patch({ preferredSkin: "Rose", preferredMessageBodyFontSize: "lg" });
+  assert.equal(set.status, 200);
+  assert.equal(((await set.json()) as { preferredSkin: string | null }).preferredSkin, "rose");
+  assert.equal((await me()).preferredSkin, "rose");
+
+  // A PATCH that does not mention the skin leaves it alone.
+  assert.equal((await patch({ preferredMessageBodyFontSize: "sm" })).status, 200);
+  const afterOther = await me();
+  assert.equal(afterOther.preferredSkin, "rose");
+  assert.equal(afterOther.preferredMessageBodyFontSize, "sm");
+
+  for (const bad of ["not-a-skin", 7, true, {}, "rose;drop"]) {
+    const res = await patch({ preferredSkin: bad });
+    assert.equal(res.status, 400, `rejects ${JSON.stringify(bad)}`);
+    assert.match(((await res.json()) as { error: string }).error, /preferredSkin/);
+  }
+  assert.equal((await me()).preferredSkin, "rose", "a rejected value changes nothing");
+
+  const cleared = await patch({ preferredSkin: null });
+  assert.equal(cleared.status, 200);
+  assert.equal(((await cleared.json()) as { preferredSkin: string | null }).preferredSkin, null);
+  assert.equal((await me()).preferredSkin, null);
+});
+
 test("GET /api/auth/me returns off translation defaults for new users", async ({ app }) => {
   const user = await seedUser("translation-default@slock.test", "translation-default");
   const token = await tokenForHuman(user.email);

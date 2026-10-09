@@ -48,6 +48,8 @@ export const users = pgTable("users", {
   preferredTranslationDisplay: text("preferred_translation_display", { enum: ["translated", "original", "bilingual"] }).notNull().default("translated"),
   preferredTimeFormat: text("preferred_time_format", { enum: ["12h", "24h"] }),
   preferredMessageBodyFontSize: text("preferred_message_body_font_size", { enum: ["sm", "md", "lg"] }),
+  // Cross-device skin id (shared skin list; null = not chosen yet, clients fall back to their local value).
+  preferredSkin: text("preferred_skin"),
   referralSource: text("referral_source"),
   referralSourceOther: text("referral_source_other"),
   referralSourceSkippedAt: timestamp("referral_source_skipped_at", { withTimezone: true }),
