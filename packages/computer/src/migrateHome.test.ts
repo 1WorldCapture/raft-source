@@ -141,7 +141,7 @@ function fakeDeps(user: string, overrides: { statuses?: MigrateHomeStatus[] } = 
     realHomeDir: () => user,
     uid: 501,
     env: {},
-    scanHomeProcesses: async () => [...liveProcesses.values()],
+    scanHomeProcesses: async () => [...liveProcesses.values()], // spellings ignored by the fake
     killHomeProcess: (pid, signal) => {
       killLog.push([pid, signal]);
       if (harnessKillWorks.value) liveProcesses.delete(pid);
@@ -684,8 +684,8 @@ test("self-check fails on a duplicate runner tree per server", async () => {
   const f2 = await fixture({ livePid: true });
   const h2 = fakeDeps(f2.user);
   // Two runners for the same server visible at the target during self-check.
-  h2.deps.scanHomeProcesses = async (home: string) =>
-    home === f2.to
+  h2.deps.scanHomeProcesses = async (homeSpellings: string[]) =>
+    homeSpellings.some((spelling) => spelling === f2.to)
       ? [
           { pid: 900, kind: "runner", serverId: ATTACHED_SERVER_ID },
           { pid: 901, kind: "runner", serverId: ATTACHED_SERVER_ID },
@@ -703,5 +703,44 @@ test("self-check fails on a duplicate runner tree per server", async () => {
     assert.equal((await stat(path.join(f2.from, "agents", "a1"))).isDirectory(), true);
   } finally {
     await rm(f2.root, { recursive: true, force: true });
+  }
+});
+
+test("scan attribution: symlink spelling and argv boundary (#281 review)", async () => {
+  const { argvMentionsHome, mentionsWithBoundary, defaultScanHomeProcesses } = await import("./migrateHome.js");
+  // argv boundary: ~/.slock must NOT select --slock-home ~/.slock-raft.
+  assert.equal(argvMentionsHome("--slock-home /Users/x/.slock-raft", "/Users/x/.slock"), false);
+  assert.equal(argvMentionsHome("--slock-home /Users/x/.slock", "/Users/x/.slock"), true);
+  assert.equal(argvMentionsHome("--slock-home=/Users/x/.slock other", "/Users/x/.slock"), true);
+  assert.equal(argvMentionsHome("--slock-home /Users/x/.slock-raft", "/Users/x/.slock-raft"), true);
+  // env boundary: same rule for environment mentions.
+  assert.equal(mentionsWithBoundary("RAFT_HOME=/Users/x/.slock-raft FOO=1", "/Users/x/.slock"), false);
+  assert.equal(mentionsWithBoundary("RAFT_HOME=/Users/x/.slock FOO=1", "/Users/x/.slock"), true);
+  assert.equal(mentionsWithBoundary("SLOCK_HOME=/Users/x/.slock", "/Users/x/.slock"), true);
+  // The scanner accepts the multi-spelling shape.
+  assert.deepEqual(await defaultScanHomeProcesses(["/definitely/absent-home-1", "/definitely/absent-home-2"]), []);
+});
+
+test("stop step sweeps by EVERY spelling: realpath + original argument + alias (#281 review)", async () => {
+  const f = await fixture({ livePid: true }); // fixture creates the ~/.slock-raft alias
+  const h = fakeDeps(f.user);
+  const spellingsSeen: string[][] = [];
+  h.deps.scanHomeProcesses = async (homeSpellings) => {
+    spellingsSeen.push(homeSpellings);
+    return [...h.liveProcesses.values()];
+  };
+  h.liveProcesses.set(4242, { pid: 4242, kind: "runner", serverId: ATTACHED_SERVER_ID });
+  try {
+    const run = await migrateHome({ from: f.from, to: f.to, ...apply }, h.deps, (e) => h.events.push(e));
+    assert.equal(run.outcome, "success");
+    const stopScan = spellingsSeen.find((spellings) => spellings.includes(f.from));
+    assert.ok(stopScan, "a scan received the realpath spelling");
+    assert.ok(stopScan!.includes(f.alias), "the alias spelling is swept too");
+    // The real owner shape: fromArg may differ from the realpath; here the
+    // fixture's --from WAS the realpath, so fromArg equals it — still assert
+    // the plumbing carried both entries distinctly.
+    assert.ok(stopScan!.length >= 2);
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
   }
 });
