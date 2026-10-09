@@ -19,7 +19,7 @@
  *   host/authHost.mjs                 auth host entry (transpiled, external @cursor/sdk)
  * ```
  *
- * Resolution order (host-owner env first, exact root, no fallback):
+ * Resolution order (host-owner env first, exact roots only):
  *   1. `RAFT_CURSOR_SDK_ASSETS` — set by the desktop host from
  *      `process.resourcesPath` BEFORE importing the daemon. This is the only
  *      path selection trusted in release. Per-agent/remote env can never
@@ -30,6 +30,14 @@
  *      daemon `dist/`; never inside an Electron/SEA bundle, which has no such
  *      ancestor). Final dev path on this machine:
  *      `packages/daemon/runtime-assets/cursor/1.0.36/darwin-arm64`.
+ *   3. Standalone-computer fallback (#computer-extract): the login-item
+ *      service runs WITHOUT the desktop app, so step 1's env is unset and
+ *      step 2's walk-up finds nothing inside the SEA bundle. The desktop's
+ *      bundled install stages the same asset root at
+ *      `<raft home>/runtime/cursor-sdk` (interface v1), resolved with the
+ *      same RAFT_HOME→SLOCK_HOME→~/.slock precedence the rest of the
+ *      daemon uses — the service process env, never per-agent env. Dev
+ *      discovery (step 2) stays authoritative on repo machines.
  *
  * Both resolution paths validate the same manifest contract and throw the same
  * sanitized, actionable typed errors. This module performs filesystem checks
@@ -38,8 +46,11 @@
 
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { resolveRaftHome } from "../raftHome.js";
 
 /** Exact @cursor/sdk version the runtime assets must contain. */
 export const CURSOR_SDK_VERSION = "1.0.36";
@@ -109,6 +120,8 @@ export interface CursorSdkAssetsResolveOptions {
   moduleUrl?: string;
   platform?: NodeJS.Platform;
   arch?: string;
+  /** Overrides os.homedir() for the standalone <raft home> fallback. */
+  homeDir?: string;
 }
 
 interface ManifestShape {
@@ -389,9 +402,17 @@ export function resolveCursorSdkAssets(options: CursorSdkAssetsResolveOptions = 
     dir = parent;
   }
 
+  // Standalone-computer fallback — only after dev discovery failed, so repo
+  // machines keep resolving their staged runtime-assets unchanged.
+  const raftHome = resolveRaftHome(env, options.homeDir ?? os.homedir());
+  const homeCandidate = path.join(raftHome, "runtime", "cursor-sdk");
+  if (existsSync(path.join(homeCandidate, "manifest.json"))) {
+    return validateAssetRoot(homeCandidate, platform, arch);
+  }
+
   throw new CursorSdkAssetsError(
     "dev_root_not_found",
-    `Cursor SDK assets not found for ${target}. Set ${RAFT_CURSOR_SDK_ASSETS_ENV} to a staged asset root (packaged desktop sets it from resources/cursor-sdk), or build dev assets with \`${BUILD_COMMAND}\`. ${devHint(target)}`,
+    `Cursor SDK assets not found for ${target}. Set ${RAFT_CURSOR_SDK_ASSETS_ENV} to a staged asset root (packaged desktop sets it from resources/cursor-sdk), stage them at ${homeCandidate} via the desktop's bundled install, or build dev assets with \`${BUILD_COMMAND}\`. ${devHint(target)}`,
   );
 }
 
