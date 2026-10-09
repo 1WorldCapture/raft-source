@@ -619,14 +619,40 @@ export async function migrateHome(
         removedEmptyTarget = true;
       }
       await fs.rename(pre.from, pre.to);
+      // The host-lifecycle owner record moved with the home but describes the
+      // OLD home's launchd job (its label/definition carry the old home's
+      // hash; the job itself was retired in the source-carrier step). Left in
+      // place, converge at the new home fails closed with
+      // HOST_LIFECYCLE_LAST_KNOWN_GOOD_UNVERIFIED (drill A1 finding). Clear
+      // it — the start step converges a fresh carrier for the new home.
+      // Record cleared ONLY after the rm actually succeeded, so a marker that
+      // is still on disk is never treated as cleared.
+      const markerPath = path.join(pre.to, "computer", "host-lifecycle-owner.json");
+      let clearedMarkerContent: string | null = null;
+      try {
+        const content = await fs.readFile(markerPath, "utf8");
+        await fs.rm(markerPath, { force: true });
+        clearedMarkerContent = content;
+      } catch {
+        clearedMarkerContent = null;
+      }
       journal.push({
         label: "move home back",
         undo: async () => {
           await fs.rename(pre.to, pre.from);
           if (removedEmptyTarget) await fs.mkdir(pre.to, { recursive: true });
+          if (clearedMarkerContent !== null) {
+            // The home is back at the SOURCE path by now — the marker
+            // restores there, never at the target (which would re-create
+            // <to>/computer and block the next migration's empty-target
+            // preflight).
+            const restorePath = path.join(pre.from, "computer", "host-lifecycle-owner.json");
+            await fs.mkdir(path.dirname(restorePath), { recursive: true });
+            await fs.writeFile(restorePath, clearedMarkerContent, "utf8");
+          }
         },
       });
-      return { from: pre.from, to: pre.to };
+      return { from: pre.from, to: pre.to, staleLifecycleMarkerCleared: clearedMarkerContent !== null };
     }))
   ) {
     return rollbackAndFinish();
