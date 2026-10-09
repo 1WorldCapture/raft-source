@@ -1,12 +1,12 @@
 import { useState, type ReactNode } from "react";
-import { Modal, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
+import { Modal, Pressable, ScrollView, StyleSheet, TextInput, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ArrowLeft, ChevronDown, ChevronRight, Pencil } from "lucide-react-native";
 import type { AppMessageId } from "../i18n/catalog";
 import { useT } from "../i18n/provider";
 import { formatMessageStamp } from "../screens/messageTime";
 import { AppText } from "../ui/text";
-import { border, color } from "../ui/tokens";
+import { border, color, tabHeaderBlockHeight } from "../ui/tokens";
 import {
   historyPointStatus,
   historyStatusChange,
@@ -156,8 +156,9 @@ export function TaskDetailView({
 export function TaskDetailBar({ onBack, task }: { onBack: () => void; task: RaftTask }) {
   const t = useT();
   const insets = useSafeAreaInsets();
+  const { height } = useWindowDimensions();
   return (
-    <View style={[styles.bar, { paddingTop: insets.top + 8 }]}>
+    <View style={[styles.bar, { height: tabHeaderBlockHeight(height, insets.top), paddingTop: insets.top }]}>
       <Pressable accessibilityLabel={t("task.modal.close")} accessibilityRole="button" onPress={onBack} style={styles.back}>
         <ArrowLeft color={color.ink} size={14} strokeWidth={2.5} />
       </Pressable>
@@ -353,7 +354,6 @@ const styles = StyleSheet.create({
     borderBottomWidth: border.strong,
     flexDirection: "row",
     gap: 12,
-    paddingBottom: 8,
     paddingHorizontal: 16,
   },
   back: {
