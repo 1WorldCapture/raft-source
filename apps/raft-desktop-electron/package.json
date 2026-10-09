@@ -1,6 +1,6 @@
 {
   "name": "@botiverse/raft-desktop-electron",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "license": "FSL-1.1-ALv2",
   "private": true,
   "description": "Raft Desktop \u2014 the native macOS app for Raft, bundling its own frontend and connecting directly to the Raft backend.",
