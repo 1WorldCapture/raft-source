@@ -17,7 +17,7 @@ import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { BrowserWindow, app, dialog, ipcMain, nativeImage, protocol, session, shell } from "electron";
 import { ELECTRON_IPC_CHANNELS } from "@raft/desktop-contract";
-import { createComputerApi, runResident, runService } from "@botiverse/raft-computer/lib";
+import { createComputerApi, resolveRaftHome, runResident, runService } from "@botiverse/raft-computer/lib";
 import { installApplicationMenu } from "../main/appMenu.js";
 import { createCursorSdkControls } from "./cursorSdkControls.js";
 import { isCursorSdkE2eBuild } from "../main/cursorSdkE2eBuild.js";
@@ -47,7 +47,8 @@ import { defaultBinaryPath, defaultStandaloneHome, readHostMode, type ComputerHo
 import { createStandaloneCli } from "./standalone/cli.js";
 import { resolveBundledComputer } from "./standalone/bundled.js";
 import { StandaloneComputerHost, type StandaloneUiState } from "./standalone/standaloneHost.js";
-import { createMigrationController, refuseWhileMigrating, registerMigrationIpc } from "./standalone/migrationIpc.js";
+import { findInterruptedMigration } from "./standalone/migrationRecovery.js";
+import { createMigrationController, finishSwitch, refuseWhileMigrating, registerMigrationIpc } from "./standalone/migrationIpc.js";
 import { registerEmbeddedStubs, registerHostModeIpc, registerStandaloneIpc } from "./standalone/ipc.js";
 import { resolveBundledCursorSdkAssets } from "./cursorSdkAssets.js";
 import { installStatusMonitorLifecycle } from "../main/statusMonitorLifecycle.js";
@@ -884,7 +885,21 @@ if (headlessMode?.mode === "__service") {
     // Safety valve: RAFT_DESKTOP_DISABLE_COMPUTER_HOST=1 skips host init entirely
     // (no lifecycle mutation, no service spawn) — for dev/CI smoke boots on a
     // machine that already runs a Computer service. Default is enabled.
-    const hostMode: ComputerHostMode = await readHostMode(app.getPath("userData"));
+    let hostMode: ComputerHostMode = await readHostMode(app.getPath("userData"));
+    // A migration that succeeded but whose app-side finish never ran (app quit/crashed in between) must be finished
+    // BEFORE anything converges a built-in host at the old home.
+    try {
+      const interrupted = await findInterruptedMigration({ hostMode, embeddedHome: resolveRaftHome(), otherHomes: [defaultStandaloneHome()] });
+      if (interrupted) {
+        const bundled = resolveBundledComputer({ isPackaged: app.isPackaged, resourcesPath: process.resourcesPath });
+        const { warnings } = await finishSwitch({ bundled, binaryTarget: defaultBinaryPath(), userDataDir: app.getPath("userData") }, interrupted.to);
+        for (const w of warnings) console.warn(`[raft-desktop] migration recovery: ${w}`);
+        console.log(`[raft-desktop] migration recovery: finished the switch to ${interrupted.to}`);
+        hostMode = { mode: "standalone", home: interrupted.to };
+      }
+    } catch (error) {
+      console.warn(`[raft-desktop] migration recovery failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
     registerHostModeIpc(ipcMain, hostMode);
     if (hostMode.mode === "standalone") {
       // No ComputerHost: no converge, no login-item takeover, no watchdog. computerHost stays null, so
