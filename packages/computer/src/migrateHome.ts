@@ -143,6 +143,13 @@ export interface MigrateHomeDeps {
   /** The REAL user home (getpwuid source — immune to a $HOME override).
    *  Guards fixed-label launchd operations to the real LaunchAgents dir. */
   realHomeDir?: () => string;
+  /** Process sweep: every __service/__run process whose env or argv binds it
+   *  to ANY of the home's path SPELLINGS (realpath, original argument, and
+   *  the ~/.slock-raft alias — live processes carry whichever spelling their
+   *  launcher used; PM review on #281). */
+  scanHomeProcesses?: (homeSpellings: string[]) => Promise<HomeProcess[]>;
+  killHomeProcess?: (pid: number, signal: "SIGTERM" | "SIGKILL") => void;
+  sweepTimeoutMs?: number;
   selfCheckTimeoutMs?: number;
   selfCheckPollMs?: number;
 }
@@ -229,6 +236,93 @@ export function defaultRealHomeDir(): string {
   return os.homedir();
 }
 
+// --- whole-tree process sweep (PM blocking fix 2026-10-09) -------------------
+//
+// The embedded app can leave orphaned per-server runners behind: the desktop
+// service's SIGTERM handler only reaps children it still owns, and a runner
+// whose parent already died (ppid 1) survives api.stop untouched — seen live
+// in the xai end-to-end. Every __service/__run child is spawned with explicit
+// RAFT_HOME/SLOCK_HOME env (service.ts), so processes are attributed to a
+// home by argv (--slock-home) or environment, independent of parentage.
+
+export interface HomeProcess {
+  pid: number;
+  kind: "service" | "runner";
+  /** For __run children: the serverId argument. */
+  serverId: string | null;
+}
+
+/** Substring match with a boundary: the character after the candidate must
+ *  be end-of-string or whitespace. Without it `--slock-home ~/.slock` would
+ *  also hit `--slock-home ~/.slock-raft` and the sweep could kill unrelated
+ *  live processes (PM review on #281). */
+export function mentionsWithBoundary(text: string, candidate: string): boolean {
+  for (let idx = text.indexOf(candidate); idx !== -1; idx = text.indexOf(candidate, idx + 1)) {
+    const after = text[idx + candidate.length];
+    if (after === undefined || after === " ") return true;
+  }
+  return false;
+}
+
+export function argvMentionsHome(command: string, spelling: string): boolean {
+  for (const sep of ["--slock-home ", "--slock-home="]) {
+    for (let idx = command.indexOf(sep); idx !== -1; idx = command.indexOf(sep, idx + 1)) {
+      const valueStart = idx + sep.length;
+      if (command.startsWith(spelling, valueStart)) {
+        const after = command[valueStart + spelling.length];
+        if (after === undefined || after === " ") return true;
+      }
+    }
+  }
+  return false;
+}
+
+export async function defaultScanHomeProcesses(homeSpellings: string[]): Promise<HomeProcess[]> {
+  const spellings = [...new Set(homeSpellings.map((sp) => sp).filter((sp) => sp.length > 0))];
+  if (spellings.length === 0) return [];
+  const { execFile } = await import("node:child_process");
+  const { promisify } = await import("node:util");
+  const run = promisify(execFile) as (cmd: string, args: string[]) => Promise<{ stdout: string }>;
+  let listing: string;
+  try {
+    listing = (await run("ps", ["-axo", "pid=,command="])).stdout;
+  } catch {
+    return [];
+  }
+  const found: HomeProcess[] = [];
+  for (const line of listing.split("\n")) {
+    const match = line.trim().match(/^(\d+)\s+([\s\S]+)$/);
+    if (!match || !match[2]) continue;
+    const pid = Number(match[1]);
+    const command = match[2];
+    const isService = /(^|\s)__service(\s|$)/.test(command);
+    const runMatch = command.match(/(?:^|\s)__run\s+(\S+)/);
+    if (!isService && !runMatch) continue;
+    if (spellings.some((spelling) => argvMentionsHome(command, spelling))) {
+      found.push({ pid, kind: isService ? "service" : "runner", serverId: runMatch?.[1] ?? null });
+      continue;
+    }
+    // Environment attribution: same-user processes expose their env via ps.
+    try {
+      const envText = (await run("ps", ["eww", "-p", String(pid), "-o", "command="])).stdout;
+      if (spellings.some((spelling) => mentionsWithBoundary(envText, spelling))) {
+        found.push({ pid, kind: isService ? "service" : "runner", serverId: runMatch?.[1] ?? null });
+      }
+    } catch {
+      /* process exited between listing and env read */
+    }
+  }
+  return found;
+}
+
+export function defaultKillHomeProcess(pid: number, signal: "SIGTERM" | "SIGKILL"): void {
+  try {
+    process.kill(pid, signal);
+  } catch {
+    /* already gone */
+  }
+}
+
 export interface MigrateHomeOptions {
   from?: string;
   to?: string;
@@ -286,6 +380,9 @@ async function readLinkOrNull(p: string): Promise<string | null> {
  *  gathered read-only. `blockers` non-empty means --apply would refuse. */
 export interface MigratePreflight {
   from: string;
+  /** The ORIGINAL --from spelling (pre-realpath): live processes may carry
+   *  it in env/argv, so the sweep matches every spelling (PM #281 review). */
+  fromArg: string;
   to: string;
   /** "in-place" when from and to resolve to the same directory (a fresh
    *  machine whose embedded home already IS ~/.slock) — takeover only. */
@@ -319,7 +416,8 @@ export async function preflightMigrateHome(
 
   const { resolveRaftHome } = await import("./paths.js");
   const fromRaw = opts.from ?? resolveRaftHome(env, homeDir);
-  const from = path.resolve(resolveTilde(fromRaw, homeDir));
+  const fromArg = path.resolve(resolveTilde(fromRaw, homeDir));
+  const from = fromArg;
   const to = path.resolve(resolveTilde(opts.to ?? path.join(homeDir, ".slock"), homeDir));
 
   // Source must be an existing directory (resolve through symlinks so the
@@ -446,6 +544,7 @@ export async function preflightMigrateHome(
 
   return {
     from: fromReal,
+    fromArg,
     to,
     mode: inPlace ? "in-place" : "move",
     blockers,
@@ -540,6 +639,58 @@ export async function migrateHome(
 
   const journal: UndoEntry[] = [];
   const backups: MigrateBackupEntry[] = [];
+  const scanHomeProcesses = deps.scanHomeProcesses ?? defaultScanHomeProcesses;
+  const killHomeProcess = deps.killHomeProcess ?? defaultKillHomeProcess;
+
+  /** Every path spelling a live process could carry for this home: the
+   *  realpath, the ORIGINAL argument, and the ~/.slock-raft alias (owner's
+   *  running processes carry the alias spelling via launchctl setenv). */
+  const spellingsFor = (primary: string, original: string | null, alias: string | null): string[] => {
+    const out = new Set<string>([primary]);
+    if (original !== null) out.add(original);
+    if (alias !== null) out.add(alias);
+    return [...out];
+  };
+  const fromSpellings = spellingsFor(pre.from, pre.fromArg, pre.alias?.path ?? null);
+  // For the target home: the path itself, its realpath once it exists, and
+  // the alias (repointed at it in move mode; already pointing at it in
+  // in-place mode). Computed lazily — `to` only exists after the move.
+  const toSpellings = (): string[] => {
+    const out = new Set<string>([pre.to]);
+    if (pre.alias) out.add(pre.alias.path);
+    return [...out];
+  };
+
+  /** TERM -> grace -> KILL -> rescan; returns whatever is STILL alive. */
+  const sweepHomeTree = async (homeSpellings: string[]): Promise<HomeProcess[]> => {
+    const deadline = Date.now() + (deps.sweepTimeoutMs ?? 10_000);
+    let procs = await scanHomeProcesses(homeSpellings);
+    if (procs.length === 0) return procs;
+    for (const proc of procs) killHomeProcess(proc.pid, "SIGTERM");
+    while (procs.length > 0 && Date.now() < deadline) {
+      await sleep(500);
+      procs = await scanHomeProcesses(homeSpellings);
+    }
+    if (procs.length > 0) {
+      for (const proc of procs) killHomeProcess(proc.pid, "SIGKILL");
+      await sleep(500);
+      procs = await scanHomeProcesses(homeSpellings);
+    }
+    return procs;
+  };
+
+  /** Graceful service stop + whole-tree sweep; THROWS when anything of this
+   *  home survives (the step fails into rollback — PM blocking fix). */
+  const stopHomeCompletely = async (home: string, homeSpellings: string[]): Promise<Record<string, unknown>> => {
+    await stopServiceAt(home);
+    const remaining = await sweepHomeTree(homeSpellings);
+    if (remaining.length > 0) {
+      throw new Error(
+        `home process tree did not stop (${remaining.map((p) => `${p.kind}:${p.pid}`).join(", ")} remain for ${home})`,
+      );
+    }
+    return { home, treeClean: true };
+  };
   let failure: string | null = null;
   let failureStep: MigrateStep | null = null;
 
@@ -628,11 +779,21 @@ export async function migrateHome(
   // may leave the service half-stopped — run the rollback path so a service
   // that was up before gets started again.
   if (pre.serviceWasRunning) {
-    if (!(await runStep("stop", () => stopServiceAt(pre.from)))) {
+    if (!(await runStep("stop", () => stopHomeCompletely(pre.from, fromSpellings)))) {
       return rollbackAndFinish();
     }
   } else {
-    record({ step: "stop", status: "skipped", detail: { reason: "service not running" } });
+    // Even with no live pidfile, an orphaned runner tree may exist (the
+    // embedded app can die without reaping) — sweep anyway; an empty tree is
+    // a no-op.
+    if (!(await runStep("stop", () => sweepHomeTree(fromSpellings).then((remaining) => {
+      if (remaining.length > 0) {
+        throw new Error(`home process tree did not stop (${remaining.map((p) => `${p.kind}:${p.pid}`).join(", ")} remain for ${pre.from})`);
+      }
+      return { home: pre.from, treeClean: true, serviceWasRunning: false };
+    })))) {
+      return rollbackAndFinish();
+    }
   }
 
   // Step 3 — the move itself: rename (atomic on the same filesystem).
@@ -891,6 +1052,7 @@ export async function migrateHome(
           label: "stop service at target",
           undo: async () => {
             await stopServiceAt(pre.to);
+            await sweepHomeTree(toSpellings()).catch(() => [] as HomeProcess[]);
             try {
               await convergeCarrierAt(pre.to, "disabled");
             } catch {
@@ -954,7 +1116,29 @@ export async function migrateHome(
         if (agentDirs !== pre.agentDirs) {
           throw new Error(`agent directory count changed across the move (before=${pre.agentDirs}, after=${agentDirs})`);
         }
-        return { serviceRunning: true, serversOnline: true, serverCount: last.serverCount, agentDirs };
+        // Exactly one runner tree per server (PM blocking fix): a surviving
+        // OLD runner alongside the new home's runner means duplicate agents.
+        // Scan every spelling of the target: live children may carry the
+        // alias or literal spelling rather than the resolved path (#281).
+        let toReal: string | null = null;
+        try {
+          toReal = await fs.realpath(pre.to);
+        } catch {
+          /* home must exist here — self-check already saw a live service */
+        }
+        const procs = await scanHomeProcesses([...toSpellings(), ...(toReal !== null ? [toReal] : [])]);
+        const runnersByServer = new Map<string, number>();
+        for (const proc of procs) {
+          if (proc.kind !== "runner" || proc.serverId === null) continue;
+          runnersByServer.set(proc.serverId, (runnersByServer.get(proc.serverId) ?? 0) + 1);
+        }
+        const duplicates = [...runnersByServer.entries()].filter(([, count]) => count > 1);
+        if (duplicates.length > 0) {
+          throw new Error(
+            `duplicate runner trees after migration: ${duplicates.map(([id, n]) => `${id} x${n}`).join(", ")}`,
+          );
+        }
+        return { serviceRunning: true, serversOnline: true, serverCount: last.serverCount, agentDirs, runnerTrees: [...runnersByServer.values()].reduce((a, b) => a + b, 0) };
       }))
     ) {
       return rollbackAndFinish();
