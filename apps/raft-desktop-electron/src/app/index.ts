@@ -43,6 +43,11 @@ import { ServerOriginConfig } from "./serverOriginConfig.js";
 import { requestStorageWipeAndRelaunch, resolvePendingStorageWipe } from "./storageDoctor.js";
 import { createOAuthCoordinator } from "./oauthCoordinator.js";
 import { ComputerHost } from "./computerHost.js";
+import { defaultBinaryPath, defaultStandaloneHome, readHostMode, type ComputerHostMode } from "./standalone/hostMode.js";
+import { createStandaloneCli } from "./standalone/cli.js";
+import { resolveBundledComputer } from "./standalone/bundled.js";
+import { StandaloneComputerHost, type StandaloneUiState } from "./standalone/standaloneHost.js";
+import { registerEmbeddedStubs, registerHostModeIpc, registerStandaloneIpc } from "./standalone/ipc.js";
 import { resolveBundledCursorSdkAssets } from "./cursorSdkAssets.js";
 import { installStatusMonitorLifecycle } from "../main/statusMonitorLifecycle.js";
 import { createStatusMonitor } from "../main/statusMonitor.js";
@@ -158,9 +163,12 @@ const headlessMode = findHeadlessMode(process.argv);
 // lock and has consumed any pending wipe (see the lock-held branch below).
 let storageWipedThisBoot = false;
 let computerHost: ComputerHost | null = null;
+// Standalone mode (computer-host.json): the Computer is an independent `raft-computer`; this app is only its UI.
+let standaloneHost: StandaloneComputerHost | null = null;
 const cursorSdkControls = createCursorSdkControls(() => {
-  if (!computerHost) throw new Error("Local Computer is not ready.");
-  return computerHost.slockHome;
+  const home = computerHost?.slockHome ?? standaloneHost?.home;
+  if (!home) throw new Error("Local Computer is not ready.");
+  return home;
 });
 let menubarResident: MenubarResident | null = null;
 let mainWindow: BrowserWindow | null = null;
@@ -868,7 +876,31 @@ if (headlessMode?.mode === "__service") {
     // Safety valve: RAFT_DESKTOP_DISABLE_COMPUTER_HOST=1 skips host init entirely
     // (no lifecycle mutation, no service spawn) — for dev/CI smoke boots on a
     // machine that already runs a Computer service. Default is enabled.
-    if (process.env.RAFT_DESKTOP_DISABLE_COMPUTER_HOST !== "1") {
+    const hostMode: ComputerHostMode = await readHostMode(app.getPath("userData"));
+    registerHostModeIpc(ipcMain, hostMode);
+    if (hostMode.mode === "standalone") {
+      // No ComputerHost: no converge, no login-item takeover, no watchdog. computerHost stays null, so
+      // the quit flow below has nothing to stop — quitting the app never touches the Computer or its agents.
+      const binaryPath = defaultBinaryPath();
+      standaloneHost = new StandaloneComputerHost({
+        home: hostMode.home,
+        binaryPath,
+        cli: createStandaloneCli({ binaryPath, home: hostMode.home }),
+        bundled: resolveBundledComputer({ isPackaged: app.isPackaged, resourcesPath: process.resourcesPath }),
+      });
+      registerEmbeddedStubs(ipcMain);
+      const monitor = registerStandaloneIpc({
+        ipc: ipcMain,
+        host: standaloneHost,
+        publish: (state: StandaloneUiState) => {
+          for (const win of BrowserWindow.getAllWindows()) {
+            if (!win.isDestroyed()) win.webContents.send("standalone:state-update", state);
+          }
+        },
+        quitting: () => lifecycle.quitting,
+      });
+      installStatusMonitorLifecycle(monitor, () => lifecycle.quitting);
+    } else if (process.env.RAFT_DESKTOP_DISABLE_COMPUTER_HOST !== "1") {
       computerHost = new ComputerHost({ configuredOrigin: serverOriginConfig.current() });
       await computerHost.restoreSelection();
       registerComputerIpc(computerHost);

@@ -127,6 +127,18 @@ contextBridge.exposeInMainWorld("raftDesktop", {
   // Local Computer host — this app is also the OS-supervised host of the local
   // raft-computer service. The renderer surfaces/controls it through here; the
   // heavy service is detached (survives app quit). Present => host-capable build.
+  // Standalone-mode Computer (computer-host.json = standalone): the app is only the UI of an independent
+  // `raft-computer`. `hostMode` tells the renderer which UI to show; `standalone.*` only works in that mode.
+  standalone: {
+    hostMode: (): Promise<{ mode: "embedded" } | { mode: "standalone"; home: string }> => ipcRenderer.invoke("computer:host-mode"),
+    getState: (): Promise<unknown> => ipcRenderer.invoke("standalone:state"),
+    onState: (handler: (state: unknown) => void): (() => void) => subscribe<unknown>("standalone:state-update", handler),
+    start: (): Promise<unknown> => ipcRenderer.invoke("standalone:start"),
+    stop: (): Promise<unknown> => ipcRenderer.invoke("standalone:stop"),
+    install: (): Promise<unknown> => ipcRenderer.invoke("standalone:install"),
+    upgrade: (): Promise<unknown> => ipcRenderer.invoke("standalone:upgrade"),
+  },
+
   computer: {
     hostCapable: true,
     // Local machine identity (OS hostname) so the renderer can correlate THIS

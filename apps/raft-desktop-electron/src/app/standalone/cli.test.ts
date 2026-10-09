@@ -96,3 +96,10 @@ esac
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("contract fixture: the exact output of the computer package's projectStatusJson (PR #263) parses, null placeholders included", () => {
+  const real = '{"home":"/home/x/.slock","socket":"/home/x/.slock/computer/run/service.sock","service":{"state":"running","pid":7,"version":"1.0.29","lastError":null,"desiredState":"running"},"servers":[{"serverId":"s1","slug":"srv","serverUrl":"https://example.test","daemonState":"online","lastError":null,"agentCount":null}],"agentCount":null,"cursorSdk":{"installed":false,"version":null,"path":null},"hostLifecycleOwner":null,"migration":{"state":"none","resultFile":"/home/x/.slock/computer/migrate-result.json"}}';
+  const status = parseStatusJson(real);
+  assert.deepEqual([status.service.state, status.service.pid, status.desiredState, status.agentCount, status.servers[0]?.agentCount, status.servers[0]?.daemonState], ["running", 7, "running", 0, 0, "online"]);
+  assert.deepEqual([status.cursorSdk.installed, status.hostLifecycleOwner, status.migration?.state], [false, null, "none"]);
+});
