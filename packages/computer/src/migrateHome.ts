@@ -619,14 +619,32 @@ export async function migrateHome(
         removedEmptyTarget = true;
       }
       await fs.rename(pre.from, pre.to);
+      // The host-lifecycle owner record moved with the home but describes the
+      // OLD home's launchd job (its label/definition carry the old home's
+      // hash; the job itself was retired in the source-carrier step). Left in
+      // place, converge at the new home fails closed with
+      // HOST_LIFECYCLE_LAST_KNOWN_GOOD_UNVERIFIED (drill A1 finding). Clear
+      // it — the start step converges a fresh carrier for the new home.
+      const markerPath = path.join(pre.to, "computer", "host-lifecycle-owner.json");
+      let clearedMarker: { path: string; content: string } | null = null;
+      try {
+        clearedMarker = { path: markerPath, content: await fs.readFile(markerPath, "utf8") };
+        await fs.rm(markerPath, { force: true });
+      } catch {
+        clearedMarker = null;
+      }
       journal.push({
         label: "move home back",
         undo: async () => {
           await fs.rename(pre.to, pre.from);
           if (removedEmptyTarget) await fs.mkdir(pre.to, { recursive: true });
+          if (clearedMarker !== null) {
+            await fs.mkdir(path.dirname(clearedMarker.path), { recursive: true });
+            await fs.writeFile(clearedMarker.path, clearedMarker.content, "utf8");
+          }
         },
       });
-      return { from: pre.from, to: pre.to };
+      return { from: pre.from, to: pre.to, staleLifecycleMarkerCleared: clearedMarker !== null };
     }))
   ) {
     return rollbackAndFinish();
