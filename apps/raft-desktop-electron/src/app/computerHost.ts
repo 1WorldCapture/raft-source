@@ -48,6 +48,7 @@ import { ComputerProcessScope, readComputerProcesses, type ComputerProcessSnapsh
 import { connectDeployment, readDeploymentSelection, type DeploymentConnectionPlan } from "./deploymentConnection.js";
 import { CONFIGURED_API_ORIGIN, OFFICIAL_API_ORIGINS } from "./configuredApiOrigin.js";
 import { runServiceRecycle } from "./serviceRecycle.js";
+import { chooseSocketSafeHome } from "./socketSafeHome.js";
 
 // Mirrors `paths.ts` CURRENT_SCHEMA_VERSION (readers tolerate a missing value,
 // but we stamp it like login.ts does).
@@ -162,7 +163,13 @@ class ComputerHost {
     process.env.SLOCK_HOME = home;
   }
 
-  private selectHome(home: string): void {
+  private selectHome(chosen: string): void {
+    // The service binds <home>/computer/run/service.sock (<= 103 bytes): a too-deep home is reached through the short
+    // ~/.slock-raft alias when that alias points at it; otherwise say so instead of failing to bind silently.
+    const safe = chooseSocketSafeHome(chosen);
+    const home = safe.home;
+    if (safe.error) this.selectionError = Object.assign(new Error(safe.error), { code: "SERVICE_SOCKET_PATH_TOO_LONG" });
+    else if (safe.usedAlias) console.warn(`[raft-desktop] ${chosen} is too deep for the service socket; using the ${home} alias`);
     this.pinProcessEnv(home);
     this.slockHome = home;
     this.processScope = new ComputerProcessScope(home);
