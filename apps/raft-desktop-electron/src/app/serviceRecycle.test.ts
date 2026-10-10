@@ -112,3 +112,22 @@ test("reduceConvergeFailure keeps ComputerServiceError codes and collapses the r
 test("defaults exist and are sane", () => {
   assert.ok(DEFAULT_CLEAR_POLL_MS > 0 && DEFAULT_CLEAR_POLL_MS <= 1000);
 });
+
+test("a start() that throws but whose service comes up shortly after is a success, not a failure", async () => {
+  const s = scripted({ start: new Error("timed out waiting for the service") });
+  let checks = 0;
+  s.deps.isRunning = async () => { checks += 1; return checks >= 3; };
+  await runServiceRecycle(s.deps, { startRecoveryMs: 10_000, clearPollMs: 1 });
+  assert.equal(checks, 3);
+  assert.deepEqual(s.settled, [{ ok: true }]);
+});
+
+test("a start() that throws and a service that never comes up is still RECYCLE_START_FAILED", async () => {
+  const s = scripted({ start: new Error("boom") });
+  s.deps.isRunning = async () => false;
+  await assert.rejects(
+    runServiceRecycle(s.deps, { startRecoveryMs: 30, clearPollMs: 1 }),
+    (error: unknown) => (error as { code?: string }).code === RECYCLE_START_FAILED,
+  );
+  assert.equal((s.settled[0] as { code?: string }).code, RECYCLE_START_FAILED);
+});

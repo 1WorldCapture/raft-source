@@ -525,6 +525,7 @@ class ComputerHost {
       start: async () => {
         await this.api.start({ serverId: null, serverLabel: null });
       },
+      isRunning: async () => (await this.api.getStatus()).service?.running === true,
       isCleared: async () => {
         try {
           const status = await this.api.getStatus();

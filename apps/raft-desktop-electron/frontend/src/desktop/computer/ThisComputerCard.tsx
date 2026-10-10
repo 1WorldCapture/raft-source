@@ -17,7 +17,7 @@
 //   - a newer version on the CDN → Update (orange)
 //   - an operation in flight → inline progress, controls hidden
 import { Monitor } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuthStore } from "@web/store/authStore";
 import { useServerStore } from "@web/store/serverStore";
 import { RUNTIME_API_ORIGIN } from "@web/desktopRuntimeEnvironment";
@@ -79,6 +79,15 @@ export default function ThisComputerCard() {
       unsubscribe();
     };
   }, [bridge]);
+
+  // An error from a failed operation (e.g. "Replace old service" reporting a start timeout) must not outlive the
+  // recovery: once the service goes from not-running to running, the old message is stale.
+  const wasRunning = useRef<boolean | null>(null);
+  useEffect(() => {
+    const running = status?.service?.running ?? null;
+    if (running === true && wasRunning.current === false) setError(null);
+    if (running !== null) wasRunning.current = running;
+  }, [status]);
 
   useEffect(() => {
     if (!bridge?.getUpgradeInfo) return;
