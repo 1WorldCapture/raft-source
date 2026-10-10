@@ -80,6 +80,8 @@ export interface MigrateRunInput {
   env?: NodeJS.ProcessEnv;
   timeoutMs?: number;
   onEvent?: (event: MigrationEvent) => void;
+  /** Absolute epoch-ms time by which the command must be done; it rolls itself back at that moment (needs --deadline support). */
+  deadlineMs?: number;
   /** The command's pid, once spawned (for cancel). */
   onSpawn?: (pid: number) => void;
 }
@@ -95,7 +97,7 @@ export type MigrateRunner = (input: MigrateRunInput) => Promise<MigrateRun>;
  */
 export const runMigrateHome: MigrateRunner = (input) =>
   new Promise((resolve) => {
-    const args = ["migrate-home", "--from", input.from, ...(input.apply ? ["--apply"] : []), "--json"];
+    const args = ["migrate-home", "--from", input.from, ...(input.apply ? ["--apply"] : []), ...(input.apply && input.deadlineMs ? ["--deadline", String(Math.round(input.deadlineMs))] : []), "--json"];
     const events: MigrationEvent[] = [];
     let final: MigrationFinal | null = null;
     let dry: "planned" | "blocked" | null = null;
@@ -234,6 +236,9 @@ export interface MigrationDeps {
   signal?: (pid: number, signal: NodeJS.Signals) => void;
 }
 
+/** Hard limit of one migration; the Computer rolls back on its own when it passes (same as its in-progress marker's deadlineAt). */
+export const MIGRATION_DEADLINE_MS = 10 * 60_000;
+
 const EMPTY: MigrationState = { phase: "idle", from: null, to: null, steps: [], blockers: [], warnings: [], error: null, resultFile: null, relaunching: false, slow: false, inPlace: false, cancellable: false, cancelRequested: false, reason: null };
 const resultFileOf = (home: string | null) => (home ? path.join(home, "computer", "migrate-result.json") : null);
 const strings = (value: unknown): string[] => (Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : []);
@@ -311,6 +316,8 @@ export class MigrationController {
       const cancelSupported = (await this.deps.supportsCancel?.(prepared.binaryPath).catch(() => false)) ?? false;
       let run = await (this.deps.run ?? runMigrateHome)({
         binaryPath: prepared.binaryPath, from: prepared.from, apply: true, onEvent: (e) => this.addStep(e),
+        // A Computer that supports cancel also takes a hard time limit: past it the command rolls itself back.
+        ...(cancelSupported ? { deadlineMs: Date.now() + MIGRATION_DEADLINE_MS } : {}),
         onSpawn: (pid) => { this.pid = pid; this.set({ ...this.state, cancellable: cancelSupported }); },
       });
       this.pid = null;
