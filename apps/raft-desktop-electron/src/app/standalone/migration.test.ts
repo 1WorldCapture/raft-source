@@ -234,3 +234,30 @@ test("an unexpected exception anywhere becomes an error state, never a stuck dia
   assert.deepEqual([s.phase, s.error], ["error", "kaboom"]);
   assert.equal(c.reset().phase, "idle", "and the dialog can be dismissed / retried");
 });
+
+test("runner: the command's stdout is a file, not a pipe (a killed app cannot make it die with EPIPE) and it is detached", async () => {
+  const body = `if [ -p /proc/self/fd/1 ]; then K=pipe; else K=file; fi
+echo "{\\"step\\":\\"stop\\",\\"status\\":\\"ok\\",\\"detail\\":{\\"stdout\\":\\"$K\\"}}"
+echo '{"dryRun":true,"outcome":"planned","blocked":false}'`;
+  await withScript(body, async (script) => {
+    const run = await runMigrateHome({ binaryPath: script, from: "/a", apply: false });
+    assert.equal(run.outcome, "planned");
+    assert.equal(run.events[0].detail?.stdout, "file");
+  });
+});
+
+test("runner: events stream while the command is still running (tail), and a late final line is read after exit", async () => {
+  const body = `echo '{"step":"stop","status":"start"}'
+sleep 1
+echo '{"step":"stop","status":"ok"}'
+printf '{"result":"success","from":"/a","to":"/b","error":null}'`;
+  await withScript(body, async (script) => {
+    const seen: string[] = [];
+    const t0 = Date.now();
+    let firstAt = 0;
+    const run = await runMigrateHome({ binaryPath: script, from: "/a", apply: true, onEvent: (e) => { if (!firstAt) firstAt = Date.now() - t0; seen.push(e.status); } });
+    assert.deepEqual(seen, ["start", "ok"]);
+    assert.ok(firstAt < 900, `first event arrived while the command was still running (${firstAt}ms)`);
+    assert.equal(run.outcome, "success", "an unterminated final line is still read");
+  });
+});

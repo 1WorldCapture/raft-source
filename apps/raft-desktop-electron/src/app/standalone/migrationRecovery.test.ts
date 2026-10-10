@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { findInterruptedMigration, type MigrationResultSummary } from "./migrationRecovery.ts";
+import { findInterruptedMigration, findMigratedAwayHome, waitForRunningMigration, type InProgressMarker, type MigrationResultSummary } from "./migrationRecovery.ts";
 
 const EMBEDDED = "/Users/u/app/computer-slock-raft";
 const success = (over: Partial<MigrationResultSummary> = {}): MigrationResultSummary => ({
@@ -52,4 +52,47 @@ test("a result about some other home is not ours", async () => {
 
 test("the new home must exist as a directory", async () => {
   assert.equal(await run({ results: { "/Users/u/.slock": success() }, toExists: false }), null);
+});
+
+const marker = (pid: number): InProgressMarker => ({ pid, from: "/h/old", to: "/h/.slock", startedAt: "2026-10-09T12:00:00Z", home: "/h/old" });
+
+test("a migration still running at launch is waited for (and only then does startup go on)", async () => {
+  let alive = 3;
+  const waits: number[] = [];
+  const waited = await waitForRunningMigration({
+    hostMode: { mode: "embedded" }, homes: ["/h/old", "/h/.slock"],
+    readMarker: async (home) => (home === "/h/.slock" ? marker(4242) : null),
+    isAlive: () => alive-- > 0, sleep: async (ms) => { waits.push(ms); },
+  });
+  assert.equal(waited, true);
+  assert.ok(waits.length >= 2, "polled until the process was gone");
+});
+
+test("nothing running / stale marker of a dead pid / already standalone: no waiting", async () => {
+  const base = { homes: ["/h/old"], sleep: async () => { throw new Error("must not sleep"); } };
+  assert.equal(await waitForRunningMigration({ ...base, hostMode: { mode: "embedded" }, readMarker: async () => null }), false);
+  assert.equal(await waitForRunningMigration({ ...base, hostMode: { mode: "embedded" }, readMarker: async () => marker(1), isAlive: () => false }), false);
+  assert.equal(await waitForRunningMigration({ ...base, hostMode: { mode: "standalone", home: "/h" }, readMarker: async () => marker(1), isAlive: () => true }), false);
+});
+
+test("waiting is bounded", async () => {
+  const waited = await waitForRunningMigration({ hostMode: { mode: "embedded" }, homes: ["/h"], readMarker: async () => marker(1), isAlive: () => true, sleep: async () => undefined, timeoutMs: -1 });
+  assert.equal(waited, true);
+});
+
+test("built-in home gone + the standard home holds a migrated Computer: adopt it (never rebuild an empty built-in home)", async () => {
+  const exists = (present: string[]) => async (p: string) => present.includes(p);
+  const base = { hostMode: { mode: "embedded" } as const, embeddedHome: "/h/old", standardHome: "/h/.slock" };
+  assert.equal(await findMigratedAwayHome({ ...base, exists: exists(["/h/.slock/computer/migrate-result.json"]) }), "/h/.slock");
+  assert.equal(await findMigratedAwayHome({ ...base, exists: exists(["/h/.slock/computer/run/service.sock"]) }), "/h/.slock");
+  assert.equal(await findMigratedAwayHome({ ...base, exists: exists(["/h/.slock/computer/migrate-in-progress.json"]) }), "/h/.slock");
+});
+
+test("…but not when the built-in home still exists, when it IS the standard home, when nothing was migrated, or in standalone mode", async () => {
+  const exists = (present: string[]) => async (p: string) => present.includes(p);
+  const base = { hostMode: { mode: "embedded" } as const, embeddedHome: "/h/old", standardHome: "/h/.slock" };
+  assert.equal(await findMigratedAwayHome({ ...base, exists: exists(["/h/old", "/h/.slock/computer/migrate-result.json"]) }), null);
+  assert.equal(await findMigratedAwayHome({ ...base, embeddedHome: "/h/.slock", exists: exists(["/h/.slock/computer/migrate-result.json"]) }), null);
+  assert.equal(await findMigratedAwayHome({ ...base, exists: exists(["/h/.slock/computer/servers"]) }), null);
+  assert.equal(await findMigratedAwayHome({ ...base, hostMode: { mode: "standalone", home: "/h/.slock" }, exists: exists(["/h/.slock/computer/migrate-result.json"]) }), null);
 });

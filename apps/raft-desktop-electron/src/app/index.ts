@@ -47,7 +47,7 @@ import { defaultBinaryPath, defaultStandaloneHome, readHostMode, type ComputerHo
 import { createStandaloneCli } from "./standalone/cli.js";
 import { resolveBundledComputer } from "./standalone/bundled.js";
 import { StandaloneComputerHost, type StandaloneUiState } from "./standalone/standaloneHost.js";
-import { findInterruptedMigration } from "./standalone/migrationRecovery.js";
+import { findInterruptedMigration, findMigratedAwayHome, waitForRunningMigration } from "./standalone/migrationRecovery.js";
 import { createMigrationController, finishSwitch, refuseWhileMigrating, registerMigrationIpc } from "./standalone/migrationIpc.js";
 import { registerEmbeddedStubs, registerHostModeIpc, registerStandaloneIpc } from "./standalone/ipc.js";
 import { resolveBundledCursorSdkAssets } from "./cursorSdkAssets.js";
@@ -889,6 +889,12 @@ if (headlessMode?.mode === "__service") {
     // A migration that succeeded but whose app-side finish never ran (app quit/crashed in between) must be finished
     // BEFORE anything converges a built-in host at the old home.
     try {
+      // 1. The command may still be running by itself (the app died mid-move): let it finish first.
+      if (await waitForRunningMigration({
+        hostMode, homes: [resolveRaftHome(), defaultStandaloneHome()],
+        onWaiting: (m) => console.log(`[raft-desktop] a migration (pid ${m.pid}) is still running; waiting for it to finish before starting`),
+      })) console.log("[raft-desktop] the interrupted migration has finished");
+      // 2. A finished one whose app-side finish never ran.
       const interrupted = await findInterruptedMigration({ hostMode, embeddedHome: resolveRaftHome(), otherHomes: [defaultStandaloneHome()] });
       if (interrupted) {
         const bundled = resolveBundledComputer({ isPackaged: app.isPackaged, resourcesPath: process.resourcesPath });
@@ -896,6 +902,15 @@ if (headlessMode?.mode === "__service") {
         for (const w of warnings) console.warn(`[raft-desktop] migration recovery: ${w}`);
         console.log(`[raft-desktop] migration recovery: finished the switch to ${interrupted.to}`);
         hostMode = { mode: "standalone", home: interrupted.to };
+      } else {
+        // 3. The built-in home is gone because the Computer was moved away: adopt it, never rebuild an empty one.
+        const away = await findMigratedAwayHome({ hostMode, embeddedHome: resolveRaftHome(), standardHome: defaultStandaloneHome() });
+        if (away) {
+          const bundled = resolveBundledComputer({ isPackaged: app.isPackaged, resourcesPath: process.resourcesPath });
+          await finishSwitch({ bundled, binaryTarget: defaultBinaryPath(), userDataDir: app.getPath("userData") }, away);
+          console.log(`[raft-desktop] the Computer was moved to ${away}; adopting it`);
+          hostMode = { mode: "standalone", home: away };
+        }
       }
     } catch (error) {
       console.warn(`[raft-desktop] migration recovery failed: ${error instanceof Error ? error.message : String(error)}`);
