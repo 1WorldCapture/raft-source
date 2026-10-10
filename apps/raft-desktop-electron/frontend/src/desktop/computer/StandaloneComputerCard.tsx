@@ -7,6 +7,7 @@ import Button from "@web/components/ui/Button";
 import StatusDot from "@web/components/ui/StatusDot";
 import { MachineRunLabel } from "@web/components/machine/MachineRunLabel";
 import { useAppNavigate } from "@web/hooks/useAppNavigate";
+import { useAgentStore } from "@web/store/agentStore";
 import { getComputerRowDotStatus, getComputerRowDotTone } from "@web/utils/computerUpgradeIndicator";
 import { deriveStandaloneCard, friendlyStandaloneError, type StandaloneAction } from "./standaloneCardLogic";
 import { useSelfMachine } from "./useSelfComputer";
@@ -21,6 +22,8 @@ export default function StandaloneComputerCard() {
   // (name, status, agents come from the server; click opens its detail) and the plain row is hidden by the mount.
   const selfMachine = useSelfMachine();
   const nav = useAppNavigate();
+  // Same count the machine's detail page shows ("AGENT n"): the server's agents placed on this machine.
+  const agentCount = useAgentStore((s) => (selfMachine ? s.agents.filter((a) => !a.deletedAt && a.machineId === selfMachine.id).length : 0));
   const openDetail = () => { if (selfMachine) nav.toComputer(selfMachine.id); };
   // In-app confirmation: window.confirm is a synchronous native modal that freezes the renderer until answered.
   const [asking, setAsking] = useState<StandaloneAction | null>(null);
@@ -54,10 +57,11 @@ export default function StandaloneComputerCard() {
           {selfMachine ? (
             <>
               <div className="mt-0.5 truncate font-mono text-[11px] text-black/50"><MachineRunLabel machine={selfMachine} /></div>
+              <div className="mt-0.5 text-[11px] text-black/60" data-testid="standalone-card-agent-count">{agentCount} {agentCount === 1 ? "agent" : "agents"}</div>
               {model.tone !== "ok" ? <div className="mt-0.5 text-[11px] font-medium text-black/70">{model.title}{model.detail ? ` — ${model.detail}` : ""}</div> : null}
             </>
           ) : model.detail ? <div className="mt-0.5 text-[11px] text-black/60">{model.detail}</div> : null}
-          {model.version ? <div className="mt-0.5 font-mono text-[10px] text-black/40">Computer {model.version}</div> : null}
+          {model.version && !selfMachine ? <div className="mt-0.5 font-mono text-[10px] text-black/40">Computer {model.version}</div> : null}
         </div>
       </div>
       {error || model.actions.length > 0 ? (
