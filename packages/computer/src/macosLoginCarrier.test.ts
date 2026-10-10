@@ -501,6 +501,31 @@ test("a non-transient bootstrap failure is not retried", async () => {
   }
 });
 
+test("a definition re-serialized by a tool (same content, different bytes) is not replaced on the next converge", async () => {
+  const f = await refreshFixture("raft-macos-login-reserialized-");
+  try {
+    const first = await convergeCliHostLifecycle(f.slockHome, "enabled", f.baseDeps);
+    const original = await readFile(first.definitionPath!, "utf8");
+    // What `plutil -convert xml1` produces: tab indentation, alphabetically sorted keys.
+    const tabbed = original
+      .replace(/^ {2}/gmu, "")
+      .replace(/^( +)/gmu, (spaces) => "\t".repeat(Math.max(1, spaces.length / 2)));
+    assert.notEqual(tabbed, original);
+    await writeFile(first.definitionPath!, tabbed, "utf8");
+    f.harness.calls.length = 0;
+    await convergeCliHostLifecycle(f.slockHome, "enabled", f.baseDeps);
+    assert.equal(
+      f.harness.calls.some((call) => call[1] === "bootout" || call[1] === "bootstrap"),
+      false,
+      "a healthy carrier whose plist only differs in formatting must be left alone",
+    );
+    assert.equal(await readFile(first.definitionPath!, "utf8"), tabbed, "the file is not rewritten");
+    assert.equal(f.harness.jobs.size, 1);
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
 test("refresh readback mismatch rolls back the prior job, definition, and owner", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "raft-macos-login-readback-rollback-"));
   const home = path.join(root, "user");
