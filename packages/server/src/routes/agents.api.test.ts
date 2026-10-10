@@ -4094,9 +4094,9 @@ test("POST /agents rejects unsupported runtimeConfig launch axes", async ({ app 
     const server = await createServer("Runtime Config Unsupported", "runtime-config-unsupported", owner.id);
   const ownerToken = await tokenForHuman(owner.email);
 
-    const providerUnsupportedRuntimes = ["codex", "grok", "antigravity", "kimi", "copilot", "gemini", "opencode"];
-    const fastUnsupportedRuntimes = ["grok", "antigravity", "kimi", "copilot", "gemini", "opencode"];
-    const reasoningUnsupportedRuntimes = ["antigravity", "kimi", "gemini", "opencode"];
+    const providerUnsupportedRuntimes = ["codex", "grok", "antigravity", "antigravity-stream", "kimi", "copilot", "gemini", "opencode"];
+    const fastUnsupportedRuntimes = ["grok", "antigravity", "antigravity-stream", "kimi", "copilot", "gemini", "opencode"];
+    const reasoningUnsupportedRuntimes = ["antigravity", "antigravity-stream", "kimi", "gemini", "opencode"];
 
     const cases = [
       ...providerUnsupportedRuntimes.map((runtime) => ({

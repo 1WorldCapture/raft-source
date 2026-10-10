@@ -990,6 +990,7 @@ export type RuntimeId =
   | "opencode"
   | "pi"
   | "omp"
+  | "antigravity-stream"
   | "external";
 
 /**
@@ -1785,6 +1786,9 @@ export const RUNTIMES: RuntimeInfo[] = [
   // `omp --mode rpc` child process (see the daemon omp driver). Ships after
   // pi in this list; ordering is display-only.
   { id: "omp", displayName: "OMP", abbreviation: "OM", binary: "omp", supported: true },
+  // Persistent stream-json agy. The deprecated `antigravity` entry stays for
+  // agents that still launch the per-turn --print driver.
+  { id: "antigravity-stream", displayName: "Antigravity", abbreviation: "AS", binary: "agy", supported: true },
 ];
 
 /**
@@ -1909,7 +1913,10 @@ export const CURSOR_MODEL_PROBE_TIMEOUT_MS = 20_000;
 
 /** Leave transport time for a Cursor probe to finish before the Server gives up. */
 export function getRuntimeModelDetectionTimeoutMs(runtime: string): number {
-  return runtime === "cursor-sdk" ? CURSOR_MODEL_PROBE_TIMEOUT_MS + 5_000 : 5_000;
+  if (runtime === "cursor-sdk") return CURSOR_MODEL_PROBE_TIMEOUT_MS + 5_000;
+  // `agy models` reaches the network and took about 12s on a 1.3.2 probe.
+  if (runtime === "antigravity-stream") return 20_000;
+  return 5_000;
 }
 
 /**
@@ -2066,6 +2073,14 @@ export const RUNTIME_MODELS: Record<string, RuntimeModelInfo[]> = {
   ],
   antigravity: [
     { id: "default", label: "AGY configured default", verified: "suggestion_only" },
+  ],
+  // Presentation catalog for the picker. Live availability still comes from
+  // `agy models`; a failed detect must not invent these ids. Medium is first
+  // so getDefaultModel selects it for a new agent.
+  "antigravity-stream": [
+    { id: "gemini-3.8-flash-medium", label: "Gemini 3.8 Flash (Medium)", verified: "launchable" },
+    { id: "gemini-3.8-flash-high", label: "Gemini 3.8 Flash (High)", verified: "launchable" },
+    { id: "gemini-3.8-flash-low", label: "Gemini 3.8 Flash (Low)", verified: "launchable" },
   ],
   copilot: [
     { id: "gpt-5.4", label: "GPT-5.4" },

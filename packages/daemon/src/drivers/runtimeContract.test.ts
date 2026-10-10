@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { test } from "vitest";
 import { getDriver } from "./index.js";
 
-const runtimeIds = ["builtin", "claude", "codex", "grok", "kimi", "cursor-sdk", "gemini", "copilot", "opencode", "pi"] as const;
+const runtimeIds = ["builtin", "claude", "codex", "grok", "kimi", "cursor-sdk", "gemini", "copilot", "opencode", "pi", "antigravity-stream"] as const;
 const stdinSteerablePersistentRuntimeIds = ["claude", "codex", "grok", "kimi"] as const;
 const perTurnRuntimeIds = ["gemini", "copilot", "opencode"] as const;
 
@@ -91,6 +91,13 @@ const expectedContracts = {
     session: { recovery: "resume_or_fresh" },
     modelVerifiedAs: "launchable",
     nativeStandingPrompt: true,
+  },
+  "antigravity-stream": {
+    lifecycle: { kind: "persistent", stdin: "direct", inFlightWake: "queue" },
+    communication: { chat: "slock_cli", runtimeControl: "none" },
+    stdoutChannel: "structured_protocol",
+    session: { recovery: "resume_or_fresh" },
+    modelVerifiedAs: "launchable",
   },
 } as const;
 

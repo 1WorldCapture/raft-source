@@ -6,7 +6,9 @@ import {
   getMachineRuntimeDisplayOptions,
   getSetupRuntimeOptions,
   RUNTIMES,
+  RUNTIME_MODELS,
   getDefaultModel,
+  getRuntimeModelDetectionTimeoutMs,
   runtimeAvailabilitySuffix,
   type RuntimeInfo,
 } from "./index.js";
@@ -100,4 +102,26 @@ test("OMP registers as a supported local CLI runtime with a default-model seed",
   // The default entry keeps getDefaultModel away from Claude's "sonnet"
   // fallback; live catalogs arrive from the daemon in the model task.
   assert.equal(getDefaultModel("omp"), "default");
+});
+
+test("antigravity-stream is creatable and defaults new agents to Gemini 3.8 Flash medium", () => {
+  const runtime = RUNTIMES.find((entry) => entry.id === "antigravity-stream");
+  assert.ok(runtime);
+  assert.equal(runtime.displayName, "Antigravity");
+  assert.equal(runtime.abbreviation, "AS");
+  assert.equal(runtime.binary, "agy");
+  assert.equal(runtime.supported, true);
+  assert.equal(runtime.deprecated, undefined);
+  assert.equal(getCreatableRuntimeOptions().some((entry) => entry.id === "antigravity-stream"), true);
+  assert.equal(getDefaultModel("antigravity-stream"), "gemini-3.8-flash-medium");
+  assert.deepEqual(RUNTIME_MODELS["antigravity-stream"]?.map((model) => model.id), [
+    "gemini-3.8-flash-medium",
+    "gemini-3.8-flash-high",
+    "gemini-3.8-flash-low",
+  ]);
+  for (const model of RUNTIME_MODELS["antigravity-stream"] ?? []) {
+    assert.equal(model.verified, "launchable", model.id);
+  }
+  assert.equal(getRuntimeModelDetectionTimeoutMs("antigravity-stream"), 20_000);
+  assert.equal(getRuntimeModelDetectionTimeoutMs("claude"), 5_000);
 });
