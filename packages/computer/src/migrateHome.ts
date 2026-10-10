@@ -27,6 +27,15 @@ import { readDesiredState } from "./desiredState.js";
 import { resolveRaftHome, servicePidPath, serviceSocketPath as serviceSocketPathOf } from "./paths.js";
 import { isProcessAlive, readPidfileAt } from "./internal/process-primitives.js";
 import { CliExit } from "./output.js";
+import {
+  argvMentionsHome as argvMentionsHomeImpl,
+  defaultKillHomeProcess,
+  defaultScanHomeProcesses,
+  homeProcessSpellings,
+  type HomeProcess,
+  mentionsWithBoundary as mentionsWithBoundaryImpl,
+  sweepHomeProcesses,
+} from "./homeProcessSweep.js";
 
 export type MigrateStep =
   | "preflight"
@@ -279,92 +288,11 @@ export function defaultRealHomeDir(): string {
   return os.homedir();
 }
 
-// --- whole-tree process sweep (PM blocking fix 2026-10-09) -------------------
-//
-// The embedded app can leave orphaned per-server runners behind: the desktop
-// service's SIGTERM handler only reaps children it still owns, and a runner
-// whose parent already died (ppid 1) survives api.stop untouched — seen live
-// in the xai end-to-end. Every __service/__run child is spawned with explicit
-// RAFT_HOME/SLOCK_HOME env (service.ts), so processes are attributed to a
-// home by argv (--slock-home) or environment, independent of parentage.
-
-export interface HomeProcess {
-  pid: number;
-  kind: "service" | "runner";
-  /** For __run children: the serverId argument. */
-  serverId: string | null;
-}
-
-/** Substring match with a boundary: the character after the candidate must
- *  be end-of-string or whitespace. Without it `--slock-home ~/.slock` would
- *  also hit `--slock-home ~/.slock-raft` and the sweep could kill unrelated
- *  live processes (PM review on #281). */
-export function mentionsWithBoundary(text: string, candidate: string): boolean {
-  for (let idx = text.indexOf(candidate); idx !== -1; idx = text.indexOf(candidate, idx + 1)) {
-    const after = text[idx + candidate.length];
-    if (after === undefined || after === " ") return true;
-  }
-  return false;
-}
-
-export function argvMentionsHome(command: string, spelling: string): boolean {
-  for (const sep of ["--slock-home ", "--slock-home="]) {
-    for (let idx = command.indexOf(sep); idx !== -1; idx = command.indexOf(sep, idx + 1)) {
-      const valueStart = idx + sep.length;
-      if (command.startsWith(spelling, valueStart)) {
-        const after = command[valueStart + spelling.length];
-        if (after === undefined || after === " ") return true;
-      }
-    }
-  }
-  return false;
-}
-
-export async function defaultScanHomeProcesses(homeSpellings: string[]): Promise<HomeProcess[]> {
-  const spellings = [...new Set(homeSpellings.map((sp) => sp).filter((sp) => sp.length > 0))];
-  if (spellings.length === 0) return [];
-  const { execFile } = await import("node:child_process");
-  const { promisify } = await import("node:util");
-  const run = promisify(execFile) as (cmd: string, args: string[]) => Promise<{ stdout: string }>;
-  let listing: string;
-  try {
-    listing = (await run("ps", ["-axo", "pid=,command="])).stdout;
-  } catch {
-    return [];
-  }
-  const found: HomeProcess[] = [];
-  for (const line of listing.split("\n")) {
-    const match = line.trim().match(/^(\d+)\s+([\s\S]+)$/);
-    if (!match || !match[2]) continue;
-    const pid = Number(match[1]);
-    const command = match[2];
-    const isService = /(^|\s)__service(\s|$)/.test(command);
-    const runMatch = command.match(/(?:^|\s)__run\s+(\S+)/);
-    if (!isService && !runMatch) continue;
-    if (spellings.some((spelling) => argvMentionsHome(command, spelling))) {
-      found.push({ pid, kind: isService ? "service" : "runner", serverId: runMatch?.[1] ?? null });
-      continue;
-    }
-    // Environment attribution: same-user processes expose their env via ps.
-    try {
-      const envText = (await run("ps", ["eww", "-p", String(pid), "-o", "command="])).stdout;
-      if (spellings.some((spelling) => mentionsWithBoundary(envText, spelling))) {
-        found.push({ pid, kind: isService ? "service" : "runner", serverId: runMatch?.[1] ?? null });
-      }
-    } catch {
-      /* process exited between listing and env read */
-    }
-  }
-  return found;
-}
-
-export function defaultKillHomeProcess(pid: number, signal: "SIGTERM" | "SIGKILL"): void {
-  try {
-    process.kill(pid, signal);
-  } catch {
-    /* already gone */
-  }
-}
+// --- whole-tree process sweep: moved to homeProcessSweep.ts (same logic,
+// now shared with the Desktop host's pre-converge sweep); re-exported here
+// so existing importers keep working. ---
+export { defaultScanHomeProcesses, defaultKillHomeProcess, argvMentionsHome, mentionsWithBoundary, sweepHomeProcesses } from "./homeProcessSweep.js";
+export type { HomeProcess } from "./homeProcessSweep.js";
 
 export interface MigrateHomeOptions {
   from?: string;
@@ -832,12 +760,7 @@ export async function migrateHome(
   /** Every path spelling a live process could carry for this home: the
    *  realpath, the ORIGINAL argument, and the ~/.slock-raft alias (owner's
    *  running processes carry the alias spelling via launchctl setenv). */
-  const spellingsFor = (primary: string, original: string | null, alias: string | null): string[] => {
-    const out = new Set<string>([primary]);
-    if (original !== null) out.add(original);
-    if (alias !== null) out.add(alias);
-    return [...out];
-  };
+  const spellingsFor = homeProcessSpellings;
   const fromSpellings = spellingsFor(pre.from, pre.fromArg, pre.alias?.path ?? null);
   // For the target home: the path itself, its realpath once it exists, and
   // the alias (repointed at it in move mode; already pointing at it in
@@ -848,23 +771,19 @@ export async function migrateHome(
     return [...out];
   };
 
-  /** TERM -> grace -> KILL -> rescan; returns whatever is STILL alive. */
+  /** The shared TERM -> grace -> KILL -> rescan ladder, with the migration's
+   *  abort guard checked between polls (forward steps only — the rollback
+   *  leaves the guard off, and sweepHomeProcesses itself is abort-agnostic). */
   const sweepHomeTree = async (homeSpellings: string[]): Promise<HomeProcess[]> => {
-    const deadline = Date.now() + (deps.sweepTimeoutMs ?? 10_000);
-    let procs = await scanHomeProcesses(homeSpellings);
-    if (procs.length === 0) return procs;
-    for (const proc of procs) killHomeProcess(proc.pid, "SIGTERM");
-    while (procs.length > 0 && Date.now() < deadline) {
-      await sleep(500);
-      checkAbort();
-      procs = await scanHomeProcesses(homeSpellings);
-    }
-    if (procs.length > 0) {
-      for (const proc of procs) killHomeProcess(proc.pid, "SIGKILL");
-      await sleep(500);
-      procs = await scanHomeProcesses(homeSpellings);
-    }
-    return procs;
+    if ((await scanHomeProcesses(homeSpellings)).length === 0) return [];
+    checkAbort();
+    const remaining = await sweepHomeProcesses(homeSpellings, {
+      scanHomeProcesses,
+      killHomeProcess,
+      sleep: async (ms) => { await sleep(ms); checkAbort(); },
+      sweepTimeoutMs: deps.sweepTimeoutMs,
+    });
+    return remaining;
   };
 
   /** Graceful service stop + whole-tree sweep; THROWS when anything of this

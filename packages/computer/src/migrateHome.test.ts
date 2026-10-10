@@ -1237,3 +1237,29 @@ test("serviceSocketPathTooLong: boundary and platform behavior", () => {
   assert.equal(serviceSocketPathTooLong(homeAtLimit), false);
   assert.equal(serviceSocketPathTooLong(homeAtLimit + "x"), true);
 });
+
+test("lib surface: the shared sweep ladder and spellings helper are importable for the Desktop host", async () => {
+  const lib = await import("./lib/homeProcessSweep.js");
+  type LibHomeProcess = import("./lib/homeProcessSweep.js").HomeProcess;
+  assert.equal(typeof lib.sweepHomeProcesses, "function");
+  assert.equal(typeof lib.defaultScanHomeProcesses, "function");
+  assert.equal(typeof lib.defaultKillHomeProcess, "function");
+  assert.equal(typeof lib.argvMentionsHome, "function");
+  assert.equal(typeof lib.mentionsWithBoundary, "function");
+  assert.deepEqual(lib.homeProcessSpellings("/a", "/a", "/a"), ["/a"]);
+  assert.deepEqual(lib.homeProcessSpellings("/real", "/arg", null), ["/real", "/arg"]);
+  // The ladder itself through fakes: one TERM-resistant process gets KILLed.
+  const procs = new Map<number, LibHomeProcess>([[42, { pid: 42, kind: "runner", serverId: "s1" }]]);
+  let termSeen = false;
+  const remaining = await lib.sweepHomeProcesses(["/h"], {
+    scanHomeProcesses: async () => [...procs.values()],
+    killHomeProcess: (pid, signal) => {
+      if (signal === "SIGTERM") termSeen = true;
+      if (signal === "SIGKILL") procs.delete(pid);
+    },
+    sleep: async () => {},
+    sweepTimeoutMs: 100,
+  });
+  assert.equal(termSeen, true);
+  assert.deepEqual(remaining, []);
+});
