@@ -350,9 +350,12 @@ export interface MigrateHomeOptions {
   from?: string;
   to?: string;
   apply: boolean;
-  /** Hard deadline (epoch ms). Forward steps and their polls abort into the
-   *  normal fail→rollback path once it passes. The rollback itself is NEVER
-   *  deadline-bound — it must always run to completion (PM fix #288). */
+  /** Hard deadline (epoch ms); defaults to startedAt +
+   *  MIGRATE_IN_PROGRESS_DEADLINE_MS so the enforced deadline always equals
+   *  the marker's deadlineAt (PM review on #290). Forward steps and their
+   *  polls abort into the normal fail→rollback path once it passes. The
+   *  rollback itself is NEVER deadline-bound — it must always run to
+   *  completion (PM fix #288). */
   deadlineAt?: number;
 }
 
@@ -633,7 +636,12 @@ export async function migrateHome(
   // disk, so a crash between the two leaves both files and readers can
   // prefer the result.
   const markerBase = { schemaVersion: 1, pid: process.pid, mode: pre.mode, from: pre.from, to: pre.to, startedAt };
-  const deadlineAt = new Date(Date.parse(startedAt) + MIGRATE_IN_PROGRESS_DEADLINE_MS).toISOString();
+  // The EFFECTIVE hard deadline: an explicit --deadline wins; otherwise
+  // startedAt + the marker budget, so the marker's deadlineAt and the
+  // enforced deadline can never disagree (PM review on #290: without a
+  // default, the UI's deadline is decorative and the run is unbounded).
+  const effectiveDeadlineAt = opts.deadlineAt ?? Date.parse(startedAt) + MIGRATE_IN_PROGRESS_DEADLINE_MS;
+  const deadlineAt = new Date(effectiveDeadlineAt).toISOString();
   let markerRetired = false;
   let markerTracked = false;
   let markerWrites: Promise<void> = Promise.resolve();
@@ -736,7 +744,7 @@ export async function migrateHome(
   // never interrupted by a further signal; it must always reach the
   // original state. The CLI adapter's SIGTERM handler only ever sets the
   // signal, so a repeat signal is a no-op by construction.
-  const hardDeadlineAt = opts.deadlineAt;
+  const hardDeadlineAt = effectiveDeadlineAt;
   const abortSignal = deps.abortSignal;
   const nowFn = deps.now ?? (() => new Date());
   let rollbackStarted = false;

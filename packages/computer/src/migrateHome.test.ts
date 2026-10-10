@@ -1021,3 +1021,31 @@ test("dry-run ignores the deadline and the abort signal (nothing to roll back)",
     await rm(f.root, { recursive: true, force: true });
   }
 });
+
+test("no explicit --deadline: the default (startedAt + 10 min) is enforced and matches the marker (PM review on #290)", async () => {
+  const f = await fixture({ livePid: true });
+  const h = fakeDeps(f.user);
+  // Deterministic clock: t0 at run start, then jump past t0 + 10 min during
+  // the stop step — the next step boundary must abort on the DEFAULT.
+  let clock = 1_700_000_000_000;
+  h.deps.now = () => new Date(clock);
+  let markerDeadlineSeen: number | null = null;
+  h.deps.stopServiceAt = async (home) => {
+    h.stopCalls.push(home);
+    const marker = JSON.parse(await readFile(migrateInProgressPath(f.from), "utf8"));
+    markerDeadlineSeen = Date.parse(marker.deadlineAt);
+    clock += MIGRATE_IN_PROGRESS_DEADLINE_MS + 1;
+  };
+  try {
+    const run = await migrateHome({ from: f.from, to: f.to, ...apply }, h.deps, (e) => h.events.push(e));
+    assert.equal(run.outcome, "rolled_back");
+    assert.match(run.result?.error ?? "", /deadline exceeded/);
+    assert.equal(run.result?.rollback?.ok, true);
+    // The enforced deadline IS the marker's deadlineAt (t0 + 10 min).
+    assert.equal(markerDeadlineSeen, 1_700_000_000_000 + MIGRATE_IN_PROGRESS_DEADLINE_MS);
+    const failed = h.events.find((e) => e.status === "fail");
+    assert.equal(failed?.step, "move");
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
