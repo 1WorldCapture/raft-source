@@ -305,11 +305,15 @@ class ComputerHost {
             : () => app.getLoginItemSettings().openAtLogin,
         },
       );
+      console.info(`[raft-desktop] converge: lifecycle.enabled=${lifecycle.enabled}`);
       if (lifecycle.enabled) {
         const status = await this.api.getStatus();
         this.lastStatus = status;
+        console.info(`[raft-desktop] converge: servers=${status.servers.length} service.running=${status.service.running}`);
+        // Clean up leftovers whether or not a server is attached yet: the sweep only touches processes of this home
+        // when no live service exists, so it is safe, and an orphan runner must never be adopted as "running".
+        await this.sweepOrphansBeforeStart();
         if (status.servers.length > 0) {
-          await this.sweepOrphansBeforeStart();
           await this.api.start({ serverId: null, serverLabel: null });
         }
         // Task #7 anti-orphan: whether we spawned the tree or adopted an
@@ -410,7 +414,7 @@ class ComputerHost {
   private async sweepOrphansBeforeStart(): Promise<void> {
     // Cheap pre-filter: no __service/__run process on the machine at all, nothing to look at.
     const snapshot = await this.readProcesses();
-    if (!snapshot.rows.some((row) => row.root)) return;
+    if (!snapshot.rows.some((row) => row.root)) { console.info("[raft-desktop] orphan sweep: no __service/__run process on the machine"); return; }
     // Attribution 1: the Computer's own, which knows EVERY spelling of the home (realpath, as configured, the
     // ~/.slock-raft alias) by looking at each process's argv/env. One spelling is not enough: a live service launched
     // with the alias spelling must count as alive even if the host was restored with the realpath.
@@ -431,6 +435,7 @@ class ComputerHost {
     // spelling could not be read (the drill-290-anna ②a retest: the sweep matched nothing and the orphan was adopted).
     const attested = snapshot.rows.filter((row) => row.root && snapshot.rootPids.includes(row.pid) && row.pid !== process.pid && (row.home === this.processScope.home || (row.home !== null && spellings.includes(row.home))));
     const serviceAlive = found.some((proc) => proc.kind === "service") || attested.some((row) => /(?:^|\s)__service(?:\s|$)/.test(row.command));
+    console.info(`[raft-desktop] orphan sweep: found=${found.length} attested=${attested.length} serviceAlive=${serviceAlive}`);
     if (serviceAlive) return; // a live service: its runners are its own
     if (found.length === 0 && attested.length === 0) return;
     if (found.length === 0) {
