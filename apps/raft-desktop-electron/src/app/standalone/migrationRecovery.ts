@@ -97,13 +97,14 @@ export function commandLineOf(pid: number): Promise<string | null> {
 
 /**
  * The marker's pid is a migration command only if its command line says so. A dead command whose pid the OS has
- * since given to an unrelated process must read as "finished" (and never receive a cancel signal). When the command
- * line carries `--from <path>`, that path must be the marker's.
+ * since given to an unrelated process must read as "finished" (and never receive a cancel signal). The `--from` on the
+ * command line is NOT compared with the marker's `from`: the app passes the path as the user wrote it (e.g. the
+ * `~/.slock-raft` symlink from RAFT_HOME) while the marker holds the realpath, and after a move the symlink points
+ * somewhere else again, so they legitimately differ.
  */
 export async function isMigrationProcess(marker: { pid: number; from: string | null }, readCommand: (pid: number) => Promise<string | null> = commandLineOf): Promise<boolean> {
   const line = await readCommand(marker.pid);
   if (!line || !/\bmigrate-home\b/.test(line)) return false;
-  if (marker.from && /--from[ =]/.test(line) && !line.includes(marker.from)) return false;
   return true;
 }
 

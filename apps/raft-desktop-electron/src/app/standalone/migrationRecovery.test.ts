@@ -105,13 +105,13 @@ test("findRunningMigration: a live marker is returned without waiting; dead pid 
   assert.equal(await findRunningMigration({ hostMode: { mode: "standalone", home: "/h" }, homes: ["/h"], readMarker: async () => live, isAlive: async () => true }), null);
 });
 
-test("isMigrationProcess: a live pid counts only if its command line is migrate-home (and, with --from, the marker's home)", async () => {
+test("isMigrationProcess: a live pid counts only if its command line is migrate-home (--from is not compared: symlink vs realpath spellings differ)", async () => {
   const m = { pid: 4242, from: "/Users/u/app/computer-slock-raft" };
   const cmd = (line: string | null) => async () => line;
   assert.equal(await isMigrationProcess(m, cmd("/x/raft-computer migrate-home --from /Users/u/app/computer-slock-raft --apply --json")), true);
   assert.equal(await isMigrationProcess(m, cmd("/x/raft-computer migrate-home --apply --json")), true, "no --from on the line: not contradicted");
   assert.equal(await isMigrationProcess(m, cmd("/usr/bin/vim notes.txt")), false, "a reused pid");
   assert.equal(await isMigrationProcess(m, cmd(null)), false, "no such process");
-  assert.equal(await isMigrationProcess(m, cmd("/x/raft-computer migrate-home --from /somewhere/else --json")), false, "another migration");
+  assert.equal(await isMigrationProcess(m, cmd("/x/raft-computer migrate-home --from /Users/u/.slock-raft --apply --json")), true, "symlink spelling of --from vs the marker's realpath: still the running migration");
   assert.equal(await isMigrationProcess({ pid: 1, from: null }, cmd("raft-computer status --json")), false, "a different raft-computer command");
 });
