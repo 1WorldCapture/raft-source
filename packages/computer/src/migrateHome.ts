@@ -75,6 +75,11 @@ export interface MigrateResultFile {
   finishedAt: string;
   /** End state of the Computer service after the command finished. */
   serviceState: "running" | "stopped-by-user" | "down";
+  /** Why the run aborted, when a cancel/deadline flag preceded the step
+   *  failure: "cancelled" (SIGTERM from the Desktop cancel button) or
+   *  "deadline". null on success and on plain step failures. `error` keeps
+   *  the failing step's original error as supplementary detail (PM #292). */
+  reason: "cancelled" | "deadline" | null;
   error: string | null;
   rollback: { attempted: boolean; ok: boolean; detail?: string } | null;
   /** Every login-item plist this run deleted, and where the byte-for-byte
@@ -172,6 +177,9 @@ export interface MigrateHomeDeps {
    *  fix #288): aborted → forward steps fail into rollback. The rollback
    *  itself ignores it — a repeat signal must never interrupt the restore. */
   abortSignal?: AbortSignal;
+  /** Upper bound for waiting out abandoned start/stop operations during a
+   *  rollback (PM review on #292). Default 30s. */
+  abandonedWaitTimeoutMs?: number;
   sweepTimeoutMs?: number;
   selfCheckTimeoutMs?: number;
   selfCheckPollMs?: number;
@@ -761,6 +769,44 @@ export async function migrateHome(
     if (reason !== null) throw new Error(`migrate-home aborted: ${reason}`);
   };
 
+  /** Race a long dependency wait against the abort flags. The underlying
+   *  operation cannot be cancelled (runStart keeps converging), so on abort
+   *  this rejects immediately with the cancel/deadline reason — the step
+   *  fails into rollback, whose whole-tree sweep reaps whatever the
+   *  half-finished start left behind (PM #292: cancel must interrupt the
+   *  start step's daemon wait, not wait out its own timeout). */
+  /** Long dependency waits abandoned by an abort. The underlying operation
+   *  keeps running in-process (runStart keeps converging) and may spawn
+   *  detached children AFTER the rollback's tree sweep — the rollback waits
+   *  these out (bounded) and sweeps again before writing the result (PM
+   *  review on #292). */
+  const abandonedOps = new Set<Promise<unknown>>();
+  const abortableWait = <T>(promise: Promise<T>, label: string): Promise<T> =>
+    new Promise<T>((resolve, reject) => {
+      const tick = () => {
+        const reason = abortReason();
+        if (reason !== null) {
+          cleanup();
+          abandonedOps.add(promise);
+          reject(new Error(`${label} aborted: ${reason}`));
+          return true;
+        }
+        return false;
+      };
+      const timer = setInterval(() => { tick(); }, 250);
+      const onSignalAbort = () => { tick(); };
+      abortSignal?.addEventListener("abort", onSignalAbort, { once: true });
+      const cleanup = () => {
+        clearInterval(timer);
+        abortSignal?.removeEventListener("abort", onSignalAbort);
+      };
+      if (tick()) return;
+      promise.then(
+        (value) => { cleanup(); resolve(value); },
+        (error) => { cleanup(); reject(error); },
+      );
+    });
+
   /** Every path spelling a live process could carry for this home: the
    *  realpath, the ORIGINAL argument, and the ~/.slock-raft alias (owner's
    *  running processes carry the alias spelling via launchctl setenv). */
@@ -802,7 +848,7 @@ export async function migrateHome(
   /** Graceful service stop + whole-tree sweep; THROWS when anything of this
    *  home survives (the step fails into rollback — PM blocking fix). */
   const stopHomeCompletely = async (home: string, homeSpellings: string[]): Promise<Record<string, unknown>> => {
-    await stopServiceAt(home);
+    await abortableWait(stopServiceAt(home), "stop");
     const remaining = await sweepHomeTree(homeSpellings);
     if (remaining.length > 0) {
       throw new Error(
@@ -831,13 +877,19 @@ export async function migrateHome(
     }
   };
 
-  const finish = async (result: MigrateOutcome, serviceState: MigrateResultFile["serviceState"], rollback: MigrateResultFile["rollback"]): Promise<MigrateHomeRun> => {
+  const finish = async (
+    result: MigrateOutcome,
+    serviceState: MigrateResultFile["serviceState"],
+    rollback: MigrateResultFile["rollback"],
+    reason: MigrateResultFile["reason"] = null,
+  ): Promise<MigrateHomeRun> => {
     // Retire the in-progress marker's refresher FIRST (no rewrite may land
     // after the deletion below), then drain any in-flight refresh before
     // the result file is written and the marker is removed.
     markerRetired = true;
     await markerWrites.catch(() => {});
     const file: MigrateResultFile = {
+      reason,
       schemaVersion: 1,
       result,
       mode: pre.mode,
@@ -1203,7 +1255,7 @@ export async function migrateHome(
           },
         });
         const tookOver = await takeOverLifecycle();
-        await startServiceAt(pre.to);
+        await abortableWait(startServiceAt(pre.to), "start");
         return { home: pre.to, mode: pre.mode, lifecycleTakeover: tookOver };
       }))
     ) {
@@ -1305,6 +1357,13 @@ export async function migrateHome(
 
   // Rolled into a function so every failure site shares one rollback path.
   async function rollbackAndFinish(): Promise<MigrateHomeRun> {
+    // Which abort flag (if any) preceded the failure? Sampled BEFORE the
+    // immunity flag goes up (afterwards abortReason() is null by design).
+    const reason: MigrateResultFile["reason"] = abortSignal?.aborted
+      ? "cancelled"
+      : hardDeadlineAt !== undefined && nowFn().getTime() >= hardDeadlineAt
+        ? "deadline"
+        : null;
     // Rollback immunity (PM fix #288): from here on the deadline and the
     // cancel signal no longer abort anything — the undo journal must always
     // run to completion.
@@ -1316,6 +1375,45 @@ export async function migrateHome(
         await entry.undo();
       } catch (error) {
         undoErrors.push(`${entry.label}: ${(error as Error).message}`);
+      }
+    }
+    // The abandoned start/stop keeps converging in-process and may spawn
+    // detached children AFTER the journal ran (PM review on #292): wait it
+    // out (bounded), sweep the affected home(s) once more, and verify the
+    // target path is in the shape the rollback promises — absent or the
+    // same empty directory it started as (move mode). Residue here is an
+    // undo error, never a silent pass. Guarded on "an abandon actually
+    // happened" — a PRE-EXISTING condition (e.g. an unkillable process the
+    // stop step already failed on) must not be double-booked into the
+    // rollback's verdict.
+    if (abandonedOps.size > 0) {
+      const abandonedDeadline = Date.now() + (deps.abandonedWaitTimeoutMs ?? 30_000);
+      for (const op of [...abandonedOps]) {
+        const remaining = abandonedDeadline - Date.now();
+        if (remaining <= 0) break;
+        // A real clock, deliberately NOT deps.sleep: the wait must hold even
+        // under a faked instant-sleep test seam.
+        await new Promise<void>((resolveWait) => {
+          const cap = setTimeout(resolveWait, remaining);
+          op.then(() => { clearTimeout(cap); resolveWait(); }, () => { clearTimeout(cap); resolveWait(); });
+        });
+      }
+      abandonedOps.clear();
+      const postRollbackSweepSpellings = pre.mode === "in-place" ? [...toSpellings(), pre.to] : toSpellings();
+      const residue = await sweepHomeTree(postRollbackSweepSpellings);
+      if (residue.length > 0) {
+        undoErrors.push(`processes survived the post-rollback sweep (${residue.map((r) => `${r.kind}:${r.pid}`).join(", ")})`);
+      }
+      if (pre.mode !== "in-place") {
+        let targetEntries: string[] | null = null;
+        try {
+          targetEntries = await fs.readdir(pre.to);
+        } catch {
+          targetEntries = null; // absent — the promised shape
+        }
+        if (targetEntries !== null && targetEntries.length > 0) {
+          undoErrors.push(`target path left non-empty after rollback: ${pre.to} (${targetEntries.slice(0, 5).join(", ")}${targetEntries.length > 5 ? ", …" : ""})`);
+        }
       }
     }
     // Bring the source service back only if it was actually up before we
@@ -1348,7 +1446,7 @@ export async function migrateHome(
       attempted: true,
       ok: rollbackOk,
       detail: undoErrors.length > 0 ? undoErrors.join("; ") : undefined,
-    });
+    }, reason);
   }
 }
 

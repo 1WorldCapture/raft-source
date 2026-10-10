@@ -961,7 +961,9 @@ test("abort signal (SIGTERM shape): forward steps cancel into rollback, which th
     // (home back, alias back) even though the signal stayed aborted.
     assert.equal((await stat(f.from)).isDirectory(), true);
     const failed = h.events.find((e) => e.status === "fail");
-    assert.equal(failed?.step, "move");
+    // The abortable wait interrupts the STOP step itself (1.0.34), not the
+    // next step boundary.
+    assert.equal(failed?.step, "stop");
     const rollbackEvent = h.events.filter((e) => e.step === "rollback").at(-1);
     assert.equal(rollbackEvent?.status, "ok");
   } finally {
@@ -991,7 +993,7 @@ test("deadline: exceeding it mid-run fails the current step into rollback; the r
     assert.equal(run.result?.rollback?.ok, true);
     assert.equal((await stat(f.from)).isDirectory(), true);
     const failed = h.events.find((e) => e.status === "fail");
-    assert.equal(failed?.step, "move");
+    assert.equal(failed?.step, "stop");
   } finally {
     await rm(f.root, { recursive: true, force: true });
   }
@@ -1045,6 +1047,154 @@ test("no explicit --deadline: the default (startedAt + 10 min) is enforced and m
     assert.equal(markerDeadlineSeen, 1_700_000_000_000 + MIGRATE_IN_PROGRESS_DEADLINE_MS);
     const failed = h.events.find((e) => e.status === "fail");
     assert.equal(failed?.step, "move");
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+// --- start-step interruption + reason field (PM #292, 1.0.34) ---
+
+test("cancel while the start step is stuck: fails into rollback within ~1s, reason=cancelled", async () => {
+  const f = await fixture({ livePid: true });
+  const h = fakeDeps(f.user);
+  const cancel = new AbortController();
+  h.deps.abortSignal = cancel.signal;
+  h.deps.abandonedWaitTimeoutMs = 1000;
+  // The start step's daemon wait never settles on its own (the xai shape:
+  // unreachable server → START_DAEMON_TIMEOUT would only fire late). Only
+  // the FIRST call hangs — the rollback's undo and the source restart must
+  // still be able to settle through the same seam.
+  let startCalls = 0;
+  h.deps.startServiceAt = async (home: string) => {
+    startCalls += 1;
+    h.startCalls.push(home);
+    if (startCalls === 1) await new Promise<void>(() => {});
+  };
+  const began = Date.now();
+  setTimeout(() => cancel.abort(), 1200);
+  try {
+    const run = await migrateHome({ from: f.from, to: f.to, ...apply }, h.deps, (e) => h.events.push(e));
+    const elapsed = Date.now() - began;
+    assert.equal(run.outcome, "rolled_back");
+    assert.equal(run.result?.reason, "cancelled");
+    assert.match(run.result?.error ?? "", /start aborted: cancelled by SIGTERM/);
+    assert.equal(run.result?.rollback?.ok, true);
+    assert.equal((await stat(f.from)).isDirectory(), true);
+    assert.ok(elapsed < 6000, `cancel must interrupt the start wait promptly, took ${elapsed}ms`);
+    const failed = h.events.find((e) => e.status === "fail");
+    assert.equal(failed?.step, "start");
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+test("deadline while the start step is stuck: reason=deadline", async () => {
+  const f = await fixture({ livePid: true });
+  const h = fakeDeps(f.user);
+  h.deps.abandonedWaitTimeoutMs = 1000;
+  let startCalls2 = 0;
+  h.deps.startServiceAt = async (home: string) => {
+    startCalls2 += 1;
+    h.startCalls.push(home);
+    if (startCalls2 === 1) await new Promise<void>(() => {});
+  };
+  const began = Date.now();
+  try {
+    const run = await migrateHome(
+      { from: f.from, to: f.to, ...apply, deadlineAt: Date.now() + 800 },
+      h.deps,
+      (e) => h.events.push(e),
+    );
+    const elapsed = Date.now() - began;
+    assert.equal(run.outcome, "rolled_back");
+    assert.equal(run.result?.reason, "deadline");
+    assert.match(run.result?.error ?? "", /start aborted: deadline exceeded/);
+    assert.equal(run.result?.rollback?.ok, true);
+    assert.ok(elapsed < 6000, `deadline must interrupt the start wait promptly, took ${elapsed}ms`);
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+test("plain step failures keep reason=null (no abort flags set)", async () => {
+  const f = await fixture({ livePid: true });
+  const h = fakeDeps(f.user, { statuses: [{ serviceRunning: false, serverCount: 1, serversOnline: false }] });
+  try {
+    const run = await migrateHome({ from: f.from, to: f.to, ...apply }, h.deps, (e) => h.events.push(e));
+    assert.equal(run.outcome, "rolled_back");
+    assert.equal(run.result?.reason, null);
+    assert.match(run.result?.error ?? "", /self-check timed out/);
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+// --- abandoned start spawning after the rollback began (PM review on #292) ---
+
+async function runLateSpawnScenario(opts: { alsoCreateTargetFiles: boolean }) {
+  const f = await fixture({ livePid: true });
+  const h = fakeDeps(f.user);
+  const cancel = new AbortController();
+  h.deps.abortSignal = cancel.signal;
+  h.deps.abandonedWaitTimeoutMs = 3000;
+  // Real (bounded) sleeps so the rollback's abandoned-wait actually waits.
+  h.deps.sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, Math.min(ms, 50)));
+  let startCalls = 0;
+  h.deps.startServiceAt = async (home: string) => {
+    startCalls += 1;
+    h.startCalls.push(home);
+    if (startCalls === 1) {
+      // The abandoned runStart: settles only AFTER the cancel, and its
+      // convergence work "spawns" a detached runner at that late moment
+      // (plus, in variant b, recreates files under the moved-back target).
+      await new Promise<void>((resolveLate) => {
+        setTimeout(async () => {
+          h.liveProcesses.set(99123, { pid: 99123, kind: "runner", serverId: ATTACHED_SERVER_ID });
+          if (opts.alsoCreateTargetFiles) {
+            await mkdir(path.join(f.to, "computer", "run"), { recursive: true });
+          }
+          resolveLate();
+        }, 1800);
+      });
+    }
+  };
+  setTimeout(() => cancel.abort(), 1000);
+  try {
+    const run = await migrateHome({ from: f.from, to: f.to, ...apply }, h.deps, (e) => h.events.push(e));
+    return { run, harness: h, f };
+  } catch (err) {
+    await rm(f.root, { recursive: true, force: true });
+    throw err;
+  }
+}
+
+test("late spawn after cancel: no process residue, target path restored, rollback ok (PM #292 review)", async () => {
+  const { run, harness: h, f } = await runLateSpawnScenario({ alsoCreateTargetFiles: false });
+  try {
+    assert.equal(run.outcome, "rolled_back");
+    assert.equal(run.result?.reason, "cancelled");
+    assert.equal(run.result?.rollback?.ok, true, `unexpected undo errors: ${run.result?.rollback?.detail}`);
+    // The late-spawned runner was reaped by the post-rollback sweep.
+    assert.equal([...h.liveProcesses.values()].length, 0, "no process of the abandoned start may survive");
+    // The home is back at the source; the target is in its promised shape.
+    assert.equal((await stat(f.from)).isDirectory(), true);
+    await assert.rejects(() => stat(f.to));
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+test("late spawn that also recreates target files is REPORTED, never silently passed (PM #292 review)", async () => {
+  const { run, harness: h, f } = await runLateSpawnScenario({ alsoCreateTargetFiles: true });
+  try {
+    // The rollback did its best (process reaped) but the target path was
+    // left non-empty — that is an undo error surfaced in the result file.
+    assert.equal(run.outcome, "failed");
+    assert.equal(run.result?.reason, "cancelled");
+    assert.equal(run.result?.rollback?.ok, false);
+    assert.match(run.result?.rollback?.detail ?? "", /target path left non-empty after rollback/);
+    assert.equal([...h.liveProcesses.values()].length, 0);
+    assert.equal((await stat(f.from)).isDirectory(), true);
   } finally {
     await rm(f.root, { recursive: true, force: true });
   }
