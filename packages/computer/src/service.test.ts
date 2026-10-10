@@ -69,6 +69,7 @@ import { buildStatusReport } from "./status.js";
 import { isDegraded, readCrashHistory } from "./health.js";
 import { buildSystemdDiscoveryPath } from "./systemdDiscoveryPath.js";
 import { withComputerMutationLock } from "./concurrency.js";
+import { markStartAwaitingService } from "./startAwaiting.js";
 import { createMachineAttestationHandler } from "./machineServiceAttestation.js";
 import { migrateLegacyOsSupervisorInstall } from "./legacyOsSupervisorMigration.js";
 import type { KUpgradeCoordinatorRequest } from "./kUpgradeCoordinator.js";
@@ -3014,6 +3015,40 @@ test("service boot: the IPC bind serializes under the home mutation lock when no
       else process.env[PARENT_LOCK_HELD_ENV_VAR] = previous;
     }
     assert.equal(bindLockCalls.length, 1, "the bind ran exactly once under the injected lock");
+  });
+});
+
+test("service boot: a launchd-carrier boot skips the bind lock while a live `start` announces it is waiting for the service", async () => {
+  await withHome(async (home) => {
+    const previous = process.env[PARENT_LOCK_HELD_ENV_VAR];
+    delete process.env[PARENT_LOCK_HELD_ENV_VAR];
+    await markStartAwaitingService(home); // this test process plays the waiting `start`
+    const bindLockCalls: number[] = [];
+    const cap = captureOut();
+    try {
+      await runService({
+        ipcBindLock: async (fn) => {
+          bindLockCalls.push(process.pid);
+          await fn();
+        },
+        serviceIdentityPublishDeps: {
+          writePidfileAtFn: async () => {},
+          writeServiceVersionEvidenceFn: async () => {},
+        },
+        shutdownServiceFn: (shutdownDeps) => shutdownService({
+          ...shutdownDeps,
+          exit: () => {},
+        }),
+        afterIpcReady: async (shutdown) => {
+          await shutdown();
+        },
+      });
+    } finally {
+      cap.restore();
+      if (previous === undefined) delete process.env[PARENT_LOCK_HELD_ENV_VAR];
+      else process.env[PARENT_LOCK_HELD_ENV_VAR] = previous;
+    }
+    assert.deepEqual(bindLockCalls, [], "start holds the lock for us; queueing for it would only time out");
   });
 });
 

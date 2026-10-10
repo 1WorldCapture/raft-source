@@ -36,17 +36,29 @@ import {
   mentionsWithBoundary as mentionsWithBoundaryImpl,
   sweepHomeProcesses,
 } from "./homeProcessSweep.js";
+import {
+  readRunningAgentsRecord,
+  recordRunningAgents,
+  removeRunningAgentsRecord,
+  restoreRecordedAgents,
+  writeRunningAgentsRecord,
+  type AgentRestoreReport,
+  type MigrateAgentRestoreDeps,
+} from "./migrateAgentRestore.js";
 
 export type MigrateStep =
   | "preflight"
   | "source-carrier"
+  | "record-agents"
   | "stop"
   | "move"
   | "alias"
   | "sessions"
+  | "cursor-sessions"
   | "home-env"
   | "backup"
   | "start"
+  | "restore-agents"
   | "self-check"
   | "rollback";
 
@@ -96,6 +108,10 @@ export interface MigrateResultFile {
    *  even after a successful migration (PM review requirement). */
   backups: MigrateBackupEntry[];
   steps: Array<{ step: MigrateStep; status: MigrateStepStatus; detail?: Record<string, unknown> }>;
+  /** Agents that were running before the migration but did not come back
+   *  after it (PM decision 2026-10-10): the migration still succeeded —
+   *  these need a manual Start. Absent when everything came back. */
+  agentsNotRestored?: Array<{ agentId: string; name: string | null; reason: string; detail?: string }>;
 }
 
 /** Label of the machine-local `launchctl setenv RAFT_HOME …` LaunchAgent
@@ -204,6 +220,9 @@ export interface MigrateHomeDeps {
   sweepTimeoutMs?: number;
   selfCheckTimeoutMs?: number;
   selfCheckPollMs?: number;
+  /** Injectable seams for the agent record/restore steps (tests fake the
+   *  per-server machine API instead of a live server). */
+  agentRestoreDeps?: MigrateAgentRestoreDeps;
 }
 
 /** A path occurrence only counts when it ends at a boundary — the character
@@ -264,6 +283,52 @@ export async function defaultListSourceCarriers(
 
 export function encodeProjectDirName(p: string): string {
   return p.replace(/[^A-Za-z0-9-]/g, "-");
+}
+
+/** Rewrite a cursor-sdk agents.ndjson cwd from any spelling of the source
+ *  home to the equivalent target-home path. Boundary-checked ("/" or end):
+ *  /old-home-neighbor must never match the /old-home spelling. Returns null
+ *  when the cwd does not live under the source home. */
+export function rewriteCursorCwd(cwd: string, sourceSpellings: string[], targetHome: string): string | null {
+  for (const spelling of sourceSpellings) {
+    if (cwd === spelling) return targetHome;
+    if (cwd.startsWith(`${spelling}/`)) return targetHome + cwd.slice(spelling.length);
+  }
+  return null;
+}
+
+/** Move every entry of `fromDir` into `toDir` when the target name is free;
+ *  a collision keeps the target's entry and is reported by name. Returns the
+ *  moved count plus the {from,to} pairs the rollback needs (in move order). */
+async function mergeSessionDir(
+  fromDir: string,
+  toDir: string,
+  conflicts: string[],
+): Promise<{ files: number; journal: Array<{ from: string; to: string }> }> {
+  const journal: Array<{ from: string; to: string }> = [];
+  let entries: Array<{ name: string; isDirectory: boolean }> = [];
+  try {
+    entries = (await fs.readdir(fromDir, { withFileTypes: true })).map((entry) => ({
+      name: entry.name,
+      isDirectory: entry.isDirectory(),
+    }));
+  } catch {
+    return { files: 0, journal };
+  }
+  for (const entry of entries) {
+    const from = path.join(fromDir, entry.name);
+    const to = path.join(toDir, entry.name);
+    try {
+      await fs.stat(to);
+      conflicts.push(entry.name);
+      continue;
+    } catch {
+      /* target name free — move it */
+    }
+    await fs.rename(from, to);
+    journal.push({ from, to });
+  }
+  return { files: journal.length, journal };
 }
 
 export function defaultClaudeProjectsDir(homeDir: string): string {
@@ -640,14 +705,17 @@ export async function migrateHome(
           ? { carriers: pre.sourceCarriers.map((c) => ({ label: c.label, plistPath: c.plistPath })) }
           : { reason: "no login items point at the source home" },
       ],
+      ["record-agents", pre.attachments.length > 0 ? "planned" : "skipped", pre.attachments.length > 0 ? { note: "snapshot the machine-assisted agents that are active right now (server roster)" } : { reason: "no server attachments — no agents to record or restore" }],
       ["stop", pre.serviceWasRunning ? "planned" : "skipped", pre.serviceWasRunning ? undefined : { reason: "service not running" }],
       // In-place mode moves nothing: no move, no alias repoint, no session
-      // renames — only the lifecycle takeover.
+      // renames — only the lifecycle takeover. Agent record/restore still
+      // apply: the tree is stopped and restarted at the same home.
       ...(!inPlace
         ? ([
             ["move", "planned", { from: pre.from, to: pre.to }],
             ["alias", pre.alias ? "planned" : "skipped", pre.alias ? { path: pre.alias.path, currentTarget: pre.alias.currentTarget } : { reason: "no ~/.slock-raft symlink into the source home" }],
-            ["sessions", "planned", { note: "rename ~/.claude/projects dirs whose encoded name starts with the old home" }],
+            ["sessions", "planned", { note: "rename ~/.claude/projects dirs whose encoded name starts with any spelling of the old home; merge on name conflict" }],
+            ["cursor-sessions", "planned", { note: "rewrite the cwd field of cursor-sdk agents.ndjson records to the new home spelling" }],
           ] as Array<[MigrateStep, MigrateStepStatus, Record<string, unknown> | undefined]>)
         : []),
       ["home-env", pre.homeEnv ? "planned" : "skipped", pre.homeEnv ? { path: pre.homeEnv.path } : { reason: "no home-env LaunchAgent" }],
@@ -660,6 +728,13 @@ export async function migrateHome(
           : pre.attachments.length === 0
             ? { reason: "no server attachments — the login item is converged but there is nothing to start" }
             : undefined,
+      ],
+      [
+        "restore-agents",
+        pre.desiredState === "running" && pre.attachments.length > 0 ? "planned" : "skipped",
+        pre.desiredState === "running" && pre.attachments.length > 0
+          ? { note: "restart the recorded agents through the server's machine start endpoint" }
+          : { reason: "the service is not started by this migration — recorded agents stay down" },
       ],
       [
         "self-check",
@@ -800,6 +875,10 @@ export async function migrateHome(
   };
   let failure: string | null = null;
   let failureStep: MigrateStep | null = null;
+  // Agent-restore state, declared before finish() (which reads it) so early
+  // failure paths can finish without tripping the temporal dead zone.
+  let restoreReport: AgentRestoreReport | null = null;
+  let agentsNotRestored: MigrateResultFile["agentsNotRestored"] = undefined;
 
   const runStep = async (step: MigrateStep, fn: () => Promise<Record<string, unknown> | void>) => {
     record({ step, status: "start" });
@@ -843,6 +922,7 @@ export async function migrateHome(
       rollback,
       backups,
       steps,
+      ...(agentsNotRestored !== undefined && agentsNotRestored.length > 0 ? { agentsNotRestored } : {}),
     };
     // Result file lives in whichever home is real on disk after the run:
     // success keeps it at the target; a rollback restores the source home,
@@ -865,6 +945,16 @@ export async function migrateHome(
         await fs.rm(migrateInProgressPath(home), { force: true });
       } catch {
         /* best-effort: a stale marker is safe (readers prefer the result) */
+      }
+    }
+    // The agent record was consumed by restore-agents (success at <to>,
+    // rollback at <from>). Drop it so a later migration starts from a fresh
+    // snapshot instead of resurrecting this run's list.
+    for (const home of [pre.from, pre.to]) {
+      try {
+        await removeRunningAgentsRecord(home);
+      } catch {
+        /* best-effort: a stale record is ignored by the next run's rewrite */
       }
     }
     return { outcome: result, blocked: false, mode: pre.mode, result: file };
@@ -903,6 +993,34 @@ export async function migrateHome(
     }
   } else {
     record({ step: "source-carrier", status: "skipped", detail: { reason: "no login items point at the source home" } });
+  }
+
+  // Step 1.5 — record the agents that are running RIGHT NOW, before the
+  // stop kills their processes. The server is the authority (its
+  // /internal/machine/agents roster says which of this machine's agents are
+  // active); a local process scan would only guess at identities. The
+  // snapshot rides the home (the move carries it to <to>); restore-agents
+  // consumes it after start, and the rollback path consumes it after the
+  // source service restarts. Best-effort BY DESIGN: a server that cannot be
+  // asked (offline, key rotated) contributes nothing and the migration still
+  // proceeds — those agents stay down exactly as they would have without
+  // this feature, wakeable by the next message or a manual start.
+  if (pre.attachments.length > 0) {
+    if (
+      !(await runStep("record-agents", async () => {
+        const { record, serversUnreachable } = await recordRunningAgents(pre.from, deps.agentRestoreDeps);
+        await writeRunningAgentsRecord(pre.from, record);
+        return {
+          recorded: record.agents.length,
+          agents: record.agents.map((agent) => ({ agentId: agent.agentId, name: agent.name, serverId: agent.serverId })),
+          ...(serversUnreachable.length > 0 ? { serversUnreachable } : {}),
+        };
+      }))
+    ) {
+      return rollbackAndFinish();
+    }
+  } else {
+    record({ step: "record-agents", status: "skipped", detail: { reason: "no server attachments — no agents to record" } });
   }
 
   // Step 2 — stop the service at the source home (idempotent; migration is
@@ -1022,51 +1140,154 @@ export async function migrateHome(
           // The encoding maps BOTH "/" and "-" to "-", so a loose
           // `${exact}-` prefix would also catch sibling projects like
           // <oldHome>-neighbor — renaming those breaks THEIR session
-          // lookup (PM review). Only two shapes are safe to move:
-          //   1. exactly encode(from)            — cwd was the home itself
-          //   2. encode(from + "/agents/") …     — every agent cwd
+          // lookup (PM review). Only two shapes are safe to move per
+          // spelling S of the old home:
+          //   1. exactly encode(S)              — cwd was the home itself
+          //   2. encode(S + "/agents/") …       — every agent cwd
           // Anything else that merely shares the prefix is listed as a
           // skipped sibling and left untouched.
-          const exact = encodeProjectDirName(pre.from);
-          const agentsPrefix = encodeProjectDirName(`${pre.from}${path.sep}agents${path.sep}`);
-          const newPrefix = encodeProjectDirName(pre.to);
+          //
+          // EVERY spelling of the source home must be covered (PM review
+          // 2026-10-10, live owner migration): agents' cwd comes from the
+          // spelling the daemon launched them with, and on the owner's
+          // machine that was the ~/.slock-raft ALIAS, not the realpath —
+          // renaming only the realpath encoding left the actually-used
+          // alias-encoded dirs behind and every resumed session opened a
+          // fresh project dir instead. The same rule applies to the
+          // configured argument spelling (pre.fromArg) when it differs.
+          const newExact = encodeProjectDirName(pre.to);
+          const newAgentsPrefix = encodeProjectDirName(`${pre.to}${path.sep}agents${path.sep}`);
           const entries = await fs.readdir(projectsDir, { withFileTypes: true });
           let renamed = 0;
+          let merged = 0;
+          const mergedFiles: Array<{ from: string; to: string }> = [];
+          const mergeConflicts: string[] = [];
           const skippedExisting: string[] = [];
           const skippedSibling: string[] = [];
-          for (const entry of entries) {
-            if (!entry.isDirectory()) continue;
-            const name = entry.name;
-            const isAgentProject = name === exact || name.startsWith(agentsPrefix);
-            if (!isAgentProject) {
-              if (name.startsWith(`${exact}-`)) skippedSibling.push(name);
-              continue;
+          const handledDirs = new Set<string>();
+          for (const spelling of [...new Set(fromSpellings)]) {
+            const exact = encodeProjectDirName(spelling);
+            const agentsPrefix = encodeProjectDirName(`${spelling}${path.sep}agents${path.sep}`);
+            for (const entry of entries) {
+              if (!entry.isDirectory()) continue;
+              const name = entry.name;
+              const isAgentProject = name === exact || name.startsWith(agentsPrefix);
+              if (!isAgentProject) {
+                if (name.startsWith(`${exact}-`)) skippedSibling.push(name);
+                continue;
+              }
+              if (handledDirs.has(name)) continue;
+              handledDirs.add(name);
+              const nextName = name === exact ? newExact : newAgentsPrefix + name.slice(agentsPrefix.length);
+              const fromDir = path.join(projectsDir, name);
+              const toDir = path.join(projectsDir, nextName);
+              if (await pathExists(toDir)) {
+                // Name already taken (e.g. the alias spelling renames into a
+                // dir the realpath spelling already produced, or a dir a
+                // post-migration session recreated): MERGE the session files
+                // in instead of clobbering — every file that does not
+                // already exist moves over; a collision keeps the target's
+                // file and is reported (PM: "把会话文件搬进去，不覆盖已有文件").
+                const moved = await mergeSessionDir(fromDir, toDir, mergeConflicts);
+                merged += moved.files;
+                for (const file of moved.journal) mergedFiles.push(file);
+                if (moved.files === 0 && mergeConflicts.length === 0) {
+                  skippedExisting.push(name);
+                }
+                journal.push({
+                  label: `restore merged session dir ${name}`,
+                  undo: async () => {
+                    for (const file of moved.journal.reverse()) {
+                      await fs.rename(file.to, file.from).catch(() => {});
+                    }
+                  },
+                });
+                continue;
+              }
+              await fs.rename(fromDir, toDir);
+              journal.push({
+                label: `restore session dir ${name}`,
+                undo: async () => {
+                  await fs.rename(toDir, fromDir);
+                },
+              });
+              renamed += 1;
             }
-            const nextName = newPrefix + name.slice(exact.length);
-            const fromDir = path.join(projectsDir, name);
-            const toDir = path.join(projectsDir, nextName);
-            // Never clobber: if the new name is already taken (e.g. an old
-            // pre-migration run), leave the directory and report it.
-            if (await pathExists(toDir)) {
-              skippedExisting.push(name);
-              continue;
-            }
-            await fs.rename(fromDir, toDir);
-            journal.push({
-              label: `restore session dir ${name}`,
-              undo: async () => {
-                await fs.rename(toDir, fromDir);
-              },
-            });
-            renamed += 1;
           }
-          return { renamed, skippedExisting, skippedSibling, projectsDir };
+          return { renamed, merged, mergedFiles: mergedFiles.length, mergeConflicts, skippedExisting, skippedSibling, projectsDir, spellings: [...new Set(fromSpellings)] };
         }))
       ) {
         return rollbackAndFinish();
       }
     } else {
       record({ step: "sessions", status: "skipped", detail: { reason: "no ~/.claude/projects directory" } });
+    }
+
+    // Step 5.5 — Cursor SDK session continuity. The daemon-managed store at
+    // <home>/cursor-sdk-host/<agentId>/store/ moved with the tree, but every
+    // agents.ndjson record embeds the cwd it was created with, and the SDK's
+    // resume wraps the store in a workspace scope: record.cwd must equal the
+    // CURRENT launch cwd or the resume raises AgentNotFoundError (owner
+    // migration 2026-10-10: Tom-mac went inactive with agent_not_found).
+    // Rewrite the cwd field from any source-home spelling to the target —
+    // only agents.ndjson carries it (runs/checkpoints/run_events do not).
+    // The original is byte-captured into migrate-backup; the rewrite is
+    // idempotent (records already at the new spelling are untouched).
+    if (
+      !(await runStep("cursor-sessions", async () => {
+        const hostRoot = path.join(pre.to, "cursor-sdk-host");
+        let agentDirs: string[] = [];
+        try {
+          agentDirs = (await fs.readdir(hostRoot, { withFileTypes: true }))
+            .filter((entry) => entry.isDirectory())
+            .map((entry) => entry.name);
+        } catch {
+          return { rewritten: 0, files: 0, reason: "no cursor-sdk-host directory" };
+        }
+        let rewritten = 0;
+        let files = 0;
+        const backupDir = path.join(pre.to, "computer", "migrate-backup");
+        for (const agentDir of agentDirs) {
+          const storeFile = path.join(hostRoot, agentDir, "store", "agents.ndjson");
+          let raw: string;
+          try {
+            raw = await fs.readFile(storeFile, "utf8");
+          } catch {
+            continue; // no store for this agent — nothing to rewrite
+          }
+          const lines = raw.split("\n");
+          let changed = false;
+          const nextLines = lines.map((line) => {
+            if (line.trim().length === 0) return line;
+            try {
+              const record = JSON.parse(line) as { cwd?: unknown };
+              if (typeof record.cwd !== "string") return line;
+              const replacement = rewriteCursorCwd(record.cwd, [...new Set(fromSpellings)], pre.to);
+              if (replacement === null) return line;
+              changed = true;
+              rewritten += 1;
+              return JSON.stringify({ ...record, cwd: replacement });
+            } catch {
+              return line; // not JSON / malformed — leave the line byte-exact
+            }
+          });
+          if (!changed) continue;
+          await fs.mkdir(backupDir, { recursive: true });
+          const backupPath = path.join(backupDir, `cursor-sdk-${agentDir}-agents.ndjson`);
+          await fs.copyFile(storeFile, backupPath);
+          journal.push({
+            label: `restore cursor-sdk store ${agentDir}`,
+            undo: async () => {
+              await fs.copyFile(backupPath, storeFile).catch(() => {});
+            },
+          });
+          await fs.writeFile(storeFile, `${nextLines.join("\n")}`, "utf8");
+          files += 1;
+        }
+        return { rewritten, files };
+      }))
+    ) {
+      return rollbackAndFinish();
     }
   }
 
@@ -1228,6 +1449,51 @@ export async function migrateHome(
     }
   }
 
+  // Step 8.5 — restore the agents that were running before the stop. Every
+  // start goes through the server's machine endpoint (the same
+  // orchestrator.startAgent path as the Start button and wake delivery), so
+  // configs and session ids always come from the server — the migration
+  // never fabricates a local start (PM review 2026-10-10). Skipped when this
+  // migration deliberately leaves the service down (desiredState "stopped"
+  // or zero attachments): those agents stay down with it.
+  if (shouldStartService) {
+    if (
+      !(await runStep("restore-agents", async () => {
+        const agentsRecord = await readRunningAgentsRecord(pre.to);
+        if (agentsRecord === null || agentsRecord.agents.length === 0) {
+          return { recorded: 0, note: "no agents were recorded running before the stop" };
+        }
+        restoreReport = await restoreRecordedAgents(pre.to, agentsRecord, {
+          ...(deps.agentRestoreDeps ?? {}),
+          // Surface SIGTERM/deadline cancellation inside the poll loop too,
+          // not just at the next step boundary.
+          ...(deps.abortSignal ? { signal: deps.abortSignal } : {}),
+        });
+        if (restoreReport.failed.length > 0) {
+          agentsNotRestored = restoreReport.failed.map((entry) => ({
+            agentId: entry.agentId,
+            name: entry.name,
+            reason: entry.outcome,
+            ...(entry.detail ? { detail: entry.detail } : {}),
+          }));
+        }
+        return {
+          recorded: restoreReport.recorded,
+          restored: restoreReport.restored,
+          ...(restoreReport.failed.length > 0 ? { failed: restoreReport.failed } : {}),
+        };
+      }))
+    ) {
+      return rollbackAndFinish();
+    }
+  } else {
+    record({
+      step: "restore-agents",
+      status: "skipped",
+      detail: { reason: pre.desiredState !== "running" ? 'desiredState is "stopped"' : "no server attachments" },
+    });
+  }
+
   // Step 9 — self-check (only meaningful when the service should be running
   // and there is something to run).
   if (shouldStartService) {
@@ -1274,7 +1540,25 @@ export async function migrateHome(
             `duplicate runner trees after migration: ${duplicates.map(([id, n]) => `${id} x${n}`).join(", ")}`,
           );
         }
-        return { serviceRunning: true, serversOnline: true, serverCount: last.serverCount, agentDirs, runnerTrees: [...runnersByServer.values()].reduce((a, b) => a + b, 0) };
+        // Recorded agents must be back — but a missing agent is a WARNING,
+        // never a rollback (PM decision 2026-10-10): the data is safely moved
+        // and the computer itself is healthy (service+daemons checked above),
+        // and rolling the whole move back because one agent's own runtime
+        // will not start fixes nothing and churns every other agent again.
+        // The result file carries `agentsNotRestored` with each reason; the
+        // desktop success page lists them for a manual Start. Only computer
+        // -level unhealthiness (service, daemon) fails the self-check.
+        let restoreDetail: Record<string, unknown> | undefined;
+        if (restoreReport !== null && restoreReport.recorded > 0) {
+          restoreDetail = {
+            recorded: restoreReport.recorded,
+            restored: restoreReport.restored.length,
+            ...(restoreReport.failed.length > 0
+              ? { notRestored: restoreReport.failed.map((entry) => ({ agentId: entry.agentId, name: entry.name, reason: entry.outcome, ...(entry.detail ? { detail: entry.detail } : {}) })) }
+              : {}),
+          };
+        }
+        return { serviceRunning: true, serversOnline: true, serverCount: last.serverCount, agentDirs, runnerTrees: [...runnersByServer.values()].reduce((a, b) => a + b, 0), ...(restoreDetail ? { agentsRestored: restoreDetail } : {}) };
       }))
     ) {
       return rollbackAndFinish();
@@ -1383,6 +1667,39 @@ export async function migrateHome(
       status: undoErrors.length === 0 ? "ok" : "fail",
       detail: undoErrors.length > 0 ? { undoErrors } : undefined,
     });
+    // Bring the recorded agents back at the ORIGINAL home too (task card:
+    // 回滚后也要恢复原来在跑的 agent). The record file rode the move back.
+    // Best-effort and AFTER the rollback verdict: a restore that cannot run
+    // (service down) or half-fails is reported as its own step outcome and
+    // never masks the undo result above.
+    if (pre.serviceWasRunning && serviceState === "running") {
+      try {
+        const agentsRecord = await readRunningAgentsRecord(pre.from);
+        if (agentsRecord !== null && agentsRecord.agents.length > 0) {
+          const rollbackRestore = await restoreRecordedAgents(pre.from, agentsRecord, {
+            ...(deps.agentRestoreDeps ?? {}),
+            // The rollback ignores the abort signal by design; the restore's
+            // own timeout is the only bound here.
+          });
+          record({
+            step: "restore-agents",
+            status: rollbackRestore.failed.length === 0 ? "ok" : "fail",
+            detail: {
+              phase: "rollback",
+              recorded: rollbackRestore.recorded,
+              restored: rollbackRestore.restored,
+              ...(rollbackRestore.failed.length > 0 ? { failed: rollbackRestore.failed } : {}),
+            },
+          });
+        }
+      } catch (error) {
+        record({
+          step: "restore-agents",
+          status: "fail",
+          detail: { phase: "rollback", error: (error as Error).message },
+        });
+      }
+    }
     return finish(rollbackOk ? "rolled_back" : "failed", serviceState, {
       attempted: true,
       ok: rollbackOk,

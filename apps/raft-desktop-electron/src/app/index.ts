@@ -50,6 +50,8 @@ import { StandaloneComputerHost, type StandaloneUiState } from "./standalone/sta
 import { findInterruptedMigration, findMigratedAwayHome, findRunningMigration, isMigrationProcess, readInProgressMarker, readMigrationResult, type InProgressMarker } from "./standalone/migrationRecovery.js";
 import { MigrationSupervisor } from "./standalone/migrationSupervisor.js";
 import { createMigrationController, finishSwitch, refuseWhileMigrating, registerMigrationIpc, restoreAndVerify } from "./standalone/migrationIpc.js";
+import { resolveEmbeddedHome } from "./embeddedHome.js";
+import { readLocalMachineIds } from "./standalone/localIdentity.js";
 import { registerEmbeddedStubs, registerHostModeIpc, registerStandaloneIpc } from "./standalone/ipc.js";
 import { resolveBundledCursorSdkAssets } from "./cursorSdkAssets.js";
 import { installStatusMonitorLifecycle } from "../main/statusMonitorLifecycle.js";
@@ -891,12 +893,18 @@ if (headlessMode?.mode === "__service") {
     // A migration that succeeded but whose app-side finish never ran (app quit/crashed in between) must be finished
     // BEFORE anything converges a built-in host at the old home.
     try {
+      // The home the built-in host will control (a saved deployment selection wins over the environment home).
+      const embeddedHome = await resolveEmbeddedHome({
+        storageDirectory: `${app.getPath("userData")}/computer-deployments`,
+        configuredOrigin: serverOriginConfig.current(),
+        defaultHome: resolveRaftHome,
+      });
       // 1. The command may still be running by itself (the app died mid-move, or was restarted): do not wait for it
       //    here (the window must open); watch it from the migration dialog instead and converge nothing meanwhile.
-      supervised = await findRunningMigration({ hostMode, homes: [resolveRaftHome(), defaultStandaloneHome()] });
+      supervised = await findRunningMigration({ hostMode, homes: [embeddedHome, defaultStandaloneHome()] });
       if (supervised) console.log(`[raft-desktop] a migration (pid ${supervised.pid}) is still running; supervising it`);
       // 2. A finished one whose app-side finish never ran.
-      const interrupted = supervised ? null : await findInterruptedMigration({ hostMode, embeddedHome: resolveRaftHome(), otherHomes: [defaultStandaloneHome()] });
+      const interrupted = supervised ? null : await findInterruptedMigration({ hostMode, embeddedHome, otherHomes: [defaultStandaloneHome()] });
       if (interrupted) {
         const bundled = resolveBundledComputer({ isPackaged: app.isPackaged, resourcesPath: process.resourcesPath });
         const { warnings } = await finishSwitch({ bundled, binaryTarget: defaultBinaryPath(), userDataDir: app.getPath("userData") }, interrupted.to);
@@ -905,7 +913,7 @@ if (headlessMode?.mode === "__service") {
         hostMode = { mode: "standalone", home: interrupted.to };
       } else if (!supervised) {
         // 3. The built-in home is gone because the Computer was moved away: adopt it, never rebuild an empty one.
-        const away = await findMigratedAwayHome({ hostMode, embeddedHome: resolveRaftHome(), standardHome: defaultStandaloneHome() });
+        const away = await findMigratedAwayHome({ hostMode, embeddedHome, standardHome: defaultStandaloneHome() });
         if (away) {
           const bundled = resolveBundledComputer({ isPackaged: app.isPackaged, resourcesPath: process.resourcesPath });
           await finishSwitch({ bundled, binaryTarget: defaultBinaryPath(), userDataDir: app.getPath("userData") }, away);
@@ -948,7 +956,8 @@ if (headlessMode?.mode === "__service") {
         cli: createStandaloneCli({ binaryPath, home: hostMode.home }),
         bundled: resolveBundledComputer({ isPackaged: app.isPackaged, resourcesPath: process.resourcesPath }),
       });
-      registerEmbeddedStubs(ipcMain);
+      const standaloneHome = hostMode.home;
+      registerEmbeddedStubs(ipcMain, { hostname: osHostname, machineIds: () => readLocalMachineIds(standaloneHome) });
       const monitor = registerStandaloneIpc({
         ipc: ipcMain,
         host: standaloneHost,

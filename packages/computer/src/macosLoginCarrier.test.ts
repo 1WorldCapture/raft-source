@@ -364,6 +364,143 @@ test("refresh replacement failure restores the last verified CLI carrier and pro
   }
 });
 
+function eioError(): Error & { code: number } {
+  return Object.assign(new Error("Bootstrap failed: 5: Input/output error"), { code: 5 });
+}
+
+async function refreshFixture(prefix: string) {
+  const root = await mkdtemp(path.join(os.tmpdir(), prefix));
+  const home = path.join(root, "user");
+  const slockHome = path.join(home, ".slock");
+  const harness = launchctlHarness();
+  const baseDeps = {
+    platform: "darwin" as const,
+    userHome: home,
+    uid: 501,
+    dispatcherPath: path.join(home, ".local", "bin", "raft-computer"),
+    legacyDesktopBundlePath: path.join(root, "Applications", "Raft Computer.app"),
+    runCommand: harness.run,
+    sleepFn: async () => {},
+  };
+  return { root, home, slockHome, harness, baseDeps };
+}
+
+test("refresh: a transient bootstrap EIO (launchd still tearing the label down) is retried and the refresh lands", async () => {
+  const f = await refreshFixture("raft-macos-login-eio-");
+  try {
+    await convergeCliHostLifecycle(f.slockHome, "enabled", f.baseDeps);
+    let eioLeft = 2;
+    const nextDispatcher = path.join(f.home, ".local", "bin", "raft-computer-next");
+    await refreshCliLoginCarrierIfOwned(f.slockHome, {
+      ...f.baseDeps,
+      dispatcherPath: nextDispatcher,
+      runCommand: async (command, args, signal) => {
+        if (args[0] === "bootstrap" && eioLeft > 0) {
+          eioLeft -= 1;
+          throw eioError();
+        }
+        return f.harness.run(command, args, signal);
+      },
+    });
+    assert.equal(eioLeft, 0, "both transient failures were absorbed");
+    assert.equal((await readHostLifecycleMarker(f.slockHome))?.dispatcherPath, nextDispatcher);
+    assert.equal(await readHostLifecycleRecoveryStatus(f.slockHome), null);
+    assert.equal(f.harness.jobs.size, 1);
+    assert.ok([...f.harness.jobs.values()][0]!.includes(nextDispatcher));
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+test("refresh: bootstrap is not issued until launchctl print says the old label is gone", async () => {
+  const f = await refreshFixture("raft-macos-login-unload-");
+  try {
+    await convergeCliHostLifecycle(f.slockHome, "enabled", f.baseDeps);
+    let stillUnloadingPrints = 3; // the job keeps showing up for a few polls after bootout
+    let bootedOut = false;
+    let bootstrapWhileLoaded = false;
+    await refreshCliLoginCarrierIfOwned(f.slockHome, {
+      ...f.baseDeps,
+      dispatcherPath: path.join(f.home, ".local", "bin", "raft-computer-next"),
+      runCommand: async (command, args, signal) => {
+        if (args[0] === "bootout") {
+          bootedOut = true;
+          const result = await f.harness.run(command, args, signal);
+          return result;
+        }
+        if (bootedOut && args[0] === "print" && args.length === 2 && !/^gui\/\d+$/.test(args[1]!) && stillUnloadingPrints > 0) {
+          stillUnloadingPrints -= 1;
+          return { stdout: `${args[1]} = { still unloading }\n`, stderr: "" };
+        }
+        if (bootedOut && args[0] === "bootstrap" && stillUnloadingPrints > 0) bootstrapWhileLoaded = true;
+        return f.harness.run(command, args, signal);
+      },
+    });
+    assert.equal(stillUnloadingPrints, 0, "the wait polled until the label disappeared");
+    assert.equal(bootstrapWhileLoaded, false);
+    assert.equal(f.harness.jobs.size, 1);
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+test("refresh: when the new definition cannot be bootstrapped, the rollback also rides out a transient EIO and restores the old carrier", async () => {
+  const f = await refreshFixture("raft-macos-login-rollback-eio-");
+  try {
+    await convergeCliHostLifecycle(f.slockHome, "enabled", f.baseDeps);
+    const previousMarker = await readHostLifecycleMarker(f.slockHome);
+    const nextDispatcher = path.join(f.home, ".local", "bin", "raft-computer-next");
+    let restoreEioLeft = 2;
+    await assert.rejects(
+      refreshCliLoginCarrierIfOwned(f.slockHome, {
+        ...f.baseDeps,
+        dispatcherPath: nextDispatcher,
+        runCommand: async (command, args, signal) => {
+          if (args[0] === "bootstrap") {
+            const definition = await readFile(args[2]!, "utf8");
+            if (definition.includes(nextDispatcher)) throw new Error("new definition denied"); // not transient
+            if (restoreEioLeft > 0) { restoreEioLeft -= 1; throw eioError(); }
+          }
+          return f.harness.run(command, args, signal);
+        },
+      }),
+      (error: unknown) => (error as { code?: string }).code === "HOST_LIFECYCLE_REGISTRATION_FAILED",
+    );
+    assert.equal(restoreEioLeft, 0);
+    assert.deepEqual(await readHostLifecycleMarker(f.slockHome), previousMarker);
+    assert.equal(f.harness.jobs.size, 1);
+    assert.ok([...f.harness.jobs.values()][0]!.includes(previousMarker!.dispatcherPath!));
+    assert.equal(await readHostLifecycleRecoveryStatus(f.slockHome), null);
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+test("a non-transient bootstrap failure is not retried", async () => {
+  const f = await refreshFixture("raft-macos-login-noretry-");
+  try {
+    await convergeCliHostLifecycle(f.slockHome, "enabled", f.baseDeps);
+    let forwardAttempts = 0;
+    const nextDispatcher = path.join(f.home, ".local", "bin", "raft-computer-next");
+    await assert.rejects(
+      refreshCliLoginCarrierIfOwned(f.slockHome, {
+        ...f.baseDeps,
+        dispatcherPath: nextDispatcher,
+        runCommand: async (command, args, signal) => {
+          if (args[0] === "bootstrap" && (await readFile(args[2]!, "utf8")).includes(nextDispatcher)) {
+            forwardAttempts += 1;
+            throw new Error("bootstrap denied");
+          }
+          return f.harness.run(command, args, signal);
+        },
+      }),
+    );
+    assert.equal(forwardAttempts, 1);
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
 test("refresh readback mismatch rolls back the prior job, definition, and owner", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "raft-macos-login-readback-rollback-"));
   const home = path.join(root, "user");

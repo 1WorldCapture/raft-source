@@ -15,7 +15,7 @@
 //     internal state of either module — keeps the contract on the
 //     wire boundary, which is the durable surface.
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { createServer as nodeCreateServer } from "node:net";
 import * as nodeNet from "node:net";
@@ -497,8 +497,9 @@ test("default ownerLiveness: a live service.pid at the install root blocks the u
   const socketPath = join(installRoot, "computer", "run", "service.sock");
   await mkdir(dirname(socketPath), { recursive: true });
   leaveRefusedSocketFile(socketPath);
-  // A live owner: this very test process.
-  await writeFile(join(installRoot, "computer", "run", "service.pid"), `${process.pid}\n`, "utf8");
+  // A live owner that is NOT this process (a different live pid).
+  const owner = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], { stdio: "ignore" });
+  await writeFile(join(installRoot, "computer", "run", "service.pid"), `${owner.pid}\n`, "utf8");
   const server = createIpcServer({ installRoot, handlers: {} }); // default liveness
   try {
     await assert.rejects(
@@ -507,6 +508,23 @@ test("default ownerLiveness: a live service.pid at the install root blocks the u
     );
     assert.equal((await stat(socketPath)).isSocket(), true);
   } finally {
+    owner.kill();
+    await rm(installRoot, { recursive: true, force: true });
+  }
+});
+
+test("default ownerLiveness: the pid in service.pid being THIS process (written by the spawner) does not block clearing a stale socket", async () => {
+  if (process.platform === "win32") return;
+  const installRoot = await mkdtemp(join(tmpdir(), "slock-ipc-selfpid-"));
+  const socketPath = join(installRoot, "computer", "run", "service.sock");
+  await mkdir(dirname(socketPath), { recursive: true });
+  leaveRefusedSocketFile(socketPath); // the unclean-death leftover
+  await writeFile(join(installRoot, "computer", "run", "service.pid"), `${process.pid}\n`, "utf8");
+  const server = createIpcServer({ installRoot, handlers: {} }); // default liveness
+  try {
+    assert.equal(await server.listen(), socketPath);
+  } finally {
+    await server.close();
     await rm(installRoot, { recursive: true, force: true });
   }
 });

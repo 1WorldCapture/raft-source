@@ -26,14 +26,16 @@ export function registerHostModeIpc(ipc: IpcMainLike, mode: ComputerHostMode): v
  * The embedded `computer:*` channels exist in the preload bridge; in standalone mode they must fail loudly
  * (never act on a Computer this app does not host).
  */
-export function registerEmbeddedStubs(ipc: IpcMainLike): void {
+export function registerEmbeddedStubs(ipc: IpcMainLike, identity?: { hostname: () => string; machineIds: () => Promise<string[]> }): void {
   const refuse = () => { throw new Error("This Computer is managed by the standalone Computer; use the Start/Stop controls."); };
   for (const channel of [
     "computer:enable", "computer:start", "computer:stop", "computer:restart", "computer:recycle", "computer:retry-converge",
     "computer:connect-deployment", "computer:upgrade", "computer:upgrade-fresh-install",
   ]) ipc.handle(channel, refuse);
-  ipc.handle("computer:local-info", () => ({ hostname: "" }));
-  ipc.handle("computer:status", () => null);
+  // The renderer's self-machine correlation (machine id first, hostname as fallback) reads these two; in
+  // standalone mode they describe the Computer this app only controls, so the card can merge into its row.
+  ipc.handle("computer:local-info", () => ({ hostname: identity?.hostname() ?? "" }));
+  ipc.handle("computer:status", () => (identity ? identity.machineIds().then((ids) => ({ servers: ids.map((machineId) => ({ machineId })) })) : null));
   ipc.handle("computer:upgrade-info", () => ({ latestVersion: null }));
   ipc.handle("computer:management", () => ({ model: "standalone" }));
 }

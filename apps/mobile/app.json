@@ -3,7 +3,7 @@
     "name": "Raft",
     "slug": "raft-mobile",
     "scheme": "raft",
-    "version": "0.1.9",
+    "version": "0.2.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "icon": "./assets/icon.png",
@@ -19,7 +19,7 @@
     "android": {
       "package": "build.raft.mobile",
       "allowBackup": false,
-      "versionCode": 109,
+      "versionCode": 200,
       "predictiveBackGestureEnabled": false,
       "usesCleartextTraffic": false,
       "adaptiveIcon": {

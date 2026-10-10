@@ -24,6 +24,10 @@ test("a deliberate Stop reads as stopped (idle), not as an error; an unexpected 
   assert.deepEqual([crashed.tone, crashed.detail], ["warn", "killed"]);
 });
 
+test("running: an unreported agent count (0) is not shown as '0 agents'", () => {
+  assert.equal(deriveStandaloneCard({ ...base, status: { agentCount: 0, servers: [{ daemonState: "online" }], service: { version: null } } }).detail, "1/1 server connected");
+});
+
 test("running: counts agents and connected servers; Stop asks first and says quitting the app does not stop agents", () => {
   const running = deriveStandaloneCard(base);
   assert.deepEqual([running.tone, running.detail, running.version], ["ok", "3 agents · 1/2 servers connected", "1.0.29"]);

@@ -285,6 +285,20 @@ export function resolveCommandOnPath(command: string, deps: ProbeDeps = {}): str
   }
 }
 
+/**
+ * Resolve the agy (Antigravity CLI) executable. PATH wins; when `which` finds nothing (a daemon started from a
+ * login item or launchd has a minimal PATH), fall back to the usual install dirs, same order as OMP:
+ * $HOME/.local/bin, $HOME/.bun/bin, Homebrew, /usr/local/bin. POSIX only.
+ */
+export function resolveAgyCommand(deps: ProbeDeps = {}): string | null {
+  const onPath = resolveCommandOnPath("agy", deps);
+  if (onPath) return onPath;
+  if ((deps.platform ?? process.platform) === "win32") return null;
+  const homeDir = deps.homeDir ?? deps.env?.HOME ?? process.env.HOME ?? "";
+  const dirs = [...(homeDir ? [`${homeDir}/.local/bin`, `${homeDir}/.bun/bin`] : []), "/opt/homebrew/bin", "/usr/local/bin"];
+  return firstExistingPath(dirs.map((dir) => `${dir}/agy`), deps);
+}
+
 export function firstExistingPath(candidates: string[], deps: ProbeDeps = {}): string | null {
   const exists = deps.existsSyncFn ?? existsSync;
   for (const candidate of candidates) {

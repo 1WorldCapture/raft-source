@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import { hydrateRuntimeConfig, runtimeConfigToLaunchFields, type AgentConfig, type RuntimeModelSourceOutcome , type AxSurfaceText } from "@botiverse/raft-shared";
 import { buildCliTransportSystemPrompt, prepareCliTransport } from "./cliTransport.js";
-import { resolveCommandOnPath, readCommandVersion, requiresWindowsShell, type ProbeDeps } from "./probe.js";
+import { resolveAgyCommand, readCommandVersion, requiresWindowsShell, type ProbeDeps } from "./probe.js";
 import type { ParsedEvent, RuntimeDriver, RuntimeProbeResult, SpawnContext, SpawnResult } from "./types.js";
 import {
   installManagedMcpRuntimeJsonOverlay,
@@ -24,7 +24,7 @@ export function resolveAntigravitySpawn(
   commandArgs: string[],
   deps: ProbeDeps = {},
 ): { command: string; args: string[]; shell: boolean } {
-  const command = resolveCommandOnPath("agy", deps) ?? "agy";
+  const command = resolveAgyCommand(deps) ?? "agy";
   return {
     command,
     args: commandArgs,
@@ -122,7 +122,7 @@ export class AntigravityDriver implements RuntimeDriver {
   private sessionAnnounced = false;
 
   probe(): RuntimeProbeResult {
-    const command = resolveCommandOnPath("agy");
+    const command = resolveAgyCommand();
     if (!command) return { available: false };
     return {
       available: true,

@@ -15,6 +15,14 @@ test("line parser: events, the apply result, the dry-run summary; anything else 
     final: { result: "rolled_back", from: "/a", to: "/b", error: "boom", serviceState: "running", reason: null, rollbackOk: null },
   });
   assert.deepEqual(parseMigrationLine('{"dryRun":true,"outcome":"blocked","blocked":true}'), { kind: "dry-run", outcome: "blocked" });
+  // agentsNotRestored rides the final result line (successful move, agent(s) needing a manual Start)
+  const withAgents = parseMigrationLine('{"schemaVersion":1,"result":"success","from":"/a","to":"/b","error":null,"serviceState":"running","steps":[],"agentsNotRestored":[{"agentId":"a1","name":"one","reason":"start-failed","detail":"boom"}]}');
+  assert.equal(withAgents.kind, "result");
+  if (withAgents.kind === "result") {
+    assert.deepEqual(withAgents.final.agentsNotRestored, [{ agentId: "a1", name: "one", reason: "start-failed", detail: "boom" }]);
+  }
+  const malformed = parseMigrationLine('{"schemaVersion":1,"result":"success","from":"/a","to":"/b","error":null,"serviceState":"running","steps":[],"agentsNotRestored":"nope"}');
+  assert.equal(malformed.kind === "result" ? malformed.final.agentsNotRestored : "not-a-result", undefined);
   assert.deepEqual(parseMigrationLine('{"dryRun":true,"outcome":"planned","blocked":false}'), { kind: "dry-run", outcome: "planned" });
   assert.equal(parseMigrationLine("oops").kind, "other");
   assert.equal(parseMigrationLine("[1]").kind, "other");

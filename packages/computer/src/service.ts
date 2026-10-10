@@ -21,6 +21,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { createRequire } from "node:module";
 import { COMPUTER_VERSION } from "./version.js";
 import { withComputerMutationLock } from "./concurrency.js";
+import { startIsAwaitingService } from "./startAwaiting.js";
 import { clearResidentConnectedMarker, readResidentConnectedMarker, writeResidentConnectedMarker } from "./residentConnectionMarker.js";
 import { residentCoreIdentity } from "./residentCoreIdentity.js";
 import { mkdir, readFile, writeFile, open, stat, unlink } from "node:fs/promises";
@@ -1232,7 +1233,9 @@ export async function runService(deps: RunServiceDeps = {}): Promise<void> {
       deps.serviceIdentityPublishDeps,
     );
   };
-  if (parentMutationLockHeld()) {
+  // A launchd-carrier boot has no parent-lock env marker; a live `start` that is waiting for this very service says so
+  // through the awaiting marker (see startAwaiting.ts) and holds the lock on our behalf.
+  if (parentMutationLockHeld() || await startIsAwaitingService(slockHome)) {
     // The spawning CLI/app still holds the home-scoped mutation lock across
     // spawn→ready; this boot is already serialized against other starters,
     // and acquiring the same lock again would deadlock.

@@ -3270,6 +3270,184 @@ test("delivery-gating seam ①c: a boundary-dropped already-consumed seq must st
 });
 
 // ===========================================================================
+// Seam ①d — the CLI pull path must settle a BUSY-QUEUED tracked mention.
+// A mention delivered while the agent is busy queues in the pending inbox and
+// waits for the observed turn boundary. But the model routinely consumes that
+// same message earlier through `message check`/`read` (the CLI pull path):
+// consumeVisibleMessages then drains it from the pending inbox WITHOUT any
+// turn-boundary delivery, and the tracked obligation used to hang — the server
+// kept finding it recoverable and redelivered on 5/10/20/40/80/160s backoff
+// while every redelivery was swallowed as duplicate_pending (task #16, seq 490).
+// Contract: consumed-and-removed-from-pending-inbox IS drained — transition
+// daemon_drained, ACK fired, redeliveries are idempotent no-ops.
+// ===========================================================================
+
+test("task #16: a busy-queued mention consumed via the CLI pull path drains and ACKs its tracked occurrence", async () => {
+  const { sink, tracer } = makeDeterministicTracer();
+  await withManager(async ({ manager }) => {
+    await manager.startAgent("agent-1", makeConfig({ sessionId: "s1" }));
+    const ap = getProcess(manager, "agent-1");
+    (manager as any).commitApmIdleState("agent-1", ap, false);        // busy → the mention queues (queued_busy_mention)
+    ap.sessionId = "s1";
+    ap.launchId = "launch-1";
+
+    const transitions: { state: string; outcome: string }[] = [];
+    const terminalErrors: string[] = [];
+    let ackCount = 0;
+
+    await manager.deliverMessage(
+      "agent-1",
+      makeMessage("hello", { seq: 490, message_id: "m-490", channel_name: "general", channel_type: "channel" }),
+      {
+        deliveryId: "occ-490",
+        mentionDelivery: {
+          occurrenceId: "occ-490",
+          messageId: "m-490",
+          launchId: ap.launchId,
+          sessionId: ap.sessionId,
+        },
+        onMentionTransition: (state: string, outcome: string) => { transitions.push({ state, outcome }); },
+        onMentionAck: () => { ackCount += 1; },
+        onMentionTerminalError: (code: string) => { terminalErrors.push(code); },
+      } as any,
+    );
+
+    assert.equal(lastDeliveryOutcome(sink), "queued_busy_mention");
+    assert.equal(ap.inbox.filter((m: any) => m.message_id === "m-490").length, 1, "the mention waits in the pending inbox");
+    assert.deepEqual(transitions, [
+      { state: "daemon_received", outcome: "accepted" },
+      { state: "daemon_pending", outcome: "accepted" },
+    ], "busy queueing parks the occurrence at daemon_pending, waiting for a turn boundary");
+    assert.equal(ackCount, 0, "no ACK while the message is still queued");
+    assert.deepEqual(terminalErrors, []);
+
+    // The model consumes the queued message through the CLI pull path while the
+    // first turn is still running — no turn boundary ever fires for it.
+    (manager as any).consumeVisibleMessages("agent-1", {
+      messages: [makeMessage("hello", { seq: 490, message_id: "m-490", channel_name: "general", channel_type: "channel" })],
+      source: "agent_api_events_local",
+    });
+
+    assert.equal(ap.inbox.length, 0, "the consumed message left the pending inbox");
+    assert.deepEqual(transitions, [
+      { state: "daemon_received", outcome: "accepted" },
+      { state: "daemon_pending", outcome: "accepted" },
+      { state: "daemon_drained", outcome: "accepted" },
+    ], "CLI consumption must settle the parked occurrence as daemon_drained (task #16 regression)");
+    assert.equal(ackCount, 1, "the ACK fires at consumption time, not at an unrelated later turn boundary");
+    assert.deepEqual(terminalErrors, []);
+  }, { tracer });
+});
+
+test("task #16: a redelivery after CLI-path settlement is an idempotent no-op", async () => {
+  const { sink, tracer } = makeDeterministicTracer();
+  await withManager(async ({ manager }) => {
+    await manager.startAgent("agent-1", makeConfig({ sessionId: "s1" }));
+    const ap = getProcess(manager, "agent-1");
+    (manager as any).commitApmIdleState("agent-1", ap, false);
+    ap.sessionId = "s1";
+    ap.launchId = "launch-1";
+
+    const deliver = (hooks: { transitions: { state: string; outcome: string }[]; ack: () => void; terminal: (code: string) => void }) =>
+      manager.deliverMessage(
+        "agent-1",
+        makeMessage("hello", { seq: 490, message_id: "m-490", channel_name: "general", channel_type: "channel" }),
+        {
+          deliveryId: "occ-490",
+          mentionDelivery: {
+            occurrenceId: "occ-490",
+            messageId: "m-490",
+            launchId: ap.launchId,
+            sessionId: ap.sessionId,
+          },
+          onMentionTransition: (state: string, outcome: string) => { hooks.transitions.push({ state, outcome }); },
+          onMentionAck: hooks.ack,
+          onMentionTerminalError: hooks.terminal,
+        } as any,
+      );
+
+    const firstAcks: number[] = [];
+    const first = {
+      transitions: [] as { state: string; outcome: string }[],
+      ack: () => { firstAcks.push(1); },
+      terminal: () => {},
+    };
+    await deliver(first);
+    assert.equal(lastDeliveryOutcome(sink), "queued_busy_mention");
+
+    (manager as any).consumeVisibleMessages("agent-1", {
+      messages: [makeMessage("hello", { seq: 490, message_id: "m-490", channel_name: "general", channel_type: "channel" })],
+      source: "agent_api_events_local",
+    });
+    assert.equal(firstAcks.length, 1, "exactly one ACK at consumption time");
+
+    // The server retries on its ack-timeout backoff; the daemon must coalesce
+    // the redelivery without re-queueing or re-transitioning. The duplicate
+    // path still fires onMentionAck — the server's ack consumer is idempotent
+    // on already-acked rows, so a repeat ACK is a harmless no-op there.
+    const secondAcks: number[] = [];
+    const second = {
+      transitions: [] as { state: string; outcome: string }[],
+      ack: () => { secondAcks.push(1); },
+      terminal: () => {},
+    };
+    const result = await deliver(second);
+
+    assert.equal(result, true, "the redelivery is accepted (coalesced)");
+    assert.equal(ap.inbox.length, 0, "the redelivery must not re-enter the pending inbox");
+    assert.deepEqual(second.transitions, [], "a settled occurrence takes no further transitions");
+    assert.deepEqual(first.transitions.at(-1), { state: "daemon_drained", outcome: "accepted" }, "state stays drained");
+    assert.equal(secondAcks.length, 1, "the duplicate_drained path still emits the ACK for the retrying server");
+  }, { tracer });
+});
+
+test("task #16: CLI consumption of an unrelated message must not settle an unrelated queued mention", async () => {
+  const { sink, tracer } = makeDeterministicTracer();
+  await withManager(async ({ manager }) => {
+    await manager.startAgent("agent-1", makeConfig({ sessionId: "s1" }));
+    const ap = getProcess(manager, "agent-1");
+    (manager as any).commitApmIdleState("agent-1", ap, false);
+    ap.sessionId = "s1";
+    ap.launchId = "launch-1";
+
+    const transitions: { state: string; outcome: string }[] = [];
+    let ackCount = 0;
+
+    await manager.deliverMessage(
+      "agent-1",
+      makeMessage("hello", { seq: 490, message_id: "m-490", channel_name: "general", channel_type: "channel" }),
+      {
+        deliveryId: "occ-490",
+        mentionDelivery: {
+          occurrenceId: "occ-490",
+          messageId: "m-490",
+          launchId: ap.launchId,
+          sessionId: ap.sessionId,
+        },
+        onMentionTransition: (state: string, outcome: string) => { transitions.push({ state, outcome }); },
+        onMentionAck: () => { ackCount += 1; },
+        onMentionTerminalError: () => {},
+      } as any,
+    );
+    assert.equal(lastDeliveryOutcome(sink), "queued_busy_mention");
+
+    // The model consumes a DIFFERENT message from another target — the queued
+    // mention's obligation must stay parked at daemon_pending.
+    (manager as any).consumeVisibleMessages("agent-1", {
+      messages: [makeMessage("other", { seq: 491, message_id: "m-491", channel_name: "random", channel_type: "channel" })],
+      source: "agent_api_events_local",
+    });
+
+    assert.deepEqual(transitions, [
+      { state: "daemon_received", outcome: "accepted" },
+      { state: "daemon_pending", outcome: "accepted" },
+    ], "an unrelated consumption must not settle the queued mention");
+    assert.equal(ackCount, 0, "no ACK fired for a message the model has not consumed");
+    assert.equal(ap.inbox.filter((m: any) => m.message_id === "m-490").length, 1, "the queued mention stays in the pending inbox");
+  }, { tracer });
+});
+
+// ===========================================================================
 // A direct @mention must wake an agent that has no running process. The mention
 // occurrence used to be rejected (IDENTITY_UNKNOWN) whenever `ap` was absent, so a
 // one-process-per-turn runtime (cursor, gemini, copilot, opencode) between turns, or

@@ -31,8 +31,9 @@ export function DesktopSelfComputerMount() {
   // Standalone mode: the machine's Computer is an independent raft-computer, shown by StandaloneComputerCard.
   const standalone = useHostMode()?.mode === "standalone";
   const self = useSelfMachine();
-  // The standalone card does not stand in for a machine row (it carries no machine id), so keep the row.
-  const selfId = standalone ? null : self?.id ?? null;
+  // Both cards stand in for this device's machine row once it is identified (standalone via the attachment's
+  // machine id or a unique hostname); until then the row stays and the card is a plain control card.
+  const selfId = self?.id ?? null;
   const [host, setHost] = useState<HTMLElement | null>(null);
 
   // Maintain the portal host at the top of the reused computers list.

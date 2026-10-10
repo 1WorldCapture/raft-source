@@ -61,7 +61,7 @@ test("rolled back says nothing changed; failed says agents may be offline; error
 
 test("every step the Computer can report has a plain-language label (no raw step names in the dialog)", async () => {
   const { STEP_LABELS } = await import("./migrationLogic.ts");
-  for (const step of ["preflight", "source-carrier", "stop", "move", "alias", "sessions", "home-env", "backup", "start", "self-check", "rollback"]) {
+  for (const step of ["preflight", "source-carrier", "record-agents", "stop", "move", "alias", "sessions", "cursor-sessions", "home-env", "backup", "start", "restore-agents", "self-check", "rollback"]) {
     assert.ok(STEP_LABELS[step], step);
   }
 });
