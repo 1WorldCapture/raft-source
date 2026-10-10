@@ -448,21 +448,28 @@ export function createIpcServer(options: IpcServerOptions): IpcServer {
       // CREATION (PM fix 2026-10-10): the old post-bind chmod had a window
       // in which a concurrent stale-probe could unlink the file between
       // bind and chmod — the chmod then failed ENOENT and killed the
-      // winning service (drill 284-run2). With no post-bind step there is
-      // no window; the umask is restored the moment the bind settles.
-      const previousUmask = process.umask(0o177);
-      try {
-        await new Promise<void>((resolve, reject) => {
-          const onError = (err: Error): void => {
-            s.removeListener("error", onError);
-            reject(err);
-          };
-          s.once("error", onError);
+      // winning service (drill 284-run2). libuv completes the AF_UNIX bind
+      // synchronously inside the `listen()` call itself, so the tight umask
+      // only brackets that one call and is restored before the callback is
+      // awaited — unrelated async creations never see it (PM review).
+      const bindSettled = new Promise<void>((resolve, reject) => {
+        const onError = (err: Error): void => {
+          s.removeListener("error", onError);
+          reject(err);
+        };
+        s.once("error", onError);
+        const previousUmask = process.umask(0o177);
+        try {
           s.listen(transportPath, () => {
             s.removeListener("error", onError);
             resolve();
           });
-        });
+        } finally {
+          process.umask(previousUmask);
+        }
+      });
+      try {
+        await bindSettled;
       } catch (error) {
         if (server === s) server = null;
         try {
@@ -471,8 +478,6 @@ export function createIpcServer(options: IpcServerOptions): IpcServer {
           /* bind never became active */
         }
         throw error;
-      } finally {
-        process.umask(previousUmask);
       }
       return transportPath;
     },

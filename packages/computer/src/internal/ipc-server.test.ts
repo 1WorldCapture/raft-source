@@ -18,6 +18,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { createServer as nodeCreateServer } from "node:net";
+import * as nodeNet from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "vitest";
@@ -515,4 +516,53 @@ test("bind under umask: the socket file is 0600 at creation (no post-bind chmod 
   await withHarness({}, async ({ socketPath }) => {
     assert.equal((await stat(socketPath)).mode & 0o777, 0o600);
   });
+});
+
+test("umask restoration: a directory created while the listen callback is still pending keeps the ambient mode (PM review on #287)", async () => {
+  if (process.platform === "win32") return;
+  const installRoot = await mkdtemp(join(tmpdir(), "slock-ipc-umask-"));
+  // Withhold the listen callback at a gate so the test can observe the
+  // bind→callback window deterministically (libuv binds synchronously
+  // inside `listen()`; only the callback is async).
+  const originalListen = nodeNet.Server.prototype.listen;
+  let callbackCaptured = false;
+  let releaseCallback: () => void = () => {};
+  nodeNet.Server.prototype.listen = function patchedListen(this: nodeNet.Server, ...args: unknown[]) {
+    const last = args.at(-1);
+    if (typeof last === "function") {
+      const userCallback = last as () => void;
+      args[args.length - 1] = () => {
+        callbackCaptured = true;
+        releaseCallback = () => userCallback();
+      };
+    }
+    return originalListen.apply(this, args as Parameters<typeof originalListen>);
+  } as typeof originalListen;
+  const server = createIpcServer({ installRoot, handlers: {} });
+  try {
+    const ambientUmask = process.umask();
+    const listenPromise = server.listen();
+    for (let i = 0; i < 200 && !callbackCaptured; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    }
+    assert.equal(callbackCaptured, true, "the gate captured the listen callback");
+    // Inside the bind→callback window: the socket was created 0600 by the
+    // umask bracket, but an UNRELATED creation must see the ambient umask —
+    // the tight one was restored synchronously, not held across the await.
+    const duringDir = join(installRoot, "during-bind");
+    await mkdir(duringDir);
+    assert.equal(
+      (await stat(duringDir)).mode & 0o777,
+      0o777 & ~ambientUmask,
+      "a concurrent directory creation must not be affected by the bind umask",
+    );
+    const socketPath = join(installRoot, "computer", "run", "service.sock");
+    assert.equal((await stat(socketPath)).mode & 0o777, 0o600, "the socket itself is 0600");
+    releaseCallback();
+    await listenPromise;
+  } finally {
+    nodeNet.Server.prototype.listen = originalListen;
+    await server.close().catch(() => {});
+    await rm(installRoot, { recursive: true, force: true });
+  }
 });
