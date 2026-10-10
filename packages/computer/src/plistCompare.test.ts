@@ -68,3 +68,17 @@ test("entities are decoded and unparseable input is never considered equal", () 
   assert.equal(plistsSemanticallyEqual("<plist><dict><key>a</key><data>AAAA</data></dict></plist>", "<plist><dict><key>a</key><data>AAAA</data></dict></plist>"), true, "byte-identical text short-circuits");
   assert.equal(plistsSemanticallyEqual("<plist><dict><key>a</key><data>AAAA</data></dict></plist>", "<plist><dict><key>a</key><data>AAAB</data></dict></plist>"), false, "unsupported element types fall back to different");
 });
+
+test("a repeated key is ambiguous, so the definitions are treated as different", () => {
+  const twice = "<plist><dict><key>a</key><string>1</string><key>a</key><string>2</string></dict></plist>";
+  const once = "<plist><dict><key>a</key><string>2</string></dict></plist>";
+  assert.equal(plistsSemanticallyEqual(twice, once), false);
+  assert.equal(plistsSemanticallyEqual(twice, twice.replace(/ /g, " ")), true, "byte-identical text still short-circuits");
+});
+
+test("a __proto__ key is an ordinary entry, not a way to hide a difference", () => {
+  const withProto = "<plist><dict><key>__proto__</key><string>x</string><key>a</key><string>1</string></dict></plist>";
+  const without = "<plist><dict><key>a</key><string>1</string></dict></plist>";
+  assert.equal(plistsSemanticallyEqual(withProto, without), false);
+  assert.equal(plistsSemanticallyEqual(withProto, "<plist><dict><key>a</key><string>1</string><key>__proto__</key><string>x</string></dict></plist>"), true);
+});

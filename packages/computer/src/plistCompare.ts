@@ -59,7 +59,7 @@ function parseElement(cursor: Cursor): PlistValue {
     const tag = name.slice(0, -1).trim();
     if (tag === "true") return true;
     if (tag === "false") return false;
-    if (tag === "dict") return {};
+    if (tag === "dict") return Object.create(null);
     if (tag === "array") return [];
     if (tag === "string") return "";
     throw new Error(`unsupported empty element ${tag}`);
@@ -79,12 +79,16 @@ function parseElement(cursor: Cursor): PlistValue {
       }
     }
     case "dict": {
-      const entries: { [key: string]: PlistValue } = {};
+      // No prototype: a key such as `__proto__` is then an ordinary entry and cannot corrupt the comparison.
+      const entries: { [key: string]: PlistValue } = Object.create(null);
       for (;;) {
         skipMisc(cursor);
         if (cursor.startsWith("</dict>")) { cursor.take("</dict>"); return entries; }
         cursor.take("<key>");
         const key = decodeEntities(cursor.until("</key>"));
+        // A repeated key is ambiguous (which value does launchd honour?): refuse to compare rather than let the
+        // later one silently win. The caller then treats the definitions as different.
+        if (key in entries) throw new Error(`duplicate key ${key}`);
         entries[key] = parseElement(cursor);
       }
     }
