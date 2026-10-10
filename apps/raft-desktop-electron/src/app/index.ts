@@ -50,6 +50,7 @@ import { StandaloneComputerHost, type StandaloneUiState } from "./standalone/sta
 import { findInterruptedMigration, findMigratedAwayHome, findRunningMigration, isMigrationProcess, readInProgressMarker, readMigrationResult, type InProgressMarker } from "./standalone/migrationRecovery.js";
 import { MigrationSupervisor } from "./standalone/migrationSupervisor.js";
 import { createMigrationController, finishSwitch, refuseWhileMigrating, registerMigrationIpc, restoreAndVerify } from "./standalone/migrationIpc.js";
+import { readLocalMachineIds } from "./standalone/localIdentity.js";
 import { registerEmbeddedStubs, registerHostModeIpc, registerStandaloneIpc } from "./standalone/ipc.js";
 import { resolveBundledCursorSdkAssets } from "./cursorSdkAssets.js";
 import { installStatusMonitorLifecycle } from "../main/statusMonitorLifecycle.js";
@@ -948,7 +949,8 @@ if (headlessMode?.mode === "__service") {
         cli: createStandaloneCli({ binaryPath, home: hostMode.home }),
         bundled: resolveBundledComputer({ isPackaged: app.isPackaged, resourcesPath: process.resourcesPath }),
       });
-      registerEmbeddedStubs(ipcMain);
+      const standaloneHome = hostMode.home;
+      registerEmbeddedStubs(ipcMain, { hostname: osHostname, machineIds: () => readLocalMachineIds(standaloneHome) });
       const monitor = registerStandaloneIpc({
         ipc: ipcMain,
         host: standaloneHost,

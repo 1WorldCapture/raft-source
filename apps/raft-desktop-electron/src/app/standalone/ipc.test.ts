@@ -48,3 +48,10 @@ test("standalone IPC drives the host: state, start, stop, install, upgrade", asy
   assert.deepEqual(log, ["stop", "start", "install", "stop", "install", "start"]);
   assert.deepEqual([...f.handlers.keys()].filter((k) => k.startsWith("standalone:")).sort(), ["standalone:install", "standalone:start", "standalone:state", "standalone:stop", "standalone:upgrade"]);
 });
+
+test("with an identity, the standalone stubs report the real hostname and the attached machine ids", async () => {
+  const f = fakeIpc();
+  registerEmbeddedStubs(f.ipc, { hostname: () => "lyondeMacBook-Pro", machineIds: async () => ["m1", "m2"] });
+  assert.deepEqual(f.call("computer:local-info"), { hostname: "lyondeMacBook-Pro" });
+  assert.deepEqual(await f.call("computer:status"), { servers: [{ machineId: "m1" }, { machineId: "m2" }] });
+});
