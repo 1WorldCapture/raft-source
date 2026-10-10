@@ -1263,3 +1263,28 @@ test("lib surface: the shared sweep ladder and spellings helper are importable f
   assert.equal(termSeen, true);
   assert.deepEqual(remaining, []);
 });
+
+test("early bootstrap armor: argv-gated handlers install on import for migrate-home only", async () => {
+  const savedArgv = process.argv;
+  const countBefore = { pipe: process.listenerCount("SIGPIPE"), hup: process.listenerCount("SIGHUP") };
+  try {
+    process.argv = ["node", "raft-computer", "migrate-home", "--apply"];
+    // The query busts the ESM cache so the module re-evaluates under the
+    // new argv; TypeScript cannot resolve query-suffixed specifiers.
+    // @ts-expect-error intentional cache-busting query import
+    await import("./earlySignals.js?v=armed");
+    assert.ok(process.listenerCount("SIGPIPE") >= countBefore.pipe + 1);
+    assert.ok(process.listenerCount("SIGHUP") >= countBefore.hup + 1);
+    assert.ok(process.stdout.listenerCount("error") >= 1);
+
+    const counts = { pipe: process.listenerCount("SIGPIPE"), hup: process.listenerCount("SIGHUP"), out: process.stdout.listenerCount("error") };
+    process.argv = ["node", "raft-computer", "status"];
+    // @ts-expect-error intentional cache-busting query import
+    await import("./earlySignals.js?v=unarmed");
+    assert.equal(process.listenerCount("SIGPIPE"), counts.pipe, "other commands add nothing");
+    assert.equal(process.listenerCount("SIGHUP"), counts.hup);
+    assert.equal(process.stdout.listenerCount("error"), counts.out);
+  } finally {
+    process.argv = savedArgv;
+  }
+});
