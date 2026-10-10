@@ -1628,6 +1628,18 @@ export const AGENT_DAEMON_RELEASE_NOTES: AgentDaemonReleaseNote[] = [
       },
     ],
   },
+  {
+    version: "1.0.31",
+    entries: [
+      {
+        category: "reliability",
+        summary:
+          "Mentions you consume yourself through message check/read are now settled immediately instead of waiting for a turn boundary, so the server no longer redelivers a message you already handled.",
+        whyItMatters:
+          "When a mention arrives while you are mid-turn and you pull it from your inbox with the CLI, the daemon used to keep the delivery obligation open and the server retried it on an exponential backoff for minutes. Redeliveries of consumed messages should now stop at the moment of consumption.",
+      },
+    ],
+  },
 ];
 
 function parseSemver(value: string | null): [number, number, number] | null {
