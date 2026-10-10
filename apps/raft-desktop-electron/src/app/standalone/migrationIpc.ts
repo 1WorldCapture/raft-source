@@ -108,3 +108,42 @@ export function registerMigrationIpc(ipc: IpcMainLike, controller: { getState():
   ipc.handle("migration:reset", () => controller.reset());
   ipc.handle("migration:cancel", () => controller.cancel());
 }
+
+export interface RestoreStatus {
+  service: { running: boolean };
+  servers: Array<{ daemon?: { running?: boolean } | null; serverConnected?: boolean }>;
+}
+
+/**
+ * "converge returned ok" is not "the Computer is back" (drill-290-anna, ②a/cancel retests: ok=true, nothing running).
+ * After a restore, poll the real status until the service runs and every attached server's daemon is up, or give up.
+ */
+export async function verifyBuiltInRunning(deps: {
+  getStatus: () => Promise<RestoreStatus>;
+  sleep?: (ms: number) => Promise<void>;
+  now?: () => number;
+  timeoutMs?: number;
+}): Promise<boolean> {
+  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const now = deps.now ?? (() => Date.now());
+  const deadline = now() + (deps.timeoutMs ?? 30_000);
+  for (;;) {
+    try {
+      const status = await deps.getStatus();
+      if (status.service.running && status.servers.every((row) => row.daemon?.running === true)) return true;
+    } catch { /* status not readable yet */ }
+    if (now() >= deadline) return false;
+    await sleep(1_000);
+  }
+}
+
+/** converge, then verify; if it reported ok but nothing runs, try one explicit start, then verify again. */
+export async function restoreAndVerify(host: { converge(): Promise<{ ok: boolean; error?: string }>; start(): Promise<void>; getStatus(): Promise<RestoreStatus> }, opts: { sleep?: (ms: number) => Promise<void>; now?: () => number; timeoutMs?: number } = {}): Promise<{ ok: boolean; error?: string }> {
+  const converged = await host.converge();
+  if (!converged.ok) return converged;
+  const verify = () => verifyBuiltInRunning({ getStatus: () => host.getStatus(), ...opts });
+  if (await verify()) return { ok: true };
+  try { await host.start(); } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) }; }
+  if (await verify()) return { ok: true };
+  return { ok: false, error: "The Computer did not come back within 30 seconds." };
+}

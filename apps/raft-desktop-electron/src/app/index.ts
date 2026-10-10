@@ -49,7 +49,7 @@ import { resolveBundledComputer } from "./standalone/bundled.js";
 import { StandaloneComputerHost, type StandaloneUiState } from "./standalone/standaloneHost.js";
 import { findInterruptedMigration, findMigratedAwayHome, findRunningMigration, isMigrationProcess, readInProgressMarker, readMigrationResult, type InProgressMarker } from "./standalone/migrationRecovery.js";
 import { MigrationSupervisor } from "./standalone/migrationSupervisor.js";
-import { createMigrationController, finishSwitch, refuseWhileMigrating, registerMigrationIpc } from "./standalone/migrationIpc.js";
+import { createMigrationController, finishSwitch, refuseWhileMigrating, registerMigrationIpc, restoreAndVerify } from "./standalone/migrationIpc.js";
 import { registerEmbeddedStubs, registerHostModeIpc, registerStandaloneIpc } from "./standalone/ipc.js";
 import { resolveBundledCursorSdkAssets } from "./cursorSdkAssets.js";
 import { installStatusMonitorLifecycle } from "../main/statusMonitorLifecycle.js";
@@ -987,7 +987,8 @@ if (headlessMode?.mode === "__service") {
             }
           },
           // A move that did not complete must leave the built-in Computer running again (converge = sweep orphans + start).
-          restoreBuiltIn: async () => embeddedHost.converge(),
+          // converge reporting ok is not enough: verify that the service and every daemon really run (one explicit Start if not).
+          restoreBuiltIn: () => restoreAndVerify(embeddedHost),
           // Only restore when the built-in home is still there and no migration command is alive (it would collide).
           safeToRestore: async () => {
             const homes = [embeddedHost.slockHome, defaultStandaloneHome()];

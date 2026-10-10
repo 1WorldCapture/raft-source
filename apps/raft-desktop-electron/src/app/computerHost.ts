@@ -148,7 +148,20 @@ class ComputerHost {
     return describeSessionOriginMismatch(check);
   }
 
+  /**
+   * The Computer library resolves its home from the PROCESS environment in several places (mutation lock, `runStart`,
+   * stale-state cleanup) while the service and runners it spawns get the selected home explicitly. When the app was
+   * started with a different RAFT_HOME than the home this host controls (a selected deployment root, a launcher that
+   * exports another path), the two halves disagreed: two services raced for the same socket and the runner never
+   * came up (drill-290-anna ②a/cancel retests; reproduced on xai). Pin the process env to the controlled home.
+   */
+  private pinProcessEnv(home: string): void {
+    process.env.RAFT_HOME = home;
+    process.env.SLOCK_HOME = home;
+  }
+
   private selectHome(home: string): void {
+    this.pinProcessEnv(home);
     this.slockHome = home;
     this.processScope = new ComputerProcessScope(home);
     this.api = createComputerApi(home, { hostLifecycleOwner: "app" });

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createMigrationController, refuseWhileMigrating } from "./migrationIpc.ts";
+import { createMigrationController, refuseWhileMigrating, restoreAndVerify, verifyBuiltInRunning } from "./migrationIpc.ts";
 import type { MigrateRun } from "./migration.ts";
 import type { InstallResult } from "./bundledInstall.ts";
 
@@ -97,4 +97,37 @@ test("embedded controls are refused in main while applying, and work again after
   assert.throws(() => start(1), /being moved/);
   applying = false;
   assert.equal(start(1), 2);
+});
+
+const up = { service: { running: true }, servers: [{ daemon: { running: true } }] };
+const down = { service: { running: false }, servers: [{ daemon: { running: false } }] };
+const clock = () => { let t = 0; return { now: () => t, sleep: async (ms: number) => { t += ms; } }; };
+
+test("verify: waits until the service runs and every daemon is up; gives up after the timeout", async () => {
+  const c = clock();
+  let n = 0;
+  assert.equal(await verifyBuiltInRunning({ getStatus: async () => (++n < 4 ? down : up), ...c }), true);
+  const c2 = clock();
+  assert.equal(await verifyBuiltInRunning({ getStatus: async () => down, ...c2, timeoutMs: 5_000 }), false);
+  assert.equal(await verifyBuiltInRunning({ getStatus: async () => { throw new Error("no status"); }, ...clock(), timeoutMs: 3_000 }), false);
+  assert.equal(await verifyBuiltInRunning({ getStatus: async () => ({ service: { running: true }, servers: [{ daemon: { running: true } }, { daemon: { running: false } }] }), ...clock(), timeoutMs: 3_000 }), false, "one daemon down = not back");
+});
+
+test("restore: converge ok but nothing runs -> one explicit start -> verified; never reports success without verification", async () => {
+  const calls: string[] = [];
+  let running = false;
+  const host = {
+    converge: async () => { calls.push("converge"); return { ok: true }; },
+    start: async () => { calls.push("start"); running = true; },
+    getStatus: async () => (running ? up : down),
+  };
+  assert.deepEqual(await restoreAndVerify(host, { ...clock(), timeoutMs: 3_000 }), { ok: true });
+  assert.deepEqual(calls, ["converge", "start"]);
+  const stuck = { converge: async () => ({ ok: true }), start: async () => undefined, getStatus: async () => down };
+  const r = await restoreAndVerify(stuck, { ...clock(), timeoutMs: 3_000 });
+  assert.equal(r.ok, false);
+  assert.match(r.error ?? "", /did not come back/);
+  assert.deepEqual(await restoreAndVerify({ ...stuck, converge: async () => ({ ok: false, error: "boom" }) }, clock()), { ok: false, error: "boom" });
+  const throwing = await restoreAndVerify({ ...stuck, start: async () => { throw new Error("start failed"); } }, { ...clock(), timeoutMs: 3_000 });
+  assert.deepEqual(throwing, { ok: false, error: "start failed" });
 });
