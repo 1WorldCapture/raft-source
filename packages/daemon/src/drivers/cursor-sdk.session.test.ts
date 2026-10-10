@@ -1105,6 +1105,68 @@ async function failSubmit(
   await waitFor(() => (kind(captured, "delivery_outcome").length > before ? true : undefined));
 }
 
+async function failSubmitWith(
+  script: ScriptedHostConnection,
+  session: CursorSdkRuntimeSession,
+  captured: CapturedRun,
+  attemptId: string,
+  errorClass: string,
+): Promise<void> {
+  const before = kind(captured, "delivery_outcome").length;
+  assert.equal(session.send({ mode: "idle", text: `msg ${attemptId}`, attemptId }).ok, true);
+  script.deliver({ kind: "attempt_result", attemptId, result: "failed", error: { message: "rejected", errorClass } } as CursorSdkHostToDriverMessage);
+  await waitFor(() => (kind(captured, "delivery_outcome").length > before ? true : undefined));
+}
+
+test("resumed session that never accepted a run: ONE unknown_agent submit failure requests a session reset", async () => {
+  const script = new ScriptedHostConnection();
+  const { deps, cleanup } = makeSessionDeps({ connection: script });
+  const { session } = makeSession(deps, { sessionId: "saved-session" });
+  const captured = capture(session);
+  try {
+    await session.start({ text: "first", attemptId: "a0" });
+    script.deliver({ kind: "attempt_result", attemptId: "a0", result: "failed", error: { message: "x", errorClass: "unknown_agent" } });
+    await waitFor(() => (captured.stderrTexts.some((t) => t.includes(CURSOR_SDK_RESUME_UNUSABLE_MARKER)) ? true : undefined));
+    await waitFor(() => (session.closed ? true : undefined));
+  } finally {
+    cleanup();
+  }
+});
+
+test("unknown_agent does not reset a fresh session, nor a plain busy one on a resumed session", async () => {
+  for (const [sessionId, errorClass] of [[undefined, "unknown_agent"], ["saved-session", "busy"]] as const) {
+    const script = new ScriptedHostConnection();
+    const { deps, cleanup } = makeSessionDeps({ connection: script });
+    const { session } = makeSession(deps, sessionId ? { sessionId } : {});
+    const captured = capture(session);
+    try {
+      await session.start({ text: "first", attemptId: "a0" });
+      script.deliver({ kind: "attempt_result", attemptId: "a0", result: "failed", error: { message: "x", errorClass } });
+      await waitFor(() => (kind(captured, "delivery_outcome").length > 0 ? true : undefined));
+      assert.equal(captured.stderrTexts.some((t) => t.includes(CURSOR_SDK_RESUME_UNUSABLE_MARKER)), false, `${sessionId}/${errorClass}`);
+      assert.equal(session.closed, false);
+    } finally {
+      cleanup();
+    }
+  }
+});
+
+test("resumed session that already accepted a run: unknown_agent is not treated as a dead session", async () => {
+  const script = new ScriptedHostConnection();
+  const { deps, cleanup } = makeSessionDeps({ connection: script });
+  const { session } = makeSession(deps, { sessionId: "saved-session" });
+  const captured = capture(session);
+  try {
+    await session.start({ text: "first", attemptId: "a0" });
+    script.deliver({ kind: "attempt_result", attemptId: "a0", result: "complete_delivered" });
+    await waitFor(() => (kind(captured, "delivery_outcome").length > 0 ? true : undefined));
+    await failSubmitWith(script, session, captured, "a1", "unknown_agent");
+    assert.equal(captured.stderrTexts.some((t) => t.includes(CURSOR_SDK_RESUME_UNUSABLE_MARKER)), false);
+  } finally {
+    cleanup();
+  }
+});
+
 test("resumed session: 3 consecutive failed submits request a session reset and stop the session", async () => {
   const script = new ScriptedHostConnection();
   const { deps, cleanup } = makeSessionDeps({ connection: script });
