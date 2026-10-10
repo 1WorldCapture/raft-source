@@ -47,7 +47,7 @@ import { defaultBinaryPath, defaultStandaloneHome, readHostMode, type ComputerHo
 import { createStandaloneCli } from "./standalone/cli.js";
 import { resolveBundledComputer } from "./standalone/bundled.js";
 import { StandaloneComputerHost, type StandaloneUiState } from "./standalone/standaloneHost.js";
-import { findInterruptedMigration, findMigratedAwayHome, findRunningMigration, processAlive, readInProgressMarker, readMigrationResult, type InProgressMarker } from "./standalone/migrationRecovery.js";
+import { findInterruptedMigration, findMigratedAwayHome, findRunningMigration, isMigrationProcess, readInProgressMarker, readMigrationResult, type InProgressMarker } from "./standalone/migrationRecovery.js";
 import { MigrationSupervisor } from "./standalone/migrationSupervisor.js";
 import { createMigrationController, finishSwitch, refuseWhileMigrating, registerMigrationIpc } from "./standalone/migrationIpc.js";
 import { registerEmbeddedStubs, registerHostModeIpc, registerStandaloneIpc } from "./standalone/ipc.js";
@@ -925,7 +925,7 @@ if (headlessMode?.mode === "__service") {
         marker: supervised,
         readMarker: readInProgressMarker,
         readResult: readMigrationResult,
-        isAlive: processAlive,
+        isAlive: (m) => isMigrationProcess(m),
         signal: (pid, sig) => process.kill(pid, sig),
         finish: (to) => finishSwitch({ bundled, binaryTarget: defaultBinaryPath(), userDataDir: app.getPath("userData") }, to),
         relaunch: () => { app.relaunch(); app.exit(0); },

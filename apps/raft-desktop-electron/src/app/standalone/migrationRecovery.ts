@@ -6,6 +6,7 @@
 // converged after a long gap would take over ~/.slock-raft, which already points at the NEW home. Detection: no standalone marker, and a migrate-result.json (in the embedded home or the standard home) records a
 // success whose from/to is this app's embedded home. Completion is the same finish the dialog
 // does after a success (copy the Cursor SDK, write the marker); the app then continues straight into standalone mode.
+import { execFile } from "node:child_process";
 import { readFile, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import type { ComputerHostMode } from "./hostMode.js";
@@ -84,6 +85,29 @@ export async function readInProgressMarker(home: string): Promise<InProgressMark
   }
 }
 
+/** `ps -o command= -p <pid>`: the command line, or null when there is no such process. */
+export function commandLineOf(pid: number): Promise<string | null> {
+  return new Promise((resolve) => {
+    execFile("ps", ["-o", "command=", "-p", String(pid)], { timeout: 5_000 }, (error, stdout) => {
+      const line = String(stdout ?? "").trim();
+      resolve(error || !line ? null : line);
+    });
+  });
+}
+
+/**
+ * The marker's pid is a migration command only if its command line says so. A dead command whose pid the OS has
+ * since given to an unrelated process must read as "finished" (and never receive a cancel signal). The `--from` on the
+ * command line is NOT compared with the marker's `from`: the app passes the path as the user wrote it (e.g. the
+ * `~/.slock-raft` symlink from RAFT_HOME) while the marker holds the realpath, and after a move the symlink points
+ * somewhere else again, so they legitimately differ.
+ */
+export async function isMigrationProcess(marker: { pid: number; from: string | null }, readCommand: (pid: number) => Promise<string | null> = commandLineOf): Promise<boolean> {
+  const line = await readCommand(marker.pid);
+  if (!line || !/\bmigrate-home\b/.test(line)) return false;
+  return true;
+}
+
 export function processAlive(pid: number): boolean {
   try { process.kill(pid, 0); return true; } catch (error) { return (error as { code?: string }).code === "EPERM"; }
 }
@@ -96,14 +120,14 @@ export async function waitForRunningMigration(input: {
   hostMode: ComputerHostMode;
   homes: string[];
   readMarker?: (home: string) => Promise<InProgressMarker | null>;
-  isAlive?: (pid: number) => boolean;
+  isAlive?: (marker: InProgressMarker) => boolean | Promise<boolean>;
   sleep?: (ms: number) => Promise<void>;
   timeoutMs?: number;
   onWaiting?: (marker: InProgressMarker) => void;
 }): Promise<boolean> {
   if (input.hostMode.mode === "standalone") return false;
   const read = input.readMarker ?? readInProgressMarker;
-  const alive = input.isAlive ?? processAlive;
+  const alive = input.isAlive ?? ((m: InProgressMarker) => isMigrationProcess(m));
   const sleep = input.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const deadline = Date.now() + (input.timeoutMs ?? 10 * 60_000);
   let waited = false;
@@ -111,7 +135,7 @@ export async function waitForRunningMigration(input: {
     let live: InProgressMarker | null = null;
     for (const home of [...new Set(input.homes)]) {
       const marker = await read(home);
-      if (marker && alive(marker.pid)) { live = marker; break; }
+      if (marker && (await alive(marker))) { live = marker; break; }
     }
     if (!live) return waited;
     if (!waited) input.onWaiting?.(live);
@@ -147,14 +171,14 @@ export async function findRunningMigration(input: {
   hostMode: ComputerHostMode;
   homes: string[];
   readMarker?: (home: string) => Promise<InProgressMarker | null>;
-  isAlive?: (pid: number) => boolean;
+  isAlive?: (marker: InProgressMarker) => boolean | Promise<boolean>;
 }): Promise<InProgressMarker | null> {
   if (input.hostMode.mode === "standalone") return null;
   const read = input.readMarker ?? readInProgressMarker;
-  const alive = input.isAlive ?? processAlive;
+  const alive = input.isAlive ?? ((m: InProgressMarker) => isMigrationProcess(m));
   for (const home of [...new Set(input.homes)]) {
     const marker = await read(home);
-    if (marker && alive(marker.pid)) return marker;
+    if (marker && (await alive(marker))) return marker;
   }
   return null;
 }

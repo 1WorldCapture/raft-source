@@ -13,7 +13,7 @@ function make(over: Partial<SupervisorDeps> = {}) {
     marker: marker(),
     readMarker: async () => marker({ step: "start" }),
     readResult: async () => ({ result: "success", from: "/h/old", to: "/h/.slock", finishedAt: "x", startedAt: "2026-10-10T00:00:05Z", error: null, reason: null }),
-    isAlive: () => aliveLeft-- > 0,
+    isAlive: async () => aliveLeft-- > 0,
     signal: (pid, sig) => { calls.push(`signal:${pid}:${sig}`); },
     finish: async (to) => { calls.push(`finish:${to}`); return { warnings: [] }; },
     relaunch: () => { calls.push("relaunch"); },
@@ -42,6 +42,7 @@ test("cancel sends SIGTERM to the marker's pid once; the rolled-back result is r
   const { sup, calls } = make({ readResult: async () => ({ result: "rolled_back", from: "/h/old", to: "/h/.slock", finishedAt: "x", startedAt: "2026-10-10T00:00:05Z", error: null, reason: "cancelled" }) });
   assert.equal(sup.cancel().cancelRequested, true);
   sup.cancel();
+  await new Promise((r) => setImmediate(r));
   await sup.run();
   assert.deepEqual(calls.filter((c) => c.startsWith("signal")), ["signal:4242:SIGTERM"]);
   const s = sup.getState();
@@ -78,4 +79,11 @@ test("a marker without a deadline (older Computer) is watched but cannot be canc
   assert.equal(sup.getState().cancellable, false);
   assert.equal(sup.cancel().cancelRequested, false);
   assert.deepEqual(calls, []);
+});
+
+test("cancel never signals a pid that is no longer the migration command (pid reuse)", async () => {
+  const { sup, calls } = make({ isAlive: async () => false });
+  sup.cancel();
+  await new Promise((r) => setImmediate(r));
+  assert.deepEqual(calls.filter((c) => c.startsWith("signal")), []);
 });
