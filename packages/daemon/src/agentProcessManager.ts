@@ -2073,12 +2073,16 @@ export class AgentProcessManager {
     const consumed = this.agentVisibleDelivery.recordConsumed(agentId, input);
     if (!consumed) return;
 
+    const consumedPendingInboxMessages: AgentMessage[] = [];
     const suppress = (messages: AgentMessage[] | undefined): number => {
       if (!messages || messages.length === 0) return 0;
       let removed = 0;
       const retained = messages.filter((message) => {
         const matched = consumed.shouldSuppress(message);
-        if (matched) removed += 1;
+        if (matched) {
+          removed += 1;
+          consumedPendingInboxMessages.push(message);
+        }
         return !matched;
       });
       messages.splice(0, messages.length, ...retained);
@@ -2089,6 +2093,7 @@ export class AgentProcessManager {
     const removedActive = suppress(active?.inbox);
     const removedStarting = this.startingInboxes.suppressConsumed(agentId, consumed.shouldSuppress);
     this.assertStartPendingDeliveryInvariants("visible-consume");
+    this.settleTrackedMentionsConsumedFromPendingInbox(agentId, consumedPendingInboxMessages);
     this.recordDaemonTrace("daemon.agent.inbox.visible_consumed", {
       agentId,
       source: input.source,
@@ -4339,6 +4344,33 @@ export class AgentProcessManager {
   private completePendingTrackedMentions(agentId: string): void {
     for (const tracked of this.trackedMentionDeliveries.values()) {
       if (tracked.agentId !== agentId || tracked.state !== "pending") continue;
+      this.completeTrackedMentionDelivery(tracked.context);
+    }
+  }
+
+  /**
+   * A mention queued while the agent was busy waits for the observed turn
+   * boundary to deliver it via stdin. The model can also consume that same
+   * message earlier through the CLI pull path (message check/read): the
+   * pending inbox is then drained WITHOUT any turn-boundary delivery, and the
+   * tracked obligation would hang until an unrelated later turn_end push
+   * happened to settle it — while the server kept redelivering a message the
+   * model has already consumed (task #16). Settle here: a message the model
+   * has consumed and that has left the pending inbox IS drained, whichever
+   * path consumed it. completeTrackedMentionDelivery is idempotent per
+   * occurrence, and the server-side ack consumer is idempotent on
+   * already-acked rows, so redrives remain no-ops.
+   */
+  private settleTrackedMentionsConsumedFromPendingInbox(agentId: string, consumedMessages: readonly AgentMessage[]): void {
+    if (consumedMessages.length === 0) return;
+    const consumedIds = new Set<string>();
+    for (const message of consumedMessages) {
+      if (message.message_id) consumedIds.add(message.message_id);
+    }
+    if (consumedIds.size === 0) return;
+    for (const tracked of this.trackedMentionDeliveries.values()) {
+      if (tracked.agentId !== agentId || tracked.state !== "pending") continue;
+      if (!consumedIds.has(tracked.messageId)) continue;
       this.completeTrackedMentionDelivery(tracked.context);
     }
   }
