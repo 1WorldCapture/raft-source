@@ -177,6 +177,9 @@ export interface MigrateHomeDeps {
    *  fix #288): aborted → forward steps fail into rollback. The rollback
    *  itself ignores it — a repeat signal must never interrupt the restore. */
   abortSignal?: AbortSignal;
+  /** Upper bound for waiting out abandoned start/stop operations during a
+   *  rollback (PM review on #292). Default 30s. */
+  abandonedWaitTimeoutMs?: number;
   sweepTimeoutMs?: number;
   selfCheckTimeoutMs?: number;
   selfCheckPollMs?: number;
@@ -772,12 +775,19 @@ export async function migrateHome(
    *  fails into rollback, whose whole-tree sweep reaps whatever the
    *  half-finished start left behind (PM #292: cancel must interrupt the
    *  start step's daemon wait, not wait out its own timeout). */
+  /** Long dependency waits abandoned by an abort. The underlying operation
+   *  keeps running in-process (runStart keeps converging) and may spawn
+   *  detached children AFTER the rollback's tree sweep — the rollback waits
+   *  these out (bounded) and sweeps again before writing the result (PM
+   *  review on #292). */
+  const abandonedOps = new Set<Promise<unknown>>();
   const abortableWait = <T>(promise: Promise<T>, label: string): Promise<T> =>
     new Promise<T>((resolve, reject) => {
       const tick = () => {
         const reason = abortReason();
         if (reason !== null) {
           cleanup();
+          abandonedOps.add(promise);
           reject(new Error(`${label} aborted: ${reason}`));
           return true;
         }
@@ -1365,6 +1375,45 @@ export async function migrateHome(
         await entry.undo();
       } catch (error) {
         undoErrors.push(`${entry.label}: ${(error as Error).message}`);
+      }
+    }
+    // The abandoned start/stop keeps converging in-process and may spawn
+    // detached children AFTER the journal ran (PM review on #292): wait it
+    // out (bounded), sweep the affected home(s) once more, and verify the
+    // target path is in the shape the rollback promises — absent or the
+    // same empty directory it started as (move mode). Residue here is an
+    // undo error, never a silent pass. Guarded on "an abandon actually
+    // happened" — a PRE-EXISTING condition (e.g. an unkillable process the
+    // stop step already failed on) must not be double-booked into the
+    // rollback's verdict.
+    if (abandonedOps.size > 0) {
+      const abandonedDeadline = Date.now() + (deps.abandonedWaitTimeoutMs ?? 30_000);
+      for (const op of [...abandonedOps]) {
+        const remaining = abandonedDeadline - Date.now();
+        if (remaining <= 0) break;
+        // A real clock, deliberately NOT deps.sleep: the wait must hold even
+        // under a faked instant-sleep test seam.
+        await new Promise<void>((resolveWait) => {
+          const cap = setTimeout(resolveWait, remaining);
+          op.then(() => { clearTimeout(cap); resolveWait(); }, () => { clearTimeout(cap); resolveWait(); });
+        });
+      }
+      abandonedOps.clear();
+      const postRollbackSweepSpellings = pre.mode === "in-place" ? [...toSpellings(), pre.to] : toSpellings();
+      const residue = await sweepHomeTree(postRollbackSweepSpellings);
+      if (residue.length > 0) {
+        undoErrors.push(`processes survived the post-rollback sweep (${residue.map((r) => `${r.kind}:${r.pid}`).join(", ")})`);
+      }
+      if (pre.mode !== "in-place") {
+        let targetEntries: string[] | null = null;
+        try {
+          targetEntries = await fs.readdir(pre.to);
+        } catch {
+          targetEntries = null; // absent — the promised shape
+        }
+        if (targetEntries !== null && targetEntries.length > 0) {
+          undoErrors.push(`target path left non-empty after rollback: ${pre.to} (${targetEntries.slice(0, 5).join(", ")}${targetEntries.length > 5 ? ", …" : ""})`);
+        }
       }
     }
     // Bring the source service back only if it was actually up before we
