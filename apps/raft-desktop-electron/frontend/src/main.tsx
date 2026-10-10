@@ -33,6 +33,7 @@ import App from "@web/App";
 import { DesktopNativeBridge } from "./desktop/DesktopNativeBridge";
 import { DesktopTopBar } from "./desktop/DesktopTopBar";
 import { DesktopSelfComputerMount } from "./desktop/computer/DesktopSelfComputerMount";
+import MigrationDialog from "./desktop/computer/MigrationDialog";
 import { DesktopOnboardingComputerMount } from "./desktop/computer/DesktopOnboardingComputerMount";
 import { DesktopSkinSync } from "./desktop/DesktopSkinSync";
 import { initSkin } from "./desktop/skins";
@@ -67,6 +68,7 @@ function DesktopShell({ children }: { children: ReactNode }) {
       {/* Portals the "This Computer" self-card into the reused Sidebar's
           Computers list (desktop-only; fully inert without the computer bridge). */}
       <DesktopSelfComputerMount />
+      <MigrationDialog />
       {/* Turns onboarding's "connect a computer" CLI step into a one-click Enable
           (desktop bundles the binary + has the session); inert off the step. */}
       <DesktopOnboardingComputerMount />

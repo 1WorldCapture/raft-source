@@ -47,7 +47,8 @@ import { defaultBinaryPath, defaultStandaloneHome, readHostMode, type ComputerHo
 import { createStandaloneCli } from "./standalone/cli.js";
 import { resolveBundledComputer } from "./standalone/bundled.js";
 import { StandaloneComputerHost, type StandaloneUiState } from "./standalone/standaloneHost.js";
-import { findInterruptedMigration, findMigratedAwayHome, waitForRunningMigration } from "./standalone/migrationRecovery.js";
+import { findInterruptedMigration, findMigratedAwayHome, findRunningMigration, processAlive, readInProgressMarker, readMigrationResult, type InProgressMarker } from "./standalone/migrationRecovery.js";
+import { MigrationSupervisor } from "./standalone/migrationSupervisor.js";
 import { createMigrationController, finishSwitch, refuseWhileMigrating, registerMigrationIpc } from "./standalone/migrationIpc.js";
 import { registerEmbeddedStubs, registerHostModeIpc, registerStandaloneIpc } from "./standalone/ipc.js";
 import { resolveBundledCursorSdkAssets } from "./cursorSdkAssets.js";
@@ -627,15 +628,15 @@ function revealMainWindow(): void {
 }
 
 // The same root/identity registry guards takeover and real app quit.
-async function orchestrateQuitShutdown(systemShutdown: boolean): Promise<void> {
-  const host = computerHost;
+async function orchestrateQuitShutdown(systemShutdown: boolean, hostOverride?: ComputerHost, stopOverride?: (signal: AbortSignal) => Promise<void>): Promise<void> {
+  const host = hostOverride ?? computerHost;
   if (!host || !(await host.canShutdown())) return;
   const abort = new AbortController();
   try {
     const complete = await runShutdownTree({
       scope: host.processScope,
       snapshot: host.readProcesses,
-      requestStop: () => host.stop(abort.signal),
+      requestStop: () => (stopOverride ? stopOverride(abort.signal) : host.stop(abort.signal)),
       now: () => Date.now(),
       sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
       signal: (pid, signal) => process.kill(pid, signal),
@@ -886,23 +887,23 @@ if (headlessMode?.mode === "__service") {
     // (no lifecycle mutation, no service spawn) — for dev/CI smoke boots on a
     // machine that already runs a Computer service. Default is enabled.
     let hostMode: ComputerHostMode = await readHostMode(app.getPath("userData"));
+    let supervised: InProgressMarker | null = null;
     // A migration that succeeded but whose app-side finish never ran (app quit/crashed in between) must be finished
     // BEFORE anything converges a built-in host at the old home.
     try {
-      // 1. The command may still be running by itself (the app died mid-move): let it finish first.
-      if (await waitForRunningMigration({
-        hostMode, homes: [resolveRaftHome(), defaultStandaloneHome()],
-        onWaiting: (m) => console.log(`[raft-desktop] a migration (pid ${m.pid}) is still running; waiting for it to finish before starting`),
-      })) console.log("[raft-desktop] the interrupted migration has finished");
+      // 1. The command may still be running by itself (the app died mid-move, or was restarted): do not wait for it
+      //    here (the window must open); watch it from the migration dialog instead and converge nothing meanwhile.
+      supervised = await findRunningMigration({ hostMode, homes: [resolveRaftHome(), defaultStandaloneHome()] });
+      if (supervised) console.log(`[raft-desktop] a migration (pid ${supervised.pid}) is still running; supervising it`);
       // 2. A finished one whose app-side finish never ran.
-      const interrupted = await findInterruptedMigration({ hostMode, embeddedHome: resolveRaftHome(), otherHomes: [defaultStandaloneHome()] });
+      const interrupted = supervised ? null : await findInterruptedMigration({ hostMode, embeddedHome: resolveRaftHome(), otherHomes: [defaultStandaloneHome()] });
       if (interrupted) {
         const bundled = resolveBundledComputer({ isPackaged: app.isPackaged, resourcesPath: process.resourcesPath });
         const { warnings } = await finishSwitch({ bundled, binaryTarget: defaultBinaryPath(), userDataDir: app.getPath("userData") }, interrupted.to);
         for (const w of warnings) console.warn(`[raft-desktop] migration recovery: ${w}`);
         console.log(`[raft-desktop] migration recovery: finished the switch to ${interrupted.to}`);
         hostMode = { mode: "standalone", home: interrupted.to };
-      } else {
+      } else if (!supervised) {
         // 3. The built-in home is gone because the Computer was moved away: adopt it, never rebuild an empty one.
         const away = await findMigratedAwayHome({ hostMode, embeddedHome: resolveRaftHome(), standardHome: defaultStandaloneHome() });
         if (away) {
@@ -916,7 +917,28 @@ if (headlessMode?.mode === "__service") {
       console.warn(`[raft-desktop] migration recovery failed: ${error instanceof Error ? error.message : String(error)}`);
     }
     registerHostModeIpc(ipcMain, hostMode);
-    if (hostMode.mode === "standalone") {
+    if (supervised) {
+      // No built-in host, no converge: the window opens with the migration's progress and a Cancel button.
+      registerEmbeddedStubs(ipcMain);
+      const bundled = resolveBundledComputer({ isPackaged: app.isPackaged, resourcesPath: process.resourcesPath });
+      const supervisor = new MigrationSupervisor({
+        marker: supervised,
+        readMarker: readInProgressMarker,
+        readResult: readMigrationResult,
+        isAlive: processAlive,
+        signal: (pid, sig) => process.kill(pid, sig),
+        finish: (to) => finishSwitch({ bundled, binaryTarget: defaultBinaryPath(), userDataDir: app.getPath("userData") }, to),
+        relaunch: () => { app.relaunch(); app.exit(0); },
+        publish: (state) => {
+          for (const win of BrowserWindow.getAllWindows()) {
+            if (!win.isDestroyed()) win.webContents.send("migration:state-update", state);
+          }
+        },
+      });
+      migrationApplying = () => { const p = supervisor.getState().phase; return p === "applying" || p === "success"; };
+      registerMigrationIpc(ipcMain, supervisor);
+      void supervisor.run();
+    } else if (hostMode.mode === "standalone") {
       // No ComputerHost: no converge, no login-item takeover, no watchdog. computerHost stays null, so
       // the quit flow below has nothing to stop — quitting the app never touches the Computer or its agents.
       const binaryPath = defaultBinaryPath();
@@ -956,6 +978,15 @@ if (headlessMode?.mode === "__service") {
               if (!win.isDestroyed()) win.webContents.send("migration:state-update", state);
             }
           },
+          // Hand-over: stop this app's own Computer (service + every runner) and verify it is gone BEFORE the command starts.
+          handOver: async () => {
+            try {
+              await orchestrateQuitShutdown(false, embeddedHost, (signal) => embeddedHost.stopForMigrationHandOver(signal));
+            } catch (error) {
+              throw new Error(`Some of its processes are still running (${error instanceof Error ? error.message : String(error)}).`);
+            }
+          },
+          restoreAfterHandOverFailure: () => embeddedHost.start(),
           switchToStandalone: () => {
             // The Computer now lives elsewhere and is not ours to stop: forget the embedded host so the quit flow
             // has nothing to stop, then restart into standalone mode (computer-host.json is already written).

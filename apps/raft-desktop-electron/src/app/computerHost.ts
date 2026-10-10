@@ -388,6 +388,11 @@ class ComputerHost {
     return this.control(() => this.stopInternal(signal));
   }
 
+  /** The migration's own hand-over stop: it IS the migration, so it is not subject to the migration control gate. */
+  async stopForMigrationHandOver(signal?: AbortSignal): Promise<void> {
+    return this.track(() => this.stopInternal(signal));
+  }
+
   private async stopInternal(signal?: AbortSignal): Promise<void> {
     await this.assertCanControl();
     const expected = this.processScope.observe(await this.readProcesses());

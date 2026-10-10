@@ -17,9 +17,14 @@ export interface MigrationState {
   relaunching: boolean;
   slow?: boolean;
   inPlace?: boolean;
+  cancellable?: boolean;
+  cancelRequested?: boolean;
+  reason?: string | null;
+  supervising?: boolean;
+  deadlineAt?: string | null;
 }
 
-export type MigrationActionId = "apply" | "recheck" | "close";
+export type MigrationActionId = "apply" | "recheck" | "close" | "cancel";
 
 export interface MigrationAction {
   id: MigrationActionId;
@@ -53,6 +58,7 @@ export interface MigrationView {
 }
 
 export const STEP_LABELS: Record<string, string> = {
+  handover: "Stop the built-in Computer",
   preflight: "Check this machine",
   "source-carrier": "Retire the old login item",
   stop: "Stop the Computer",
@@ -71,6 +77,11 @@ export function friendlyMigrationError(raw: string): string {
   if (/NO_ATTACHMENT/.test(raw)) return "No server is connected to this Computer yet, so it could not be started on its own. Connect it to a server first.";
   if (/unknown command|migrate-home/i.test(raw) && /unknown|not found|ENOENT/i.test(raw)) return "The installed raft-computer is too old to move the Computer. Update it and try again.";
   return raw;
+}
+
+function formatClock(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? iso : `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
 const act = (id: MigrationActionId, label: string, primary = false, confirm: string | null = null): MigrationAction => ({ id, label, primary, confirm });
@@ -140,8 +151,20 @@ export function deriveMigrationView(state: MigrationState | null): MigrationView
         steps: [],
         actions: [act("recheck", "Check again", true), act("close", "Close")],
       };
-    case "applying":
-      return { ...base, open: true, tone: "busy", title: state.inPlace ? "Switching the Computer…" : "Moving the Computer…", lines: state.slow ? ["The move is taking longer than expected but is still running. Keep this app open; this dialog updates when it reports.", ...resultLine] : ["Keep this app open until it finishes. Agents are offline during the move."], locked: true, actions: [] };
+    case "applying": {
+      const title = state.cancelRequested ? "Cancelling…" : state.supervising ? "Finishing the switch…" : state.inPlace ? "Switching the Computer…" : "Moving the Computer…";
+      const lines = state.cancelRequested
+        ? ["Rolling everything back to how it was. Keep this app open until it finishes."]
+        : state.supervising
+          ? ["A switch that started earlier is still running. Keep this app open; it finishes by itself.", ...(state.deadlineAt ? [`It rolls back on its own if it is not done by ${formatClock(state.deadlineAt)}.`] : []), ...resultLine]
+          : state.slow
+            ? ["The move is taking longer than expected but is still running. Keep this app open; this dialog updates when it reports.", ...resultLine]
+            : ["Keep this app open until it finishes. Agents are offline during the move."];
+      const actions = state.cancellable && !state.cancelRequested
+        ? [act("cancel", "Cancel the switch", false, "Cancel the switch? The Computer is rolled back to how it was, and its agents go offline for a moment while it does.")]
+        : [];
+      return { ...base, open: true, tone: "busy", title, lines, locked: true, actions };
+    }
     case "success":
       return {
         ...base,
@@ -157,8 +180,8 @@ export function deriveMigrationView(state: MigrationState | null): MigrationView
         ...base,
         open: true,
         tone: "warn",
-        title: "Nothing changed",
-        lines: ["The move did not complete and was rolled back. The Computer is back the way it was.", ...(state.error ? [friendlyMigrationError(state.error)] : []), ...resultLine],
+        title: state.reason === "cancelled" ? "Cancelled" : "Nothing changed",
+        lines: [state.reason === "cancelled" ? "The switch was cancelled. The Computer is back the way it was." : state.reason === "deadline" ? "The switch ran out of time and was rolled back. The Computer is back the way it was." : "The move did not complete and was rolled back. The Computer is back the way it was.", ...(state.error ? [friendlyMigrationError(state.error)] : []), ...resultLine],
         actions: [act("recheck", "Try again", true), act("close", "Close")],
       };
     case "failed":

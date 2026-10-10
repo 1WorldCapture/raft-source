@@ -67,6 +67,9 @@ export interface InProgressMarker {
   from: string | null;
   to: string | null;
   startedAt: string | null;
+  /** When the Computer's own hard time limit rolls the move back, and the step it is on (updated every step). */
+  deadlineAt?: string | null;
+  step?: string | null;
   /** Where the marker was found. */
   home: string;
 }
@@ -75,7 +78,7 @@ export interface InProgressMarker {
 export async function readInProgressMarker(home: string): Promise<InProgressMarker | null> {
   try {
     const raw = JSON.parse(await readFile(path.join(home, "computer", "migrate-in-progress.json"), "utf8")) as Record<string, unknown>;
-    return typeof raw.pid === "number" && raw.pid > 0 ? { pid: raw.pid, from: str(raw.from), to: str(raw.to), startedAt: str(raw.startedAt), home } : null;
+    return typeof raw.pid === "number" && raw.pid > 0 ? { pid: raw.pid, from: str(raw.from), to: str(raw.to), startedAt: str(raw.startedAt), deadlineAt: str(raw.deadlineAt), step: str(raw.step), home } : null;
   } catch {
     return null;
   }
@@ -135,6 +138,23 @@ export async function findMigratedAwayHome(input: {
   if (await exists(input.embeddedHome)) return null;
   for (const marker of ["migrate-result.json", "migrate-in-progress.json", path.join("run", "service.sock")]) {
     if (await exists(path.join(input.standardHome, "computer", marker))) return input.standardHome;
+  }
+  return null;
+}
+
+/** A migration command that is running right now (marker with a live pid), without waiting for it. */
+export async function findRunningMigration(input: {
+  hostMode: ComputerHostMode;
+  homes: string[];
+  readMarker?: (home: string) => Promise<InProgressMarker | null>;
+  isAlive?: (pid: number) => boolean;
+}): Promise<InProgressMarker | null> {
+  if (input.hostMode.mode === "standalone") return null;
+  const read = input.readMarker ?? readInProgressMarker;
+  const alive = input.isAlive ?? processAlive;
+  for (const home of [...new Set(input.homes)]) {
+    const marker = await read(home);
+    if (marker && alive(marker.pid)) return marker;
   }
   return null;
 }

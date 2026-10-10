@@ -84,3 +84,27 @@ test("in-place: the button and text say Switch, and that no data is moved", () =
   assert.equal(deriveMigrationView({ ...base, phase: "applying", inPlace: true }).title, "Switching the Computer…");
   assert.equal(deriveMigrationView(base).actions[0].label, "Move now");
 });
+
+test("applying: Cancel appears only once the command runs, asks first, and becomes 'Cancelling…'", () => {
+  assert.deepEqual(ids({ ...base, phase: "applying" }), []);
+  const cancellable = deriveMigrationView({ ...base, phase: "applying", cancellable: true });
+  assert.deepEqual(cancellable.actions.map((a) => a.id), ["cancel"]);
+  assert.match(cancellable.actions[0].confirm ?? "", /rolled back/);
+  const cancelling = deriveMigrationView({ ...base, phase: "applying", cancellable: true, cancelRequested: true });
+  assert.equal(cancelling.title, "Cancelling…");
+  assert.deepEqual(cancelling.actions, []);
+});
+
+test("a switch found already running at launch says so, with its deadline", () => {
+  const view = deriveMigrationView({ ...base, phase: "applying", supervising: true, cancellable: true, deadlineAt: "2026-10-10T10:07:00" });
+  assert.equal(view.title, "Finishing the switch…");
+  assert.match(view.lines.join(" "), /still running/);
+  assert.match(view.lines.join(" "), /10:07/);
+  assert.equal(view.locked, true);
+});
+
+test("cancelled and timed-out rollbacks are named; the hand-over step has a plain label", () => {
+  assert.equal(deriveMigrationView({ ...base, phase: "rolled_back", reason: "cancelled" }).title, "Cancelled");
+  assert.match(deriveMigrationView({ ...base, phase: "rolled_back", reason: "deadline" }).lines.join(" "), /ran out of time/);
+  assert.equal(deriveMigrationView({ ...base, phase: "applying", steps: [{ step: "handover", status: "start" }] }).steps[0].label, "Stop the built-in Computer");
+});

@@ -30,6 +30,8 @@ export interface MigrationFinal {
   to: string | null;
   error: string | null;
   serviceState: string | null;
+  /** Why a rolled-back run ended that way, e.g. "cancelled" or "deadline" (reported by the Computer). */
+  reason?: string | null;
 }
 
 export type MigrationLine =
@@ -50,7 +52,7 @@ export function parseMigrationLine(line: string): MigrationLine {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { kind: "other" };
   const obj = raw as Record<string, unknown>;
   if (obj.result === "success" || obj.result === "rolled_back" || obj.result === "failed") {
-    return { kind: "result", final: { result: obj.result, from: str(obj.from), to: str(obj.to), error: str(obj.error), serviceState: str(obj.serviceState) } };
+    return { kind: "result", final: { result: obj.result, from: str(obj.from), to: str(obj.to), error: str(obj.error), serviceState: str(obj.serviceState), reason: str(obj.reason) } };
   }
   if (obj.dryRun === true) return { kind: "dry-run", outcome: obj.outcome === "blocked" || obj.blocked === true ? "blocked" : "planned" };
   if (typeof obj.step === "string" && typeof obj.status === "string") {
@@ -78,6 +80,8 @@ export interface MigrateRunInput {
   env?: NodeJS.ProcessEnv;
   timeoutMs?: number;
   onEvent?: (event: MigrationEvent) => void;
+  /** The command's pid, once spawned (for cancel). */
+  onSpawn?: (pid: number) => void;
 }
 
 export type MigrateRunner = (input: MigrateRunInput) => Promise<MigrateRun>;
@@ -159,6 +163,7 @@ export const runMigrateHome: MigrateRunner = (input) =>
       resolve({ outcome: "error", events, final: null, detail: String(error), exitCode: null });
       return;
     }
+    if (child.pid) input.onSpawn?.(child.pid);
     const poll = setInterval(drain, 200);
     const timer = setTimeout(() => {
       // Stop waiting, never kill: a migration cut off between move and start could not roll itself back.
@@ -188,6 +193,15 @@ export interface MigrationState {
   slow: boolean;
   /** The Computer already lives at the target: nothing is moved, the app only hands it over. */
   inPlace: boolean;
+  /** apply is running its command and Cancel can be sent. */
+  cancellable: boolean;
+  cancelRequested: boolean;
+  /** Why the Computer rolled back ("cancelled", "deadline"…), when it said. */
+  reason: string | null;
+  /** The app found this migration already running at launch and is only watching it. */
+  supervising?: boolean;
+  /** When the Computer's hard time limit rolls it back (ISO), when known. */
+  deadlineAt?: string | null;
 }
 
 export interface MigrationDeps {
@@ -204,9 +218,23 @@ export interface MigrationDeps {
   readResult?: (home: string) => Promise<{ result: string; startedAt: string; from: string | null; to: string | null; error: string | null } | null>;
   sleep?: (ms: number) => Promise<void>;
   pollMs?: number;
+  /**
+   * Before the command is spawned: stop the built-in Computer's whole tree and verify it is gone. Throws when anything
+   * is left (nothing has been changed by the migration yet).
+   */
+  handOver?: () => Promise<void>;
+  /** After a failed hand-over: put the built-in Computer back as it was (best effort). */
+  restoreAfterHandOverFailure?: () => Promise<void>;
+  /**
+   * Whether this raft-computer treats SIGTERM as "cancel and roll back" (it reports a `--deadline` option when it
+   * does). An older one would simply die mid-move, so the Cancel button is not offered for it.
+   */
+  supportsCancel?: (binaryPath: string) => Promise<boolean>;
+  /** Sends SIGTERM (cancel) to the running command. */
+  signal?: (pid: number, signal: NodeJS.Signals) => void;
 }
 
-const EMPTY: MigrationState = { phase: "idle", from: null, to: null, steps: [], blockers: [], warnings: [], error: null, resultFile: null, relaunching: false, slow: false, inPlace: false };
+const EMPTY: MigrationState = { phase: "idle", from: null, to: null, steps: [], blockers: [], warnings: [], error: null, resultFile: null, relaunching: false, slow: false, inPlace: false, cancellable: false, cancelRequested: false, reason: null };
 const resultFileOf = (home: string | null) => (home ? path.join(home, "computer", "migrate-result.json") : null);
 const strings = (value: unknown): string[] => (Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : []);
 
@@ -222,6 +250,7 @@ async function readResultFile(home: string): Promise<{ result: string; startedAt
 export class MigrationController {
   private state: MigrationState;
   private busy = false;
+  private pid: number | null = null;
 
   constructor(private readonly deps: MigrationDeps) {
     this.state = { ...EMPTY, phase: deps.available ? "idle" : "unavailable" };
@@ -260,11 +289,32 @@ export class MigrationController {
     this.busy = true;
     try {
       const planned = this.state;
-      this.set({ ...EMPTY, phase: "applying", from: planned.from, to: planned.to });
+      this.set({ ...EMPTY, phase: "applying", from: planned.from, to: planned.to, inPlace: planned.inPlace });
       const prepared = await this.prepare(planned.from);
       if (!prepared) return this.state;
+      // Hand-over: the app stops its own built-in Computer (service, runners) and verifies it is gone BEFORE the
+      // command starts. If anything is left, nothing has been migrated: abort and put the built-in one back.
+      if (this.deps.handOver) {
+        this.addStep({ step: "handover", status: "start" });
+        try {
+          await this.deps.handOver();
+          this.addStep({ step: "handover", status: "ok" });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          this.addStep({ step: "handover", status: "fail", detail: { error: message } });
+          this.set({ ...this.state, phase: "error", error: `The built-in Computer could not be stopped cleanly, so nothing was changed. ${message}` });
+          try { await this.deps.restoreAfterHandOverFailure?.(); } catch { /* best effort */ }
+          return this.state;
+        }
+      }
       const startedAt = new Date().toISOString();
-      let run = await (this.deps.run ?? runMigrateHome)({ binaryPath: prepared.binaryPath, from: prepared.from, apply: true, onEvent: (e) => this.addStep(e) });
+      const cancelSupported = (await this.deps.supportsCancel?.(prepared.binaryPath).catch(() => false)) ?? false;
+      let run = await (this.deps.run ?? runMigrateHome)({
+        binaryPath: prepared.binaryPath, from: prepared.from, apply: true, onEvent: (e) => this.addStep(e),
+        onSpawn: (pid) => { this.pid = pid; this.set({ ...this.state, cancellable: cancelSupported }); },
+      });
+      this.pid = null;
+      this.set({ ...this.state, cancellable: false });
       if (run.timedOut) run = await this.waitForResultFile(prepared.from, planned.to, startedAt, run);
       if (run.outcome === "success") {
         const to = run.final?.to ?? planned.to;
@@ -279,6 +329,13 @@ export class MigrationController {
     } finally {
       this.busy = false;
     }
+  }
+
+  /** Cancel = SIGTERM to the running command; it stops at a safe point, rolls back and writes the result file. */
+  cancel(): MigrationState {
+    if (this.state.phase !== "applying" || this.pid === null || !this.state.cancellable || this.state.cancelRequested) return this.state;
+    try { (this.deps.signal ?? process.kill)(this.pid, "SIGTERM"); } catch { /* already gone */ }
+    return this.set({ ...this.state, cancelRequested: true });
   }
 
   /** Any unexpected exception becomes an error state the dialog shows; nothing may leave the dialog stuck on a pending phase. */
@@ -339,7 +396,7 @@ export class MigrationController {
       case "success":
         return this.set({ ...common, phase: "success" });
       case "rolled_back":
-        return this.set({ ...common, phase: "rolled_back", error: run.final?.error ?? null, resultFile: resultFileOf(from) });
+        return this.set({ ...common, phase: "rolled_back", error: run.final?.error ?? null, reason: run.final?.reason ?? null, resultFile: resultFileOf(from) });
       case "failed":
         return this.set({ ...common, phase: "failed", error: run.final?.error ?? null, resultFile: resultFileOf(from) });
       case "error":
