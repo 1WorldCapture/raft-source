@@ -69,7 +69,9 @@ export function deriveStandaloneCard(state: StandaloneState | null): StandaloneC
       return {
         tone: "ok",
         title: "Running",
-        detail: `${agents} ${agents === 1 ? "agent" : "agents"} · ${online}/${total} ${total === 1 ? "server" : "servers"} connected`,
+        // The Computer's own agent count is a placeholder (0) until it reports one; never show a made-up "0 agents".
+        // The merged card takes the real count from the server's machine row instead.
+        detail: `${agents > 0 ? `${agents} ${agents === 1 ? "agent" : "agents"} · ` : ""}${online}/${total} ${total === 1 ? "server" : "servers"} connected`,
         version,
         actions: [...upgrade, act("stop", "Stop", false, "Stop the Computer? All agents on this machine go offline until you start it again. Closing this app does not stop them.")],
       };
