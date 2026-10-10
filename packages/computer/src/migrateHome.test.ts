@@ -143,6 +143,16 @@ function fakeDeps(user: string, overrides: { statuses?: MigrateHomeStatus[] } = 
   const liveProcesses = new Map<number, HomeProcess>();
   const killLog: Array<[number, "SIGTERM" | "SIGKILL"]> = [];
   const harnessKillWorks = { value: true };
+  // Machine-API fake for record/restore-agents. rosterPhases is consumed per
+  // GET: record reads phase 1, restore reads the next ones — a test can make
+  // the record see "active" and the restore see the agent down. When only
+  // one phase is seeded every GET returns it.
+  const machineCalls: string[] = [];
+  const rosterPhases: Array<Array<{ id: string; name: string; status: string; runtime: string }>> = [
+    [{ id: "agent-fixture-1", name: "fixture-one", status: "active", runtime: "claude" }],
+  ];
+  let rosterPoll = 0;
+  const startStatus = { code: 200 };
   let poll = 0;
   const deps: MigrateHomeDeps = {
     homeDir: user,
@@ -159,6 +169,20 @@ function fakeDeps(user: string, overrides: { statuses?: MigrateHomeStatus[] } = 
     sleep: async () => {},
     selfCheckTimeoutMs: 200,
     selfCheckPollMs: 1,
+    agentRestoreDeps: {
+      fetchImpl: async (_serverUrl, _apiKey, apiPath, init) => {
+        machineCalls.push(`${init?.method ?? "GET"} ${apiPath}`);
+        if (apiPath === "/internal/machine/agents") {
+          const roster = rosterPhases[Math.min(rosterPoll, rosterPhases.length - 1)];
+          rosterPoll += 1;
+          return { status: 200, json: async () => roster };
+        }
+        if (apiPath.startsWith("/internal/machine/agents/") && init?.method === "POST") {
+          return { status: startStatus.code, json: async () => ({ ok: true }) };
+        }
+        return { status: 404, json: async () => ({ error: "not found" }) };
+      },
+    },
     stopServiceAt: async (home) => {
       stopCalls.push(home);
     },
@@ -187,6 +211,9 @@ function fakeDeps(user: string, overrides: { statuses?: MigrateHomeStatus[] } = 
     startCalls,
     convergeCalls,
     launchctlCalls,
+    machineCalls,
+    rosterPhases,
+    startStatus,
     liveProcesses,
     killLog,
     setKillWorks: (works: boolean) => {
@@ -216,7 +243,7 @@ test("dry-run plans the full migration and mutates nothing", async () => {
     const preflight = h.events.filter((e) => e.step === "preflight").at(-1);
     assert.equal(preflight?.status, "ok");
     const statuses = h.events.filter((e) => e.step !== "preflight").map((e) => e.status);
-    assert.deepEqual(statuses, Array.from({ length: 9 }, () => "planned"));
+    assert.deepEqual(statuses, Array.from({ length: 12 }, () => "planned"));
   } finally {
     await rm(f.root, { recursive: true, force: true });
   }
@@ -304,6 +331,8 @@ test("apply: full success — move, alias repoint, home-env removal, start, self
         "preflight:ok",
         "source-carrier:start",
         "source-carrier:ok",
+        "record-agents:start",
+        "record-agents:ok",
         "stop:start",
         "stop:ok",
         "move:start",
@@ -312,16 +341,28 @@ test("apply: full success — move, alias repoint, home-env removal, start, self
         "alias:ok",
         "sessions:start",
         "sessions:ok",
+        "cursor-sessions:start",
+        "cursor-sessions:ok",
         "home-env:start",
         "home-env:ok",
         "backup:start",
         "backup:ok",
         "start:start",
         "start:ok",
+        "restore-agents:start",
+        "restore-agents:ok",
         "self-check:start",
         "self-check:ok",
       ],
     );
+    // Record/restore round trip: the fixture roster's active agent was
+    // recorded before the stop, found already running after the (fake)
+    // start, and the record file was consumed by finish().
+    const restore = h.events.filter((e) => e.step === "restore-agents").at(-1);
+    assert.equal(restore?.detail?.recorded, 1);
+    assert.deepEqual(restore?.detail?.alreadyRunning, ["agent-fixture-1"]);
+    await assert.rejects(() => readFile(path.join(f.to, "computer", "migrate-restore-agents.json")));
+    await assert.rejects(() => readFile(path.join(f.from, "computer", "migrate-restore-agents.json")));
   } finally {
     await rm(f.root, { recursive: true, force: true });
   }
@@ -471,7 +512,7 @@ test("in-place: from === to plans a takeover (no move steps, mode surfaced)", as
     assert.ok(!steps.includes("move"), "no move step");
     assert.ok(!steps.includes("alias"), "no alias step");
     assert.ok(!steps.includes("sessions"), "no sessions step");
-    assert.deepEqual(steps, ["source-carrier", "stop", "home-env", "backup", "start", "self-check"]);
+    assert.deepEqual(steps, ["source-carrier", "record-agents", "stop", "home-env", "backup", "start", "restore-agents", "self-check"]);
     assert.equal((await stat(path.join(f.from, "agents", "a1"))).isDirectory(), true);
     assert.deepEqual(h.stopCalls, []);
     assert.deepEqual(h.startCalls, []);
@@ -782,7 +823,7 @@ test("apply writes the in-progress marker at start and removes it on success", a
     // mid-run read may lag by an event or two — assert it is a plausible
     // recent step of this run, not an exact one.
     assert.ok(
-      ["preflight", "source-carrier", "stop"].includes(marker.step as string),
+      ["preflight", "source-carrier", "record-agents", "stop"].includes(marker.step as string),
       `unexpected mid-run marker step ${JSON.stringify(marker.step)}`,
     );
     // deadlineAt = startedAt + the app's bounded-wait budget.
@@ -1286,5 +1327,108 @@ test("early bootstrap armor: argv-gated handlers install on import for migrate-h
     assert.equal(process.stdout.listenerCount("error"), counts.out);
   } finally {
     process.argv = savedArgv;
+  }
+});
+
+test("sessions: every spelling of the old home is renamed — alias-encoded dirs move too (owner migration 2026-10-10)", async () => {
+  const f = await fixture({ livePid: true });
+  const h = fakeDeps(f.user);
+  try {
+    // The live-incident shape: the agent cwd went through the ~/.slock-raft
+    // ALIAS, so the actually-used project dir is alias-encoded while the
+    // realpath-encoded dir also exists (older sessions).
+    const aliasAgentsDir = path.join(
+      f.projectsDir,
+      `${encodeProjectDirName(f.alias)}-agents-a1`,
+    );
+    await mkdir(aliasAgentsDir, { recursive: true });
+    await writeFile(path.join(aliasAgentsDir, "history.jsonl"), "[]", "utf8");
+    const run = await migrateHome({ from: f.from, to: f.to, ...apply }, h.deps, (e) => h.events.push(e));
+    assert.equal(run.outcome, "success");
+    // Both spellings landed at the SAME new-prefix dir — the alias-encoded
+    // history merged into the dir the realpath rename produced.
+    const mergedDir = path.join(f.projectsDir, `${encodeProjectDirName(f.to)}-agents-a1`);
+    assert.equal((await stat(path.join(mergedDir, "history.jsonl"))).isFile(), true);
+    const sessions = h.events.filter((e) => e.step === "sessions").at(-1);
+    assert.equal(sessions?.detail?.renamed, 1, "realpath-encoded dir renamed");
+    assert.equal(sessions?.detail?.merged, 1, "alias-encoded dir merged into it");
+    assert.deepEqual(sessions?.detail?.mergeConflicts, []);
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+test("sessions: a name collision keeps the target's file and reports it", async () => {
+  const f = await fixture({ livePid: true });
+  const h = fakeDeps(f.user);
+  try {
+    // Both sides hold a file with the SAME name — the target's byte content
+    // must win and the collision must be reported (PM: 不覆盖已有文件).
+    const aliasAgentsDir = path.join(f.projectsDir, `${encodeProjectDirName(f.alias)}-agents-a1`);
+    await mkdir(aliasAgentsDir, { recursive: true });
+    await writeFile(path.join(aliasAgentsDir, "session.jsonl"), "alias-side", "utf8");
+    const run = await migrateHome({ from: f.from, to: f.to, ...apply }, h.deps, (e) => h.events.push(e));
+    assert.equal(run.outcome, "success");
+    const mergedFile = path.join(f.projectsDir, `${encodeProjectDirName(f.to)}-agents-a1`, "session.jsonl");
+    assert.equal(await readFile(mergedFile, "utf8"), "[]", "the pre-existing target file wins");
+    const sessions = h.events.filter((e) => e.step === "sessions").at(-1);
+    assert.deepEqual(sessions?.detail?.mergeConflicts, ["session.jsonl"]);
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+test("cursor-sessions: agents.ndjson cwd is rewritten to the new home spelling", async () => {
+  const f = await fixture({ livePid: true });
+  const h = fakeDeps(f.user);
+  try {
+    const agentId = "3fa7c2d2-fixture";
+    const storeDir = path.join(f.from, "cursor-sdk-host", agentId, "store");
+    await mkdir(storeDir, { recursive: true });
+    const oldCwd = `${f.alias}/agents/${agentId}`;
+    const lines = [
+      JSON.stringify({ agentId: "agent-a", cwd: oldCwd, status: "running" }),
+      JSON.stringify({ agentId: "agent-b", cwd: `${f.from}/agents/${agentId}`, status: "idle" }),
+      JSON.stringify({ agentId: "agent-c", cwd: "/Users/someone/elsewhere", status: "idle" }),
+      "",
+    ].join("\n");
+    await writeFile(path.join(storeDir, "agents.ndjson"), lines, "utf8");
+    const run = await migrateHome({ from: f.from, to: f.to, ...apply }, h.deps, (e) => h.events.push(e));
+    assert.equal(run.outcome, "success");
+    const after = (await readFile(path.join(f.to, "cursor-sdk-host", agentId, "store", "agents.ndjson"), "utf8"))
+      .split("\n").filter((line) => line.length > 0).map((line) => JSON.parse(line) as { cwd: string });
+    assert.equal(after[0].cwd, `${f.to}/agents/${agentId}`, "alias spelling rewritten");
+    assert.equal(after[1].cwd, `${f.to}/agents/${agentId}`, "realpath spelling rewritten");
+    assert.equal(after[2].cwd, "/Users/someone/elsewhere", "foreign cwd untouched");
+    // Original byte-captured into migrate-backup for the rollback.
+    const backup = await readFile(path.join(f.to, "computer", "migrate-backup", `cursor-sdk-${agentId}-agents.ndjson`), "utf8");
+    assert.equal(backup, lines);
+    const cursor = h.events.filter((e) => e.step === "cursor-sessions").at(-1);
+    assert.equal(cursor?.detail?.rewritten, 2);
+    assert.equal(cursor?.detail?.files, 1);
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+test("restore-agents: a recorded agent that fails to come back fails the self-check with its name", async () => {
+  const f = await fixture({ livePid: true });
+  const h = fakeDeps(f.user);
+  try {
+    // Phase 1 (record): active. Phase 2+ (restore/poll): the server has it
+    // inactive and rejects the restart — the self-check must name it.
+    h.rosterPhases.push([{ id: "agent-fixture-1", name: "fixture-one", status: "inactive", runtime: "claude" }]);
+    h.startStatus.code = 500;
+    const run = await migrateHome({ from: f.from, to: f.to, ...apply }, h.deps, (e) => h.events.push(e));
+    assert.equal(run.outcome, "rolled_back");
+    assert.match(run.result?.error ?? "", /agent-fixture-1/);
+    const restore = h.events.filter((e) => e.step === "restore-agents").find((e) => e.status === "ok");
+    assert.ok(restore, "the restore step itself completed and reported");
+    const failed = restore?.detail?.failed as Array<{ outcome: string }> | undefined;
+    assert.equal(failed?.[0]?.outcome, "start-failed");
+    const selfCheck = h.events.filter((e) => e.step === "self-check").at(-1);
+    assert.equal(selfCheck?.status, "fail");
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
   }
 });
