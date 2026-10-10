@@ -1480,7 +1480,6 @@ export async function migrateHome(
         return {
           recorded: restoreReport.recorded,
           restored: restoreReport.restored,
-          alreadyRunning: restoreReport.alreadyRunning,
           ...(restoreReport.failed.length > 0 ? { failed: restoreReport.failed } : {}),
         };
       }))
@@ -1554,7 +1553,6 @@ export async function migrateHome(
           restoreDetail = {
             recorded: restoreReport.recorded,
             restored: restoreReport.restored.length,
-            alreadyRunning: restoreReport.alreadyRunning.length,
             ...(restoreReport.failed.length > 0
               ? { notRestored: restoreReport.failed.map((entry) => ({ agentId: entry.agentId, name: entry.name, reason: entry.outcome, ...(entry.detail ? { detail: entry.detail } : {}) })) }
               : {}),
@@ -1690,7 +1688,6 @@ export async function migrateHome(
               phase: "rollback",
               recorded: rollbackRestore.recorded,
               restored: rollbackRestore.restored,
-              alreadyRunning: rollbackRestore.alreadyRunning,
               ...(rollbackRestore.failed.length > 0 ? { failed: rollbackRestore.failed } : {}),
             },
           });

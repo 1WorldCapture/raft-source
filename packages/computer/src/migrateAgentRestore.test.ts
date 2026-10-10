@@ -112,7 +112,10 @@ test("restoreRecordedAgents starts inactive agents and waits for them to turn ac
   assert.deepEqual(starts, ["/internal/machine/agents/a1/start"]);
 });
 
-test("restoreRecordedAgents leaves already-active agents alone", async () => {
+test("restoreRecordedAgents starts an agent even when the roster claims active (stale-active drill 2026-10-10)", async () => {
+  // After an unclean daemon death the roster can show active+online for a
+  // process that no longer exists — the start must fire anyway (idempotent
+  // rebind for genuinely-running agents, real recovery for stale ones).
   const { api, starts } = fakeApi([[{ id: "a1", status: "active" }]]);
   const record: RunningAgentsRecord = {
     schemaVersion: 1,
@@ -122,10 +125,11 @@ test("restoreRecordedAgents leaves already-active agents alone", async () => {
   const report = await restoreRecordedAgents("/unused", record, {
     fetchImpl: api,
     listAttachments: async () => [ATTACHMENT],
+    sleep: async () => {},
   });
-  assert.deepEqual(report.alreadyRunning, ["a1"]);
-  assert.deepEqual(report.restored, []);
-  assert.deepEqual(starts, []);
+  assert.deepEqual(report.restored, ["a1"]);
+  assert.deepEqual(report.failed, []);
+  assert.deepEqual(starts, ["/internal/machine/agents/a1/start"]);
 });
 
 test("restoreRecordedAgents reports a rejected start and a roster disappearance separately", async () => {
