@@ -11,6 +11,8 @@
 // file ({result: success|rolled_back|failed, from, to, error, rollback, serviceState, steps}) or, for a dry run,
 // {dryRun: true, outcome: planned|blocked, blocked}.
 import { spawn } from "node:child_process";
+import { closeSync, mkdtempSync, openSync, readFileSync, readSync, rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -80,25 +82,27 @@ export interface MigrateRunInput {
 
 export type MigrateRunner = (input: MigrateRunInput) => Promise<MigrateRun>;
 
-/** Run `raft-computer migrate-home` and fold its NDJSON stream into a MigrateRun. Never throws. */
+/**
+ * Run `raft-computer migrate-home` and fold its NDJSON stream into a MigrateRun. Never throws.
+ *
+ * The command's stdout/stderr go to FILES, not pipes, and it runs detached: a pipe whose reader (this app) was
+ * killed makes the command's next write fail with EPIPE and die before it writes migrate-result.json. With a file
+ * the command always reaches its end, whatever happens to the app; we just tail the file.
+ */
 export const runMigrateHome: MigrateRunner = (input) =>
   new Promise((resolve) => {
     const args = ["migrate-home", "--from", input.from, ...(input.apply ? ["--apply"] : []), "--json"];
     const events: MigrationEvent[] = [];
     let final: MigrationFinal | null = null;
     let dry: "planned" | "blocked" | null = null;
-    let stdoutRest = "";
-    let stderrTail = "";
     let settled = false;
-    const finish = (exitCode: number | null, spawnError?: string, timedOut = false) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      if (stdoutRest.trim()) consume(stdoutRest);
-      const outcome: MigrationOutcome = final ? final.result : dry ?? "error";
-      const detail = outcome === "error" ? spawnError ?? (stderrTail.trim().split("\n").filter(Boolean).slice(-3).join(" ") || `raft-computer exited with ${exitCode} and no result`) : null;
-      resolve({ outcome, events, final, detail, exitCode, ...(timedOut ? { timedOut: true } : {}) });
-    };
+    let offset = 0;
+    let rest = "";
+    let outFd = -1;
+    let errFd = -1;
+    const dir = mkdtempSync(path.join(tmpdir(), "raft-migrate-"));
+    const outFile = path.join(dir, "out.ndjson");
+    const errFile = path.join(dir, "err.log");
     const consume = (line: string) => {
       const parsed = parseMigrationLine(line.trim());
       if (parsed.kind === "event") {
@@ -107,26 +111,59 @@ export const runMigrateHome: MigrateRunner = (input) =>
       } else if (parsed.kind === "result") final = parsed.final;
       else if (parsed.kind === "dry-run") dry = parsed.outcome;
     };
+    const drain = () => {
+      try {
+        const size = statSync(outFile).size;
+        if (size <= offset) return;
+        const fd = openSync(outFile, "r");
+        try {
+          const buf = Buffer.alloc(size - offset);
+          readSync(fd, buf, 0, buf.length, offset);
+          offset = size;
+          rest += buf.toString("utf8");
+        } finally {
+          closeSync(fd);
+        }
+        const lines = rest.split("\n");
+        rest = lines.pop() ?? "";
+        for (const line of lines) if (line.trim()) consume(line);
+      } catch {
+        /* file not there yet / being written: next poll */
+      }
+    };
+    const tail = () => { try { return readFileSync(errFile, "utf8").slice(-2000); } catch { return ""; } };
+    const cleanup = () => {
+      for (const fd of [outFd, errFd]) { try { if (fd >= 0) closeSync(fd); } catch { /* already closed */ } }
+      try { rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+    };
+    const finish = (exitCode: number | null, spawnError?: string, timedOut = false) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      clearInterval(poll);
+      drain();
+      if (rest.trim()) consume(rest);
+      const outcome: MigrationOutcome = final ? final.result : dry ?? "error";
+      const detail = outcome === "error" ? spawnError ?? (tail().trim().split("\n").filter(Boolean).slice(-3).join(" ") || `raft-computer exited with ${exitCode} and no result`) : null;
+      // A still-running command keeps its files (it owns them until it exits); only clean up when it is done.
+      if (!timedOut) cleanup();
+      resolve({ outcome, events, final, detail, exitCode, ...(timedOut ? { timedOut: true } : {}) });
+    };
     let child: ReturnType<typeof spawn>;
     try {
-      child = spawn(input.binaryPath, args, { env: input.env ?? process.env, stdio: ["ignore", "pipe", "pipe"] });
+      outFd = openSync(outFile, "a");
+      errFd = openSync(errFile, "a");
+      child = spawn(input.binaryPath, args, { env: input.env ?? process.env, stdio: ["ignore", outFd, errFd], detached: true });
     } catch (error) {
+      cleanup();
       resolve({ outcome: "error", events, final: null, detail: String(error), exitCode: null });
       return;
     }
+    const poll = setInterval(drain, 200);
     const timer = setTimeout(() => {
       // Stop waiting, never kill: a migration cut off between move and start could not roll itself back.
       finish(null, "migrate-home is still running", true);
     }, input.timeoutMs ?? 10 * 60_000);
-    child.stdout?.setEncoding("utf8");
-    child.stdout?.on("data", (chunk: string) => {
-      stdoutRest += chunk;
-      const lines = stdoutRest.split("\n");
-      stdoutRest = lines.pop() ?? "";
-      for (const line of lines) if (line.trim()) consume(line);
-    });
-    child.stderr?.setEncoding("utf8");
-    child.stderr?.on("data", (chunk: string) => { stderrTail = (stderrTail + chunk).slice(-2000); });
     child.on("error", (error) => finish(null, String(error.message || error)));
     child.on("close", (code) => finish(code));
   });
