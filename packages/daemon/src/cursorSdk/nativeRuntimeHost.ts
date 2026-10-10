@@ -54,7 +54,7 @@ function errorCode(error: unknown): CursorSdkWireError {
   if (value?.name === "AgentNotFoundError" || value?.code === "agent_not_found") return { errorClass: "agent_not_found", message: "The saved Cursor SDK conversation is missing. Restore its store or explicitly reset the session." };
   if (value?.name === "AgentBusyError") return { errorClass: "busy", message: "Cursor rejected a concurrent run; the saved conversation has not been reset." };
   // Kept apart from "busy" so the daemon can tell a resumed session the SDK no longer knows from a real concurrent run.
-  if (value?.name === "UnknownAgentError") return { errorClass: "unknown_agent", message: "Cursor rejected a concurrent run; the saved conversation has not been reset." };
+  if (value?.name === "UnknownAgentError") return { errorClass: "unknown_agent", message: "The saved Cursor conversation no longer exists on Cursor's side; starting a new session." };
   return { errorClass: "host_internal", message: "Cursor SDK operation failed. The existing conversation was preserved." };
 }
 
