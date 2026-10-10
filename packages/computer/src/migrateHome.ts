@@ -24,7 +24,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { readDesiredState } from "./desiredState.js";
-import { resolveRaftHome, servicePidPath } from "./paths.js";
+import { resolveRaftHome, servicePidPath, serviceSocketPath as serviceSocketPathOf } from "./paths.js";
 import { isProcessAlive, readPidfileAt } from "./internal/process-primitives.js";
 import { CliExit } from "./output.js";
 
@@ -123,6 +123,18 @@ export function migrateInProgressPath(slockHome: string): string {
  *  redirected (stdout-to-file) Desktop spawn tails. */
 export function migrateRunLogPath(slockHome: string): string {
   return path.join(slockHome, "computer", "migrate-run.ndjson");
+}
+
+/** POSIX AF_UNIX sun_path is 104 bytes INCLUDING the NUL terminator, so a
+ *  socket path longer than 103 bytes cannot bind (macOS raises EINVAL, Linux
+ *  truncates). The drill on a deep temp home hit exactly that: the migration
+ *  ran stop+move and only then failed at start's listen EINVAL — a full
+ *  rollback for a condition preflight can see statically (PM fix 2026-10-10). */
+export const MAX_SERVICE_SOCKET_PATH_BYTES = 103;
+
+export function serviceSocketPathTooLong(slockHome: string, platform: NodeJS.Platform = process.platform): boolean {
+  if (platform === "win32") return false; // named pipes do not live on the fs
+  return Buffer.byteLength(serviceSocketPathOf(slockHome), "utf8") > MAX_SERVICE_SOCKET_PATH_BYTES;
 }
 
 export interface MigrateHomeStatus {
@@ -521,6 +533,16 @@ export async function preflightMigrateHome(
       }
     } catch (error) {
       blockers.push(`cannot compare filesystems: ${(error as Error).message}`);
+    }
+
+    // The start step binds <to>/computer/run/service.sock; a path over the
+    // AF_UNIX limit can never bind (listen EINVAL) — block BEFORE anything
+    // moves instead of discovering it mid-apply and rolling back.
+    if (serviceSocketPathTooLong(to)) {
+      blockers.push(
+        `target socket path is ${Buffer.byteLength(serviceSocketPathOf(to), "utf8")} bytes, over the ${MAX_SERVICE_SOCKET_PATH_BYTES}-byte AF_UNIX limit (${serviceSocketPathOf(to)}); ` +
+        "move the Computer to a home with a shorter path",
+      );
     }
   }
 

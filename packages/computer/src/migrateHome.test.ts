@@ -18,6 +18,7 @@ import {
   MIGRATE_IN_PROGRESS_DEADLINE_MS,
   migrateResultPath,
   migrateRunLogPath,
+  serviceSocketPathTooLong,
   type MigrateEvent,
   type MigrateHomeDeps,
   type MigrateHomeStatus,
@@ -45,8 +46,12 @@ async function fixture(
   } = {},
 ) {
   // realpath up front: preflight resolves through symlinks (macOS /tmp → /private/tmp),
-  // and the tests compare against the resolved paths.
-  const root = await realpath(await mkdtemp(path.join(tmpdir(), "migrate-home-")));
+  // and the tests compare against the resolved paths. The root sits under a
+  // SHORT /tmp prefix, not os.tmpdir(): on macOS the per-user tempdir prefix
+  // alone (~49 bytes) pushes the target socket path past the AF_UNIX limit
+  // the preflight now blocks on, and every apply test would trip it.
+  const rootPrefix = process.platform === "win32" ? path.join(tmpdir(), "migrate-home-") : "/tmp/migrate-home-";
+  const root = await realpath(await mkdtemp(rootPrefix));
   const user = path.join(root, "user");
   const from = path.join(user, "embedded");
   const to = path.join(user, ".slock");
@@ -1198,4 +1203,37 @@ test("late spawn that also recreates target files is REPORTED, never silently pa
   } finally {
     await rm(f.root, { recursive: true, force: true });
   }
+});
+
+// --- target socket path length guard (PM fix, drill 290-anna finding) ---
+
+test("preflight: a target whose service.sock path exceeds the AF_UNIX limit is blocked before any mutation", async () => {
+  const f = await fixture();
+  const h = fakeDeps(f.user);
+  // A deep target home: path.join(long prefixes) until the socket path is
+  // over 103 bytes.
+  const deep = path.join(f.root, "a-very-long-directory-name-padding", "nested-further", "and-further-still", "target-home");
+  try {
+    const run = await migrateHome({ from: f.from, to: deep, ...apply }, h.deps, (e) => h.events.push(e));
+    assert.equal(run.outcome, "blocked");
+    const preflight = h.events.filter((e) => e.step === "preflight").at(-1);
+    assert.match(JSON.stringify(preflight?.detail?.blockers), /AF_UNIX limit/);
+    // Blocked applies mutate nothing and write neither marker nor result.
+    await assert.rejects(() => readFile(migrateInProgressPath(f.from)));
+    await assert.rejects(() => readFile(migrateResultPath(f.from)));
+    assert.equal((await stat(f.from)).isDirectory(), true);
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+test("serviceSocketPathTooLong: boundary and platform behavior", () => {
+  // Windows named pipes never trip the guard.
+  assert.equal(serviceSocketPathTooLong("/" + "x".repeat(300), "win32"), false);
+  // Exactly at the limit passes; one byte over fails.
+  const suffixBytes = Buffer.byteLength("/computer/run/service.sock", "utf8");
+  const homeAtLimit = "/" + "h".repeat(103 - 1 - suffixBytes);
+  assert.equal(Buffer.byteLength(path.join(homeAtLimit, "computer", "run", "service.sock"), "utf8"), 103);
+  assert.equal(serviceSocketPathTooLong(homeAtLimit), false);
+  assert.equal(serviceSocketPathTooLong(homeAtLimit + "x"), true);
 });
