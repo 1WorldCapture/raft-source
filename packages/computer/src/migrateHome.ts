@@ -19,14 +19,14 @@
 // `status --json`.migration reads the result file this command writes
 // (<home>/computer/migrate-result.json, schema shared with statusJson.ts).
 
-import { promises as fs } from "node:fs";
+import { promises as fs, appendFileSync as fsAppendFileSync, mkdirSync as fsMkdirSync, statSync as fsStatSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
 import { readDesiredState } from "./desiredState.js";
-import { servicePidPath } from "./paths.js";
+import { resolveRaftHome, servicePidPath } from "./paths.js";
 import { isProcessAlive, readPidfileAt } from "./internal/process-primitives.js";
-import { CliExit, info } from "./output.js";
+import { CliExit } from "./output.js";
 
 export type MigrateStep =
   | "preflight"
@@ -99,6 +99,21 @@ export function aliasPathFor(homeDir: string): string {
 
 export function migrateResultPath(slockHome: string): string {
   return path.join(slockHome, "computer", "migrate-result.json");
+}
+
+/** In-progress marker written at apply start and removed by finish() (PM fix
+ *  2026-10-10). The Desktop app reads it to tell "a migration is running"
+ *  apart from "none ever happened" when the result file does not exist yet —
+ *  e.g. the app was killed mid-apply and the CLI is still finishing alone.
+ *  It rides the home (the move renames it to <to>). */
+export function migrateInProgressPath(slockHome: string): string {
+  return path.join(slockHome, "computer", "migrate-in-progress.json");
+}
+
+/** Event-log fallback for the hardened stdout sink — the same file a
+ *  redirected (stdout-to-file) Desktop spawn tails. */
+export function migrateRunLogPath(slockHome: string): string {
+  return path.join(slockHome, "computer", "migrate-run.ndjson");
 }
 
 export interface MigrateHomeStatus {
@@ -344,6 +359,21 @@ function resolveTilde(input: string, homeDir: string): string {
   return input;
 }
 
+/** Argument-level from/to resolution, shared by preflight and the CLI
+ *  adapter (the adapter needs the paths up front to build its hardened
+ *  event sink before any preflight work runs). Returns the ORIGINAL --from
+ *  spelling resolved against homeDir — live processes may carry it verbatim. */
+export function resolveMigrateHomeArgumentPaths(
+  opts: Pick<MigrateHomeOptions, "from" | "to">,
+  env: { RAFT_HOME?: string; SLOCK_HOME?: string },
+  homeDir: string,
+): { fromArg: string; to: string } {
+  const fromRaw = opts.from ?? resolveRaftHome(env, homeDir);
+  const fromArg = path.resolve(resolveTilde(fromRaw, homeDir));
+  const to = path.resolve(resolveTilde(opts.to ?? path.join(homeDir, ".slock"), homeDir));
+  return { fromArg, to };
+}
+
 async function defaultDeviceOf(p: string): Promise<number> {
   // fs.Stats.dev is the containing filesystem's id — same device means
   // rename(2) stays a move, never a copy.
@@ -414,11 +444,8 @@ export async function preflightMigrateHome(
 
   emit({ step: "preflight", status: "start" });
 
-  const { resolveRaftHome } = await import("./paths.js");
-  const fromRaw = opts.from ?? resolveRaftHome(env, homeDir);
-  const fromArg = path.resolve(resolveTilde(fromRaw, homeDir));
+  const { fromArg, to } = resolveMigrateHomeArgumentPaths(opts, env, homeDir);
   const from = fromArg;
-  const to = path.resolve(resolveTilde(opts.to ?? path.join(homeDir, ".slock"), homeDir));
 
   // Source must be an existing directory (resolve through symlinks so the
   // mv operates on the real path — the alias is repointed separately).
@@ -631,6 +658,20 @@ export async function migrateHome(
     return { outcome: "blocked", blocked: true, mode: pre.mode, result: null };
   }
 
+  // In-progress marker (PM fix 2026-10-10): the FIRST mutation of the apply.
+  // The Desktop app polls it to tell "a migration is running" apart from
+  // "none ever happened" while migrate-result.json does not exist yet —
+  // exactly the state a killed app leaves when the CLI is still finishing
+  // alone (drill 284-run3). It rides the home (the move renames it to <to>);
+  // finish() removes it AFTER the result file is on disk, so a crash between
+  // the two leaves both files and readers can prefer the result.
+  await fs.mkdir(path.dirname(migrateInProgressPath(pre.from)), { recursive: true });
+  await fs.writeFile(
+    migrateInProgressPath(pre.from),
+    `${JSON.stringify({ schemaVersion: 1, pid: process.pid, mode: pre.mode, from: pre.from, to: pre.to, startedAt }, null, 2)}\n`,
+    "utf8",
+  );
+
   // ---- apply ----
   const homeDir = deps.homeDir ?? os.homedir();
   const uid = deps.uid ?? (typeof process.getuid === "function" ? process.getuid() : -1);
@@ -734,6 +775,16 @@ export async function migrateHome(
         break;
       } catch {
         /* try the other home; if both fail the summary still returns */
+      }
+    }
+    // Retire the in-progress marker only after the result file landed (see
+    // the marker write for the ordering rationale). Best-effort on both
+    // candidate homes — exactly one of them holds it.
+    for (const home of [pre.from, pre.to]) {
+      try {
+        await fs.rm(migrateInProgressPath(home), { force: true });
+      } catch {
+        /* best-effort: a stale marker is safe (readers prefer the result) */
       }
     }
     return { outcome: result, blocked: false, mode: pre.mode, result: file };
@@ -1205,6 +1256,94 @@ export async function migrateHome(
   }
 }
 
+// ---------- forced-quit stdout hardening (drill 284-run3, PM fix 2026-10-10) ----------
+
+export function isEpipeError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const code = (error as NodeJS.ErrnoException).code;
+  return code === "EPIPE" || /EPIPE/i.test(error.message);
+}
+
+export interface MigrationEventSinkDeps {
+  writeStdout?: (line: string) => void;
+  onStdoutError?: (handler: (error: Error) => void) => void;
+  ignoreSignals?: () => void;
+  appendFileSync?: (file: string, line: string) => void;
+  homeComputerExists?: (home: string) => boolean;
+}
+
+/**
+ * NDJSON line sink that survives the spawning app dying. The Desktop app
+ * spawns `migrate-home --json` with stdout as a PIPE and folds the stream;
+ * SIGKILL the app mid-apply and the pipe's reader is gone — the next stdout
+ * write raises EPIPE and the CLI would die BEFORE finish() writes
+ * migrate-result.json (drill 284-run3: the launchd-spawned service happily
+ * completed at the new home while the app's launch recovery had nothing to
+ * read). The sink swallows EPIPE — whether it surfaces as a synchronous
+ * throw or the stream's async 'error' event — and from then on appends
+ * every line to <home>/computer/migrate-run.ndjson (the same file a
+ * redirected Desktop spawn tails), so the run still reaches finish().
+ *
+ * The fallback home is re-resolved per line: before the move the log rides
+ * the SOURCE home (the rename carries it to the target — by path it IS the
+ * target's file afterwards); after the move the target wins. A home only
+ * qualifies when its computer/ dir exists, so a rolled-back run (which can
+ * restore an EMPTY target dir) never makes the sink resurrect the old path.
+ */
+export function createMigrationEventSink(
+  from: string,
+  to: string,
+  deps: MigrationEventSinkDeps = {},
+): { emitLine: (line: string) => void; stdoutBroken: () => boolean } {
+  const writeStdout = deps.writeStdout ?? ((line: string) => {
+    process.stdout.write(line);
+  });
+  const onStdoutError = deps.onStdoutError ?? ((handler) => {
+    process.stdout.on("error", handler);
+  });
+  const appendLine = deps.appendFileSync ?? ((file, line) => {
+    fsMkdirSync(path.dirname(file), { recursive: true });
+    fsAppendFileSync(file, line);
+  });
+  const homeComputerExists = deps.homeComputerExists ?? ((home) => {
+    try {
+      return fsStatSync(path.join(home, "computer")).isDirectory();
+    } catch {
+      return false;
+    }
+  });
+  let broken = false;
+  onStdoutError((error) => {
+    if (isEpipeError(error)) broken = true;
+    else throw error;
+  });
+  (deps.ignoreSignals ?? (() => {
+    // The CLI must not die of its launcher's terminal signals mid-move: a
+    // killed app ends the session, which can SIGHUP the surviving child.
+    process.on("SIGPIPE", () => {});
+    process.on("SIGHUP", () => {});
+  }))();
+  const toFile = (line: string) => {
+    const home = homeComputerExists(to) ? to : from;
+    appendLine(migrateRunLogPath(home), line);
+  };
+  return {
+    emitLine(line: string) {
+      if (!broken) {
+        try {
+          writeStdout(line);
+          return;
+        } catch (error) {
+          if (!isEpipeError(error)) throw error;
+          broken = true;
+        }
+      }
+      toFile(line);
+    },
+    stdoutBroken: () => broken,
+  };
+}
+
 // ---------- CLI adapter (`raft-computer migrate-home`) ----------
 
 function summarizeDetail(detail: Record<string, unknown>): string {
@@ -1222,12 +1361,21 @@ function summarizeDetail(detail: Record<string, unknown>): string {
 export async function runMigrateHomeCommand(
   opts: { from?: string; to?: string; apply?: boolean; json?: boolean },
 ): Promise<void> {
+  // Hardened sink (drill 284-run3 fix): stdout may be a PIPE whose reader —
+  // the Desktop app — can be SIGKILLed mid-apply. EPIPE must never kill the
+  // CLI before finish() writes the result file.
+  const { fromArg, to } = resolveMigrateHomeArgumentPaths(
+    { from: opts.from, to: opts.to },
+    process.env as { RAFT_HOME?: string; SLOCK_HOME?: string },
+    os.homedir(),
+  );
+  const sink = createMigrationEventSink(fromArg, to);
   const emit = (event: MigrateEvent) => {
     if (opts.json) {
-      process.stdout.write(`${JSON.stringify(event)}\n`);
+      sink.emitLine(`${JSON.stringify(event)}\n`);
     } else {
       const detail = event.detail ? ` — ${summarizeDetail(event.detail)}` : "";
-      info(`migrate-home: [${event.step}] ${event.status}${detail}`);
+      sink.emitLine(`migrate-home: [${event.step}] ${event.status}${detail}\n`);
     }
   };
 
@@ -1306,11 +1454,11 @@ export async function runMigrateHomeCommand(
 
   if (opts.json) {
     const finalLine = run.result ?? { dryRun: true, outcome: run.outcome, blocked: run.blocked, mode: run.mode };
-    process.stdout.write(`${JSON.stringify(finalLine)}\n`);
+    sink.emitLine(`${JSON.stringify(finalLine)}\n`);
   } else if (run.outcome === "planned") {
-    info("Dry-run OK — re-run with --apply to perform the migration.");
+    sink.emitLine("Dry-run OK — re-run with --apply to perform the migration.\n");
   } else if (run.outcome === "blocked") {
-    info("Dry-run found blockers — nothing was changed. Fix the blockers above and re-run.");
+    sink.emitLine("Dry-run found blockers — nothing was changed. Fix the blockers above and re-run.\n");
   }
 
   if (run.outcome === "blocked" || run.outcome === "failed") {
