@@ -110,12 +110,16 @@ export interface IpcServerOptions {
 
 /** Default `ownerLiveness`: the service pidfile plus a signal-0 liveness
  *  probe. EPERM counts as alive (another user's live pid); everything else
- *  unreadable/dead counts as "no live owner". */
+ *  unreadable/dead, and this process's own pid, counts as "no live owner". */
 async function defaultOwnerLiveness(installRoot: string): Promise<boolean> {
   try {
     const raw = await readFile(servicePidPath(installRoot), "utf8");
     const pid = Number.parseInt(raw.trim(), 10);
     if (!Number.isInteger(pid) || pid <= 0) return false;
+    // `spawnDetachedService` writes the child's pid into service.pid right after the spawn, i.e. BEFORE this
+    // process has bound anything. Our own pid is never a competing owner: counting it made every start after an
+    // unclean service death (stale refused socket) fail with EADDRINUSE, retries included.
+    if (pid === process.pid) return false;
     try {
       process.kill(pid, 0);
       return true;
