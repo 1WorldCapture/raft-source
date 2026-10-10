@@ -45,6 +45,7 @@
  *   __service                        the long-running service process
  *   __run <serverId>                   one per-server daemon child
  */
+import "./earlySignals.js";
 import { pathToFileURL } from "node:url";
 import { randomUUID } from "node:crypto";
 import { Command } from "commander";
