@@ -156,6 +156,8 @@ class ComputerHost {
    * came up (drill-290-anna ②a/cancel retests; reproduced on xai). Pin the process env to the controlled home.
    */
   private pinProcessEnv(home: string): void {
+    const fromEnv = process.env.RAFT_HOME ?? process.env.SLOCK_HOME;
+    if (fromEnv && fromEnv !== home) console.warn(`[raft-desktop] the app was started with RAFT_HOME=${fromEnv}, but the Computer home in use is ${home}; ${home} is used for everything from now on`);
     process.env.RAFT_HOME = home;
     process.env.SLOCK_HOME = home;
   }
