@@ -1,5 +1,5 @@
-import { spawn } from "node:child_process";
-import { execFileSync } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
+import { promisify } from "node:util";
 import {
   hydrateRuntimeConfig,
   runtimeConfigToLaunchFields,
@@ -119,19 +119,42 @@ export function parseAntigravityModelList(output: string): RuntimeModelInfo[] {
   return models;
 }
 
-export function detectAntigravityStreamModels(deps: ProbeDeps = {}): RuntimeModelSourceOutcome {
+const execFileAsync = promisify(execFile);
+
+export type AntigravityModelDetectDeps = ProbeDeps & {
+  execFileFn?: (
+    command: string,
+    args: readonly string[],
+    options: {
+      timeout: number;
+      encoding: "utf8";
+      env?: NodeJS.ProcessEnv;
+      cwd?: string;
+    },
+  ) => Promise<{ stdout?: string | Buffer; stderr?: string | Buffer }>;
+};
+
+/**
+ * `agy models` reaches the network (about 12s on 1.3.2, timeout 20s). It must
+ * not use execFileSync: that would stall the daemon event loop. Path lookup
+ * stays synchronous; `agy --version` in probe() is a local process (0.25s on
+ * 1.3.2) and RuntimeDriver.probe() is synchronous.
+ */
+export async function detectAntigravityStreamModels(
+  deps: AntigravityModelDetectDeps = {},
+): Promise<RuntimeModelSourceOutcome> {
   const command = resolveCommandOnPath("agy", deps);
   if (!command) return { kind: "error", retryable: true };
-  const execFileSyncFn = deps.execFileSyncFn ?? execFileSync;
+  const execFileFn = deps.execFileFn ?? execFileAsync;
   try {
-    const output = execFileSyncFn(command, ["models"], {
-      stdio: ["ignore", "pipe", "pipe"],
+    const output = await execFileFn(command, ["models"], {
       timeout: ANTIGRAVITY_STREAM_MODEL_PROBE_TIMEOUT_MS,
       encoding: "utf8",
       ...(deps.env ? { env: deps.env } : {}),
       ...(deps.cwd ? { cwd: deps.cwd } : {}),
     });
-    const text = Buffer.isBuffer(output) ? output.toString("utf8") : String(output ?? "");
+    const stdout = output && typeof output === "object" && "stdout" in output ? output.stdout : output;
+    const text = Buffer.isBuffer(stdout) ? stdout.toString("utf8") : String(stdout ?? "");
     return runtimeModelSourceOutcomeFromSet({ models: parseAntigravityModelList(text) });
   } catch {
     return { kind: "error", retryable: true };
@@ -237,6 +260,10 @@ export class AntigravityStreamDriver implements RuntimeDriver {
       cwd: ctx.workingDirectory,
       stdio: ["pipe", "pipe", "pipe"],
       env: spawnEnv,
+      // Own process group so stop() can signal agy and the tools it spawned.
+      // A daemon crash or SIGKILL does not reap this group; see the PR note.
+      // omp and cursor-sdk use the same detached shape and also have no
+      // parent-death watchdog.
       detached: process.platform !== "win32",
     });
     this.child = proc;

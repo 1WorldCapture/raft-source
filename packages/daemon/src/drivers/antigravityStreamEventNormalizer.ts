@@ -70,12 +70,17 @@ function asString(value: unknown): string | null {
 /**
  * Maps agy 1.3.2 stream-json stdout into ParsedEvents.
  *
- * Step `usage` objects are per model call. `result.usage` is cumulative for
- * the process, so a turn's telemetry is the sum of the step usages only.
+ * Step `usage` is the latest snapshot for that `step_index`, not a delta.
+ * ACTIVE and DONE for the same index must not both be added. `result.usage`
+ * is cumulative for the process, so a turn's telemetry sums the kept step
+ * snapshots only.
  */
 export class AntigravityStreamEventNormalizer {
   private sessionId: string | null = null;
-  private turnUsage = emptyTotals();
+  /** Last usage object seen for each step_index in the open turn. */
+  private stepUsage = new Map<number, Record<string, unknown>>();
+  /** Usage on a step_update that did not carry a step_index. */
+  private anonymousUsage: Record<string, unknown>[] = [];
   private printTimeoutEmitted = false;
   private turnClosed = false;
 
@@ -135,17 +140,17 @@ export class AntigravityStreamEventNormalizer {
     if (stepType === "system_message") return [];
     if (stepType === "user_input") {
       if (this.turnClosed) this.printTimeoutEmitted = false;
-      this.turnUsage = emptyTotals();
+      this.clearStepUsage();
       this.turnClosed = false;
       return [];
     }
 
     if (this.turnClosed) {
-      this.turnUsage = emptyTotals();
+      this.clearStepUsage();
       this.turnClosed = false;
     }
 
-    addUsage(this.turnUsage, step.usage);
+    this.noteStepUsage(step);
 
     if (stepType === "agent_response") {
       const text = asString(step.text_delta);
@@ -184,7 +189,7 @@ export class AntigravityStreamEventNormalizer {
     // A print-timeout already closed this turn from stderr. result.usage is
     // cumulative and this SUCCESS is not a normal completion.
     if (this.printTimeoutEmitted) {
-      this.turnUsage = emptyTotals();
+      this.clearStepUsage();
       return [];
     }
 
@@ -205,10 +210,28 @@ export class AntigravityStreamEventNormalizer {
     return events;
   }
 
+  private noteStepUsage(step: Record<string, unknown>): void {
+    const usage = asRecord(step.usage);
+    if (!usage) return;
+    const index = step.step_index;
+    if (typeof index === "number" && Number.isInteger(index)) {
+      this.stepUsage.set(index, usage);
+      return;
+    }
+    this.anonymousUsage.push(usage);
+  }
+
+  private clearStepUsage(): void {
+    this.stepUsage.clear();
+    this.anonymousUsage = [];
+  }
+
   private takeTurnTelemetry(): ParsedEvent | null {
-    const telemetry = telemetryEvent(this.turnUsage, this.sessionId);
-    this.turnUsage = emptyTotals();
-    return telemetry;
+    const totals = emptyTotals();
+    for (const usage of this.stepUsage.values()) addUsage(totals, usage);
+    for (const usage of this.anonymousUsage) addUsage(totals, usage);
+    this.clearStepUsage();
+    return telemetryEvent(totals, this.sessionId);
   }
 
   private endTurn(): ParsedEvent | null {

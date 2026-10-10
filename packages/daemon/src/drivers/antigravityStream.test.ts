@@ -6,6 +6,7 @@ import type { AgentConfig } from "@botiverse/raft-shared";
 import { getDriver } from "./index.js";
 import {
   ANTIGRAVITY_STREAM_DEFAULT_MODEL,
+  ANTIGRAVITY_STREAM_MODEL_PROBE_TIMEOUT_MS,
   AntigravityStreamVersionError,
   assertAntigravityStreamLaunchVersion,
   antigravityStreamStopSignal,
@@ -141,7 +142,7 @@ test("version 1.1.7 is refused, 1.3.2 is accepted, and a missing binary is unava
   assert.doesNotThrow(() => assertAntigravityStreamLaunchVersion(null));
 });
 
-test("agy models tab output becomes launchable ids and a failed probe invents none", () => {
+test("agy models tab output becomes launchable ids and a failed probe invents none", async () => {
   assert.deepEqual(parseAntigravityModelList([
     "Fetching models…",
     "gemini-3.8-flash-low\tGemini 3.8 Flash (Low)",
@@ -151,14 +152,22 @@ test("agy models tab output becomes launchable ids and a failed probe invents no
     { id: "gemini-3.8-flash-low", label: "Gemini 3.8 Flash (Low)", verified: "launchable" },
   ]);
 
-  const live = detectAntigravityStreamModels({
+  let modelCalls = 0;
+  const live = await detectAntigravityStreamModels({
     platform: "darwin",
     env: { PATH: "/tmp/agy-test" },
     execFileSyncFn: execSpy({
       "which agy": "/tmp/agy-test/agy",
-      "/tmp/agy-test/agy models": "gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\n",
     }),
+    execFileFn: async (command, args, options) => {
+      modelCalls += 1;
+      assert.equal(command, "/tmp/agy-test/agy");
+      assert.deepEqual([...args], ["models"]);
+      assert.equal(options.timeout, ANTIGRAVITY_STREAM_MODEL_PROBE_TIMEOUT_MS);
+      return { stdout: "gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\n" };
+    },
   });
+  assert.equal(modelCalls, 1);
   assert.equal(live.kind, "live");
   if (live.kind === "live") {
     assert.deepEqual(live.value.models, [
@@ -166,13 +175,15 @@ test("agy models tab output becomes launchable ids and a failed probe invents no
     ]);
   }
 
-  const failed = detectAntigravityStreamModels({
+  const failed = await detectAntigravityStreamModels({
     platform: "darwin",
     env: { PATH: "/tmp/agy-test" },
     execFileSyncFn: execSpy({
       "which agy": "/tmp/agy-test/agy",
-      "/tmp/agy-test/agy models": new Error("network"),
     }),
+    execFileFn: async () => {
+      throw new Error("network");
+    },
   });
   assert.deepEqual(failed, { kind: "error", retryable: true });
 });
@@ -324,6 +335,103 @@ test("turn telemetry sums step usage and does not add cumulative result usage", 
   }
   assert.deepEqual(kinds(second), ["tool_output", "telemetry", "turn_end"]);
   assert.equal(second.some((event) => event.kind === "text"), false);
+});
+
+test("the same step_index keeps only its last usage", () => {
+  // Probe conversation da54c2e7: agent_response ACTIVE carried the text delta
+  // and no usage; DONE on step 15 carried the step usage. Step 5's numbers are
+  // the thinking step from the same probe. The ACTIVE usage below is the
+  // duplicate the review asked to drop; that frame did not include usage.
+  const normalizer = new AntigravityStreamEventNormalizer();
+  const events = feed(normalizer, [
+    { event: "init", conversation_id: CONVERSATION_ID },
+    {
+      event: "step_update",
+      step_update: {
+        conversation_id: CONVERSATION_ID,
+        step_index: 15,
+        state: "ACTIVE",
+        step_type: "agent_response",
+        text_delta: "PINECONE",
+      },
+    },
+    {
+      event: "step_update",
+      step_update: {
+        conversation_id: CONVERSATION_ID,
+        step_index: 15,
+        state: "DONE",
+        step_type: "agent_response",
+        text_delta: "\n",
+        usage: {
+          input_tokens: 13327,
+          output_tokens: 1,
+          thinking_tokens: 0,
+          cache_read_tokens: 0,
+          total_tokens: 13328,
+        },
+      },
+    },
+    {
+      event: "step_update",
+      step_update: {
+        conversation_id: CONVERSATION_ID,
+        step_index: 5,
+        state: "ACTIVE",
+        step_type: "agent_response",
+        usage: {
+          input_tokens: 100,
+          output_tokens: 1,
+          thinking_tokens: 1,
+          cache_read_tokens: 0,
+          total_tokens: 102,
+        },
+      },
+    },
+    {
+      event: "step_update",
+      step_update: {
+        conversation_id: CONVERSATION_ID,
+        step_index: 5,
+        state: "DONE",
+        step_type: "agent_response",
+        usage: {
+          input_tokens: 12236,
+          output_tokens: 234,
+          thinking_tokens: 172,
+          cache_read_tokens: 0,
+          total_tokens: 12470,
+        },
+      },
+    },
+    {
+      event: "result",
+      result: {
+        conversation_id: CONVERSATION_ID,
+        status: "SUCCESS",
+        response: "PINECONE\n",
+        usage: {
+          input_tokens: 99999,
+          output_tokens: 99999,
+          thinking_tokens: 99999,
+          cache_read_tokens: 0,
+          total_tokens: 99999,
+        },
+      },
+    },
+  ]);
+  const usage = events.find((event) => event.kind === "telemetry");
+  assert.equal(usage?.kind, "telemetry");
+  if (usage?.kind === "telemetry") {
+    assert.deepEqual(usage.attrs, {
+      inputTokens: 25563,
+      outputTokens: 235,
+      thinkingTokens: 172,
+      cachedInputTokens: 0,
+      totalTokens: 25798,
+    });
+  }
+  assert.equal(events.filter((event) => event.kind === "text").map((event) => event.kind === "text" ? event.text : "").join(""), "PINECONE\n");
 });
 
 test("interrupted result is an error and a turn end, without counting result usage", () => {
