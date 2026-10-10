@@ -168,6 +168,10 @@ export interface MigrateHomeDeps {
    *  launcher used; PM review on #281). */
   scanHomeProcesses?: (homeSpellings: string[]) => Promise<HomeProcess[]>;
   killHomeProcess?: (pid: number, signal: "SIGTERM" | "SIGKILL") => void;
+  /** Cancellation signal (SIGTERM from the Desktop app's cancel button, PM
+   *  fix #288): aborted → forward steps fail into rollback. The rollback
+   *  itself ignores it — a repeat signal must never interrupt the restore. */
+  abortSignal?: AbortSignal;
   sweepTimeoutMs?: number;
   selfCheckTimeoutMs?: number;
   selfCheckPollMs?: number;
@@ -346,6 +350,13 @@ export interface MigrateHomeOptions {
   from?: string;
   to?: string;
   apply: boolean;
+  /** Hard deadline (epoch ms); defaults to startedAt +
+   *  MIGRATE_IN_PROGRESS_DEADLINE_MS so the enforced deadline always equals
+   *  the marker's deadlineAt (PM review on #290). Forward steps and their
+   *  polls abort into the normal fail→rollback path once it passes. The
+   *  rollback itself is NEVER deadline-bound — it must always run to
+   *  completion (PM fix #288). */
+  deadlineAt?: number;
 }
 
 export interface MigrateHomeRun {
@@ -625,7 +636,12 @@ export async function migrateHome(
   // disk, so a crash between the two leaves both files and readers can
   // prefer the result.
   const markerBase = { schemaVersion: 1, pid: process.pid, mode: pre.mode, from: pre.from, to: pre.to, startedAt };
-  const deadlineAt = new Date(Date.parse(startedAt) + MIGRATE_IN_PROGRESS_DEADLINE_MS).toISOString();
+  // The EFFECTIVE hard deadline: an explicit --deadline wins; otherwise
+  // startedAt + the marker budget, so the marker's deadlineAt and the
+  // enforced deadline can never disagree (PM review on #290: without a
+  // default, the UI's deadline is decorative and the run is unbounded).
+  const effectiveDeadlineAt = opts.deadlineAt ?? Date.parse(startedAt) + MIGRATE_IN_PROGRESS_DEADLINE_MS;
+  const deadlineAt = new Date(effectiveDeadlineAt).toISOString();
   let markerRetired = false;
   let markerTracked = false;
   let markerWrites: Promise<void> = Promise.resolve();
@@ -722,6 +738,29 @@ export async function migrateHome(
   const scanHomeProcesses = deps.scanHomeProcesses ?? defaultScanHomeProcesses;
   const killHomeProcess = deps.killHomeProcess ?? defaultKillHomeProcess;
 
+  // Hard deadline + cancellation (PM fix #288): FORWARD steps and their
+  // polls abort into the normal fail→rollback path. Once the rollback
+  // starts both guards are off — the rollback is never deadline-bound and
+  // never interrupted by a further signal; it must always reach the
+  // original state. The CLI adapter's SIGTERM handler only ever sets the
+  // signal, so a repeat signal is a no-op by construction.
+  const hardDeadlineAt = effectiveDeadlineAt;
+  const abortSignal = deps.abortSignal;
+  const nowFn = deps.now ?? (() => new Date());
+  let rollbackStarted = false;
+  const abortReason = (): string | null => {
+    if (rollbackStarted) return null;
+    if (abortSignal?.aborted) return "cancelled by SIGTERM";
+    if (hardDeadlineAt !== undefined && nowFn().getTime() >= hardDeadlineAt) {
+      return `deadline exceeded (deadline ${new Date(hardDeadlineAt).toISOString()}, now ${nowFn().toISOString()})`;
+    }
+    return null;
+  };
+  const checkAbort = (): void => {
+    const reason = abortReason();
+    if (reason !== null) throw new Error(`migrate-home aborted: ${reason}`);
+  };
+
   /** Every path spelling a live process could carry for this home: the
    *  realpath, the ORIGINAL argument, and the ~/.slock-raft alias (owner's
    *  running processes carry the alias spelling via launchctl setenv). */
@@ -749,6 +788,7 @@ export async function migrateHome(
     for (const proc of procs) killHomeProcess(proc.pid, "SIGTERM");
     while (procs.length > 0 && Date.now() < deadline) {
       await sleep(500);
+      checkAbort();
       procs = await scanHomeProcesses(homeSpellings);
     }
     if (procs.length > 0) {
@@ -777,6 +817,9 @@ export async function migrateHome(
   const runStep = async (step: MigrateStep, fn: () => Promise<Record<string, unknown> | void>) => {
     record({ step, status: "start" });
     try {
+      // Inside the try ON PURPOSE: an abort (deadline / SIGTERM) must fail
+      // THIS step into the normal rollback path — never escape the run.
+      checkAbort();
       const detail = await fn();
       record({ step, status: "ok", ...(detail ? { detail } : {}) });
       return true;
@@ -1202,6 +1245,7 @@ export async function migrateHome(
         const deadline = Date.now() + timeoutMs;
         let last: MigrateHomeStatus = { serviceRunning: false, serverCount: pre.serverDirs, serversOnline: false };
         for (;;) {
+          checkAbort();
           last = await statusAt(pre.to);
           if (last.serviceRunning && last.serversOnline) break;
           if (Date.now() >= deadline) {
@@ -1261,6 +1305,10 @@ export async function migrateHome(
 
   // Rolled into a function so every failure site shares one rollback path.
   async function rollbackAndFinish(): Promise<MigrateHomeRun> {
+    // Rollback immunity (PM fix #288): from here on the deadline and the
+    // cancel signal no longer abort anything — the undo journal must always
+    // run to completion.
+    rollbackStarted = true;
     record({ step: "rollback", status: "start", detail: { failedStep: failureStep } });
     const undoErrors: string[] = [];
     for (const entry of [...journal].reverse()) {
@@ -1394,6 +1442,20 @@ export function createMigrationEventSink(
 
 // ---------- CLI adapter (`raft-computer migrate-home`) ----------
 
+/** Parse `--deadline`: an absolute instant, either epoch milliseconds or an
+ *  ISO 8601 timestamp (the Desktop app passes Date.now() + its wait budget
+ *  — an absolute instant survives spawn latency; a duration would not). */
+export function parseMigrateDeadline(raw: string): number {
+  if (/^-?\d+$/.test(raw.trim())) {
+    const epochMs = Number(raw.trim());
+    if (epochMs > 0) return epochMs;
+    throw new CliExit(1, "MIGRATE_DEADLINE_INVALID"); // a non-positive epoch is never a deadline
+  }
+  const parsed = Date.parse(raw);
+  if (!Number.isNaN(parsed) && parsed > 0) return parsed;
+  throw new CliExit(1, "MIGRATE_DEADLINE_INVALID");
+}
+
 function summarizeDetail(detail: Record<string, unknown>): string {
   const parts: string[] = [];
   for (const [key, value] of Object.entries(detail)) {
@@ -1405,9 +1467,25 @@ function summarizeDetail(detail: Record<string, unknown>): string {
 
 /** Real-deps wiring + output shaping. `--json` emits one event per line
  *  (interface v1 NDJSON) with the result summary as the final line; the
- *  human mode prints one line per event. Non-zero exit on blocked/failed. */
+ *  human mode prints one line per event. Non-zero exit on blocked/failed.
+ *  SIGTERM cancels into the rollback path (never a bare death); repeat
+ *  signals are no-ops and the rollback itself ignores the signal. */
 export async function runMigrateHomeCommand(
-  opts: { from?: string; to?: string; apply?: boolean; json?: boolean },
+  opts: { from?: string; to?: string; apply?: boolean; json?: boolean; deadline?: string },
+): Promise<void> {
+  const cancel = new AbortController();
+  const onSigterm = (): void => cancel.abort();
+  process.on("SIGTERM", onSigterm);
+  try {
+    await runMigrateHomeCommandInner(opts, cancel.signal);
+  } finally {
+    process.removeListener("SIGTERM", onSigterm);
+  }
+}
+
+async function runMigrateHomeCommandInner(
+  opts: { from?: string; to?: string; apply?: boolean; json?: boolean; deadline?: string },
+  abortSignal: AbortSignal,
 ): Promise<void> {
   // Hardened sink (drill 284-run3 fix): stdout may be a PIPE whose reader —
   // the Desktop app — can be SIGKILLed mid-apply. EPIPE must never kill the
@@ -1427,7 +1505,9 @@ export async function runMigrateHomeCommand(
     }
   };
 
+  const deadlineAt = opts.deadline !== undefined ? parseMigrateDeadline(opts.deadline) : undefined;
   const deps: MigrateHomeDeps = {
+    abortSignal,
     // Plain graceful stop: no desiredState write (a migration is not a user
     // stop) and no lifecycle convergence (the old carrier is the desktop
     // app's business; rollback restores the process, not the app's marker).
@@ -1498,7 +1578,7 @@ export async function runMigrateHomeCommand(
       }),
   };
 
-  const run = await migrateHome({ from: opts.from, to: opts.to, apply: !!opts.apply }, deps, emit);
+  const run = await migrateHome({ from: opts.from, to: opts.to, apply: !!opts.apply, deadlineAt }, deps, emit);
 
   if (opts.json) {
     const finalLine = run.result ?? { dryRun: true, outcome: run.outcome, blocked: run.blocked, mode: run.mode };
