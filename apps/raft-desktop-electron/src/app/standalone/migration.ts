@@ -289,7 +289,7 @@ export class MigrationController {
     this.busy = true;
     try {
       const planned = this.state;
-      this.set({ ...EMPTY, phase: "applying", from: planned.from, to: planned.to });
+      this.set({ ...EMPTY, phase: "applying", from: planned.from, to: planned.to, inPlace: planned.inPlace });
       const prepared = await this.prepare(planned.from);
       if (!prepared) return this.state;
       // Hand-over: the app stops its own built-in Computer (service, runners) and verifies it is gone BEFORE the

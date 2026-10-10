@@ -338,3 +338,15 @@ test("an older raft-computer (no clean cancel) never offers Cancel: SIGTERM woul
   release();
   await applying;
 });
+
+test("in-place is remembered once apply starts (the dialog keeps saying Switching)", async () => {
+  const { c } = withHandOver(async () => undefined, {
+    onRun: async () => ({ outcome: "success", events: [], final: { result: "success", from: "/h", to: "/h", error: null, serviceState: "running" }, detail: null, exitCode: 0 }),
+  });
+  // plan() reports in-place through the preflight detail
+  (c as unknown as { deps: { run: unknown } }).deps.run = async (input: { apply: boolean }) => input.apply
+    ? { outcome: "success", events: [], final: { result: "success", from: "/h", to: "/h", error: null, serviceState: "running" }, detail: null, exitCode: 0 }
+    : { outcome: "planned", events: [{ step: "preflight", status: "ok", detail: { mode: "in-place", from: "/h", to: "/h" } }], final: null, detail: null, exitCode: 0 };
+  assert.equal((await c.plan()).inPlace, true);
+  assert.equal((await c.apply()).inPlace, true);
+});
