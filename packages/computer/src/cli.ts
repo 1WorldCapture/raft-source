@@ -492,8 +492,9 @@ program
   .option("--from <dir>", "source home to move away from (default: the home this Computer uses now)")
   .option("--to <dir>", "target home (default: ~/.slock)")
   .option("--apply", "carry out the move (without this flag, the command only checks and prints the plan)")
+  .option("--deadline <instant>", "with --apply: hard time limit as epoch milliseconds or an ISO 8601 timestamp; once passed the migration aborts and rolls back (the rollback itself is never time-limited)")
   .option("--json", "newline-delimited JSON events (interface v1); the final line carries the result summary")
-  .action(withCliExit(async (opts: { from?: string; to?: string; apply?: boolean; json?: boolean }) => {
+  .action(withCliExit(async (opts: { from?: string; to?: string; apply?: boolean; deadline?: string; json?: boolean }) => {
     const { runMigrateHomeCommand } = await import("./migrateHome.js");
     await runMigrateHomeCommand(opts);
   }));

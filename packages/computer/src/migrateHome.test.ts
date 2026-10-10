@@ -14,6 +14,7 @@ import {
   mentionsPathBounded,
   migrateHome,
   migrateInProgressPath,
+  parseMigrateDeadline,
   MIGRATE_IN_PROGRESS_DEADLINE_MS,
   migrateResultPath,
   migrateRunLogPath,
@@ -936,4 +937,87 @@ test("sink: the fallback home never resurrects a rolled-back (empty) target dir"
   });
   sink.emitLine("rollback-tail\n");
   assert.match(fileLines[0]!, /^\/from-home\/computer\/migrate-run\.ndjson::/);
+});
+
+// --- hard deadline + SIGTERM cancellation (PM fix #288) ---
+
+test("abort signal (SIGTERM shape): forward steps cancel into rollback, which the signal never interrupts", async () => {
+  const f = await fixture({ livePid: true });
+  const h = fakeDeps(f.user);
+  const cancel = new AbortController();
+  h.deps.abortSignal = cancel.signal;
+  // Abort DURING the stop step's service stop — the next step boundary
+  // (move) must fail with the cancellation reason and roll everything back.
+  h.deps.stopServiceAt = async (home) => {
+    h.stopCalls.push(home);
+    cancel.abort();
+  };
+  try {
+    const run = await migrateHome({ from: f.from, to: f.to, ...apply }, h.deps, (e) => h.events.push(e));
+    assert.equal(run.outcome, "rolled_back");
+    assert.match(run.result?.error ?? "", /cancelled by SIGTERM/);
+    assert.equal(run.result?.rollback?.ok, true);
+    // Rollback immunity in practice: the undo journal ran to completion
+    // (home back, alias back) even though the signal stayed aborted.
+    assert.equal((await stat(f.from)).isDirectory(), true);
+    const failed = h.events.find((e) => e.status === "fail");
+    assert.equal(failed?.step, "move");
+    const rollbackEvent = h.events.filter((e) => e.step === "rollback").at(-1);
+    assert.equal(rollbackEvent?.status, "ok");
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+test("deadline: exceeding it mid-run fails the current step into rollback; the rollback is not deadline-bound", async () => {
+  const f = await fixture({ livePid: true });
+  const h = fakeDeps(f.user);
+  // Deterministic clock: t0 at run start, then jump far past the deadline
+  // so the check at the move step boundary trips.
+  let clock = 1_700_000_000_000;
+  h.deps.now = () => new Date(clock);
+  h.deps.stopServiceAt = async (home) => {
+    h.stopCalls.push(home);
+    clock += 10 * 60_000; // the deadline (startedAt + 1min) is now far past
+  };
+  try {
+    const run = await migrateHome(
+      { from: f.from, to: f.to, ...apply, deadlineAt: 1_700_000_000_000 + 60_000 },
+      h.deps,
+      (e) => h.events.push(e),
+    );
+    assert.equal(run.outcome, "rolled_back");
+    assert.match(run.result?.error ?? "", /deadline exceeded/);
+    assert.equal(run.result?.rollback?.ok, true);
+    assert.equal((await stat(f.from)).isDirectory(), true);
+    const failed = h.events.find((e) => e.status === "fail");
+    assert.equal(failed?.step, "move");
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+test("parseMigrateDeadline: epoch milliseconds, ISO 8601, and the invalid shape", () => {
+  assert.equal(parseMigrateDeadline("1770000000000"), 1_770_000_000_000);
+  assert.equal(parseMigrateDeadline("2026-10-10T00:00:00.000Z"), Date.parse("2026-10-10T00:00:00.000Z"));
+  assert.throws(() => parseMigrateDeadline("in-a-while"), /MIGRATE_DEADLINE_INVALID/);
+  assert.throws(() => parseMigrateDeadline("-5"), /MIGRATE_DEADLINE_INVALID/);
+});
+
+test("dry-run ignores the deadline and the abort signal (nothing to roll back)", async () => {
+  const f = await fixture();
+  const h = fakeDeps(f.user);
+  const cancel = new AbortController();
+  cancel.abort();
+  h.deps.abortSignal = cancel.signal;
+  try {
+    const run = await migrateHome(
+      { from: f.from, to: f.to, ...dry, deadlineAt: 1 },
+      h.deps,
+      (e) => h.events.push(e),
+    );
+    assert.equal(run.outcome, "planned");
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
 });
