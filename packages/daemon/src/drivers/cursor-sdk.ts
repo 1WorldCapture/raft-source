@@ -1036,7 +1036,7 @@ export class CursorSdkRuntimeSession implements RuntimeSession {
       // Suppress further busy steering for this run until true idle.
       run!.steeringSuppressed = true;
     }
-    if (kind === "run_submit") this.trackSubmitOutcome(message.result);
+    if (kind === "run_submit") this.trackSubmitOutcome(message.result, message.error?.errorClass);
     if (kind === "run_submit" && runStillCurrent && !run!.terminal &&
         (message.result === "revert" || message.result === "failed")) {
       // The optimistic run never started — the SDK refused the submission.
@@ -1057,7 +1057,7 @@ export class CursorSdkRuntimeSession implements RuntimeSession {
    * means no run object exists (nothing was accepted, nothing can duplicate).
    * `revert` (busy) and anything after a run started are never counted.
    */
-  private trackSubmitOutcome(result: CursorSdkAttemptResultMessage["result"]): void {
+  private trackSubmitOutcome(result: CursorSdkAttemptResultMessage["result"], errorClass?: string): void {
     if (result === "complete_delivered") {
       this.runEverAccepted = true;
       this.submitFailures = 0;
@@ -1071,8 +1071,12 @@ export class CursorSdkRuntimeSession implements RuntimeSession {
       this.submitFailuresSinceMs = now;
     }
     this.submitFailures += 1;
-    if (this.submitFailures < CURSOR_SDK_SUBMIT_FAILURE_LIMIT) return;
     const resumed = Boolean(this.ctx.config.sessionId);
+    // UnknownAgentError on a resumed session that has not accepted a single run in this launch: the SDK no longer
+    // knows the saved conversation. One occurrence is proof enough; waiting for more attempts left a restarted agent
+    // silent until the next stall (and the one-restart-per-window stall guard then paused it for good).
+    const sessionUnknown = errorClass === "unknown_agent" && resumed && !this.runEverAccepted;
+    if (this.submitFailures < CURSOR_SDK_SUBMIT_FAILURE_LIMIT && !sessionUnknown) return;
     if (resumed && !this.runEverAccepted) {
       // A resumed session that never accepted a run in this launch: the saved
       // conversation itself is suspect. Ask the daemon to reset it.

@@ -52,7 +52,9 @@ function errorCode(error: unknown): CursorSdkWireError {
   const value = error as { name?: unknown; code?: unknown } | null;
   if (value?.name === "AuthenticationError") return { errorClass: "auth", message: "Cursor authentication failed. Reconnect this computer's Cursor account." };
   if (value?.name === "AgentNotFoundError" || value?.code === "agent_not_found") return { errorClass: "agent_not_found", message: "The saved Cursor SDK conversation is missing. Restore its store or explicitly reset the session." };
-  if (value?.name === "AgentBusyError" || value?.name === "UnknownAgentError") return { errorClass: "busy", message: "Cursor rejected a concurrent run; the saved conversation has not been reset." };
+  if (value?.name === "AgentBusyError") return { errorClass: "busy", message: "Cursor rejected a concurrent run; the saved conversation has not been reset." };
+  // Kept apart from "busy" so the daemon can tell a resumed session the SDK no longer knows from a real concurrent run.
+  if (value?.name === "UnknownAgentError") return { errorClass: "unknown_agent", message: "Cursor rejected a concurrent run; the saved conversation has not been reset." };
   return { errorClass: "host_internal", message: "Cursor SDK operation failed. The existing conversation was preserved." };
 }
 
