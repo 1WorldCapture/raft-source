@@ -41,8 +41,12 @@ test("orphaned runners are swept before a service is started (Start and launch c
   } });
   t.mock.module("@botiverse/raft-computer/lib", { namedExports: {
     connectService: async () => { throw new Error("unused"); },
-    homeProcessSpellings: (primary: string, original: string | null, alias: string | null) => [primary, original, alias].filter((v): v is string => v !== null),
+    // The lib knows the alias spelling of the home (here a fixed one) in addition to the realpath and the configured path.
+    homeProcessSpellings: (primary: string, original: string | null) => [primary, original, "ALIAS-SPELLING"].filter((v): v is string => v !== null),
     // The Computer's own sweep: the orphans are gone afterwards (and so are their pidfiles).
+    // Attribution as the real scan does it: a process counts for the home if ANY spelling matches the spelling it carries.
+    defaultScanHomeProcesses: async (spellings: string[]) =>
+      rows.filter((r) => spellings.includes((r as { spelling?: string }).spelling ?? testHome)).map((r) => ({ pid: r.pid, kind: /__service/.test(r.command) ? "service" : "runner", serverId: null })),
     sweepHomeProcesses: async (spellings: string[]) => {
       for (const r of rows) signals.push([r.pid, `sweep:${spellings.length > 0}`]);
       rows = []; rootPids = [];
@@ -87,6 +91,14 @@ test("orphaned runners are swept before a service is started (Start and launch c
     setRows([row(100, "/app/raft-desktop __service"), row(101, "/app/raft-desktop __run s1", 100)], [100, 101]);
     await host.start();
     assert.deepEqual([signals, calls], [[], ["start"]]);
+  });
+
+  await t.test("MIXED spellings: a live service carrying the ALIAS spelling + an orphan carrying the realpath: nothing is swept", async () => {
+    setRows([row(100, "/app/raft-desktop __service"), row(4242, "/app/raft-desktop __run s1")], [100, 4242]);
+    (rows[0] as { spelling?: string }).spelling = "ALIAS-SPELLING"; // the healthy service was launched with RAFT_HOME=<alias>
+    await host.start();
+    assert.deepEqual(signals, [], "the healthy service and its agents were not touched");
+    assert.deepEqual(calls, ["start"]);
   });
 
   await t.test("an orphan that survives the sweep stops the start (nothing is started over it)", async () => {

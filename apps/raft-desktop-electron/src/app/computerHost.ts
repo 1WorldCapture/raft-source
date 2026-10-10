@@ -384,18 +384,20 @@ class ComputerHost {
    * verified shutdown ladder (identity re-read before every signal). Anything that cannot be verified stops the start.
    */
   private async sweepOrphansBeforeStart(): Promise<void> {
+    // Cheap pre-filter: no __service/__run process on the machine at all, nothing to look at.
     const snapshot = await this.readProcesses();
-    const serviceAlive = snapshot.rows.some((row) => row.root && row.home === this.processScope.home && /(?:^|\s)__service(?:\s|$)/.test(row.command) && snapshot.rootPids.includes(row.pid));
-    if (serviceAlive) return;
-    this.processScope.assertRoots(snapshot);
-    if (this.processScope.observe(snapshot).length === 0) return;
-    // The Computer's own whole-home sweep (the one migrate-home uses): attributes processes by every spelling of the
-    // home (realpath, as configured, the ~/.slock-raft alias) with boundary matching, TERM → grace → KILL → rescan.
+    if (!snapshot.rows.some((row) => row.root)) return;
+    // Everything below uses the Computer's own attribution, which knows EVERY spelling of the home (realpath, as
+    // configured, the ~/.slock-raft alias). One spelling is not enough: a live service launched with the alias spelling
+    // must count as alive even if the host was restored with the realpath.
     const lib = await import("@botiverse/raft-computer/lib");
     const real = await realpath(this.slockHome).catch(() => this.slockHome);
     const aliasPath = join(homedir(), ".slock-raft");
     const alias = (await realpath(aliasPath).catch(() => null)) === real ? aliasPath : null;
-    const left = await lib.sweepHomeProcesses(lib.homeProcessSpellings(real, this.slockHome, alias));
+    const spellings = lib.homeProcessSpellings(real, this.slockHome, alias);
+    const found = await lib.defaultScanHomeProcesses(spellings);
+    if (found.length === 0 || found.some((proc) => proc.kind === "service")) return; // nothing, or a live service: its runners are its own
+    const left = await lib.sweepHomeProcesses(spellings);
     if (left.length > 0) throw new Error("This Computer left processes behind that could not be cleaned up, so it was not started. Quit the app and try again.");
   }
 

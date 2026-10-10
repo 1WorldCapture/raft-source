@@ -268,7 +268,7 @@ function withHandOver(handOver: () => Promise<void>, over: { onRun?: (input: { o
   const c = new MigrationController({
     available: true, getFromHome: async () => "/h", ensureBinary: async () => "/b",
     handOver: async () => { order.push("handover"); await handOver(); },
-    restoreAfterHandOverFailure: async () => { order.push("restore"); },
+    restoreBuiltIn: async () => { order.push("restore"); return { ok: true }; },
     signal: (pid, sig) => { signals.push([pid, sig]); },
     supportsCancel: async () => over.supportsCancel ?? true,
     run: async (input) => {
@@ -376,5 +376,46 @@ test("controller: a Computer that supports cancel gets a 10-minute deadline; an 
     await c.apply();
     if (supported) assert.ok(seen[0]! >= t0 + 10 * 60_000 && seen[0]! <= Date.now() + 10 * 60_000);
     else assert.equal(seen[0], undefined);
+  }
+});
+
+test("a move that did not complete puts the built-in Computer back (cancelled, deadline, failed, no result); a success never does", async () => {
+  const cases: Array<[string, MigrateRun["outcome"], string | null]> = [["cancelled", "rolled_back", "cancelled"], ["deadline", "rolled_back", "deadline"], ["failed", "failed", null], ["rolled back", "rolled_back", null], ["no result", "error", null]];
+  for (const [label, outcome, reason] of cases) {
+    const { c, order } = withHandOver(async () => undefined, {
+      onRun: async () => ({ outcome, events: [], final: outcome === "error" ? null : { result: outcome as "failed", from: "/h", to: "/t", error: "boom", serviceState: "down", reason }, detail: "no result", exitCode: 1 }),
+    });
+    await c.plan();
+    const s = await c.apply();
+    assert.deepEqual(order, ["handover", "run", "restore"], label);
+    assert.deepEqual([s.restored, s.restoreError], ["ok", null], label);
+  }
+  const ok = withHandOver(async () => undefined);
+  await ok.c.plan();
+  assert.equal((await ok.c.apply()).restored, null);
+  assert.deepEqual(ok.order, ["handover", "run"], "success: not restored");
+});
+
+test("hand-over aborted: the built-in Computer is restored and the command never ran", async () => {
+  const { c, order } = withHandOver(async () => { throw new Error("pid 4 still running"); });
+  await c.plan();
+  const s = await c.apply();
+  assert.deepEqual(order, ["handover", "restore"]);
+  assert.deepEqual([s.phase, s.restored], ["error", "ok"]);
+});
+
+test("a restore that fails (or throws) is reported, never silent", async () => {
+  for (const restore of [async () => ({ ok: false, error: "port busy" }), async () => { throw new Error("explode"); }]) {
+    const c = new MigrationController({
+      available: true, getFromHome: async () => "/h", ensureBinary: async () => "/b", handOver: async () => undefined, restoreBuiltIn: restore,
+      run: async (input) => input.apply
+        ? { outcome: "failed", events: [], final: { result: "failed", from: "/h", to: "/t", error: "x", serviceState: "down" }, detail: null, exitCode: 1 }
+        : { outcome: "planned", events: [ev("preflight", "ok", { to: "/t" })], final: null, detail: null, exitCode: 0 },
+      afterSuccess: async () => ({ warnings: [] }), publish: () => undefined,
+    });
+    await c.plan();
+    const s = await c.apply();
+    assert.equal(s.restored, "failed");
+    assert.match(s.restoreError ?? "", /port busy|explode/);
   }
 });

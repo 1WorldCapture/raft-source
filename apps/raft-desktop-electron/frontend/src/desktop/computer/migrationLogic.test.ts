@@ -108,3 +108,10 @@ test("cancelled and timed-out rollbacks are named; the hand-over step has a plai
   assert.match(deriveMigrationView({ ...base, phase: "rolled_back", reason: "deadline" }).lines.join(" "), /ran out of time/);
   assert.equal(deriveMigrationView({ ...base, phase: "applying", steps: [{ step: "handover", status: "start" }] }).steps[0].label, "Stop the built-in Computer");
 });
+
+test("after a move that did not complete the dialog says whether the built-in Computer was started again", () => {
+  assert.match(deriveMigrationView({ ...base, phase: "rolled_back", reason: "cancelled", restored: "ok" }).lines.join(" "), /started again/);
+  const failed = deriveMigrationView({ ...base, phase: "failed", restored: "failed", restoreError: "port busy" }).lines.join(" ");
+  assert.match(failed, /could not be started again automatically \(port busy\).*Use Start/);
+  assert.doesNotMatch(deriveMigrationView({ ...base, phase: "rolled_back" }).lines.join(" "), /started again/);
+});

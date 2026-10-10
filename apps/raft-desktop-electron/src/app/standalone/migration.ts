@@ -202,6 +202,9 @@ export interface MigrationState {
   reason: string | null;
   /** The app found this migration already running at launch and is only watching it. */
   supervising?: boolean;
+  /** After a move that did not complete: was the built-in Computer started again? null = not applicable / not tried. */
+  restored?: "ok" | "failed" | null;
+  restoreError?: string | null;
   /** When the Computer's hard time limit rolls it back (ISO), when known. */
   deadlineAt?: string | null;
 }
@@ -226,7 +229,11 @@ export interface MigrationDeps {
    */
   handOver?: () => Promise<void>;
   /** After a failed hand-over: put the built-in Computer back as it was (best effort). */
-  restoreAfterHandOverFailure?: () => Promise<void>;
+  /**
+   * The move did not complete (rolled back, failed, no result) or the hand-over was aborted: bring the built-in Computer
+   * back to how it was (converge + start, with the orphan sweep). Never called after a success.
+   */
+  restoreBuiltIn?: () => Promise<{ ok: boolean; error?: string }>;
   /**
    * Whether this raft-computer treats SIGTERM as "cancel and roll back" (it reports a `--deadline` option when it
    * does). An older one would simply die mid-move, so the Cancel button is not offered for it.
@@ -239,7 +246,7 @@ export interface MigrationDeps {
 /** Hard limit of one migration; the Computer rolls back on its own when it passes (same as its in-progress marker's deadlineAt). */
 export const MIGRATION_DEADLINE_MS = 10 * 60_000;
 
-const EMPTY: MigrationState = { phase: "idle", from: null, to: null, steps: [], blockers: [], warnings: [], error: null, resultFile: null, relaunching: false, slow: false, inPlace: false, cancellable: false, cancelRequested: false, reason: null };
+const EMPTY: MigrationState = { phase: "idle", from: null, to: null, steps: [], blockers: [], warnings: [], error: null, resultFile: null, relaunching: false, slow: false, inPlace: false, cancellable: false, cancelRequested: false, reason: null, restored: null, restoreError: null };
 const resultFileOf = (home: string | null) => (home ? path.join(home, "computer", "migrate-result.json") : null);
 const strings = (value: unknown): string[] => (Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : []);
 
@@ -308,8 +315,7 @@ export class MigrationController {
           const message = error instanceof Error ? error.message : String(error);
           this.addStep({ step: "handover", status: "fail", detail: { error: message } });
           this.set({ ...this.state, phase: "error", error: `The built-in Computer could not be stopped cleanly, so nothing was changed. ${message}` });
-          try { await this.deps.restoreAfterHandOverFailure?.(); } catch { /* best effort */ }
-          return this.state;
+          return this.restoreBuiltIn();
         }
       }
       const startedAt = new Date().toISOString();
@@ -332,10 +338,23 @@ export class MigrationController {
           return this.set({ ...this.state, phase: "error", to, resultFile: resultFileOf(to), error: `The Computer was moved to ${to}, but this app could not switch to it: ${error instanceof Error ? error.message : String(error)}. Do not quit the app; ask for help.` });
         }
       }
-      return this.settle(run, prepared.from);
+      this.settle(run, prepared.from);
+      return this.restoreBuiltIn();
     } finally {
       this.busy = false;
     }
+  }
+
+  /** Put the built-in Computer back after a move that did not complete, and say how that went. */
+  private async restoreBuiltIn(): Promise<MigrationState> {
+    if (!this.deps.restoreBuiltIn) return this.state;
+    let outcome: { ok: boolean; error?: string };
+    try {
+      outcome = await this.deps.restoreBuiltIn();
+    } catch (error) {
+      outcome = { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
+    return this.set({ ...this.state, restored: outcome.ok ? "ok" : "failed", restoreError: outcome.ok ? null : outcome.error ?? "unknown error" });
   }
 
   /** Cancel = SIGTERM to the running command; it stops at a safe point, rolls back and writes the result file. */

@@ -986,7 +986,8 @@ if (headlessMode?.mode === "__service") {
               throw new Error(`Some of its processes are still running (${error instanceof Error ? error.message : String(error)}).`);
             }
           },
-          restoreAfterHandOverFailure: () => embeddedHost.start(),
+          // A move that did not complete must leave the built-in Computer running again (converge = sweep orphans + start).
+          restoreBuiltIn: async () => embeddedHost.converge(),
           switchToStandalone: () => {
             // The Computer now lives elsewhere and is not ours to stop: forget the embedded host so the quit flow
             // has nothing to stop, then restart into standalone mode (computer-host.json is already written).
