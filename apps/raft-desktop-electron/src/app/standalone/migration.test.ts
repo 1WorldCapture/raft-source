@@ -350,3 +350,31 @@ test("in-place is remembered once apply starts (the dialog keeps saying Switchin
   assert.equal((await c.plan()).inPlace, true);
   assert.equal((await c.apply()).inPlace, true);
 });
+
+test("runner: --deadline is passed (absolute epoch-ms) only on apply, never on a dry run", async () => {
+  await withScript(`echo "$@" > "$0.args"\necho '{"dryRun":true,"outcome":"planned","blocked":false}'`, async (script) => {
+    const { readFile } = await import("node:fs/promises");
+    await runMigrateHome({ binaryPath: script, from: "/a", apply: false, deadlineMs: 1234 });
+    assert.equal((await readFile(`${script}.args`, "utf8")).trim(), "migrate-home --from /a --json");
+    await runMigrateHome({ binaryPath: script, from: "/a", apply: true, deadlineMs: 1234.4 });
+    assert.equal((await readFile(`${script}.args`, "utf8")).trim(), "migrate-home --from /a --apply --deadline 1234 --json");
+  });
+});
+
+test("controller: a Computer that supports cancel gets a 10-minute deadline; an older one gets none", async () => {
+  for (const supported of [true, false]) {
+    const seen: Array<number | undefined> = [];
+    const c = new MigrationController({
+      available: true, getFromHome: async () => "/h", ensureBinary: async () => "/b", supportsCancel: async () => supported,
+      run: async (input) => { if (input.apply) seen.push(input.deadlineMs); return input.apply
+        ? { outcome: "success", events: [], final: { result: "success", from: "/h", to: "/t", error: null, serviceState: "running" }, detail: null, exitCode: 0 }
+        : { outcome: "planned", events: [ev("preflight", "ok", { to: "/t" })], final: null, detail: null, exitCode: 0 }; },
+      afterSuccess: async () => ({ warnings: [] }), publish: () => undefined,
+    });
+    const t0 = Date.now();
+    await c.plan();
+    await c.apply();
+    if (supported) assert.ok(seen[0]! >= t0 + 10 * 60_000 && seen[0]! <= Date.now() + 10 * 60_000);
+    else assert.equal(seen[0], undefined);
+  }
+});
