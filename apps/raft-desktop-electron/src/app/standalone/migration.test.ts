@@ -12,7 +12,7 @@ test("line parser: events, the apply result, the dry-run summary; anything else 
   assert.deepEqual(parseMigrationLine('{"step":"move","status":"planned","detail":{"to":"/h"}}'), { kind: "event", event: { step: "move", status: "planned", detail: { to: "/h" } } });
   assert.deepEqual(parseMigrationLine('{"schemaVersion":1,"result":"rolled_back","from":"/a","to":"/b","error":"boom","serviceState":"running","steps":[]}'), {
     kind: "result",
-    final: { result: "rolled_back", from: "/a", to: "/b", error: "boom", serviceState: "running", reason: null },
+    final: { result: "rolled_back", from: "/a", to: "/b", error: "boom", serviceState: "running", reason: null, rollbackOk: null },
   });
   assert.deepEqual(parseMigrationLine('{"dryRun":true,"outcome":"blocked","blocked":true}'), { kind: "dry-run", outcome: "blocked" });
   assert.deepEqual(parseMigrationLine('{"dryRun":true,"outcome":"planned","blocked":false}'), { kind: "dry-run", outcome: "planned" });
@@ -379,21 +379,48 @@ test("controller: a Computer that supports cancel gets a 10-minute deadline; an 
   }
 });
 
-test("a move that did not complete puts the built-in Computer back (cancelled, deadline, failed, no result); a success never does", async () => {
-  const cases: Array<[string, MigrateRun["outcome"], string | null]> = [["cancelled", "rolled_back", "cancelled"], ["deadline", "rolled_back", "deadline"], ["failed", "failed", null], ["rolled back", "rolled_back", null], ["no result", "error", null]];
-  for (const [label, outcome, reason] of cases) {
+test("restore rules: rolled back (incl. cancelled / deadline) and no-result-with-no-command-alive restore; failed (rollback itself failed) and success never do", async () => {
+  const cases: Array<[string, MigrateRun["outcome"], string | null, boolean | null, "ok" | "skipped" | null]> = [
+    ["cancelled", "rolled_back", "cancelled", true, "ok"],
+    ["deadline", "rolled_back", "deadline", true, "ok"],
+    ["rolled back", "rolled_back", null, true, "ok"],
+    ["rollback not reported", "rolled_back", null, null, "ok"],
+    ["rolled back but the Computer's rollback failed", "rolled_back", null, false, "skipped"],
+    ["failed", "failed", null, null, "skipped"],
+    ["no result", "error", null, null, "ok"],
+  ];
+  for (const [label, outcome, reason, rollbackOk, expected] of cases) {
     const { c, order } = withHandOver(async () => undefined, {
-      onRun: async () => ({ outcome, events: [], final: outcome === "error" ? null : { result: outcome as "failed", from: "/h", to: "/t", error: "boom", serviceState: "down", reason }, detail: "no result", exitCode: 1 }),
+      onRun: async () => ({ outcome, events: [], final: outcome === "error" ? null : { result: outcome as "failed", from: "/h", to: "/t", error: "boom", serviceState: "down", reason, rollbackOk }, detail: "no result", exitCode: 1 }),
     });
     await c.plan();
     const s = await c.apply();
-    assert.deepEqual(order, ["handover", "run", "restore"], label);
-    assert.deepEqual([s.restored, s.restoreError], ["ok", null], label);
+    assert.equal(s.restored, expected, label);
+    assert.deepEqual(order, expected === "ok" ? ["handover", "run", "restore"] : ["handover", "run"], label);
+    if (expected === "skipped") assert.match(s.restoreError ?? "", /not restarted automatically/, label);
   }
   const ok = withHandOver(async () => undefined);
   await ok.c.plan();
   assert.equal((await ok.c.apply()).restored, null);
   assert.deepEqual(ok.order, ["handover", "run"], "success: not restored");
+});
+
+test("restore is refused when it is not safe: a migration command still alive, or the built-in home gone; the reason is shown", async () => {
+  for (const reason of ["A migration (pid 4242) is still running", "The built-in Computer's folder is not where it was"]) {
+    const restored: string[] = [];
+    const c = new MigrationController({
+      available: true, getFromHome: async () => "/h", ensureBinary: async () => "/b", handOver: async () => undefined,
+      restoreBuiltIn: async () => { restored.push("restore"); return { ok: true }; },
+      safeToRestore: async () => ({ ok: false, reason }),
+      run: async (input) => input.apply
+        ? { outcome: "rolled_back", events: [], final: { result: "rolled_back", from: "/h", to: "/t", error: null, serviceState: "down", reason: "cancelled", rollbackOk: true }, detail: null, exitCode: 1 }
+        : { outcome: "planned", events: [ev("preflight", "ok", { to: "/t" })], final: null, detail: null, exitCode: 0 },
+      afterSuccess: async () => ({ warnings: [] }), publish: () => undefined,
+    });
+    await c.plan();
+    const s = await c.apply();
+    assert.deepEqual([restored, s.restored, s.restoreError], [[], "skipped", reason]);
+  }
 });
 
 test("hand-over aborted: the built-in Computer is restored and the command never ran", async () => {
@@ -409,7 +436,7 @@ test("a restore that fails (or throws) is reported, never silent", async () => {
     const c = new MigrationController({
       available: true, getFromHome: async () => "/h", ensureBinary: async () => "/b", handOver: async () => undefined, restoreBuiltIn: restore,
       run: async (input) => input.apply
-        ? { outcome: "failed", events: [], final: { result: "failed", from: "/h", to: "/t", error: "x", serviceState: "down" }, detail: null, exitCode: 1 }
+        ? { outcome: "rolled_back", events: [], final: { result: "rolled_back", from: "/h", to: "/t", error: "x", serviceState: "down", rollbackOk: true }, detail: null, exitCode: 1 }
         : { outcome: "planned", events: [ev("preflight", "ok", { to: "/t" })], final: null, detail: null, exitCode: 0 },
       afterSuccess: async () => ({ warnings: [] }), publish: () => undefined,
     });

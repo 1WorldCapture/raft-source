@@ -115,3 +115,10 @@ test("after a move that did not complete the dialog says whether the built-in Co
   assert.match(failed, /could not be started again automatically \(port busy\).*Use Start/);
   assert.doesNotMatch(deriveMigrationView({ ...base, phase: "rolled_back" }).lines.join(" "), /started again/);
 });
+
+test("a skipped restore says why and points at what to do; the failed-move text is not hidden", () => {
+  const lines = deriveMigrationView({ ...base, phase: "failed", restored: "skipped", restoreError: "needs attention", resultFile: "/h/computer/migrate-result.json" }).lines.join(" ");
+  assert.match(lines, /not restarted automatically: needs attention/);
+  assert.match(lines, /migrate-result\.json/);
+  assert.match(lines, /may be offline/);
+});

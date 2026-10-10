@@ -21,7 +21,7 @@ export interface MigrationState {
   cancelRequested?: boolean;
   reason?: string | null;
   supervising?: boolean;
-  restored?: "ok" | "failed" | null;
+  restored?: "ok" | "failed" | "skipped" | null;
   restoreError?: string | null;
   deadlineAt?: string | null;
 }
@@ -113,7 +113,7 @@ export function deriveMigrationView(state: MigrationState | null): MigrationView
     .map((s) => ({ key: s.step, label: STEP_LABELS[s.step] ?? s.step, tone: stepTone(s.status), note: stepNote(s) }));
   const base = { available: true, steps, locked: false };
   const to = state.to ?? "the standard location";
-  const restoreLine = state.restored === "ok" ? ["Your built-in Computer was started again."] : state.restored === "failed" ? [`It could not be started again automatically (${state.restoreError ?? "unknown error"}). Use Start on the Computer card.`] : [];
+  const restoreLine = state.restored === "ok" ? ["Your built-in Computer was started again."] : state.restored === "skipped" ? [`The built-in Computer was not restarted automatically: ${state.restoreError ?? "it needs attention"}`] : state.restored === "failed" ? [`It could not be started again automatically (${state.restoreError ?? "unknown error"}). Use Start on the Computer card.`] : [];
   const resultLine = state.resultFile ? [`Details: ${state.resultFile}`] : [];
   switch (state.phase) {
     case "idle":
