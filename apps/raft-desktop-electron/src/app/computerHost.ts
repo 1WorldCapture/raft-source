@@ -14,7 +14,8 @@
 // that session via `ensureUsableUserSession` — just works, with no second login.
 
 import { execFile } from "node:child_process";
-import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, realpath, rename, rm, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { app } from "electron";
 import {
@@ -284,6 +285,7 @@ class ComputerHost {
         const status = await this.api.getStatus();
         this.lastStatus = status;
         if (status.servers.length > 0) {
+          await this.sweepOrphansBeforeStart();
           await this.api.start({ serverId: null, serverLabel: null });
         }
         // Task #7 anti-orphan: whether we spawned the tree or adopted an
@@ -375,8 +377,33 @@ class ComputerHost {
     return this.control(() => this.startInternal());
   }
 
+  /**
+   * A service that died (or was killed with the app) can leave its runners behind as orphans. A new service started
+   * over them never gets a runner of its own (the orphan keeps the slot and the server connection). So before the
+   * service is started, any process of THIS home that is still alive while its service is not is swept with the
+   * verified shutdown ladder (identity re-read before every signal). Anything that cannot be verified stops the start.
+   */
+  private async sweepOrphansBeforeStart(): Promise<void> {
+    // Cheap pre-filter: no __service/__run process on the machine at all, nothing to look at.
+    const snapshot = await this.readProcesses();
+    if (!snapshot.rows.some((row) => row.root)) return;
+    // Everything below uses the Computer's own attribution, which knows EVERY spelling of the home (realpath, as
+    // configured, the ~/.slock-raft alias). One spelling is not enough: a live service launched with the alias spelling
+    // must count as alive even if the host was restored with the realpath.
+    const lib = await import("@botiverse/raft-computer/lib");
+    const real = await realpath(this.slockHome).catch(() => this.slockHome);
+    const aliasPath = join(homedir(), ".slock-raft");
+    const alias = (await realpath(aliasPath).catch(() => null)) === real ? aliasPath : null;
+    const spellings = lib.homeProcessSpellings(real, this.slockHome, alias);
+    const found = await lib.defaultScanHomeProcesses(spellings);
+    if (found.length === 0 || found.some((proc) => proc.kind === "service")) return; // nothing, or a live service: its runners are its own
+    const left = await lib.sweepHomeProcesses(spellings);
+    if (left.length > 0) throw new Error("This Computer left processes behind that could not be cleaned up, so it was not started. Quit the app and try again.");
+  }
+
   private async startInternal(): Promise<void> {
     await this.assertCanControl();
+    await this.sweepOrphansBeforeStart();
     await this.api.start({ serverId: null, serverLabel: null });
     // Any action that leaves the local service running clears a stale
     // converge/recycle failure notice (e.g. the start-only retry offered after

@@ -32,6 +32,8 @@ export interface MigrationFinal {
   serviceState: string | null;
   /** Why a rolled-back run ended that way, e.g. "cancelled" or "deadline" (reported by the Computer). */
   reason?: string | null;
+  /** The Computer's own rollback finished OK (rolled_back results); null when not reported. */
+  rollbackOk?: boolean | null;
 }
 
 export type MigrationLine =
@@ -52,7 +54,7 @@ export function parseMigrationLine(line: string): MigrationLine {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { kind: "other" };
   const obj = raw as Record<string, unknown>;
   if (obj.result === "success" || obj.result === "rolled_back" || obj.result === "failed") {
-    return { kind: "result", final: { result: obj.result, from: str(obj.from), to: str(obj.to), error: str(obj.error), serviceState: str(obj.serviceState), reason: str(obj.reason) } };
+    return { kind: "result", final: { result: obj.result, from: str(obj.from), to: str(obj.to), error: str(obj.error), serviceState: str(obj.serviceState), reason: str(obj.reason), rollbackOk: obj.rollback && typeof obj.rollback === "object" && typeof (obj.rollback as Record<string, unknown>).ok === "boolean" ? (obj.rollback as Record<string, boolean>).ok : null } };
   }
   if (obj.dryRun === true) return { kind: "dry-run", outcome: obj.outcome === "blocked" || obj.blocked === true ? "blocked" : "planned" };
   if (typeof obj.step === "string" && typeof obj.status === "string") {
@@ -202,6 +204,9 @@ export interface MigrationState {
   reason: string | null;
   /** The app found this migration already running at launch and is only watching it. */
   supervising?: boolean;
+  /** After a move that did not complete: was the built-in Computer started again? null = not applicable / not tried. */
+  restored?: "ok" | "failed" | "skipped" | null;
+  restoreError?: string | null;
   /** When the Computer's hard time limit rolls it back (ISO), when known. */
   deadlineAt?: string | null;
 }
@@ -226,7 +231,13 @@ export interface MigrationDeps {
    */
   handOver?: () => Promise<void>;
   /** After a failed hand-over: put the built-in Computer back as it was (best effort). */
-  restoreAfterHandOverFailure?: () => Promise<void>;
+  /**
+   * The move did not complete (rolled back, failed, no result) or the hand-over was aborted: bring the built-in Computer
+   * back to how it was (converge + start, with the orphan sweep). Never called after a success.
+   */
+  restoreBuiltIn?: () => Promise<{ ok: boolean; error?: string }>;
+  /** Right before restoring: is it safe to converge the built-in host (home still there, no migration command alive)? */
+  safeToRestore?: () => Promise<{ ok: boolean; reason?: string }>;
   /**
    * Whether this raft-computer treats SIGTERM as "cancel and roll back" (it reports a `--deadline` option when it
    * does). An older one would simply die mid-move, so the Cancel button is not offered for it.
@@ -239,7 +250,7 @@ export interface MigrationDeps {
 /** Hard limit of one migration; the Computer rolls back on its own when it passes (same as its in-progress marker's deadlineAt). */
 export const MIGRATION_DEADLINE_MS = 10 * 60_000;
 
-const EMPTY: MigrationState = { phase: "idle", from: null, to: null, steps: [], blockers: [], warnings: [], error: null, resultFile: null, relaunching: false, slow: false, inPlace: false, cancellable: false, cancelRequested: false, reason: null };
+const EMPTY: MigrationState = { phase: "idle", from: null, to: null, steps: [], blockers: [], warnings: [], error: null, resultFile: null, relaunching: false, slow: false, inPlace: false, cancellable: false, cancelRequested: false, reason: null, restored: null, restoreError: null };
 const resultFileOf = (home: string | null) => (home ? path.join(home, "computer", "migrate-result.json") : null);
 const strings = (value: unknown): string[] => (Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : []);
 
@@ -256,6 +267,7 @@ export class MigrationController {
   private state: MigrationState;
   private busy = false;
   private pid: number | null = null;
+  private lastRollbackOk: boolean | null = null;
 
   constructor(private readonly deps: MigrationDeps) {
     this.state = { ...EMPTY, phase: deps.available ? "idle" : "unavailable" };
@@ -308,8 +320,7 @@ export class MigrationController {
           const message = error instanceof Error ? error.message : String(error);
           this.addStep({ step: "handover", status: "fail", detail: { error: message } });
           this.set({ ...this.state, phase: "error", error: `The built-in Computer could not be stopped cleanly, so nothing was changed. ${message}` });
-          try { await this.deps.restoreAfterHandOverFailure?.(); } catch { /* best effort */ }
-          return this.state;
+          return this.restoreBuiltIn("handover-aborted");
         }
       }
       const startedAt = new Date().toISOString();
@@ -332,10 +343,37 @@ export class MigrationController {
           return this.set({ ...this.state, phase: "error", to, resultFile: resultFileOf(to), error: `The Computer was moved to ${to}, but this app could not switch to it: ${error instanceof Error ? error.message : String(error)}. Do not quit the app; ask for help.` });
         }
       }
-      return this.settle(run, prepared.from);
+      this.lastRollbackOk = run.final?.rollbackOk ?? null;
+      this.settle(run, prepared.from);
+      return this.restoreBuiltIn(run.outcome);
     } finally {
       this.busy = false;
     }
+  }
+
+  /**
+   * Put the built-in Computer back after a move that did not complete, and say how that went. Only when it is safe:
+   * the Computer's own rollback finished, or the command never ran; never while a migration command may still be
+   * running (it would collide with a converge) and never after a failed rollback (the home may be half-moved).
+   */
+  private async restoreBuiltIn(outcome: MigrateRun["outcome"] | "handover-aborted"): Promise<MigrationState> {
+    if (!this.deps.restoreBuiltIn) return this.state;
+    if (outcome === "failed" || (outcome === "rolled_back" && this.lastRollbackOk === false)) {
+      return this.set({ ...this.state, restored: "skipped", restoreError: "The move could not be rolled back completely, so the built-in Computer was not restarted automatically. It needs attention." });
+    }
+    if (outcome === "success" || outcome === "planned" || outcome === "blocked") return this.state;
+    if (this.deps.safeToRestore) {
+      let safe: { ok: boolean; reason?: string };
+      try { safe = await this.deps.safeToRestore(); } catch (error) { safe = { ok: false, reason: error instanceof Error ? error.message : String(error) }; }
+      if (!safe.ok) return this.set({ ...this.state, restored: "skipped", restoreError: safe.reason ?? "It is not safe to restart the built-in Computer right now." });
+    }
+    let result: { ok: boolean; error?: string };
+    try {
+      result = await this.deps.restoreBuiltIn();
+    } catch (error) {
+      result = { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
+    return this.set({ ...this.state, restored: result.ok ? "ok" : "failed", restoreError: result.ok ? null : result.error ?? "unknown error" });
   }
 
   /** Cancel = SIGTERM to the running command; it stops at a safe point, rolls back and writes the result file. */

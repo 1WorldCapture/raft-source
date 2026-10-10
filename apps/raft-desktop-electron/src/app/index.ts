@@ -986,7 +986,16 @@ if (headlessMode?.mode === "__service") {
               throw new Error(`Some of its processes are still running (${error instanceof Error ? error.message : String(error)}).`);
             }
           },
-          restoreAfterHandOverFailure: () => embeddedHost.start(),
+          // A move that did not complete must leave the built-in Computer running again (converge = sweep orphans + start).
+          restoreBuiltIn: async () => embeddedHost.converge(),
+          // Only restore when the built-in home is still there and no migration command is alive (it would collide).
+          safeToRestore: async () => {
+            const homes = [embeddedHost.slockHome, defaultStandaloneHome()];
+            const running = await findRunningMigration({ hostMode: { mode: "embedded" }, homes });
+            if (running) return { ok: false, reason: `A migration (pid ${running.pid}) is still running; the app will pick it up when it ends.` };
+            if (!existsSync(embeddedHost.slockHome)) return { ok: false, reason: "The built-in Computer's folder is not where it was, so it was not restarted automatically." };
+            return { ok: true };
+          },
           switchToStandalone: () => {
             // The Computer now lives elsewhere and is not ours to stop: forget the embedded host so the quit flow
             // has nothing to stop, then restart into standalone mode (computer-host.json is already written).

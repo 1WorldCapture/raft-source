@@ -21,6 +21,8 @@ export interface MigrationState {
   cancelRequested?: boolean;
   reason?: string | null;
   supervising?: boolean;
+  restored?: "ok" | "failed" | "skipped" | null;
+  restoreError?: string | null;
   deadlineAt?: string | null;
 }
 
@@ -111,6 +113,7 @@ export function deriveMigrationView(state: MigrationState | null): MigrationView
     .map((s) => ({ key: s.step, label: STEP_LABELS[s.step] ?? s.step, tone: stepTone(s.status), note: stepNote(s) }));
   const base = { available: true, steps, locked: false };
   const to = state.to ?? "the standard location";
+  const restoreLine = state.restored === "ok" ? ["Your built-in Computer was started again."] : state.restored === "skipped" ? [`The built-in Computer was not restarted automatically: ${state.restoreError ?? "it needs attention"}`] : state.restored === "failed" ? [`It could not be started again automatically (${state.restoreError ?? "unknown error"}). Use Start on the Computer card.`] : [];
   const resultLine = state.resultFile ? [`Details: ${state.resultFile}`] : [];
   switch (state.phase) {
     case "idle":
@@ -181,7 +184,7 @@ export function deriveMigrationView(state: MigrationState | null): MigrationView
         open: true,
         tone: "warn",
         title: state.reason === "cancelled" ? "Cancelled" : "Nothing changed",
-        lines: [state.reason === "cancelled" ? "The switch was cancelled. The Computer is back the way it was." : state.reason === "deadline" ? "The switch ran out of time and was rolled back. The Computer is back the way it was." : "The move did not complete and was rolled back. The Computer is back the way it was.", ...(state.error ? [friendlyMigrationError(state.error)] : []), ...resultLine],
+        lines: [state.reason === "cancelled" ? "The switch was cancelled. The Computer is back the way it was." : state.reason === "deadline" ? "The switch ran out of time and was rolled back. The Computer is back the way it was." : "The move did not complete and was rolled back. The Computer is back the way it was.", ...(state.error ? [friendlyMigrationError(state.error)] : []), ...restoreLine, ...resultLine],
         actions: [act("recheck", "Try again", true), act("close", "Close")],
       };
     case "failed":
@@ -190,7 +193,7 @@ export function deriveMigrationView(state: MigrationState | null): MigrationView
         open: true,
         tone: "error",
         title: "The move failed",
-        lines: ["The move failed and the automatic rollback did not fully succeed. Your agents may be offline.", ...(state.error ? [friendlyMigrationError(state.error)] : []), ...resultLine],
+        lines: ["The move failed and the automatic rollback did not fully succeed. Your agents may be offline.", ...(state.error ? [friendlyMigrationError(state.error)] : []), ...restoreLine, ...resultLine],
         actions: [act("close", "Close", true)],
       };
     case "error":
@@ -199,7 +202,7 @@ export function deriveMigrationView(state: MigrationState | null): MigrationView
         open: true,
         tone: "error",
         title: "Couldn't run the move",
-        lines: [state.error ? friendlyMigrationError(state.error) : "The migration command did not report a result.", ...resultLine],
+        lines: [state.error ? friendlyMigrationError(state.error) : "The migration command did not report a result.", ...restoreLine, ...resultLine],
         steps: [],
         actions: [act("recheck", "Try again", true), act("close", "Close")],
       };

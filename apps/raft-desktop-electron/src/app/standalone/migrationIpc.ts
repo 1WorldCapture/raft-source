@@ -21,7 +21,8 @@ export interface MigrationWiringDeps {
   /** Test seams. */
   run?: MigrateRunner;
   handOver?: () => Promise<void>;
-  restoreAfterHandOverFailure?: () => Promise<void>;
+  restoreBuiltIn?: () => Promise<{ ok: boolean; error?: string }>;
+  safeToRestore?: () => Promise<{ ok: boolean; reason?: string }>;
   signal?: (pid: number, signal: NodeJS.Signals) => void;
   supportsCancel?: (binaryPath: string) => Promise<boolean>;
   install?: typeof installBundledComputer;
@@ -73,7 +74,8 @@ export function createMigrationController(deps: MigrationWiringDeps): MigrationC
     publish: deps.publish,
     run: deps.run,
     handOver: deps.handOver,
-    restoreAfterHandOverFailure: deps.restoreAfterHandOverFailure,
+    restoreBuiltIn: deps.restoreBuiltIn,
+    safeToRestore: deps.safeToRestore,
     signal: deps.signal,
     supportsCancel: deps.supportsCancel ?? defaultSupportsCancel,
     ensureBinary: async () => {
