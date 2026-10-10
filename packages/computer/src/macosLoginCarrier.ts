@@ -81,6 +81,8 @@ export interface MacosHostLifecycleDeps {
   setTimeoutFn?: typeof setClockTimeout;
   clearTimeoutFn?: typeof clearClockTimeout;
   runCommand?: HostLifecycleCommandRunner;
+  /** Test seam for the bootout/bootstrap settle waits (defaults to a real timer). */
+  sleepFn?: (ms: number) => Promise<void>;
   /**
    * "converge" (default): the healthy-carrier deferral may skip a swap whose
    * only difference is the resolved dispatcher path. "refresh": an explicit
@@ -639,6 +641,52 @@ async function isExecutableFile(file: string): Promise<boolean> {
   }
 }
 
+const defaultCarrierSleep = (ms: number): Promise<void> => new Promise((resolve) => setClockTimeout(resolve, ms));
+const UNLOAD_SETTLE_TIMEOUT_MS = 10_000;
+const UNLOAD_SETTLE_POLL_MS = 250;
+const BOOTSTRAP_TRANSIENT_RETRY_DELAYS_MS = [500, 1_000, 2_000, 4_000];
+
+/** launchctl exits 5 ("Bootstrap failed: 5: Input/output error") while launchd is still tearing down a previous
+ *  registration of the same label; it clears once the unload settles. */
+function isTransientBootstrapError(error: unknown): boolean {
+  const code = (error as { code?: unknown } | null)?.code;
+  const message = error instanceof Error ? error.message : "";
+  return code === 5 || code === "5" || /Input\/output error/i.test(message);
+}
+
+/** `launchctl bootout` returns before a running job has finished unloading. Bootstrapping the same label straight
+ *  away raced that teardown (EIO, then the rollback hit the same race and left the carrier gone). Bounded wait. */
+async function waitForJobUnloaded(
+  spec: MacosLoginCarrierSpec,
+  runCommand: HostLifecycleCommandRunner,
+  sleep: (ms: number) => Promise<void>,
+): Promise<void> {
+  for (let waited = 0; waited < UNLOAD_SETTLE_TIMEOUT_MS; waited += UNLOAD_SETTLE_POLL_MS) {
+    if ((await printJob(spec, runCommand)) === null) return;
+    await sleep(UNLOAD_SETTLE_POLL_MS);
+  }
+}
+
+async function bootstrapCarrier(
+  spec: MacosLoginCarrierSpec,
+  runCommand: HostLifecycleCommandRunner,
+  sleep: (ms: number) => Promise<void>,
+): Promise<void> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await runCommand("/bin/launchctl", ["bootstrap", spec.domain, spec.definitionPath]);
+      return;
+    } catch (error) {
+      const delay = BOOTSTRAP_TRANSIENT_RETRY_DELAYS_MS[attempt];
+      if (delay === undefined || !isTransientBootstrapError(error)) throw error;
+      // Clear a half-dead registration, let the unload settle, then try again.
+      await runCommand("/bin/launchctl", ["bootout", `${spec.domain}/${spec.label}`]).catch(() => undefined);
+      await sleep(delay);
+      await waitForJobUnloaded(spec, runCommand, sleep);
+    }
+  }
+}
+
 /**
  * Unload the live launchd job WITHOUT touching the on-disk definition.
  * Distinct from removeCliCarrier on purpose: a bootout failure here leaves
@@ -651,6 +699,7 @@ async function isExecutableFile(file: string): Promise<boolean> {
 async function bootoutCarrier(
   spec: MacosLoginCarrierSpec,
   runCommand: HostLifecycleCommandRunner,
+  sleep: (ms: number) => Promise<void> = defaultCarrierSleep,
 ): Promise<"booted-out" | "not-loaded"> {
   await assertGuiDomain(spec, runCommand);
   if ((await printJob(spec, runCommand)) === null) return "not-loaded";
@@ -658,6 +707,7 @@ async function bootoutCarrier(
     "bootout",
     `${spec.domain}/${spec.label}`,
   ]);
+  await waitForJobUnloaded(spec, runCommand, sleep);
   return "booted-out";
 }
 
@@ -702,6 +752,7 @@ async function recoverPendingReplace(
   spec: MacosLoginCarrierSpec,
   pending: HostLifecyclePendingReplace,
   runCommand: HostLifecycleCommandRunner,
+  sleep: (ms: number) => Promise<void> = defaultCarrierSleep,
 ): Promise<HostLifecycleMarker> {
   if (
     pending.previousMarker.label !== spec.label
@@ -738,11 +789,7 @@ async function recoverPendingReplace(
     await removeCliCarrier(spec, runCommand);
     await mkdir(path.dirname(spec.definitionPath), { recursive: true, mode: 0o700 });
     await writeDurableTextFile(spec.definitionPath, pending.previousDefinition);
-    await runCommand("/bin/launchctl", [
-      "bootstrap",
-      spec.domain,
-      spec.definitionPath,
-    ]);
+    await bootstrapCarrier(spec, runCommand, sleep);
     const restored = await printJob(spec, runCommand);
     if (
       restored === null
@@ -779,6 +826,7 @@ async function enableCliCarrier(
   deps: MacosHostLifecycleDeps,
 ): Promise<{ deferredRefresh?: { liveDispatcher: string; wantedDispatcher: string } }> {
   const runCommand = bindCommandSignal(baseRunCommand, deps.signal);
+  const sleep = deps.sleepFn ?? defaultCarrierSleep;
   await assertGuiDomain(spec, runCommand);
   const existingDefinition = await readFile(spec.definitionPath, "utf8").catch(
     (error: NodeJS.ErrnoException) => {
@@ -895,14 +943,10 @@ async function enableCliCarrier(
       // only to clear a half-dead registration. "not loaded" (and even an
       // error on an already-absent job) is fine — bootstrap below is the
       // authoritative step.
-      await bootoutCarrier(spec, recoveryRunCommand).catch(() => "not-loaded" as const);
+      await bootoutCarrier(spec, recoveryRunCommand, sleep).catch(() => "not-loaded" as const);
       await mkdir(path.dirname(spec.definitionPath), { recursive: true, mode: 0o700 });
       await writeDurableTextFile(spec.definitionPath, rollback.definition);
-      await recoveryRunCommand("/bin/launchctl", [
-        "bootstrap",
-        spec.domain,
-        spec.definitionPath,
-      ]);
+      await bootstrapCarrier(spec, recoveryRunCommand, sleep);
       const restored = await printJob(spec, recoveryRunCommand);
       if (
         restored === null
@@ -924,7 +968,7 @@ async function enableCliCarrier(
       });
       throw new ComputerServiceError(
         "HOST_LIFECYCLE_ROLLBACK_FAILED",
-        "Raft Computer could not restore the last verified macOS login carrier after refresh failed. The enabled owner marker was removed; `raft-computer status` and `raft-computer doctor` expose the durable recovery record.",
+        "Raft Computer could not restore the last verified macOS login carrier after refresh failed. The previous owner record and login definition were kept, but the carrier job is not loaded. Run `raft-computer doctor` (it shows the durable recovery record) and retry `raft-computer start`.",
         error,
       );
     }
@@ -949,7 +993,7 @@ async function enableCliCarrier(
     // intact (job loaded, plist on disk, marker still pointing at it), so it
     // is reported as a no-op instead of stranding the machine.
     try {
-      await bootoutCarrier(spec, forwardRunCommand);
+      await bootoutCarrier(spec, forwardRunCommand, sleep);
     } catch (error) {
       // A launchctl error does not prove nothing happened: bootout can
       // report failure AFTER unloading the job (late error). Verify the
@@ -970,11 +1014,7 @@ async function enableCliCarrier(
           // its previous carrier back. The raw runner's per-command timeout
           // keeps this bounded — a failed or exhausted recovery degrades to
           // the pending record.
-          await recoveryRunCommand("/bin/launchctl", [
-            "bootstrap",
-            spec.domain,
-            spec.definitionPath,
-          ]);
+          await bootstrapCarrier(spec, recoveryRunCommand, sleep);
           const recovered = await printJob(spec, recoveryRunCommand);
           const previousDispatcher = previousMarker?.dispatcherPath
             ?? dispatcherFromDefinition(
@@ -1028,11 +1068,7 @@ async function enableCliCarrier(
         "Raft Computer could not verify the macOS post-login definition after writing it.",
       );
     }
-    await forwardRunCommand("/bin/launchctl", [
-      "bootstrap",
-      spec.domain,
-      spec.definitionPath,
-    ]);
+    await bootstrapCarrier(spec, forwardRunCommand, sleep);
     const live = await printJob(spec, forwardRunCommand);
     if (
       live === null
@@ -1112,7 +1148,7 @@ export async function convergeCliHostLifecycle(
   const runCommand = bindCommandSignal(context.runCommand, deps.signal);
   const pending = await readPendingReplace(slockHome);
   if (pending !== null) {
-    current = await recoverPendingReplace(spec, pending, runCommand);
+    current = await recoverPendingReplace(spec, pending, runCommand, deps.sleepFn);
   }
   if (current === null) {
     await assertNoMarkerlessLegacyDesktop(deps, runCommand);
@@ -1207,7 +1243,7 @@ export async function convergeAppHostLifecycle(
   const runCommand = bindCommandSignal(context.runCommand, deps.signal);
   const pending = await readPendingReplace(slockHome);
   if (pending !== null) {
-    current = await recoverPendingReplace(context.spec, pending, runCommand);
+    current = await recoverPendingReplace(context.spec, pending, runCommand, deps.sleepFn);
   }
   await rm(markerPath(slockHome), { force: true });
   await removeCliCarrier(context.spec, runCommand);
