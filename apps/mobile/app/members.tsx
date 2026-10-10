@@ -57,7 +57,7 @@ export default function MembersScreen() {
       const data = await session.client.post<unknown>("/channels/dm", person.kind === "agent" ? { agentId: person.id } : { userId: person.id });
       const id = isRecord(data) && typeof data.id === "string" ? data.id : null;
       if (!id) throw new Error("missing");
-      router.push({ pathname: "/messages/[channelId]", params: { channelId: id, name: person.name } });
+      router.push({ pathname: "/messages/[channelId]", params: { channelId: id, name: person.name, bubbles: "1" } });
     } catch (caught) {
       if (caught instanceof StaleRequestError) return;
       Alert.alert(t("mobile.members.openFailed"));

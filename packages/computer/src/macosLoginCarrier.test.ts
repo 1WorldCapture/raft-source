@@ -1315,3 +1315,31 @@ test("forward timeout + failed in-call recovery reports the degraded truth, neve
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("carrier plist carries self-contained RAFT_HOME/SLOCK_HOME env (#computer-extract pitfall A)", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "carrier-env-"));
+  const home = path.join(root, "user");
+  const slockHome = path.join(root, "slock");
+  await mkdir(home, { recursive: true });
+  const harness = launchctlHarness();
+  const baseDeps = {
+    platform: "darwin" as const,
+    uid: 501,
+    userHome: home,
+    dispatcherPath: path.join(home, ".local", "bin", "raft-computer"),
+    runCommand: harness.run,
+  };
+  try {
+    await convergeCliHostLifecycle(slockHome, "enabled", baseDeps);
+    const marker = await readHostLifecycleMarker(slockHome);
+    const definition = await readFile(marker!.definitionPath!, "utf8");
+    assert.ok(definition.includes("<key>RAFT_HOME</key>"), "RAFT_HOME key present");
+    assert.ok(definition.includes(`<string>${slockHome}</string>`), "RAFT_HOME value is the home");
+    // Both keys present; ProgramArguments pinning is asserted elsewhere already.
+    const slockKey = definition.indexOf("<key>SLOCK_HOME</key>");
+    assert.ok(slockKey > 0, "SLOCK_HOME key present");
+  } finally {
+    // `home` lives under `root`; removing `root` covers both (PM review nit, PR #266).
+    await rm(root, { recursive: true, force: true });
+  }
+});

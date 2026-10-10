@@ -300,3 +300,8 @@ export { runService, runResident } from "../service.js";
 // exits gracefully when that binding stops matching — so a crashed or
 // force-quit GUI can never leave the background processes orphaned.
 export { rebindParentEvidence, readProcessStartTime } from "../parentWatchdog.js";
+// Whole-home process sweep (drill 290-anna-②a fix support): the Desktop
+// host reuses the CLI's exact ladder (TERM -> grace -> KILL -> rescan over
+// every home spelling) before converging a home, so orphaned __service/__run
+// trees left by an interrupted handover cannot survive a relaunch.
+export * from "./homeProcessSweep.js";

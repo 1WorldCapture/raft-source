@@ -301,7 +301,9 @@ test("dev discovery failure is a typed, actionable error", () => {
     assert.throws(
       () =>
         resolveCursorSdkAssets({
-          env: {},
+          // SLOCK_HOME pinned to the empty fixture dir keeps the standalone
+          // home fallback quiet on machines that really have ~/.slock.
+          env: { SLOCK_HOME: dir },
           moduleUrl,
           platform: "darwin",
           arch: "arm64",
@@ -582,6 +584,83 @@ test("verifyCursorSdkAssetsIntegrity reports a missing staged file", () => {
     assert.ok(
       result.problems.some((p) => p === "file missing: node/LICENSE"),
       JSON.stringify(result.problems),
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("standalone fallback: <raft home>/runtime/cursor-sdk resolves when env is unset", () => {
+  const dir = tempDir("cursor-assets-home-");
+  try {
+    const home = path.join(dir, "home");
+    const root = path.join(home, "runtime", "cursor-sdk");
+    writeAssetRoot(root);
+    // moduleUrl in a tree with NO dev runtime-assets → walk-up fails → home.
+    const moduleUrl = pathToFileURL(path.join(dir, "somewhere", "assets.ts"));
+    const assets = resolveCursorSdkAssets({
+      env: { SLOCK_HOME: home },
+      moduleUrl,
+      platform: "darwin",
+      arch: "arm64",
+    } as never);
+    assert.equal(assets.root, root);
+
+    // RAFT_HOME wins over SLOCK_HOME in the fallback, matching raftHome.ts.
+    const otherHome = path.join(dir, "other-home");
+    const otherRoot = path.join(otherHome, "runtime", "cursor-sdk");
+    writeAssetRoot(otherRoot);
+    assert.equal(
+      resolveCursorSdkAssets({
+        env: { RAFT_HOME: otherHome, SLOCK_HOME: home },
+        moduleUrl,
+        platform: "darwin",
+        arch: "arm64",
+      } as never).root,
+      otherRoot,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("dev discovery stays authoritative over the standalone home fallback", () => {
+  const dir = tempDir("cursor-assets-devwins-");
+  try {
+    const home = path.join(dir, "home");
+    writeAssetRoot(path.join(home, "runtime", "cursor-sdk"));
+    const daemonRoot = path.join(dir, "daemon");
+    const devRoot = path.join(daemonRoot, "runtime-assets", "cursor", CURSOR_SDK_VERSION, TARGET);
+    writeAssetRoot(devRoot);
+    const moduleUrl = pathToFileURL(path.join(daemonRoot, "src", "cursorSdk", "assets.ts"));
+    assert.equal(
+      resolveCursorSdkAssets({
+        env: { SLOCK_HOME: home },
+        moduleUrl,
+        platform: "darwin",
+        arch: "arm64",
+      } as never).root,
+      devRoot,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("env root beats the standalone home fallback", () => {
+  const dir = tempDir("cursor-assets-envwins-");
+  try {
+    const home = path.join(dir, "home");
+    writeAssetRoot(path.join(home, "runtime", "cursor-sdk"));
+    const envRoot = path.join(dir, "env-root");
+    writeAssetRoot(envRoot);
+    assert.equal(
+      resolveCursorSdkAssets({
+        env: { [RAFT_CURSOR_SDK_ASSETS_ENV]: envRoot, SLOCK_HOME: home },
+        platform: "darwin",
+        arch: "arm64",
+      } as never).root,
+      envRoot,
     );
   } finally {
     rmSync(dir, { recursive: true, force: true });

@@ -2,7 +2,9 @@ import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const EXPECTED_TEST_FILE_COUNT = 79;
+// 2026-10-10: 89 on plain dev (the guard had drifted — ten files were added
+// without bumping this) + 1 for src/migrateHome.test.ts (PR migrate-home).
+const EXPECTED_TEST_FILE_COUNT = 90;
 
 const root = new URL("..", import.meta.url);
 const srcDir = fileURLToPath(new URL("src", root));

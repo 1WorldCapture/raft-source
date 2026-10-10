@@ -15,8 +15,10 @@
 //     internal state of either module — keeps the contract on the
 //     wire boundary, which is the durable surface.
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, stat } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { createServer as nodeCreateServer } from "node:net";
+import * as nodeNet from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "vitest";
@@ -435,4 +437,132 @@ test("POSIX IPC protects its directory before accepting clients", async () => {
     assert.equal((await stat(dirname(socketPath))).mode & 0o777, 0o700);
     assert.equal((await stat(socketPath)).mode & 0o777, 0o600);
   });
+});
+
+// --- concurrent-start race (drill 284-run2, PM fix 2026-10-10) ---
+
+/** Bind a socket file at `path` and exit without closing — the POSIX
+ * "crashed prior service" shape: the file exists, connects are refused. */
+function leaveRefusedSocketFile(path: string): void {
+  execFileSync(process.execPath, [
+    "-e",
+    "const net = require('node:net'); const s = net.createServer(); s.listen(process.argv[1], () => { process.exit(0); });",
+    path,
+  ]);
+}
+
+test("stale-socket probe: refused socket with a LIVE owner pid is NOT unlinked — listen fails EADDRINUSE (bind→listen window race)", async () => {
+  if (process.platform === "win32") return;
+  const installRoot = await mkdtemp(join(tmpdir(), "slock-ipc-race-"));
+  const socketPath = join(installRoot, "computer", "run", "service.sock");
+  await mkdir(dirname(socketPath), { recursive: true });
+  leaveRefusedSocketFile(socketPath);
+  const server = createIpcServer({ installRoot, handlers: {}, ownerLiveness: async () => true });
+  try {
+    // The refused connect alone would say "stale" — but the pidfile says a
+    // live owner exists (the winner is mid bind→listen). Fail closed.
+    await assert.rejects(
+      () => server.listen(),
+      (err: unknown) => (err as NodeJS.ErrnoException).code === "EADDRINUSE",
+    );
+    // The socket file survived the probe — the winner keeps its path.
+    const stats = await stat(socketPath);
+    assert.equal(stats.isSocket(), true);
+  } finally {
+    await rm(installRoot, { recursive: true, force: true });
+  }
+});
+
+test("stale-socket probe: refused socket with no live owner is cleared (existing behavior preserved)", async () => {
+  if (process.platform === "win32") return;
+  const installRoot = await mkdtemp(join(tmpdir(), "slock-ipc-race-"));
+  const socketPath = join(installRoot, "computer", "run", "service.sock");
+  await mkdir(dirname(socketPath), { recursive: true });
+  leaveRefusedSocketFile(socketPath);
+  const server = createIpcServer({ installRoot, handlers: {}, ownerLiveness: async () => false });
+  try {
+    const path = await server.listen();
+    assert.equal(path, socketPath);
+    const client = await connectService(installRoot);
+    await client.close();
+  } finally {
+    await server.close();
+    await rm(installRoot, { recursive: true, force: true });
+  }
+});
+
+test("default ownerLiveness: a live service.pid at the install root blocks the unlink", async () => {
+  if (process.platform === "win32") return;
+  const installRoot = await mkdtemp(join(tmpdir(), "slock-ipc-race-"));
+  const socketPath = join(installRoot, "computer", "run", "service.sock");
+  await mkdir(dirname(socketPath), { recursive: true });
+  leaveRefusedSocketFile(socketPath);
+  // A live owner: this very test process.
+  await writeFile(join(installRoot, "computer", "run", "service.pid"), `${process.pid}\n`, "utf8");
+  const server = createIpcServer({ installRoot, handlers: {} }); // default liveness
+  try {
+    await assert.rejects(
+      () => server.listen(),
+      (err: unknown) => (err as NodeJS.ErrnoException).code === "EADDRINUSE",
+    );
+    assert.equal((await stat(socketPath)).isSocket(), true);
+  } finally {
+    await rm(installRoot, { recursive: true, force: true });
+  }
+});
+
+test("bind under umask: the socket file is 0600 at creation (no post-bind chmod window)", async () => {
+  if (process.platform === "win32") return;
+  await withHarness({}, async ({ socketPath }) => {
+    assert.equal((await stat(socketPath)).mode & 0o777, 0o600);
+  });
+});
+
+test("umask restoration: a directory created while the listen callback is still pending keeps the ambient mode (PM review on #287)", async () => {
+  if (process.platform === "win32") return;
+  const installRoot = await mkdtemp(join(tmpdir(), "slock-ipc-umask-"));
+  // Withhold the listen callback at a gate so the test can observe the
+  // bind→callback window deterministically (libuv binds synchronously
+  // inside `listen()`; only the callback is async).
+  const originalListen = nodeNet.Server.prototype.listen;
+  let callbackCaptured = false;
+  let releaseCallback: () => void = () => {};
+  nodeNet.Server.prototype.listen = function patchedListen(this: nodeNet.Server, ...args: unknown[]) {
+    const last = args.at(-1);
+    if (typeof last === "function") {
+      const userCallback = last as () => void;
+      args[args.length - 1] = () => {
+        callbackCaptured = true;
+        releaseCallback = () => userCallback();
+      };
+    }
+    return originalListen.apply(this, args as Parameters<typeof originalListen>);
+  } as typeof originalListen;
+  const server = createIpcServer({ installRoot, handlers: {} });
+  try {
+    const ambientUmask = process.umask();
+    const listenPromise = server.listen();
+    for (let i = 0; i < 200 && !callbackCaptured; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    }
+    assert.equal(callbackCaptured, true, "the gate captured the listen callback");
+    // Inside the bind→callback window: the socket was created 0600 by the
+    // umask bracket, but an UNRELATED creation must see the ambient umask —
+    // the tight one was restored synchronously, not held across the await.
+    const duringDir = join(installRoot, "during-bind");
+    await mkdir(duringDir);
+    assert.equal(
+      (await stat(duringDir)).mode & 0o777,
+      0o777 & ~ambientUmask,
+      "a concurrent directory creation must not be affected by the bind umask",
+    );
+    const socketPath = join(installRoot, "computer", "run", "service.sock");
+    assert.equal((await stat(socketPath)).mode & 0o777, 0o600, "the socket itself is 0600");
+    releaseCallback();
+    await listenPromise;
+  } finally {
+    nodeNet.Server.prototype.listen = originalListen;
+    await server.close().catch(() => {});
+    await rm(installRoot, { recursive: true, force: true });
+  }
 });

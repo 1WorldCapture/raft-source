@@ -350,12 +350,13 @@ test("Codex supports custom model name and no per-agent API URL", () => {
 });
 
 test("runtime config form exposes only supported per-runtime axes", () => {
-  const runtimes = ["builtin", "claude", "codex", "grok", "antigravity", "kimi", "copilot", "gemini", "opencode", "pi", "omp"];
+  const runtimes = ["builtin", "claude", "codex", "grok", "antigravity", "antigravity-stream", "kimi", "copilot", "gemini", "opencode", "pi", "omp"];
 
   assert.deepEqual(runtimes.filter(supportsRuntimeApiUrl), ["claude"]);
   assert.deepEqual(runtimes.filter(supportsRuntimeFastMode), ["claude", "codex"]);
   assert.deepEqual(runtimes.filter(supportsRuntimeCustomModelName), ["builtin", "claude", "codex", "copilot", "pi"]);
   assert.deepEqual(runtimes.filter(runtimeIgnoresModel), ["antigravity"]);
+  assert.equal(runtimeIgnoresModel("antigravity-stream"), false);
   assert.deepEqual(runtimes.filter((runtime) => REASONING_EFFORT_RUNTIMES.has(runtime)), ["builtin", "claude", "codex", "grok", "copilot", "pi", "omp"]);
 });
 

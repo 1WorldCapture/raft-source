@@ -20,6 +20,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createRequire } from "node:module";
 import { COMPUTER_VERSION } from "./version.js";
+import { withComputerMutationLock } from "./concurrency.js";
 import { clearResidentConnectedMarker, readResidentConnectedMarker, writeResidentConnectedMarker } from "./residentConnectionMarker.js";
 import { residentCoreIdentity } from "./residentCoreIdentity.js";
 import { mkdir, readFile, writeFile, open, stat, unlink } from "node:fs/promises";
@@ -845,6 +846,13 @@ export interface RunServiceDeps extends ServiceUpgradeStartSeams {
   stopAfterMutationsReady?: boolean;
   shutdownServiceFn?: typeof shutdownService;
   afterIpcReady?: (shutdown: () => Promise<void>) => void | Promise<void>;
+  /** Serialization around the IPC probe→bind window. Defaults to the
+   *  home-scoped mutation lock so concurrent starters (launchd carrier vs
+   *  app/CLI start) cannot race the stale-socket probe against each other's
+   *  fresh bind; skipped entirely when the spawning parent still holds the
+   *  mutation lock (acquiring it again would deadlock). Test seam for boot
+   *  unit tests (PM fix 2026-10-10). */
+  ipcBindLock?: (fn: () => Promise<void>) => Promise<void>;
 }
 
 /**
@@ -1217,11 +1225,26 @@ export async function runService(deps: RunServiceDeps = {}): Promise<void> {
   // evidence is still being published; that request must observe the exact
   // live server it reached rather than the pre-bind null sentinel.
   ipc = createServiceIpcSeam(slockHome, mutations, sourceServicePid);
-  await publishServiceIdentityAfterIpcBind(
-    slockHome,
-    () => listenServiceIpcSeam(ipc!),
-    deps.serviceIdentityPublishDeps,
-  );
+  const bindAndPublishIpc = async (): Promise<void> => {
+    await publishServiceIdentityAfterIpcBind(
+      slockHome,
+      () => listenServiceIpcSeam(ipc!),
+      deps.serviceIdentityPublishDeps,
+    );
+  };
+  if (parentMutationLockHeld()) {
+    // The spawning CLI/app still holds the home-scoped mutation lock across
+    // spawn→ready; this boot is already serialized against other starters,
+    // and acquiring the same lock again would deadlock.
+    await bindAndPublishIpc();
+  } else {
+    // Serialize the probe→bind window against other starters (PM fix
+    // 2026-10-10): a launchd carrier and an app/CLI start can race on the
+    // same home; under the lock the loser probes AFTER the winner's bind
+    // settles and fails closed with native EADDRINUSE instead of unlinking
+    // the winner's fresh socket mid-window.
+    await (deps.ipcBindLock ?? ((fn: () => Promise<void>) => withComputerMutationLock(slockHome, fn)))(bindAndPublishIpc);
+  }
 
   const shutdown = async (): Promise<void> => {
     if (shuttingDown) return;

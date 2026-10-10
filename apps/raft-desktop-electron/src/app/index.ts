@@ -17,7 +17,7 @@ import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { BrowserWindow, app, dialog, ipcMain, nativeImage, protocol, session, shell } from "electron";
 import { ELECTRON_IPC_CHANNELS } from "@raft/desktop-contract";
-import { createComputerApi, runResident, runService } from "@botiverse/raft-computer/lib";
+import { createComputerApi, resolveRaftHome, runResident, runService } from "@botiverse/raft-computer/lib";
 import { installApplicationMenu } from "../main/appMenu.js";
 import { createCursorSdkControls } from "./cursorSdkControls.js";
 import { isCursorSdkE2eBuild } from "../main/cursorSdkE2eBuild.js";
@@ -43,6 +43,14 @@ import { ServerOriginConfig } from "./serverOriginConfig.js";
 import { requestStorageWipeAndRelaunch, resolvePendingStorageWipe } from "./storageDoctor.js";
 import { createOAuthCoordinator } from "./oauthCoordinator.js";
 import { ComputerHost } from "./computerHost.js";
+import { defaultBinaryPath, defaultStandaloneHome, readHostMode, type ComputerHostMode } from "./standalone/hostMode.js";
+import { createStandaloneCli } from "./standalone/cli.js";
+import { resolveBundledComputer } from "./standalone/bundled.js";
+import { StandaloneComputerHost, type StandaloneUiState } from "./standalone/standaloneHost.js";
+import { findInterruptedMigration, findMigratedAwayHome, findRunningMigration, isMigrationProcess, readInProgressMarker, readMigrationResult, type InProgressMarker } from "./standalone/migrationRecovery.js";
+import { MigrationSupervisor } from "./standalone/migrationSupervisor.js";
+import { createMigrationController, finishSwitch, refuseWhileMigrating, registerMigrationIpc, restoreAndVerify } from "./standalone/migrationIpc.js";
+import { registerEmbeddedStubs, registerHostModeIpc, registerStandaloneIpc } from "./standalone/ipc.js";
 import { resolveBundledCursorSdkAssets } from "./cursorSdkAssets.js";
 import { installStatusMonitorLifecycle } from "../main/statusMonitorLifecycle.js";
 import { createStatusMonitor } from "../main/statusMonitor.js";
@@ -158,9 +166,12 @@ const headlessMode = findHeadlessMode(process.argv);
 // lock and has consumed any pending wipe (see the lock-held branch below).
 let storageWipedThisBoot = false;
 let computerHost: ComputerHost | null = null;
+// Standalone mode (computer-host.json): the Computer is an independent `raft-computer`; this app is only its UI.
+let standaloneHost: StandaloneComputerHost | null = null;
 const cursorSdkControls = createCursorSdkControls(() => {
-  if (!computerHost) throw new Error("Local Computer is not ready.");
-  return computerHost.slockHome;
+  const home = computerHost?.slockHome ?? standaloneHost?.home;
+  if (!home) throw new Error("Local Computer is not ready.");
+  return home;
 });
 let menubarResident: MenubarResident | null = null;
 let mainWindow: BrowserWindow | null = null;
@@ -333,6 +344,12 @@ function broadcastComputerStatus(status: ComputerStatusReport): void {
   }
 }
 
+// While a migration is applying, the embedded controls are refused here in main (not just greyed out in the UI).
+let migrationApplying: () => boolean = () => false;
+function guardedHandle(channel: string, listener: (event: Electron.IpcMainInvokeEvent, ...args: any[]) => unknown): void {
+  ipcMain.handle(channel, refuseWhileMigrating(() => migrationApplying(), listener));
+}
+
 function registerComputerIpc(host: ComputerHost): void {
   // The local OS hostname lets the renderer correlate THIS machine to its row in
   // the server-derived machine list (so the self-card IS that computer, not a
@@ -346,16 +363,16 @@ function registerComputerIpc(host: ComputerHost): void {
   computerStatusMonitor = monitor;
   installStatusMonitorLifecycle(monitor, () => lifecycle.quitting);
   ipcMain.handle("computer:status", () => monitor.read());
-  ipcMain.handle("computer:enable", (_e, input: unknown) => monitor.afterOperation(() => host.enable(input as never)));
-  ipcMain.handle("computer:start", () => monitor.afterOperation(() => host.start()));
-  ipcMain.handle("computer:stop", () => monitor.afterOperation(() => host.stop()));
-  ipcMain.handle("computer:restart", () => monitor.afterOperation(() => host.restart()));
+  guardedHandle("computer:enable", (_e, input: unknown) => monitor.afterOperation(() => host.enable(input as never)));
+  guardedHandle("computer:start", () => monitor.afterOperation(() => host.start()));
+  guardedHandle("computer:stop", () => monitor.afterOperation(() => host.stop()));
+  guardedHandle("computer:restart", () => monitor.afterOperation(() => host.restart()));
   // Real stop→start recycle for a version-skewed resident (see computerHost).
   // The renderer confirms with the user first: it briefly offlines every agent
   // on this machine.
-  ipcMain.handle("computer:recycle", () => monitor.afterOperation(() => host.recycleService()));
-  ipcMain.handle("computer:retry-converge", () => monitor.afterOperation(() => host.retryConverge()));
-  ipcMain.handle("computer:connect-deployment", (_event, userId: unknown) => monitor.afterOperation(async () => {
+  guardedHandle("computer:recycle", () => monitor.afterOperation(() => host.recycleService()));
+  guardedHandle("computer:retry-converge", () => monitor.afterOperation(() => host.retryConverge()));
+  guardedHandle("computer:connect-deployment", (_event, userId: unknown) => monitor.afterOperation(async () => {
     const abort = new AbortController();
     const cancelOnQuit = () => abort.abort();
     app.once("before-quit", cancelOnQuit);
@@ -416,8 +433,8 @@ function registerComputerIpc(host: ComputerHost): void {
   }));
 
   ipcMain.handle("computer:upgrade-info", () => host.getUpgradeInfo());
-  ipcMain.handle("computer:upgrade", () => monitor.afterOperation(() => host.upgrade()));
-  ipcMain.handle("computer:upgrade-fresh-install", (_e, version: unknown) =>
+  guardedHandle("computer:upgrade", () => monitor.afterOperation(() => host.upgrade()));
+  guardedHandle("computer:upgrade-fresh-install", (_e, version: unknown) =>
     monitor.afterOperation(() => host.upgradeViaFreshInstall(typeof version === "string" ? version : "")),
   );
   ipcMain.handle("computer:management", () => host.getManagement());
@@ -611,15 +628,15 @@ function revealMainWindow(): void {
 }
 
 // The same root/identity registry guards takeover and real app quit.
-async function orchestrateQuitShutdown(systemShutdown: boolean): Promise<void> {
-  const host = computerHost;
+async function orchestrateQuitShutdown(systemShutdown: boolean, hostOverride?: ComputerHost, stopOverride?: (signal: AbortSignal) => Promise<void>): Promise<void> {
+  const host = hostOverride ?? computerHost;
   if (!host || !(await host.canShutdown())) return;
   const abort = new AbortController();
   try {
     const complete = await runShutdownTree({
       scope: host.processScope,
       snapshot: host.readProcesses,
-      requestStop: () => host.stop(abort.signal),
+      requestStop: () => (stopOverride ? stopOverride(abort.signal) : host.stop(abort.signal)),
       now: () => Date.now(),
       sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
       signal: (pid, signal) => process.kill(pid, signal),
@@ -758,6 +775,7 @@ if (headlessMode?.mode === "__service") {
         savePrefs: (prefs) => saveQuitNoConfirm(prefs.quitNoConfirm),
         orchestrateShutdown: orchestrateQuitShutdown,
         quit: () => app.quit(),
+        migrationInProgress: () => migrationApplying(),
       });
       return host ? host.runQuitAttempt(attempt) : attempt();
     },
@@ -868,10 +886,129 @@ if (headlessMode?.mode === "__service") {
     // Safety valve: RAFT_DESKTOP_DISABLE_COMPUTER_HOST=1 skips host init entirely
     // (no lifecycle mutation, no service spawn) — for dev/CI smoke boots on a
     // machine that already runs a Computer service. Default is enabled.
-    if (process.env.RAFT_DESKTOP_DISABLE_COMPUTER_HOST !== "1") {
+    let hostMode: ComputerHostMode = await readHostMode(app.getPath("userData"));
+    let supervised: InProgressMarker | null = null;
+    // A migration that succeeded but whose app-side finish never ran (app quit/crashed in between) must be finished
+    // BEFORE anything converges a built-in host at the old home.
+    try {
+      // 1. The command may still be running by itself (the app died mid-move, or was restarted): do not wait for it
+      //    here (the window must open); watch it from the migration dialog instead and converge nothing meanwhile.
+      supervised = await findRunningMigration({ hostMode, homes: [resolveRaftHome(), defaultStandaloneHome()] });
+      if (supervised) console.log(`[raft-desktop] a migration (pid ${supervised.pid}) is still running; supervising it`);
+      // 2. A finished one whose app-side finish never ran.
+      const interrupted = supervised ? null : await findInterruptedMigration({ hostMode, embeddedHome: resolveRaftHome(), otherHomes: [defaultStandaloneHome()] });
+      if (interrupted) {
+        const bundled = resolveBundledComputer({ isPackaged: app.isPackaged, resourcesPath: process.resourcesPath });
+        const { warnings } = await finishSwitch({ bundled, binaryTarget: defaultBinaryPath(), userDataDir: app.getPath("userData") }, interrupted.to);
+        for (const w of warnings) console.warn(`[raft-desktop] migration recovery: ${w}`);
+        console.log(`[raft-desktop] migration recovery: finished the switch to ${interrupted.to}`);
+        hostMode = { mode: "standalone", home: interrupted.to };
+      } else if (!supervised) {
+        // 3. The built-in home is gone because the Computer was moved away: adopt it, never rebuild an empty one.
+        const away = await findMigratedAwayHome({ hostMode, embeddedHome: resolveRaftHome(), standardHome: defaultStandaloneHome() });
+        if (away) {
+          const bundled = resolveBundledComputer({ isPackaged: app.isPackaged, resourcesPath: process.resourcesPath });
+          await finishSwitch({ bundled, binaryTarget: defaultBinaryPath(), userDataDir: app.getPath("userData") }, away);
+          console.log(`[raft-desktop] the Computer was moved to ${away}; adopting it`);
+          hostMode = { mode: "standalone", home: away };
+        }
+      }
+    } catch (error) {
+      console.warn(`[raft-desktop] migration recovery failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    registerHostModeIpc(ipcMain, hostMode);
+    if (supervised) {
+      // No built-in host, no converge: the window opens with the migration's progress and a Cancel button.
+      registerEmbeddedStubs(ipcMain);
+      const bundled = resolveBundledComputer({ isPackaged: app.isPackaged, resourcesPath: process.resourcesPath });
+      const supervisor = new MigrationSupervisor({
+        marker: supervised,
+        readMarker: readInProgressMarker,
+        readResult: readMigrationResult,
+        isAlive: (m) => isMigrationProcess(m),
+        signal: (pid, sig) => process.kill(pid, sig),
+        finish: (to) => finishSwitch({ bundled, binaryTarget: defaultBinaryPath(), userDataDir: app.getPath("userData") }, to),
+        relaunch: () => { app.relaunch(); app.exit(0); },
+        publish: (state) => {
+          for (const win of BrowserWindow.getAllWindows()) {
+            if (!win.isDestroyed()) win.webContents.send("migration:state-update", state);
+          }
+        },
+      });
+      migrationApplying = () => { const p = supervisor.getState().phase; return p === "applying" || p === "success"; };
+      registerMigrationIpc(ipcMain, supervisor);
+      void supervisor.run();
+    } else if (hostMode.mode === "standalone") {
+      // No ComputerHost: no converge, no login-item takeover, no watchdog. computerHost stays null, so
+      // the quit flow below has nothing to stop — quitting the app never touches the Computer or its agents.
+      const binaryPath = defaultBinaryPath();
+      standaloneHost = new StandaloneComputerHost({
+        home: hostMode.home,
+        binaryPath,
+        cli: createStandaloneCli({ binaryPath, home: hostMode.home }),
+        bundled: resolveBundledComputer({ isPackaged: app.isPackaged, resourcesPath: process.resourcesPath }),
+      });
+      registerEmbeddedStubs(ipcMain);
+      const monitor = registerStandaloneIpc({
+        ipc: ipcMain,
+        host: standaloneHost,
+        publish: (state: StandaloneUiState) => {
+          for (const win of BrowserWindow.getAllWindows()) {
+            if (!win.isDestroyed()) win.webContents.send("standalone:state-update", state);
+          }
+        },
+        quitting: () => lifecycle.quitting,
+      });
+      installStatusMonitorLifecycle(monitor, () => lifecycle.quitting);
+    } else if (process.env.RAFT_DESKTOP_DISABLE_COMPUTER_HOST !== "1") {
       computerHost = new ComputerHost({ configuredOrigin: serverOriginConfig.current() });
       await computerHost.restoreSelection();
       registerComputerIpc(computerHost);
+      // One-click move of this app-hosted Computer to an independent raft-computer (needs the Computer bundled in
+      // this app; hidden otherwise). Nothing runs until the user starts it from the migration dialog.
+      if (process.platform !== "win32") {
+        const embeddedHost = computerHost;
+        const migration = createMigrationController({
+          bundled: resolveBundledComputer({ isPackaged: app.isPackaged, resourcesPath: process.resourcesPath }),
+          binaryTarget: defaultBinaryPath(),
+          getFromHome: async () => embeddedHost.slockHome,
+          userDataDir: app.getPath("userData"),
+          publish: (state) => {
+            for (const win of BrowserWindow.getAllWindows()) {
+              if (!win.isDestroyed()) win.webContents.send("migration:state-update", state);
+            }
+          },
+          // Hand-over: stop this app's own Computer (service + every runner) and verify it is gone BEFORE the command starts.
+          handOver: async () => {
+            try {
+              await orchestrateQuitShutdown(false, embeddedHost, (signal) => embeddedHost.stopForMigrationHandOver(signal));
+            } catch (error) {
+              throw new Error(`Some of its processes are still running (${error instanceof Error ? error.message : String(error)}).`);
+            }
+          },
+          // A move that did not complete must leave the built-in Computer running again (converge = sweep orphans + start).
+          // converge reporting ok is not enough: verify that the service and every daemon really run (one explicit Start if not).
+          restoreBuiltIn: () => restoreAndVerify(embeddedHost),
+          // Only restore when the built-in home is still there and no migration command is alive (it would collide).
+          safeToRestore: async () => {
+            const homes = [embeddedHost.slockHome, defaultStandaloneHome()];
+            const running = await findRunningMigration({ hostMode: { mode: "embedded" }, homes });
+            if (running) return { ok: false, reason: `A migration (pid ${running.pid}) is still running; the app will pick it up when it ends.` };
+            if (!existsSync(embeddedHost.slockHome)) return { ok: false, reason: "The built-in Computer's folder is not where it was, so it was not restarted automatically." };
+            return { ok: true };
+          },
+          switchToStandalone: () => {
+            // The Computer now lives elsewhere and is not ours to stop: forget the embedded host so the quit flow
+            // has nothing to stop, then restart into standalone mode (computer-host.json is already written).
+            computerHost = null;
+            setTimeout(() => { app.relaunch(); app.exit(0); }, 4_000);
+          },
+        });
+        migrationApplying = () => { const p = migration.getState().phase; return p === "applying" || p === "success"; };
+        // Not just the IPC channels: converge/retry/any internal caller is refused inside the host while a move runs.
+        embeddedHost.setControlGate(() => (migrationApplying() ? "The Computer is being moved out of this app. Wait until it finishes." : null));
+        registerMigrationIpc(ipcMain, migration);
+      }
       // Read-only mode observes + surfaces an already-installed Computer (the
       // "adopt" path) but does NOT converge host lifecycle — no launch-at-login
       // mutation, no service spawn. Safe to run on a machine already hosting a

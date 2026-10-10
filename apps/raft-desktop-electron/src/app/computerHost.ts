@@ -14,7 +14,8 @@
 // that session via `ensureUsableUserSession` — just works, with no second login.
 
 import { execFile } from "node:child_process";
-import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, realpath, rename, rm, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { app } from "electron";
 import {
@@ -47,6 +48,7 @@ import { ComputerProcessScope, readComputerProcesses, type ComputerProcessSnapsh
 import { connectDeployment, readDeploymentSelection, type DeploymentConnectionPlan } from "./deploymentConnection.js";
 import { CONFIGURED_API_ORIGIN, OFFICIAL_API_ORIGINS } from "./configuredApiOrigin.js";
 import { runServiceRecycle } from "./serviceRecycle.js";
+import { chooseSocketSafeHome } from "./socketSafeHome.js";
 
 // Mirrors `paths.ts` CURRENT_SCHEMA_VERSION (readers tolerate a missing value,
 // but we stamp it like login.ts does).
@@ -89,7 +91,9 @@ class ComputerHost {
   private connectionSettled: Promise<void> = Promise.resolve();
   private selectionError: Error | null = null;
   private readonly storageDirectory: string;
-  constructor(options: { home?: string; configuredOrigin?: string; readProcesses?: () => Promise<ComputerProcessSnapshot>; storageDirectory?: string } = {}) {
+  private readonly signalProcess: (pid: number, signal: NodeJS.Signals) => void;
+  constructor(options: { home?: string; configuredOrigin?: string; readProcesses?: () => Promise<ComputerProcessSnapshot>; storageDirectory?: string; signalProcess?: (pid: number, signal: NodeJS.Signals) => void } = {}) {
+    this.signalProcess = options.signalProcess ?? ((pid, signal) => process.kill(pid, signal));
     this.slockHome = options.home ?? resolveRaftHome();
     this.configuredOrigin = options.configuredOrigin ?? CONFIGURED_API_ORIGIN;
     this.storageDirectory = options.storageDirectory ?? `${app.getPath("userData")}/computer-deployments`;
@@ -145,7 +149,28 @@ class ComputerHost {
     return describeSessionOriginMismatch(check);
   }
 
-  private selectHome(home: string): void {
+  /**
+   * The Computer library resolves its home from the PROCESS environment in several places (mutation lock, `runStart`,
+   * stale-state cleanup) while the service and runners it spawns get the selected home explicitly. When the app was
+   * started with a different RAFT_HOME than the home this host controls (a selected deployment root, a launcher that
+   * exports another path), the two halves disagreed: two services raced for the same socket and the runner never
+   * came up (drill-290-anna ②a/cancel retests; reproduced on xai). Pin the process env to the controlled home.
+   */
+  private pinProcessEnv(home: string): void {
+    const fromEnv = process.env.RAFT_HOME ?? process.env.SLOCK_HOME;
+    if (fromEnv && fromEnv !== home) console.warn(`[raft-desktop] the app was started with RAFT_HOME=${fromEnv}, but the Computer home in use is ${home}; ${home} is used for everything from now on`);
+    process.env.RAFT_HOME = home;
+    process.env.SLOCK_HOME = home;
+  }
+
+  private selectHome(chosen: string): void {
+    // The service binds <home>/computer/run/service.sock (<= 103 bytes): a too-deep home is reached through the short
+    // ~/.slock-raft alias when that alias points at it; otherwise say so instead of failing to bind silently.
+    const safe = chooseSocketSafeHome(chosen);
+    const home = safe.home;
+    if (safe.error) this.selectionError = Object.assign(new Error(safe.error), { code: "SERVICE_SOCKET_PATH_TOO_LONG" });
+    else if (safe.usedAlias) console.warn(`[raft-desktop] ${chosen} is too deep for the service socket; using the ${home} alias`);
+    this.pinProcessEnv(home);
     this.slockHome = home;
     this.processScope = new ComputerProcessScope(home);
     this.api = createComputerApi(home, { hostLifecycleOwner: "app" });
@@ -192,7 +217,21 @@ class ComputerHost {
     } finally { this.connecting = false; settle(); }
   }
 
+  /**
+   * While set and returning a message, every control operation (start/stop/restart/recycle/converge/enable/upgrade,
+   * whoever calls it: IPC, converge, retry) is refused. The one-click migration uses it so nothing can restart the
+   * service in the home that is being moved. Quit attempts are never gated.
+   */
+  private controlGate: (() => string | null) | null = null;
+  setControlGate(gate: (() => string | null) | null): void { this.controlGate = gate; }
+
   private async control<T>(operation: () => Promise<T>): Promise<T> {
+    const blocked = this.controlGate?.();
+    if (blocked) throw new Error(blocked);
+    return this.track(operation);
+  }
+
+  private async track<T>(operation: () => Promise<T>): Promise<T> {
     this.controlInFlight++;
     try { return await operation(); }
     finally { this.controlInFlight--; }
@@ -203,7 +242,7 @@ class ComputerHost {
   async runQuitAttempt(attempt: () => Promise<boolean>): Promise<boolean> {
     // Keep the selected root stable through confirmation and the full ladder,
     // including the window after stop() has returned but tools remain alive.
-    return this.control(attempt);
+    return this.track(attempt);
   }
 
   async assertCanControl(): Promise<void> {
@@ -270,6 +309,7 @@ class ComputerHost {
         const status = await this.api.getStatus();
         this.lastStatus = status;
         if (status.servers.length > 0) {
+          await this.sweepOrphansBeforeStart();
           await this.api.start({ serverId: null, serverLabel: null });
         }
         // Task #7 anti-orphan: whether we spawned the tree or adopted an
@@ -361,8 +401,60 @@ class ComputerHost {
     return this.control(() => this.startInternal());
   }
 
+  /**
+   * A service that died (or was killed with the app) can leave its runners behind as orphans. A new service started
+   * over them never gets a runner of its own (the orphan keeps the slot and the server connection). So before the
+   * service is started, any process of THIS home that is still alive while its service is not is swept with the
+   * verified shutdown ladder (identity re-read before every signal). Anything that cannot be verified stops the start.
+   */
+  private async sweepOrphansBeforeStart(): Promise<void> {
+    // Cheap pre-filter: no __service/__run process on the machine at all, nothing to look at.
+    const snapshot = await this.readProcesses();
+    if (!snapshot.rows.some((row) => row.root)) return;
+    // Attribution 1: the Computer's own, which knows EVERY spelling of the home (realpath, as configured, the
+    // ~/.slock-raft alias) by looking at each process's argv/env. One spelling is not enough: a live service launched
+    // with the alias spelling must count as alive even if the host was restored with the realpath.
+    const lib = await import("@botiverse/raft-computer/lib");
+    const real = await realpath(this.slockHome).catch(() => this.slockHome);
+    const aliasPath = join(homedir(), ".slock-raft");
+    const alias = (await realpath(aliasPath).catch(() => null)) === real ? aliasPath : null;
+    // macOS: /tmp, /var and /etc are symlinks into /private; a process may carry either spelling.
+    const variants = new Set<string>([real, this.slockHome]);
+    for (const p of [...variants]) {
+      if (/^\/private\/(tmp|var|etc)(\/|$)/.test(p)) variants.add(p.slice("/private".length));
+      else if (/^\/(tmp|var|etc)(\/|$)/.test(p)) variants.add(`/private${p}`);
+    }
+    const spellings = [...new Set([...lib.homeProcessSpellings(real, this.slockHome, alias), ...variants])];
+    const found = await lib.defaultScanHomeProcesses(spellings);
+    // Attribution 2: this home's own pidfiles (service.pid, servers/*/runner.pid). A process the home's pidfile names,
+    // that really is a __service/__run and is not claimed by a DIFFERENT home, is this home's even when its env/argv
+    // spelling could not be read (the drill-290-anna ②a retest: the sweep matched nothing and the orphan was adopted).
+    const attested = snapshot.rows.filter((row) => row.root && snapshot.rootPids.includes(row.pid) && row.pid !== process.pid && (row.home === this.processScope.home || (row.home !== null && spellings.includes(row.home))));
+    const serviceAlive = found.some((proc) => proc.kind === "service") || attested.some((row) => /(?:^|\s)__service(?:\s|$)/.test(row.command));
+    if (serviceAlive) return; // a live service: its runners are its own
+    if (found.length === 0 && attested.length === 0) return;
+    if (found.length === 0) {
+      console.warn(`[raft-desktop] orphan sweep: no process matched the home spellings ${JSON.stringify(spellings)}, but ${attested.length} pidfile-attested process(es) belong to it: ${attested.map((row) => `${row.pid}(home=${row.home ?? "unknown"})`).join(", ")}`);
+    }
+    const left = found.length > 0 ? await lib.sweepHomeProcesses(spellings) : [];
+    // Whatever the home's pidfiles still name after the spelling-based sweep: verified TERM → KILL (identity re-read).
+    const stillAttested = async () => {
+      const fresh = await this.readProcesses();
+      return attested.filter((row) => fresh.rows.some((now) => now.pid === row.pid && now.lstart === row.lstart && now.command === row.command));
+    };
+    let remaining = await stillAttested();
+    for (const [signal, waitMs] of [["SIGTERM", 5_000], ["SIGKILL", 2_000]] as const) {
+      if (remaining.length === 0) break;
+      for (const row of remaining) { try { this.signalProcess(row.pid, signal); } catch { /* already gone */ } }
+      const deadline = Date.now() + waitMs;
+      while (remaining.length > 0 && Date.now() < deadline) { await new Promise((resolve) => setTimeout(resolve, 250)); remaining = await stillAttested(); }
+    }
+    if (left.length > 0 || remaining.length > 0) throw new Error("This Computer left processes behind that could not be cleaned up, so it was not started. Quit the app and try again.");
+  }
+
   private async startInternal(): Promise<void> {
     await this.assertCanControl();
+    await this.sweepOrphansBeforeStart();
     await this.api.start({ serverId: null, serverLabel: null });
     // Any action that leaves the local service running clears a stale
     // converge/recycle failure notice (e.g. the start-only retry offered after
@@ -372,6 +464,11 @@ class ComputerHost {
 
   async stop(signal?: AbortSignal): Promise<void> {
     return this.control(() => this.stopInternal(signal));
+  }
+
+  /** The migration's own hand-over stop: it IS the migration, so it is not subject to the migration control gate. */
+  async stopForMigrationHandOver(signal?: AbortSignal): Promise<void> {
+    return this.track(() => this.stopInternal(signal));
   }
 
   private async stopInternal(signal?: AbortSignal): Promise<void> {

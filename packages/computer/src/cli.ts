@@ -45,6 +45,7 @@
  *   __service                        the long-running service process
  *   __run <serverId>                   one per-server daemon child
  */
+import "./earlySignals.js";
 import { pathToFileURL } from "node:url";
 import { randomUUID } from "node:crypto";
 import { Command } from "commander";
@@ -54,6 +55,7 @@ import { runCursorSdkLogin, runCursorSdkLogout, runCursorSdkStatus } from "./cur
 import { runAttach } from "./attach.js";
 import { runSetup } from "./setup.js";
 import { formatStatusReport } from "./status.js";
+import { projectStatusJson } from "./statusJson.js";
 import { runRunnersList, runRunnersStop } from "./runners.js";
 import { runStart, runStop } from "./startStop.js";
 import { runResident, runService, isSeaBinary, OS_SUPERVISOR_KIND_ENV_VAR, RESIDENT_CLI_PATH_ENV_VAR } from "./service.js";
@@ -466,12 +468,36 @@ program
 program
   .command("status")
   .description("Show whether Raft Computer is logged in, running, and connected to servers.")
-  .action(withCliExit(async () => {
+  .option("--json", "machine-readable projection (Desktop ComputerController contract, interface v1)")
+  .action(withCliExit(async (opts: { json?: boolean }) => {
     const slockHome = resolveRaftHome();
     const api = createComputerApi(slockHome);
+    const report = await api.getStatus();
+    if (opts.json) {
+      process.stdout.write(`${JSON.stringify(await projectStatusJson(report), null, 2)}\n`);
+      return;
+    }
     await present(async () => {
-      formatStatusReport(await api.getStatus());
+      formatStatusReport(report);
     });
+  }));
+
+// --- migrate-home (extract §10–§11: unattended move to the default home) ---
+// Dry-run by default; `--apply` performs stop → mv → repoint ~/.slock-raft →
+// remove home-env LaunchAgent → start standalone → self-check, journalling
+// every mutation and rolling back automatically on failure. The result file
+// (<home>/computer/migrate-result.json) feeds `status --json`.migration.
+program
+  .command("migrate-home")
+  .description("Move this Computer's data to the default location (~/.slock) in one unattended step, with a self-check and automatic rollback. Checks and prints the plan without changing anything unless --apply is passed.")
+  .option("--from <dir>", "source home to move away from (default: the home this Computer uses now)")
+  .option("--to <dir>", "target home (default: ~/.slock)")
+  .option("--apply", "carry out the move (without this flag, the command only checks and prints the plan)")
+  .option("--deadline <instant>", "with --apply: hard time limit as epoch milliseconds or an ISO 8601 timestamp (default: ten minutes after the run starts); once passed the migration aborts and rolls back (the rollback itself is never time-limited)")
+  .option("--json", "newline-delimited JSON events (interface v1); the final line carries the result summary")
+  .action(withCliExit(async (opts: { from?: string; to?: string; apply?: boolean; deadline?: string; json?: boolean }) => {
+    const { runMigrateHomeCommand } = await import("./migrateHome.js");
+    await runMigrateHomeCommand(opts);
   }));
 
 // --- doctor (aggregate per-server health) ---
@@ -808,6 +834,18 @@ program
   .action(withCliExit(async (opts: { slockHome?: string; raftHome?: string; osSupervised?: string }) => {
     const home = opts.slockHome ?? opts.raftHome;
     if (home) process.env.SLOCK_HOME = home;
+    // Persistent user intent gate (#computer-extract, PM decision
+    // 2026-10-09): a user-stopped Computer stays stopped across logins and
+    // reboots. The LaunchAgent's RunAtLoad lands here; honour the recorded
+    // intent BEFORE any socket/pid work and exit 0 so launchd does not
+    // relaunch-thrash. Absent file reads as "running" (pre-extract
+    // behaviour) — see desiredState.ts.
+    if (home !== undefined) {
+      const { readDesiredState } = await import("./desiredState.js");
+      if ((await readDesiredState(home)) === "stopped") {
+        process.exit(0);
+      }
+    }
     if (opts.osSupervised) {
       const kinds: OsSupervisorKind[] = ["launchd-user", "systemd-user", "windows-task"];
       if (!kinds.includes(opts.osSupervised as OsSupervisorKind)) {

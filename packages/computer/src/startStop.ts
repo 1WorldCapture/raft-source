@@ -78,6 +78,10 @@ export async function runStart(
   // RunStartDeps shape is preserved + forwarded so existing service.test.ts
   // cases keep working.
   const slockHome = resolveRaftHome();
+  // Record persistent intent BEFORE any start work: the LaunchAgent's
+  // RunAtLoad gate and `status --json`.desiredState both read this.
+  const { writeDesiredState } = await import("./desiredState.js");
+  await writeDesiredState(slockHome, "running");
   const api = createComputerApi(slockHome);
 
   // Track whether the service took the background-spawn path so we know
@@ -194,7 +198,13 @@ export async function runStop(deps: RunStopDeps = {}): Promise<void> {
   // CLI presenter over `api.stop`. The api drives the StopService lifecycle;
   // this supplies the info() sink and `present()` maps a thrown ComputerError
   // → the shared stderr contract. RunStopDeps is preserved + forwarded for the tests.
-  const api = createComputerApi(resolveRaftHome());
+  const slockHome = resolveRaftHome();
+  // Record persistent intent BEFORE any stop work (same file start writes).
+  {
+    const { writeDesiredState } = await import("./desiredState.js");
+    await writeDesiredState(slockHome, "stopped");
+  }
+  const api = createComputerApi(slockHome);
   await present(async () => {
     await api.stop(
       (event) => {

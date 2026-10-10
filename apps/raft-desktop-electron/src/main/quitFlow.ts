@@ -57,6 +57,8 @@ export interface QuitFlowDeps {
    * must not stall. */
   orchestrateShutdown(systemShutdown: boolean): Promise<void>;
   quit(): void;
+  /** True while the one-click migration is moving the Computer out of this app. */
+  migrationInProgress?(): boolean;
 }
 
 /**
@@ -66,6 +68,21 @@ export interface QuitFlowDeps {
  */
 export async function runQuitFlow(deps: QuitFlowDeps): Promise<boolean> {
   const osShuttingDown = powerMonitorIsShuttingDown();
+  // A quit during a move would stop the service migrate-home is working on and force a rollback. A user quit is
+  // held (the app restarts itself when the switch is done); a forced one (shutdown/logout) skips stopping the
+  // Computer and leaves migrate-home to finish or roll back by itself.
+  if (deps.migrationInProgress?.()) {
+    if (osShuttingDown) return true;
+    await dialog.showMessageBox({
+      type: "info",
+      buttons: ["OK"],
+      defaultId: 0,
+      message: "Switching the Computer…",
+      detail: `${PRODUCT_NAME} is moving its Computer out of the app. Quitting now would interrupt it. The app restarts by itself when the switch is done.`,
+      noLink: true,
+    });
+    return false;
+  }
   const anythingRunning = await deps.anythingRunning();
   const mustAsk = shouldAskQuitConfirm({ prefs: deps.prefs(), osShuttingDown, anythingRunning });
   if (mustAsk) {

@@ -91,6 +91,21 @@ test("quit flow: when to ask, copy truthfulness, cancel vs proceed", async (t) =
     assert.equal(orchestrated.length, 1);
   });
 
+  await t.test("quit while a migration applies: held with a notice, nothing stopped; forced (OS shutdown) skips stopping", async () => {
+    dialogCalls.length = 0;
+    const { deps, orchestrated } = makeDeps({ migrationInProgress: () => true });
+    assert.equal(await runQuitFlow(deps), false);
+    assert.equal(orchestrated.length, 0, "the service being moved is not stopped");
+    assert.equal(dialogCalls.length, 1, "the user is told why");
+    // OS shutdown flag is latched by powerMonitor's "shutdown" event.
+    shutdownHandler?.();
+    dialogCalls.length = 0;
+    const forced = makeDeps({ migrationInProgress: () => true });
+    assert.equal(await runQuitFlow(forced.deps), true, "logout/shutdown is not blocked");
+    assert.equal(forced.orchestrated.length, 0, "and still does not stop the Computer");
+    assert.equal(dialogCalls.length, 0, "no modal during shutdown");
+  });
+
   await t.test("repeated quit stays intercepted until cleanup completes", async () => {
     let release!: (proceed: boolean) => void;
     let attempts = 0;

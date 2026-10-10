@@ -31,10 +31,12 @@
 //     A successful probe means a live service is already bound — we
 //     refuse listen with the native `EADDRINUSE` (service-startup
 //     boundary, NOT a client-side IPC wire error). Only `ECONNREFUSED`
-//     / `ENOENT` / non-socket file is treated as stale and unlinked.
-//     This prevents a second service starting on the same install root
-//     from silently stealing the socket pathname while the first
-//     service keeps running on an unlinked inode.
+//     with NO live owner pid (service pidfile, PM fix 2026-10-10) is
+//     treated as stale and unlinked. This prevents a second service
+//     starting on the same install root from silently stealing the
+//     socket pathname while the first service keeps running on an
+//     unlinked inode — including the bind→listen window of a concurrent
+//     start, where the winner's fresh socket refuses connects too.
 //   - Graceful close: `close()` stops accepting new connections and
 //     destroys all open sockets immediately. In-flight handler
 //     responses are NOT drained — outstanding requests on the client
@@ -64,9 +66,9 @@
 //   later commits via dependency injection (`registerHandler`), keeping
 //   the transport module free of every business-logic import.
 import { connect, createServer, type Server, type Socket } from "node:net";
-import { chmod, lstat, mkdir, stat, unlink } from "node:fs/promises";
+import { chmod, lstat, mkdir, readFile, stat, unlink } from "node:fs/promises";
 import { dirname } from "node:path";
-import { serviceSocketPath, serviceWindowsPipeName } from "../paths.js";
+import { servicePidPath, serviceSocketPath, serviceWindowsPipeName } from "../paths.js";
 import { FrameDecoder, encodeFrame } from "./ipc-codec.js";
 import {
   ServiceClientError,
@@ -98,6 +100,31 @@ export interface IpcServerOptions {
   installRoot: string;
   /** Per-method handler table. Methods absent from the map respond with `IPC_MALFORMED_FRAME`. */
   handlers: RequestHandlerMap;
+  /** True when a live owner process exists for this install root (service
+   *  pidfile with a live pid). Defaults to reading `<installRoot>/computer/
+   *  run/service.pid`. The stale-socket probe treats a live owner as
+   *  "not stale" even on a refused connect (bind→listen window race, PM fix
+   *  2026-10-10). */
+  ownerLiveness?: () => Promise<boolean>;
+}
+
+/** Default `ownerLiveness`: the service pidfile plus a signal-0 liveness
+ *  probe. EPERM counts as alive (another user's live pid); everything else
+ *  unreadable/dead counts as "no live owner". */
+async function defaultOwnerLiveness(installRoot: string): Promise<boolean> {
+  try {
+    const raw = await readFile(servicePidPath(installRoot), "utf8");
+    const pid = Number.parseInt(raw.trim(), 10);
+    if (!Number.isInteger(pid) || pid <= 0) return false;
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch (err) {
+      return (err as NodeJS.ErrnoException).code === "EPERM";
+    }
+  } catch {
+    return false; // no pidfile / unreadable — no provable live owner
+  }
 }
 
 export interface IpcServer {
@@ -172,7 +199,10 @@ function resolveTransportPath(installRoot: string): string {
  * filesystem; OS-level pipe-server creation surfaces collision through
  * `EADDRINUSE` directly when the pipe name is in use.
  */
-async function probeAndClearStaleSocket(socketPath: string): Promise<void> {
+async function probeAndClearStaleSocket(
+  socketPath: string,
+  ownerLiveness: () => Promise<boolean>,
+): Promise<void> {
   if (process.platform === "win32") return;
 
   let isSocket = false;
@@ -223,8 +253,17 @@ async function probeAndClearStaleSocket(socketPath: string): Promise<void> {
     return;
   }
 
-  // outcome === "refused": kernel knows the inode but nobody is
-  // accepting. Unlink so listen() can rebind cleanly.
+  // A refused connect proves no listener is ACCEPTING — but during a
+  // concurrent start the winner's freshly-bound socket sits in its
+  // bind→listen window and refuses connects too (drill 284-run2 shape:
+  // the loser unlinked it, the winner then died at chmod with ENOENT).
+  // The service pidfile is the tiebreaker (PM fix 2026-10-10): a live
+  // owner pid means the socket is NOT stale — leave the path so the
+  // loser surfaces native EADDRINUSE instead of killing the winner.
+  if (await ownerLiveness()) return;
+
+  // outcome === "refused" and no live owner: kernel knows the inode but
+  // nobody is accepting. Unlink so listen() can rebind cleanly.
   try {
     await unlink(socketPath);
   } catch (err) {
@@ -239,9 +278,11 @@ async function probeAndClearStaleSocket(socketPath: string): Promise<void> {
  *
  * Lifecycle:
  *   1. `listen()` — creates the parent dir (`<installRoot>/run`),
- *      removes any stale socket, binds, and chmod's the file to `0o600`
- *      so only the owning user can connect (POSIX). Returns the resolved
- *      transport path on success.
+ *      removes any stale socket (refused-connect AND no live owner pid),
+ *      binds under a restrictive umask so the socket is `0o600` at
+ *      creation — there is no post-bind chmod window in which a
+ *      concurrent stale-probe could unlink the fresh file (PM fix
+ *      2026-10-10). Returns the resolved transport path on success.
  *   2. Per-connection: install `data` listener that drives a
  *      `FrameDecoder` and dispatches frames; install `close` / `error`
  *      listeners to clean up the connection record.
@@ -251,6 +292,7 @@ async function probeAndClearStaleSocket(socketPath: string): Promise<void> {
  */
 export function createIpcServer(options: IpcServerOptions): IpcServer {
   const { installRoot, handlers } = options;
+  const ownerLiveness = options.ownerLiveness ?? (() => defaultOwnerLiveness(installRoot));
   const transportPath = resolveTransportPath(installRoot);
   const connections = new Set<Connection>();
   let server: Server | null = null;
@@ -395,25 +437,39 @@ export function createIpcServer(options: IpcServerOptions): IpcServer {
         if (!owner.isDirectory() || (process.getuid && owner.uid !== process.getuid())) {
           throw new Error("IPC directory must belong to the service user");
         }
-        // Restrict traversal BEFORE binding, so even the pre-chmod socket
-        // cannot be reached by another user under a permissive umask.
+        // Restrict traversal BEFORE binding, so the socket cannot be
+        // reached by another user under a permissive umask.
         await chmod(directory, 0o700);
-        await probeAndClearStaleSocket(transportPath);
+        await probeAndClearStaleSocket(transportPath, ownerLiveness);
       }
       const s = createServer(attachConnection);
       server = s;
-      try {
-        await new Promise<void>((resolve, reject) => {
-          const onError = (err: Error): void => {
-            s.removeListener("error", onError);
-            reject(err);
-          };
-          s.once("error", onError);
+      // Bind under a restrictive umask so the socket file is 0600 at
+      // CREATION (PM fix 2026-10-10): the old post-bind chmod had a window
+      // in which a concurrent stale-probe could unlink the file between
+      // bind and chmod — the chmod then failed ENOENT and killed the
+      // winning service (drill 284-run2). libuv completes the AF_UNIX bind
+      // synchronously inside the `listen()` call itself, so the tight umask
+      // only brackets that one call and is restored before the callback is
+      // awaited — unrelated async creations never see it (PM review).
+      const bindSettled = new Promise<void>((resolve, reject) => {
+        const onError = (err: Error): void => {
+          s.removeListener("error", onError);
+          reject(err);
+        };
+        s.once("error", onError);
+        const previousUmask = process.umask(0o177);
+        try {
           s.listen(transportPath, () => {
             s.removeListener("error", onError);
             resolve();
           });
-        });
+        } finally {
+          process.umask(previousUmask);
+        }
+      });
+      try {
+        await bindSettled;
       } catch (error) {
         if (server === s) server = null;
         try {
@@ -422,15 +478,6 @@ export function createIpcServer(options: IpcServerOptions): IpcServer {
           /* bind never became active */
         }
         throw error;
-      }
-      if (process.platform !== "win32") {
-        try {
-          await chmod(transportPath, 0o600);
-        } catch (error) {
-          s.close();
-          server = null;
-          throw error;
-        }
       }
       return transportPath;
     },
