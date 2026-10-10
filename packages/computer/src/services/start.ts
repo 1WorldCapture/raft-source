@@ -46,6 +46,7 @@ import { isDegraded, readTerminalUnlinked } from "../health.js";
 import { resetRunner } from "../reset.js";
 import type { ComputerApiEvent } from "../lib/events.js";
 import { ComputerServiceError } from "./errors.js";
+import { clearStartAwaitingService, markStartAwaitingService } from "../startAwaiting.js";
 import { COMPUTER_VERSION } from "../version.js";
 import { hasUnlinkedComputerHandshake, readRunnerLogTail } from "../internal/runner-log-diagnostics.js";
 import { collectMachineFacts } from "../machineFacts.js";
@@ -409,12 +410,18 @@ async function startInner(input: StartInput, options: StartOptions = {}): Promis
   ) {
     const sleep = options.sleep ?? delay;
     const deadline = currentTimeMs() + (options.ensureTimeoutMs ?? START_ENSURE_TIMEOUT_MS);
-    while (existing === null && currentTimeMs() < deadline) {
-      await sleep(Math.min(options.ensurePollIntervalMs ?? START_ENSURE_POLL_INTERVAL_MS, deadline - currentTimeMs()));
-      ({ pid: existing } = await findLiveServicePid(slockHome, {
-        readPidfile: options.readPidfile,
-        isProcessAlive: options.isProcessAlive,
-      }));
+    // We hold the mutation lock while the carrier's service boots; tell it so it does not queue for the same lock.
+    await markStartAwaitingService(slockHome).catch(() => undefined);
+    try {
+      while (existing === null && currentTimeMs() < deadline) {
+        await sleep(Math.min(options.ensurePollIntervalMs ?? START_ENSURE_POLL_INTERVAL_MS, deadline - currentTimeMs()));
+        ({ pid: existing } = await findLiveServicePid(slockHome, {
+          readPidfile: options.readPidfile,
+          isProcessAlive: options.isProcessAlive,
+        }));
+      }
+    } finally {
+      await clearStartAwaitingService(slockHome).catch(() => undefined);
     }
     if (existing === null) {
       throw new ComputerServiceError(
