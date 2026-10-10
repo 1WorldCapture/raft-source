@@ -875,6 +875,10 @@ export async function migrateHome(
   };
   let failure: string | null = null;
   let failureStep: MigrateStep | null = null;
+  // Agent-restore state, declared before finish() (which reads it) so early
+  // failure paths can finish without tripping the temporal dead zone.
+  let restoreReport: AgentRestoreReport | null = null;
+  let agentsNotRestored: MigrateResultFile["agentsNotRestored"] = undefined;
 
   const runStep = async (step: MigrateStep, fn: () => Promise<Record<string, unknown> | void>) => {
     record({ step, status: "start" });
@@ -1452,8 +1456,6 @@ export async function migrateHome(
   // never fabricates a local start (PM review 2026-10-10). Skipped when this
   // migration deliberately leaves the service down (desiredState "stopped"
   // or zero attachments): those agents stay down with it.
-  let restoreReport: AgentRestoreReport | null = null;
-  let agentsNotRestored: MigrateResultFile["agentsNotRestored"] = undefined;
   if (shouldStartService) {
     if (
       !(await runStep("restore-agents", async () => {
