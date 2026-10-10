@@ -3,6 +3,7 @@ import { ClaudeDriver } from "./claude.js";
 import { CodexDriver } from "./codex.js";
 import { GrokDriver } from "./grok.js";
 import { AntigravityDriver } from "./antigravity.deprecated.js";
+import { AntigravityStreamDriver } from "./antigravityStream.js";
 import { CopilotDriver } from "./copilot.js";
 import { CursorSdkDriver } from "./cursor-sdk.js";
 import { GeminiDriver } from "./gemini.js";
@@ -49,6 +50,7 @@ const driverFactories: Record<string, () => RuntimeDriver> = {
   // Deprecated: retain for existing agents to run/resume. Shared availability
   // and server admission prohibit creating agents or switching into this runtime.
   antigravity: () => new AntigravityDriver(),
+  "antigravity-stream": () => new AntigravityStreamDriver(),
   copilot: () => new CopilotDriver(),
   "cursor-sdk": () => new CursorSdkDriver(),
   gemini: () => new GeminiDriver(),
