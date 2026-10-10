@@ -70,6 +70,7 @@ test("orphaned runners are swept before a service is started (Start and launch c
   const host = new ComputerHost({
     home: testHome, configuredOrigin: "http://example.invalid",
     readProcesses: async () => ({ rootPids: [...rootPids], rows: rows.map((r) => ({ ...r })) }),
+    signalProcess: (pid, signal) => { signals.push([pid, signal]); rows = rows.filter((r) => r.pid !== pid); rootPids = rootPids.filter((p) => p !== pid); },
   });
 
   await t.test("Start: an orphan is swept first, then the service starts", async () => {
@@ -107,6 +108,21 @@ test("orphaned runners are swept before a service is started (Start and launch c
     await assert.rejects(() => host.start(), /could not be cleaned up/);
     assert.deepEqual(calls, []);
     sweepLeft = [];
+  });
+
+  await t.test("the Computer's attribution matches NOTHING (a spelling it cannot read) but this host's own attribution and the home's pidfile name the orphan runner: still swept", async () => {
+    setRows([row(4242, "/app/raft-desktop __run s1")], [4242]);
+    (rows[0] as { spelling?: string }).spelling = "SOME-OTHER-SPELLING"; // lib scan cannot attribute it
+    await host.start();
+    assert.deepEqual(signals[0], [4242, "SIGTERM"], "terminated through the verified pidfile path");
+    assert.deepEqual(calls, ["start"]);
+  });
+
+  await t.test("a pidfile-named process that is not a __service/__run (reused pid) is never signalled: the start is refused by the identity check", async () => {
+    setRows([{ ...row(4242, "/usr/bin/vim notes.txt"), root: false }], [4242]);
+    (rows[0] as { spelling?: string }).spelling = "SOME-OTHER-SPELLING";
+    await assert.rejects(() => host.start(), /无法确认进程 4242/);
+    assert.deepEqual([signals, calls], [[], []]);
   });
 
   await t.test("nothing running: no sweep, plain start", async () => {

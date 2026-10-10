@@ -90,7 +90,9 @@ class ComputerHost {
   private connectionSettled: Promise<void> = Promise.resolve();
   private selectionError: Error | null = null;
   private readonly storageDirectory: string;
-  constructor(options: { home?: string; configuredOrigin?: string; readProcesses?: () => Promise<ComputerProcessSnapshot>; storageDirectory?: string } = {}) {
+  private readonly signalProcess: (pid: number, signal: NodeJS.Signals) => void;
+  constructor(options: { home?: string; configuredOrigin?: string; readProcesses?: () => Promise<ComputerProcessSnapshot>; storageDirectory?: string; signalProcess?: (pid: number, signal: NodeJS.Signals) => void } = {}) {
+    this.signalProcess = options.signalProcess ?? ((pid, signal) => process.kill(pid, signal));
     this.slockHome = options.home ?? resolveRaftHome();
     this.configuredOrigin = options.configuredOrigin ?? CONFIGURED_API_ORIGIN;
     this.storageDirectory = options.storageDirectory ?? `${app.getPath("userData")}/computer-deployments`;
@@ -146,7 +148,22 @@ class ComputerHost {
     return describeSessionOriginMismatch(check);
   }
 
+  /**
+   * The Computer library resolves its home from the PROCESS environment in several places (mutation lock, `runStart`,
+   * stale-state cleanup) while the service and runners it spawns get the selected home explicitly. When the app was
+   * started with a different RAFT_HOME than the home this host controls (a selected deployment root, a launcher that
+   * exports another path), the two halves disagreed: two services raced for the same socket and the runner never
+   * came up (drill-290-anna ②a/cancel retests; reproduced on xai). Pin the process env to the controlled home.
+   */
+  private pinProcessEnv(home: string): void {
+    const fromEnv = process.env.RAFT_HOME ?? process.env.SLOCK_HOME;
+    if (fromEnv && fromEnv !== home) console.warn(`[raft-desktop] the app was started with RAFT_HOME=${fromEnv}, but the Computer home in use is ${home}; ${home} is used for everything from now on`);
+    process.env.RAFT_HOME = home;
+    process.env.SLOCK_HOME = home;
+  }
+
   private selectHome(home: string): void {
+    this.pinProcessEnv(home);
     this.slockHome = home;
     this.processScope = new ComputerProcessScope(home);
     this.api = createComputerApi(home, { hostLifecycleOwner: "app" });
@@ -387,18 +404,45 @@ class ComputerHost {
     // Cheap pre-filter: no __service/__run process on the machine at all, nothing to look at.
     const snapshot = await this.readProcesses();
     if (!snapshot.rows.some((row) => row.root)) return;
-    // Everything below uses the Computer's own attribution, which knows EVERY spelling of the home (realpath, as
-    // configured, the ~/.slock-raft alias). One spelling is not enough: a live service launched with the alias spelling
-    // must count as alive even if the host was restored with the realpath.
+    // Attribution 1: the Computer's own, which knows EVERY spelling of the home (realpath, as configured, the
+    // ~/.slock-raft alias) by looking at each process's argv/env. One spelling is not enough: a live service launched
+    // with the alias spelling must count as alive even if the host was restored with the realpath.
     const lib = await import("@botiverse/raft-computer/lib");
     const real = await realpath(this.slockHome).catch(() => this.slockHome);
     const aliasPath = join(homedir(), ".slock-raft");
     const alias = (await realpath(aliasPath).catch(() => null)) === real ? aliasPath : null;
-    const spellings = lib.homeProcessSpellings(real, this.slockHome, alias);
+    // macOS: /tmp, /var and /etc are symlinks into /private; a process may carry either spelling.
+    const variants = new Set<string>([real, this.slockHome]);
+    for (const p of [...variants]) {
+      if (/^\/private\/(tmp|var|etc)(\/|$)/.test(p)) variants.add(p.slice("/private".length));
+      else if (/^\/(tmp|var|etc)(\/|$)/.test(p)) variants.add(`/private${p}`);
+    }
+    const spellings = [...new Set([...lib.homeProcessSpellings(real, this.slockHome, alias), ...variants])];
     const found = await lib.defaultScanHomeProcesses(spellings);
-    if (found.length === 0 || found.some((proc) => proc.kind === "service")) return; // nothing, or a live service: its runners are its own
-    const left = await lib.sweepHomeProcesses(spellings);
-    if (left.length > 0) throw new Error("This Computer left processes behind that could not be cleaned up, so it was not started. Quit the app and try again.");
+    // Attribution 2: this home's own pidfiles (service.pid, servers/*/runner.pid). A process the home's pidfile names,
+    // that really is a __service/__run and is not claimed by a DIFFERENT home, is this home's even when its env/argv
+    // spelling could not be read (the drill-290-anna ②a retest: the sweep matched nothing and the orphan was adopted).
+    const attested = snapshot.rows.filter((row) => row.root && snapshot.rootPids.includes(row.pid) && row.pid !== process.pid && (row.home === this.processScope.home || (row.home !== null && spellings.includes(row.home))));
+    const serviceAlive = found.some((proc) => proc.kind === "service") || attested.some((row) => /(?:^|\s)__service(?:\s|$)/.test(row.command));
+    if (serviceAlive) return; // a live service: its runners are its own
+    if (found.length === 0 && attested.length === 0) return;
+    if (found.length === 0) {
+      console.warn(`[raft-desktop] orphan sweep: no process matched the home spellings ${JSON.stringify(spellings)}, but ${attested.length} pidfile-attested process(es) belong to it: ${attested.map((row) => `${row.pid}(home=${row.home ?? "unknown"})`).join(", ")}`);
+    }
+    const left = found.length > 0 ? await lib.sweepHomeProcesses(spellings) : [];
+    // Whatever the home's pidfiles still name after the spelling-based sweep: verified TERM → KILL (identity re-read).
+    const stillAttested = async () => {
+      const fresh = await this.readProcesses();
+      return attested.filter((row) => fresh.rows.some((now) => now.pid === row.pid && now.lstart === row.lstart && now.command === row.command));
+    };
+    let remaining = await stillAttested();
+    for (const [signal, waitMs] of [["SIGTERM", 5_000], ["SIGKILL", 2_000]] as const) {
+      if (remaining.length === 0) break;
+      for (const row of remaining) { try { this.signalProcess(row.pid, signal); } catch { /* already gone */ } }
+      const deadline = Date.now() + waitMs;
+      while (remaining.length > 0 && Date.now() < deadline) { await new Promise((resolve) => setTimeout(resolve, 250)); remaining = await stillAttested(); }
+    }
+    if (left.length > 0 || remaining.length > 0) throw new Error("This Computer left processes behind that could not be cleaned up, so it was not started. Quit the app and try again.");
   }
 
   private async startInternal(): Promise<void> {
