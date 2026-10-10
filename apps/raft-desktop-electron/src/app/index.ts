@@ -50,6 +50,7 @@ import { StandaloneComputerHost, type StandaloneUiState } from "./standalone/sta
 import { findInterruptedMigration, findMigratedAwayHome, findRunningMigration, isMigrationProcess, readInProgressMarker, readMigrationResult, type InProgressMarker } from "./standalone/migrationRecovery.js";
 import { MigrationSupervisor } from "./standalone/migrationSupervisor.js";
 import { createMigrationController, finishSwitch, refuseWhileMigrating, registerMigrationIpc, restoreAndVerify } from "./standalone/migrationIpc.js";
+import { relaunchPreservingUserData } from "./relaunch.js";
 import { resolveEmbeddedHome } from "./embeddedHome.js";
 import { readLocalMachineIds } from "./standalone/localIdentity.js";
 import { registerEmbeddedStubs, registerHostModeIpc, registerStandaloneIpc } from "./standalone/ipc.js";
@@ -305,7 +306,7 @@ function registerIpcHandlers(): void {
     // Renderer-side corruption heuristic fired (canary lost while the
     // IndexedDB cache clearly has data): schedule the wipe marker and
     // relaunch so the next boot starts from a clean Local Storage.
-    requestStorageWipeAndRelaunch(app.getPath("userData"), () => app.relaunch(), (code) => app.exit(code));
+    requestStorageWipeAndRelaunch(app.getPath("userData"), () => relaunchPreservingUserData(app), (code) => app.exit(code));
   });
   // Server-origin configuration (phase 3-1). set/reset re-validate in THIS
   // process — the renderer's value is never trusted. A persisted change is
@@ -315,7 +316,7 @@ function registerIpcHandlers(): void {
     typeof raw === "string" ? serverOriginConfig.set(raw) : Promise.resolve({ ok: false, error: "invalid_server_origin" }));
   ipcMain.handle(ELECTRON_IPC_CHANNELS.serverOriginReset, () => serverOriginConfig.reset());
   ipcMain.on(ELECTRON_IPC_CHANNELS.serverOriginRelaunch, () => {
-    app.relaunch();
+    relaunchPreservingUserData(app);
     app.exit(0);
   });
   // Private update detection (phase 3-2) — inert unless a private checker
@@ -936,7 +937,7 @@ if (headlessMode?.mode === "__service") {
         isAlive: (m) => isMigrationProcess(m),
         signal: (pid, sig) => process.kill(pid, sig),
         finish: (to) => finishSwitch({ bundled, binaryTarget: defaultBinaryPath(), userDataDir: app.getPath("userData") }, to),
-        relaunch: () => { app.relaunch(); app.exit(0); },
+        relaunch: () => { relaunchPreservingUserData(app); app.exit(0); },
         publish: (state) => {
           for (const win of BrowserWindow.getAllWindows()) {
             if (!win.isDestroyed()) win.webContents.send("migration:state-update", state);
@@ -1010,7 +1011,7 @@ if (headlessMode?.mode === "__service") {
             // The Computer now lives elsewhere and is not ours to stop: forget the embedded host so the quit flow
             // has nothing to stop, then restart into standalone mode (computer-host.json is already written).
             computerHost = null;
-            setTimeout(() => { app.relaunch(); app.exit(0); }, 4_000);
+            setTimeout(() => { relaunchPreservingUserData(app); app.exit(0); }, 4_000);
           },
         });
         migrationApplying = () => { const p = migration.getState().phase; return p === "applying" || p === "success"; };
