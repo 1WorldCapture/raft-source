@@ -44,6 +44,7 @@ import {
 } from "./sessionOriginGuard.js";
 import { reduceConvergeFailure, type ConvergeState } from "./convergeState.js";
 import { ComputerProcessScope, readComputerProcesses, type ComputerProcessSnapshot } from "../main/computerProcesses.js";
+import { runShutdownTree } from "../main/shutdown.js";
 import { connectDeployment, readDeploymentSelection, type DeploymentConnectionPlan } from "./deploymentConnection.js";
 import { CONFIGURED_API_ORIGIN, OFFICIAL_API_ORIGINS } from "./configuredApiOrigin.js";
 import { runServiceRecycle } from "./serviceRecycle.js";
@@ -89,7 +90,9 @@ class ComputerHost {
   private connectionSettled: Promise<void> = Promise.resolve();
   private selectionError: Error | null = null;
   private readonly storageDirectory: string;
-  constructor(options: { home?: string; configuredOrigin?: string; readProcesses?: () => Promise<ComputerProcessSnapshot>; storageDirectory?: string } = {}) {
+  private readonly signalProcess: (pid: number, signal: NodeJS.Signals) => void;
+  constructor(options: { home?: string; configuredOrigin?: string; readProcesses?: () => Promise<ComputerProcessSnapshot>; storageDirectory?: string; signalProcess?: (pid: number, signal: NodeJS.Signals) => void } = {}) {
+    this.signalProcess = options.signalProcess ?? ((pid, signal) => process.kill(pid, signal));
     this.slockHome = options.home ?? resolveRaftHome();
     this.configuredOrigin = options.configuredOrigin ?? CONFIGURED_API_ORIGIN;
     this.storageDirectory = options.storageDirectory ?? `${app.getPath("userData")}/computer-deployments`;
@@ -284,6 +287,7 @@ class ComputerHost {
         const status = await this.api.getStatus();
         this.lastStatus = status;
         if (status.servers.length > 0) {
+          await this.sweepOrphansBeforeStart();
           await this.api.start({ serverId: null, serverLabel: null });
         }
         // Task #7 anti-orphan: whether we spawned the tree or adopted an
@@ -375,8 +379,36 @@ class ComputerHost {
     return this.control(() => this.startInternal());
   }
 
+  /**
+   * A service that died (or was killed with the app) can leave its runners behind as orphans. A new service started
+   * over them never gets a runner of its own (the orphan keeps the slot and the server connection). So before the
+   * service is started, any process of THIS home that is still alive while its service is not is swept with the
+   * verified shutdown ladder (identity re-read before every signal). Anything that cannot be verified stops the start.
+   */
+  private async sweepOrphansBeforeStart(): Promise<void> {
+    const snapshot = await this.readProcesses();
+    const serviceAlive = snapshot.rows.some((row) => row.root && row.home === this.processScope.home && /(?:^|\s)__service(?:\s|$)/.test(row.command) && snapshot.rootPids.includes(row.pid));
+    if (serviceAlive) return;
+    this.processScope.assertRoots(snapshot);
+    if (this.processScope.observe(snapshot).length === 0) return;
+    const complete = await runShutdownTree({
+      scope: this.processScope,
+      snapshot: this.readProcesses,
+      requestStop: async () => undefined,
+      now: () => Date.now(),
+      sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+      signal: this.signalProcess,
+      logFile: join(this.slockHome, "computer", "run", "orphan-sweep.log"),
+      systemShutdown: false,
+      // No service to ask politely: go straight to SIGTERM (then SIGKILL after 5 s).
+      tuning: { gracefulTimeoutMs: 0, termTimeoutMs: 5_000 },
+    });
+    if (!complete) throw new Error("This Computer left processes behind that could not be cleaned up, so it was not started. Quit the app and try again.");
+  }
+
   private async startInternal(): Promise<void> {
     await this.assertCanControl();
+    await this.sweepOrphansBeforeStart();
     await this.api.start({ serverId: null, serverLabel: null });
     // Any action that leaves the local service running clears a stale
     // converge/recycle failure notice (e.g. the start-only retry offered after
