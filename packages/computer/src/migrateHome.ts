@@ -75,6 +75,11 @@ export interface MigrateResultFile {
   finishedAt: string;
   /** End state of the Computer service after the command finished. */
   serviceState: "running" | "stopped-by-user" | "down";
+  /** Why the run aborted, when a cancel/deadline flag preceded the step
+   *  failure: "cancelled" (SIGTERM from the Desktop cancel button) or
+   *  "deadline". null on success and on plain step failures. `error` keeps
+   *  the failing step's original error as supplementary detail (PM #292). */
+  reason: "cancelled" | "deadline" | null;
   error: string | null;
   rollback: { attempted: boolean; ok: boolean; detail?: string } | null;
   /** Every login-item plist this run deleted, and where the byte-for-byte
@@ -761,6 +766,37 @@ export async function migrateHome(
     if (reason !== null) throw new Error(`migrate-home aborted: ${reason}`);
   };
 
+  /** Race a long dependency wait against the abort flags. The underlying
+   *  operation cannot be cancelled (runStart keeps converging), so on abort
+   *  this rejects immediately with the cancel/deadline reason — the step
+   *  fails into rollback, whose whole-tree sweep reaps whatever the
+   *  half-finished start left behind (PM #292: cancel must interrupt the
+   *  start step's daemon wait, not wait out its own timeout). */
+  const abortableWait = <T>(promise: Promise<T>, label: string): Promise<T> =>
+    new Promise<T>((resolve, reject) => {
+      const tick = () => {
+        const reason = abortReason();
+        if (reason !== null) {
+          cleanup();
+          reject(new Error(`${label} aborted: ${reason}`));
+          return true;
+        }
+        return false;
+      };
+      const timer = setInterval(() => { tick(); }, 250);
+      const onSignalAbort = () => { tick(); };
+      abortSignal?.addEventListener("abort", onSignalAbort, { once: true });
+      const cleanup = () => {
+        clearInterval(timer);
+        abortSignal?.removeEventListener("abort", onSignalAbort);
+      };
+      if (tick()) return;
+      promise.then(
+        (value) => { cleanup(); resolve(value); },
+        (error) => { cleanup(); reject(error); },
+      );
+    });
+
   /** Every path spelling a live process could carry for this home: the
    *  realpath, the ORIGINAL argument, and the ~/.slock-raft alias (owner's
    *  running processes carry the alias spelling via launchctl setenv). */
@@ -802,7 +838,7 @@ export async function migrateHome(
   /** Graceful service stop + whole-tree sweep; THROWS when anything of this
    *  home survives (the step fails into rollback — PM blocking fix). */
   const stopHomeCompletely = async (home: string, homeSpellings: string[]): Promise<Record<string, unknown>> => {
-    await stopServiceAt(home);
+    await abortableWait(stopServiceAt(home), "stop");
     const remaining = await sweepHomeTree(homeSpellings);
     if (remaining.length > 0) {
       throw new Error(
@@ -831,13 +867,19 @@ export async function migrateHome(
     }
   };
 
-  const finish = async (result: MigrateOutcome, serviceState: MigrateResultFile["serviceState"], rollback: MigrateResultFile["rollback"]): Promise<MigrateHomeRun> => {
+  const finish = async (
+    result: MigrateOutcome,
+    serviceState: MigrateResultFile["serviceState"],
+    rollback: MigrateResultFile["rollback"],
+    reason: MigrateResultFile["reason"] = null,
+  ): Promise<MigrateHomeRun> => {
     // Retire the in-progress marker's refresher FIRST (no rewrite may land
     // after the deletion below), then drain any in-flight refresh before
     // the result file is written and the marker is removed.
     markerRetired = true;
     await markerWrites.catch(() => {});
     const file: MigrateResultFile = {
+      reason,
       schemaVersion: 1,
       result,
       mode: pre.mode,
@@ -1203,7 +1245,7 @@ export async function migrateHome(
           },
         });
         const tookOver = await takeOverLifecycle();
-        await startServiceAt(pre.to);
+        await abortableWait(startServiceAt(pre.to), "start");
         return { home: pre.to, mode: pre.mode, lifecycleTakeover: tookOver };
       }))
     ) {
@@ -1305,6 +1347,13 @@ export async function migrateHome(
 
   // Rolled into a function so every failure site shares one rollback path.
   async function rollbackAndFinish(): Promise<MigrateHomeRun> {
+    // Which abort flag (if any) preceded the failure? Sampled BEFORE the
+    // immunity flag goes up (afterwards abortReason() is null by design).
+    const reason: MigrateResultFile["reason"] = abortSignal?.aborted
+      ? "cancelled"
+      : hardDeadlineAt !== undefined && nowFn().getTime() >= hardDeadlineAt
+        ? "deadline"
+        : null;
     // Rollback immunity (PM fix #288): from here on the deadline and the
     // cancel signal no longer abort anything — the undo journal must always
     // run to completion.
@@ -1348,7 +1397,7 @@ export async function migrateHome(
       attempted: true,
       ok: rollbackOk,
       detail: undoErrors.length > 0 ? undoErrors.join("; ") : undefined,
-    });
+    }, reason);
   }
 }
 
