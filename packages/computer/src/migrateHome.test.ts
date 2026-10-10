@@ -6,13 +6,16 @@ import { test } from "vitest";
 
 import {
   aliasPathFor,
+  createMigrationEventSink,
   defaultListSourceCarriers,
   type HomeProcess,
   encodeProjectDirName,
   homeEnvPlistPath,
   mentionsPathBounded,
   migrateHome,
+  migrateInProgressPath,
   migrateResultPath,
+  migrateRunLogPath,
   type MigrateEvent,
   type MigrateHomeDeps,
   type MigrateHomeStatus,
@@ -743,4 +746,183 @@ test("stop step sweeps by EVERY spelling: realpath + original argument + alias (
   } finally {
     await rm(f.root, { recursive: true, force: true });
   }
+});
+
+// --- in-progress marker + forced-quit stdout hardening (drill 284-run3, PM fix) ---
+
+test("apply writes the in-progress marker at start and removes it on success", async () => {
+  const f = await fixture({ livePid: true });
+  const h = fakeDeps(f.user);
+  let markerDuringRun: unknown = null;
+  h.deps.stopServiceAt = async (home) => {
+    h.stopCalls.push(home);
+    // By the time the service stops, the apply is underway — the marker must
+    // exist at the SOURCE home and carry the run's identity.
+    markerDuringRun = JSON.parse(await readFile(migrateInProgressPath(f.from), "utf8"));
+  };
+  try {
+    const run = await migrateHome({ from: f.from, to: f.to, ...apply }, h.deps, (e) => h.events.push(e));
+    assert.equal(run.outcome, "success");
+    assert.ok(markerDuringRun, "marker existed while the apply was running");
+    const marker = markerDuringRun as Record<string, unknown>;
+    assert.equal(marker.schemaVersion, 1);
+    assert.equal(marker.from, f.from);
+    assert.equal(marker.to, f.to);
+    assert.equal(marker.mode, "move");
+    assert.equal(typeof marker.pid, "number");
+    assert.equal(typeof marker.startedAt, "string");
+    // Removed from BOTH candidate homes once the result file is on disk.
+    await assert.rejects(() => readFile(migrateInProgressPath(f.to)));
+    await assert.rejects(() => readFile(migrateInProgressPath(f.from)));
+    // The result file (the marker's successor) does exist.
+    const result = JSON.parse(await readFile(migrateResultPath(f.to), "utf8"));
+    assert.equal(result.result, "success");
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+test("rolled-back apply removes the in-progress marker from the restored home", async () => {
+  const f = await fixture({ livePid: true });
+  const h = fakeDeps(f.user, { statuses: [{ serviceRunning: false, serverCount: 1, serversOnline: false }] });
+  try {
+    const run = await migrateHome({ from: f.from, to: f.to, ...apply }, h.deps, (e) => h.events.push(e));
+    assert.equal(run.outcome, "rolled_back");
+    // The rollback restored the source home — the marker must be gone from
+    // it (and never left behind at the target).
+    await assert.rejects(() => readFile(migrateInProgressPath(f.from)));
+    await assert.rejects(() => readFile(migrateInProgressPath(f.to)));
+    const result = JSON.parse(await readFile(migrateResultPath(f.from), "utf8"));
+    assert.equal(result.result, "rolled_back");
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+test("dry-run and blocked applies never write the in-progress marker", async () => {
+  const f = await fixture();
+  const h = fakeDeps(f.user);
+  try {
+    await migrateHome({ from: f.from, to: f.to, ...dry }, h.deps, (e) => h.events.push(e));
+    await assert.rejects(() => readFile(migrateInProgressPath(f.from)));
+
+    const blocked = await fixture();
+    await mkdir(blocked.to, { recursive: true });
+    await writeFile(path.join(blocked.to, "leftover.txt"), "x", "utf8");
+    const bh = fakeDeps(blocked.user);
+    const run = await migrateHome({ from: blocked.from, to: blocked.to, ...apply }, bh.deps, (e) => bh.events.push(e));
+    assert.equal(run.outcome, "blocked");
+    await assert.rejects(() => readFile(migrateInProgressPath(blocked.from)));
+    await rm(blocked.root, { recursive: true, force: true });
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+test("stdout EPIPE mid-run: events switch to the migrate-run.ndjson file and the result file still lands", async () => {
+  const f = await fixture({ livePid: true });
+  const h = fakeDeps(f.user);
+  const stdoutLines: string[] = [];
+  const fileEntries: Array<{ file: string; line: string }> = [];
+  let stdoutWrites = 0;
+  // Break stdout after the preflight events — the drill shape (the app died
+  // mid-apply, so the very next emit hits the dead pipe).
+  const sink = createMigrationEventSink(f.from, f.to, {
+    writeStdout: (line) => {
+      stdoutWrites += 1;
+      if (stdoutWrites > 2) {
+        const error = new Error("write EPIPE") as NodeJS.ErrnoException;
+        error.code = "EPIPE";
+        throw error;
+      }
+      stdoutLines.push(line);
+    },
+    onStdoutError: () => {},
+    ignoreSignals: () => {},
+    appendFileSync: (file, line) => {
+      fileEntries.push({ file, line });
+    },
+  });
+  try {
+    const run = await migrateHome({ from: f.from, to: f.to, ...apply }, h.deps, (event) =>
+      sink.emitLine(`${JSON.stringify(event)}\n`),
+    );
+    assert.equal(run.outcome, "success");
+    assert.equal(sink.stdoutBroken(), true);
+    // No emit ever escaped as a throw — the run reached finish().
+    const result = JSON.parse(await readFile(migrateResultPath(f.to), "utf8"));
+    assert.equal(result.result, "success");
+    // The final summary line went through the same hardened sink.
+    sink.emitLine(`${JSON.stringify(result)}\n`);
+    // Post-move, the fallback resolves to the TARGET home; every event after
+    // the break is in the file and none was lost.
+    assert.ok(fileEntries.length >= 10, `expected the remaining events in the file, got ${fileEntries.length}`);
+    assert.ok(stdoutLines.length === 2);
+    const fileText = fileEntries.map((entry) => entry.line).join("");
+    assert.match(fileText, /"step":"start"/);
+    assert.match(fileText, /"step":"self-check"/);
+    const lastEntry = fileEntries.at(-1)!;
+    const lastLine = JSON.parse(lastEntry.line.trim());
+    assert.equal(lastLine.result, "success");
+    // The fallback path rides the home: pre-move lines ride the SOURCE home
+    // (the rename then carries that file to the target — by inode it IS the
+    // same file), post-move lines resolve the target spelling directly.
+    const allowed = new Set([migrateRunLogPath(f.from), migrateRunLogPath(f.to)]);
+    for (const entry of fileEntries) assert.ok(allowed.has(entry.file), `unexpected fallback path ${entry.file}`);
+    assert.equal(lastEntry.file, migrateRunLogPath(f.to));
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+test("sink: async stdout 'error' event flips to the file; non-EPIPE errors still throw", () => {
+  const fileLines: string[] = [];
+  let errorHandler: ((error: Error) => void) | undefined;
+  const sink = createMigrationEventSink("/from-home", "/to-home", {
+    writeStdout: (line) => {
+      if (line.includes("die")) {
+        const error = new Error("write EPIPE") as NodeJS.ErrnoException;
+        error.code = "EPIPE";
+        throw error;
+      }
+    },
+    onStdoutError: (handler) => {
+      errorHandler = handler;
+    },
+    ignoreSignals: () => {},
+    appendFileSync: (_file, line) => {
+      fileLines.push(line);
+    },
+    homeComputerExists: () => false,
+  });
+  // Async EPIPE arrives on the stream's 'error' event before any throw.
+  const epipe = new Error("write EPIPE") as NodeJS.ErrnoException;
+  epipe.code = "EPIPE";
+  errorHandler!(epipe);
+  assert.equal(sink.stdoutBroken(), true);
+  sink.emitLine("after-async-epipe\n");
+  assert.deepEqual(fileLines, ["after-async-epipe\n"]);
+  // Non-EPIPE stream errors keep their crash semantics.
+  assert.throws(() => errorHandler!(new Error("EBADF: bad file descriptor")), /EBADF/);
+});
+
+test("sink: the fallback home never resurrects a rolled-back (empty) target dir", () => {
+  // Post-rollback shape: <to> exists but has NO computer/ dir (the rollback
+  // restored an empty target); the real home is back at <from>.
+  const fileLines: string[] = [];
+  const sink = createMigrationEventSink("/from-home", "/to-home", {
+    writeStdout: () => {
+      const error = new Error("write EPIPE") as NodeJS.ErrnoException;
+      error.code = "EPIPE";
+      throw error;
+    },
+    onStdoutError: () => {},
+    ignoreSignals: () => {},
+    appendFileSync: (file, line) => {
+      fileLines.push(`${file}::${line}`);
+    },
+    homeComputerExists: (home) => home === "/from-home",
+  });
+  sink.emitLine("rollback-tail\n");
+  assert.match(fileLines[0]!, /^\/from-home\/computer\/migrate-run\.ndjson::/);
 });
