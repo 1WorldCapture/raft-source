@@ -34,6 +34,9 @@ export interface MigrationFinal {
   reason?: string | null;
   /** The Computer's own rollback finished OK (rolled_back results); null when not reported. */
   rollbackOk?: boolean | null;
+  /** Agents that were running before the move but did not come back after it
+   *  (a successful move can still carry these; they need a manual Start). */
+  agentsNotRestored?: Array<{ agentId: string; name: string | null; reason: string; detail?: string }>;
 }
 
 export type MigrationLine =
@@ -54,7 +57,20 @@ export function parseMigrationLine(line: string): MigrationLine {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { kind: "other" };
   const obj = raw as Record<string, unknown>;
   if (obj.result === "success" || obj.result === "rolled_back" || obj.result === "failed") {
-    return { kind: "result", final: { result: obj.result, from: str(obj.from), to: str(obj.to), error: str(obj.error), serviceState: str(obj.serviceState), reason: str(obj.reason), rollbackOk: obj.rollback && typeof obj.rollback === "object" && typeof (obj.rollback as Record<string, unknown>).ok === "boolean" ? (obj.rollback as Record<string, boolean>).ok : null } };
+    const agentsNotRestored = Array.isArray(obj.agentsNotRestored)
+      ? obj.agentsNotRestored.flatMap((entry): Array<{ agentId: string; name: string | null; reason: string; detail?: string }> => {
+        if (!entry || typeof entry !== "object") return [];
+        const agent = entry as Record<string, unknown>;
+        if (typeof agent.agentId !== "string" || typeof agent.reason !== "string") return [];
+        return [{
+          agentId: agent.agentId,
+          name: typeof agent.name === "string" && agent.name.length > 0 ? agent.name : null,
+          reason: agent.reason,
+          ...(typeof agent.detail === "string" ? { detail: agent.detail } : {}),
+        }];
+      })
+      : undefined;
+    return { kind: "result", final: { result: obj.result, from: str(obj.from), to: str(obj.to), error: str(obj.error), serviceState: str(obj.serviceState), reason: str(obj.reason), rollbackOk: obj.rollback && typeof obj.rollback === "object" && typeof (obj.rollback as Record<string, unknown>).ok === "boolean" ? (obj.rollback as Record<string, boolean>).ok : null, ...(agentsNotRestored !== undefined && agentsNotRestored.length > 0 ? { agentsNotRestored } : {}) } };
   }
   if (obj.dryRun === true) return { kind: "dry-run", outcome: obj.outcome === "blocked" || obj.blocked === true ? "blocked" : "planned" };
   if (typeof obj.step === "string" && typeof obj.status === "string") {
@@ -439,7 +455,19 @@ export class MigrationController {
       case "blocked":
         return this.set({ ...common, phase: "blocked", blockers: strings(preflight?.detail?.blockers) });
       case "success":
-        return this.set({ ...common, phase: "success" });
+        // A successful move can still leave agents that did not come back
+        // (their own runtime refused to start). Surface each as a warning
+        // line on the success page instead of hiding the manual Start.
+        return this.set({
+          ...common,
+          phase: "success",
+          warnings: [
+            ...strings(detail?.warnings),
+            ...(run.final?.agentsNotRestored ?? []).map(
+              (entry) => `${entry.name ?? entry.agentId} did not come back after the move (${entry.reason}) — start it manually.`,
+            ),
+          ],
+        });
       case "rolled_back":
         return this.set({ ...common, phase: "rolled_back", error: run.final?.error ?? null, reason: run.final?.reason ?? null, resultFile: resultFileOf(from) });
       case "failed":

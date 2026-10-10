@@ -1411,23 +1411,25 @@ test("cursor-sessions: agents.ndjson cwd is rewritten to the new home spelling",
   }
 });
 
-test("restore-agents: a recorded agent that fails to come back fails the self-check with its name", async () => {
+test("restore-agents: an agent that fails to come back leaves a SUCCESS with agentsNotRestored (no rollback)", async () => {
   const f = await fixture({ livePid: true });
   const h = fakeDeps(f.user);
   try {
     // Phase 1 (record): active. Phase 2+ (restore/poll): the server has it
-    // inactive and rejects the restart — the self-check must name it.
+    // inactive and rejects the restart (PM decision 2026-10-10: the move is
+    // done and the computer is healthy — a stuck agent is a manual-Start
+    // warning, never a reason to churn every agent back to the old home).
     h.rosterPhases.push([{ id: "agent-fixture-1", name: "fixture-one", status: "inactive", runtime: "claude" }]);
     h.startStatus.code = 500;
     const run = await migrateHome({ from: f.from, to: f.to, ...apply }, h.deps, (e) => h.events.push(e));
-    assert.equal(run.outcome, "rolled_back");
-    assert.match(run.result?.error ?? "", /agent-fixture-1/);
-    const restore = h.events.filter((e) => e.step === "restore-agents").find((e) => e.status === "ok");
-    assert.ok(restore, "the restore step itself completed and reported");
-    const failed = restore?.detail?.failed as Array<{ outcome: string }> | undefined;
-    assert.equal(failed?.[0]?.outcome, "start-failed");
+    assert.equal(run.outcome, "success");
+    assert.deepEqual(
+      run.result?.agentsNotRestored?.map((entry) => ({ agentId: entry.agentId, reason: entry.reason })),
+      [{ agentId: "agent-fixture-1", reason: "start-failed" }],
+    );
     const selfCheck = h.events.filter((e) => e.step === "self-check").at(-1);
-    assert.equal(selfCheck?.status, "fail");
+    assert.equal(selfCheck?.status, "ok", "computer health passed; the missing agent is a warning");
+    assert.ok(!h.events.some((e) => e.step === "rollback"), "a missing agent never triggers a rollback");
   } finally {
     await rm(f.root, { recursive: true, force: true });
   }

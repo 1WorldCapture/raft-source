@@ -108,6 +108,10 @@ export interface MigrateResultFile {
    *  even after a successful migration (PM review requirement). */
   backups: MigrateBackupEntry[];
   steps: Array<{ step: MigrateStep; status: MigrateStepStatus; detail?: Record<string, unknown> }>;
+  /** Agents that were running before the migration but did not come back
+   *  after it (PM decision 2026-10-10): the migration still succeeded —
+   *  these need a manual Start. Absent when everything came back. */
+  agentsNotRestored?: Array<{ agentId: string; name: string | null; reason: string; detail?: string }>;
 }
 
 /** Label of the machine-local `launchctl setenv RAFT_HOME …` LaunchAgent
@@ -914,6 +918,7 @@ export async function migrateHome(
       rollback,
       backups,
       steps,
+      ...(agentsNotRestored !== undefined && agentsNotRestored.length > 0 ? { agentsNotRestored } : {}),
     };
     // Result file lives in whichever home is real on disk after the run:
     // success keeps it at the target; a rollback restores the source home,
@@ -1448,6 +1453,7 @@ export async function migrateHome(
   // migration deliberately leaves the service down (desiredState "stopped"
   // or zero attachments): those agents stay down with it.
   let restoreReport: AgentRestoreReport | null = null;
+  let agentsNotRestored: MigrateResultFile["agentsNotRestored"] = undefined;
   if (shouldStartService) {
     if (
       !(await runStep("restore-agents", async () => {
@@ -1461,6 +1467,14 @@ export async function migrateHome(
           // not just at the next step boundary.
           ...(deps.abortSignal ? { signal: deps.abortSignal } : {}),
         });
+        if (restoreReport.failed.length > 0) {
+          agentsNotRestored = restoreReport.failed.map((entry) => ({
+            agentId: entry.agentId,
+            name: entry.name,
+            reason: entry.outcome,
+            ...(entry.detail ? { detail: entry.detail } : {}),
+          }));
+        }
         return {
           recorded: restoreReport.recorded,
           restored: restoreReport.restored,
@@ -1525,26 +1539,23 @@ export async function migrateHome(
             `duplicate runner trees after migration: ${duplicates.map(([id, n]) => `${id} x${n}`).join(", ")}`,
           );
         }
-        // Recorded agents must be back (task card: 全部恢复运行，否则自检失败).
-        // "missing-from-roster" is reported but NOT fatal: the agent was
-        // deleted server-side during the migration and no rollback can
-        // resurrect it — the migration itself succeeded.
+        // Recorded agents must be back — but a missing agent is a WARNING,
+        // never a rollback (PM decision 2026-10-10): the data is safely moved
+        // and the computer itself is healthy (service+daemons checked above),
+        // and rolling the whole move back because one agent's own runtime
+        // will not start fixes nothing and churns every other agent again.
+        // The result file carries `agentsNotRestored` with each reason; the
+        // desktop success page lists them for a manual Start. Only computer
+        // -level unhealthiness (service, daemon) fails the self-check.
         let restoreDetail: Record<string, unknown> | undefined;
         if (restoreReport !== null && restoreReport.recorded > 0) {
-          const fatal = restoreReport.failed.filter(
-            (entry) => entry.outcome === "start-failed" || entry.outcome === "not-active-after-timeout",
-          );
-          const gone = restoreReport.failed.filter((entry) => entry.outcome === "missing-from-roster");
-          if (fatal.length > 0) {
-            throw new Error(
-              `recorded agents did not come back: ${fatal.map((entry) => `${entry.agentId} (${entry.outcome}: ${entry.detail ?? "no detail"})`).join("; ")}`,
-            );
-          }
           restoreDetail = {
             recorded: restoreReport.recorded,
             restored: restoreReport.restored.length,
             alreadyRunning: restoreReport.alreadyRunning.length,
-            ...(gone.length > 0 ? { deletedDuringMigration: gone.map((entry) => entry.agentId) } : {}),
+            ...(restoreReport.failed.length > 0
+              ? { notRestored: restoreReport.failed.map((entry) => ({ agentId: entry.agentId, name: entry.name, reason: entry.outcome, ...(entry.detail ? { detail: entry.detail } : {}) })) }
+              : {}),
           };
         }
         return { serviceRunning: true, serversOnline: true, serverCount: last.serverCount, agentDirs, runnerTrees: [...runnersByServer.values()].reduce((a, b) => a + b, 0), ...(restoreDetail ? { agentsRestored: restoreDetail } : {}) };
