@@ -356,11 +356,13 @@ test("apply: full success — move, alias repoint, home-env removal, start, self
       ],
     );
     // Record/restore round trip: the fixture roster's active agent was
-    // recorded before the stop, found already running after the (fake)
-    // start, and the record file was consumed by finish().
+    // recorded before the stop and explicitly (re)started after it — the
+    // roster's "active" is never trusted as proof the process is alive
+    // (stale-active drill 2026-10-10) — and the record file was consumed.
     const restore = h.events.filter((e) => e.step === "restore-agents").at(-1);
     assert.equal(restore?.detail?.recorded, 1);
-    assert.deepEqual(restore?.detail?.alreadyRunning, ["agent-fixture-1"]);
+    assert.deepEqual(restore?.detail?.restored, ["agent-fixture-1"]);
+    assert.ok(h.machineCalls.some((call) => call === "POST /internal/machine/agents/agent-fixture-1/start"));
     await assert.rejects(() => readFile(path.join(f.to, "computer", "migrate-restore-agents.json")));
     await assert.rejects(() => readFile(path.join(f.from, "computer", "migrate-restore-agents.json")));
   } finally {

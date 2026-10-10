@@ -43,7 +43,6 @@ export interface AgentRestoreOutcome {
 export interface AgentRestoreReport {
   recorded: number;
   restored: string[];
-  alreadyRunning: string[];
   failed: AgentRestoreOutcome[];
 }
 
@@ -203,7 +202,13 @@ export async function removeRunningAgentsRecord(slockHome: string): Promise<void
 
 /** Restart every recorded agent through the server and wait until each is
  *  active again. The report names every agent that did NOT come back — the
- *  self-check turns that into an explicit failure instead of a silent gap. */
+ *  self-check turns that into an explicit failure instead of a silent gap.
+ *
+ *  EVERY recorded agent gets an explicit start — never skip on a roster that
+ *  says "active": after an unclean daemon death the server's status AND
+ *  activity can both be stale (drill 2026-10-10: process gone, roster still
+ *  active+online, nothing wakes it). orchestrator.startAgent is idempotent —
+ *  on a genuinely running agent it rebinds, exactly like the Start button. */
 export async function restoreRecordedAgents(
   slockHome: string,
   record: RunningAgentsRecord,
@@ -219,7 +224,7 @@ export async function restoreRecordedAgents(
   const byServer = new Map<string, ServerAttachment>();
   for (const attachment of attachments) byServer.set(attachment.serverId, attachment);
 
-  const report: AgentRestoreReport = { recorded: record.agents.length, restored: [], alreadyRunning: [], failed: [] };
+  const report: AgentRestoreReport = { recorded: record.agents.length, restored: [], failed: [] };
   if (record.agents.length === 0) return report;
 
   for (const agent of record.agents) {
@@ -240,10 +245,6 @@ export async function restoreRecordedAgents(
       report.failed.push({ ...agent, outcome: "missing-from-roster", detail: "agent no longer assigned to this machine" });
       continue;
     }
-    if (agentStatus(view) === "active") {
-      report.alreadyRunning.push(agent.agentId);
-      continue;
-    }
     try {
       const res = await fetchImpl(attachment.serverUrl, attachment.apiKey, `/internal/machine/agents/${agent.agentId}/start`, { method: "POST" });
       if (res.status !== 200) {
@@ -259,8 +260,7 @@ export async function restoreRecordedAgents(
   // Wait for every started agent to surface as active. Agents that already
   // failed their start keep their failure; only the pending ones are polled.
   const pending = record.agents.filter(
-    (agent) => !report.alreadyRunning.includes(agent.agentId)
-      && !report.failed.some((entry) => entry.agentId === agent.agentId),
+    (agent) => !report.failed.some((entry) => entry.agentId === agent.agentId),
   );
   const deadline = now().getTime() + timeoutMs;
   const unsettled = new Set(pending.map((agent) => agent.agentId));
