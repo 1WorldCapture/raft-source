@@ -105,7 +105,11 @@ export function migrateResultPath(slockHome: string): string {
  *  2026-10-10). The Desktop app reads it to tell "a migration is running"
  *  apart from "none ever happened" when the result file does not exist yet —
  *  e.g. the app was killed mid-apply and the CLI is still finishing alone.
- *  It rides the home (the move renames it to <to>). */
+ *  It rides the home (the move renames it to <to>). `deadlineAt` (startedAt
+ *  + this budget) bounds the app's wait for a still-running CLI; `step` is
+ *  the most recent step the run touched, for progress display. */
+export const MIGRATE_IN_PROGRESS_DEADLINE_MS = 10 * 60_000;
+
 export function migrateInProgressPath(slockHome: string): string {
   return path.join(slockHome, "computer", "migrate-in-progress.json");
 }
@@ -605,6 +609,50 @@ export async function migrateHome(
   const record = (event: MigrateEvent) => {
     steps.push(event);
     emit(event);
+    if (markerTracked) writeInProgressMarker(event.step);
+  };
+
+  // In-progress marker machinery (PM fix 2026-10-10) — declared before
+  // `record` is ever CALLED with tracking enabled (apply only; the dry-run
+  // path below never sets markerTracked). The marker is the FIRST mutation
+  // of the apply: the Desktop app polls it to tell "a migration is running"
+  // apart from "none ever happened" while migrate-result.json does not
+  // exist yet — exactly the state a killed app leaves when the CLI is still
+  // finishing alone (drill 284-run3). It rides the home (the move renames
+  // it to <to>); `record` refreshes `step` on every event so the app can
+  // render progress and enforce `deadlineAt` (its bounded wait for the
+  // still-running CLI). finish() removes it AFTER the result file is on
+  // disk, so a crash between the two leaves both files and readers can
+  // prefer the result.
+  const markerBase = { schemaVersion: 1, pid: process.pid, mode: pre.mode, from: pre.from, to: pre.to, startedAt };
+  const deadlineAt = new Date(Date.parse(startedAt) + MIGRATE_IN_PROGRESS_DEADLINE_MS).toISOString();
+  let markerRetired = false;
+  let markerTracked = false;
+  let markerWrites: Promise<void> = Promise.resolve();
+  const writeInProgressMarker = (step: MigrateStep): Promise<void> => {
+    if (markerRetired) return markerWrites;
+    markerWrites = markerWrites.then(async () => {
+      if (markerRetired) return;
+      // The marker rides the home: post-move it lives at <to>; pre-move at
+      // <from> (same live-home resolution rule as the event-sink fallback).
+      let home = pre.to;
+      try {
+        await fs.stat(path.join(pre.to, "computer"));
+      } catch {
+        home = pre.from;
+      }
+      try {
+        await fs.mkdir(path.dirname(migrateInProgressPath(home)), { recursive: true });
+        await fs.writeFile(
+          migrateInProgressPath(home),
+          `${JSON.stringify({ ...markerBase, deadlineAt, step }, null, 2)}\n`,
+          "utf8",
+        );
+      } catch {
+        /* advisory marker — a failed refresh is never fatal */
+      }
+    });
+    return markerWrites;
   };
 
   // ---- dry-run: the preflight above IS the run; emit the plan as steps ----
@@ -658,19 +706,10 @@ export async function migrateHome(
     return { outcome: "blocked", blocked: true, mode: pre.mode, result: null };
   }
 
-  // In-progress marker (PM fix 2026-10-10): the FIRST mutation of the apply.
-  // The Desktop app polls it to tell "a migration is running" apart from
-  // "none ever happened" while migrate-result.json does not exist yet —
-  // exactly the state a killed app leaves when the CLI is still finishing
-  // alone (drill 284-run3). It rides the home (the move renames it to <to>);
-  // finish() removes it AFTER the result file is on disk, so a crash between
-  // the two leaves both files and readers can prefer the result.
-  await fs.mkdir(path.dirname(migrateInProgressPath(pre.from)), { recursive: true });
-  await fs.writeFile(
-    migrateInProgressPath(pre.from),
-    `${JSON.stringify({ schemaVersion: 1, pid: process.pid, mode: pre.mode, from: pre.from, to: pre.to, startedAt }, null, 2)}\n`,
-    "utf8",
-  );
+  // The marker machinery lives above `record`; enabling tracking here makes
+  // the initial write the FIRST mutation of the apply.
+  markerTracked = true;
+  await writeInProgressMarker("preflight");
 
   // ---- apply ----
   const homeDir = deps.homeDir ?? os.homedir();
@@ -750,6 +789,11 @@ export async function migrateHome(
   };
 
   const finish = async (result: MigrateOutcome, serviceState: MigrateResultFile["serviceState"], rollback: MigrateResultFile["rollback"]): Promise<MigrateHomeRun> => {
+    // Retire the in-progress marker's refresher FIRST (no rewrite may land
+    // after the deletion below), then drain any in-flight refresh before
+    // the result file is written and the marker is removed.
+    markerRetired = true;
+    await markerWrites.catch(() => {});
     const file: MigrateResultFile = {
       schemaVersion: 1,
       result,
@@ -851,6 +895,10 @@ export async function migrateHome(
   // Skipped entirely in in-place mode: from==to means nothing moves.
   if (pre.mode !== "in-place" &&
     !(await runStep("move", async () => {
+      // Drain marker refreshes first: a write that resolved its home as
+      // <from> before this rename must land BEFORE it — afterwards it would
+      // recreate the old home tree and break the rollback's move-back.
+      await markerWrites.catch(() => {});
       await fs.mkdir(path.dirname(pre.to), { recursive: true });
       // Absent-and-empty target: POSIX rename(2) handles an empty dir target
       // on Linux but NOT reliably everywhere — clear it explicitly and record

@@ -14,6 +14,7 @@ import {
   mentionsPathBounded,
   migrateHome,
   migrateInProgressPath,
+  MIGRATE_IN_PROGRESS_DEADLINE_MS,
   migrateResultPath,
   migrateRunLogPath,
   type MigrateEvent,
@@ -771,6 +772,16 @@ test("apply writes the in-progress marker at start and removes it on success", a
     assert.equal(marker.mode, "move");
     assert.equal(typeof marker.pid, "number");
     assert.equal(typeof marker.startedAt, "string");
+    // step tracks the run's progress; refreshes are chained async, so a
+    // mid-run read may lag by an event or two — assert it is a plausible
+    // recent step of this run, not an exact one.
+    assert.ok(
+      ["preflight", "source-carrier", "stop"].includes(marker.step as string),
+      `unexpected mid-run marker step ${JSON.stringify(marker.step)}`,
+    );
+    // deadlineAt = startedAt + the app's bounded-wait budget.
+    const expectedDeadline = Date.parse(marker.startedAt as string) + MIGRATE_IN_PROGRESS_DEADLINE_MS;
+    assert.equal(Date.parse(marker.deadlineAt as string), expectedDeadline);
     // Removed from BOTH candidate homes once the result file is on disk.
     await assert.rejects(() => readFile(migrateInProgressPath(f.to)));
     await assert.rejects(() => readFile(migrateInProgressPath(f.from)));

@@ -2983,3 +2983,69 @@ test("buildResidentSpawn: packaged Electron dispatches mode directly without tre
     command: process.execPath, args: ["/dev/app", "__service"],
   });
 });
+
+test("service boot: the IPC bind serializes under the home mutation lock when no parent lock is held (PM fix 2026-10-10)", async () => {
+  await withHome(async () => {
+    const previous = process.env[PARENT_LOCK_HELD_ENV_VAR];
+    delete process.env[PARENT_LOCK_HELD_ENV_VAR];
+    const bindLockCalls: number[] = [];
+    const cap = captureOut();
+    try {
+      await runService({
+        ipcBindLock: async (fn) => {
+          bindLockCalls.push(process.pid);
+          await fn();
+        },
+        serviceIdentityPublishDeps: {
+          writePidfileAtFn: async () => {},
+          writeServiceVersionEvidenceFn: async () => {},
+        },
+        shutdownServiceFn: (shutdownDeps) => shutdownService({
+          ...shutdownDeps,
+          exit: () => {},
+        }),
+        afterIpcReady: async (shutdown) => {
+          await shutdown();
+        },
+      });
+    } finally {
+      cap.restore();
+      if (previous === undefined) delete process.env[PARENT_LOCK_HELD_ENV_VAR];
+      else process.env[PARENT_LOCK_HELD_ENV_VAR] = previous;
+    }
+    assert.equal(bindLockCalls.length, 1, "the bind ran exactly once under the injected lock");
+  });
+});
+
+test("service boot: the IPC bind lock is SKIPPED when the parent CLI/app still holds the mutation lock (deadlock guard)", async () => {
+  await withHome(async () => {
+    const previous = process.env[PARENT_LOCK_HELD_ENV_VAR];
+    process.env[PARENT_LOCK_HELD_ENV_VAR] = "1";
+    const bindLockCalls: number[] = [];
+    const cap = captureOut();
+    try {
+      await runService({
+        ipcBindLock: async (fn) => {
+          bindLockCalls.push(process.pid);
+          await fn();
+        },
+        serviceIdentityPublishDeps: {
+          writePidfileAtFn: async () => {},
+          writeServiceVersionEvidenceFn: async () => {},
+        },
+        shutdownServiceFn: (shutdownDeps) => shutdownService({
+          ...shutdownDeps,
+          exit: () => {},
+        }),
+        afterIpcReady: async (shutdown) => {
+          await shutdown();
+        },
+      });
+    } finally {
+      cap.restore();
+      if (previous === undefined) delete process.env[PARENT_LOCK_HELD_ENV_VAR];
+      else process.env[PARENT_LOCK_HELD_ENV_VAR] = previous;
+    }
+    assert.deepEqual(bindLockCalls, [], "the parent already serializes the boot — no second acquisition");
+  });
+});
