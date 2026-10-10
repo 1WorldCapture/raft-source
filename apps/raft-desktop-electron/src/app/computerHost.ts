@@ -14,7 +14,8 @@
 // that session via `ensureUsableUserSession` — just works, with no second login.
 
 import { execFile } from "node:child_process";
-import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, realpath, rename, rm, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { app } from "electron";
 import {
@@ -44,7 +45,6 @@ import {
 } from "./sessionOriginGuard.js";
 import { reduceConvergeFailure, type ConvergeState } from "./convergeState.js";
 import { ComputerProcessScope, readComputerProcesses, type ComputerProcessSnapshot } from "../main/computerProcesses.js";
-import { runShutdownTree } from "../main/shutdown.js";
 import { connectDeployment, readDeploymentSelection, type DeploymentConnectionPlan } from "./deploymentConnection.js";
 import { CONFIGURED_API_ORIGIN, OFFICIAL_API_ORIGINS } from "./configuredApiOrigin.js";
 import { runServiceRecycle } from "./serviceRecycle.js";
@@ -90,9 +90,7 @@ class ComputerHost {
   private connectionSettled: Promise<void> = Promise.resolve();
   private selectionError: Error | null = null;
   private readonly storageDirectory: string;
-  private readonly signalProcess: (pid: number, signal: NodeJS.Signals) => void;
-  constructor(options: { home?: string; configuredOrigin?: string; readProcesses?: () => Promise<ComputerProcessSnapshot>; storageDirectory?: string; signalProcess?: (pid: number, signal: NodeJS.Signals) => void } = {}) {
-    this.signalProcess = options.signalProcess ?? ((pid, signal) => process.kill(pid, signal));
+  constructor(options: { home?: string; configuredOrigin?: string; readProcesses?: () => Promise<ComputerProcessSnapshot>; storageDirectory?: string } = {}) {
     this.slockHome = options.home ?? resolveRaftHome();
     this.configuredOrigin = options.configuredOrigin ?? CONFIGURED_API_ORIGIN;
     this.storageDirectory = options.storageDirectory ?? `${app.getPath("userData")}/computer-deployments`;
@@ -391,19 +389,14 @@ class ComputerHost {
     if (serviceAlive) return;
     this.processScope.assertRoots(snapshot);
     if (this.processScope.observe(snapshot).length === 0) return;
-    const complete = await runShutdownTree({
-      scope: this.processScope,
-      snapshot: this.readProcesses,
-      requestStop: async () => undefined,
-      now: () => Date.now(),
-      sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
-      signal: this.signalProcess,
-      logFile: join(this.slockHome, "computer", "run", "orphan-sweep.log"),
-      systemShutdown: false,
-      // No service to ask politely: go straight to SIGTERM (then SIGKILL after 5 s).
-      tuning: { gracefulTimeoutMs: 0, termTimeoutMs: 5_000 },
-    });
-    if (!complete) throw new Error("This Computer left processes behind that could not be cleaned up, so it was not started. Quit the app and try again.");
+    // The Computer's own whole-home sweep (the one migrate-home uses): attributes processes by every spelling of the
+    // home (realpath, as configured, the ~/.slock-raft alias) with boundary matching, TERM → grace → KILL → rescan.
+    const lib = await import("@botiverse/raft-computer/lib");
+    const real = await realpath(this.slockHome).catch(() => this.slockHome);
+    const aliasPath = join(homedir(), ".slock-raft");
+    const alias = (await realpath(aliasPath).catch(() => null)) === real ? aliasPath : null;
+    const left = await lib.sweepHomeProcesses(lib.homeProcessSpellings(real, this.slockHome, alias));
+    if (left.length > 0) throw new Error("This Computer left processes behind that could not be cleaned up, so it was not started. Quit the app and try again.");
   }
 
   private async startInternal(): Promise<void> {

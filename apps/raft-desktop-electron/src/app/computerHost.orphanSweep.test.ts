@@ -18,6 +18,7 @@ test("orphaned runners are swept before a service is started (Start and launch c
   let rows: Array<ReturnType<typeof row> & { home: string }> = [];
   let rootPids: number[] = [];
   const setRows = (list: Array<ReturnType<typeof row>>, roots: number[]) => { rows = list.map((r) => ({ ...r, home: testHome })); rootPids = roots; calls = []; signals = []; };
+  let sweepLeft: Array<{ pid: number }> = [];
   const api = {
     getStatus: async () => ({ servers: [{ serverId: "s1" }], service: { running: false } }),
     stop: async () => { calls.push("stop"); },
@@ -40,6 +41,13 @@ test("orphaned runners are swept before a service is started (Start and launch c
   } });
   t.mock.module("@botiverse/raft-computer/lib", { namedExports: {
     connectService: async () => { throw new Error("unused"); },
+    homeProcessSpellings: (primary: string, original: string | null, alias: string | null) => [primary, original, alias].filter((v): v is string => v !== null),
+    // The Computer's own sweep: the orphans are gone afterwards (and so are their pidfiles).
+    sweepHomeProcesses: async (spellings: string[]) => {
+      for (const r of rows) signals.push([r.pid, `sweep:${spellings.length > 0}`]);
+      rows = []; rootPids = [];
+      return sweepLeft;
+    },
     convergeAppHostLifecycle: async () => ({ owner: "app", enabled: true, status: "converged", label: null, definitionPath: null, definition: null }),
     createComputerApi: () => api,
     readProcessStartTime: async () => null,
@@ -58,14 +66,12 @@ test("orphaned runners are swept before a service is started (Start and launch c
   const host = new ComputerHost({
     home: testHome, configuredOrigin: "http://example.invalid",
     readProcesses: async () => ({ rootPids: [...rootPids], rows: rows.map((r) => ({ ...r })) }),
-    // The process is gone, and so is its pidfile (what a real exit leaves behind).
-    signalProcess: (pid, signal) => { signals.push([pid, signal]); rows = rows.filter((r) => r.pid !== pid); rootPids = rootPids.filter((p) => p !== pid); },
   });
 
   await t.test("Start: an orphan is swept first, then the service starts", async () => {
     setRows([row(4242, "/app/raft-desktop __run s1")], [4242]);
     await host.start();
-    assert.deepEqual(signals[0], [4242, "SIGTERM"]);
+    assert.deepEqual(signals[0], [4242, "sweep:true"]);
     assert.deepEqual(calls, ["start"], "started only after the sweep");
   });
 
@@ -73,7 +79,7 @@ test("orphaned runners are swept before a service is started (Start and launch c
     setRows([row(4242, "/app/raft-desktop __run s1")], [4242]);
     const result = await host.converge();
     assert.equal(result.ok, true, JSON.stringify(result));
-    assert.deepEqual(signals[0], [4242, "SIGTERM"]);
+    assert.deepEqual(signals[0], [4242, "sweep:true"]);
     assert.deepEqual(calls, ["start"]);
   });
 
@@ -81,6 +87,14 @@ test("orphaned runners are swept before a service is started (Start and launch c
     setRows([row(100, "/app/raft-desktop __service"), row(101, "/app/raft-desktop __run s1", 100)], [100, 101]);
     await host.start();
     assert.deepEqual([signals, calls], [[], ["start"]]);
+  });
+
+  await t.test("an orphan that survives the sweep stops the start (nothing is started over it)", async () => {
+    setRows([row(4242, "/app/raft-desktop __run s1")], [4242]);
+    sweepLeft = [{ pid: 4242 }];
+    await assert.rejects(() => host.start(), /could not be cleaned up/);
+    assert.deepEqual(calls, []);
+    sweepLeft = [];
   });
 
   await t.test("nothing running: no sweep, plain start", async () => {
