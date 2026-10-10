@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { findInterruptedMigration, findMigratedAwayHome, findRunningMigration, waitForRunningMigration, type InProgressMarker, type MigrationResultSummary } from "./migrationRecovery.ts";
+import { isMigrationProcess, findInterruptedMigration, findMigratedAwayHome, findRunningMigration, waitForRunningMigration, type InProgressMarker, type MigrationResultSummary } from "./migrationRecovery.ts";
 
 const EMBEDDED = "/Users/u/app/computer-slock-raft";
 const success = (over: Partial<MigrationResultSummary> = {}): MigrationResultSummary => ({
@@ -62,7 +62,7 @@ test("a migration still running at launch is waited for (and only then does star
   const waited = await waitForRunningMigration({
     hostMode: { mode: "embedded" }, homes: ["/h/old", "/h/.slock"],
     readMarker: async (home) => (home === "/h/.slock" ? marker(4242) : null),
-    isAlive: () => alive-- > 0, sleep: async (ms) => { waits.push(ms); },
+    isAlive: async () => alive-- > 0, sleep: async (ms) => { waits.push(ms); },
   });
   assert.equal(waited, true);
   assert.ok(waits.length >= 2, "polled until the process was gone");
@@ -71,12 +71,12 @@ test("a migration still running at launch is waited for (and only then does star
 test("nothing running / stale marker of a dead pid / already standalone: no waiting", async () => {
   const base = { homes: ["/h/old"], sleep: async () => { throw new Error("must not sleep"); } };
   assert.equal(await waitForRunningMigration({ ...base, hostMode: { mode: "embedded" }, readMarker: async () => null }), false);
-  assert.equal(await waitForRunningMigration({ ...base, hostMode: { mode: "embedded" }, readMarker: async () => marker(1), isAlive: () => false }), false);
-  assert.equal(await waitForRunningMigration({ ...base, hostMode: { mode: "standalone", home: "/h" }, readMarker: async () => marker(1), isAlive: () => true }), false);
+  assert.equal(await waitForRunningMigration({ ...base, hostMode: { mode: "embedded" }, readMarker: async () => marker(1), isAlive: async () => false }), false);
+  assert.equal(await waitForRunningMigration({ ...base, hostMode: { mode: "standalone", home: "/h" }, readMarker: async () => marker(1), isAlive: async () => true }), false);
 });
 
 test("waiting is bounded", async () => {
-  const waited = await waitForRunningMigration({ hostMode: { mode: "embedded" }, homes: ["/h"], readMarker: async () => marker(1), isAlive: () => true, sleep: async () => undefined, timeoutMs: -1 });
+  const waited = await waitForRunningMigration({ hostMode: { mode: "embedded" }, homes: ["/h"], readMarker: async () => marker(1), isAlive: async () => true, sleep: async () => undefined, timeoutMs: -1 });
   assert.equal(waited, true);
 });
 
@@ -99,8 +99,19 @@ test("…but not when the built-in home still exists, when it IS the standard ho
 
 test("findRunningMigration: a live marker is returned without waiting; dead pid / none / standalone are not", async () => {
   const live = marker(4242);
-  assert.deepEqual(await findRunningMigration({ hostMode: { mode: "embedded" }, homes: ["/h/old", "/h/.slock"], readMarker: async (h) => (h === "/h/.slock" ? live : null), isAlive: () => true }), live);
-  assert.equal(await findRunningMigration({ hostMode: { mode: "embedded" }, homes: ["/h"], readMarker: async () => live, isAlive: () => false }), null);
+  assert.deepEqual(await findRunningMigration({ hostMode: { mode: "embedded" }, homes: ["/h/old", "/h/.slock"], readMarker: async (h) => (h === "/h/.slock" ? live : null), isAlive: async () => true }), live);
+  assert.equal(await findRunningMigration({ hostMode: { mode: "embedded" }, homes: ["/h"], readMarker: async () => live, isAlive: async () => false }), null);
   assert.equal(await findRunningMigration({ hostMode: { mode: "embedded" }, homes: ["/h"], readMarker: async () => null }), null);
-  assert.equal(await findRunningMigration({ hostMode: { mode: "standalone", home: "/h" }, homes: ["/h"], readMarker: async () => live, isAlive: () => true }), null);
+  assert.equal(await findRunningMigration({ hostMode: { mode: "standalone", home: "/h" }, homes: ["/h"], readMarker: async () => live, isAlive: async () => true }), null);
+});
+
+test("isMigrationProcess: a live pid counts only if its command line is migrate-home (and, with --from, the marker's home)", async () => {
+  const m = { pid: 4242, from: "/Users/u/app/computer-slock-raft" };
+  const cmd = (line: string | null) => async () => line;
+  assert.equal(await isMigrationProcess(m, cmd("/x/raft-computer migrate-home --from /Users/u/app/computer-slock-raft --apply --json")), true);
+  assert.equal(await isMigrationProcess(m, cmd("/x/raft-computer migrate-home --apply --json")), true, "no --from on the line: not contradicted");
+  assert.equal(await isMigrationProcess(m, cmd("/usr/bin/vim notes.txt")), false, "a reused pid");
+  assert.equal(await isMigrationProcess(m, cmd(null)), false, "no such process");
+  assert.equal(await isMigrationProcess(m, cmd("/x/raft-computer migrate-home --from /somewhere/else --json")), false, "another migration");
+  assert.equal(await isMigrationProcess({ pid: 1, from: null }, cmd("raft-computer status --json")), false, "a different raft-computer command");
 });

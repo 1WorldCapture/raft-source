@@ -11,7 +11,8 @@ export interface SupervisorDeps {
   /** Re-read the marker (step / deadline move on). */
   readMarker: (home: string) => Promise<InProgressMarker | null>;
   readResult: (home: string) => Promise<(MigrationResultSummary & { error?: string | null; reason?: string | null; startedAt?: string | null }) | null>;
-  isAlive: (pid: number) => boolean;
+  /** True only while the marker's pid is still a migrate-home command (not a reused pid). */
+  isAlive: (marker: InProgressMarker) => boolean | Promise<boolean>;
   signal: (pid: number, signal: NodeJS.Signals) => void;
   /** Success: copy the Cursor SDK, write the standalone marker. */
   finish: (to: string) => Promise<{ warnings: string[] }>;
@@ -43,8 +44,12 @@ export class MigrationSupervisor {
 
   cancel(): MigrationState {
     if (this.state.phase !== "applying" || !this.state.cancellable || this.state.cancelRequested) return this.state;
-    try { this.deps.signal(this.current.pid, "SIGTERM"); } catch { /* already gone */ }
-    return this.set({ ...this.state, cancelRequested: true });
+    const next = this.set({ ...this.state, cancelRequested: true });
+    // Signal only a pid that is still the migration command; a reused pid is somebody else's process.
+    void Promise.resolve(this.deps.isAlive(this.current)).then((alive) => {
+      if (alive) { try { this.deps.signal(this.current.pid, "SIGTERM"); } catch { /* already gone */ } }
+    });
+    return next;
   }
 
   /** Closing the result: restart so the normal launch decision (built-in or standalone) runs. */
@@ -57,7 +62,7 @@ export class MigrationSupervisor {
   async run(): Promise<void> {
     const sleep = this.deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
     try {
-      while (this.deps.isAlive(this.current.pid)) {
+      while (await this.deps.isAlive(this.current)) {
         const fresh = await this.deps.readMarker(this.current.home);
         if (fresh) {
           this.current = fresh;
