@@ -95,9 +95,47 @@ test("stdin user frames stay a single NDJSON object", () => {
   });
 });
 
+test("probe falls back to the fixed install dirs when which finds nothing, and still gates on version", () => {
+  const exec = (versions: Record<string, string>) => execSpy({
+    "which agy": new Error("not found"),
+    ...versions,
+  });
+  const local = probeAntigravityStream({
+    platform: "darwin",
+    homeDir: "/Users/u",
+    env: { PATH: "/usr/bin" },
+    existsSyncFn: (p) => p === "/Users/u/.local/bin/agy",
+    execFileSyncFn: exec({ "/Users/u/.local/bin/agy --version": "1.3.2\n" }),
+  });
+  assert.deepEqual(local, { available: true, version: "1.3.2" });
+
+  const brew = probeAntigravityStream({
+    platform: "darwin",
+    homeDir: "/Users/u",
+    env: { PATH: "/usr/bin" },
+    existsSyncFn: (p) => p === "/opt/homebrew/bin/agy",
+    execFileSyncFn: exec({ "/opt/homebrew/bin/agy --version": "1.1.7\n" }),
+  });
+  assert.equal(brew.available, true);
+  assert.equal(brew.version, "1.1.7"); // the launch gate still refuses it
+  assert.throws(() => assertAntigravityStreamLaunchVersion(brew.version), AntigravityStreamVersionError);
+
+  // PATH wins over the fixed dirs.
+  const pathWins = probeAntigravityStream({
+    platform: "darwin",
+    homeDir: "/Users/u",
+    env: { PATH: "/tmp/agy-test" },
+    existsSyncFn: () => true,
+    execFileSyncFn: execSpy({ "which agy": "/tmp/agy-test/agy", "/tmp/agy-test/agy --version": "1.3.2\n" }),
+  });
+  assert.equal(pathWins.available, true);
+});
+
 test("version 1.1.7 is refused, 1.3.2 is accepted, and a missing binary is unavailable", () => {
   const missing = probeAntigravityStream({
     platform: "darwin",
+    homeDir: "/home/nobody",
+    existsSyncFn: () => false,
     env: { PATH: "/tmp/agy-test" },
     execFileSyncFn: execSpy({
       "which agy": new Error("not found"),

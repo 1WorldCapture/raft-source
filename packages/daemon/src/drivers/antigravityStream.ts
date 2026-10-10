@@ -11,7 +11,7 @@ import {
 } from "@botiverse/raft-shared";
 import { buildCliTransportSystemPrompt, prepareCliTransport } from "./cliTransport.js";
 import { AntigravityStreamEventNormalizer } from "./antigravityStreamEventNormalizer.js";
-import { readCommandVersion, resolveCommandOnPath, type ProbeDeps } from "./probe.js";
+import { readCommandVersion, resolveAgyCommand, type ProbeDeps } from "./probe.js";
 import { ChildProcessRuntimeSession } from "./runtimeSession.js";
 import type { ParsedEvent, RuntimeDriver, RuntimeProbeResult, RuntimeSession, SpawnContext, SpawnResult } from "./types.js";
 
@@ -97,7 +97,7 @@ export function encodeAntigravityStreamUserMessage(text: string): string {
 }
 
 export function probeAntigravityStream(deps: ProbeDeps = {}): RuntimeProbeResult {
-  const command = resolveCommandOnPath("agy", deps);
+  const command = resolveAgyCommand(deps);
   if (!command) return { available: false };
   return {
     available: true,
@@ -143,7 +143,7 @@ export type AntigravityModelDetectDeps = ProbeDeps & {
 export async function detectAntigravityStreamModels(
   deps: AntigravityModelDetectDeps = {},
 ): Promise<RuntimeModelSourceOutcome> {
-  const command = resolveCommandOnPath("agy", deps);
+  const command = resolveAgyCommand(deps);
   if (!command) return { kind: "error", retryable: true };
   const execFileFn = deps.execFileFn ?? execFileAsync;
   try {
@@ -254,7 +254,7 @@ export class AntigravityStreamDriver implements RuntimeDriver {
     });
     for (const key of SSH_ENV_KEYS) delete spawnEnv[key];
 
-    const command = resolveCommandOnPath("agy") ?? "agy";
+    const command = resolveAgyCommand() ?? "agy";
     const args = buildAntigravityStreamArgs(ctx.config);
     const proc = spawn(command, args, {
       cwd: ctx.workingDirectory,
