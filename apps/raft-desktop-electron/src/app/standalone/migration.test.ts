@@ -12,7 +12,7 @@ test("line parser: events, the apply result, the dry-run summary; anything else 
   assert.deepEqual(parseMigrationLine('{"step":"move","status":"planned","detail":{"to":"/h"}}'), { kind: "event", event: { step: "move", status: "planned", detail: { to: "/h" } } });
   assert.deepEqual(parseMigrationLine('{"schemaVersion":1,"result":"rolled_back","from":"/a","to":"/b","error":"boom","serviceState":"running","steps":[]}'), {
     kind: "result",
-    final: { result: "rolled_back", from: "/a", to: "/b", error: "boom", serviceState: "running" },
+    final: { result: "rolled_back", from: "/a", to: "/b", error: "boom", serviceState: "running", reason: null },
   });
   assert.deepEqual(parseMigrationLine('{"dryRun":true,"outcome":"blocked","blocked":true}'), { kind: "dry-run", outcome: "blocked" });
   assert.deepEqual(parseMigrationLine('{"dryRun":true,"outcome":"planned","blocked":false}'), { kind: "dry-run", outcome: "planned" });
@@ -260,4 +260,81 @@ printf '{"result":"success","from":"/a","to":"/b","error":null}'`;
     assert.ok(firstAt < 900, `first event arrived while the command was still running (${firstAt}ms)`);
     assert.equal(run.outcome, "success", "an unterminated final line is still read");
   });
+});
+
+function withHandOver(handOver: () => Promise<void>, over: { onRun?: (input: { onSpawn?: (pid: number) => void }) => Promise<MigrateRun>; supportsCancel?: boolean } = {}) {
+  const order: string[] = [];
+  const signals: Array<[number, string]> = [];
+  const c = new MigrationController({
+    available: true, getFromHome: async () => "/h", ensureBinary: async () => "/b",
+    handOver: async () => { order.push("handover"); await handOver(); },
+    restoreAfterHandOverFailure: async () => { order.push("restore"); },
+    signal: (pid, sig) => { signals.push([pid, sig]); },
+    supportsCancel: async () => over.supportsCancel ?? true,
+    run: async (input) => {
+      if (!input.apply) return { outcome: "planned", events: [ev("preflight", "ok", { to: "/t" })], final: null, detail: null, exitCode: 0 };
+      order.push("run");
+      return over.onRun ? over.onRun(input) : { outcome: "success", events: [], final: { result: "success", from: "/h", to: "/t", error: null, serviceState: "running" }, detail: null, exitCode: 0 };
+    },
+    afterSuccess: async () => ({ warnings: [] }), publish: () => undefined,
+  });
+  return { c, order, signals };
+}
+
+test("hand-over runs BEFORE the command and is a visible step", async () => {
+  const { c, order } = withHandOver(async () => undefined);
+  await c.plan();
+  const s = await c.apply();
+  assert.deepEqual(order, ["handover", "run"]);
+  assert.equal(s.steps.find((x) => x.step === "handover")?.status, "ok");
+});
+
+test("hand-over that leaves processes behind aborts: no command is run, error says nothing changed, built-in is restored", async () => {
+  const { c, order } = withHandOver(async () => { throw new Error("pid 4 still running"); });
+  await c.plan();
+  const s = await c.apply();
+  assert.deepEqual(order, ["handover", "restore"], "the migrate command was never started");
+  assert.equal(s.phase, "error");
+  assert.match(s.error ?? "", /nothing was changed.*pid 4 still running/i);
+  assert.equal(s.steps.find((x) => x.step === "handover")?.status, "fail");
+});
+
+test("cancel: only once the command runs; sends SIGTERM to its pid; the rollback result says 'cancelled'", async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((r) => { release = r; });
+  const { c, signals } = withHandOver(async () => undefined, {
+    onRun: async (input) => {
+      input.onSpawn?.(777);
+      await gate;
+      return { outcome: "rolled_back", events: [], final: { result: "rolled_back", from: "/h", to: "/t", error: null, serviceState: "running", reason: "cancelled" }, detail: null, exitCode: 1 };
+    },
+  });
+  await c.plan();
+  const applying = c.apply();
+  assert.deepEqual(c.cancel().cancelRequested, false, "not cancellable before the command is running");
+  await new Promise((r) => setImmediate(r));
+  assert.equal(c.getState().cancellable, true);
+  assert.equal(c.cancel().cancelRequested, true);
+  c.cancel(); // second press is ignored
+  release();
+  const s = await applying;
+  assert.deepEqual(signals, [[777, "SIGTERM"]]);
+  assert.deepEqual([s.phase, s.reason, s.cancellable], ["rolled_back", "cancelled", false]);
+});
+
+test("an older raft-computer (no clean cancel) never offers Cancel: SIGTERM would kill the move half way", async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((r) => { release = r; });
+  const { c, signals } = withHandOver(async () => undefined, {
+    supportsCancel: false,
+    onRun: async (input) => { input.onSpawn?.(9); await gate; return { outcome: "success", events: [], final: { result: "success", from: "/h", to: "/t", error: null, serviceState: "running" }, detail: null, exitCode: 0 }; },
+  });
+  await c.plan();
+  const applying = c.apply();
+  await new Promise((r) => setImmediate(r));
+  assert.equal(c.getState().cancellable, false);
+  assert.equal(c.cancel().cancelRequested, false);
+  assert.deepEqual(signals, []);
+  release();
+  await applying;
 });

@@ -8,6 +8,7 @@ interface MigrationBridge {
   plan: () => Promise<unknown>;
   apply: () => Promise<unknown>;
   reset: () => Promise<unknown>;
+  cancel: () => Promise<unknown>;
 }
 
 function bridge(): MigrationBridge | null {
@@ -48,7 +49,7 @@ export function useMigration(): {
 
   const begin = useCallback(() => call((b) => b.plan()), [call]);
   const run = useCallback(
-    (action: MigrationActionId) => call((b) => (action === "apply" ? b.apply() : action === "recheck" ? b.plan() : b.reset())),
+    (action: MigrationActionId) => call((b) => (action === "apply" ? b.apply() : action === "recheck" ? b.plan() : action === "cancel" ? b.cancel() : b.reset())),
     [call],
   );
   return { state, begin, run, error };

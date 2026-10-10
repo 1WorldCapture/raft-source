@@ -1,5 +1,6 @@
 // Main-process wiring of the one-click migration: which binary to run, what to do after a successful move,
 // and the IPC channels. Registered only in embedded mode when the app carries a Computer.
+import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import type { IpcMainLike } from "./ipc.js";
 import { installBundledComputer, type BundledComputer } from "./bundledInstall.js";
@@ -19,6 +20,10 @@ export interface MigrationWiringDeps {
   switchToStandalone: () => void;
   /** Test seams. */
   run?: MigrateRunner;
+  handOver?: () => Promise<void>;
+  restoreAfterHandOverFailure?: () => Promise<void>;
+  signal?: (pid: number, signal: NodeJS.Signals) => void;
+  supportsCancel?: (binaryPath: string) => Promise<boolean>;
   install?: typeof installBundledComputer;
   fileExists?: (target: string) => boolean;
   readVersion?: (binaryPath: string, home: string) => Promise<string | null>;
@@ -51,6 +56,13 @@ export async function finishSwitch(
   return { warnings };
 }
 
+/** `migrate-home --help` lists `--deadline` only in a raft-computer that handles SIGTERM as a clean cancel. */
+export function defaultSupportsCancel(binaryPath: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    execFile(binaryPath, ["migrate-home", "--help"], { timeout: 15_000 }, (error, stdout) => resolve(!error && /--deadline/.test(String(stdout))));
+  });
+}
+
 export function createMigrationController(deps: MigrationWiringDeps): MigrationController {
   const install = deps.install ?? installBundledComputer;
   const fileExists = deps.fileExists ?? existsSync;
@@ -60,6 +72,10 @@ export function createMigrationController(deps: MigrationWiringDeps): MigrationC
     getFromHome: deps.getFromHome,
     publish: deps.publish,
     run: deps.run,
+    handOver: deps.handOver,
+    restoreAfterHandOverFailure: deps.restoreAfterHandOverFailure,
+    signal: deps.signal,
+    supportsCancel: deps.supportsCancel ?? defaultSupportsCancel,
     ensureBinary: async () => {
       const from = await deps.getFromHome();
       const installed = fileExists(deps.binaryTarget) ? await readVersion(deps.binaryTarget, from) : null;
@@ -83,9 +99,10 @@ export function refuseWhileMigrating<A extends unknown[], R>(isApplying: () => b
   };
 }
 
-export function registerMigrationIpc(ipc: IpcMainLike, controller: MigrationController): void {
+export function registerMigrationIpc(ipc: IpcMainLike, controller: { getState(): MigrationState; plan(): Promise<MigrationState>; apply(): Promise<MigrationState>; reset(): MigrationState; cancel(): MigrationState }): void {
   ipc.handle("migration:state", () => controller.getState());
   ipc.handle("migration:plan", () => controller.plan());
   ipc.handle("migration:apply", () => controller.apply());
   ipc.handle("migration:reset", () => controller.reset());
+  ipc.handle("migration:cancel", () => controller.cancel());
 }

@@ -137,6 +137,7 @@ contextBridge.exposeInMainWorld("raftDesktop", {
     plan: (): Promise<unknown> => ipcRenderer.invoke("migration:plan"),
     apply: (): Promise<unknown> => ipcRenderer.invoke("migration:apply"),
     reset: (): Promise<unknown> => ipcRenderer.invoke("migration:reset"),
+    cancel: (): Promise<unknown> => ipcRenderer.invoke("migration:cancel"),
   },
   standalone: {
     hostMode: (): Promise<{ mode: "embedded" } | { mode: "standalone"; home: string }> => ipcRenderer.invoke("computer:host-mode"),

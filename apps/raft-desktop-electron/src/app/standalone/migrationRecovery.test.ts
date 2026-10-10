@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { findInterruptedMigration, findMigratedAwayHome, waitForRunningMigration, type InProgressMarker, type MigrationResultSummary } from "./migrationRecovery.ts";
+import { findInterruptedMigration, findMigratedAwayHome, findRunningMigration, waitForRunningMigration, type InProgressMarker, type MigrationResultSummary } from "./migrationRecovery.ts";
 
 const EMBEDDED = "/Users/u/app/computer-slock-raft";
 const success = (over: Partial<MigrationResultSummary> = {}): MigrationResultSummary => ({
@@ -95,4 +95,12 @@ test("…but not when the built-in home still exists, when it IS the standard ho
   assert.equal(await findMigratedAwayHome({ ...base, embeddedHome: "/h/.slock", exists: exists(["/h/.slock/computer/migrate-result.json"]) }), null);
   assert.equal(await findMigratedAwayHome({ ...base, exists: exists(["/h/.slock/computer/servers"]) }), null);
   assert.equal(await findMigratedAwayHome({ ...base, hostMode: { mode: "standalone", home: "/h/.slock" }, exists: exists(["/h/.slock/computer/migrate-result.json"]) }), null);
+});
+
+test("findRunningMigration: a live marker is returned without waiting; dead pid / none / standalone are not", async () => {
+  const live = marker(4242);
+  assert.deepEqual(await findRunningMigration({ hostMode: { mode: "embedded" }, homes: ["/h/old", "/h/.slock"], readMarker: async (h) => (h === "/h/.slock" ? live : null), isAlive: () => true }), live);
+  assert.equal(await findRunningMigration({ hostMode: { mode: "embedded" }, homes: ["/h"], readMarker: async () => live, isAlive: () => false }), null);
+  assert.equal(await findRunningMigration({ hostMode: { mode: "embedded" }, homes: ["/h"], readMarker: async () => null }), null);
+  assert.equal(await findRunningMigration({ hostMode: { mode: "standalone", home: "/h" }, homes: ["/h"], readMarker: async () => live, isAlive: () => true }), null);
 });
