@@ -364,6 +364,7 @@ function registerComputerIpc(host: ComputerHost): void {
     intervalMs: COMPUTER_STATUS_POLL_MS,
   });
   computerStatusMonitor = monitor;
+  host.onStatusInvalidated = () => monitor.refresh();
   installStatusMonitorLifecycle(monitor, () => lifecycle.quitting);
   ipcMain.handle("computer:status", () => monitor.read());
   guardedHandle("computer:enable", (_e, input: unknown) => monitor.afterOperation(() => host.enable(input as never)));

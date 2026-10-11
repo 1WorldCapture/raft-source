@@ -58,6 +58,15 @@ rm /tmp/redis-migrate.rdb
 
 注：RDB 丢失的最坏影响是缓存类数据重建（机器重新上报心跳），非持久数据无损；迁移步骤是为了消除「升级 redis 镜像时全员短暂离线」的惊扰。
 
+## TLS 证书续期（自动）
+
+- **机制**：systemd timer `raft-tailscale-cert.timer` 每日跑 `/usr/local/sbin/raft-tailscale-cert-renew`（oneshot service 的 "inactive" 是正常间歇态，timer 活性用 `systemctl list-timers` 看）
+- **续期条件**：`tailscale cert --min-validity 720h`——证书剩余有效期 >30 天时不换新（原件在 `/var/lib/raft-ops/certs/`，root:raft 644/640，归档保留）
+- **docker 同步（2026-10-11 起）**：证书**内容**（sha256）变化时，脚本自动把 fullchain/privkey 拷入两栈 `certs/`（同目录暂存+原子 rename，owner/mode 保持 root:root 644/600），并在各 web 容器内 `nginx -t` + `nginx -s reload`。**任一步失败即中止，不再动另一栈**（单栈故障不扩散）
+- **手动验证**：`/usr/local/sbin/raft-tailscale-cert-renew --force-sync`（证书未变也强制走一遍拷贝+reload 链路，用于验证）；外部核验用 `openssl s_client -connect raft.tailf3efbe.ts.net:443` / `:8443` 看指纹与到期时间
+- **日志**：journal（`journalctl -u raft-tailscale-cert`）+ `/var/log/raft-cert-renew.log` 双落
+- **关键日期**：当前证书（三处同指纹）**2026-12-31 02:14 GMT 到期**，约 **12-01 自动续新**并同步两栈；此前（10-07~10-11）docker 两栈证书是手工一次性副本、无同步机制，此脚本即为闭环该缺口
+
 ## 磁盘治理（39G 盘）
 
 - 常态线：**至少 6G 空闲**；每小时 `/root/bin/disk-alert.sh` cron 检查，>85% 写 syslog + `/var/log/disk-alert.log`（运维日常巡检该文件，超线在 #prod-docker 报告）

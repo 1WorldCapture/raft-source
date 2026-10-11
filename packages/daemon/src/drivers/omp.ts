@@ -528,6 +528,16 @@ async function probeOmpModels(deps: { command?: string; args?: string[]; timeout
       }
     };
 
+    // A write to a child that has already exited does NOT throw
+    // synchronously — it surfaces asynchronously as an EPIPE `error` event
+    // on the stdin stream. Without a listener that event is unhandled and
+    // takes down the whole daemon (observed as a vitest "Unhandled Errors"
+    // entry on xai; same crash shape in production). The watchdog/exit path
+    // owns the probe outcome, so swallow it here.
+    proc.stdin?.on("error", () => {
+      // Stdin closed (child exited mid-probe); the watchdog or exit handles the outcome.
+    });
+
     const onFrame = (frame: Record<string, unknown>): void => {
       if (frame.type === "ready" && !negotiateSent) {
         negotiateSent = true;

@@ -3972,3 +3972,4 @@ export function accountNeedsIdentitySetup(user: {
   return hasPlaceholderHandle(user.name) || !user.name;
 }
 export * from "./inboxScopeReadFrontier.js";
+export * from "./diagnosticRedaction.js";

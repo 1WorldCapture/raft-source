@@ -28,6 +28,12 @@ import {
 const DAEMON_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const BUILDER = path.join(DAEMON_ROOT, "scripts", "build-cursor-sdk-assets.mjs");
 
+// Stage/verify the fixture for THIS host's target. probeCursorSdkAssets
+// rejects assets whose target cannot run locally (target_mismatch), so a
+// hardcoded darwin-arm64 fixture is platform-dependent — red on linux-x64
+// hosts even though every step is otherwise a local fixture.
+const TARGET = `${process.platform}-${process.arch}`;
+
 const FIXTURE_CLOSURE = {
   "@cursor/sdk": "1.0.36",
   "@bufbuild/protobuf": "1.10.0",
@@ -36,7 +42,7 @@ const FIXTURE_CLOSURE = {
   "@statsig/js-client": "3.31.0",
   "@statsig/client-core": "3.31.0",
   zod: "3.25.76",
-  "@cursor/sdk-darwin-arm64": "1.0.36",
+  [`@cursor/sdk-${TARGET}`]: "1.0.36",
 };
 
 function writeFixtureNodeModules(dir: string): string {
@@ -86,7 +92,7 @@ test("builder stages a root the resolver accepts, and verify catches tampering",
         "--node-from-local",
         nodeSource,
         "--target",
-        "darwin-arm64",
+        TARGET,
       ],
       { RAFT_CURSOR_ASSETS_BASE: base },
     );
@@ -96,7 +102,7 @@ test("builder stages a root the resolver accepts, and verify catches tampering",
       `builder failed:\nstdout: ${staged.stdout}\nstderr: ${staged.stderr}`,
     );
 
-    const root = path.join(base, CURSOR_SDK_VERSION, "darwin-arm64");
+    const root = path.join(base, CURSOR_SDK_VERSION, TARGET);
     assert.ok(existsSync(path.join(root, "manifest.json")), "manifest.json missing");
     assert.ok(existsSync(path.join(root, "host", "runtimeHost.mjs")), "runtime host missing");
     assert.ok(existsSync(path.join(root, "host", "authHost.mjs")), "auth host missing");
@@ -131,8 +137,8 @@ test("builder stages a root the resolver accepts, and verify catches tampering",
     // The resolver (env exact-root path) accepts the builder's output.
     const assets = resolveCursorSdkAssets({
       env: { [RAFT_CURSOR_SDK_ASSETS_ENV]: root },
-      platform: "darwin",
-      arch: "arm64",
+      platform: process.platform,
+      arch: process.arch,
     });
     assert.equal(assets.root, root);
     assert.equal(assets.nodePath, path.join(root, "node", "bin", "node"));
@@ -142,10 +148,10 @@ test("builder stages a root the resolver accepts, and verify catches tampering",
     });
 
     // Clean verify, then tamper detection.
-    assert.equal(runBuilder(["--verify", "--target", "darwin-arm64"], { RAFT_CURSOR_ASSETS_BASE: base }).status, 0);
+    assert.equal(runBuilder(["--verify", "--target", TARGET], { RAFT_CURSOR_ASSETS_BASE: base }).status, 0);
     const victim = path.join(root, "node_modules", "zod", "index.js");
     writeFileSync(victim, "export const tampered = true;\n");
-    const tampered = runBuilder(["--verify", "--target", "darwin-arm64"], { RAFT_CURSOR_ASSETS_BASE: base });
+    const tampered = runBuilder(["--verify", "--target", TARGET], { RAFT_CURSOR_ASSETS_BASE: base });
     assert.notEqual(tampered.status, 0, "verify must fail after tampering");
     assert.match(tampered.stderr, /integrity mismatch|unmanifested/);
   } finally {
@@ -164,7 +170,7 @@ test("builder refuses a local Node whose version is not the pinned official one"
   chmodSync(stub, 0o755);
   try {
     const result = runBuilder(
-      ["--only", "node", "--node-from-local", path.join(dir, "wrong-node"), "--target", "darwin-arm64"],
+      ["--only", "node", "--node-from-local", path.join(dir, "wrong-node"), "--target", TARGET],
       { RAFT_CURSOR_ASSETS_BASE: base },
     );
     assert.notEqual(result.status, 0);
@@ -181,13 +187,13 @@ test("builder --verify refuses manifest inventory paths that escape the root", (
   const base = path.join(dir, "assets");
   try {
     assert.equal(stageFixtureRoot(dir, base).status, 0);
-    const root = path.join(base, CURSOR_SDK_VERSION, "darwin-arm64");
+    const root = path.join(base, CURSOR_SDK_VERSION, TARGET);
     const manifestPath = path.join(root, "manifest.json");
     const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
     manifest.files["../../hostile"] = "0".repeat(64);
     writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
 
-    const result = runBuilder(["--verify", "--target", "darwin-arm64"], { RAFT_CURSOR_ASSETS_BASE: base });
+    const result = runBuilder(["--verify", "--target", TARGET], { RAFT_CURSOR_ASSETS_BASE: base });
     assert.notEqual(result.status, 0, "verify must fail on escaping inventory paths");
     assert.match(result.stderr, /manifest inventory path escapes asset root: \.\.\/\.\.\/hostile/);
     // The escaping path must never have been read from outside the root.
@@ -203,7 +209,7 @@ test("builder --verify --require-registry rejects local-copy dev provenance", ()
   try {
     assert.equal(stageFixtureRoot(dir, base).status, 0);
     const result = runBuilder(
-      ["--verify", "--require-registry", "--target", "darwin-arm64"],
+      ["--verify", "--require-registry", "--target", TARGET],
       { RAFT_CURSOR_ASSETS_BASE: base },
     );
     assert.notEqual(result.status, 0, "release packaging must not accept local-copy provenance");
@@ -218,7 +224,7 @@ function stageFixtureRoot(dir: string, base: string) {
   const sdkSource = writeFixtureNodeModules(dir);
   const nodeSource = writeFixtureNodeDist(dir);
   return runBuilder(
-    ["--sdk-from-local", sdkSource, "--node-from-local", nodeSource, "--target", "darwin-arm64"],
+    ["--sdk-from-local", sdkSource, "--node-from-local", nodeSource, "--target", TARGET],
     { RAFT_CURSOR_ASSETS_BASE: base },
   );
 }

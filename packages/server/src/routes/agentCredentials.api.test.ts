@@ -265,6 +265,47 @@ test("server member without issueAgentCredentials or creator authority gets 403 
   });
 });
 
+test("credential write after membership removal gets 404 agent_missing (fenced re-check, anti-enumeration)", async () => {
+  await withDeviceAuthGateOn(async () => {
+    const app = await openTestApp("pglite://", 0, { humanActivityMuteFlagDefaultEnabled: true, onboardingOpenerFlagDefaultEnabled: false });
+    try {
+      const owner = await seedUser("fence-route-owner@slock.test", "fence-route-owner");
+      const server = await createServer("Fence Route Test", "fence-route-test", owner.id);
+      const agent = await createAgent(server.id, "fence-route-agent", { runtime: "codex" });
+      const issued = await mintAgentCredential({ agentId: agent.id, scopes: ["read"], createdByUserId: owner.id });
+      const token = await login(app.baseUrl, owner.email);
+
+      // Departure lands before the request arrives. Both the request-level
+      // guard and the in-transaction membership fence must collapse it to
+      // the same byte-identical 404 `agent_missing`.
+      await getDb().delete(serverMembers).where(eq(serverMembers.serverId, server.id));
+
+      const mint = await fetch(`${app.baseUrl}/api/agents/${agent.id}/credentials`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({}),
+      });
+      assert.equal(mint.status, 404, `expected 404, got ${mint.status}`);
+      assert.equal((await mint.json()).code, "agent_missing");
+
+      const revoke = await fetch(`${app.baseUrl}/api/agents/${agent.id}/credentials/${issued.credentialId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      assert.equal(revoke.status, 404, `expected 404, got ${revoke.status}`);
+      assert.equal((await revoke.json()).code, "agent_missing");
+
+      // Revocation must NOT have happened — no credential write may slip
+      // through after the membership is gone.
+      const row = await getDb().select({ revokedAt: agentCredentials.revokedAt })
+        .from(agentCredentials).where(eq(agentCredentials.id, issued.credentialId));
+      assert.equal(row[0]?.revokedAt, null);
+    } finally {
+      await app.close();
+    }
+  });
+});
+
 test("soft-deleted agent returns 404 agent_missing — not 403, not 400 (Hao gate)", async () => {
   await withDeviceAuthGateOn(async () => {
     const app = await openTestApp("pglite://", 0, { humanActivityMuteFlagDefaultEnabled: true, onboardingOpenerFlagDefaultEnabled: false });

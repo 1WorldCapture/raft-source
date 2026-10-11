@@ -10,6 +10,7 @@ import { useAppNavigate } from "@web/hooks/useAppNavigate";
 import { useAgentStore } from "@web/store/agentStore";
 import { getComputerRowDotStatus, getComputerRowDotTone } from "@web/utils/computerUpgradeIndicator";
 import { deriveStandaloneCard, friendlyStandaloneError, type StandaloneAction } from "./standaloneCardLogic";
+import { preferLocalComputerVersion } from "./thisComputerLogic";
 import { useSelfMachine } from "./useSelfComputer";
 import { useStandaloneComputer } from "./useStandaloneComputer";
 
@@ -56,7 +57,7 @@ export default function StandaloneComputerCard() {
           </div>
           {selfMachine ? (
             <>
-              <div className="mt-0.5 truncate font-mono text-[11px] text-black/50"><MachineRunLabel machine={selfMachine} /></div>
+              <div className="mt-0.5 truncate font-mono text-[11px] text-black/50"><MachineRunLabel machine={preferLocalComputerVersion(selfMachine, { running: state?.phase === "running", version: state?.status?.service.version })} /></div>
               <div className="mt-0.5 text-[11px] text-black/60" data-testid="standalone-card-agent-count">{agentCount} {agentCount === 1 ? "agent" : "agents"}</div>
               {model.tone !== "ok" ? <div className="mt-0.5 text-[11px] font-medium text-black/70">{model.title}{model.detail ? ` — ${model.detail}` : ""}</div> : null}
             </>

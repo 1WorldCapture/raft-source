@@ -21,6 +21,7 @@ import { asAxSurfaceText, type AxSurfaceText,
   formatTraceparent,
   MemoryTraceSink,
   parseTraceparent,
+  RUNTIMES,
   type AgentConfig,
   type ComputerLifecycleExecutionAck,
   type MachineToServerMessage,
@@ -1831,10 +1832,10 @@ test("detectRuntimes treats driver probe unavailable as authoritative", async ()
     assert.equal(detection.ids.includes("opencode"), false);
     assert.match(detection.versions.opencode ?? "", /requires >= 1\.14\.30/);
     const span = sink.getTrace(traceId).find((candidate) => candidate.name === "daemon.runtime.detect");
-    // RUNTIMES grew by one when omp registered (phase-1 task #1) and by one
-    // more with the packaged cursor-sdk runtime; the legacy Cursor CLI runtime
-    // was then retired.
-    assert.equal(span?.attrs?.known_runtime_count, 13);
+    // The known-runtime count must track the registry, not a hardcoded value:
+    // every new runtime registration would otherwise turn this into a
+    // baseline-red failure unrelated to any behavior change.
+    assert.equal(span?.attrs?.known_runtime_count, RUNTIMES.length);
     assert.equal(span?.attrs?.detected_runtime_count, detection.ids.length);
     const opencodeEvent = eventsForSpan(sink, traceId, "daemon.runtime.detect")
       .find((event) => event.attrs?.runtime === "opencode");

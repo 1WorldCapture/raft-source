@@ -11,6 +11,7 @@ import {
   type AgentMigrationExportManifest,
 } from "./agentMigrationExport.js";
 import { normalizeAgentMigrationWorkspaceRelativePath } from "./agentMigrationWorkspacePath.js";
+import { assertDirectChildOf, assertSafePathSegment } from "./agentMigrationPathSafety.js";
 
 export type AgentMigrationAdoptSourceKind = "staged_bundle" | "orphan_directory";
 
@@ -141,10 +142,24 @@ export async function buildAgentMigrationAdoptPlan(input: BuildAgentMigrationAdo
     expectedAgentId: input.sourceKind === "orphan_directory" ? input.agentId : manifest.agentId,
   });
 
+  // `manifest.agentId` becomes a directory name below the agents root. For an adopted bundle the check above
+  // compares it to itself, so it is not validated at all here — and the bundle is content that arrived from
+  // another machine. Reject any name that is not one literal path segment before it is joined into a path
+  // (task #25). The bundle is additionally covered by its manifest hash + attestation; this is the local,
+  // independent check that does not depend on that model.
+  assertSafePathSegment(manifest.agentId, "MIGRATION_MANIFEST_AGENT_ID_INVALID");
+  if (input.sourceKind === "orphan_directory") {
+    assertSafePathSegment(input.agentId, "MIGRATION_ORPHAN_AGENT_ID_INVALID");
+  }
+
   const sourceWorkspacePath = path.resolve(
     input.sourceKind === "staged_bundle" ? input.stagingWorkspacePath : input.orphanWorkspacePath,
   );
   const finalWorkspacePath = path.resolve(input.finalWorkspacePath ?? path.join(slockHome, "agents", manifest.agentId));
+  // Containment: the placement target must be exactly one directory below the agents root. This holds for the
+  // default above and for an explicit `finalWorkspacePath`, so no caller can aim a rename at the agents root
+  // itself or anywhere outside it (task #25).
+  assertDirectChildOf(path.join(slockHome, "agents"), finalWorkspacePath, "MIGRATION_FINAL_WORKSPACE_PATH_OUTSIDE_AGENTS_ROOT");
   const reportPath = path.resolve(input.reportPath ?? path.join(
     slockHome,
     "migrations",

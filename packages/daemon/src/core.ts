@@ -738,6 +738,7 @@ export const DAEMON_CORE_TRACE_ATTR_CONTRACTS = {
   },
 } satisfies TraceSpanAttrContracts;
 export { subscribeDaemonLogs, type DaemonLogEvent, type DaemonLogLevel } from "./logger.js";
+import { resolveWorkspaceDirectoryPath as resolveGuardedWorkspacePath } from "./workspaces.js";
 export {
   deleteWorkspaceDirectory,
   resolveWorkspaceDirectoryPath,
@@ -2996,7 +2997,13 @@ export class DaemonCore {
       if (message.sessionId) {
         const marker = await this.readMigrationCancellationMarker(message.sessionId);
         if (marker) {
-          const expectedFinalWorkspacePath = path.resolve(this.agentsDataDir, message.agentId);
+          // `message.agentId` is server-supplied. `path.resolve(agentsDataDir, ".")` is the agents root itself, so
+          // this path is used below for a recursive delete — apply the same containment guard as the other
+          // workspace-root paths (task #24) instead of relying only on the marker comparison below.
+          const expectedFinalWorkspacePath = resolveGuardedWorkspacePath(this.agentsDataDir, message.agentId);
+          if (!expectedFinalWorkspacePath) {
+            throw new Error("MIGRATION_CANCEL_MARKER_IDENTITY_MISMATCH");
+          }
           if (
             marker.agentId !== message.agentId
             || marker.migrationId !== message.migrationId
@@ -3724,7 +3731,12 @@ export class DaemonCore {
 
       case "agent:reset-workspace":
         logger.info(`[Agent ${msg.agentId}] Workspace reset requested`);
-        this.agentManager.resetWorkspace(msg.agentId);
+        // Surface the outcome: a refused reset (invalid agent id) must not read like a silent success.
+        void this.agentManager.resetWorkspace(msg.agentId).then((outcome) => {
+          if (outcome !== "reset") {
+            logger.warn(`[Agent ${JSON.stringify(msg.agentId)}] Workspace reset did not complete: outcome=${outcome}`);
+          }
+        });
         break;
 
       case "agent:inbox:purge":

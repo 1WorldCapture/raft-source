@@ -64,7 +64,7 @@ import {
 } from "./drivers/index.js";
 import { logger } from "./logger.js";
 import { reapOrphanProcesses } from "./daemonOrphanReaper.js";
-import { deleteWorkspaceDirectory, initializeAgentWorkspace, scanWorkspaceDirectories } from "./workspaces.js";
+import { deleteWorkspaceDirectory, initializeAgentWorkspace, resolveWorkspaceDirectoryPath, scanWorkspaceDirectories } from "./workspaces.js";
 import { agentPurgeTargets, cursorHostDirectory, isCursorHostLockHeld, isPurgeableAgentId, moveAgentDirectoriesToTrash } from "./agentPurge.js";
 import { buildCindyMemoryMd, buildCindySeedFiles } from "./cindy.js";
 import { AgentStartCoordinator, type AgentStartQueueItem, type PendingStartRebind } from "./agentStartCoordinator.js";
@@ -1164,6 +1164,12 @@ interface TrackedMentionDelivery {
   state: "received" | "pending" | "drained";
   context: DeliveryTraceContext;
 }
+
+/**
+ * Outcome of a workspace reset. Mirrors `AgentPurgeOutcome`: a rejected name must be reported, never
+ * swallowed, so a refused reset cannot be mistaken for a successful one.
+ */
+export type AgentWorkspaceResetOutcome = "reset" | "invalid_agent_id" | "error";
 
 export class AgentProcessManager {
   private agents = new Map<string, AgentProcess>();
@@ -5003,13 +5009,23 @@ export class AgentProcessManager {
     return true;
   }
 
-  async resetWorkspace(agentId: string) {
-    const agentDataDir = path.join(this.dataDir, agentId);
+  async resetWorkspace(agentId: string): Promise<AgentWorkspaceResetOutcome> {
+    // `agentId` arrives from the server unvalidated. `path.join(dataDir, ".")` is `dataDir` itself, so an unguarded
+    // reset of "." would wipe every agent workspace on the machine (same class as the workspace-delete fix, #335).
+    // Go through the same containment guard: exactly one path segment below the data dir.
+    const agentDataDir = resolveWorkspaceDirectoryPath(this.dataDir, agentId);
+    if (!agentDataDir) {
+      logger.warn(`[Agent ${JSON.stringify(agentId)}] Workspace reset rejected: invalid agent directory name (dataDir=${path.resolve(this.dataDir)})`);
+      return "invalid_agent_id";
+    }
     try {
+      logger.info(`[Agent ${agentId}] Resetting workspace: path=${agentDataDir}`);
       await rm(agentDataDir, { recursive: true, force: true });
       logger.info(`[Agent ${agentId}] Workspace reset complete (${agentDataDir})`);
+      return "reset";
     } catch (err) {
       logger.error(`[Agent ${agentId}] Workspace reset failed`, err);
+      return "error";
     }
   }
 

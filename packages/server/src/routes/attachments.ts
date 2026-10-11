@@ -594,6 +594,12 @@ export function buildHtmlPreviewContentSecurityPolicy(frameAncestorOrigins = get
   const frameAncestors = ["'self'", ...frameAncestorOrigins].join(" ");
   return [
     "default-src 'none'",
+    // Opaque origin even when the preview URL is opened directly (not only
+    // inside the web app's sandboxed iframe): hostile HTML must never run as
+    // the API origin, where same-origin deployments keep credentials.
+    // (upstream 1.21.2 security port; allows scripts for Mermaid/charts but
+    // strips same-origin privileges from the preview document.)
+    "sandbox allow-scripts",
     // Treat every HTML attachment as hostile, whether it came from a human or
     // an agent. v0 intentionally allows HTTPS subresources for Mermaid/charts;
     // the security contract is that a leaked previewToken only replays this

@@ -230,6 +230,17 @@ export function createApp(options: CreateAppOptions = {}): Express {
     express.json({ limit: "24mb" }),
   );
   app.use(express.json());
+  // Default freshness policy for the whole authenticated API surface (human
+  // /api and agent /internal alike): per-user JSON with no explicit policy is
+  // storable by any HTTP cache and may be served with heuristic freshness —
+  // observed upstream (2026-09-21) as a stale /channels/inbox body replayed by
+  // an intermediate cache. Cacheable-by-design responses (immutable
+  // attachments, release notes, share artifacts) override this by setting
+  // their own Cache-Control in the route.
+  app.use(["/api", "/internal"], (_req, res, next) => {
+    res.setHeader("Cache-Control", "private, no-store");
+    next();
+  });
   app.use(raftdevActivityMiddleware);
   app.use(requestObservabilityMiddleware);
   app.use(perfAttributionMiddleware);

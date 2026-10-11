@@ -1671,6 +1671,25 @@ export const AGENT_DAEMON_RELEASE_NOTES: AgentDaemonReleaseNote[] = [
       },
     ],
   },
+  {
+    version: "1.0.34",
+    entries: [
+      {
+        category: "reliability",
+        summary:
+          "Fixed a case where deleting or resetting a workspace with an empty or \".\" name could remove every agent workspace on the machine; workspace names must now be exactly one directory below the data directory.",
+        whyItMatters:
+          "Your workspace files are no longer at risk from a malformed workspace-delete or workspace-reset request, and a refused reset is now reported instead of silently ignored. Nothing changes for normal use.",
+      },
+      {
+        category: "reliability",
+        summary:
+          "Adopting a migration bundle now refuses an agent id that is not a single path segment, and the restored workspace must land exactly one directory below the agent data directory.",
+        whyItMatters:
+          "A malformed bundle could previously aim a restore at the agent data root itself; it is now refused before anything is moved. Normal migrations are unaffected.",
+      },
+    ],
+  },
 ];
 
 function parseSemver(value: string | null): [number, number, number] | null {
