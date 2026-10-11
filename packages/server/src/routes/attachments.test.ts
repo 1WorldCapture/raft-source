@@ -181,6 +181,9 @@ test("normal attachment disposition keeps HTML as download-only", () => {
 
 test("HTML preview CSP allows external subresources but blocks privileged channels", () => {
   const csp = buildHtmlPreviewContentSecurityPolicy(["https://app.slock.ai"]);
+  // Sandboxed opaque origin: scripts run for Mermaid/charts, but the preview
+  // document must never hold API-origin privileges (upstream 1.21.2 port).
+  assert.match(csp, /sandbox allow-scripts/);
   assert.match(csp, /script-src 'unsafe-inline' https:/);
   assert.match(csp, /style-src 'unsafe-inline' https:/);
   assert.match(csp, /img-src data: blob: https:/);

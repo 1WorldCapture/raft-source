@@ -51,6 +51,13 @@
  *   - 400 `scopes_invalid` / `scopes_empty` / `name_invalid` for body
  *     validation failures.
  *   - 404 `device_login_disabled` when the feature gate is off.
+ *
+ * Mint and revoke are additionally fenced (upstream 1.21.2 security port):
+ * the write runs in one transaction that first re-locks the caller's
+ * `server_members` row and re-evaluates the authority predicate under the
+ * locked role, so a demotion or departure that lands mid-request cannot
+ * still produce a minted key. The anti-enumeration contract above is
+ * preserved: membership lost mid-request is byte-identical to `agent_missing`.
  */
 
 import type { Request, Response } from "express";
@@ -67,6 +74,14 @@ import {
 import { isDeviceAuthSurfaceEnabled } from "../services/deviceAuthService.js";
 import { addTraceEvent } from "../tracing/semanticTrace.js";
 import { resolveActorContext, userCanActOnAgentResource } from "../lib/actorPermissions.js";
+import { and, eq, isNull } from "drizzle-orm";
+import { agents as agentsTable } from "../db/schema.js";
+import type { DatabaseTransaction } from "../db/index.js";
+import {
+  FencedAuthorizationDeniedError,
+  ServerMembershipRevokedError,
+  withActorMembershipFence,
+} from "../lib/actorMembershipFence.js";
 
 // Shared 404 response for both "agent does not exist" and "user is not a
 // member of the agent's server". Going through one helper keeps the two
@@ -94,6 +109,53 @@ async function authorizedAgent(req: Request<{ id: string }>, res: Response) {
   return agent;
 }
 
+// Upstream 1.21.2 security port: credential writes re-authorize inside the
+// write transaction under a share lock on the caller's membership row
+// (member row first), then a share lock on the agent row (agent row second).
+// A role read before the transaction is not evidence — a demotion or a
+// departure that lands mid-request must not still result in a minted key.
+async function withFencedCredentialAuthority<T>(
+  agent: { id: string; serverId: string },
+  userId: string,
+  run: (tx: DatabaseTransaction) => Promise<T>,
+): Promise<T> {
+  return withActorMembershipFence(agent.serverId, userId, async (tx, lockedRole) => {
+    const [locked] = await tx
+      .select({
+        id: agentsTable.id,
+        serverId: agentsTable.serverId,
+        creatorType: agentsTable.creatorType,
+        creatorId: agentsTable.creatorId,
+      })
+      .from(agentsTable)
+      .where(and(eq(agentsTable.id, agent.id), isNull(agentsTable.deletedAt)))
+      .for("share");
+    if (!locked || locked.serverId !== agent.serverId) throw new FencedAuthorizationDeniedError("not_found");
+    if (!userCanActOnAgentResource(lockedRole, userId, locked, "issueAgentCredentials")) {
+      throw new FencedAuthorizationDeniedError("forbidden");
+    }
+    return run(tx);
+  });
+}
+
+// Keeps this surface's anti-enumeration contract: membership lost mid-request
+// is byte-identical to "agent does not exist".
+function respondFencedCredentialError(error: unknown, res: Response): boolean {
+  if (error instanceof ServerMembershipRevokedError
+    || (error instanceof FencedAuthorizationDeniedError && error.reason === "not_found")) {
+    respondAgentMissing(res);
+    return true;
+  }
+  if (error instanceof FencedAuthorizationDeniedError) {
+    res.status(403).json({
+      error: "The `issueAgentCredentials` capability or human creator authority is required to manage agent credentials",
+      code: "insufficient_role",
+    });
+    return true;
+  }
+  return false;
+}
+
 // Listing and revocation must still work when new issuance is disabled.
 export async function listAgentCredentialsHandler(req: Request<{ id: string }>, res: Response): Promise<void> {
   try {
@@ -112,17 +174,19 @@ export async function revokeAgentCredentialHandler(req: Request<{ id: string; cr
     if (!agent) return;
     const credentialId = req.params.credentialId;
     const validId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(credentialId);
-    if (!validId || !await revokeAgentCredential({
+    const revoked = validId && await withFencedCredentialAuthority(agent, req.userId!, (tx) => revokeAgentCredential({
       credentialId, agentId: agent.id, serverId: agent.serverId,
       reason: "user_revoked", revokedByUserId: req.userId!,
-    })) {
+    }, { executor: tx }));
+    if (!revoked) {
       res.status(404).json({ error: "Credential not found", code: "credential_missing" });
       return;
     }
     addTraceEvent("agents.credentials.revoked", { agent_id: agent.id, server_id: agent.serverId, credential_id: credentialId, user_id: req.userId! });
     res.setHeader("Cache-Control", "no-store");
     res.status(204).end();
-  } catch {
+  } catch (error) {
+    if (respondFencedCredentialError(error, res)) return;
     res.status(500).json({ error: "Failed to revoke agent credential" });
   }
 }
@@ -197,12 +261,12 @@ export async function agentCredentialsHandler(
       name = body.name;
     }
 
-    const minted = await mintAgentCredential({
+    const minted = await withFencedCredentialAuthority(agent, req.userId!, (tx) => mintAgentCredential({
       agentId: agent.id,
       scopes,
       createdByUserId: req.userId!,
       ...(name !== null ? { name } : {}),
-    });
+    }, { executor: tx }));
 
     // Request-path audit trace event (sister to `credential_issued`
     // domain lifecycle event emitted inside the service). XX msg=2cb5b485:
@@ -236,6 +300,7 @@ export async function agentCredentialsHandler(
       res.status(404).json({ error: "Agent not found", code: "agent_missing" });
       return;
     }
+    if (respondFencedCredentialError(err, res)) return;
     console.error("agents.credentials.mint error:", err);
     res.status(500).json({ error: "Failed to mint agent credential" });
   }

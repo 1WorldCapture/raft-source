@@ -23,7 +23,7 @@ import { randomBytes, createHmac } from "node:crypto";
 import argon2 from "argon2";
 import { eq, and, isNull, desc } from "drizzle-orm";
 import { makeIsMember } from "@botiverse/raft-shared";
-import { getDb } from "../db/index.js";
+import { getDb, type DatabaseExecutor } from "../db/index.js";
 import { agentCredentials, agentBootstrapTokens, agents, servers } from "../db/schema.js";
 import { addTraceEvent } from "../tracing/semanticTrace.js";
 
@@ -297,6 +297,9 @@ export interface MintAgentCredentialInput {
  */
 export async function mintAgentCredential(
   input: MintAgentCredentialInput,
+  // Callers that need atomicity pass a transaction executor (e.g. the
+  // membership-fenced credential writes); the default reads the ambient db.
+  options: { executor?: DatabaseExecutor } = {},
 ): Promise<{
   credentialId: string;
   apiKey: string;
@@ -305,7 +308,7 @@ export async function mintAgentCredential(
   serverId: string;
   agentName: string;
 }> {
-  const db = getDb();
+  const db = options.executor ?? getDb();
 
   // Resolve agent + soft-delete check + server liveness in one go.
   const [agentRow] = await db
@@ -347,8 +350,11 @@ export async function mintAgentCredential(
 }
 
 /** Public management metadata only; never return key material or usage IPs. */
-export async function listAgentCredentials(agentId: string) {
-  const rows = await getDb().select({
+export async function listAgentCredentials(
+  agentId: string,
+  options: { executor?: DatabaseExecutor } = {},
+) {
+  const rows = await (options.executor ?? getDb()).select({
     id: agentCredentials.id,
     apiKeyPrefix: agentCredentials.apiKeyPrefix,
     name: agentCredentials.name,
@@ -371,8 +377,8 @@ export async function revokeAgentCredential(input: {
   serverId?: string;
   reason: string;
   revokedByUserId?: string;
-}): Promise<boolean> {
-  const db = getDb();
+}, options: { executor?: DatabaseExecutor } = {}): Promise<boolean> {
+  const db = options.executor ?? getDb();
   const [row] = await db
     .select({
       id: agentCredentials.id,
