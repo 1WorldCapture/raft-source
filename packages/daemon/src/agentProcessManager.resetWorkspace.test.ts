@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { expect, test } from "vitest";
@@ -22,13 +22,17 @@ test("resetWorkspace removes one agent's workspace and refuses names that would 
     await mkdir(keepB);
     await writeFile(path.join(keepA, "MEMORY.md"), "a");
     await writeFile(path.join(keepB, "MEMORY.md"), "b");
-    for (const bad of [".", "", "..", "../x", "nested/x", "agent-a/..", "./agent-a"]) {
-      await manager.resetWorkspace(bad);
+    for (const bad of [".", "", "..", "../x", "a/b", "nested/x", "agent-a/..", "./agent-a", "agent-a\u0000b"]) {
+      // A refused reset must be reported, never silently swallowed as a success (task #24).
+      expect(await manager.resetWorkspace(bad), JSON.stringify(bad)).toBe("invalid_agent_id");
       expect(await exists(path.join(keepA, "MEMORY.md")), `after ${JSON.stringify(bad)}`).toBe(true);
       expect(await exists(path.join(keepB, "MEMORY.md")), `after ${JSON.stringify(bad)}`).toBe(true);
     }
+    // The data dir itself survives every rejected name.
+    expect(await exists(dataDir)).toBe(true);
+    expect((await readdir(dataDir)).sort()).toEqual(["agent-a", "agent-b"]);
     // A legitimate reset still removes exactly that agent's directory.
-    await manager.resetWorkspace("agent-a");
+    expect(await manager.resetWorkspace("agent-a")).toBe("reset");
     expect(await exists(keepA)).toBe(false);
     expect(await exists(path.join(keepB, "MEMORY.md"))).toBe(true);
   } finally {
