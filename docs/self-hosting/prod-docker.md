@@ -72,6 +72,7 @@ rm /tmp/redis-migrate.rdb
 - 构建期磁盘峰值：pnpm install + 双镜像层需 >5G 余量，盘紧会 ENOSPC 失败（先清 journal/悬空层再构建）
 - **从 owner Mac 往服务器传产物，默认走 tailscale**（`root@100.99.233.89`，链路 direct），只有 tailscale 不通才退回公网 IP（38.55.131.6）。实测产物级 ~125KB/s——瓶颈是 Mac 上行带宽，与链路类型无关，200MB 级文件预算 25-30 分钟。**已知现象（2026-10-09，原因待查）**：tailscale 长传输（200MB 级 rsync）出现过两次**早期即断**（exit 11，ping 仍 direct/271ms，服务器侧零字节落盘）；同窗口公网 IP 的 scp/rsync 稳定。遇 tailscale 连续早断即按「不通」处理退公网，逐文件传 + `rsync --partial` 续传，勿反复重试 tailscale
 - **传输目标只写目录，不写文件名**（如 `rsync -av src/ host:/opt/raft-prod-docker/downloads/desktop/0.1.6/`）：nginx 下载路径**大小写敏感**，手写目标文件名一旦大小写与 latest-mac.yml 的 url 不一致就 404（0.1.6 发版实测：rsync 目标名小写化 → yml 引用的 `Raft-Desktop-…` 404）。需要中转就整目录一起传；落位后按发版清单第 5 步对 yml 每个 url `curl -I` 核 200
+- **传输脚本起飞前先自检源/目标路径**：脚本开头 `test -d "$SRC"`，目标目录不存在时先显式 `ssh mkdir -p` 并打印，随后打印源与目标全路径再传；任一不匹配或不存在就 `exit 1`，**绝不让 rsync 的隐式远端建目录行为替你建路径**（2026-10-11 实测：脚本目标路径笔误时，rsync 在因源缺失报错之前已把错误的目标目录建了出来）
 - pipefail 下 `xxx --list | grep -q` 会因 SIGPIPE 假失败——长输出流校验用文件中转
 - 空 crontab 时 `crontab -l | grep -v X` 退出码 1，在 set -e/pipefail 的 subshell 里会静默吞掉后续行——加 `|| true` 护栏
 - **后台启动三件套**：先建好日志目录再重定向、脚本自写 pidfile、启动后 kill -0 验活——只看日志判断进度，不靠 pgrep（自匹配假阳性曾吞掉 25 分钟）
