@@ -308,3 +308,21 @@ test("detect cache stays retryable: launch failures are not pinned for the TTL",
     rmSync(home, { recursive: true, force: true });
   }
 });
+
+test("detect does not leak an unhandled stdin EPIPE when the child closes stdin", async () => {
+  const home = mkdtempSync(path.join(os.tmpdir(), "slock-omp-epipe-"));
+  try {
+    // Close the read end of the stdin pipe and stay alive: every probe send
+    // then fails asynchronously with EPIPE on the stdin stream. Before the
+    // stdin error listener, that surfaced as an unhandled 'error' event
+    // (vitest "Unhandled Errors" / a production daemon crash); the watchdog
+    // still owns the probe outcome and reports the timeout error.
+    const wrapper = path.join(home, "close-stdin-omp.sh");
+    writeFileSync(wrapper, "#!/bin/sh\nexec 0<&-\nsleep 30\n", { mode: 0o755 });
+
+    const result = await detectOmpModels({ command: wrapper, timeoutMs: 1000 });
+    assert.equal(result.kind, "error");
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
