@@ -174,12 +174,17 @@ interface VersionCall {
 function recordedVersionDeps(
   home: string,
   respond: (call: { command: string; args: string[] }) => string,
+  // Default hermetic: no file exists at ANY fallback location (including the
+  // machine-wide Homebrew prefixes). Tests that stage a fake executable
+  // pass a predicate that only matches their temp dir.
+  existsSyncFn: ProbeDeps["existsSyncFn"] = () => false,
 ): { deps: ProbeDeps; calls: VersionCall[] } {
   const calls: VersionCall[] = [];
   const deps: ProbeDeps = {
     platform: "darwin",
     homeDir: home,
     env: { HOME: home, PATH: "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin" },
+    existsSyncFn,
     execFileSyncFn: ((command: string, args: string[], opts?: { env?: Record<string, string> }) => {
       if (command === "which") throw new Error("not found");
       calls.push({ command, args: [...args], envPath: opts?.env?.PATH ?? "" });
@@ -197,7 +202,7 @@ test("probe runs a bun-installed omp via its own bin dir (bun beside the symlink
     writeFileSync(ompScript, "#!/usr/bin/env bun\n", { mode: 0o755 });
     writeFileSync(bunScript, "#!/bin/sh\n", { mode: 0o755 });
 
-    const { deps, calls } = recordedVersionDeps(home, () => "omp/18.6.1\n");
+    const { deps, calls } = recordedVersionDeps(home, () => "omp/18.6.1\n", (p) => p === ompScript || p === bunScript);
 
     const result = new OmpDriver().probe(deps);
     assert.deepEqual(result, { available: true, version: "omp/18.6.1" });
@@ -238,7 +243,7 @@ test("probe keeps the self-contained binary path unchanged (no bun involved)", (
     // omp.sh self-contained binary: no env shebang, no interpreter needed.
     writeFileSync(localInstall, "#!/bin/sh\necho omp/18.6.1\n", { mode: 0o755 });
 
-    const { deps, calls } = recordedVersionDeps(home, () => "omp/18.6.1\n");
+    const { deps, calls } = recordedVersionDeps(home, () => "omp/18.6.1\n", (p) => p === localInstall);
     const result = new OmpDriver().probe(deps);
     assert.deepEqual(result, { available: true, version: "omp/18.6.1" });
     // Direct exec of the resolved file — no interpreter lookup on the wire.
@@ -254,10 +259,9 @@ test("probe reports a missing interpreter as unavailable with a readable cause",
     mkdirSync(path.dirname(ompScript), { recursive: true });
     writeFileSync(ompScript, "#!/usr/bin/env bun\n", { mode: 0o755 });
     // No bun in ~/.bun/bin, no Homebrew bun — the interpreter is gone.
-
     const { deps } = recordedVersionDeps(home, () => {
       throw new Error("must not exec");
-    });
+    }, (p) => p === ompScript);
     const result = new OmpDriver().probe(deps);
     assert.equal(result.available, false);
     assert.match(result.diagnostic ?? "", /bun/i);
@@ -275,7 +279,7 @@ test("probe degrades a found-but-failing --version to unavailable, never availab
     const deps: ProbeDeps = {
       ...recordedVersionDeps(home, () => {
         throw new Error("exit 1");
-      }).deps,
+      }, (p) => p === localInstall).deps,
     };
     const result = new OmpDriver().probe(deps);
     assert.equal(result.available, false, "a versionless probe must not claim availability");
