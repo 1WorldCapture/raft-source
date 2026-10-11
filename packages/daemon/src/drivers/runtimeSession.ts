@@ -9,6 +9,7 @@ import type {
   RuntimeSessionDescriptor,
   SpawnContext,
 } from "./types.js";
+import { guardChildStdin } from "./probe.js";
 
 function descriptorFromDriver(driver: RuntimeDriver): RuntimeSessionDescriptor {
   const lifecycle = driver.lifecycle.kind === "per_turn" ? "turn_based" : "persistent_stream";
@@ -131,6 +132,7 @@ export class ChildProcessRuntimeSession implements RuntimeSession {
     };
     const { process } = await this.driver.spawn(launchCtx);
     this.process = process;
+    guardChildStdin(process);
     this.attachProcess(process);
     // Task #13: give the driver an outlet for events produced outside the
     // parseLine return channel (async held-turn closures).
