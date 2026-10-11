@@ -23,6 +23,7 @@ import {
 import {
   MIGRATION_FRESH_TRIGGERS,
   pickZeroMatchMigrationFromInput,
+  zeroMatchSummaryMessage,
   pickMigrationCandidateFromInput,
   runSetup as runSetupImpl,
   setupCore,
@@ -1013,7 +1014,7 @@ test("setup output: zero-match defaults to summary and capped server rows", asyn
   const text = writes.join("");
   assert.match(text, /You can migrate a computer this server already knows/);
   assert.match(text, /\(1 more: type `a` to show all\)/);
-  assert.match(text, /Choose 1-5\/a:  \(`new` = set up as a new computer · `q` = quit, nothing changed\)/);
+  assert.match(text, /Choose 1-5\/a:  \(`new` = register this machine as a new computer on this server · `q` = quit, no changes\)/);
   assert.match(text, /Full evidence: rerun with --verbose/);
   assert.doesNotMatch(text, /Choose \[1\.\.5\/new\/q\]/);
   assert.doesNotMatch(text, /excluded local daemon/);
@@ -1030,9 +1031,49 @@ test("setup output: zero-match with no server rows does not imply known computer
   );
   assert.deepEqual(selection, { kind: "quit" });
   const text = writes.join("");
-  assert.match(text, /No matching computers on this server\. Type new/);
+  assert.match(text, /No existing computer on this server matches this machine\. Type new to register this machine on this server/);
   assert.match(text, /Full evidence: rerun with --verbose/);
   assert.doesNotMatch(text, /You can connect a computer this server already knows/);
+});
+
+test("setup output: zero-match wording names this machine, marks the daemon records informational (task #20)", async () => {
+  // The owner read "set up as a new computer" as installing a SECOND
+  // computer, and the daemon-trace summary as something to fix. The reworded
+  // picker must name the acting machine and defuse the records line.
+  const writes: string[] = [];
+  await pickZeroMatchMigrationFromInput(
+    [{ ownerState: "absent", reasons: ["not_in_roster"] }],
+    [],
+    async () => ({ line: "q", eof: false }),
+    (line) => { writes.push(line); },
+  );
+  const text = writes.join("");
+  assert.match(text, /No existing computer on this server matches this machine/);
+  assert.match(text, /its existing data is kept; nothing is migrated/);
+  assert.doesNotMatch(text, /set up as a new computer/);
+});
+
+test("setup output: zero-match says the machine keeps serving its other servers when attached (task #20)", async () => {
+  const writes: string[] = [];
+  await pickZeroMatchMigrationFromInput(
+    [{ ownerState: "absent", reasons: ["not_in_roster"] }],
+    [],
+    async () => ({ line: "new", eof: false }),
+    (line) => { writes.push(line); },
+    2,
+  );
+  const text = writes.join("");
+  assert.match(text, /it keeps serving the 2 other servers it is already connected to; nothing is migrated/);
+});
+
+test("setup output: the daemon-record summary is informational and names other servers (task #20)", async () => {
+  const message = zeroMatchSummaryMessage(
+    [{ ownerState: "absent", reasons: ["not_in_roster"], serverUrlHost: "daemon.example.com" }],
+    "/new-server",
+  );
+  assert.match(message, /1 record of daemons this machine previously ran for other servers/);
+  assert.match(message, /Informational only, nothing to clean up/);
+  assert.doesNotMatch(message, /traces of old daemons/);
 });
 
 test("setup output: --verbose local evidence uses human reasons, not internal enums", async () => {
@@ -1332,7 +1373,7 @@ test("setup: §X.4 zero-match local evidence — picker fresh selection proceeds
     assert.equal(candidatePickerCalled, 0, "zero_match must not use the matched-candidate picker");
     assert.deepEqual(diagnosticsCalls, ["migration:true:true"]);
     assert.deepEqual(calls, ["attach", `start:${SERVER_A}`]);
-    assert.match(cap.text(), /Found 1 trace of old daemons/);
+    assert.match(cap.text(), /Found 1 record of daemons this machine previously ran for other servers/);
     assert.match(cap.text(), /belongs to other servers/);
     assert.doesNotMatch(cap.text(), /reasons=server_url_mismatch/);
     assert.match(cap.text(), /fresh attach selected after unmatched local legacy evidence/);
@@ -1740,7 +1781,7 @@ test("setup: dismissed zero-match evidence is not asked again, but new evidence 
     } finally {
       capThird.restore();
     }
-    assert.match(capThird.text(), /Found 1 trace of old daemons/);
+    assert.match(capThird.text(), /Found 1 record of daemons this machine previously ran for other servers/);
     assert.match(capThird.text(), /MIGRATION_LOCAL_EVIDENCE_UNMATCHED/);
   });
 });
