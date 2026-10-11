@@ -184,6 +184,7 @@ import {
   runSingleAttachmentUpload,
 } from "./attachments.js";
 import { addTraceEvent, tracePhase, withTraceChildSpan } from "../tracing/semanticTrace.js";
+import { readPositionSettleMs, scheduleDeferredReadAdvance, settledReadThroughSeq } from "../services/readPositionSettle.js";
 import { traceSendRouteFailure, traceSendRouteCatch } from "../tracing/sendRouteFailure.js";
 import { traceQuerySpan } from "../tracing/queryTrace.js";
 import { handleAgentKnowledgeGet, handleAgentKnowledgeSearch } from "./agentKnowledge.js";
@@ -260,6 +261,7 @@ async function syncReminderToComputer(
 
 const MAX_REACTION_LENGTH = 16;
 const ATTESTED_SEND_HELD_CONTEXT_LIMIT = 3;
+const DEFERRED_READ_ADVANCE_SCAN_LIMIT = 500;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const profileAvatarUpload = createAvatarUpload();
 const serverAvatarUpload = createAvatarUpload();
@@ -2149,9 +2151,23 @@ registerAgentApiRoute("historyRead", async (req, res) => {
     hasNewer = page.hasNewer;
 
     if (!around && pageMsgs.length > 0) {
-      const maxSeq = Math.max(...pageMsgs.map((m) => m.seq ?? 0));
+      // Seq order is not commit order: a transaction holding seq 100 can
+      // commit after one holding 101. Moving the read position to maxSeq the
+      // moment it is visible would skip 100 forever (the next --unread and
+      // inbox check both count from the read position). So the read position
+      // only moves through the settled prefix of the page: rows older than
+      // readPositionSettleMs(). Newer rows are still returned and stay
+      // unread for now; a deferred check (below) moves the position over
+      // them once the window has passed and no late lower seq appeared.
+      // (upstream 1.21.2 readPositionSettle port)
+      const pageSeqs = pageMsgs
+        .map((message) => Number(message.seq ?? 0))
+        .filter((seq) => Number.isInteger(seq) && seq > 0);
+      const maxSeq = pageSeqs.length > 0 ? Math.max(...pageSeqs) : 0;
+      const priorReadSeq = Math.max(0, Number(lastReadSeq) || 0);
       if (maxSeq > 0) {
-        channelService.markRead({ kind: "agent", id: actingAgentId }, channelId, maxSeq).then((readState) =>
+        const readThroughSeq = settledReadThroughSeq(pageMsgs, Date.now() - readPositionSettleMs());
+        const markAgentRead = (seq: number) => channelService.markRead({ kind: "agent", id: actingAgentId }, channelId, seq).then((readState) =>
           emitScopeReadUpdated({
             io: req.app.get("io") as SocketServer | undefined,
             serverId,
@@ -2161,7 +2177,28 @@ registerAgentApiRoute("historyRead", async (req, res) => {
             maxReadSeq: readState.maxReadSeq,
             changed: readState.changed,
           })
-        ).catch(() => {});
+        );
+        if (readThroughSeq !== null && readThroughSeq > priorReadSeq) {
+          markAgentRead(readThroughSeq).catch(() => {});
+        }
+        if (maxSeq > Math.max(priorReadSeq, readThroughSeq ?? 0)) {
+          scheduleDeferredReadAdvance({
+            agentId: actingAgentId,
+            channelId,
+            fromSeq: Math.max(priorReadSeq, readThroughSeq ?? 0),
+            returnedSeqs: pageSeqs,
+            listSeqs: async (fromSeq, toSeq) => (
+              await messageService.listMessages(storageChannelId, DEFERRED_READ_ADVANCE_SCAN_LIMIT, toSeq + 1, fromSeq)
+            ).map((message) => Number(message.seq)).filter((seq) => Number.isInteger(seq) && seq > fromSeq && seq <= toSeq),
+            advance: async (seq) => { await markAgentRead(seq); },
+            record: (outcome, attrs) => addTraceEvent("server.agent_api.history_read.deferred_advance", {
+              outcome,
+              agent_id: actingAgentId,
+              channel_id: channelId,
+              ...attrs,
+            }),
+          });
+        }
       }
     }
 
