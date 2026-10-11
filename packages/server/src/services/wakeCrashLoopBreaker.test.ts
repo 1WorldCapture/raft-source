@@ -397,3 +397,23 @@ test("the exit launchId must match the current start — a late exit never count
   assert.equal(obs.rejected, "launch_mismatch");
   assert.equal((await b.snapshot("a")).earlyExitCount, 0);
 });
+
+test("catch-up debt: refused wakes stay owed through episodes until a carried start reports active", async () => {
+  const store = new InMemoryWakeCrashLoopStateStore();
+  const b = new WakeCrashLoopBreaker(store, { windowMs: 60_000, threshold: 3, blockCooldownMs: 0 });
+  const t0 = 1_000_000;
+
+  // Two refused automatic wakes owe the catch-up.
+  await b.markCatchupOwed("a");
+  // A human start opens a new episode but the debt survives.
+  await b.recordStart("a", "human-launch", t0, { human: true });
+  assert.equal(await b.isCatchupOwed("a"), true, "the owed catch-up survives a human start");
+  // A wrong launchId cannot claim or confirm the debt.
+  await b.markCatchupCarried("a", "auto-launch");
+  await b.recordStart("a", "auto-launch", t0 + 1_000);
+  await b.markCatchupCarried("a", "auto-launch");
+  assert.equal(await b.confirmCatchupDelivered("a", "other-launch"), false, "a foreign launch cannot clear the debt");
+  assert.equal(await b.isCatchupOwed("a"), true);
+  assert.equal(await b.confirmCatchupDelivered("a", "auto-launch"), true, "the carrying start's active report clears it");
+  assert.equal(await b.isCatchupOwed("a"), false);
+});
