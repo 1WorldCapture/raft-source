@@ -22,6 +22,7 @@ import {
   type MigrateEvent,
   type MigrateHomeDeps,
   type MigrateHomeStatus,
+  missingAgentDirs,
 } from "./migrateHome.js";
 import { writeDesiredState } from "./desiredState.js";
 
@@ -43,6 +44,9 @@ async function fixture(
     oldCarrier?: boolean;
     /** Write a real (parseable) runner.state.json so `start` has work. */
     attachment?: boolean;
+    /** Agent directories under <from>/agents/ (default a1, a2; [] = the
+     *  zero-agent clean-home shape from task #19). */
+    agentNames?: string[];
   } = {},
 ) {
   // realpath up front: preflight resolves through symlinks (macOS /tmp → /private/tmp),
@@ -55,8 +59,9 @@ async function fixture(
   const user = path.join(root, "user");
   const from = path.join(user, "embedded");
   const to = path.join(user, ".slock");
-  await mkdir(path.join(from, "agents", "a1"), { recursive: true });
-  await mkdir(path.join(from, "agents", "a2"), { recursive: true });
+  for (const name of opts.agentNames ?? ["a1", "a2"]) {
+    await mkdir(path.join(from, "agents", name), { recursive: true });
+  }
   await mkdir(path.join(from, "computer", "servers", ATTACHED_SERVER_ID), { recursive: true });
   await mkdir(path.join(from, "computer", "run"), { recursive: true });
   if (opts.attachment !== false) {
@@ -1408,6 +1413,70 @@ test("cursor-sessions: agents.ndjson cwd is rewritten to the new home spelling",
     const cursor = h.events.filter((e) => e.step === "cursor-sessions").at(-1);
     assert.equal(cursor?.detail?.rewritten, 2);
     assert.equal(cursor?.detail?.files, 1);
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+// --- self-check agent-directory semantics (task #19) --------------------------
+
+test("self-check: a zero-agent clean home succeeds even though start creates a new agent workspace", async () => {
+  // Anna's 0.2.1 quick-check shape: a fresh home with an attachment but ZERO
+  // agent directories. The start step boots the daemon, which calls
+  // initializeAgentWorkspace for an agent the server assigns — a LEGITIMATE
+  // new directory mid-migration. The old count comparison (0 !== 1) rolled
+  // the whole migration back; the set semantics must let it pass.
+  const f = await fixture({ livePid: true, agentNames: [] });
+  const h = fakeDeps(f.user);
+  h.deps.startServiceAt = async (home) => {
+    h.startCalls.push(home);
+    // Simulate the daemon creating the first agent workspace after boot.
+    await mkdir(path.join(home, "agents", "agent-new-from-start"), { recursive: true });
+  };
+  try {
+    const run = await migrateHome({ from: f.from, to: f.to, ...apply }, h.deps, (e) => h.events.push(e));
+    assert.equal(run.outcome, "success");
+    const selfCheck = h.events.filter((e) => e.step === "self-check").at(-1);
+    assert.equal(selfCheck?.status, "ok");
+    assert.equal(selfCheck?.detail?.agentDirs, 1, "the new workspace is visible, not a failure");
+    const result = JSON.parse(await readFile(migrateResultPath(f.to), "utf8")) as { result: string };
+    assert.equal(result.result, "success");
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+test("missingAgentDirs: set semantics, and an absent before-set degrades to not-verified (PM review)", () => {
+  // Normal path: only real losses count.
+  assert.deepEqual(missingAgentDirs(["a", "b"], ["a", "b", "new"]), { missing: [], verified: true });
+  assert.deepEqual(missingAgentDirs(["a", "b"], ["b", "new"]), { missing: ["a"], verified: true });
+  // Defensive path: `before` is this run's preflight product and never comes
+  // from the persisted marker, but if a future data flow ever loses it the
+  // check must be visibly skipped, never silently pass.
+  assert.deepEqual(missingAgentDirs(undefined, ["a"]), { missing: [], verified: false });
+});
+
+test("self-check: a PRE-EXISTING agent directory disappearing still fails into rollback", async () => {
+  // The loss contract is unchanged: a directory that existed before the move
+  // must still exist after it. Simulate it vanishing during start.
+  const f = await fixture({ livePid: true });
+  const h = fakeDeps(f.user);
+  h.deps.startServiceAt = async (home) => {
+    h.startCalls.push(home);
+    await rm(path.join(home, "agents", "a1"), { recursive: true, force: true });
+  };
+  try {
+    const run = await migrateHome({ from: f.from, to: f.to, ...apply }, h.deps, (e) => h.events.push(e));
+    assert.equal(run.outcome, "rolled_back");
+    const selfCheck = h.events.filter((e) => e.step === "self-check").at(-1);
+    assert.equal(selfCheck?.status, "fail");
+    assert.match(String(selfCheck?.detail?.error), /agent directories lost across the move.*a1/);
+    // Home restored to the source; a2 is back. (a1 was rm'd by this test's
+    // own hook INSIDE the moved tree — the rollback restores the tree as it
+    // is, it cannot resurrect externally deleted files; detecting and
+    // reporting the loss is exactly the self-check's job.)
+    assert.equal((await stat(path.join(f.from, "agents", "a2"))).isDirectory(), true);
+    await assert.rejects(() => stat(path.join(f.from, "agents", "a1")));
   } finally {
     await rm(f.root, { recursive: true, force: true });
   }

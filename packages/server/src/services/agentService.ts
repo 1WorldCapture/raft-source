@@ -114,6 +114,11 @@ export async function createAgent(
       credentialVersion: number;
       updatedByUserId: string;
     };
+    // Task #18: sidecar writes that must commit or roll back WITH the agent row
+    // (e.g. seeding channel memberships from POST /api/agents channelIds). The
+    // handler validates everything first; this hook keeps the writes themselves
+    // in the same transaction so a partial create is impossible.
+    afterCreateTx?: (tx: DatabaseTransaction, agent: typeof agents.$inferSelect) => Promise<void>;
   } = {}
 ) {
   const nameError = validateAgentName(name, "Agent name");
@@ -302,6 +307,10 @@ export async function createAgent(
     // may not be Cindy. Someone running a non-Cindy agent has still set their server up.
     if (opts.setupCompletion !== "skip") {
       await markServerSetupCompleteOnFirstAgent(tx, serverId);
+    }
+
+    if (opts.afterCreateTx) {
+      await opts.afterCreateTx(tx, newAgent);
     }
 
     return newAgent;
