@@ -40,6 +40,10 @@ type StubAgentOrchestrator = {
   stopAgent: (agentId: string, reason?: string) => Promise<void>;
   resetAgent: (agentId: string, mode: "restart" | "session" | "full", options?: { restartIfStopped?: boolean }) => Promise<void>;
   evictCache: (agentId: string) => void;
+  // Added by the B1 upstream port (#347/#354); routes call these on the
+  // app-mounted orchestrator.
+  liftWakeCrashLoopBlockForConfigChange: (agentId: string) => Promise<boolean>;
+  getWakeCrashLoopDiagnostic: (agentId: string) => Promise<unknown>;
   shutdown: () => void;
   setIO: () => void;
   hasMachineLocally: (machineId: string) => boolean;
@@ -116,6 +120,8 @@ function createAgentOrchestratorStub(): StubAgentOrchestrator {
     stopAgent: async () => { },
     resetAgent: async () => { },
     evictCache: () => { },
+    liftWakeCrashLoopBlockForConfigChange: async () => false,
+    getWakeCrashLoopDiagnostic: async () => null,
     shutdown: () => { },
     setIO: () => { },
     hasMachineLocally: () => true,
