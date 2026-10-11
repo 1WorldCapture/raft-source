@@ -73,7 +73,7 @@ import { ComputerError } from "./lib/errors.js";
 import type { ComputerTracer } from "./lib/traceTypes.js";
 import { formatUpgradeLogTimestamp, resolveRaftHome, serverAttachmentPath } from "./paths.js";
 import { resolveServerUrl, resolveServerUrlEnv } from "./serverUrl.js";
-import { formatServerSlugDisplay, migrateKnownServerUrl, normalizeServerSlug, resolveAttachedServerSlug } from "./serverState.js";
+import { formatServerSlugDisplay, listServerAttachments, migrateKnownServerUrl, normalizeServerSlug, resolveAttachedServerSlug } from "./serverState.js";
 import { isPrivateClientContext, resolveAttachmentWebOrigin } from "./computerRelease.js";
 import {
   adoptLegacyByDaemonId as adoptLegacyByDaemonIdService,
@@ -172,6 +172,7 @@ export interface SetupDeps {
   pickZeroMatchMigration?: (
     excluded: SetupExcludedCandidate[],
     serverCandidates: LegacyMachineManualEntry[],
+    attachedServerCount: number,
   ) => Promise<ZeroMatchSelection>;
   pickRosterUnavailable?: (localCount: number | null) => Promise<RosterUnavailableSelection>;
   /**
@@ -578,13 +579,13 @@ function emitZeroMatchSummary(
   excluded: SetupExcludedCandidate[],
   label: string,
 ): void {
-  emit(`Found ${excluded.length} ${pluralize(excluded.length, "trace", "traces")} of old daemons on this computer, but none can migrate to ${label}:`);
+  emit(`Found ${excluded.length} ${pluralize(excluded.length, "record", "records")} of daemons this machine previously ran for other servers — none can migrate to ${label}. Informational only, nothing to clean up:`);
   for (const line of zeroMatchGroups(excluded)) emit(line);
 }
 
-function zeroMatchSummaryMessage(excluded: SetupExcludedCandidate[], label = "this server"): string {
+export function zeroMatchSummaryMessage(excluded: SetupExcludedCandidate[], label = "this server"): string {
   return [
-    `Found ${excluded.length} ${pluralize(excluded.length, "trace", "traces")} of old daemons on this computer, but none can migrate to ${label}.`,
+    `Found ${excluded.length} ${pluralize(excluded.length, "record", "records")} of daemons this machine previously ran for other servers — none can migrate to ${label}. Informational only, nothing to clean up.`,
     ...zeroMatchGroups(excluded).map((line) => line.trim()),
   ].join("\n");
 }
@@ -648,11 +649,23 @@ export async function pickZeroMatchMigrationFromInput(
   serverCandidates: LegacyMachineManualEntry[],
   read: () => Promise<{ line: string; eof: boolean }>,
   write: (s: string) => void,
+  attachedServerCount = 0,
 ): Promise<ZeroMatchSelection> {
+  // Task #20 wording (PM-approved 2026-10-11): "set up as a new computer"
+  // read like installing a SECOND computer; the action actually registers
+  // THIS machine on THIS server. The daemon-trace summary is informational
+  // only, and when the machine already serves other servers we say so —
+  // one Computer, several servers.
+  const freshHint =
+    attachedServerCount > 0
+      ? `it keeps serving the ${attachedServerCount} other ${attachedServerCount === 1 ? "server" : "servers"} it is already connected to; nothing is migrated`
+      : "its existing data is kept; nothing is migrated";
   if (serverCandidates.length > 0) {
-    write("You can migrate a computer this server already knows, or set this up as new:\n");
+    write("You can migrate a computer this server already knows, or register this machine as new:\n");
   } else {
-    write("No matching computers on this server. Type new to set up as a new computer, or q to quit without changing local state.\n");
+    write(
+      `No existing computer on this server matches this machine. Type new to register this machine on this server (${freshHint}), or q to quit with no changes.\n`,
+    );
   }
   let visibleCount = Math.min(serverCandidates.length, 5);
   const writeCandidates = () => {
@@ -670,8 +683,8 @@ export async function pickZeroMatchMigrationFromInput(
   while (true) {
     write(
       serverCandidates.length > 0
-        ? `Choose 1-${visibleCount}${serverCandidates.length > visibleCount ? "/a" : ""}:  (\`new\` = set up as a new computer · \`q\` = quit, nothing changed) `
-        : "Choose:  (`new` = set up as a new computer · `q` = quit, nothing changed) ",
+        ? `Choose 1-${visibleCount}${serverCandidates.length > visibleCount ? "/a" : ""}:  (\`new\` = register this machine as a new computer on this server · \`q\` = quit, no changes) `
+        : "Choose:  (`new` = register this machine as a new computer on this server · `q` = quit, no changes) ",
     );
     const { line, eof } = await read();
     if (eof) return { kind: "quit" };
@@ -698,6 +711,7 @@ export async function pickZeroMatchMigrationFromInput(
 async function defaultPickZeroMatchMigration(
   excluded: SetupExcludedCandidate[],
   serverCandidates: LegacyMachineManualEntry[],
+  attachedServerCount: number,
 ): Promise<ZeroMatchSelection> {
   return pickZeroMatchMigrationFromInput(
     excluded,
@@ -706,6 +720,7 @@ async function defaultPickZeroMatchMigration(
     (s) => {
       process.stdout.write(s);
     },
+    attachedServerCount,
   );
 }
 
@@ -1551,7 +1566,13 @@ export async function setupCore(
                 emit(`Migration: server-row manual adoption unavailable (${manualRoster.status}); choose fresh or quit.`);
               }
             }
-            const selection = await pickZeroMatch(activeExcluded, serverCandidates);
+            let attachedServerCount = 0;
+            try {
+              attachedServerCount = (await listServerAttachments(slockHome)).length;
+            } catch {
+              /* informational only — the count stays 0 and the hint degrades */
+            }
+            const selection = await pickZeroMatch(activeExcluded, serverCandidates, attachedServerCount);
             if (selection.kind === "quit") {
               recordMigrationDecision(tracer, migrationAttemptId, {
                 decision: "fail",
