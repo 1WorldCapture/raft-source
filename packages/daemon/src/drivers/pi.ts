@@ -26,6 +26,7 @@ import {
   hydrateRuntimeConfig,
   isBuiltInRuntimeGatewayProviderId,
   isBuiltInRuntimeProviderId,
+  PI_BUILTIN_PROVIDER_DEFAULT_MODELS,
   PI_BUILTIN_PROVIDER_ENV_KEYS,
   RUNTIME_MODELS,
   runtimeConfigToLaunchFields,
@@ -102,6 +103,7 @@ type PiSessionFactory = (
   ctx: SpawnContext,
   sessionId: string,
   toolExecutionObserver?: PiToolExecutionObserver,
+  startupNotices?: PiStartupNotice[],
 ) => Promise<AgentSession>;
 type PiAssistantMessageEvent = Extract<AgentSessionEvent, { type: "message_update" }>["assistantMessageEvent"];
 
@@ -421,6 +423,43 @@ function resolvePiModelFromRegistry(
   }
 
   return modelRegistry.getAll().find((model) => model.id === modelId);
+}
+
+/** Startup notice the session factory reports to the wrapper for user-visible playback. */
+export type PiStartupNotice = {
+  kind: "model_fallback";
+  requestedModel: string;
+  resolvedModel: string;
+};
+
+/**
+ * Fallback model for a requested id the registry no longer knows (upstream
+ * drops retired models from its catalog across SDK bumps). Prefer the
+ * provider's catalog default, then an available model of the same provider.
+ * When neither exists, return undefined so the session starts on the same
+ * model it would get with model="default" — never an arbitrary cross-provider
+ * pick (a different provider can mean a different key or billing).
+ */
+export function resolvePiFallbackModel(
+  modelRegistry: Pick<ModelRegistry, "find" | "getAvailable">,
+  requestedModelId: string,
+): Model<any> | undefined {
+  const providerId = requestedModelId.includes("/") ? requestedModelId.split("/")[0] : undefined;
+  const catalogDefault = providerId
+    ? (PI_BUILTIN_PROVIDER_DEFAULT_MODELS as Record<string, string>)[providerId]
+    : undefined;
+  if (catalogDefault) {
+    const [defaultProvider, ...defaultParts] = catalogDefault.split("/");
+    if (defaultProvider && defaultParts.length > 0) {
+      const found = modelRegistry.find(defaultProvider, defaultParts.join("/"));
+      if (found) return found;
+    }
+  }
+  if (providerId) {
+    const sameProvider = modelRegistry.getAvailable().find((model) => model.provider === providerId);
+    if (sameProvider) return sameProvider;
+  }
+  return undefined;
 }
 
 function normalizeGatewayBaseUrl(baseUrl: string): string {
@@ -994,7 +1033,11 @@ export function mapPiSdkEventToParsedEvents(
       });
       return events;
     case "tool_execution_end":
-      events.push({ kind: "tool_output", name: event.toolName || "unknown_tool" });
+      events.push({
+        kind: "tool_output",
+        name: event.toolName || "unknown_tool",
+        ...(typeof event.durationMs === "number" ? { durationMs: event.durationMs } : {}),
+      });
       return events;
     case "compaction_start":
       if (state.compactionTerminal) return events;
@@ -1111,7 +1154,7 @@ function installProviderHttpClient(
 export async function createPiAgentSessionForContext(
   ctx: SpawnContext,
   sessionId: string,
-  opts: { agentDir?: string; sessionDir?: string; traceName?: string; traceEventPrefix?: string; logPrefix?: string; exposeLaunchEnvToTools?: boolean; isolateHostProviderEnv?: boolean; agentDirSource?: "default" | "spawn_env" | "managed_builtin"; exposeLaunchTraceEvidence?: boolean } = {},
+  opts: { agentDir?: string; sessionDir?: string; traceName?: string; traceEventPrefix?: string; logPrefix?: string; exposeLaunchEnvToTools?: boolean; isolateHostProviderEnv?: boolean; agentDirSource?: "default" | "spawn_env" | "managed_builtin"; exposeLaunchTraceEvidence?: boolean; startupNotices?: PiStartupNotice[] } = {},
   toolExecutionObserver?: PiToolExecutionObserver,
 ): Promise<AgentSession> {
   const sessionDir = opts.sessionDir ?? buildPiSessionDir(ctx.workingDirectory);
@@ -1231,7 +1274,83 @@ export async function createPiAgentSessionForContext(
       agent_dir_source: opts.agentDirSource ?? (spawnEnv.PI_CODING_AGENT_DIR ? "spawn_env" : "default"),
       ...launchTraceEvidenceAttrs,
     });
-    const model = resolvePiModelFromRegistry(launchRuntimeFields.model, modelRegistry, runtimeConfig);
+    let model = resolvePiModelFromRegistry(launchRuntimeFields.model, modelRegistry, runtimeConfig);
+    let modelFallbackFrom: string | null = null;
+    let defaultPathNotice: PiStartupNotice | undefined;
+    if (launchRuntimeFields.model && launchRuntimeFields.model !== "default" && !model) {
+      const fallbackModel = resolvePiFallbackModel(modelRegistry, launchRuntimeFields.model);
+      const registryEmpty = modelRegistry.getAvailable().length === 0;
+      if (fallbackModel) {
+        model = fallbackModel;
+        modelFallbackFrom = launchRuntimeFields.model;
+        opts.startupNotices?.push({
+          kind: "model_fallback",
+          requestedModel: launchRuntimeFields.model,
+          resolvedModel: formatPiModelLogId(fallbackModel),
+        });
+        console.warn(
+          "[%s] create_session missing_model_fallback requested=%s fallback=%s available=%d — the configured model is no longer in the catalog; update this agent's model setting",
+          logPrefix,
+          requestedModel,
+          formatPiModelLogId(fallbackModel),
+          modelRegistry.getAvailable().length,
+        );
+        traceSpan?.addEvent(`${traceEventPrefix}.model_fallback`, {
+          fallback_from: requestedModel,
+          fallback_to: formatPiModelLogId(fallbackModel),
+          available_models_count: modelRegistry.getAvailable().length,
+          ...launchTraceEvidenceAttrs,
+        });
+      } else if (!registryEmpty) {
+        // Neither the requested model nor any same-provider fallback exists,
+        // but the registry has models: start on the same model the agent would
+        // get with model="default". resolvedModel is refined to the session's
+        // actual model after createAgentSessionFromServices below.
+        model = undefined;
+        modelFallbackFrom = launchRuntimeFields.model;
+        defaultPathNotice = {
+          kind: "model_fallback",
+          requestedModel: launchRuntimeFields.model,
+          resolvedModel: "default",
+        };
+        opts.startupNotices?.push(defaultPathNotice);
+        console.warn(
+          "[%s] create_session missing_model_fallback requested=%s fallback=default available=%d — no model of that provider is available; starting on the default model, update this agent's model setting",
+          logPrefix,
+          requestedModel,
+          modelRegistry.getAvailable().length,
+        );
+        traceSpan?.addEvent(`${traceEventPrefix}.model_fallback`, {
+          fallback_from: requestedModel,
+          fallback_to: "default",
+          available_models_count: modelRegistry.getAvailable().length,
+          ...launchTraceEvidenceAttrs,
+        });
+      } else {
+        console.warn(
+          "[%s] create_session missing_model requested=%s available=%d",
+          logPrefix,
+          requestedModel,
+          modelRegistry.getAvailable().length,
+        );
+        traceSpan?.addEvent(`${traceEventPrefix}.missing_model`, {
+          available_models_count: modelRegistry.getAvailable().length,
+          requested_model: requestedModel,
+          ...launchTraceEvidenceAttrs,
+        });
+        traceSpan?.end("error", {
+          attrs: {
+            outcome: "missing_model",
+            available_models_count: modelRegistry.getAvailable().length,
+            requested_model: requestedModel,
+            resolved_model_present: false,
+            ...piServiceDiagnosticTraceAttrs(services),
+            ...launchTraceEvidenceAttrs,
+          },
+        });
+        throw new Error(`Pi model not found: ${launchRuntimeFields.model}`);
+      }
+    }
     const resolvedModel = formatPiModelLogId(model);
     traceSpan?.addEvent(`${traceEventPrefix}.model_resolved`, {
       available_models_count: modelRegistry.getAvailable().length,
@@ -1239,40 +1358,18 @@ export async function createPiAgentSessionForContext(
       requested_model_explicit: requestedModel !== "default",
       resolved_model: resolvedModel,
       resolved_model_present: Boolean(model),
+      ...(modelFallbackFrom ? { model_fallback_from: modelFallbackFrom } : {}),
       ...launchTraceEvidenceAttrs,
     });
     console.info(
-      "[%s] create_session services_ready agentDir=%s available=%d requested=%s resolved=%s",
+      "[%s] create_session services_ready agentDir=%s available=%d requested=%s resolved=%s%s",
       logPrefix,
       agentDir,
       modelRegistry.getAvailable().length,
       requestedModel,
       resolvedModel,
+      modelFallbackFrom ? ` (fallback from ${modelFallbackFrom})` : "",
     );
-    if (launchRuntimeFields.model && launchRuntimeFields.model !== "default" && !model) {
-      console.warn(
-        "[%s] create_session missing_model requested=%s available=%d",
-        logPrefix,
-        requestedModel,
-        modelRegistry.getAvailable().length,
-      );
-      traceSpan?.addEvent(`${traceEventPrefix}.missing_model`, {
-        available_models_count: modelRegistry.getAvailable().length,
-        requested_model: requestedModel,
-        ...launchTraceEvidenceAttrs,
-      });
-      traceSpan?.end("error", {
-        attrs: {
-          outcome: "missing_model",
-          available_models_count: modelRegistry.getAvailable().length,
-          requested_model: requestedModel,
-          resolved_model_present: false,
-          ...piServiceDiagnosticTraceAttrs(services),
-          ...launchTraceEvidenceAttrs,
-        },
-      });
-      throw new Error(`Pi model not found: ${launchRuntimeFields.model}`);
-    }
 
     const existingSessionFile = ctx.config.sessionId ? findPiSessionFile(sessionDir, ctx.config.sessionId) : null;
     const sessionManager = existingSessionFile
@@ -1306,6 +1403,9 @@ export async function createPiAgentSessionForContext(
         ...managedMcpTools,
       ],
     }), { removeFirst: providerEnvScope });
+    if (defaultPathNotice && session.model) {
+      defaultPathNotice.resolvedModel = formatPiModelLogId(session.model);
+    }
     const disposeSession = session.dispose.bind(session);
     let sessionDisposed = false;
     session.dispose = () => {
@@ -1383,6 +1483,7 @@ export class PiSdkRuntimeSession implements RuntimeSession {
   private readonly toolExecutionObserver: PiToolExecutionObserver | undefined;
   private session: AgentSession | null = null;
   private unsubscribe: (() => void) | null = null;
+  private pendingStartupNotices: PiStartupNotice[] = [];
   private started = false;
   private didClose = false;
   private requestedStopReason: string | undefined;
@@ -1396,7 +1497,8 @@ export class PiSdkRuntimeSession implements RuntimeSession {
       sessionCtx,
       sessionId,
       observer,
-    ) => createPiAgentSessionForContext(sessionCtx, sessionId, {}, observer),
+      startupNotices,
+    ) => createPiAgentSessionForContext(sessionCtx, sessionId, { startupNotices }, observer),
   ) {
     this.mappingState = createPiSdkEventMappingState(ctx.config.sessionId || null);
     const runtimeContext = ctx.config.runtimeContext;
@@ -1467,14 +1569,16 @@ export class PiSdkRuntimeSession implements RuntimeSession {
     this.setCurrentSessionId(sessionId);
     this.toolExecutionObserver?.setRuntimeSessionId(sessionId);
 
+    const startupNotices: PiStartupNotice[] = [];
     const session = await this.sessionFactory({
       ...this.ctx,
       config: {
         ...this.ctx.config,
         sessionId,
       },
-    }, sessionId, this.toolExecutionObserver);
+    }, sessionId, this.toolExecutionObserver, startupNotices);
     this.session = session;
+    this.pendingStartupNotices = startupNotices;
     this.mappingState.sessionId = session.sessionId;
     this.setCurrentSessionId(session.sessionId);
     this.toolExecutionObserver?.setRuntimeSessionId(session.sessionId);
@@ -1507,6 +1611,17 @@ export class PiSdkRuntimeSession implements RuntimeSession {
     // enqueue a busy steer; FIFO setImmediate ordering must keep the initial
     // prompt ahead of that steer.
     this.emitSessionInit();
+    // Surface factory-recorded startup notices (e.g. retired-model fallback)
+    // as user-visible runtime diagnostics, after init so activity state exists.
+    for (const notice of this.pendingStartupNotices.splice(0)) {
+      this.emitRuntimeEvent({
+        kind: "runtime_diagnostic",
+        severity: "warning",
+        source: "pi_model_fallback",
+        itemType: "modelFallback",
+        message: `Configured model ${notice.requestedModel} is no longer available; using ${notice.resolvedModel} for this session. Update the agent's model setting.`,
+      });
+    }
     return { ok: true, acceptedAs: "prompt" };
   }
 
