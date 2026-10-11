@@ -540,8 +540,12 @@ class ComputerHost {
       settle: (state) => {
         this.convergeState = state;
       },
+      notify: () => this.onStatusInvalidated?.(),
     });
   }
+
+  /** Set by the IPC layer: re-read and push the status now (the monitor otherwise waits for its next poll). */
+  onStatusInvalidated: (() => void) | null = null;
 
   /** Re-run the startup host converge (the generic failure retry path). */
   async retryConverge(): Promise<void> {

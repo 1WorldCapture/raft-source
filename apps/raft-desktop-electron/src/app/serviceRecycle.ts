@@ -26,6 +26,8 @@ export interface RecycleDeps {
   /** Abort pending waits; called when the overall budget is exhausted. */
   onTimeout?(): void;
   settle(state: ConvergeState): void;
+  /** Ask the status monitor to re-read and push now (the state the card shows just changed). */
+  notify?(): void;
 }
 
 export interface RecycleOptions {
@@ -86,6 +88,11 @@ export async function runServiceRecycle(deps: RecycleDeps, options: RecycleOptio
     }
     await deps.delay(pollMs);
   }
+  // The old service is gone: whatever it left in the converge state (typically SERVICE_VERSION_SKEW, the very reason
+  // the user pressed Replace) is no longer true. Clearing it only after start() finished left the stale message and the
+  // old version on the card for the whole stop + start + readiness wait (~20s, longer on a slow reconnect).
+  deps.settle({ ok: true });
+  deps.notify?.();
   try {
     await deps.start();
   } catch (error) {
@@ -99,4 +106,5 @@ export async function runServiceRecycle(deps: RecycleDeps, options: RecycleOptio
     throw Object.assign(new Error(failure.message), { code: RECYCLE_START_FAILED });
   }
   deps.settle({ ok: true });
+  deps.notify?.();
 }
