@@ -9,6 +9,10 @@
 //
 // CI gate keeps this in sync with the SDK by re-running the generator and
 // failing on `git diff` drift.
+//
+// Curated additions ahead of the upstream catalog (PI_CATALOG_ADDITIONS in
+// packages/daemon/scripts/generate-pi-builtin-models.ts): minimax-cn/MiniMax-M3.1-Flash-Preview.
+// Each drops out automatically once the SDK catalog ships the same id.
 
 export interface PiBuiltinModel {
   id: string;
@@ -104,6 +108,7 @@ export const PI_BUILTIN_PROVIDER_MODELS_GENERATED: Record<string, ReadonlyArray<
   "minimax-cn": [
     { id: "minimax-cn/MiniMax-M3", label: "MiniMax-M3" },
     { id: "minimax-cn/MiniMax-M2.7", label: "MiniMax-M2.7" },
+    { id: "minimax-cn/MiniMax-M3.1-Flash-Preview", label: "MiniMax-M3.1-Flash-Preview" },
     { id: "minimax-cn/MiniMax-M2.7-highspeed", label: "MiniMax-M2.7-highspeed" },
   ],
   "zai": [

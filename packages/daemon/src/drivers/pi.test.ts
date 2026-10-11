@@ -22,6 +22,7 @@ import {
   detectPiModels,
   detectPiModelsFromRegistry,
   mapPiSdkEventToParsedEvents,
+  applyPiPresetModelAdditions,
   resolvePiFallbackModel,
   type PiStartupNotice,
   projectPiCompactionInputTelemetry,
@@ -3532,6 +3533,52 @@ test("resolvePiFallbackModel prefers the provider catalog default, then same-pro
   // 4. Empty registry: same default path, never a hard arbitrary pick.
   const empty = registryFrom([]);
   assert.equal(resolvePiFallbackModel(empty, "openai/gpt-5.4"), undefined);
+});
+
+test("applyPiPresetModelAdditions re-registers builtin preset providers with missing additions only", () => {
+  const registered: Array<{ providerId: string; models: Array<Record<string, unknown>> }> = [];
+  const registryFrom = (models: Array<{ id: string } & Record<string, unknown>>) => ({
+    getProvider: (providerId: string) =>
+      providerId === "minimax-cn" ? { getModels: () => models } : undefined,
+    registerProvider: (providerId: string, config: { models: ReadonlyArray<unknown> }) => {
+      registered.push({ providerId, models: [...config.models] as Array<Record<string, unknown>> });
+    },
+  });
+
+  // builtin runtime: the provider is re-registered with its current catalog
+  // plus the addition (registerProvider replaces, not merges, the list).
+  const catalog = [
+    { id: "MiniMax-M3", api: "anthropic-messages" },
+    { id: "MiniMax-M2.7", api: "anthropic-messages" },
+  ];
+  applyPiPresetModelAdditions(registryFrom(catalog), { runtime: "builtin" });
+  assert.equal(registered.length, 1, "one re-registration");
+  assert.equal(registered[0].providerId, "minimax-cn");
+  assert.deepEqual(
+    registered[0].models.map((model) => (model as { id: string }).id),
+    ["MiniMax-M3", "MiniMax-M2.7", "MiniMax-M3.1-Flash-Preview"],
+    "existing catalog is preserved and the addition is appended",
+  );
+  const added = registered[0].models.at(-1) as Record<string, unknown>;
+  assert.equal(added.api, "anthropic-messages");
+  assert.equal(added.baseUrl, "https://api.minimaxi.com/anthropic");
+  assert.equal(added.contextWindow, 1_000_000);
+  assert.equal(added.maxTokens, 512_000);
+  assert.deepEqual(added.input, ["text", "image"]);
+
+  // Once upstream ships the same id the addition must become a no-op so the
+  // SDK's own entry (with its authoritative metadata) stays in place.
+  registered.length = 0;
+  applyPiPresetModelAdditions(
+    registryFrom([{ id: "MiniMax-M3" }, { id: "MiniMax-M3.1-Flash-Preview" }]),
+    { runtime: "builtin" },
+  );
+  assert.equal(registered.length, 0, "no re-registration when the SDK already carries the id");
+
+  // The pi CLI runtime shares this factory but must not gain builtin additions.
+  registered.length = 0;
+  applyPiPresetModelAdditions(registryFrom(catalog), { runtime: "pi" });
+  assert.equal(registered.length, 0, "non-builtin runtimes are untouched");
 });
 
 test("PiSdkRuntimeSession surfaces a factory model-fallback notice as a user-visible runtime diagnostic", async () => {

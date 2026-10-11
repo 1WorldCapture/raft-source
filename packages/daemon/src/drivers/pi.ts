@@ -516,6 +516,85 @@ export function resolveBuiltInGatewayLaunch(
   return null;
 }
 
+/**
+ * Preset-provider models surfaced ahead of the upstream pi-ai catalog. Mirrors
+ * PI_CATALOG_ADDITIONS in packages/daemon/scripts/generate-pi-builtin-models.ts:
+ * the shared list only makes the id selectable and reportable; this table is
+ * what lets a builtin session actually resolve and run the model, because
+ * pi-ai's registry only knows models shipped by the SDK. Each entry becomes a
+ * no-op once upstream ships the same id (the id is then already in the
+ * provider's catalog and we skip re-registration); delete entries here and in
+ * the generator after the SDK bump regenerates them natively.
+ */
+interface PiPresetModelAddition {
+  id: string;
+  name: string;
+  api: string;
+  baseUrl: string;
+  reasoning: boolean;
+  input: ("text" | "image")[];
+  inputLimits?: Record<string, unknown>;
+  cost: { input: number; output: number; cacheRead: number; cacheWrite: number };
+  contextWindow: number;
+  maxTokens: number;
+}
+
+const PI_PRESET_MODEL_ADDITIONS: Readonly<Record<string, ReadonlyArray<PiPresetModelAddition>>> = {
+  "minimax-cn": [
+    {
+      // MiniMax M3.1 Flash preview, released 2026-09-27: 1M context, 512K
+      // output, text+image input, free during preview on both MiniMax token
+      // plans (models.dev). Mirrors the SDK's MiniMax-M3 entry shape on the
+      // same anthropic-messages CN endpoint.
+      id: "MiniMax-M3.1-Flash-Preview",
+      name: "MiniMax-M3.1-Flash-Preview",
+      api: "anthropic-messages",
+      baseUrl: "https://api.minimaxi.com/anthropic",
+      reasoning: true,
+      input: ["text", "image"],
+      inputLimits: {
+        images: {
+          resize: { maxWidth: 2000, maxHeight: 2000, maxBytes: 4718592, jpegQuality: 80 },
+        },
+      },
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: 1_000_000,
+      maxTokens: 512_000,
+    },
+  ],
+};
+
+/** Minimal registry surface applyPiPresetModelAdditions needs (unit-testable). */
+export interface PiPresetModelAdditionRegistry {
+  getProvider(providerId: string): { getModels(): ReadonlyArray<{ id: string }> } | undefined;
+  registerProvider(providerId: string, config: { models: ReadonlyArray<unknown> }): void;
+}
+
+/**
+ * Register PI_PRESET_MODEL_ADDITIONS into the live session registry. pi-ai's
+ * registerProvider REPLACES a provider's model list rather than merging it, so
+ * each provider is re-registered with its current catalog plus the missing
+ * additions; provider auth is untouched (the extension layer inherits the
+ * native provider's credential resolution).
+ */
+export function applyPiPresetModelAdditions(
+  modelRegistry: PiPresetModelAdditionRegistry,
+  runtimeConfig: Pick<RuntimeConfig, "runtime">,
+): void {
+  if (runtimeConfig.runtime !== "builtin") return;
+  for (const [providerId, additions] of Object.entries(PI_PRESET_MODEL_ADDITIONS)) {
+    const provider = modelRegistry.getProvider(providerId);
+    if (!provider) continue;
+    const models = provider.getModels();
+    const known = new Set(models.map((model) => model.id));
+    const missing = additions.filter((addition) => !known.has(addition.id));
+    if (missing.length === 0) continue;
+    modelRegistry.registerProvider(providerId, {
+      models: [...models.map((model) => ({ ...model })), ...missing.map((addition) => ({ ...addition }))],
+    });
+  }
+}
+
 function configureBuiltInGatewayCustomModel(
   modelRegistry: ModelRegistry,
   runtimeConfig: RuntimeConfig,
@@ -1268,6 +1347,10 @@ export async function createPiAgentSessionForContext(
     providerHttpClient = sessionServices.providerHttpClient;
     const modelRegistry = new pi.ModelRegistry(services.modelRuntime);
     configureBuiltInGatewayCustomModel(modelRegistry, runtimeConfig, managedProviderConnection);
+    // The SDK's overloaded registerProvider (native Provider | ProviderConfigInput)
+    // does not structurally unify with the addition-registry view this function
+    // uses so it stays unit-testable; the runtime objects are identical.
+    applyPiPresetModelAdditions(modelRegistry as unknown as PiPresetModelAdditionRegistry, runtimeConfig);
     applyPiDaemonSettingsOverrides(services.settingsManager);
     logPiServiceDiagnostics("create_session", services);
     addPiServiceTraceEvent(traceSpan, `${traceEventPrefix}.services_ready`, services, {
