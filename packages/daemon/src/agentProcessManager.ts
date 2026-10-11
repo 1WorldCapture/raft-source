@@ -222,6 +222,18 @@ import {
 
 export { DecisionErrorWindow } from "./runtimeOutputWindow.js";
 
+/** Activity detail for a finished tool run; appends the runtime-measured wall time when known. */
+export function formatToolFinishedDetail(durationMs: number | undefined): string {
+  if (typeof durationMs !== "number" || !Number.isFinite(durationMs) || durationMs < 0) return "Tool finished";
+  const seconds = durationMs / 1000;
+  const formatted = seconds >= 60
+    ? `${Math.floor(seconds / 60)}m ${Math.round(seconds % 60)}s`
+    : seconds >= 10
+      ? `${seconds.toFixed(0)}s`
+      : `${seconds.toFixed(1)}s`;
+  return `Tool finished (${formatted})`;
+}
+
 const DEFAULT_MAX_CONCURRENT_AGENT_STARTS = 5;
 const DEFAULT_AGENT_START_INTERVAL_MS = 500;
 const RUNNER_CREDENTIAL_MINT_MAX_ATTEMPTS = 3;
@@ -737,6 +749,8 @@ function isStartupRequestErrorEvent(event: ParsedEvent): event is StartupRequest
 
 function runtimeDiagnosticTitle(event: RuntimeDiagnosticEvent): string {
   switch (event.itemType) {
+    case "modelFallback":
+      return "Configured model retired";
     case "configWarning":
       return "Codex config warning";
     case "guardianWarning":
@@ -7662,11 +7676,14 @@ export class AgentProcessManager {
         if (ap) {
           this.clearRuntimeErrorDeliveryBackoffAfterProgress(agentId, ap, event.kind);
           const reduction = reduceApmToolUse(ap.gatedSteering, { kind: "tool_output" });
-          this.recordRuntimeTraceEvent(agentId, ap, "tool.output.observed", { tool: invocation.toolName });
+          this.recordRuntimeTraceEvent(agentId, ap, "tool.output.observed", {
+            tool: invocation.toolName,
+            ...(typeof event.durationMs === "number" ? { duration_ms: event.durationMs } : {}),
+          });
           this.recordRuntimeTraceEvent(agentId, ap, "runtime.continuation.expected");
           this.commitGatedSteeringDecisionState(agentId, ap, reduction.nextState);
         }
-        this.broadcastActivity(agentId, "working", "Tool finished", [], undefined, "tool_end");
+        this.broadcastActivity(agentId, "working", formatToolFinishedDetail(event.durationMs), [], undefined, "tool_end");
         break;
       }
 

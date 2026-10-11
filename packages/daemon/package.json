@@ -1,6 +1,6 @@
 {
   "name": "@botiverse/raft-daemon",
-  "version": "1.0.31",
+  "version": "1.0.32",
   "license": "FSL-1.1-ALv2",
   "type": "module",
   "bin": {
@@ -31,8 +31,8 @@
     "dev": "pnpm --filter @botiverse/raft build && tsx watch src/index.ts",
     "start": "tsx src/index.ts",
     "build": "pnpm --filter @botiverse/raft build && tsup && node -e \"require('fs').cpSync('../cli/dist','dist/cli',{recursive:true})\" && node scripts/write-dist-bins.mjs",
-    "test": "vitest run",
-    "test:sea-host": "vitest run --config vitest.sea-host.config.ts",
+    "test": "env -u PI_PACKAGE_DIR vitest run",
+    "test:sea-host": "env -u PI_PACKAGE_DIR vitest run --config vitest.sea-host.config.ts",
     "prepack": "pnpm run build",
     "prepublishOnly": "pnpm run build",
     "typecheck": "tsc --noEmit",
@@ -52,8 +52,8 @@
   "dependencies": {
     "@botiverse/kimi-code-sdk": "0.34.0-botiverse.0",
     "@botiverse/oar": "0.0.7",
-    "@earendil-works/pi-ai": "0.85.1",
-    "@earendil-works/pi-coding-agent": "0.85.1",
+    "@earendil-works/pi-ai": "1.1.0",
+    "@earendil-works/pi-coding-agent": "1.1.0",
     "@jackwener/opencli": "^1.8.3",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "ajv": "^8.18.0",

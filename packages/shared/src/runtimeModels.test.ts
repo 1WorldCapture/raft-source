@@ -182,8 +182,9 @@ test("Built-in Xiaomi MiMo provider is generated from the Pi model catalog", () 
   const xiaomiModels = PI_BUILTIN_PROVIDER_MODELS.xiaomi;
 
   assert.equal(PI_BUILTIN_PROVIDER_DEFAULT_MODELS.xiaomi, "xiaomi/mimo-v2.5-pro");
-  assert.equal(xiaomiModels[0]?.id, "xiaomi/mimo-v2.5-pro");
-  assert.equal(xiaomiModels[0]?.label, "MiMo-V2.5-Pro");
+  // pi 1.1.0 lists v2.6-pro ahead of v2.5-pro; the provider default stays v2.5-pro.
+  assert.equal(xiaomiModels[0]?.id, "xiaomi/mimo-v2.6-pro");
+  assert.equal(xiaomiModels[0]?.label, "MiMo-V2.6-Pro");
   assert.ok(xiaomiModels.some((model) => model.id === "xiaomi/mimo-v2.5-pro-ultraspeed"));
 });
 

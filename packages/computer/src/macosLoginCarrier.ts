@@ -12,6 +12,7 @@ import {
 } from "@botiverse/raft-shared";
 
 import { writeDurableTextFile } from "./durableFile.js";
+import { plistsSemanticallyEqual } from "./plistCompare.js";
 import { ComputerServiceError } from "./services/errors.js";
 
 const execFileAsync = promisify(execFile);
@@ -836,7 +837,8 @@ async function enableCliCarrier(
   );
   const existingJob = await printJob(spec, runCommand);
   if (
-    existingDefinition === spec.definition
+    existingDefinition !== null
+    && (existingDefinition === spec.definition || plistsSemanticallyEqual(existingDefinition, spec.definition))
     && existingJob !== null
     && existingJob.includes(spec.label)
     && existingJob.includes(spec.dispatcherPath)
