@@ -381,3 +381,83 @@ test("final staged adoption rejects Windows drive-relative manifest paths before
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("a manifest agent id that is not one literal path segment is refused before placement (task #25)", async () => {
+  const root = tempRoot();
+  try {
+    const slockHome = path.join(root, ".slock");
+    const staged = path.join(root, "staged-workspace");
+    mkdirSync(staged, { recursive: true });
+    writeFileSync(path.join(staged, "notes.md"), "hello\n");
+
+    // For an adopted bundle `assertManifestIdentity` compares manifest.agentId to itself, so these names are
+    // otherwise unchecked. "." would make the placement target the agents root itself.
+    for (const bad of [".", "..", "", "a/b", "a\\b", "x\u0000y"]) {
+      const badManifest = manifest({ agentId: bad, slockHome, workspace: staged });
+      await assert.rejects(
+        () => buildAgentMigrationAdoptPlan({
+          sourceKind: "staged_bundle",
+          slockHome,
+          stagingWorkspacePath: staged,
+          manifest: badManifest,
+          manifestSha256: hashAgentMigrationManifest(badManifest),
+          generation: generation(),
+        }),
+        /MIGRATION_MANIFEST_AGENT_ID_INVALID/,
+        JSON.stringify(bad),
+      );
+    }
+
+    // Nothing was created, and the agents root itself is untouched.
+    assert.equal(existsSync(path.join(slockHome, "agents", "agent-1")), false);
+    assert.equal(existsSync(path.join(staged, "notes.md")), true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a final workspace path outside the agents root is refused (task #25)", async () => {
+  const root = tempRoot();
+  try {
+    const slockHome = path.join(root, ".slock");
+    const staged = path.join(root, "staged-workspace");
+    mkdirSync(staged, { recursive: true });
+    writeFileSync(path.join(staged, "notes.md"), "hello\n");
+    const sourceManifest = manifest({ agentId: "agent-3", slockHome, workspace: staged });
+
+    // The agents root itself, a sibling of it, and a nested path below it are all outside the invariant.
+    for (const bad of [
+      path.join(slockHome, "agents"),
+      path.join(slockHome, "agents", ".."),
+      path.join(slockHome, "elsewhere", "agent-3"),
+      path.join(slockHome, "agents", "nested", "agent-3"),
+    ]) {
+      await assert.rejects(
+        () => buildAgentMigrationAdoptPlan({
+          sourceKind: "staged_bundle",
+          slockHome,
+          stagingWorkspacePath: staged,
+          manifest: sourceManifest,
+          manifestSha256: hashAgentMigrationManifest(sourceManifest),
+          generation: generation(),
+          finalWorkspacePath: bad,
+        }),
+        /MIGRATION_FINAL_WORKSPACE_PATH_OUTSIDE_AGENTS_ROOT/,
+        bad,
+      );
+    }
+
+    // The legitimate default still resolves to exactly one directory below the agents root.
+    const plan = await buildAgentMigrationAdoptPlan({
+      sourceKind: "staged_bundle",
+      slockHome,
+      stagingWorkspacePath: staged,
+      manifest: sourceManifest,
+      manifestSha256: hashAgentMigrationManifest(sourceManifest),
+      generation: generation(),
+    });
+    assert.equal(plan.finalWorkspacePath, path.join(slockHome, "agents", "agent-3"));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

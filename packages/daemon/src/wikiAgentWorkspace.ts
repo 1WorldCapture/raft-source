@@ -116,6 +116,18 @@ async function tryLstat(targetPath: string) {
 }
 
 async function assertWorkspacePathIsSafe(agentDataDir: string, relativePath: string): Promise<void> {
+  // Defence in depth (task #25): every caller currently routes through `isAllowedPackPath`, which already
+  // rejects "." / ".." / empty segments. Re-checking here makes the invariant local instead of depending on
+  // each call site having pre-validated, so a future caller cannot reintroduce an escaping path.
+  const segments = relativePath.split("/");
+  if (
+    !relativePath
+    || path.posix.isAbsolute(relativePath)
+    || path.posix.normalize(relativePath) !== relativePath
+    || segments.some((segment) => segment === "." || segment === ".." || segment === "")
+  ) {
+    throw new Error(`Wiki workspace managed path is not a normalized relative path: ${relativePath}`);
+  }
   const rootStat = await lstat(agentDataDir);
   if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) {
     throw new Error("Wiki Agent workspace root must be a real directory");
