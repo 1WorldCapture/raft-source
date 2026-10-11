@@ -3462,17 +3462,52 @@ test("resolvePiFallbackModel prefers the provider catalog default, then same-pro
     "falls back to another available model of the same provider",
   );
 
-  // 3. Nothing left of the provider: any available model.
+  // 3. Nothing left of the provider: undefined, i.e. the same model the agent
+  // would get with model="default" — never an arbitrary cross-provider pick
+  // (a different provider can mean a different key or billing).
   const otherProviderOnly = registryFrom([
     { provider: "anthropic", id: "claude-haiku-5-5" },
   ]);
   assert.equal(
-    resolvePiFallbackModel(otherProviderOnly, "openai/gpt-5.4")?.id,
-    "claude-haiku-5-5",
-    "falls back to the first available model when the provider has none",
+    resolvePiFallbackModel(otherProviderOnly, "openai/gpt-5.4"),
+    undefined,
+    "falls back to the default resolution path when the provider has nothing",
   );
 
-  // 4. Empty registry: no fallback, caller keeps the hard failure.
+  // 4. Empty registry: same default path, never a hard arbitrary pick.
   const empty = registryFrom([]);
   assert.equal(resolvePiFallbackModel(empty, "openai/gpt-5.4"), undefined);
+});
+
+test("PiSdkRuntimeSession surfaces a factory model-fallback notice as a user-visible runtime diagnostic", async () => {
+  const events: ParsedEvent[] = [];
+  const fake = createFakeAgentSession("pi-session-model-fallback", []);
+  const runtime = new PiSdkRuntimeSession(
+    makeSpawnContext(),
+    () => undefined,
+    async (_ctx, _sessionId, _observer, startupNotices) => {
+      startupNotices?.push({
+        kind: "model_fallback",
+        requestedModel: "deepseek/deepseek-v4-flash",
+        resolvedModel: "deepseek/deepseek-v4-pro",
+      });
+      return fake as unknown as AgentSession;
+    },
+  );
+  runtime.on("runtime_event", (event) => events.push(event));
+
+  assert.deepEqual(await runtime.start({ text: "initial prompt" }), { ok: true, acceptedAs: "prompt" });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const diagnostics = events.filter((event) => event.kind === "runtime_diagnostic");
+  assert.equal(diagnostics.length, 1, "exactly one fallback diagnostic per start");
+  const diagnostic = diagnostics[0] as Extract<ParsedEvent, { kind: "runtime_diagnostic" }>;
+  assert.equal(diagnostic.source, "pi_model_fallback");
+  assert.equal(diagnostic.severity, "warning");
+  assert.equal(diagnostic.itemType, "modelFallback");
+  assert.ok(diagnostic.message.includes("deepseek/deepseek-v4-flash"));
+  assert.ok(diagnostic.message.includes("deepseek/deepseek-v4-pro"));
+  assert.ok(diagnostic.message.includes("Update the agent's model setting"));
+  // session_init still comes first so activity state exists when it renders.
+  assert.equal(events[0]?.kind, "session_init");
 });

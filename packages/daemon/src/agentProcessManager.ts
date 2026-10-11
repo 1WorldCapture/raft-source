@@ -749,6 +749,8 @@ function isStartupRequestErrorEvent(event: ParsedEvent): event is StartupRequest
 
 function runtimeDiagnosticTitle(event: RuntimeDiagnosticEvent): string {
   switch (event.itemType) {
+    case "modelFallback":
+      return "Configured model retired";
     case "configWarning":
       return "Codex config warning";
     case "guardianWarning":

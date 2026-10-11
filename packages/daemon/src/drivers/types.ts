@@ -195,7 +195,7 @@ export type ParsedEvent =
   | {
       kind: "runtime_diagnostic";
       severity: "warning";
-      source: "codex_app_server_notification" | "grok_acp_notification" | "omp_rpc_notification";
+      source: "codex_app_server_notification" | "grok_acp_notification" | "omp_rpc_notification" | "pi_model_fallback";
       itemType: string;
       message: string;
       details?: string;

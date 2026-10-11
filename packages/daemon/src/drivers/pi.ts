@@ -103,6 +103,7 @@ type PiSessionFactory = (
   ctx: SpawnContext,
   sessionId: string,
   toolExecutionObserver?: PiToolExecutionObserver,
+  startupNotices?: PiStartupNotice[],
 ) => Promise<AgentSession>;
 type PiAssistantMessageEvent = Extract<AgentSessionEvent, { type: "message_update" }>["assistantMessageEvent"];
 
@@ -424,11 +425,20 @@ function resolvePiModelFromRegistry(
   return modelRegistry.getAll().find((model) => model.id === modelId);
 }
 
+/** Startup notice the session factory reports to the wrapper for user-visible playback. */
+export type PiStartupNotice = {
+  kind: "model_fallback";
+  requestedModel: string;
+  resolvedModel: string;
+};
+
 /**
  * Fallback model for a requested id the registry no longer knows (upstream
- * drops retired models from its catalog across SDK bumps). Never fails the
- * session on a stale id alone: prefer the provider's catalog default, then any
- * available model of the same provider, then any available model.
+ * drops retired models from its catalog across SDK bumps). Prefer the
+ * provider's catalog default, then an available model of the same provider.
+ * When neither exists, return undefined so the session starts on the same
+ * model it would get with model="default" — never an arbitrary cross-provider
+ * pick (a different provider can mean a different key or billing).
  */
 export function resolvePiFallbackModel(
   modelRegistry: Pick<ModelRegistry, "find" | "getAvailable">,
@@ -449,7 +459,7 @@ export function resolvePiFallbackModel(
     const sameProvider = modelRegistry.getAvailable().find((model) => model.provider === providerId);
     if (sameProvider) return sameProvider;
   }
-  return modelRegistry.getAvailable()[0];
+  return undefined;
 }
 
 function normalizeGatewayBaseUrl(baseUrl: string): string {
@@ -1144,7 +1154,7 @@ function installProviderHttpClient(
 export async function createPiAgentSessionForContext(
   ctx: SpawnContext,
   sessionId: string,
-  opts: { agentDir?: string; sessionDir?: string; traceName?: string; traceEventPrefix?: string; logPrefix?: string; exposeLaunchEnvToTools?: boolean; isolateHostProviderEnv?: boolean; agentDirSource?: "default" | "spawn_env" | "managed_builtin"; exposeLaunchTraceEvidence?: boolean } = {},
+  opts: { agentDir?: string; sessionDir?: string; traceName?: string; traceEventPrefix?: string; logPrefix?: string; exposeLaunchEnvToTools?: boolean; isolateHostProviderEnv?: boolean; agentDirSource?: "default" | "spawn_env" | "managed_builtin"; exposeLaunchTraceEvidence?: boolean; startupNotices?: PiStartupNotice[] } = {},
   toolExecutionObserver?: PiToolExecutionObserver,
 ): Promise<AgentSession> {
   const sessionDir = opts.sessionDir ?? buildPiSessionDir(ctx.workingDirectory);
@@ -1271,6 +1281,11 @@ export async function createPiAgentSessionForContext(
       if (fallbackModel) {
         model = fallbackModel;
         modelFallbackFrom = launchRuntimeFields.model;
+        opts.startupNotices?.push({
+          kind: "model_fallback",
+          requestedModel: launchRuntimeFields.model,
+          resolvedModel: formatPiModelLogId(fallbackModel),
+        });
         console.warn(
           "[%s] create_session missing_model_fallback requested=%s fallback=%s available=%d — the configured model is no longer in the catalog; update this agent's model setting",
           logPrefix,
@@ -1438,6 +1453,7 @@ export class PiSdkRuntimeSession implements RuntimeSession {
   private readonly toolExecutionObserver: PiToolExecutionObserver | undefined;
   private session: AgentSession | null = null;
   private unsubscribe: (() => void) | null = null;
+  private pendingStartupNotices: PiStartupNotice[] = [];
   private started = false;
   private didClose = false;
   private requestedStopReason: string | undefined;
@@ -1451,7 +1467,8 @@ export class PiSdkRuntimeSession implements RuntimeSession {
       sessionCtx,
       sessionId,
       observer,
-    ) => createPiAgentSessionForContext(sessionCtx, sessionId, {}, observer),
+      startupNotices,
+    ) => createPiAgentSessionForContext(sessionCtx, sessionId, { startupNotices }, observer),
   ) {
     this.mappingState = createPiSdkEventMappingState(ctx.config.sessionId || null);
     const runtimeContext = ctx.config.runtimeContext;
@@ -1522,14 +1539,16 @@ export class PiSdkRuntimeSession implements RuntimeSession {
     this.setCurrentSessionId(sessionId);
     this.toolExecutionObserver?.setRuntimeSessionId(sessionId);
 
+    const startupNotices: PiStartupNotice[] = [];
     const session = await this.sessionFactory({
       ...this.ctx,
       config: {
         ...this.ctx.config,
         sessionId,
       },
-    }, sessionId, this.toolExecutionObserver);
+    }, sessionId, this.toolExecutionObserver, startupNotices);
     this.session = session;
+    this.pendingStartupNotices = startupNotices;
     this.mappingState.sessionId = session.sessionId;
     this.setCurrentSessionId(session.sessionId);
     this.toolExecutionObserver?.setRuntimeSessionId(session.sessionId);
@@ -1562,6 +1581,17 @@ export class PiSdkRuntimeSession implements RuntimeSession {
     // enqueue a busy steer; FIFO setImmediate ordering must keep the initial
     // prompt ahead of that steer.
     this.emitSessionInit();
+    // Surface factory-recorded startup notices (e.g. retired-model fallback)
+    // as user-visible runtime diagnostics, after init so activity state exists.
+    for (const notice of this.pendingStartupNotices.splice(0)) {
+      this.emitRuntimeEvent({
+        kind: "runtime_diagnostic",
+        severity: "warning",
+        source: "pi_model_fallback",
+        itemType: "modelFallback",
+        message: `Configured model ${notice.requestedModel} is no longer available; using ${notice.resolvedModel} for this session. Update the agent's model setting.`,
+      });
+    }
     return { ok: true, acceptedAs: "prompt" };
   }
 
