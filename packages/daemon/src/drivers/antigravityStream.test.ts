@@ -3,6 +3,7 @@ import type { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { test } from "vitest";
 import type { AgentConfig } from "@botiverse/raft-shared";
+import { logger } from "../logger.js";
 import { getDriver } from "./index.js";
 import {
   ANTIGRAVITY_STREAM_DEFAULT_MODEL,
@@ -563,4 +564,36 @@ test("the registered driver queues busy wakes and does not install managed MCP c
   const source = readFileSync(new URL("./antigravityStream.ts", import.meta.url), "utf8");
   assert.equal(source.includes("mcp_config.json"), false);
   assert.equal(getDriver("antigravity").id, "antigravity");
+});
+
+test("an unrecognized agy stream-json frame is dropped but logged by event type (task #27)", () => {
+  // Without this, "agy emits a turn-end frame we never map" is indistinguishable from
+  // "agy has no turn-end frame", because the old fallthrough returned [] silently.
+  const seen: string[] = [];
+  const originalWarn = logger.warn;
+  (logger as unknown as { warn: (m: string) => void }).warn = (m: string) => {
+    seen.push(m);
+  };
+  try {
+    const normalizer = new AntigravityStreamEventNormalizer();
+    // Dropped, and named in the log — but the payload is never logged.
+    assert.deepEqual(
+      normalizer.normalizeLine(line({ event: "turn_complete", secret: "user-content" })),
+      [],
+    );
+    assert.equal(seen.length, 1);
+    assert.match(seen[0], /Unrecognized agy stream-json event type/);
+    assert.match(seen[0], /turn_complete/);
+    assert.ok(!seen[0].includes("user-content"), "must not log the frame payload");
+
+    // The three mapped frames must stay silent.
+    seen.length = 0;
+    const ok = new AntigravityStreamEventNormalizer();
+    ok.normalizeLine(line({ event: "init", conversation_id: "c-1" }));
+    ok.normalizeLine(line({ event: "step_update", step_update: { conversation_id: "c-1", step_type: "system_message" } }));
+    ok.normalizeLine(line({ event: "result", result: { conversation_id: "c-1", status: "SUCCESS", usage: {} } }));
+    assert.deepEqual(seen, []);
+  } finally {
+    (logger as unknown as { warn: (m: string) => void }).warn = originalWarn;
+  }
 });
