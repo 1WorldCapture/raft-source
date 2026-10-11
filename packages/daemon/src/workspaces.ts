@@ -166,9 +166,13 @@ export async function scanWorkspaceDirectories(dataDir: string): Promise<Workspa
 export async function deleteWorkspaceDirectory(dataDir: string, directoryName: string): Promise<boolean> {
   const targetDir = resolveWorkspaceDirectoryPath(dataDir, directoryName);
   if (!targetDir) {
+    // Leave a trace: a rejected name is either a bug upstream or an attempt to delete more than one workspace.
+    logger.warn(`[Workspace] Rejected invalid workspace directory name for delete: ${JSON.stringify(directoryName)} (dataDir=${path.resolve(dataDir)})`);
     return false;
   }
   try {
+    // The directory name is the agent id; log the resolved absolute path before anything is removed.
+    logger.info(`[Workspace] Deleting workspace directory: agentId=${directoryName} path=${targetDir}`);
     await rm(targetDir, { recursive: true, force: true });
     logger.info(`[Workspace] Deleted directory: ${targetDir}`);
     return true;
