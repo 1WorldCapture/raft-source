@@ -62,3 +62,21 @@ test("a re-staged experiment slot is not mistaken for the running binary", () =>
     EXPERIMENT,
   );
 });
+
+// Review of #345: when the startup identity matches NEITHER candidate (the
+// promotion copied rather than renamed, or crossed volumes), the startup
+// spelling may be gone while the stable sibling still exists — fall through to
+// the spelling loop instead of returning a path that may no longer exist.
+test("when no candidate matches the startup identity, an existing spelling still wins over a gone execPath", () => {
+  const exists = (p: string) => p === STABLE;
+  const identityOf = (p: string) => (p === STABLE ? "9:900" : null);
+  assert.equal(
+    resolveLiveExecutablePath({ execPath: EXPERIMENT, platform: "darwin", exists, identityOf, startupIdentity: "1:100" }),
+    STABLE,
+  );
+  // Both spellings gone: keep the historical last-resort answer.
+  assert.equal(
+    resolveLiveExecutablePath({ execPath: EXPERIMENT, platform: "darwin", exists: () => false, identityOf, startupIdentity: "1:100" }),
+    EXPERIMENT,
+  );
+});

@@ -36,6 +36,7 @@ import {
   OS_SUPERVISOR_KIND_ENV_VAR,
   parseLegacyOsSupervisorInvocation,
 } from "./osSupervisorLifecycle.js";
+import { liveProcessExecutablePath } from "./liveExecutable.js";
 import {
   applyCapturedEnv,
   captureShellEnv,
@@ -307,9 +308,12 @@ function printEnvMode(argv: string[]): void {
  * execArgv + script) — see CaptureShellEnvDeps.selfExec.
  */
 export function buildSelfExecArgv(): string[] {
-  if (isSeaEntry()) return [process.execPath];
+  // Re-exec after a K promotion must resolve the live binary: the startup
+  // execPath may have been renamed away under this process.
+  const livePath = liveProcessExecutablePath();
+  if (isSeaEntry()) return [livePath];
   return [
-    process.execPath,
+    livePath,
     ...process.execArgv,
     ...(process.argv[1] !== undefined ? [process.argv[1]] : []),
   ];

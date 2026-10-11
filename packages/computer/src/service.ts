@@ -24,6 +24,7 @@ import { withComputerMutationLock } from "./concurrency.js";
 import { startIsAwaitingService } from "./startAwaiting.js";
 import { clearResidentConnectedMarker, readResidentConnectedMarker, writeResidentConnectedMarker } from "./residentConnectionMarker.js";
 import { residentCoreIdentity } from "./residentCoreIdentity.js";
+import { liveProcessExecutablePath } from "./liveExecutable.js";
 import { mkdir, readFile, writeFile, open, stat, unlink } from "node:fs/promises";
 import { dirname, join as joinPath } from "node:path";
 import {
@@ -1113,7 +1114,9 @@ export async function runService(deps: RunServiceDeps = {}): Promise<void> {
     if (kRecoveryChild === null && (deps.isSeaBinaryFn ?? isSeaBinary)()) {
       const recovery = await (deps.spawnPendingKUpgradeRecoveryFn ?? spawnPendingKUpgradeRecovery)(
         slockHome,
-        process.execPath,
+        // The service keeps running across a K promotion rename; hand the
+        // recovery child the live binary path, not the startup spelling.
+        liveProcessExecutablePath(),
       ).catch(() => null);
       if (recovery) {
         kRecoveryChild = recovery;
@@ -1139,7 +1142,9 @@ export async function runService(deps: RunServiceDeps = {}): Promise<void> {
   // comes back live without a restart.
   const upgradeStart = createServiceUpgradeStart({
     slockHome,
-    currentBinaryPath: process.execPath,
+    // Version/channel inspection of the running binary can happen after a K
+    // promotion renamed the startup spelling away — resolve the live path.
+    currentBinaryPath: liveProcessExecutablePath(),
     servicePid: process.pid,
     isSeaBinaryFn: deps.isSeaBinaryFn ?? isSeaBinary,
     readChannelFn: deps.readChannelFn,

@@ -22,9 +22,14 @@ let readProcSelfExeForHost: () => string | null = () => {
   }
 };
 
-/** Test seam: a test that fakes process.execPath cannot fake /proc/self/exe. */
+// Re-exported for tests that assert wrapper contents against the shared
+// identity helper used to build them.
 export { executableFileIdentity };
 
+/**
+ * Test seam: a test that fakes process.execPath cannot fake /proc/self/exe,
+ * so the Linux branch's kernel answer must be injectable to be testable.
+ */
 export function setProcSelfExeReaderForTests(reader: (() => string | null) | null): void {
   readProcSelfExeForHost = reader ?? (() => {
     try {

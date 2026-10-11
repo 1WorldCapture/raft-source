@@ -59,7 +59,10 @@ export function resolveLiveExecutablePath(deps: LiveExecutablePathDeps): string 
     for (const candidate of candidates) {
       if (exists(candidate) && deps.identityOf(candidate) === startup) return candidate;
     }
-    return execPath;
+    // No candidate IS the running binary (promotion done by copy rather than
+    // rename, or across volumes). Fall through to the spelling loop instead of
+    // returning execPath: the startup spelling may be gone while a sibling
+    // slot path still exists and is the only re-executable one.
   }
   for (const candidate of candidates) {
     if (exists(candidate)) return candidate;
