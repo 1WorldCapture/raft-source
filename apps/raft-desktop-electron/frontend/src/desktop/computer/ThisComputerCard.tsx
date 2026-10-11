@@ -30,6 +30,7 @@ import { getComputerBridge, useSelfMachine } from "./useSelfComputer";
 import {
   deriveConvergeNotice,
   deriveControls,
+  preferLocalComputerVersion,
   freshInstallCommand,
   routeUpdateAction,
   type ComputerStatusReport,
@@ -230,7 +231,7 @@ export default function ThisComputerCard() {
               </span>
             </div>
             <div className="mt-0.5 truncate font-mono text-[11px] text-black/50">
-              <MachineRunLabel machine={selfMachine} />
+              <MachineRunLabel machine={preferLocalComputerVersion(selfMachine, { running: status?.service?.running === true, version: status?.service?.version?.version })} />
             </div>
           </div>
         </div>
