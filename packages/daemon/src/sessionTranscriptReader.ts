@@ -1,13 +1,11 @@
 import path from "node:path";
 import { lstat, open, realpath } from "node:fs/promises";
+import { redactDiagnosticText } from "@botiverse/raft-shared";
 
-function redactTranscript(text: string): string {
-  return text
-    .replace(/sk_(?:agent|machine|computer)_[A-Za-z0-9_-]+/g, "sk_[redacted]")
-    .replace(/sap_[A-Za-z0-9_-]+/g, "sap_[redacted]")
-    .replace(/Bearer\s+[A-Za-z0-9_\-./+=]+/g, "Bearer [redacted]")
-    .replace(/["']?auth[_-]?token["']?\s*[:=]\s*["'][^"']+["']/gi, "[redacted]")
-    .replace(/https?:\/\/[^\s\"]+/g, "[url]");
+// Shared rule set (task #272 upstream): the previous local four-rule list let a bare JWT through. Transcripts keep
+// dropping whole URLs, as they always have.
+export function redactTranscript(text: string): string {
+  return redactDiagnosticText(text, { urls: "drop" });
 }
 
 export async function isPathWithinAllowedRoots(filePath: string, roots: string[]): Promise<boolean> {

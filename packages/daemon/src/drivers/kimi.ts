@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { hydrateRuntimeConfig, runtimeConfigToLaunchFields, runtimeModelSourceOutcomeFromSet, type AgentConfig, type RuntimeModelInfo, type RuntimeModelSet, type RuntimeModelSourceOutcome , type AxSurfaceText } from "@botiverse/raft-shared";
@@ -16,6 +16,37 @@ import { resolveRaftHome } from "../raftHome.js";
 const KIMI_WIRE_PROTOCOL_VERSION = "1.3";
 const KIMI_SYSTEM_PROMPT_FILE = ".slock-kimi-system.md";
 const KIMI_AGENT_FILE = ".slock-kimi-agent.yaml";
+
+/**
+ * Write the Kimi prompt + agent-config files for a launch.
+ *
+ * Extracted so the file modes are assertable without spawning a runtime (ported from upstream, task #302). Both
+ * files are 0o600: the prompt body carries no credential field, but it lands in the agent workspace and every
+ * sibling prompt writer is owner-only; without an explicit mode these are created 0644 under the usual umask.
+ */
+export function writeKimiPromptFiles(
+  workingDirectory: string,
+  prompt: string,
+  isResume: boolean,
+): { systemPromptPath: string; agentFilePath: string } {
+  const systemPromptPath = path.join(workingDirectory, KIMI_SYSTEM_PROMPT_FILE);
+  const agentFilePath = path.join(workingDirectory, KIMI_AGENT_FILE);
+  if (!isResume || !existsSync(systemPromptPath)) {
+    writeFileSync(systemPromptPath, prompt, { encoding: "utf8", mode: 0o600 });
+  }
+  writeFileSync(agentFilePath, [
+    "version: 1",
+    "agent:",
+    "  extend: default",
+    `  system_prompt_path: ./${KIMI_SYSTEM_PROMPT_FILE}`,
+    "",
+  ].join("\n"), { encoding: "utf8", mode: 0o600 });
+  // writeFileSync only applies `mode` when it CREATES the file, and on resume the prompt write above is skipped
+  // entirely. A pre-existing file keeps its old 0644, which is the stock this fix exists for. chmod is idempotent.
+  chmodSync(systemPromptPath, 0o600);
+  chmodSync(agentFilePath, 0o600);
+  return { systemPromptPath, agentFilePath };
+}
 
 interface JsonRpcEventMessage {
   jsonrpc: "2.0";
@@ -125,19 +156,7 @@ export class KimiDriver implements RuntimeDriver {
     this.sessionAnnounced = false;
     this.promptRequestId = randomUUID();
 
-    const systemPromptPath = path.join(ctx.workingDirectory, KIMI_SYSTEM_PROMPT_FILE);
-    const agentFilePath = path.join(ctx.workingDirectory, KIMI_AGENT_FILE);
-
-    if (!isResume || !existsSync(systemPromptPath)) {
-      writeFileSync(systemPromptPath, ctx.prompt, "utf8");
-    }
-    writeFileSync(agentFilePath, [
-      "version: 1",
-      "agent:",
-      "  extend: default",
-      `  system_prompt_path: ./${KIMI_SYSTEM_PROMPT_FILE}`,
-      "",
-    ].join("\n"), "utf8");
+    const { systemPromptPath, agentFilePath } = writeKimiPromptFiles(ctx.workingDirectory, ctx.prompt, isResume);
     const managedMcp = await prepareManagedMcpRuntimeProxy({
       agentId: ctx.agentId,
       launchId: ctx.launchId,

@@ -38,7 +38,7 @@ import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { createHash, randomUUID } from "node:crypto";
 import { gzipSync } from "node:zlib";
 import path from "node:path";
-import { currentDate } from "@botiverse/raft-shared";
+import { currentDate, redactDiagnosticText } from "@botiverse/raft-shared";
 
 import {
   computerDir,
@@ -317,35 +317,8 @@ async function readComputerTraceRecords(slockHome: string): Promise<string[]> {
   return lines;
 }
 
-const SECRET_PATTERNS: RegExp[] = [
-  /sk_[a-z]+_[A-Za-z0-9._-]+/g,
-  /\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/gi,
-  /\b(?:sk|sk-ant|sk-proj|xox[baprs]?)-[A-Za-z0-9_-]{8,}\b/g,
-  /\beyJ[A-Za-z0-9._-]{20,}/g,
-  /\b[A-Fa-f0-9]{40,}\b/g,
-  /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g,
-  /\/Users\/[^\s"'<>:]+(?:\/[^\s"'<>:]+)*/g,
-  /\/home\/[^\s"'<>:]+(?:\/[^\s"'<>:]+)*/g,
-  /[A-Za-z]:\\Users\\[^\s"'<>:]+(?:\\[^\s"'<>:]+)*/g,
-];
-
-function redactUrlQuery(value: string): string {
-  try {
-    const url = new URL(value);
-    if (url.search) url.search = "?[REDACTED_QUERY]";
-    if (url.username) url.username = "[REDACTED_USER]";
-    if (url.password) url.password = "[REDACTED_PASSWORD]";
-    return url.toString();
-  } catch {
-    return value.replace(/\?.*$/, "?[REDACTED_QUERY]");
-  }
-}
-
-function redactDiagnosticText(text: string): string {
-  let out = text.replace(/https?:\/\/[^\s"'<>]+/gi, (url) => redactUrlQuery(url));
-  for (const re of SECRET_PATTERNS) out = out.replace(re, "***REDACTED***");
-  return out;
-}
+// Redaction is the shared scrubber (packages/shared diagnosticRedaction), one rule set for every surface that sends
+// diagnostic text off a machine. This file used to carry a private copy whose rule list had gaps (task #272).
 
 interface RedactedTail {
   lines: string[];
