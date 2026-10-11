@@ -417,6 +417,17 @@ export class WakeCrashLoopBreaker {
     return (await this.read(agentId)).state.catchupOwed === true;
   }
 
+  /**
+   * A wake was refused while the block was active: the arriving messages
+   * stayed in the inbox, so the episode owes a catch-up start once a release
+   * path (cooldown / human / config change) opens.
+   */
+  async markCatchupOwed(agentId: string): Promise<void> {
+    await this.mutate(agentId, (state) => state.catchupOwed === true
+      ? { state, result: undefined, write: false }
+      : { state: { ...state, catchupOwed: true }, result: undefined, write: true });
+  }
+
   /** This start (launchId) carries the owed catch-up. */
   async markCatchupCarried(agentId: string, launchId: string): Promise<void> {
     await this.mutate(agentId, (state) => state.catchupOwed === true && state.lastStartLaunchId === launchId

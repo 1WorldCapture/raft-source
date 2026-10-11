@@ -6483,12 +6483,12 @@ type CanonicalThreadRow = {
 
 async function listCanonicalThreadsForParentMessages(
   parentMessageIds: string[],
+  executor: DatabaseExecutor = getDb(),
 ): Promise<CanonicalThreadRow[]> {
   const dedupedParentMessageIds = [...new Set(parentMessageIds.filter(Boolean))];
   if (dedupedParentMessageIds.length === 0) return [];
 
-  const db = getDb();
-  const rows = await db.execute(sql`
+  const rows = await executor.execute(sql`
     SELECT DISTINCT ON (c.parent_message_id)
       c.id::text AS "threadChannelId",
       c.id::text AS "storageThreadChannelId",
@@ -6647,8 +6647,11 @@ export async function listRecentThreadParentMessageIdsForChannelView(channelId: 
   return listRecentCanonicalThreadParentMessageIds(resolved.canonicalChannelId, limit);
 }
 
-async function getCanonicalThreadForParentMessage(parentMessageId: string): Promise<CanonicalThreadRow | null> {
-  const [row] = await listCanonicalThreadsForParentMessages([parentMessageId]);
+async function getCanonicalThreadForParentMessage(
+  parentMessageId: string,
+  executor: DatabaseExecutor = getDb(),
+): Promise<CanonicalThreadRow | null> {
+  const [row] = await listCanonicalThreadsForParentMessages([parentMessageId], executor);
   return row ?? null;
 }
 
@@ -6793,20 +6796,34 @@ export async function getOrCreateThread(
   // thread_id; search relies on "a thread's parent always carries its
   // thread_id".
   const threadName = `thread-${parentMessageId.slice(0, 8)}`;
-  const threadChannel = await db.transaction(async (tx) => {
+  const threadResult = await db.transaction(async (tx) => {
     await lockThreadRootMessageForCreate(tx, parentMessageId);
+    // Re-query UNDER the lock: there is no unique index on parent_message_id,
+    // so a concurrent creator that committed between our outer check and this
+    // lock is only visible here. Without this, both creators insert a thread
+    // and the later one re-stamps the parent's thread_id.
+    const raced = await getCanonicalThreadForParentMessage(parentMessageId, tx);
+    if (raced) {
+      await syncParentMessageThreadId(parentMessageId, raced.threadChannelId, tx);
+      return { id: raced.threadChannelId, created: false as const };
+    }
     const [inserted] = await tx.insert(channels).values({
       serverId: parentChannel.serverId,
       name: threadName,
       type: "thread",
       parentMessageId,
     }).onConflictDoNothing().returning();
-    if (inserted) await syncParentMessageThreadId(parentMessageId, inserted.id, tx);
-    return inserted;
+    if (inserted) {
+      await syncParentMessageThreadId(parentMessageId, inserted.id, tx);
+      return { id: inserted.id, created: true as const };
+    }
+    // The insert conflicted (a unique violation elsewhere) but the re-query
+    // found nothing visible; fall back to a post-commit canonical lookup.
+    return { id: null, created: false as const };
   });
 
-  if (threadChannel) {
-    return { id: threadChannel.id, serverId: parentChannel.serverId, parentMessageId, created: true };
+  if (threadResult.id) {
+    return { id: threadResult.id, serverId: parentChannel.serverId, parentMessageId, created: threadResult.created };
   }
 
   const canonical = await getCanonicalThreadForParentMessage(parentMessageId);

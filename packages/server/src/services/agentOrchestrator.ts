@@ -718,6 +718,13 @@ interface StartAgentOptions {
   wakeMessage?: AgentMessage;
   wakeMessageTransient?: boolean;
   requireQueueReceipt?: boolean;
+  /**
+   * The start was requested by a human act (e.g. the channel resume route).
+   * Human starts always lift a wake crash-loop block and open a fresh
+   * episode, even when they carry a resume prompt (which would otherwise
+   * classify the start as automatic).
+   */
+  human?: boolean;
 }
 
 export type AgentStartDispatchResult =
@@ -2264,6 +2271,8 @@ export class AgentOrchestrator extends EventEmitter {
   private readonly daemonIngressRateLimitDisabled: boolean;
   /** Upstream 1.21.2 port: automatic-wake crash-loop breaker (task #3 item 2). */
   private readonly wakeCrashLoopBreaker: WakeCrashLoopBreaker;
+  /** One pending catch-up wake per agent: fires when the block cooldown ends. */
+  private readonly wakeCrashLoopCatchupTimers = new Map<string, unknown>();
 
   constructor(
     private readonly replicaStateStore: ReplicaStateStore = redisReplicaStateStore,
@@ -6877,6 +6886,11 @@ export class AgentOrchestrator extends EventEmitter {
             next_status: nextStatus,
             ...liveActivityAttrs,
           });
+          if (action === "persist-active" && msg.launchId) {
+            // The runtime that carried an owed catch-up is live: the queued
+            // messages reached it, so the debt is paid.
+            await this.wakeCrashLoopBreaker.confirmCatchupDelivered(msg.agentId, msg.launchId).catch(() => {});
+          }
           // Breaker exit observation (upstream 1.21.2 port): an inactive
           // frame whose launchId matches the current start and arrives within
           // the window is an early exit. Our agent:status protocol carries no
@@ -6895,6 +6909,8 @@ export class AgentOrchestrator extends EventEmitter {
                   `[Agent ${msg.agentId}] Wake crash-loop breaker TRIPPED after ${observation.snapshot.earlyExitCount} ` +
                   `early exits within ${observation.snapshot.windowMs}ms — automatic wakes are blocked until a release path clears it.`,
                 );
+                await this.wakeCrashLoopBreaker.markCatchupOwed(msg.agentId).catch(() => {});
+                this.scheduleWakeCrashLoopCatchup(msg.agentId, observation.snapshot.blockedAtMs ?? this.clock.now());
               }
             } catch (err) {
               console.warn(`[Agent ${msg.agentId}] wake crash-loop recordExit failed:`, err);
@@ -10050,6 +10066,7 @@ export class AgentOrchestrator extends EventEmitter {
 
   async startAgent(agentId: string, options: StartAgentOptions = {}): Promise<AgentStartDispatchResult> {
     const { resumePrompt, wakeMessage, wakeMessageTransient } = options;
+    const humanStart = options.human === true;
     // Load from DB (and populate cache) for start — need full state
     const agent = await this.loadAgentForStart(agentId);
     const startCause = wakeMessage ? "message" : resumePrompt ? "resume" : "manual";
@@ -10088,7 +10105,7 @@ export class AgentOrchestrator extends EventEmitter {
     // release path clears it (human start, manual stop, config change, or the
     // time cooldown). Messages are not lost: they stay in the inbox and the
     // start path re-queries unread at dispatch time.
-    if (startCause !== "manual" && await this.wakeCrashLoopBreaker.isBlocked(agentId, this.clock.now())) {
+    if (!humanStart && startCause !== "manual" && await this.wakeCrashLoopBreaker.isBlocked(agentId, this.clock.now())) {
       const snapshot = await this.wakeCrashLoopBreaker.snapshot(agentId);
       this.recordLifecycleEvent({
         agentId,
@@ -10105,6 +10122,10 @@ export class AgentOrchestrator extends EventEmitter {
         `within ${snapshot.windowMs}ms, blocked_at=${snapshot.blockedAtMs}). ` +
         `Start the agent manually or change its runtime config to release.`,
       );
+      // The refused messages stay in the inbox: owe a catch-up start and
+      // schedule it for when the cooldown lifts, so nothing strands.
+      await this.wakeCrashLoopBreaker.markCatchupOwed(agentId).catch(() => {});
+      this.scheduleWakeCrashLoopCatchup(agentId, snapshot.blockedAtMs ?? this.clock.now());
       return { outcome: "skipped", reason: "wake_crash_loop_blocked" };
     }
     const rollbackStatus = previousStatus ?? "inactive";
@@ -10389,8 +10410,13 @@ export class AgentOrchestrator extends EventEmitter {
       // Breaker bookkeeping (upstream 1.21.2 port): a successfully dispatched
       // start opens/resets the episode. Human starts always lift a block and
       // open a fresh episode; automatic starts keep it.
-      await this.wakeCrashLoopBreaker.recordStart(agentId, launchId ?? null, this.clock.now(), { human: startCause === "manual" })
+      await this.wakeCrashLoopBreaker.recordStart(agentId, launchId ?? null, this.clock.now(), { human: startCause === "manual" || humanStart })
         .catch((err) => console.warn(`[Agent ${agentId}] wake crash-loop recordStart failed:`, err));
+      // If this start carries an owed catch-up, claim it under this launchId;
+      // the active report below clears it once the runtime is really up.
+      if (launchId && await this.wakeCrashLoopBreaker.isCatchupOwed(agentId).catch(() => false)) {
+        await this.wakeCrashLoopBreaker.markCatchupCarried(agentId, launchId).catch(() => {});
+      }
     } catch (err) {
       startDispatchSpan.end("error", {
         attrs: {
@@ -10527,6 +10553,42 @@ export class AgentOrchestrator extends EventEmitter {
   async getWakeCrashLoopDiagnostic(agentId: string): Promise<WakeCrashLoopActivityDiagnostic | null> {
     const snapshot = await this.wakeCrashLoopBreaker.snapshot(agentId);
     return snapshot.blocked || snapshot.earlyExitCount > 0 ? snapshot : null;
+  }
+
+  /**
+   * Catch-up wake (B1 follow-up): messages that arrived while the breaker
+   * block was active stayed in the inbox; schedule one automatic wake at
+   * block end so they are not stranded until an unrelated message arrives.
+   */
+  private scheduleWakeCrashLoopCatchup(agentId: string, blockedAtMs: number): void {
+    const rules = this.wakeCrashLoopBreaker.getRules();
+    if (rules.blockCooldownMs <= 0) return;
+    const existing = this.wakeCrashLoopCatchupTimers.get(agentId);
+    if (existing !== undefined) this.clock.clearTimeout(existing);
+    const fireAt = blockedAtMs + rules.blockCooldownMs + 1_000;
+    const delay = Math.max(1, fireAt - this.clock.now());
+    const timer = this.clock.setTimeout(() => {
+      this.wakeCrashLoopCatchupTimers.delete(agentId);
+      void this.triggerWakeCrashLoopCatchup(agentId);
+    }, delay);
+    this.wakeCrashLoopCatchupTimers.set(agentId, timer);
+  }
+
+  private async triggerWakeCrashLoopCatchup(agentId: string): Promise<void> {
+    try {
+      if (!(await this.wakeCrashLoopBreaker.isCatchupOwed(agentId))) return;
+      const agent = await this.getCachedAgent(agentId);
+      if (!agent || agent.status === "stopped") return;
+      // An automatic resume wake: isBlocked lifts the expired block, and the
+      // ordinary start path re-queries the unread inbox, so the queued
+      // messages reach the agent. If the agent re-trips immediately, the
+      // refusal path marks the catch-up owed again and reschedules.
+      await this.startAgent(agentId, {
+        resumePrompt: "<system>Wake crash-loop cooldown elapsed; catching up on queued messages.</system>",
+      });
+    } catch (err) {
+      console.warn(`[Agent ${agentId}] wake crash-loop catch-up wake failed:`, err);
+    }
   }
 
   protected async applyStopAction(context: StopApplyContext) {

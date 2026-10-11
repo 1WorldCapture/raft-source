@@ -3051,7 +3051,10 @@ channelRouter.post("/:id/resume-all-agents", async (req, res) => {
     await Promise.allSettled(
       agents.map(async (agent) => {
         try {
-          await agentOrchestrator.startAgent(agent.id, { resumePrompt: prompt });
+          // A channel resume is a human act: it must lift a tripped wake
+          // crash-loop block like a manual start, not bounce off it as an
+          // automatic wake.
+          await agentOrchestrator.startAgent(agent.id, { resumePrompt: prompt, human: true });
           results.push({ agentId: agent.id, ok: true });
         } catch (err: unknown) {
           results.push({ agentId: agent.id, ok: false, error: (err as Error).message });
