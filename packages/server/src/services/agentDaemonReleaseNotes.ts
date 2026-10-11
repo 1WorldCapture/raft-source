@@ -1640,6 +1640,25 @@ export const AGENT_DAEMON_RELEASE_NOTES: AgentDaemonReleaseNote[] = [
       },
     ],
   },
+  {
+    version: "1.0.32",
+    entries: [
+      {
+        category: "new_capability",
+        summary:
+          "The Built-in and Pi runtimes now run on pi 1.1.0, which adds current model options (for example Claude Haiku 5.5, Grok 4.7, and GPT-6.1 Sol) and shows each tool's real run time in the activity feed.",
+        whyItMatters:
+          "Model lists follow the upstream catalog, so newly released models are selectable as soon as the daemon updates. Tool entries that read `Tool finished (1.2s)` report the runtime-measured duration of the run, not an estimate.",
+      },
+      {
+        category: "reliability",
+        summary:
+          "An agent whose configured model was retired from the catalog now starts on the provider's default model with a clear `missing_model_fallback` log line instead of failing to start.",
+        whyItMatters:
+          "Upstream retires old models between releases. Previously a stale model id made every session start throw `Pi model not found`; now pick a current model at your convenience and the agent keeps working in the meantime.",
+      },
+    ],
+  },
 ];
 
 function parseSemver(value: string | null): [number, number, number] | null {

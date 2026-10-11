@@ -1,6 +1,6 @@
 {
   "name": "@botiverse/raft-daemon",
-  "version": "1.0.31",
+  "version": "1.0.32",
   "license": "FSL-1.1-ALv2",
   "type": "module",
   "bin": {
@@ -52,8 +52,8 @@
   "dependencies": {
     "@botiverse/kimi-code-sdk": "0.34.0-botiverse.0",
     "@botiverse/oar": "0.0.7",
-    "@earendil-works/pi-ai": "0.85.1",
-    "@earendil-works/pi-coding-agent": "0.85.1",
+    "@earendil-works/pi-ai": "1.1.0",
+    "@earendil-works/pi-coding-agent": "1.1.0",
     "@jackwener/opencli": "^1.8.3",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "ajv": "^8.18.0",

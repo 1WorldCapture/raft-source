@@ -11,7 +11,7 @@ import { createLazyModule } from "../lazyModule.js";
  * this constant and the installed SDK's own `VERSION` diverge, so a dependency
  * bump must update it.
  */
-export const PI_SDK_VERSION = "0.85.1";
+export const PI_SDK_VERSION = "1.1.0";
 
 export type LoadedPiSdk = {
   codingAgent: typeof PiCodingAgentSdk;

@@ -96,7 +96,7 @@ export type ParsedEvent =
   | ({ kind: "thinking"; text: string; runtimeTurn?: RuntimeTurnAttribution } & SubagentLineage)
   | ({ kind: "text"; text: string; runtimeTurn?: RuntimeTurnAttribution } & SubagentLineage)
   | ({ kind: "tool_call"; name: string; input: any } & SubagentLineage)
-  | ({ kind: "tool_output"; name: string; /** Result text when the runtime carries it (truncated by the driver); absent otherwise. */ text?: string; /** True when the runtime marked the tool result as an error. */ isError?: boolean } & SubagentLineage)
+  | ({ kind: "tool_output"; name: string; /** Result text when the runtime carries it (truncated by the driver); absent otherwise. */ text?: string; /** True when the runtime marked the tool result as an error. */ isError?: boolean; /** Wall time `execute()` took per the runtime's monotonic clock; absent when unknown. */ durationMs?: number } & SubagentLineage)
   | { kind: "compaction_started" }
   | { kind: "compaction_finished" }
   | {

@@ -22,6 +22,7 @@ import {
   detectPiModels,
   detectPiModelsFromRegistry,
   mapPiSdkEventToParsedEvents,
+  resolvePiFallbackModel,
   projectPiCompactionInputTelemetry,
   resolveBuiltInGatewayModelInput,
   resolveBuiltInGatewayLaunch,
@@ -36,7 +37,7 @@ import {
   type AgentSession,
   type AgentSessionEvent,
 } from "@earendil-works/pi-coding-agent";
-import { InMemoryCredentialStore, type Model } from "@earendil-works/pi-ai";
+import { InMemoryCredentialStore, normalizeContext, type Model } from "@earendil-works/pi-ai";
 import { streamSimple as streamSimpleOpenAICompletions } from "@earendil-works/pi-ai/api/openai-completions";
 import { streamSimple as streamSimpleAnthropicMessages } from "@earendil-works/pi-ai/api/anthropic-messages";
 import { getGlobalDispatcher } from "undici";
@@ -200,11 +201,22 @@ test("Built-in driver is a separate preset runtime with static launchable models
       runtime: "builtin",
       runtimeVersion: driver.probe().version,
     });
+    // One current-model sentinel per surfaced provider family; ids follow the
+    // generated catalog, which is regenerated from the SDK at dependency-bump
+    // time. Upstream retirements between pi 0.85.1 and 1.1.0 hit specific
+    // providers (deepseek dropped v4-flash; zai-coding-cn dropped the GLM 5.x
+    // line), while the GPT-5.4 family survives on the plain openai provider —
+    // only the OpenAI Codex selection dropped it.
     assert.equal(detected.value.models.some((model) => model.id === "deepseek/deepseek-v4-pro" && model.verified === "launchable"), true);
-    assert.equal(detected.value.models.some((model) => model.id === "deepseek/deepseek-v4-flash" && model.verified === "launchable"), true);
+    assert.equal(detected.value.models.some((model) => model.id === "openai/gpt-5.5" && model.verified === "launchable"), true);
     assert.equal(detected.value.models.some((model) => model.id === "openai/gpt-5.4" && model.verified === "launchable"), true);
+    assert.equal(detected.value.models.some((model) => model.id === "anthropic/claude-haiku-5-5" && model.verified === "launchable"), true);
+    assert.equal(detected.value.models.some((model) => model.id === "xai/grok-4.7" && model.verified === "launchable"), true);
     assert.equal(detected.value.models.some((model) => model.id === "moonshotai-cn/kimi-k2.7-code" && model.verified === "launchable"), true);
     assert.equal(detected.value.models.some((model) => model.id === "xiaomi/mimo-v2.5-pro" && model.verified === "launchable"), true);
+    // Retired upstream: the regenerated catalog must not resurrect them.
+    assert.equal(detected.value.models.some((model) => model.id === "deepseek/deepseek-v4-flash"), false);
+    assert.equal(detected.value.models.some((model) => model.id === "zai-coding-cn/glm-5.2"), false);
   } finally {
     restoreEnv("PI_CODING_AGENT_DIR", previousAgentDir);
     restoreEnv("TASK349_PI_API_KEY", previousTaskKey);
@@ -354,7 +366,7 @@ test("unchecked unknown gateways downgrade image blocks before OpenAI and Anthro
   let openAIPayload: unknown;
   const openAIResult = await streamSimpleOpenAICompletions(
     { ...common, provider: "openai", api: "openai-completions" },
-    { messages },
+    normalizeContext({ messages }),
     {
       apiKey: "sk-test",
       onPayload: (payload) => {
@@ -373,7 +385,7 @@ test("unchecked unknown gateways downgrade image blocks before OpenAI and Anthro
   let anthropicPayload: unknown;
   const anthropicResult = await streamSimpleAnthropicMessages(
     { ...common, provider: "anthropic", api: "anthropic-messages" },
-    { messages },
+    normalizeContext({ messages }),
     {
       apiKey: "sk-test",
       onPayload: (payload) => {
@@ -448,7 +460,7 @@ test("Built-in gateway custom model is registered for SDK session launch", { tim
       let fetchCalls = 0;
       const result = await streamSimpleOpenAICompletions(
         gatewayModel!,
-        {
+        normalizeContext({
           messages: [{
             role: "user",
             content: [
@@ -457,7 +469,7 @@ test("Built-in gateway custom model is registered for SDK session launch", { tim
             ],
             timestamp: 1,
           }],
-        },
+        }),
         {
           apiKey: "sk-gateway-test",
           onPayload: (payload) => {
@@ -931,10 +943,10 @@ test("Built-in gateway inherits Qwen Token Plan payload compatibility from the P
       let capturedPayload: unknown;
       const result = await streamSimpleOpenAICompletions(
         openAIModel,
-        {
+        normalizeContext({
           systemPrompt: "standing instructions",
           messages: [{ role: "user", content: "wake prompt", timestamp: 1 }],
-        },
+        }),
         {
           apiKey: "sk-qwen-token-plan-test",
           reasoning: "high",
@@ -1016,10 +1028,10 @@ test("Built-in Qwen Token Plan CN preset resolves without a custom gateway and e
       let capturedPayload: unknown;
       const result = await streamSimpleOpenAICompletions(
         openAIModel,
-        {
+        normalizeContext({
           systemPrompt: "standing instructions",
           messages: [{ role: "user", content: "wake prompt", timestamp: 1 }],
-        },
+        }),
         {
           apiKey: "sk-qwen-token-plan-cn-test",
           reasoning: "high",
@@ -1100,7 +1112,7 @@ test("Built-in gateway custom model resolution stays pinned when another provide
       let capturedPayload: unknown;
       const result = await streamSimpleAnthropicMessages(
         session.model as Model<"anthropic-messages">,
-        {
+        normalizeContext({
           messages: [{
             role: "user",
             content: [
@@ -1109,7 +1121,7 @@ test("Built-in gateway custom model resolution stays pinned when another provide
             ],
             timestamp: 1,
           }],
-        },
+        }),
         {
           apiKey: "sk-gateway-test",
           onPayload: (payload) => {
@@ -2379,12 +2391,15 @@ test("pi pin is the version this offline guarantee was verified against", () => 
   //      (models.getAvailable / models.checkAuth / credentials.read).
   //   If the credential path is untouched, the guarantee holds. 0.84.4 -> 0.85.1 was a 7-line
   //   diff, entirely a fetchDeferred -> streamDeferred refactor, with the seeding path
-  //   byte-identical.
+  //   byte-identical. 0.85.1 -> 1.1.0 grew the file (~273 diff lines across the 1.0 major),
+  //   but synchronizeCredentialState's refresh is unchanged (still allowNetwork:false and
+  //   providers-scoped) and refreshProviderAvailability still reads only local state
+  //   (getAvailable / checkAuth / credentials.read).
   //
   // Then update VERIFIED_AGAINST *and* the three sibling 0.8x.y labels below (the positive-control
   // comment, the "never triggers a remote model refresh (pi X)" test name, and its comment) --
   // otherwise they assert a version nobody re-checked.
-  const VERIFIED_AGAINST = "0.85.1";
+  const VERIFIED_AGAINST = "1.1.0";
   const pkg = JSON.parse(
     readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
   ) as { dependencies: Record<string, string> };
@@ -2401,8 +2416,8 @@ test("pi pin is the version this offline guarantee was verified against", () => 
   }
 });
 
-test("Pi auth seeding never triggers a remote model refresh (pi 0.85.1)", async () => {
-  // Under 0.85.1 the offline guarantee lives inside the library: credential synchronization
+test("Pi auth seeding never triggers a remote model refresh (pi 1.1.0)", async () => {
+  // Under 1.1.0 the offline guarantee lives inside the library: credential synchronization
   // refreshes with allowNetwork:false and reconciles only local catalog/composition/availability.
   // Our side of the contract is that seeding issues NO refresh of its own — remote freshness is a
   // separate, deliberate caller decision. This counts refreshes rather than inspecting arguments,
@@ -3392,4 +3407,72 @@ test("concurrent pi agents do not queue behind each other, and spans prove it", 
     promptSpans.every((span) => typeof span.attrs?.duration_ms === "number"),
     "each prompt span must carry duration_ms",
   );
+});
+
+test("tool_execution_end carries the SDK-measured durationMs onto tool_output", () => {
+  const state = createPiSdkEventMappingState("pi-session-duration");
+  const withDuration = mapPiSdkEventToParsedEvents({
+    type: "tool_execution_end",
+    toolCallId: "call-1",
+    toolName: "bash",
+    result: "ok",
+    isError: false,
+    durationMs: 1234,
+  } as unknown as AgentSessionEvent, state);
+  assert.deepEqual(withDuration.at(-1), { kind: "tool_output", name: "bash", durationMs: 1234 });
+
+  const withoutDuration = mapPiSdkEventToParsedEvents({
+    type: "tool_execution_end",
+    toolCallId: "call-2",
+    toolName: "read",
+    result: "ok",
+    isError: false,
+  } as unknown as AgentSessionEvent, state);
+  assert.deepEqual(withoutDuration.at(-1), { kind: "tool_output", name: "read" });
+});
+
+test("resolvePiFallbackModel prefers the provider catalog default, then same-provider, then any available", () => {
+  const registryFrom = (models: Array<{ provider: string; id: string }>) => ({
+    find: (provider: string, id: string) => {
+      const hit = models.find((m) => m.provider === provider && m.id === id);
+      return hit ? ({ provider: hit.provider, id: hit.id } as Model<any>) : undefined;
+    },
+    getAvailable: () => models.map((m) => ({ provider: m.provider, id: m.id } as Model<any>)),
+  });
+
+  // 1. Requested provider has a catalog default that is available.
+  const withDefault = registryFrom([
+    { provider: "openai", id: "gpt-5.5" },
+    { provider: "xai", id: "grok-4.7" },
+  ]);
+  assert.equal(
+    resolvePiFallbackModel(withDefault, "openai/gpt-5.4")?.id,
+    "gpt-5.5",
+    "falls back to the catalog default of the requested provider",
+  );
+
+  // 2. No catalog default available: any available model of the same provider.
+  const sameProviderOnly = registryFrom([
+    { provider: "openai", id: "gpt-6-sol" },
+    { provider: "anthropic", id: "claude-haiku-5-5" },
+  ]);
+  assert.equal(
+    resolvePiFallbackModel(sameProviderOnly, "openai/gpt-5.4")?.id,
+    "gpt-6-sol",
+    "falls back to another available model of the same provider",
+  );
+
+  // 3. Nothing left of the provider: any available model.
+  const otherProviderOnly = registryFrom([
+    { provider: "anthropic", id: "claude-haiku-5-5" },
+  ]);
+  assert.equal(
+    resolvePiFallbackModel(otherProviderOnly, "openai/gpt-5.4")?.id,
+    "claude-haiku-5-5",
+    "falls back to the first available model when the provider has none",
+  );
+
+  // 4. Empty registry: no fallback, caller keeps the hard failure.
+  const empty = registryFrom([]);
+  assert.equal(resolvePiFallbackModel(empty, "openai/gpt-5.4"), undefined);
 });
