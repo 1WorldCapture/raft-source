@@ -37,14 +37,25 @@ export async function initializeAgentWorkspace(
 }
 
 function isValidWorkspaceDirectoryName(directoryName: string): boolean {
-  return !directoryName.includes("/") && !directoryName.includes("\\") && !directoryName.includes("..");
+  return !directoryName.includes("/") && !directoryName.includes("\\") && !directoryName.includes("..") && !directoryName.includes("\0");
 }
 
+/**
+ * The workspace directory for `directoryName`, or null when the name is not exactly one path segment below
+ * `dataDir`. A name blacklist alone let "." and "" through: `path.join(dataDir, ".")` IS `dataDir`, so a request to
+ * delete that "workspace" removed every agent workspace on the machine and reported success (fixed upstream in
+ * 1.21.2). The containment check is the real guard: after resolving, the target's parent must be `dataDir` itself.
+ */
 export function resolveWorkspaceDirectoryPath(dataDir: string, directoryName: string): string | null {
-  if (!isValidWorkspaceDirectoryName(directoryName)) {
+  if (directoryName.length === 0 || !isValidWorkspaceDirectoryName(directoryName)) {
     return null;
   }
-  return path.join(dataDir, directoryName);
+  const root = path.resolve(dataDir);
+  const target = path.resolve(root, directoryName);
+  if (path.dirname(target) !== root || target === root) {
+    return null;
+  }
+  return target;
 }
 
 interface WorkspaceDirectorySummary {

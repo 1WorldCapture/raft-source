@@ -62,3 +62,37 @@ test("deleteWorkspaceDirectory removes only valid workspace directories", async 
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("resolveWorkspaceDirectoryPath only accepts exactly one path segment below the data dir", () => {
+  const dataDir = path.join(path.sep, "tmp", "daemon");
+  for (const bad of [".", "", "..", "../x", "nested/x", "a\\b", "x/..", "./x", "x/", "/abs", "a\0b"]) {
+    assert.equal(resolveWorkspaceDirectoryPath(dataDir, bad), null, JSON.stringify(bad));
+  }
+  assert.equal(resolveWorkspaceDirectoryPath(dataDir, "agent-1"), path.join(dataDir, "agent-1"));
+  assert.equal(resolveWorkspaceDirectoryPath(dataDir, "3fa7c2d2-e3a8-42fe-bfb4-ee706129c53b"), path.join(dataDir, "3fa7c2d2-e3a8-42fe-bfb4-ee706129c53b"));
+  assert.equal(resolveWorkspaceDirectoryPath(`${dataDir}${path.sep}`, "agent-1"), path.join(dataDir, "agent-1"), "a trailing separator on the data dir is fine");
+});
+
+test("deleteWorkspaceDirectory refuses '.', '' and traversal and deletes nothing", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "daemon-workspaces-guard-"));
+  try {
+    const keepA = path.join(root, "agent-a");
+    const keepB = path.join(root, "agent-b");
+    await mkdir(keepA);
+    await mkdir(keepB);
+    await writeFile(path.join(keepA, "MEMORY.md"), "a");
+    await writeFile(path.join(keepB, "MEMORY.md"), "b");
+    await writeFile(path.join(root, "outside-sibling.txt"), "x");
+    for (const bad of [".", "", "..", "../x", "nested/x", "agent-a/..", "./agent-a"]) {
+      assert.equal(await deleteWorkspaceDirectory(root, bad), false, JSON.stringify(bad));
+    }
+    const left = (await scanWorkspaceDirectories(root)).map((entry) => entry.directoryName).sort();
+    assert.deepEqual(left, ["agent-a", "agent-b"]);
+    assert.equal((await scanWorkspaceDirectories(root)).length, 2);
+    // A legitimate single-segment delete still works and touches only that directory.
+    assert.equal(await deleteWorkspaceDirectory(root, "agent-a"), true);
+    assert.deepEqual((await scanWorkspaceDirectories(root)).map((entry) => entry.directoryName), ["agent-b"]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
