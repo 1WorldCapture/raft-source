@@ -1677,9 +1677,9 @@ export const AGENT_DAEMON_RELEASE_NOTES: AgentDaemonReleaseNote[] = [
       {
         category: "reliability",
         summary:
-          "Fixed a case where deleting a workspace with an empty or \".\" name could remove every agent workspace on the machine; workspace names must now be exactly one directory below the data directory.",
+          "Fixed a case where deleting or resetting a workspace with an empty or \".\" name could remove every agent workspace on the machine; workspace names must now be exactly one directory below the data directory.",
         whyItMatters:
-          "Your workspace files are no longer at risk from a malformed workspace-delete request. Nothing changes for normal use.",
+          "Your workspace files are no longer at risk from a malformed workspace-delete or workspace-reset request, and a refused reset is now reported instead of silently ignored. Nothing changes for normal use.",
       },
     ],
   },
