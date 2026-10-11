@@ -3995,7 +3995,12 @@ serverRouter.get("/:id/machines/:machineId/runtime-models/:runtime", async (req,
     });
 
     const result = await tracePhase(
-      () => agentOrchestrator.detectMachineRuntimeModels(req.params.machineId, req.params.runtime),
+      // `?refresh=1` bypasses the daemon's 5-minute detection cache (the web
+      // hook's manual refresh); the default auto-fetch path is served from the
+      // cache so a flapping connection cannot re-spawn every runtime CLI.
+      () => agentOrchestrator.detectMachineRuntimeModels(req.params.machineId, req.params.runtime, {
+        refresh: req.query.refresh === "1" || req.query.refresh === "true",
+      }),
       (_durationMs, detectResult) => ({
         name: "runtime_models.detected",
         attrs: {
