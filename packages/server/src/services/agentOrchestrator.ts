@@ -5048,6 +5048,11 @@ export class AgentOrchestrator extends EventEmitter {
         serverTime: this.clock.now(),
       });
       this.emit("machine:online", { machineId, serverId });
+      // Task #30: agents created while no computer was online are waiting
+      // for a machine. When one comes online, bind them — but only when this
+      // is the server's only machine, so multi-machine servers never grab
+      // agents unpredictably.
+      void this.bindUnassignedAgentsToLoneOnlineMachine(machineId, serverId).catch(() => undefined);
       span.addEvent("machine.status.emitted", {
         outcome: "emitted",
         status: "online",
@@ -10161,7 +10166,7 @@ export class AgentOrchestrator extends EventEmitter {
     const { resumePrompt, wakeMessage, wakeMessageTransient } = options;
     const humanStart = options.human === true;
     // Load from DB (and populate cache) for start — need full state
-    const agent = await this.loadAgentForStart(agentId);
+    let agent = await this.loadAgentForStart(agentId);
     const startCause = wakeMessage ? "message" : resumePrompt ? "resume" : "manual";
     if (!agent) {
       this.recordLifecycleEvent({
@@ -10236,23 +10241,35 @@ export class AgentOrchestrator extends EventEmitter {
       throw new Error("External agents are operator-run; Slock never starts or manages their runtime (SHA-V0-006C).");
     }
 
-    if (!agent.machineId) {
-      this.recordLifecycleEvent({
-        agentId,
-        machineId: null,
-        action: "start",
-        outcome: "failed",
-        cause: startCause,
-        previousStatus,
-        detail: "machine_unassigned",
-      });
-      throw new Error("No machine assigned. Please assign a machine to this agent first.");
+    let startMachineId = agent.machineId;
+    if (!startMachineId) {
+      // Task #30: an agent created while no computer was online keeps an
+      // empty affinity (creation never binds to an offline machine). A start
+      // is the user's explicit act — bind to an online machine now.
+      const picked = await agentService.pickOnlineMachineForServer(agent.serverId);
+      if (picked) {
+        await agentService.assignMachine(agent.id, picked.id);
+        agent = { ...agent, machineId: picked.id };
+        startMachineId = picked.id;
+        console.log(`[Agent ${agentId}] Bound to online machine ${picked.id} at start (was unassigned)`);
+      } else {
+        this.recordLifecycleEvent({
+          agentId,
+          machineId: null,
+          action: "start",
+          outcome: "failed",
+          cause: startCause,
+          previousStatus,
+          detail: "machine_unassigned",
+        });
+        throw new Error("No computer is online for this server. Connect a computer, then start the agent (or assign one explicitly).");
+      }
     }
 
     const normalizedRuntimeConfig = hydrateRuntimeConfig(agent);
     const launchRuntimeFields = runtimeConfigToLaunchFields(normalizedRuntimeConfig);
     if (launchRuntimeFields.runtime === "kimi-sdk" && launchRuntimeFields.reasoningEffort !== null) {
-      const detected = await this.detectMachineRuntimeModels(agent.machineId, "kimi-sdk");
+      const detected = await this.detectMachineRuntimeModels(startMachineId, "kimi-sdk");
       const selectedModel = detected.kind === "live"
         ? detected.value.models.find((candidate) => candidate.id === launchRuntimeFields.model)
         : undefined;
@@ -10279,12 +10296,12 @@ export class AgentOrchestrator extends EventEmitter {
     // Catalog preflight and generation lease are both before wake locks,
     // cache/status mutation, credentials/session work, and spawn dispatch.
     const catalogValidation = await this.validateBuiltInPresetForMachine(
-      agent.machineId,
+      startMachineId,
       normalizedRuntimeConfig,
     );
     const releaseCatalogAuthority = catalogValidation
       ? this.acquireBuiltInCatalogAuthority(
-          agent.machineId,
+          startMachineId,
           catalogValidation.authority,
         )
       : () => undefined;
@@ -10478,14 +10495,14 @@ export class AgentOrchestrator extends EventEmitter {
         // queue acknowledgement. Fail before publishing so a retry cannot wake
         // a remote daemon twice after the source reports `dropped`.
         if (!this.sendLocalAgentStartWithAckRetry(
-          agent.machineId,
+          startMachineId,
           startMessage as AgentStartMessage & { startDispatchId: string },
         )) {
           throw new CrossReplicaQueueReceiptUnavailableError();
         }
       } else {
         if (!await this.sendAgentStartWithAckRetry(
-          agent.machineId,
+          startMachineId,
           startMessage as AgentStartMessage & { startDispatchId: string },
         )) {
           throw new RouteFailureError(
@@ -10497,7 +10514,7 @@ export class AgentOrchestrator extends EventEmitter {
       startDispatchSpan.end("ok", {
         attrs: {
           outcome: "sent",
-          queue_depth: this.pendingStartQueueDepth(agent.machineId),
+          queue_depth: this.pendingStartQueueDepth(startMachineId),
         },
       });
       // Breaker bookkeeping (upstream 1.21.2 port): a successfully dispatched
@@ -10546,7 +10563,7 @@ export class AgentOrchestrator extends EventEmitter {
     const { event } = adaptStartLifecycleEvent({
       serverId: agent.serverId,
       agentId,
-      machineId: agent.machineId,
+      machineId: startMachineId,
       launchId,
       previousStatus,
       startCause,
@@ -10665,6 +10682,24 @@ export class AgentOrchestrator extends EventEmitter {
       void this.triggerWakeCrashLoopCatchup(agentId);
     }, delay);
     this.wakeCrashLoopCatchupTimers.set(agentId, timer);
+  }
+
+  /**
+   * Task #30: bind agents whose affinity was left empty at creation (no
+   * computer online) to a machine that just came online — only when it is
+   * the server's only machine, so multi-machine servers keep explicit
+   * assignment as the rule.
+   */
+  private async bindUnassignedAgentsToLoneOnlineMachine(machineId: string, serverId: string): Promise<void> {
+    const machine = await machineService.getMachine(asMachineId(machineId)).catch(() => null);
+    if (!machine || machine.serverId !== serverId) return;
+    const serverMachines = await machineService.listMachines(serverId).catch(() => null);
+    if (!serverMachines || serverMachines.length !== 1) return;
+    const unassigned = await agentService.listUnassignedManagedAgents(serverId).catch(() => []);
+    for (const row of unassigned) {
+      if (isExternalAgentRuntime(row.runtime)) continue;
+      await agentService.assignMachine(row.id, machineId).catch(() => undefined);
+    }
   }
 
   private async triggerWakeCrashLoopCatchup(agentId: string): Promise<void> {
