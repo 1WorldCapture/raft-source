@@ -417,6 +417,35 @@ async function countDirs(p: string): Promise<number> {
   }
 }
 
+/** Directory NAMES under `p` — the self-check compares sets, not counts: the
+ *  start/restore steps legitimately create NEW agent workspaces (the daemon
+ *  calls initializeAgentWorkspace for every agent the server starts), so a
+ *  zero-agent home that gains its first workspace mid-migration is healthy.
+ *  Only a PRE-EXISTING directory that disappears means data was lost. */
+/** Loss contract for the self-check (task #19): every agent directory that
+ *  existed BEFORE the move must still exist after it. `before` comes from
+ *  this run's own preflight — it is never persisted in the in-progress
+ *  marker, so a migration resumed by a DIFFERENT computer version simply
+ *  re-runs preflight. The undefined arm is defensive only: if a future data
+ *  flow ever loses the names, the check degrades to an explicit
+ *  "not verified" outcome (surfaced as a warning), never a silent pass. */
+export function missingAgentDirs(
+  before: string[] | undefined,
+  after: string[],
+): { missing: string[]; verified: boolean } {
+  if (!Array.isArray(before)) return { missing: [], verified: false };
+  return { missing: before.filter((name) => !after.includes(name)), verified: true };
+}
+
+async function listDirs(p: string): Promise<string[]> {
+  try {
+    const entries = await fs.readdir(p, { withFileTypes: true });
+    return entries.filter((e) => e.isDirectory()).map((e) => e.name);
+  } catch {
+    return [];
+  }
+}
+
 async function pathExists(p: string): Promise<boolean> {
   try {
     await fs.lstat(p);
@@ -450,6 +479,10 @@ export interface MigratePreflight {
   serviceWasRunning: boolean;
   desiredState: "running" | "stopped";
   agentDirs: number;
+  /** Names of the agent directories that existed BEFORE the move — the
+   *  self-check's loss contract (task #19): every one of these must still
+   *  exist afterwards; directories created by start/restore are fine. */
+  agentDirNames: string[];
   serverDirs: number;
   /** Real attachments — gates whether the start step can run the service. */
   attachments: string[];
@@ -570,7 +603,8 @@ export async function preflightMigrateHome(
   const desiredState = await readDesiredState(fromReal);
   const pid = await readPidfileAt(servicePidPath(fromReal));
   const serviceWasRunning = pid !== null && isProcessAlive(pid);
-  const agentDirs = await countDirs(path.join(fromReal, "agents"));
+  const agentDirNames = await listDirs(path.join(fromReal, "agents"));
+  const agentDirs = agentDirNames.length;
   const serverDirs = await countDirs(path.join(fromReal, "computer", "servers"));
   // Real attachments (parseable runner.state.json), not just directory
   // counts: `start` refuses to run a service with zero attachments
@@ -593,6 +627,7 @@ export async function preflightMigrateHome(
     serviceWasRunning,
     desiredState,
     agentDirs,
+    agentDirNames,
     serverDirs,
     attachments,
     aliasRepoint: alias !== null,
@@ -617,6 +652,7 @@ export async function preflightMigrateHome(
     serviceWasRunning,
     desiredState,
     agentDirs,
+    agentDirNames,
     serverDirs,
     attachments,
     alias,
@@ -1514,10 +1550,14 @@ export async function migrateHome(
           }
           await sleep(pollMs);
         }
-        const agentDirs = await countDirs(path.join(pre.to, "agents"));
-        if (agentDirs !== pre.agentDirs) {
-          throw new Error(`agent directory count changed across the move (before=${pre.agentDirs}, after=${agentDirs})`);
+        const afterAgentDirs = await listDirs(path.join(pre.to, "agents"));
+        const loss = missingAgentDirs(pre.agentDirNames, afterAgentDirs);
+        if (loss.missing.length > 0) {
+          throw new Error(
+            `agent directories lost across the move (missing: ${loss.missing.join(", ")})`,
+          );
         }
+        const agentDirs = afterAgentDirs.length;
         // Exactly one runner tree per server (PM blocking fix): a surviving
         // OLD runner alongside the new home's runner means duplicate agents.
         // Scan every spelling of the target: live children may carry the
@@ -1558,7 +1598,7 @@ export async function migrateHome(
               : {}),
           };
         }
-        return { serviceRunning: true, serversOnline: true, serverCount: last.serverCount, agentDirs, runnerTrees: [...runnersByServer.values()].reduce((a, b) => a + b, 0), ...(restoreDetail ? { agentsRestored: restoreDetail } : {}) };
+        return { serviceRunning: true, serversOnline: true, serverCount: last.serverCount, agentDirs, agentDirsVerified: loss.verified, runnerTrees: [...runnersByServer.values()].reduce((a, b) => a + b, 0), ...(restoreDetail ? { agentsRestored: restoreDetail } : {}) };
       }))
     ) {
       return rollbackAndFinish();
