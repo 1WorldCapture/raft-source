@@ -53,7 +53,8 @@ test("happy path: stop, confirm cleared, start, settle ok", async () => {
   const s = scripted({});
   await runServiceRecycle(s.deps);
   assert.deepEqual(s.calls, ["stop", "isCleared", "start"]);
-  assert.deepEqual(s.settled, [{ ok: true }]);
+  // The stale state is cleared once the old service is gone, then confirmed after start.
+  assert.deepEqual(s.settled, [{ ok: true }, { ok: true }]);
 });
 
 test("polls with the default cadence until the service is confirmed gone", async () => {
@@ -93,7 +94,7 @@ test("start failure surfaces RECYCLE_START_FAILED (machine stopped — retry mus
   const s = scripted({ start: Object.assign(new Error("spawn failed"), { code: "SUPERVISOR_SPAWN_FAILED" }) });
   await assert.rejects(runServiceRecycle(s.deps), (error: { code?: string }) => error.code === RECYCLE_START_FAILED);
   assert.deepEqual(s.calls, ["stop", "isCleared", "start"]);
-  const state = s.settled[0] as { ok: boolean; code: string; message: string };
+  const state = s.settled.at(-1) as { ok: boolean; code: string; message: string };
   assert.equal(state.ok, false);
   assert.equal(state.code, RECYCLE_START_FAILED);
   assert.match(state.message, /no second stop/);
@@ -119,7 +120,7 @@ test("a start() that throws but whose service comes up shortly after is a succes
   s.deps.isRunning = async () => { checks += 1; return checks >= 3; };
   await runServiceRecycle(s.deps, { startRecoveryMs: 10_000, clearPollMs: 1 });
   assert.equal(checks, 3);
-  assert.deepEqual(s.settled, [{ ok: true }]);
+  assert.deepEqual(s.settled, [{ ok: true }, { ok: true }]);
 });
 
 test("a start() that throws and a service that never comes up is still RECYCLE_START_FAILED", async () => {
@@ -129,5 +130,22 @@ test("a start() that throws and a service that never comes up is still RECYCLE_S
     runServiceRecycle(s.deps, { startRecoveryMs: 30, clearPollMs: 1 }),
     (error: unknown) => (error as { code?: string }).code === RECYCLE_START_FAILED,
   );
-  assert.equal((s.settled[0] as { code?: string }).code, RECYCLE_START_FAILED);
+  assert.equal((s.settled.at(-1) as { code?: string }).code, RECYCLE_START_FAILED);
+});
+
+test("the stale converge state is cleared as soon as the old service is gone, before start() runs", async () => {
+  const order: string[] = [];
+  const s = scripted({});
+  s.deps.stop = async () => { order.push("stop"); };
+  s.deps.settle = (state) => { order.push(`settle:${(state as { ok: boolean }).ok}`); };
+  s.deps.notify = () => { order.push("notify"); };
+  s.deps.start = async () => { order.push("start"); };
+  await runServiceRecycle(s.deps);
+  assert.deepEqual(order, ["stop", "settle:true", "notify", "start", "settle:true", "notify"]);
+});
+
+test("if start() then fails, the failure replaces the early all-clear", async () => {
+  const s = scripted({ start: new Error("boom") });
+  await assert.rejects(runServiceRecycle(s.deps), (error: unknown) => (error as { code?: string }).code === RECYCLE_START_FAILED);
+  assert.deepEqual(s.settled.map((state) => (state as { ok: boolean }).ok), [true, false]);
 });
