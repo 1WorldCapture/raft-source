@@ -1,3 +1,4 @@
+import { logger } from "../logger.js";
 import type { ParsedEvent } from "./types.js";
 
 const PRINT_TIMEOUT_RE = /print timeout/i;
@@ -119,6 +120,13 @@ export class AntigravityStreamEventNormalizer {
     if (kind === "init") return this.normalizeInit(record);
     if (kind === "step_update") return this.normalizeStep(record);
     if (kind === "result") return this.normalizeResult(record);
+    // Unrecognized frame types used to be dropped with no trace at all, which made it
+    // impossible to tell "agy never emits a turn-end frame" from "agy emits one we do
+    // not map". Log the kind (not the payload — it can contain user content) so the
+    // question is answerable from a normal run. Tracked in task #27.
+    if (kind !== null) {
+      logger.warn(`[AntigravityStream] Unrecognized agy stream-json event type: ${JSON.stringify(kind)}`);
+    }
     return [];
   }
 
