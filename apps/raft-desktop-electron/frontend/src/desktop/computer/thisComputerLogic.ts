@@ -203,3 +203,19 @@ export function deriveControls(input: ControlsInput, now: number = Date.now(), a
   const updateAvailable = !appManaged && !upgrading && !rolledBackToLatest && isNewer(latestVersion, localVersion);
   return { running, upgrading, updateAvailable, localVersion };
 }
+
+/**
+ * The machine record the self card renders. The server's `computerVersion` only changes after the new service has
+ * reconnected, so right after a Replace/upgrade the card of THIS machine kept showing the old version for tens of
+ * seconds. The local service is the truth while it runs: prefer its version, fall back to the server record when the
+ * service is not running or reports none. Other machines' cards never go through here.
+ */
+export function preferLocalComputerVersion<T extends { computerVersion?: string | null }>(
+  machine: T,
+  local: { running: boolean; version: string | null | undefined },
+): T {
+  const version = local.running && typeof local.version === "string" && local.version.length > 0 ? local.version : null;
+  if (version === null || version === machine.computerVersion) return machine;
+  return { ...machine, computerVersion: version };
+}
+
