@@ -18021,3 +18021,273 @@ test("machine:status carries since and serverTime for online and offline", async
   ]);
   await orchestrator.shutdown();
 });
+
+// ===========================================================================
+// agent:delivery:rejected (upstream task #1113) — the daemon answered a
+// delivery with "no process and no cached restart snapshot". The Server owns
+// the config: the pending delivery settles as converted and ONE ordinary
+// start carries the message as its wake message. Idempotent per delivery key;
+// a refused start either re-tracks the delivery (wake lock held, start threw)
+// or ends it with a typed outcome (manual_stop).
+// ===========================================================================
+
+class RejectedDeliveryWakeOrchestrator extends DeterministicAgentOrchestrator {
+  readonly startAgentCalls: Array<{ agentId: string; options: { wakeMessage?: AgentMessage; wakeMessageTransient?: boolean } }> = [];
+  startAgentResult: { outcome: "dispatched" } | { outcome: "skipped"; reason: "manual_stop" | "wake_lock_held" } = { outcome: "dispatched" };
+  startAgentError: Error | null = null;
+
+  override async startAgent(
+    agentId: string,
+    options: { wakeMessage?: AgentMessage; wakeMessageTransient?: boolean } = {},
+  ): Promise<{ outcome: "dispatched" } | { outcome: "skipped"; reason: "manual_stop" | "wake_lock_held" }> {
+    this.startAgentCalls.push({ agentId, options });
+    if (this.startAgentError) throw this.startAgentError;
+    return this.startAgentResult;
+  }
+}
+
+function makeAgentDeliverMessage(seq: number): Extract<import("@botiverse/raft-shared").ServerToMachineMessage, { type: "agent:deliver" }> {
+  return {
+    type: "agent:deliver",
+    agentId: "agent-1",
+    message: makeAgentMessage(`wake-${seq}`, seq),
+    seq,
+  };
+}
+
+test("agent:delivery:rejected converts the pending delivery into one agent:start carrying the message, idempotently", async () => {
+  const orchestrator = new RejectedDeliveryWakeOrchestrator();
+  seedActiveAgent(orchestrator);
+  seedMachineConnection(orchestrator, "machine-1", makeFakeWs());
+  const deliver = makeAgentDeliverMessage(77);
+  (orchestrator as unknown as { trackPendingAgentDeliveryAck(machineId: string, msg: unknown): void })
+    .trackPendingAgentDeliveryAck("machine-1", deliver);
+
+  await orchestrator.handleMachineMessage("machine-1", {
+    type: "agent:delivery:rejected",
+    agentId: "agent-1",
+    seq: 77,
+    reason: "no_process",
+  } as MachineToServerMessage);
+  await flushMicrotasks();
+
+  assert.equal(orchestrator.startAgentCalls.length, 1, "exactly one wake start");
+  assert.equal(orchestrator.startAgentCalls[0]?.agentId, "agent-1");
+  assert.equal(orchestrator.startAgentCalls[0]?.options.wakeMessage, deliver.message, "the wake start carries the pending delivery's message");
+  assert.equal(
+    (orchestrator as unknown as { pendingAgentDeliveryAcks: Map<string, unknown> }).pendingAgentDeliveryAcks.size,
+    0,
+    "the pending delivery settled as converted",
+  );
+
+  // Idempotent: a duplicate rejection finds no pending delivery and is ignored.
+  await orchestrator.handleMachineMessage("machine-1", {
+    type: "agent:delivery:rejected",
+    agentId: "agent-1",
+    seq: 77,
+    reason: "no_process",
+  } as MachineToServerMessage);
+  await flushMicrotasks();
+  assert.equal(orchestrator.startAgentCalls.length, 1, "no second start for a duplicate rejection");
+
+  await orchestrator.shutdown();
+});
+
+test("agent:delivery:rejected for a manually stopped agent starts nothing and settles the delivery", async () => {
+  const orchestrator = new RejectedDeliveryWakeOrchestrator();
+  seedActiveAgent(orchestrator);
+  seedMachineConnection(orchestrator, "machine-1", makeFakeWs());
+  orchestrator.startAgentResult = { outcome: "skipped", reason: "manual_stop" };
+  (orchestrator as unknown as { trackPendingAgentDeliveryAck(machineId: string, msg: unknown): void })
+    .trackPendingAgentDeliveryAck("machine-1", makeAgentDeliverMessage(78));
+
+  await orchestrator.handleMachineMessage("machine-1", {
+    type: "agent:delivery:rejected",
+    agentId: "agent-1",
+    seq: 78,
+    reason: "no_process",
+  } as MachineToServerMessage);
+  await flushMicrotasks();
+
+  assert.equal(orchestrator.startAgentCalls.length, 1);
+  assert.equal(
+    (orchestrator as unknown as { pendingAgentDeliveryAcks: Map<string, unknown> }).pendingAgentDeliveryAcks.size,
+    0,
+    "manual_stop ends the delivery instead of retrying until gave_up",
+  );
+  await orchestrator.shutdown();
+});
+
+test("agent:delivery:rejected while another replica holds the wake lock keeps the delivery for the ordinary retry path", async () => {
+  const orchestrator = new RejectedDeliveryWakeOrchestrator();
+  seedActiveAgent(orchestrator);
+  seedMachineConnection(orchestrator, "machine-1", makeFakeWs());
+  orchestrator.startAgentResult = { outcome: "skipped", reason: "wake_lock_held" };
+  (orchestrator as unknown as { trackPendingAgentDeliveryAck(machineId: string, msg: unknown): void })
+    .trackPendingAgentDeliveryAck("machine-1", makeAgentDeliverMessage(79));
+
+  await orchestrator.handleMachineMessage("machine-1", {
+    type: "agent:delivery:rejected",
+    agentId: "agent-1",
+    seq: 79,
+    reason: "no_process",
+  } as MachineToServerMessage);
+  await flushMicrotasks();
+
+  assert.equal(
+    (orchestrator as unknown as { pendingAgentDeliveryAcks: Map<string, unknown> }).pendingAgentDeliveryAcks.size,
+    1,
+    "the delivery is re-tracked for the in-flight start's ordinary redelivery",
+  );
+  await orchestrator.shutdown();
+});
+
+test("agent:delivery:rejected whose wake start throws keeps the delivery observable through the ack-retry path", async () => {
+  const orchestrator = new RejectedDeliveryWakeOrchestrator();
+  seedActiveAgent(orchestrator);
+  seedMachineConnection(orchestrator, "machine-1", makeFakeWs());
+  orchestrator.startAgentError = new Error("start pipeline exploded");
+  (orchestrator as unknown as { trackPendingAgentDeliveryAck(machineId: string, msg: unknown): void })
+    .trackPendingAgentDeliveryAck("machine-1", makeAgentDeliverMessage(80));
+
+  await orchestrator.handleMachineMessage("machine-1", {
+    type: "agent:delivery:rejected",
+    agentId: "agent-1",
+    seq: 80,
+    reason: "no_process",
+  } as MachineToServerMessage);
+  await flushMicrotasks();
+
+  assert.equal(
+    (orchestrator as unknown as { pendingAgentDeliveryAcks: Map<string, unknown> }).pendingAgentDeliveryAcks.size,
+    1,
+    "a failed wake start re-tracks the delivery instead of losing it",
+  );
+  await orchestrator.shutdown();
+});
+
+test("agent:delivery:rejected with no matching pending delivery is ignored", async () => {
+  const orchestrator = new RejectedDeliveryWakeOrchestrator();
+  seedActiveAgent(orchestrator);
+  seedMachineConnection(orchestrator, "machine-1", makeFakeWs());
+
+  await orchestrator.handleMachineMessage("machine-1", {
+    type: "agent:delivery:rejected",
+    agentId: "agent-1",
+    seq: 404,
+    reason: "no_process",
+  } as MachineToServerMessage);
+  await flushMicrotasks();
+
+  assert.equal(orchestrator.startAgentCalls.length, 0, "an unmatched rejection starts nothing");
+  await orchestrator.shutdown();
+});
+
+test("agent:delivery:rejected never applies to a delivery another machine owns", async () => {
+  const orchestrator = new RejectedDeliveryWakeOrchestrator();
+  seedActiveAgent(orchestrator);
+  seedMachineConnection(orchestrator, "machine-1", makeFakeWs());
+  seedMachineConnection(orchestrator, "machine-2", makeFakeWs());
+  (orchestrator as unknown as { trackPendingAgentDeliveryAck(machineId: string, msg: unknown): void })
+    .trackPendingAgentDeliveryAck("machine-2", makeAgentDeliverMessage(81));
+
+  await orchestrator.handleMachineMessage("machine-1", {
+    type: "agent:delivery:rejected",
+    agentId: "agent-1",
+    seq: 81,
+    reason: "no_process",
+  } as MachineToServerMessage);
+  await flushMicrotasks();
+
+  assert.equal(orchestrator.startAgentCalls.length, 0, "machine-1 cannot convert machine-2's delivery");
+  assert.equal(
+    (orchestrator as unknown as { pendingAgentDeliveryAcks: Map<string, unknown> }).pendingAgentDeliveryAcks.size,
+    1,
+    "the other machine's pending delivery is untouched",
+  );
+  await orchestrator.shutdown();
+});
+
+test("agent:delivery:rejected removes the pending entry before validating, so a concurrent retry cannot double-route", async () => {
+  const orchestrator = new RejectedDeliveryWakeOrchestrator();
+  seedActiveAgent(orchestrator);
+  const ws = makeFakeWs();
+  seedMachineConnection(orchestrator, "machine-1", ws);
+  const deliver = makeAgentDeliverMessage(79);
+  (orchestrator as unknown as { trackPendingAgentDeliveryAck(machineId: string, msg: unknown): void })
+    .trackPendingAgentDeliveryAck("machine-1", deliver);
+
+  // Gate validateMachineAgentMessage so the rejection handler is observably
+  // parked inside its first await — exactly the window where an ack-timeout
+  // retry used to pass its map check and re-send the same message.
+  let releaseValidate!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    releaseValidate = resolve;
+  });
+  const inner = (orchestrator as unknown as {
+    validateMachineAgentMessage: (...args: unknown[]) => Promise<unknown>;
+  });
+  const origValidate = inner.validateMachineAgentMessage.bind(orchestrator);
+  inner.validateMachineAgentMessage = async (...args: unknown[]) => {
+    await gate;
+    return origValidate(...args);
+  };
+
+  const rejection = orchestrator.handleMachineMessage("machine-1", {
+    type: "agent:delivery:rejected",
+    agentId: "agent-1",
+    seq: 79,
+    reason: "no_process",
+  } as MachineToServerMessage);
+  await flushMicrotasks();
+
+  assert.equal(
+    (orchestrator as unknown as { pendingAgentDeliveryAcks: Map<string, unknown> }).pendingAgentDeliveryAcks.size,
+    0,
+    "the entry is removed synchronously, before the validation await",
+  );
+
+  // A retry firing inside the window must not re-send the delivery.
+  await (orchestrator as unknown as {
+    retryPendingAgentDelivery(key: string, reason: string): Promise<void>;
+  }).retryPendingAgentDelivery("seq:agent-1:79", "ack_timeout");
+  assert.equal(
+    ws.sent.filter((data) => data.includes("agent:deliver")).length,
+    0,
+    "the concurrent retry is suppressed, not double-routed",
+  );
+
+  releaseValidate();
+  await rejection;
+  await flushMicrotasks();
+
+  assert.equal(orchestrator.startAgentCalls.length, 1, "exactly one wake start after validation releases");
+  assert.equal(orchestrator.startAgentCalls[0]?.options.wakeMessage, deliver.message);
+  await orchestrator.shutdown();
+});
+
+test("agent:delivery:rejected restores the pending delivery when validation fails, so a forged rejection cannot eat it", async () => {
+  const orchestrator = new RejectedDeliveryWakeOrchestrator();
+  // The cached agent belongs to another machine, so validation returns null
+  // (no DB touch) — the shape of a rejection forged from a foreign machine.
+  seedActiveAgent(orchestrator, "agent-1", "machine-2");
+  seedMachineConnection(orchestrator, "machine-1", makeFakeWs());
+  (orchestrator as unknown as { trackPendingAgentDeliveryAck(machineId: string, msg: unknown): void })
+    .trackPendingAgentDeliveryAck("machine-1", makeAgentDeliverMessage(80));
+
+  await orchestrator.handleMachineMessage("machine-1", {
+    type: "agent:delivery:rejected",
+    agentId: "agent-1",
+    seq: 80,
+    reason: "no_process",
+  } as MachineToServerMessage);
+  await flushMicrotasks();
+
+  assert.equal(orchestrator.startAgentCalls.length, 0, "an invalid rejection starts nothing");
+  assert.equal(
+    (orchestrator as unknown as { pendingAgentDeliveryAcks: Map<string, unknown> }).pendingAgentDeliveryAcks.size,
+    1,
+    "the pending delivery is restored (retryable) after a failed validation",
+  );
+  await orchestrator.shutdown();
+});

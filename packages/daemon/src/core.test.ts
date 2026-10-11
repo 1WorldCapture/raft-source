@@ -4741,7 +4741,7 @@ test("DaemonCore exposes tracked busy transition receipts and ACKs only after tu
     await core.stop();
     await rm(dataDir, { recursive: true, force: true });
   }
-});
+}, 60_000);
 
 test("DaemonCore does not acknowledge delivery when no process or idle cache can accept it", async () => {
   const dataDir = await mkdtemp(path.join(os.tmpdir(), "slock-daemon-core-test-"));

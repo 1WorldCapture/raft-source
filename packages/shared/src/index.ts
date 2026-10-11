@@ -880,6 +880,7 @@ export type MachineToServerMessage =
   | { type: "agent:deliver:ack"; agentId: string; seq: number; traceparent?: string; deliveryId?: string; mentionDelivery?: MentionDeliveryIdentitySnapshot }
   | { type: "agent:delivery:transition"; agentId: string; stage: MentionDeliveryTransitionStage; outcome: "accepted" | "coalesced"; mentionDelivery: MentionDeliveryIdentitySnapshot; traceparent?: string }
   | { type: "agent:delivery:terminal_error"; agentId: string; code: MentionDeliveryTerminalErrorCode; mentionDelivery: MentionDeliveryIdentitySnapshot; traceparent?: string }
+  | { type: "agent:delivery:rejected"; agentId: string; seq: number; traceparent?: string; deliveryId?: string; reason: "no_process"; mentionDelivery?: MentionDeliveryIdentitySnapshot }
   | { type: "agent:workspace:file_tree"; agentId: string; files: FileNode[]; dirPath?: string; includeHidden?: boolean }
   | { type: "agent:workspace:file_content"; agentId: string; requestId: string; content: string | null; binary: boolean; size?: number; mimeType?: string; encoding?: "utf-8" | "base64" }
   | { type: "agent:workspace:wiki_ensured"; agentId: string; requestId: string; success: boolean; packId: string; files: WikiWorkspaceFileReceipt[]; error?: string }
