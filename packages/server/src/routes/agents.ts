@@ -1924,7 +1924,17 @@ agentRouter.get("/:id", async (req, res) => {
       activityDetail,
       runtimeProfile,
     });
-    res.json(canManage ? result : stripEnvVars(result));
+    // Breaker visibility (upstream 1.21.2 port): when the wake crash-loop
+    // breaker has tripped (or an episode is in progress), surface the
+    // diagnostic so an agent that refuses to wake reads as "circuit breaker
+    // tripped", not a silent bug.
+    const orchestrator = req.app.get("agentOrchestrator") as AgentOrchestrator | undefined;
+    const wakeCrashLoop = orchestrator
+      ? await orchestrator.getWakeCrashLoopDiagnostic(agent.id).catch(() => null)
+      : null;
+    res.json(canManage
+      ? { ...result, ...(wakeCrashLoop ? { wakeCrashLoop } : {}) }
+      : stripEnvVars({ ...result, ...(wakeCrashLoop ? { wakeCrashLoop } : {}) }));
   } catch {
     res.status(500).json({ error: "Failed to get agent" });
   }
@@ -2444,6 +2454,12 @@ agentRouter.patch("/:id", async (req, res) => {
       await agentRuntimeProfileService.queueRuntimeProfileMigrationForAgentSettings(req.params.id);
     }
     agentOrchestrator.evictCache(req.params.id);
+    // Breaker release path (upstream 1.21.2 port): the runtime profile
+    // changed, so a crash-loop block that retrying could not lift may no
+    // longer apply. Open a fresh episode; the next wake starts normally.
+    if (runtimeChanged || normalizedConfig !== null) {
+      await agentOrchestrator.liftWakeCrashLoopBlockForConfigChange(req.params.id).catch(() => {});
+    }
     if (restartMode) {
       // Runtime switches intentionally reset the native runtime session. So does
       // a Codex MODEL switch (tygg/Tenny 2026-07-10): Codex `thread/resume` pins

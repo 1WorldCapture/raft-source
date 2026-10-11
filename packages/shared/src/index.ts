@@ -780,6 +780,26 @@ export interface RuntimeErrorActivityDiagnostic {
 }
 
 export type FeedbackTranscriptReportTimeSource = "web_report_bundle" | "server_request_received";
+
+/**
+ * Server-side wake crash-loop breaker diagnostic (upstream 1.21.2 port, their
+ * task #1119): the tripped/unsettled state of an automatic-wake episode,
+ * surfaced on the agent status so an agent that refuses to wake is visible as
+ * "circuit breaker tripped", not silent. Counts, classes, ids and times only.
+ */
+export interface WakeCrashLoopActivityDiagnostic {
+  episode: number;
+  earlyExitCount: number;
+  threshold: number;
+  windowMs: number;
+  blocked: boolean;
+  blockedAtMs: number | null;
+  firstExitAtMs: number | null;
+  lastExitAtMs: number | null;
+  lastExitKind: "machine_disconnected" | "agent_process_exited" | null;
+  lastSignal: string | null;
+  lastLaunchId: string | null;
+}
 export type FeedbackTranscriptWindowCoverage =
   | "covered"
   | "outside_report_window"

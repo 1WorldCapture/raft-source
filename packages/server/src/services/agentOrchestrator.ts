@@ -217,6 +217,11 @@ import {
 } from "../replicaRouter.js";
 import { redisReplicaStateStore, type MachineMeta, type ReplicaStateStore } from "./replicaStateStore.js";
 import {
+  WakeCrashLoopBreaker,
+  resolveWakeCrashLoopRules,
+  type WakeCrashLoopActivityDiagnostic,
+} from "./wakeCrashLoopBreaker.js";
+import {
   buildRuntimeTraceContext,
   projectMachineConnectTraceAttrs,
   projectOwnerTraceAttrs,
@@ -717,7 +722,7 @@ interface StartAgentOptions {
 
 export type AgentStartDispatchResult =
   | { outcome: "dispatched" }
-  | { outcome: "skipped"; reason: "manual_stop" | "wake_lock_held" };
+  | { outcome: "skipped"; reason: "manual_stop" | "wake_lock_held" | "wake_crash_loop_blocked" };
 
 class CrossReplicaQueueReceiptUnavailableError extends Error {
   constructor() {
@@ -2257,6 +2262,8 @@ export class AgentOrchestrator extends EventEmitter {
   private readonly daemonIngressRateLimitMaxEvents: number;
   private readonly daemonIngressRateLimitMaxEventsPerMachine: number;
   private readonly daemonIngressRateLimitDisabled: boolean;
+  /** Upstream 1.21.2 port: automatic-wake crash-loop breaker (task #3 item 2). */
+  private readonly wakeCrashLoopBreaker: WakeCrashLoopBreaker;
 
   constructor(
     private readonly replicaStateStore: ReplicaStateStore = redisReplicaStateStore,
@@ -2264,6 +2271,7 @@ export class AgentOrchestrator extends EventEmitter {
     private readonly tracer: Tracer = noopTracer,
   ) {
     super();
+    this.wakeCrashLoopBreaker = new WakeCrashLoopBreaker(this.replicaStateStore, resolveWakeCrashLoopRules());
     this.daemonIngressRateLimitWindowMs = readPositiveIntegerEnv(
       "SLOCK_DAEMON_INGRESS_RATE_LIMIT_WINDOW_MS",
       AgentOrchestrator.DAEMON_INGRESS_RATE_LIMIT_DEFAULT_WINDOW_MS,
@@ -6869,6 +6877,29 @@ export class AgentOrchestrator extends EventEmitter {
             next_status: nextStatus,
             ...liveActivityAttrs,
           });
+          // Breaker exit observation (upstream 1.21.2 port): an inactive
+          // frame whose launchId matches the current start and arrives within
+          // the window is an early exit. Our agent:status protocol carries no
+          // exit code/signal (upstream's does), so the evidence is synthetic
+          // {code: null, signal: null} — documented in wakeCrashLoopBreaker.ts;
+          // conservative defaults absorb the weaker signal.
+          if (normalizedStatus === "inactive") {
+            try {
+              const observation = await this.wakeCrashLoopBreaker.recordExit(
+                msg.agentId,
+                { kind: "agent_process_exited", evidence: { code: null, signal: null }, launchId: msg.launchId ?? null },
+                this.clock.now(),
+              );
+              if (observation.blockedNow) {
+                console.warn(
+                  `[Agent ${msg.agentId}] Wake crash-loop breaker TRIPPED after ${observation.snapshot.earlyExitCount} ` +
+                  `early exits within ${observation.snapshot.windowMs}ms — automatic wakes are blocked until a release path clears it.`,
+                );
+              }
+            } catch (err) {
+              console.warn(`[Agent ${msg.agentId}] wake crash-loop recordExit failed:`, err);
+            }
+          }
         } catch (err) {
           span.end("error", {
             attrs: {
@@ -10051,6 +10082,31 @@ export class AgentOrchestrator extends EventEmitter {
       });
       return { outcome: "skipped", reason: "manual_stop" };
     }
+
+    // Upstream 1.21.2 port (task #3 item 2): automatic wakes consult the
+    // crash-loop breaker. A tripped block refuses message/resume wakes until a
+    // release path clears it (human start, manual stop, config change, or the
+    // time cooldown). Messages are not lost: they stay in the inbox and the
+    // start path re-queries unread at dispatch time.
+    if (startCause !== "manual" && await this.wakeCrashLoopBreaker.isBlocked(agentId, this.clock.now())) {
+      const snapshot = await this.wakeCrashLoopBreaker.snapshot(agentId);
+      this.recordLifecycleEvent({
+        agentId,
+        machineId: agent.machineId,
+        action: "wake",
+        outcome: "suppressed",
+        cause: startCause,
+        previousStatus,
+        detail: "wake_crash_loop_blocked",
+      });
+      console.warn(
+        `[Agent ${agentId}] Automatic wake refused: crash-loop breaker tripped ` +
+        `(episode=${snapshot.episode} early_exits=${snapshot.earlyExitCount}/${snapshot.threshold} ` +
+        `within ${snapshot.windowMs}ms, blocked_at=${snapshot.blockedAtMs}). ` +
+        `Start the agent manually or change its runtime config to release.`,
+      );
+      return { outcome: "skipped", reason: "wake_crash_loop_blocked" };
+    }
     const rollbackStatus = previousStatus ?? "inactive";
 
     if (isExternalAgentRuntime(agent.runtime)) {
@@ -10330,6 +10386,11 @@ export class AgentOrchestrator extends EventEmitter {
           queue_depth: this.pendingStartQueueDepth(agent.machineId),
         },
       });
+      // Breaker bookkeeping (upstream 1.21.2 port): a successfully dispatched
+      // start opens/resets the episode. Human starts always lift a block and
+      // open a fresh episode; automatic starts keep it.
+      await this.wakeCrashLoopBreaker.recordStart(agentId, launchId ?? null, this.clock.now(), { human: startCause === "manual" })
+        .catch((err) => console.warn(`[Agent ${agentId}] wake crash-loop recordStart failed:`, err));
     } catch (err) {
       startDispatchSpan.end("error", {
         attrs: {
@@ -10443,7 +10504,29 @@ export class AgentOrchestrator extends EventEmitter {
       nextStatus,
     };
 
+    // Breaker bookkeeping (upstream 1.21.2 port): a manual stop forgets the
+    // early-exit streak — the agent is offline by intent, not crashing.
+    if (reason === "manual") {
+      await this.wakeCrashLoopBreaker.recordManualStop(agentId).catch(() => {});
+    }
+
     await this.applyStopAction(context);
+  }
+
+  /**
+   * Release-path wiring (upstream 1.21.2 port): the agent's runtime config
+   * changed, so a block that retrying could not lift may no longer apply.
+   * Called by the agent update route after a runtime-affecting change lands.
+   */
+  async liftWakeCrashLoopBlockForConfigChange(agentId: string): Promise<boolean> {
+    return this.wakeCrashLoopBreaker.liftForConfigChange(agentId);
+  }
+
+  /** Breaker diagnostic for agent-status visibility: an agent that refuses to
+   * wake shows "circuit breaker tripped" instead of looking like a silent bug. */
+  async getWakeCrashLoopDiagnostic(agentId: string): Promise<WakeCrashLoopActivityDiagnostic | null> {
+    const snapshot = await this.wakeCrashLoopBreaker.snapshot(agentId);
+    return snapshot.blocked || snapshot.earlyExitCount > 0 ? snapshot : null;
   }
 
   protected async applyStopAction(context: StopApplyContext) {
