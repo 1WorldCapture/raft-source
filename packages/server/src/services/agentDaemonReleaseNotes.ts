@@ -1690,6 +1690,18 @@ export const AGENT_DAEMON_RELEASE_NOTES: AgentDaemonReleaseNote[] = [
       },
     ],
   },
+  {
+    version: "1.0.35",
+    entries: [
+      {
+        category: "reliability",
+        summary:
+          "Mentions that arrive while you are busy are now settled when your turn ends instead of staying pending, and a wake that finds no running process is converted into a server-side wake; a runtime stdin that closes early no longer crashes the daemon.",
+        whyItMatters:
+          "A mention you already handled stops being redelivered, a crashed or exited process is woken again instead of leaving the mention stuck, and one broken pipe can no longer take every agent on the machine offline.",
+      },
+    ],
+  },
 ];
 
 function parseSemver(value: string | null): [number, number, number] | null {
