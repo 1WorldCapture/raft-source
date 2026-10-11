@@ -35,3 +35,10 @@ if (unsafe(process.env.SLOCK_HOME)) {
   const isolatedHome = mkdtempSync(join(tmpdir(), "raft-server-tests-"));
   process.env.SLOCK_HOME = join(isolatedHome, "slock");
 }
+
+// Read-position settling (upstream 1.21.2 port): the production default
+// (3s) would keep rows written-and-read within one test from ever advancing
+// the read position. Tests about settling set their own window and restore
+// it in a finally.
+import { setReadPositionSettleMsForTests } from "./services/readPositionSettle.js";
+setReadPositionSettleMsForTests(0);
