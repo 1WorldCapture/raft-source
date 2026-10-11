@@ -58,6 +58,11 @@ import {
 import { AGENT_ACTIVITY_WRITER_REGISTRY, classifyDaemonActivityObservation } from "./agentLifecycleReducer.js";
 import { buildMachineReadModel } from "./machineReadModel.js";
 import type { AgentRuntimeErrorMirror, MachineMeta, ReplicaStateStore } from "./replicaStateStore.js";
+import {
+  InMemoryWakeCrashLoopStateStore,
+  type WakeCrashLoopEpisodeState,
+  type WakeCrashLoopStateRecord,
+} from "./wakeCrashLoopBreaker.js";
 import type {
   ClaimedComputerLifecycleDispatch,
   ObserveComputerLifecycleResult,
@@ -261,6 +266,16 @@ class InMemoryReplicaStateStore implements ReplicaStateStore {
   async clearMachineMeta(machineId: string): Promise<void> {
     this.machineMeta.delete(machineId);
     this.machineMetaDeadlines.delete(machineId);
+  }
+
+  private readonly wakeCrashLoopStates = new InMemoryWakeCrashLoopStateStore();
+
+  getWakeCrashLoopState(agentId: string): Promise<WakeCrashLoopStateRecord | null> {
+    return this.wakeCrashLoopStates.getWakeCrashLoopState(agentId);
+  }
+
+  compareAndSetWakeCrashLoopState(agentId: string, expectedVersion: number, state: WakeCrashLoopEpisodeState): Promise<boolean> {
+    return this.wakeCrashLoopStates.compareAndSetWakeCrashLoopState(agentId, expectedVersion, state);
   }
 }
 
@@ -563,6 +578,16 @@ class ControlledReplicaStateStore implements ReplicaStateStore {
 
   async clearMachineMeta(machineId: string): Promise<void> {
     this.shared.machineMeta.delete(machineId);
+  }
+
+  private readonly wakeCrashLoopStates = new InMemoryWakeCrashLoopStateStore();
+
+  getWakeCrashLoopState(agentId: string): Promise<WakeCrashLoopStateRecord | null> {
+    return this.wakeCrashLoopStates.getWakeCrashLoopState(agentId);
+  }
+
+  compareAndSetWakeCrashLoopState(agentId: string, expectedVersion: number, state: WakeCrashLoopEpisodeState): Promise<boolean> {
+    return this.wakeCrashLoopStates.compareAndSetWakeCrashLoopState(agentId, expectedVersion, state);
   }
 
 }

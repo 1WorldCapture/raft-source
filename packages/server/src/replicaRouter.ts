@@ -11,6 +11,12 @@
  */
 import crypto from "node:crypto";
 import { MachineResponseRelay, redisMachineReplyStore } from "./machineResponseRelay.js";
+import {
+  InMemoryWakeCrashLoopStateStore,
+  freshWakeCrashLoopEpisode,
+  type WakeCrashLoopEpisodeState,
+  type WakeCrashLoopStateRecord,
+} from "./services/wakeCrashLoopBreaker.js";
 import type Redis from "ioredis";
 import { getRedis, getRedisReplicaSub, isRedisAvailable, resetRedisReplicaSub } from "./redis.js";
 import {
@@ -1384,6 +1390,185 @@ export async function getAgentRuntimeError(agentId: string): Promise<AgentRuntim
   if (!isRedisAvailable()) return null;
   const redis = getRedis();
   return projectAgentRuntimeErrorFromRedisHash(await redis.hgetall(agentRuntimeErrorKey(agentId)));
+}
+
+// --- Wake crash-loop breaker state in Redis (upstream 1.21.2 port, task #1119) ---
+
+export const wakeCrashLoopKey = (agentId: string) => `slock:agent:${agentId}:wake_crash_loop`;
+/**
+ * A blocked episode must survive until a release path clears it, so a blocked
+ * record has no TTL. An unblocked streak is only meaningful while the agent
+ * keeps being restarted; it expires after 7 days of no writes.
+ */
+export const WAKE_CRASH_LOOP_UNBLOCKED_TTL_SEC = 7 * 86_400;
+
+/**
+ * KEYS[1] = hash {version, state}; ARGV[1] = expected version ("0" when absent);
+ * ARGV[2] = state JSON; ARGV[3] = ttl seconds ("0" = persist).
+ * Writes only when the stored version equals the expected one; returns 1/0.
+ */
+export const CAS_WAKE_CRASH_LOOP_LUA = `
+local current = redis.call('HGET', KEYS[1], 'version')
+if current == false then current = '0' end
+if current ~= ARGV[1] then return 0 end
+local next = tonumber(current) + 1
+redis.call('HSET', KEYS[1], 'version', tostring(next), 'state', ARGV[2])
+if tonumber(ARGV[3]) > 0 then
+  redis.call('EXPIRE', KEYS[1], ARGV[3])
+else
+  redis.call('PERSIST', KEYS[1])
+end
+return 1
+`;
+
+/** No-Redis fallback: a single replica keeps the state in-process (still CAS-shaped). */
+export const localWakeCrashLoopStateStore = new InMemoryWakeCrashLoopStateStore();
+
+const WAKE_CRASH_LOOP_EXIT_KINDS_PERSISTED: ReadonlySet<string> = new Set(["machine_disconnected", "agent_process_exited"]);
+
+export interface DecodedWakeCrashLoopState {
+  /**
+   * `Required`: the decoder must produce every field the state type declares,
+   *   optional ones included, so a field added to the type without a decode step
+   *   is a type error here instead of a value that silently vanishes on the
+   *   Redis read.
+   */
+  state: Required<WakeCrashLoopEpisodeState>;
+  /** Fields the stored record did not carry in a valid shape; empty when the record was whole. */
+  repaired: string[];
+}
+
+function finiteOrNull(record: Record<string, unknown>, key: string, repaired: string[]): number | null {
+  const value = record[key];
+  if (value === null || value === undefined) { if (value === undefined) repaired.push(key); return null; }
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  repaired.push(key);
+  return null;
+}
+
+function stringOrNull(record: Record<string, unknown>, key: string, repaired: string[]): string | null {
+  const value = record[key];
+  if (value === null || value === undefined) { if (value === undefined) repaired.push(key); return null; }
+  if (typeof value === "string" && value.length <= 128) return value;
+  repaired.push(key);
+  return null;
+}
+
+/** Optional field: absent is legal and means null. */
+function optionalStringOrNull(record: Record<string, unknown>, key: string, repaired: string[]): string | null {
+  return record[key] === undefined ? null : stringOrNull(record, key, repaired);
+}
+
+/** Optional flag: absent is legal and means false; a non-boolean is repaired to false. */
+function optionalBoolean(record: Record<string, unknown>, key: string, repaired: string[]): boolean {
+  const value = record[key];
+  if (value === undefined) return false;
+  if (typeof value === "boolean") return value;
+  repaired.push(key);
+  return false;
+}
+
+/** The Redis write form of an episode; `decodeWakeCrashLoopState` is its inverse. */
+export function encodeWakeCrashLoopState(state: WakeCrashLoopEpisodeState): string {
+  return JSON.stringify(state);
+}
+
+/**
+ * Decode a persisted crash-loop episode. Every field is checked against the
+ * shape `WakeCrashLoopEpisodeState` declares; the breaker does arithmetic on
+ * the times and branches on the booleans, so an unchecked field would flow
+ * into a time comparison as a string or a truthy "false". A field that is
+ * missing or has the wrong type is replaced by its neutral value (null /
+ * false) and named in `repaired`, so the record stays readable and the CAS
+ * version is preserved. `blocked === true` is always honoured — a damaged
+ * blocked record is never turned into an unblocked one by decoding.
+ */
+export function decodeWakeCrashLoopState(raw: unknown): DecodedWakeCrashLoopState | null {
+  if (typeof raw !== "string") return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  const record = parsed as Record<string, unknown>;
+  if (typeof record.blocked !== "boolean") return null;
+  const repaired: string[] = [];
+  const episode = typeof record.episode === "number" && Number.isInteger(record.episode) && record.episode >= 1 ? record.episode : null;
+  const earlyExitCount = typeof record.earlyExitCount === "number" && Number.isInteger(record.earlyExitCount) && record.earlyExitCount >= 0
+    ? record.earlyExitCount
+    : null;
+  if (episode === null || earlyExitCount === null) {
+    // The counters are unreadable. Only a blocked record is worth keeping:
+    // the block must survive until a release path clears it. An unblocked
+    // record with broken counters carries nothing the breaker can use.
+    if (!record.blocked) return null;
+    if (episode === null) repaired.push("episode");
+    if (earlyExitCount === null) repaired.push("earlyExitCount");
+  }
+  const lastStartCounted = typeof record.lastStartCounted === "boolean" ? record.lastStartCounted : (repaired.push("lastStartCounted"), false);
+  const lastExitKindRaw = record.lastExitKind;
+  let lastExitKind: WakeCrashLoopEpisodeState["lastExitKind"] = null;
+  if (lastExitKindRaw === undefined || (lastExitKindRaw !== null && !(typeof lastExitKindRaw === "string" && WAKE_CRASH_LOOP_EXIT_KINDS_PERSISTED.has(lastExitKindRaw)))) {
+    repaired.push("lastExitKind");
+  } else {
+    lastExitKind = lastExitKindRaw as WakeCrashLoopEpisodeState["lastExitKind"];
+  }
+  const state: Required<WakeCrashLoopEpisodeState> = {
+    episode: episode ?? 1,
+    earlyExitCount: earlyExitCount ?? 0,
+    blocked: record.blocked,
+    blockedAtMs: finiteOrNull(record, "blockedAtMs", repaired),
+    lastStartAtMs: finiteOrNull(record, "lastStartAtMs", repaired),
+    lastStartLaunchId: stringOrNull(record, "lastStartLaunchId", repaired),
+    lastStartCounted,
+    firstExitAtMs: finiteOrNull(record, "firstExitAtMs", repaired),
+    lastExitAtMs: finiteOrNull(record, "lastExitAtMs", repaired),
+    lastExitKind,
+    lastSignal: stringOrNull(record, "lastSignal", repaired),
+    lastLaunchId: stringOrNull(record, "lastLaunchId", repaired),
+    needsActionReason: optionalStringOrNull(record, "needsActionReason", repaired),
+    catchupOwed: optionalBoolean(record, "catchupOwed", repaired),
+    catchupCarriedLaunchId: optionalStringOrNull(record, "catchupCarriedLaunchId", repaired),
+  };
+  return { state, repaired };
+}
+
+export async function getWakeCrashLoopState(agentId: string): Promise<WakeCrashLoopStateRecord | null> {
+  if (!isRedisAvailable()) return localWakeCrashLoopStateStore.getWakeCrashLoopState(agentId);
+  const data = await getRedis().hgetall(wakeCrashLoopKey(agentId));
+  if (data.state === undefined && data.version === undefined) return null;
+  const version = Number(data.version);
+  const decoded = decodeWakeCrashLoopState(data.state);
+  if (!Number.isInteger(version) || version <= 0 || !decoded) {
+    // A record exists but cannot be read as an episode. Say so; the breaker
+    // then starts from a fresh episode at this version instead of looping on
+    // a compare-and-set against version 0.
+    console.warn(`[ReplicaRouter] wake crash-loop state for agent ${agentId} is unreadable (version=${String(data.version)}); treating as fresh`);
+    return Number.isInteger(version) && version > 0 ? { state: freshWakeCrashLoopEpisode(1), version } : null;
+  }
+  if (decoded.repaired.length > 0) {
+    console.warn(`[ReplicaRouter] wake crash-loop state for agent ${agentId} repaired on read: ${decoded.repaired.join(", ")}${decoded.state.blocked ? " (blocked preserved)" : ""}`);
+  }
+  return { state: decoded.state, version };
+}
+
+export async function compareAndSetWakeCrashLoopState(
+  agentId: string,
+  expectedVersion: number,
+  state: WakeCrashLoopEpisodeState,
+): Promise<boolean> {
+  if (!isRedisAvailable()) return localWakeCrashLoopStateStore.compareAndSetWakeCrashLoopState(agentId, expectedVersion, state);
+  const result = await getRedis().eval(
+    CAS_WAKE_CRASH_LOOP_LUA,
+    1,
+    wakeCrashLoopKey(agentId),
+    String(expectedVersion),
+    encodeWakeCrashLoopState(state),
+    String(state.blocked ? 0 : WAKE_CRASH_LOOP_UNBLOCKED_TTL_SEC),
+  );
+  return result === 1;
 }
 
 // --- Machine meta in Redis ---

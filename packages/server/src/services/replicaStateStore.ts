@@ -17,6 +17,8 @@ import {
   setMachineMeta,
   getMachineMeta,
   clearMachineMeta,
+  getWakeCrashLoopState,
+  compareAndSetWakeCrashLoopState,
   type MachineMeta,
   type AgentRuntimeErrorMirror,
 } from "../replicaRouter.js";
@@ -25,6 +27,11 @@ import type { AgentActivityDetailKind, AgentActivityKind } from "@botiverse/raft
 import type { AgentPresence } from "@botiverse/raft-shared";
 import type { AgentRuntimeErrorState } from "@botiverse/raft-shared";
 import type { MachineConnectTraceContext } from "../tracing/migrationTraceContext.js";
+
+import type {
+  WakeCrashLoopEpisodeState,
+  WakeCrashLoopStateRecord,
+} from "./wakeCrashLoopBreaker.js";
 
 export type { MachineMeta, AgentRuntimeErrorMirror };
 
@@ -88,6 +95,8 @@ export interface ReplicaStateStore {
   setMachineMeta(machineId: string, meta: MachineMeta): Promise<void>;
   getMachineMeta(machineId: string): Promise<MachineMeta | null>;
   clearMachineMeta(machineId: string): Promise<void>;
+  getWakeCrashLoopState(agentId: string): Promise<WakeCrashLoopStateRecord | null>;
+  compareAndSetWakeCrashLoopState(agentId: string, expectedVersion: number, state: WakeCrashLoopEpisodeState): Promise<boolean>;
 }
 
 export const redisReplicaStateStore: ReplicaStateStore = {
@@ -110,4 +119,6 @@ export const redisReplicaStateStore: ReplicaStateStore = {
   setMachineMeta,
   getMachineMeta,
   clearMachineMeta,
+  getWakeCrashLoopState,
+  compareAndSetWakeCrashLoopState,
 };
