@@ -1,6 +1,7 @@
 import { lstat, mkdir, readdir, realpath, rename, rm, stat, utimes } from "node:fs/promises";
 import path from "node:path";
 import { currentDate } from "@botiverse/raft-shared";
+import { assertSafePathSegment } from "./agentMigrationPathSafety.js";
 
 export const AGENT_MIGRATION_WORKSPACE_BACKUP_DIRECTORY = "migration-workspace-backups";
 export const AGENT_MIGRATION_WORKSPACE_BACKUP_MAX_PER_AGENT = 3;
@@ -10,18 +11,7 @@ export type AgentMigrationWorkspaceArchiveOutcome =
   | "archived"
   | "already_archived";
 
-function assertSafePathSegment(value: string, label: string): void {
-  if (
-    value.length === 0
-    || value === "."
-    || value === ".."
-    || value.includes("/")
-    || value.includes("\\")
-    || value.includes("\0")
-  ) {
-    throw new Error(`MIGRATION_WORKSPACE_ARCHIVE_${label}_INVALID`);
-  }
-}
+
 
 function pathExists(targetPath: string): Promise<boolean> {
   return lstat(targetPath).then(() => true, (error: unknown) => {
@@ -85,8 +75,8 @@ export async function archiveCompletedAgentMigrationSourceWorkspace(input: {
   migrationId: string;
   now?: Date;
 }): Promise<AgentMigrationWorkspaceArchiveOutcome> {
-  assertSafePathSegment(input.agentId, "AGENT_ID");
-  assertSafePathSegment(input.migrationId, "MIGRATION_ID");
+  assertSafePathSegment(input.agentId, "MIGRATION_WORKSPACE_ARCHIVE_AGENT_ID_INVALID");
+  assertSafePathSegment(input.migrationId, "MIGRATION_WORKSPACE_ARCHIVE_MIGRATION_ID_INVALID");
 
   const now = input.now ?? currentDate();
   const dataDir = path.resolve(input.dataDir);
