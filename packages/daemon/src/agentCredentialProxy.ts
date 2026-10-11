@@ -1918,6 +1918,12 @@ export function unregisterAgentCredentialProxyForLaunch(input: {
       removed += 1;
     }
   }
+  // No live registration means no credential to report with; drop whatever
+  // this agent still owed instead of retrying forever — but only when no other
+  // launch's registration survives.
+  if (removed > 0 && ![...registrations.values()].some((registration) => registration.agentId === input.agentId)) {
+    thirdPartyEventDeliveryReporter.forget(input.agentId);
+  }
   return removed;
 }
 
@@ -1929,5 +1935,6 @@ export function unregisterAgentCredentialProxiesForAgent(agentId: string): numbe
     registrations.delete(token);
     removed += 1;
   }
+  if (removed > 0) thirdPartyEventDeliveryReporter.forget(agentId);
   return removed;
 }

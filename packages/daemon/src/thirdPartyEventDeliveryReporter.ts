@@ -46,6 +46,8 @@ type AgentReportState = {
 export type ThirdPartyEventDeliveryReporter = {
   report(agentId: string, eventIds: readonly string[]): void;
   pendingEventIds(agentId: string): string[];
+  /** Drop everything this agent still owes: called on proxy deregistration. */
+  forget(agentId: string): void;
   reset(): void;
 };
 
@@ -113,11 +115,18 @@ export function createThirdPartyEventDeliveryReporter(deps: {
       for (const id of batch) state.pending.delete(id);
       state.failures = 0;
       deps.onOutcome?.({ agentId, outcome: "reported", eventCount: batch.length, httpStatus, pendingCount: state.pending.size });
-    } else if (httpStatus === 400) {
-      // The server will never accept this batch; retrying it would pin the
-      // queue. Its events stay `delivering` and are re-delivered once.
+    } else if (httpStatus === 400 || httpStatus === 401 || httpStatus === 403) {
+      // The server will never accept this batch: 400 is a contract rejection,
+      // 401/403 mean the agent was deleted or its credential revoked. Retrying
+      // would pin the queue forever (every 5 minutes); the events stay
+      // `delivering` server-side and are re-delivered once to whatever agent
+      // registration replaces this one.
       for (const id of batch) state.pending.delete(id);
       deps.onOutcome?.({ agentId, outcome: "rejected", eventCount: batch.length, httpStatus, pendingCount: state.pending.size });
+      if (state.pending.size === 0) {
+        if (state.timer) clearTimeout(state.timer);
+        states.delete(agentId);
+      }
     } else {
       scheduleRetry(agentId, state);
       deps.onOutcome?.({ agentId, outcome: "retry_scheduled", eventCount: batch.length, httpStatus, pendingCount: state.pending.size });
@@ -150,6 +159,12 @@ export function createThirdPartyEventDeliveryReporter(deps: {
     },
     pendingEventIds(agentId) {
       return [...(states.get(agentId)?.pending ?? [])];
+    },
+    forget(agentId) {
+      const state = states.get(agentId);
+      if (!state) return;
+      if (state.timer) clearTimeout(state.timer);
+      states.delete(agentId);
     },
     reset() {
       for (const state of states.values()) {

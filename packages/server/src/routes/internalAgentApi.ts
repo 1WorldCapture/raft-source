@@ -1779,9 +1779,6 @@ internalAgentApiRouter.patch("/server", requireAgentCapability("server"), async 
   }
 });
 
-// Server Labs uses the same transactional service and role policy as the
-// human Settings API. The credential scope is an additional transport gate;
-// it never substitutes for owner/admin membership authorization.
 /**
  * POST /internal/agent-api/third-party-events/delivered — upstream task #175.
  *
@@ -1833,6 +1830,9 @@ internalAgentApiRouter.post("/third-party-events/delivered", requireAgentCapabil
   }
 });
 
+// Server Labs uses the same transactional service and role policy as the
+// human Settings API. The credential scope is an additional transport gate;
+// it never substitutes for owner/admin membership authorization.
 internalAgentApiRouter.get("/labs", requireAgentCapability("read"), getAgentServerLabs);
 internalAgentApiRouter.patch("/labs/access", requireAgentCapability("server"), patchAgentServerLabsAccess);
 internalAgentApiRouter.put("/labs/:labKey", requireAgentCapability("server"), putAgentServerLabEnrollment);
