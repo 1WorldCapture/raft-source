@@ -320,6 +320,28 @@ test("retry: a deadlock on the first attempt is retried and the run succeeds", a
   assert.match(joined, /\[MIGRATION_RETRY_SUCCEEDED\] attempt=2\/3/, "a retried success is distinguishable from a first-try success");
 });
 
+test("retry: a 55P03 lock_not_available on the first attempt is retried and the run succeeds", async () => {
+  const folder = writeMigrations([{ tag: "0000_ok", sql: "SELECT 1;" }]);
+  const logs: string[] = [];
+  let calls = 0;
+  await runDeployMigrations(
+    async () => {
+      calls += 1;
+      if (calls === 1) {
+        throw Object.assign(new Error("canceling statement due to lock timeout"), { code: "55P03" });
+      }
+    },
+    folder,
+    async () => 0,
+    (line) => logs.push(line),
+    { sleep: async () => {}, maxAttempts: 3, baseDelayMs: 1 },
+  );
+  assert.equal(calls, 2, "the phase must be re-run exactly once after a lock race");
+  const joined = logs.join("\n");
+  assert.match(joined, /sqlstate=55P03/, "the diagnostic names lock_not_available");
+  assert.match(joined, /\[MIGRATION_RETRY\] reason=sqlstate=55P03 attempt=1\/3/);
+});
+
 test("retry: a non-concurrency failure is NOT retried (no accidental masking)", async () => {
   const folder = writeMigrations([{ tag: "0000_bad", sql: "SELECT 1;" }]);
   const logs: string[] = [];
