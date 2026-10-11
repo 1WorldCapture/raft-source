@@ -1276,8 +1276,10 @@ export async function createPiAgentSessionForContext(
     });
     let model = resolvePiModelFromRegistry(launchRuntimeFields.model, modelRegistry, runtimeConfig);
     let modelFallbackFrom: string | null = null;
+    let defaultPathNotice: PiStartupNotice | undefined;
     if (launchRuntimeFields.model && launchRuntimeFields.model !== "default" && !model) {
       const fallbackModel = resolvePiFallbackModel(modelRegistry, launchRuntimeFields.model);
+      const registryEmpty = modelRegistry.getAvailable().length === 0;
       if (fallbackModel) {
         model = fallbackModel;
         modelFallbackFrom = launchRuntimeFields.model;
@@ -1296,6 +1298,31 @@ export async function createPiAgentSessionForContext(
         traceSpan?.addEvent(`${traceEventPrefix}.model_fallback`, {
           fallback_from: requestedModel,
           fallback_to: formatPiModelLogId(fallbackModel),
+          available_models_count: modelRegistry.getAvailable().length,
+          ...launchTraceEvidenceAttrs,
+        });
+      } else if (!registryEmpty) {
+        // Neither the requested model nor any same-provider fallback exists,
+        // but the registry has models: start on the same model the agent would
+        // get with model="default". resolvedModel is refined to the session's
+        // actual model after createAgentSessionFromServices below.
+        model = undefined;
+        modelFallbackFrom = launchRuntimeFields.model;
+        defaultPathNotice = {
+          kind: "model_fallback",
+          requestedModel: launchRuntimeFields.model,
+          resolvedModel: "default",
+        };
+        opts.startupNotices?.push(defaultPathNotice);
+        console.warn(
+          "[%s] create_session missing_model_fallback requested=%s fallback=default available=%d — no model of that provider is available; starting on the default model, update this agent's model setting",
+          logPrefix,
+          requestedModel,
+          modelRegistry.getAvailable().length,
+        );
+        traceSpan?.addEvent(`${traceEventPrefix}.model_fallback`, {
+          fallback_from: requestedModel,
+          fallback_to: "default",
           available_models_count: modelRegistry.getAvailable().length,
           ...launchTraceEvidenceAttrs,
         });
@@ -1376,6 +1403,9 @@ export async function createPiAgentSessionForContext(
         ...managedMcpTools,
       ],
     }), { removeFirst: providerEnvScope });
+    if (defaultPathNotice && session.model) {
+      defaultPathNotice.resolvedModel = formatPiModelLogId(session.model);
+    }
     const disposeSession = session.dispose.bind(session);
     let sessionDisposed = false;
     session.dispose = () => {

@@ -23,6 +23,7 @@ import {
   detectPiModelsFromRegistry,
   mapPiSdkEventToParsedEvents,
   resolvePiFallbackModel,
+  type PiStartupNotice,
   projectPiCompactionInputTelemetry,
   resolveBuiltInGatewayModelInput,
   resolveBuiltInGatewayLaunch,
@@ -969,6 +970,60 @@ test("Built-in gateway inherits Qwen Token Plan payload compatibility from the P
     } finally {
       session.dispose();
     }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Built-in preset with an unresolvable model id starts on the default path and reports one fallback notice", { timeout: 10_000 }, async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "slock-builtin-default-path-fallback-"));
+  const workingDirectory = path.join(root, "workspace");
+  mkdirSync(workingDirectory, { recursive: true });
+  const startupNotices: PiStartupNotice[] = [];
+
+  try {
+    // zai is configured, so the registry is non-empty; the requested id belongs
+    // to no catalog provider, so neither the requested model, its catalog
+    // default, nor a same-provider model exists -> the default-path branch.
+    const session = await createPiAgentSessionForContext(
+      makeSpawnContext({
+        runtime: "builtin",
+        model: "not-a-provider/some-retired-model",
+        runtimeConfig: {
+          version: RUNTIME_CONFIG_VERSION,
+          runtime: "builtin",
+          provider: {
+            kind: "preset",
+            providerId: "zai",
+            apiKey: "sk-zai-test",
+          },
+          hostUserState: "forbidden",
+          model: { kind: "preset", id: "not-a-provider/some-retired-model" },
+          mode: { kind: "default" },
+          envVars: null,
+        },
+      }, { workingDirectory, launchId: "launch-1" }),
+      "builtin-default-path-fallback-session",
+      {
+        agentDir: buildBuiltInAgentDir(workingDirectory),
+        sessionDir: buildBuiltInSessionDir(workingDirectory),
+        traceName: "daemon.builtin.session.create",
+        traceEventPrefix: "daemon.builtin.session",
+        logPrefix: "builtin-driver-test",
+        agentDirSource: "managed_builtin",
+        isolateHostProviderEnv: true,
+        startupNotices,
+      },
+    );
+
+    assert.ok(session.sessionId, "session starts successfully on the default path");
+    assert.equal(startupNotices.length, 1, "exactly one fallback notice");
+    assert.equal(startupNotices[0]?.kind, "model_fallback");
+    assert.equal(startupNotices[0]?.requestedModel, "not-a-provider/some-retired-model");
+    // resolvedModel is either refined to the session's actual default model or stays "default".
+    const resolved = startupNotices[0]?.resolvedModel ?? "";
+    assert.ok(resolved === "default" || /^\w/.test(resolved), `resolvedModel is usable: ${resolved}`);
+    session.dispose();
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
