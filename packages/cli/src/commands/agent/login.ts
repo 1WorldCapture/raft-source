@@ -376,7 +376,14 @@ async function mintAndPersist(
   accessToken: string,
   paths: ProfilePaths,
 ): Promise<void> {
-  // No X-Server-Id header — the route derives server context from the agent
+  // Scopes the CLI actually needs as an agent (task #8): message, read,
+// react, inbox/mentions/tasks, channels/threads, attachments, knowledge,
+// own profile. NOT `server` (server administration / migrations) and NOT
+// `mcp` (managed MCP with server-held credentials) — asking explicitly
+// keeps login working when the server default flips to least privilege.
+const CLI_AGENT_CREDENTIAL_SCOPES = ["channels", "knowledge", "mentions", "reactions", "read", "send", "tasks"] as const;
+
+// No X-Server-Id header — the route derives server context from the agent
   // row (CLI resource-explicit invariant, see #proj-runtime:3d515727).
   const mintRes = await undiciFetch(
     `${options.server.replace(/\/+$/, "")}/api/agents/${encodeURIComponent(options.agent)}/credentials`,
@@ -386,7 +393,7 @@ async function mintAndPersist(
         "content-type": "application/json",
         authorization: `Bearer ${accessToken}`,
       },
-      body: JSON.stringify({}),
+      body: JSON.stringify({ scopes: [...CLI_AGENT_CREDENTIAL_SCOPES] }),
     },
   );
   if (!mintRes.ok) {

@@ -36,7 +36,12 @@
  * to be mintable via web session simply don't flip the flag.
  *
  * Request body: { scopes?: string[], name?: string }
- *   - scopes: subset of ALLOWED_AGENT_CAPABILITIES. Defaults to ALL.
+ *   - scopes: subset of ALLOWED_AGENT_CAPABILITIES. Defaults to the
+ *     least-privilege DEFAULT_EXTERNAL_AGENT_CAPABILITIES (no `server`, no
+ *     `mcp`) — task #8 / upstream 1.21.2 port. Clients that predate the
+ *     change send no scopes and receive the least-privilege set: normal
+ *     agent messaging keeps working; any flow that needed `server`/`mcp`
+ *     must name them explicitly (compat note in the PR).
  *   - name: optional human-readable label for the credential row.
  *
  * Error contract (anti-enumeration):
@@ -65,6 +70,7 @@ import type { Request, Response } from "express";
 import * as agentService from "../services/agentService.js";
 import {
   ALLOWED_AGENT_CAPABILITIES,
+  DEFAULT_EXTERNAL_AGENT_CAPABILITIES,
   mintAgentCredential,
   listAgentCredentials,
   revokeAgentCredential,
@@ -223,7 +229,7 @@ export async function agentCredentialsHandler(
 
     let scopes: AgentCapability[];
     if (body.scopes === undefined) {
-      scopes = [...ALLOWED_AGENT_CAPABILITIES];
+      scopes = [...DEFAULT_EXTERNAL_AGENT_CAPABILITIES];
     } else if (!Array.isArray(body.scopes)) {
       res.status(400).json({
         error: "scopes must be an array of capability literals",

@@ -48,6 +48,28 @@ export const ALLOWED_AGENT_CAPABILITIES = [
   "mcp",
 ] as const;
 export type AgentCapability = (typeof ALLOWED_AGENT_CAPABILITIES)[number];
+/**
+ * Least-privilege default for a web/CLI-minted `sk_agent_*` when the minter
+ * does not name scopes (upstream 1.21.2 port; A1 assessment follow-up,
+ * task #8): everything a normal member agent needs to message, read, react,
+ * work its inbox / mentions / tasks, use channels and threads, attach files,
+ * read knowledge and edit its own profile (`send`). Excluded (must be
+ * requested explicitly by an authorized minter):
+ *   - `server` — acting on the server: PATCH /server, avatar, labs,
+ *     agent migration between computers;
+ *   - `mcp`    — managed MCP tools with server-held provider credentials.
+ * A managed runner credential (daemon RUNNER_CREDENTIAL_SCOPES) still names
+ * the full set explicitly and is unaffected.
+ */
+export const DEFAULT_EXTERNAL_AGENT_CAPABILITIES: readonly AgentCapability[] = [
+  "channels",
+  "knowledge",
+  "mentions",
+  "reactions",
+  "read",
+  "send",
+  "tasks",
+];
 const isAgentCapability = makeIsMember(ALLOWED_AGENT_CAPABILITIES);
 
 // Exported so the device-code grant (task #30 PR-A2, deviceAuthService.ts)
