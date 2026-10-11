@@ -188,6 +188,21 @@ test("Built-in Xiaomi MiMo provider is generated from the Pi model catalog", () 
   assert.ok(xiaomiModels.some((model) => model.id === "xiaomi/mimo-v2.5-pro-ultraspeed"));
 });
 
+test("Built-in MiniMax CN carries curated additions ahead of the upstream catalog", () => {
+  const minimaxCn = PI_BUILTIN_PROVIDER_MODELS["minimax-cn"];
+
+  // Curated addition (task #21): pi-ai 1.1.0 predates the M3.1 Flash preview
+  // (released 2026-09-27). The generator merges PI_CATALOG_ADDITIONS and drops
+  // the entry automatically once the SDK ships the same id — this pin is what
+  // forces that cleanup to be deliberate instead of silent.
+  assert.ok(
+    minimaxCn.some((model) => model.id === "minimax-cn/MiniMax-M3.1-Flash-Preview"),
+    "MiniMax-M3.1-Flash-Preview must be selectable on the MiniMax CN provider",
+  );
+  // The SDK default is the selection authority; additions never change it.
+  assert.equal(PI_BUILTIN_PROVIDER_DEFAULT_MODELS["minimax-cn"], "minimax-cn/MiniMax-M2.7");
+});
+
 test("Built-in provider env keys are generated for every surfaced Pi provider", () => {
   const providerIds = BUILTIN_RUNTIME_PROVIDERS.map((provider) => provider.id).sort();
   assert.deepEqual(providerIds, Object.keys(PI_BUILTIN_PROVIDER_MODELS).sort());

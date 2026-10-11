@@ -1659,6 +1659,18 @@ export const AGENT_DAEMON_RELEASE_NOTES: AgentDaemonReleaseNote[] = [
       },
     ],
   },
+  {
+    version: "1.0.33",
+    entries: [
+      {
+        category: "new_capability",
+        summary:
+          "MiniMax M3.1 Flash Preview is now selectable and launchable on the MiniMax CN provider (1M-token context, free during the preview), ahead of the upstream pi catalog.",
+        whyItMatters:
+          "Newly released models used to wait for the next pi SDK bump. Curated additions surface them immediately; each entry retires itself automatically once the upstream catalog ships the same model.",
+      },
+    ],
+  },
 ];
 
 function parseSemver(value: string | null): [number, number, number] | null {
