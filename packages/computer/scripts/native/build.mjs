@@ -42,6 +42,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { createGzip } from "node:zlib";
 
 import { assertBuildOutputFresh } from "./dependency-freshness.mjs";
+import { warnPiAssetGaps } from "./pi-asset-scan.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const COMPUTER_ROOT = resolve(HERE, "..", "..");
@@ -530,6 +531,10 @@ async function main() {
   const gzDigest = await sha256(outGz);
   await writeFile(`${outGz}.sha256`, `${gzDigest}  ${gzName}\n`);
   await copyPhotonWasmSidecar(outDir);
+  // Warn-only inventory rail (see pi-asset-scan.mjs): esbuild inlines JS, not
+  // .wasm/.node/.so assets — anything in pi's runtime closure beyond the
+  // whitelisted sidecars must at least be visible in the build log.
+  warnPiAssetGaps(DAEMON_ROOT);
   console.log(`[build] done: ${outBinary}`);
   console.log(`[build] sha256: ${digest}`);
   console.log(`[build] gzip:   ${outGz} (${gzDigest})`);
