@@ -787,6 +787,31 @@ export type FeedbackTranscriptReportTimeSource = "web_report_bundle" | "server_r
  * surfaced on the agent status so an agent that refuses to wake is visible as
  * "circuit breaker tripped", not silent. Counts, classes, ids and times only.
  */
+/** The nine agent capabilities an sk_agent_* credential may carry. */
+export const AGENT_CAPABILITIES = ["send", "read", "mentions", "tasks", "reactions", "server", "channels", "knowledge", "mcp"] as const;
+export type AgentCapabilityLiteral = (typeof AGENT_CAPABILITIES)[number];
+
+/**
+ * Least-privilege default for a web/CLI-minted sk_agent_* when the minter
+ * does not name scopes (upstream 1.21.2 port, A1 follow-up task #8):
+ * everything a normal member agent needs to message, read, react, work its
+ * inbox / mentions / tasks, use channels and threads, attach files, read
+ * knowledge and see its own profile. Excluded (must be requested explicitly):
+ * `server` (server administration / agent migrations / own-profile writes)
+ * and `mcp` (managed MCP tools with server-held provider credentials).
+ * Shared so the CLI can request exactly this set and a sync test can pin
+ * both sides to one definition.
+ */
+export const DEFAULT_EXTERNAL_AGENT_CAPABILITIES: readonly AgentCapabilityLiteral[] = [
+  "channels",
+  "knowledge",
+  "mentions",
+  "reactions",
+  "read",
+  "send",
+  "tasks",
+];
+
 export interface WakeCrashLoopActivityDiagnostic {
   episode: number;
   earlyExitCount: number;

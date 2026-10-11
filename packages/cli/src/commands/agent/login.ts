@@ -8,6 +8,7 @@
  */
 
 import { mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { DEFAULT_EXTERNAL_AGENT_CAPABILITIES } from "@botiverse/raft-shared";
 import path from "node:path";
 import { createInterface } from "node:readline";
 import { Writable } from "node:stream";
@@ -378,10 +379,13 @@ async function mintAndPersist(
 ): Promise<void> {
   // Scopes the CLI actually needs as an agent (task #8): message, read,
 // react, inbox/mentions/tasks, channels/threads, attachments, knowledge,
-// own profile. NOT `server` (server administration / migrations) and NOT
-// `mcp` (managed MCP with server-held credentials) — asking explicitly
-// keeps login working when the server default flips to least privilege.
-const CLI_AGENT_CREDENTIAL_SCOPES = ["channels", "knowledge", "mentions", "reactions", "read", "send", "tasks"] as const;
+// own profile. NOT `server` (server administration / migrations / own-
+// profile writes) and NOT `mcp` (managed MCP with server-held credentials)
+// — asking explicitly keeps login working when the server default flips to
+// least privilege. The deliberately out-of-scope CLI commands (server
+// info/update, profile update, agent migrate, mcp *) are listed in
+// cliAgentCommandScopeCoverage.test.ts.
+const CLI_AGENT_CREDENTIAL_SCOPES: readonly string[] = DEFAULT_EXTERNAL_AGENT_CAPABILITIES;
 
 // No X-Server-Id header — the route derives server context from the agent
   // row (CLI resource-explicit invariant, see #proj-runtime:3d515727).
