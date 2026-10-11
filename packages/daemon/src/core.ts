@@ -3507,6 +3507,21 @@ export class DaemonCore {
     });
   }
 
+  /** Upstream task #1113: no process and no cached restart snapshot — hand the
+   *  wake back to the Server with the delivery key. The Server owns the agent
+   *  config and converts the rejection into a start that carries the message. */
+  private sendDeliveryRejectedNoProcess(msg: AgentDeliverMessage, traceparent?: string): void {
+    this.connection.send({
+      type: "agent:delivery:rejected",
+      agentId: msg.agentId,
+      seq: msg.seq > 0 ? msg.seq : msg.message.seq ?? 0,
+      ...(msg.deliveryId ? { deliveryId: msg.deliveryId } : {}),
+      reason: "no_process",
+      ...(msg.mentionDelivery ? { mentionDelivery: msg.mentionDelivery } : {}),
+      ...(traceparent ? { traceparent } : {}),
+    });
+  }
+
   private rememberAcceptedStartDispatch(receipt: AgentStartAckMessage): void {
     this.acceptedStartDispatches.delete(receipt.startDispatchId);
     this.acceptedStartDispatches.set(receipt.startDispatchId, receipt);
@@ -3805,6 +3820,7 @@ export class DaemonCore {
               formatTraceparent(span.context),
             ),
             onMentionAck: () => this.sendDeliveryAck(msg, formatTraceparent(span.context)),
+            onRejectedNoProcess: () => this.sendDeliveryRejectedNoProcess(msg, formatTraceparent(span.context)),
           });
           Promise.resolve(acceptedOrPromise).then((accepted) => {
             span.addEvent("daemon.deliver_to_agent_manager", { accepted });
