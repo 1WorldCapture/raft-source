@@ -422,6 +422,21 @@ async function countDirs(p: string): Promise<number> {
  *  calls initializeAgentWorkspace for every agent the server starts), so a
  *  zero-agent home that gains its first workspace mid-migration is healthy.
  *  Only a PRE-EXISTING directory that disappears means data was lost. */
+/** Loss contract for the self-check (task #19): every agent directory that
+ *  existed BEFORE the move must still exist after it. `before` comes from
+ *  this run's own preflight — it is never persisted in the in-progress
+ *  marker, so a migration resumed by a DIFFERENT computer version simply
+ *  re-runs preflight. The undefined arm is defensive only: if a future data
+ *  flow ever loses the names, the check degrades to an explicit
+ *  "not verified" outcome (surfaced as a warning), never a silent pass. */
+export function missingAgentDirs(
+  before: string[] | undefined,
+  after: string[],
+): { missing: string[]; verified: boolean } {
+  if (!Array.isArray(before)) return { missing: [], verified: false };
+  return { missing: before.filter((name) => !after.includes(name)), verified: true };
+}
+
 async function listDirs(p: string): Promise<string[]> {
   try {
     const entries = await fs.readdir(p, { withFileTypes: true });
@@ -1536,10 +1551,10 @@ export async function migrateHome(
           await sleep(pollMs);
         }
         const afterAgentDirs = await listDirs(path.join(pre.to, "agents"));
-        const missing = pre.agentDirNames.filter((name) => !afterAgentDirs.includes(name));
-        if (missing.length > 0) {
+        const loss = missingAgentDirs(pre.agentDirNames, afterAgentDirs);
+        if (loss.missing.length > 0) {
           throw new Error(
-            `agent directories lost across the move (missing: ${missing.join(", ")})`,
+            `agent directories lost across the move (missing: ${loss.missing.join(", ")})`,
           );
         }
         const agentDirs = afterAgentDirs.length;
@@ -1583,7 +1598,7 @@ export async function migrateHome(
               : {}),
           };
         }
-        return { serviceRunning: true, serversOnline: true, serverCount: last.serverCount, agentDirs, runnerTrees: [...runnersByServer.values()].reduce((a, b) => a + b, 0), ...(restoreDetail ? { agentsRestored: restoreDetail } : {}) };
+        return { serviceRunning: true, serversOnline: true, serverCount: last.serverCount, agentDirs, agentDirsVerified: loss.verified, runnerTrees: [...runnersByServer.values()].reduce((a, b) => a + b, 0), ...(restoreDetail ? { agentsRestored: restoreDetail } : {}) };
       }))
     ) {
       return rollbackAndFinish();

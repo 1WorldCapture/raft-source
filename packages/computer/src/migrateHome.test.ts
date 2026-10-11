@@ -22,6 +22,7 @@ import {
   type MigrateEvent,
   type MigrateHomeDeps,
   type MigrateHomeStatus,
+  missingAgentDirs,
 } from "./migrateHome.js";
 import { writeDesiredState } from "./desiredState.js";
 
@@ -1443,6 +1444,16 @@ test("self-check: a zero-agent clean home succeeds even though start creates a n
   } finally {
     await rm(f.root, { recursive: true, force: true });
   }
+});
+
+test("missingAgentDirs: set semantics, and an absent before-set degrades to not-verified (PM review)", () => {
+  // Normal path: only real losses count.
+  assert.deepEqual(missingAgentDirs(["a", "b"], ["a", "b", "new"]), { missing: [], verified: true });
+  assert.deepEqual(missingAgentDirs(["a", "b"], ["b", "new"]), { missing: ["a"], verified: true });
+  // Defensive path: `before` is this run's preflight product and never comes
+  // from the persisted marker, but if a future data flow ever loses it the
+  // check must be visibly skipped, never silently pass.
+  assert.deepEqual(missingAgentDirs(undefined, ["a"]), { missing: [], verified: false });
 });
 
 test("self-check: a PRE-EXISTING agent directory disappearing still fails into rollback", async () => {
