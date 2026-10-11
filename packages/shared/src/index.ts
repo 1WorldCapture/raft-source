@@ -198,6 +198,7 @@ export * from "./unreadSummaryEvent.js";
 export * from "./channelPermissions.js";
 export * from "./raftPermalinks.js";
 export * from "./raftRefs.js";
+export * from "./liveExecutablePath.js";
 export * from "./thirdPartyInertRenderer.js";
 export * from "./producerFactLineage.js";
 export * from "./apmHeldFreshness.js";

@@ -3,10 +3,10 @@
 import assert from "node:assert/strict";
 import { afterAll, beforeAll, test } from "vitest";
 import { spawnSync } from "node:child_process";
-import { readFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { readFileSync, existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { deriveCliFallbackCandidates, deriveOpencliFallbackCandidates, prepareCliTransport, regenerateExistingOpencliWrappers, SLOCK_AGENT_LAUNCH_DIR_ENV, upgradeExistingAgentWrappers, writeOpencliWrapper } from "./cliTransport.js";
+import { deriveCliFallbackCandidates, deriveOpencliFallbackCandidates, prepareCliTransport, regenerateExistingOpencliWrappers, SLOCK_AGENT_LAUNCH_DIR_ENV, setProcSelfExeReaderForTests, upgradeExistingAgentWrappers, writeOpencliWrapper } from "./cliTransport.js";
 import { applyLoopbackNoProxyEnv } from "../loopbackNoProxy.js";
 import type { SpawnContext } from "./types.js";
 
@@ -1739,6 +1739,42 @@ test("prepareCliTransport treats an unidentified host explicitly, not as Electro
     const wrapper = readFileSync(path.join(result.slockDir, "slock"), "utf8");
     assert.doesNotMatch(wrapper, /ELECTRON_RUN_AS_NODE/, "an unidentified host must not be guessed into Electron mode");
   } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("a wrapper written while running from K's experiment slot still runs after promotion renames it to stable", { skip: process.platform === "win32" }, async () => {
+  // K starts an upgrade from slots/experiment and promotes it by renaming the
+  // directory to slots/stable under the running process (upstream IT-armbian
+  // 2026-09-27: every new session's `raft` exec'd the vanished experiment
+  // path, exit 127). Run the real wrapper across the rename.
+  const tmp = mkdtempSync(path.join(os.tmpdir(), "slock-cli-k-promote-"));
+  const originalExecPath = process.execPath;
+  try {
+    const experimentDir = path.join(tmp, "k", "slots", "experiment");
+    mkdirSync(experimentDir, { recursive: true });
+    const artifact = path.join(experimentDir, "artifact.bin");
+    writeFileSync(artifact, "#!/bin/sh\necho \"HOST:$0 ARGS:$*\"\n", { mode: 0o755 });
+    process.execPath = artifact;
+    // The fake artifact is not the running binary, so /proc/self/exe (node)
+    // must not be consulted here.
+    setProcSelfExeReaderForTests(() => null);
+    const ctx = makeCtx(path.join(tmp, "work"));
+    ctx.slockCliPath = "__cli";
+    const result = await prepareCliTransport(ctx, {}, "linux", false, () => true);
+    const wrapper = path.join(result.slockDir, "raft");
+
+    const before = runWrapper(wrapper, {});
+    assert.equal(before.status, 0, before.stderr);
+    assert.match(before.stdout, new RegExp(`HOST:${artifact} ARGS:__cli message check`));
+
+    renameSync(experimentDir, path.join(tmp, "k", "slots", "stable"));
+    const after = runWrapper(wrapper, {});
+    assert.equal(after.status, 0, `wrapper must follow the promoted slot: ${after.stderr}`);
+    assert.match(after.stdout, new RegExp(`HOST:${path.join(tmp, "k", "slots", "stable", "artifact.bin")} ARGS:__cli message check`));
+  } finally {
+    setProcSelfExeReaderForTests(null);
+    process.execPath = originalExecPath;
     rmSync(tmp, { recursive: true, force: true });
   }
 });
