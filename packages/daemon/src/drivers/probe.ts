@@ -343,7 +343,12 @@ export function guardChildStdin(proc: import("node:child_process").ChildProcess)
   // Test doubles may hand us a bare writable without the EventEmitter API.
   if (!stdin || typeof stdin.on !== "function" || guardedStdins.has(stdin)) return;
   guardedStdins.add(stdin);
-  (stdin as { on: (event: string, listener: () => void) => void }).on("error", () => {
-    // Stdin closed (child exited mid-write); lifecycle paths own the outcome.
+  (stdin as { on: (event: string, listener: (err: Error) => void) => void }).on("error", (err) => {
+    // A write to an exited child is expected (EPIPE / destroyed stream):
+    // lifecycle paths own the outcome. Anything else on stdin is unusual
+    // enough to keep visible.
+    const code = (err as { code?: unknown }).code;
+    if (code === "EPIPE" || code === "ERR_STREAM_DESTROYED") return;
+    logger.warn(`[guardChildStdin] unexpected child stdin error: ${err?.message ?? String(err)}`);
   });
 }

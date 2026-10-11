@@ -12,18 +12,22 @@ import { guardChildStdin } from "./probe.js";
  * plus the pre-existing omp and piCommandTool guards).
  */
 
+function fakeProc() {
+  return { stdin: new EventEmitter() };
+}
+
 test("a guarded child stdin can emit EPIPE without an unhandled error", () => {
-  const proc = { stdin: new EventEmitter() } as never;
-  guardChildStdin(proc);
+  const proc = fakeProc();
+  guardChildStdin(proc as never);
   assert.doesNotThrow(() => {
     proc.stdin.emit("error", Object.assign(new Error("write EPIPE"), { code: "EPIPE" }));
   });
 });
 
 test("guardChildStdin is idempotent per process", () => {
-  const proc = { stdin: new EventEmitter() } as never;
-  guardChildStdin(proc);
-  guardChildStdin(proc);
+  const proc = fakeProc();
+  guardChildStdin(proc as never);
+  guardChildStdin(proc as never);
   assert.equal(proc.stdin.listenerCount("error"), 1, "one listener is enough; repeats must not stack");
 });
 
