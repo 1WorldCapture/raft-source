@@ -64,8 +64,15 @@ const CLI_AGENT_ENDPOINT_USES: readonly CliEndpointUse[] = [
   { command: "integration login/manage", method: "POST", endpoint: "/integrations/login|app/*", capability: "read" },
   // events / inbox
   { command: "inbox drain / events", method: "GET", endpoint: "/events* (+ /events/ack)", capability: "read" },
-  // profile READ (own profile write is `server` — see OUTSIDE list)
+  // profile: show under read; own-profile WRITE re-filed under send by the
+  // upstream 1.21.2 port (task #8 review) — upstream files an agent editing
+  // its own profile/avatar under `send`.
   { command: "profile show", method: "GET", endpoint: "/profile", capability: "read" },
+  { command: "profile update", method: "POST", endpoint: "/profile (+ /profile/avatar)", capability: "send" },
+  // agent startup discovery: GET /server lists channels/agents/humans visible
+  // to the bound agent; upstream 1.21.2 files it under `read` (was `server`
+  // in our v1.13 fork). Server ADMINISTRATION stays `server` (OUTSIDE list).
+  { command: "server info", method: "GET", endpoint: "/server", capability: "read" },
   // migration status polling (initiating a migration is `server` — OUTSIDE)
   { command: "migrate status", method: "GET", endpoint: "/migrations/current", capability: "read" },
   // misc
@@ -84,14 +91,10 @@ const CLI_AGENT_ENDPOINT_USES: readonly CliEndpointUse[] = [
  * default for the common case.
  */
 const DELIBERATELY_OUTSIDE: readonly CliEndpointUse[] = [
-  { command: "server info", method: "GET", endpoint: "/server", capability: "server",
-    reason: "server administration surface; admin agents need an explicitly-scoped credential" },
   { command: "server update", method: "PATCH", endpoint: "/server (+ /server/avatar)", capability: "server",
-    reason: "server administration surface" },
-  { command: "profile update", method: "POST", endpoint: "/profile (+ /profile/avatar)", capability: "server",
-    reason: "the upstream contract places own-profile WRITES under the server capability" },
+    reason: "server administration stays `server` in the upstream contract too" },
   { command: "agent migrate", method: "POST", endpoint: "/migrations", capability: "server",
-    reason: "cross-computer agent migration is an operator action" },
+    reason: "cross-computer agent migration is an operator action (upstream has no such agent route)" },
   { command: "mcp tools/call", method: "*", endpoint: "/mcp/*", capability: "mcp",
     reason: "managed MCP calls spend server-held provider credentials" },
 ];
@@ -109,7 +112,7 @@ test("every CLI agent endpoint use is covered by the least-privilege scopes", ()
 });
 
 test("the out-of-scope commands are a conscious, documented list", () => {
-  assert.equal(DELIBERATELY_OUTSIDE.length, 5);
+  assert.equal(DELIBERATELY_OUTSIDE.length, 3);
   for (const use of DELIBERATELY_OUTSIDE) {
     assert.ok(
       use.reason,

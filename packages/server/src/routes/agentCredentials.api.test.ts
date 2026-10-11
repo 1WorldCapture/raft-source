@@ -177,11 +177,24 @@ test("mint without scopes now issues the least-privilege default (no server/mcp)
         "default must be the least-privilege set without server/mcp");
       assert.ok(!defaultBody.scopes.includes("server") && !defaultBody.scopes.includes("mcp"));
 
-      // The least-privilege credential works for the ordinary agent surface.
+      // The least-privilege credential works for the ordinary agent surface,
+      // including startup discovery and own-profile writes — upstream 1.21.2
+      // files GET /server under `read` and POST /profile under `send`
+      // (task #8 review); our v1.13 fork had both under `server`.
       const whoami = await fetch(`${app.baseUrl}/internal/agent-api/`, {
         headers: { Authorization: `Bearer ${defaultBody.apiKey}` },
       });
       assert.equal(whoami.status, 200);
+      const serverInfo = await fetch(`${app.baseUrl}/internal/agent-api/server`, {
+        headers: { Authorization: `Bearer ${defaultBody.apiKey}` },
+      });
+      assert.equal(serverInfo.status, 200, "agent startup discovery (GET /server) must work with the least-privilege set");
+      const profileUpdate = await fetch(`${app.baseUrl}/internal/agent-api/profile`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${defaultBody.apiKey}` },
+        body: JSON.stringify({ description: "least-privilege self-description" }),
+      });
+      assert.equal(profileUpdate.status, 200, "own-profile write (POST /profile) must work with the least-privilege set");
 
       // An explicit full-scope request is still honored (runner/migration flows).
       const explicit = await fetch(`${app.baseUrl}/api/agents/${agent.id}/credentials`, {
