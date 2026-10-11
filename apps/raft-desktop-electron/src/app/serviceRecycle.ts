@@ -21,6 +21,8 @@ export interface RecycleDeps {
   /** True once no live service remains (poll after stop resolves). */
   isCleared(): Promise<boolean>;
   delay(ms: number): Promise<void>;
+  /** True when the new service is up and answering. Used to turn a start() "timeout" into success. */
+  isRunning?(): Promise<boolean>;
   /** Abort pending waits; called when the overall budget is exhausted. */
   onTimeout?(): void;
   settle(state: ConvergeState): void;
@@ -31,12 +33,30 @@ export interface RecycleOptions {
   clearPollMs?: number;
   /** Total budget for confirming the service is gone after stop() resolves. */
   clearTimeoutMs?: number;
+  /** After start() throws, how long to keep checking whether the service came up anyway. */
+  startRecoveryMs?: number;
 }
 
 export const DEFAULT_CLEAR_POLL_MS = 250;
 export const DEFAULT_CLEAR_TIMEOUT_MS = 15_000;
+// `start` gives up waiting for readiness after a fixed time, but "old service stopped + new one up + reconnected to
+// every server" can take longer; the service then comes up right after the failure was reported (0.2.0 upgrade retest).
+export const DEFAULT_START_RECOVERY_MS = 30_000;
 
 class RecycleTimeoutError extends Error {}
+
+async function waitUntilRunning(deps: RecycleDeps, budgetMs: number, pollMs: number): Promise<boolean> {
+  const deadline = Date.now() + budgetMs;
+  for (;;) {
+    try {
+      if (await deps.isRunning!()) return true;
+    } catch {
+      // not readable yet: keep waiting
+    }
+    if (Date.now() >= deadline) return false;
+    await deps.delay(Math.max(pollMs, 1_000));
+  }
+}
 
 /**
  * Run stop → wait-for-clear → start. Throws only {code, message} reduced
@@ -69,6 +89,10 @@ export async function runServiceRecycle(deps: RecycleDeps, options: RecycleOptio
   try {
     await deps.start();
   } catch (error) {
+    if (deps.isRunning && (await waitUntilRunning(deps, options.startRecoveryMs ?? DEFAULT_START_RECOVERY_MS, pollMs))) {
+      deps.settle({ ok: true });
+      return;
+    }
     const failure = reduceConvergeFailure("Stopped the old service, but starting the new one failed: ", error);
     // The machine is STOPPED now — the renderer must offer start-only retry.
     deps.settle({ ok: false, code: RECYCLE_START_FAILED, message: `${failure.message} (Retry starts the service — no second stop.)` });

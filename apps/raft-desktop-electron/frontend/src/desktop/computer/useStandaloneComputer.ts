@@ -51,6 +51,14 @@ export function useStandaloneComputer(): {
     return () => { alive.current = false; off(); };
   }, []);
 
+  // Same rule as the embedded card: a failed Start/Replace message is stale once the Computer is running again.
+  const wasRunning = useRef<boolean | null>(null);
+  useEffect(() => {
+    const running = state ? state.phase === "running" : null;
+    if (running === true && wasRunning.current === false) setError(null);
+    if (running !== null) wasRunning.current = running;
+  }, [state]);
+
   const run = useCallback(async (action: StandaloneActionId) => {
     const b = bridge();
     if (!b) return;
