@@ -1,5 +1,20 @@
-import { existsSync } from "node:fs";
-import { executableFileIdentity, resolveLiveExecutablePath } from "@botiverse/raft-shared";
+import { existsSync, statSync } from "node:fs";
+import { resolveLiveExecutablePath } from "@botiverse/raft-shared";
+
+/**
+ * `dev:ino` of a file, or null when the platform cannot report one. Lives
+ * here (node side) rather than in shared: shared is consumed as source by
+ * the browser web package and must stay free of node:fs imports (same shape
+ * as the daemon's drivers/cliTransport copy — upstream keeps one per package).
+ */
+export function executableFileIdentity(path: string, statOf: (p: string) => { dev: number; ino: number } = statSync): string | null {
+  try {
+    const stat = statOf(path);
+    return stat.ino > 0 ? `${stat.dev}:${stat.ino}` : null;
+  } catch {
+    return null;
+  }
+}
 
 // Captured at module load, i.e. before any later K promotion or staging can
 // rename or replace the file behind process.execPath.

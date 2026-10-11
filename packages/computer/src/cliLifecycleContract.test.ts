@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { test } from "vitest";
 
 import { program, runRestartCommand, type RestartCommandDeps } from "./cli.js";
+import { callerIsRunnerHosted, setParentPidReaderForTests } from "./restartReadiness.js";
 
 test("CLI lifecycle contract: ordinary command surface excludes destructive and reversal-only verbs", () => {
   const commands = program.commands.map((cmd) => cmd.name());
@@ -37,7 +38,7 @@ test("CLI lifecycle contract: detach implementation is absent from ordinary pack
   assert.doesNotMatch(indexSrc, /\.command\("detach"\)/);
 });
 
-test("CLI restart records one restart operation and does not kill a live service from the caller", async () => {
+test("CLI restart command delegates to runRestartCommand; the agent-hosted path records one restart operation", async () => {
   const src = await readFile(new URL("./cli.ts", import.meta.url), "utf8");
   const restartStart = src.indexOf('.command("restart")');
   const restartEnd = src.indexOf("// --- status", restartStart);
@@ -49,7 +50,116 @@ test("CLI restart records one restart operation and does not kill a live service
   assert.doesNotMatch(restartBlock, /\brunStop\(/);
 });
 
-test("CLI restart live-service path requests IPC handoff and never starts from the caller", async () => {
+const LIVE_SERVICE = {
+  pid: 4242,
+  pidfilePath: "/tmp/raft-home/computer/run/service.pid",
+  firstStalePidfile: null,
+  firstStalePid: null,
+};
+
+// Upstream task #1202: a user whose service could not resolve DNS after a new
+// macOS login session recovered only with `stop` then `start` from the new
+// session; `restart`, which had the old service launch its own replacement,
+// did not help. From a person's terminal, restart is now exactly that stop
+// then start.
+test("CLI restart from a person's terminal with a live service stops then starts from the caller", async () => {
+  const calls: string[] = [];
+  const signal = new AbortController().signal;
+  const deps = {
+    resolveRaftHome: () => "/tmp/raft-home",
+    listAttachedServerIds: async () => {
+      calls.push("list");
+      return ["server-a", "server-b"];
+    },
+    prepareLocalLifecycleOperations: async () => {
+      throw new Error("stop and start record their own lifecycle steps");
+    },
+    findLiveServicePidReadOnly: async () => {
+      calls.push("find");
+      return LIVE_SERVICE;
+    },
+    callerIsRunnerHosted: () => false,
+    runStop: async (stopDeps) => {
+      assert.equal(stopDeps?.signal, signal);
+      calls.push(`stop:${stopDeps?.hostLifecycleOwner}`);
+    },
+    runStart: async (opts, runtimeDeps) => {
+      assert.ok(opts);
+      assert.equal(runtimeDeps?.signal, signal);
+      calls.push(`start:${opts.serverId}:${opts.serverLabel}:${opts.foreground}:${opts.recordLifecycleIntent}:${opts.hostLifecycleOwner}`);
+    },
+    prepareTargetsForServiceHandoff: async () => {
+      throw new Error("a terminal restart must not hand off inside the old service");
+    },
+    requestServiceRestartViaIpc: async () => {
+      throw new Error("a terminal restart must not ask the old service to launch its replacement");
+    },
+    info: (line: string) => {
+      calls.push(`info:${line}`);
+    },
+    fail: (code: string, message: string): never => {
+      throw new Error(`fail:${code}:${message}`);
+    },
+  } satisfies RestartCommandDeps;
+
+  await runRestartCommand(undefined, {}, signal, deps);
+
+  assert.deepEqual(calls, [
+    "list",
+    "find",
+    "info:Restarting from this terminal: stopping the service (pid 4242), then starting it again.",
+    "stop:cli",
+    "start:null:null:undefined:undefined:cli",
+  ]);
+});
+
+test("CLI restart from a terminal starts nothing when the stop does not finish", async () => {
+  let started = false;
+  const deps = {
+    resolveRaftHome: () => "/tmp/raft-home",
+    listAttachedServerIds: async () => ["server-a"],
+    findLiveServicePidReadOnly: async () => LIVE_SERVICE,
+    callerIsRunnerHosted: () => false,
+    runStop: async () => {
+      throw new Error("STOP_TIMEOUT: service did not exit");
+    },
+    runStart: async () => {
+      started = true;
+    },
+    info: () => {},
+  } satisfies RestartCommandDeps;
+
+  await assert.rejects(
+    runRestartCommand(undefined, {}, new AbortController().signal, deps),
+    /STOP_TIMEOUT/,
+  );
+  assert.equal(started, false, "a failed stop must never be followed by a second service");
+});
+
+test("CLI restart --foreground from a terminal stops then starts in the foreground, on every platform", async () => {
+  const calls: string[] = [];
+  const deps = {
+    resolveRaftHome: () => "/tmp/raft-home",
+    listAttachedServerIds: async () => ["server-a"],
+    findLiveServicePidReadOnly: async () => LIVE_SERVICE,
+    callerIsRunnerHosted: () => false,
+    runStop: async () => {
+      calls.push("stop");
+    },
+    runStart: async (opts) => {
+      calls.push(`start:${opts?.foreground}`);
+    },
+    info: () => {},
+    fail: (code: string, message: string): never => {
+      throw new Error(`${code}:${message}`);
+    },
+  } satisfies RestartCommandDeps;
+
+  await runRestartCommand(undefined, { foreground: true }, new AbortController().signal, deps);
+  assert.deepEqual(calls, ["stop", "start:true"]);
+});
+
+test("CLI restart from inside an agent process requests the IPC handoff and never stops or starts from the caller", async () => {
   const calls: string[] = [];
   const signal = new AbortController().signal;
   const deps = {
@@ -68,12 +178,7 @@ test("CLI restart live-service path requests IPC handoff and never starts from t
     },
     findLiveServicePidReadOnly: async (slockHome: string) => {
       calls.push(`find:${slockHome}`);
-      return {
-        pid: 4242,
-        pidfilePath: "/tmp/raft-home/computer/run/service.pid",
-        firstStalePidfile: null,
-        firstStalePid: null,
-      };
+      return LIVE_SERVICE;
     },
     prepareTargetsForServiceHandoff: async (
       slockHome: string,
@@ -87,9 +192,13 @@ test("CLI restart live-service path requests IPC handoff and never starts from t
       calls.push(`ipc:${slockHome}`);
       return { status: "accepted" as const };
     },
+    runStop: async () => {
+      calls.push("forbidden-stop");
+    },
     runStart: async () => {
       calls.push("forbidden-start");
     },
+    callerIsRunnerHosted: () => true,
     info: (line: string) => {
       calls.push(`info:${line}`);
     },
@@ -102,12 +211,88 @@ test("CLI restart live-service path requests IPC handoff and never starts from t
 
   assert.deepEqual(calls, [
     "list:/tmp/raft-home",
-    "intent:/tmp/raft-home:restart:server-a,server-b",
     "find:/tmp/raft-home",
+    "intent:/tmp/raft-home:restart:server-a,server-b",
     "prepare:/tmp/raft-home:server-a,server-b",
     "ipc:/tmp/raft-home",
     "info:Service restart requested (pid 4242); replacement service will take over without relying on this shell.",
+    "info:Running inside an agent process: not waiting for runners to reconnect. Check with `raft-computer status`.",
   ]);
+});
+
+test("CLI restart from a service descendant WITHOUT the agent marker (in-process SDK lane) takes the IPC handoff", async () => {
+  const calls: string[] = [];
+  const signal = new AbortController().signal;
+  const deps = {
+    resolveRaftHome: () => "/tmp/raft-home",
+    listAttachedServerIds: async () => ["server-a"],
+    prepareLocalLifecycleOperations: async () => [],
+    findLiveServicePidReadOnly: async () => LIVE_SERVICE,
+    // The REAL classifier, anchored to a fake self pid whose parent IS the
+    // service — the pi/kimi-sdk bash-tool lane: daemon env (no agent marker),
+    // but the CLI still runs as a service descendant.
+    callerIsRunnerHosted: (env: NodeJS.ProcessEnv | undefined, probe?: { servicePid?: number | null; selfPid?: number }) =>
+      callerIsRunnerHosted(env ?? {}, { ...probe, selfPid: 4243 }),
+    runStop: async () => {
+      calls.push("forbidden-stop");
+    },
+    runStart: async () => {
+      calls.push("forbidden-start");
+    },
+    prepareTargetsForServiceHandoff: async () => {
+      calls.push("prepare");
+    },
+    requestServiceRestartViaIpc: async () => {
+      calls.push("ipc");
+      return { status: "accepted" as const };
+    },
+    info: (line: string) => {
+      calls.push(`info:${line}`);
+    },
+    fail: (code: string, message: string): never => {
+      throw new Error(`fail:${code}:${message}`);
+    },
+  } satisfies RestartCommandDeps;
+
+  setParentPidReaderForTests((pid) => (pid === 4243 ? 4242 : null));
+  try {
+    await runRestartCommand(undefined, {}, signal, deps);
+  } finally {
+    setParentPidReaderForTests(null);
+  }
+
+  assert.ok(calls.includes("ipc"), "a service descendant must get the IPC handoff");
+  assert.ok(!calls.includes("forbidden-stop"), "the service is never stopped from a descendant caller");
+  assert.ok(!calls.includes("forbidden-start"));
+});
+
+test("CLI restart from a terminal prints a clear stopped-machine message when the start half fails", async () => {
+  const infos: string[] = [];
+  const deps = {
+    resolveRaftHome: () => "/tmp/raft-home",
+    listAttachedServerIds: async () => ["server-a"],
+    findLiveServicePidReadOnly: async () => LIVE_SERVICE,
+    callerIsRunnerHosted: () => false,
+    runStop: async () => {},
+    runStart: async () => {
+      throw new Error("DNS resolution failed");
+    },
+    info: (line: string) => {
+      infos.push(line);
+    },
+    fail: (code: string, message: string): never => {
+      throw new Error(`${code}:${message}`);
+    },
+  } satisfies RestartCommandDeps;
+
+  await assert.rejects(
+    runRestartCommand(undefined, {}, new AbortController().signal, deps),
+    /DNS resolution failed/,
+  );
+  assert.ok(
+    infos.some((line) => line.includes("STOPPED") && line.includes("raft-computer start")),
+    `the failure must tell the user the machine is down and how to recover: ${JSON.stringify(infos)}`,
+  );
 });
 
 test("CLI restart cold-boot path remains start-only and preserves scoped target", async () => {
@@ -133,12 +318,11 @@ test("CLI restart cold-boot path remains start-only and preserves scoped target"
     },
     findLiveServicePidReadOnly: async (slockHome: string) => {
       calls.push(`find:${slockHome}`);
-      return {
-        pid: null,
-        pidfilePath: "/tmp/raft-home/computer/run/service.pid",
-        firstStalePidfile: null,
-        firstStalePid: null,
-      };
+      return { ...LIVE_SERVICE, pid: null };
+    },
+    callerIsRunnerHosted: () => false,
+    runStop: async () => {
+      throw new Error("nothing to stop when no service is live");
     },
     runStart: async (opts, runtimeDeps) => {
       assert.ok(opts);
@@ -159,24 +343,26 @@ test("CLI restart cold-boot path remains start-only and preserves scoped target"
 
   assert.deepEqual(calls, [
     "resolve:/alpha",
-    "intent:/tmp/raft-home:restart:server-a",
     "find:/tmp/raft-home",
+    "intent:/tmp/raft-home:restart:server-a",
     "start:server-a:/alpha:true:false:cli",
   ]);
 });
 
-test("CLI restart live-service path fails loud when IPC handoff is unavailable", async () => {
+test("CLI restart agent-hosted path fails loud when IPC handoff is unavailable", async () => {
   const signal = new AbortController().signal;
   const deps = {
     resolveRaftHome: () => "/tmp/raft-home",
     listAttachedServerIds: async () => ["server-a"],
     prepareLocalLifecycleOperations: async () => [],
-    findLiveServicePidReadOnly: async () => ({
-      pid: 4242,
-      pidfilePath: "/tmp/raft-home/computer/run/service.pid",
-      firstStalePidfile: null,
-      firstStalePid: null,
-    }),
+    findLiveServicePidReadOnly: async () => LIVE_SERVICE,
+    callerIsRunnerHosted: () => true,
+    runStop: async () => {
+      throw new Error("forbidden-stop");
+    },
+    runStart: async () => {
+      throw new Error("forbidden-start");
+    },
     prepareTargetsForServiceHandoff: async () => undefined,
     requestServiceRestartViaIpc: async () => {
       throw new Error("socket unavailable");

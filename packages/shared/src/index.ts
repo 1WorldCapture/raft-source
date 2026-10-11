@@ -605,7 +605,7 @@ export type ServerToMachineMessage =
   | { type: "agent:activity_probe"; agentId: string; probeId: string; purpose: "sweep" | "manual" }
   | { type: "machine:workspace:scan" }
   | { type: "machine:workspace:delete"; directoryName: string }
-  | { type: "machine:runtime_models:detect"; requestId: string; runtime: string }
+  | { type: "machine:runtime_models:detect"; requestId: string; runtime: string; refresh?: boolean }
   /**
    * Ask the owning Computer to start a Cursor SDK owner sign-in for the web
    * login button. The daemon answers with `machine:cursor_sdk:login_result`

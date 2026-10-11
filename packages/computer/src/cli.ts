@@ -87,6 +87,7 @@ import { findLiveServicePidReadOnly } from "./internal/service-pid-fallback.js";
 import { isDegraded } from "./health.js";
 import { resetRunner } from "./reset.js";
 import { requestServiceRestartViaIpc } from "./serviceControl.js";
+import { callerIsRunnerHosted } from "./restartReadiness.js";
 import { readKUpgradeCoordinatorRequest } from "./kUpgradeProcess.js";
 import { runKUpgradeCoordinator } from "./kUpgradeCoordinator.js";
 import { requestKTargetConsent } from "./kConsent.js";
@@ -177,8 +178,10 @@ export interface RestartCommandDeps {
   prepareLocalLifecycleOperations?: typeof prepareLocalLifecycleOperations;
   findLiveServicePidReadOnly?: typeof findLiveServicePidReadOnly;
   runStart?: typeof runStart;
+  runStop?: typeof runStop;
   prepareTargetsForServiceHandoff?: typeof prepareRestartTargetsForServiceHandoff;
   requestServiceRestartViaIpc?: typeof requestServiceRestartViaIpc;
+  callerIsRunnerHosted?: typeof callerIsRunnerHosted;
   info?: typeof info;
   fail?: typeof fail;
 }
@@ -190,8 +193,10 @@ interface RestartCommandRuntime {
   prepareLifecycle: typeof prepareLocalLifecycleOperations;
   findLiveService: typeof findLiveServicePidReadOnly;
   start: typeof runStart;
+  stop: typeof runStop;
   prepareTargets: typeof prepareRestartTargetsForServiceHandoff;
   requestRestart: typeof requestServiceRestartViaIpc;
+  callerRunnerHosted: typeof callerIsRunnerHosted;
   emitInfo: typeof info;
   emitFail: typeof fail;
 }
@@ -211,8 +216,10 @@ function resolveRestartRuntime(deps: RestartCommandDeps): RestartCommandRuntime 
     prepareLifecycle: deps.prepareLocalLifecycleOperations ?? prepareLocalLifecycleOperations,
     findLiveService: deps.findLiveServicePidReadOnly ?? findLiveServicePidReadOnly,
     start: deps.runStart ?? runStart,
+    stop: deps.runStop ?? runStop,
     prepareTargets: deps.prepareTargetsForServiceHandoff ?? prepareRestartTargetsForServiceHandoff,
     requestRestart: deps.requestServiceRestartViaIpc ?? requestServiceRestartViaIpc,
+    callerRunnerHosted: deps.callerIsRunnerHosted ?? callerIsRunnerHosted,
     emitInfo: deps.info ?? info,
     emitFail: deps.fail ?? fail,
   };
@@ -280,6 +287,53 @@ async function requestLiveServiceRestart(
   runtime.emitInfo(
     `Service restart requested (pid ${liveServicePid}); replacement service will take over without relying on this shell.`,
   );
+
+  // Only an agent-hosted caller reaches this handoff (see runRestartCommand).
+  // Restarting tears down the caller's own runner, so the shell may not
+  // survive long enough to observe reconnects.
+  runtime.emitInfo("Running inside an agent process: not waiting for runners to reconnect. Check with `raft-computer status`.");
+}
+
+/**
+ * A restart asked for from a person's own terminal is a stop followed by a
+ * start from that terminal, exactly what `raft-computer stop` then
+ * `raft-computer start` would do. The live-service IPC handoff instead has the
+ * old service launch its own replacement, so the replacement inherits whatever
+ * launch context the old service had; a user report (upstream task #1202)
+ * could only recover with a stop and a start from the new login session. Each
+ * half records its own lifecycle step, as the two commands do. A stop that
+ * cannot finish (the old service does not exit) fails loudly before anything
+ * is started, so the machine is never left with two services.
+ */
+async function runCallerStopThenStart(
+  plan: RestartTargetPlan,
+  liveServicePid: number,
+  opts: { foreground?: boolean },
+  signal: AbortSignal,
+  runtime: Pick<RestartCommandRuntime, "stop" | "start" | "emitInfo">,
+): Promise<void> {
+  runtime.emitInfo(
+    `Restarting from this terminal: stopping the service (pid ${liveServicePid}), then starting it again.`,
+  );
+  await runtime.stop({ signal, hostLifecycleOwner: "cli" });
+  signal.throwIfAborted();
+  try {
+    await runtime.start(
+      {
+        foreground: opts.foreground,
+        serverId: plan.serverId,
+        serverLabel: plan.serverLabel,
+        hostLifecycleOwner: "cli",
+      },
+      { signal },
+    );
+  } catch (err) {
+    // The stop already succeeded, so a failed start leaves the machine DOWN.
+    // Say so explicitly — the raw error alone reads like nothing happened.
+    const detail = err instanceof Error ? err.message : String(err);
+    runtime.emitInfo(`Start failed after the stop (${detail}). The service is STOPPED — run \`raft-computer start\` to bring it back up.`);
+    throw err;
+  }
 }
 
 export async function runRestartCommand(
@@ -290,11 +344,18 @@ export async function runRestartCommand(
 ): Promise<void> {
   const runtime = resolveRestartRuntime(deps);
   const plan = await resolveRestartTargetPlan(serverSlug, runtime);
-  await recordRestartIntent(plan, runtime);
 
   const { pid } = await runtime.findLiveService(plan.slockHome);
   signal.throwIfAborted();
 
+  if (pid !== null && !runtime.callerRunnerHosted(process.env, { servicePid: pid })) {
+    await runCallerStopThenStart(plan, pid, opts, signal, runtime);
+    return;
+  }
+
+  // Inside an agent process the service must hand off to its own replacement:
+  // stopping it from here would stop the caller's runner with it.
+  await recordRestartIntent(plan, runtime);
   if (pid === null) {
     await runColdBootRestart(plan, opts, signal, runtime);
     return;

@@ -190,6 +190,12 @@ const RUNNER_CREDENTIAL_MINT_MAX_ATTEMPTS = 3;
 const RUNNER_CREDENTIAL_MINT_RETRY_DELAY_MS = 250;
 const MIGRATION_OBJECT_STORE_DOWNLOAD_RETRY_INITIAL_MS = 25;
 const MIGRATION_OBJECT_STORE_DOWNLOAD_RETRY_MAX_MS = 250;
+// Detection spawns each runtime's CLI (some take seconds), so a flapping
+// connection must not re-run it on every reconnect-driven re-request: a
+// completed detection (live or unsupported — not a transient error) is served
+// from cache for this long, concurrent requests for the same runtime join one
+// detection, and a request carrying `refresh` bypasses both.
+const RUNTIME_MODEL_DETECT_CACHE_TTL_MS = 5 * 60_000;
 
 function migrationStatePathSegment(value: string): string {
   return value.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 128) || "migration";
@@ -1565,6 +1571,9 @@ export class DaemonCore {
   private readonly coreStartPendingDeliveries = new Map<string, AgentDeliverMessage[]>();
   private readonly acceptedStartDispatches = new Map<string, AgentStartAckMessage>();
   private readonly acceptingStartDispatches = new Map<string, Promise<AgentStartAckMessage>>();
+  private readonly runtimeModelDetectCache = new Map<string, { atMs: number; outcome: RuntimeModelSourceOutcome }>();
+  private readonly runtimeModelDetectInFlight = new Map<string, Promise<RuntimeModelSourceOutcome>>();
+  private readonly lastReadyRuntimeVersions = new Map<string, string | null>();
   private readonly handledComputerControlOperationIds = new Set<string>();
   private readonly runtimeAccountUsageCollector: RuntimeAccountUsageCollector;
   private static readonly START_DISPATCH_RECEIPT_CACHE_SIZE = 1_024;
@@ -3712,6 +3721,54 @@ export class DaemonCore {
     }
   }
 
+  /**
+   * Drop cached model detections: one runtime (version change at ready) or
+   * the whole machine (credential surface / upgrade / explicit rescan — see
+   * the callers; a fresh detection is only a CLI spawn away, so clearing is
+   * cheap and always safe).
+   */
+  private clearRuntimeModelDetectCache(runtime?: string): void {
+    if (runtime) this.runtimeModelDetectCache.delete(runtime);
+    else this.runtimeModelDetectCache.clear();
+  }
+
+  /**
+   * Single-flight + short-cache wrapper around one runtime's model detection
+   * (B2 item 3, model-catalog re-pull storm). Detection spawns the runtime's
+   * CLI (some take seconds), so concurrent `machine:runtime_models:detect`
+   * requests for the same runtime join one detection, and a completed
+   * non-error outcome is served from a 5-minute cache so a flapping connection
+   * cannot re-spawn every runtime CLI on each reconnect. `refresh` bypasses
+   * both. The error outcome is never cached (usually transient), so a failed
+   * detection is retried on the next request.
+   */
+  private detectRuntimeModelJoined(
+    runtime: string,
+    refresh: boolean | undefined,
+    startDetection: () => Promise<RuntimeModelSourceOutcome>,
+  ): Promise<RuntimeModelSourceOutcome> {
+    const cached = refresh ? undefined : this.runtimeModelDetectCache.get(runtime);
+    if (cached && currentTimeMs() - cached.atMs < RUNTIME_MODEL_DETECT_CACHE_TTL_MS) {
+      return Promise.resolve(cached.outcome);
+    }
+    const existing = this.runtimeModelDetectInFlight.get(runtime);
+    if (existing) return existing;
+    const settled = startDetection()
+      .then((outcome) => {
+        if (outcome.kind !== "error") {
+          this.runtimeModelDetectCache.set(runtime, { atMs: currentTimeMs(), outcome });
+        }
+        return outcome;
+      })
+      .finally(() => {
+        if (this.runtimeModelDetectInFlight.get(runtime) === settled) {
+          this.runtimeModelDetectInFlight.delete(runtime);
+        }
+      });
+    this.runtimeModelDetectInFlight.set(runtime, settled);
+    return settled;
+  }
+
   private handleMessage(msg: ServerToMachineMessage) {
     const summary = summarizeIncomingMessage(msg);
     logger.info(`[Daemon] Received ${msg.type}${summary ? ` ${summary}` : ""}`);
@@ -4060,6 +4117,9 @@ export class DaemonCore {
       // as `machine:capabilities` — so re-emitting IS the answer, no bespoke
       // result message needed.
       case "machine:runtimes:rescan":
+        // The Server re-probes because the runtime surface changed (install,
+        // removal, credential grant): stale detections must not answer it.
+        this.clearRuntimeModelDetectCache();
         this.emitReadyIfConnected();
         break;
 
@@ -4096,6 +4156,9 @@ export class DaemonCore {
       case "machine:cursor_sdk:login": {
         // Owner-only upstream (server enforces machine ownership); the reply
         // carries only the validated login URL or a failure reason — the
+        // A Cursor login changes the credential surface behind the model list;
+        // drop cached detections so the next ask reflects it (task #4 item 3).
+        this.clearRuntimeModelDetectCache();
         // browser wait is observed via status polling, never held open here.
         const span = this.tracer.startSpan("daemon.cursor_sdk.login", {
           surface: "daemon",
@@ -4129,6 +4192,9 @@ export class DaemonCore {
       }
 
       case "machine:cursor_sdk:status": {
+        // Status transitions (bound -> logged out, key rotations) are part of
+        // the credential surface; drop cached detections (task #4 item 3).
+        this.clearRuntimeModelDetectCache();
         const span = this.tracer.startSpan("daemon.cursor_sdk.status", {
           surface: "daemon",
           kind: "internal",
@@ -4183,13 +4249,17 @@ export class DaemonCore {
             requestId: msg.requestId,
           },
         });
-        const detect: Promise<RuntimeModelSourceOutcome> = typeof driver?.detectModels === "function"
-          ? driver.detectModels({ tracer: this.tracer, span })
-          : Promise.resolve(
-              staticSource
-                ? { kind: "live", value: staticSource }
-                : { kind: "unsupported" },
-            );
+        const detect: Promise<RuntimeModelSourceOutcome> = this.detectRuntimeModelJoined(
+          msg.runtime,
+          msg.refresh,
+          () => typeof driver?.detectModels === "function"
+            ? driver.detectModels({ tracer: this.tracer, span })
+            : Promise.resolve(
+                staticSource
+                  ? { kind: "live", value: staticSource }
+                  : { kind: "unsupported" },
+              ),
+        );
         void detect.then((detectedOutcome) => {
           const resultMessage = buildRuntimeModelSourceResultMessage(
             msg.requestId,
@@ -4283,6 +4353,11 @@ export class DaemonCore {
         // launched by a Computer service (onComputerControl wired); a raw
         // daemon has no service to drive and ignores it.
         const action = msg.type === "computer:restart" ? "restart" : "upgrade";
+        if (action === "upgrade") {
+          // An upgrade swaps the binaries/runtimes themselves: every cached
+          // detection is potentially stale (task #4 item 3).
+          this.clearRuntimeModelDetectCache();
+        }
         const operationId = msg.operationId ?? msg.requestId;
         const requestId = msg.requestId ?? msg.operationId;
         const alreadyDurable = operationId
@@ -4370,6 +4445,15 @@ export class DaemonCore {
 
   private async emitReady(expectedLifecycleGeneration?: number): Promise<boolean> {
     const { ids: runtimes, versions: runtimeVersions, diagnostics: runtimeDiagnostics = {} } = this.runtimeDetector();
+    // A version change at ready means the runtime was reinstalled/upgraded:
+    // its cached model detection is stale (task #4 item 3).
+    for (const id of runtimes) {
+      const version = runtimeVersions[id] ?? null;
+      if (this.lastReadyRuntimeVersions.has(id) && this.lastReadyRuntimeVersions.get(id) !== version) {
+        this.clearRuntimeModelDetectCache(id);
+      }
+      this.lastReadyRuntimeVersions.set(id, version);
+    }
     const runtimeInfo = runtimes.map((id) => runtimeVersions[id] ? `${id} (${runtimeVersions[id]})` : id);
     logger.info(`[Daemon] Detected runtimes: ${runtimeInfo.join(", ") || "none"}`);
     for (const [runtime, diagnostic] of Object.entries(runtimeDiagnostics)) {

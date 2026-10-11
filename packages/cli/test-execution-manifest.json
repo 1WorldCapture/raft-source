@@ -3,8 +3,8 @@
   "package": "@botiverse/raft",
   "runner": "node --import tsx --test",
   "testFileGlob": "src/**/*.test.ts",
-  "fileCount": 105,
-  "total": 928,
+  "fileCount": 106,
+  "total": 931,
   "files": [
     {
       "file": "src/agentApiNoBypass.test.ts",
@@ -3237,6 +3237,21 @@
         },
         {
           "name": "a handler-thrown CliExit passes through without an INTERNAL_BUG rendering (task #60)"
+        }
+      ]
+    },
+    {
+      "file": "src/core/stdoutEpipe.test.ts",
+      "count": 3,
+      "cases": [
+        {
+          "name": "installStdoutEpipeGuard swallows EPIPE without throwing"
+        },
+        {
+          "name": "installStdoutEpipeGuard swallows follow-up writes to a destroyed stream"
+        },
+        {
+          "name": "installStdoutEpipeGuard keeps any other stdout error fatal"
         }
       ]
     },

@@ -8002,7 +8002,10 @@ export class AgentOrchestrator extends EventEmitter {
         this.pendingAgentDeliveryAcks.delete(key);
         const agent = await this.validateMachineAgentMessage(machineId, conn?.serverId ?? null, msg.agentId, msg.type);
         if (!agent) {
-          this.trackPendingAgentDeliveryAck(machineId, pending.msg, { scheduleTimeout: false });
+          // Restore with the NORMAL retry timer: parking it here would let a
+          // forged rejection silently remove a live delivery's retry (review
+          // follow-up on #344).
+          this.trackPendingAgentDeliveryAck(machineId, pending.msg);
           endWith("invalid_agent_restored");
           break;
         }
@@ -11165,7 +11168,7 @@ export class AgentOrchestrator extends EventEmitter {
     return { status: response.status, source: response.source };
   }
 
-  async detectMachineRuntimeModels(machineId: string, runtime: string): Promise<RuntimeModelSourceOutcome> {
+  async detectMachineRuntimeModels(machineId: string, runtime: string, opts: { refresh?: boolean } = {}): Promise<RuntimeModelSourceOutcome> {
     // Plain model discovery does not consume connection-generation authority.
     // Built-in admission continues to use the local, fenced WithAuthority path.
     if (!this.machineConnections.has(machineId)) {
@@ -11173,7 +11176,7 @@ export class AgentOrchestrator extends EventEmitter {
       const response = await this.getMachineResponseRelay().request({
         requestId, machineId, type: "machine:runtime_models:result",
       }, getRuntimeModelDetectionTimeoutMs(runtime), () => this.sendRequiredToMachine(machineId, {
-        type: "machine:runtime_models:detect", requestId, runtime,
+        type: "machine:runtime_models:detect", requestId, runtime, ...(opts.refresh ? { refresh: true } : {}),
       }), (event, attrs) => this.recordMachineResponseRelay(event, attrs));
       if (response.type !== "machine:runtime_models:result") throw new Error("Unexpected model response");
       return projectRuntimeModelSourceResult(response, runtime);
