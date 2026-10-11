@@ -78,6 +78,9 @@ import {
   type ServerId,
   type TaskStatus,
   failpoints,
+  THIRD_PARTY_EVENT_DELIVERED_REPORT_MAX_IDS,
+  THIRD_PARTY_EVENT_ID_PATTERN,
+  isThirdPartyEventId,
 } from "@botiverse/raft-shared";
 import * as agentService from "../services/agentService.js";
 import { resolveReadableAttachmentAuthorityContext } from "../services/attachmentAuthorityService.js";
@@ -262,7 +265,7 @@ async function syncReminderToComputer(
 const MAX_REACTION_LENGTH = 16;
 const ATTESTED_SEND_HELD_CONTEXT_LIMIT = 3;
 const DEFERRED_READ_ADVANCE_SCAN_LIMIT = 500;
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID_RE = THIRD_PARTY_EVENT_ID_PATTERN;
 const profileAvatarUpload = createAvatarUpload();
 const serverAvatarUpload = createAvatarUpload();
 const integrationLogoUpload = createAvatarUpload();
@@ -1773,6 +1776,57 @@ internalAgentApiRouter.patch("/server", requireAgentCapability("server"), async 
   } catch (err) {
     console.error("internal.agent-api.server.update error:", serializeErrorForLog(err));
     res.status(500).json({ error: "Failed to update server" });
+  }
+});
+
+/**
+ * POST /internal/agent-api/third-party-events/delivered — upstream task #175.
+ *
+ * A managed daemon answers `/events` from its Local Inbox and never forwards
+ * that request, so the `/events` ack below never runs for the third-party
+ * events it served. After writing such a response to the runtime, the daemon
+ * reports the served event ids here. Idempotent by id (only queued/delivering
+ * rows move to delivered) and scoped to the acting agent's own events.
+ */
+internalAgentApiRouter.post("/third-party-events/delivered", requireAgentCapability("read"), async (req, res) => {
+  try {
+    const actingAgentId = req.actingAgentId!;
+    const serverId = req.serverId!;
+    const rawIds: unknown = req.body?.eventIds;
+    if (
+      !Array.isArray(rawIds)
+      || rawIds.length === 0
+      || rawIds.length > THIRD_PARTY_EVENT_DELIVERED_REPORT_MAX_IDS
+      || !rawIds.every(isThirdPartyEventId)
+    ) {
+      res.status(400).json({
+        error: `eventIds must be a non-empty array of at most ${THIRD_PARTY_EVENT_DELIVERED_REPORT_MAX_IDS} event ids`,
+        code: "event_ids_invalid",
+      });
+      return;
+    }
+    const eventIds = [...new Set((rawIds as string[]).map((id) => id.toLowerCase()))];
+
+    const agent = await agentService.getAgent(actingAgentId);
+    if (!agent || agent.serverId !== serverId) {
+      res.status(401).json({ error: "Agent no longer exists" });
+      return;
+    }
+
+    const delivered = await oauthService.markThirdPartyAgentEventsDelivered(eventIds, { agentId: actingAgentId });
+    // The server buffer may still hold these seq-less entries (the daemon's
+    // delivery ack carries seq 0, which clears nothing); drop them so they are
+    // not served again by a later forwarded `/events`.
+    const agentOrchestrator = req.app.get("agentOrchestrator") as { acknowledgeDeliveredMessages?: (agentId: string, seqs: number[], messageIds: string[]) => { removedCount: number } } | undefined;
+    agentOrchestrator?.acknowledgeDeliveredMessages?.(actingAgentId, [], eventIds);
+    res.json({ ok: true, delivered });
+  } catch (err: any) {
+    sendJsonServerError(req, res, {
+      error: "Failed to record third-party event delivery",
+      code: "third_party_events_delivered_failed",
+      logPrefix: "[AgentAPI] Failed to record third-party event delivery",
+      err,
+    });
   }
 });
 

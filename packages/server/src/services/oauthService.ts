@@ -3654,12 +3654,15 @@ export async function markThirdPartyAgentEventDelivered(eventId: string) {
   await markThirdPartyAgentEventsDelivered([eventId]);
 }
 
-export async function markThirdPartyAgentEventsDelivered(eventIds: string[]) {
+export async function markThirdPartyAgentEventsDelivered(
+  eventIds: string[],
+  options: { agentId?: string } = {},
+): Promise<number> {
   const ids = [...new Set(eventIds.filter(Boolean))];
-  if (ids.length === 0) return;
+  if (ids.length === 0) return 0;
   const db = getDbForService();
   const now = new Date();
-  await db.update(thirdPartyAgentEvents)
+  const updated = await db.update(thirdPartyAgentEvents)
     .set({
       status: "delivered",
       deliveredAt: now,
@@ -3667,11 +3670,14 @@ export async function markThirdPartyAgentEventsDelivered(eventIds: string[]) {
     })
     .where(and(
       inArray(thirdPartyAgentEvents.id, ids),
+      options.agentId ? eq(thirdPartyAgentEvents.agentId, options.agentId) : undefined,
       or(
         eq(thirdPartyAgentEvents.status, "queued"),
         eq(thirdPartyAgentEvents.status, "delivering"),
       ),
-    ));
+    ))
+    .returning({ id: thirdPartyAgentEvents.id });
+  return updated.length;
 }
 
 export async function rebuildPendingThirdPartyAgentEventMessages(input: {

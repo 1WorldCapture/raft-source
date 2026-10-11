@@ -23,7 +23,7 @@ import { mintAgentCredential } from "../services/agentCredentialService.js";
 import { __setAppMemberRefKeyForTests } from "../services/appOutboundProjectionService.js";
 import { AgentOrchestrator } from "../services/agentOrchestrator.js";
 import { encodePixelAvatarKey, renderPixelAvatarSvg } from "../services/pixelAvatarService.js";
-import { BasicTracer, extractRaftRefTargets, MemoryTraceSink, type AgentMessage } from "@botiverse/raft-shared";
+import { BasicTracer, extractRaftRefTargets, isThirdPartyEventId, MemoryTraceSink, type AgentMessage } from "@botiverse/raft-shared";
 
 const test = createApiTest({ humanActivityMuteFlagDefaultEnabled: true, onboardingOpenerFlagDefaultEnabled: false });
 
@@ -2403,4 +2403,89 @@ test("third-party agent event endpoint rejects unbound identity token", async ({
   });
   const stored = await getDb().select().from(oauthAccessTokens);
   assert.equal(stored.length, 1);
+});
+
+test("managed daemon report of locally served third-party events marks them delivered and ends the /events replay", async ({ app }) => {
+  app.app.set("agentOrchestrator", new AgentOrchestrator() as any);
+  const suffix = randomUUID();
+  const { agent, accessToken } = await createAgentEventAccessToken(app, { suffix });
+  const minted = await mintAgentCredential({
+    agentId: agent.id,
+    scopes: ["read"],
+    name: "managed-third-party-event-report-test",
+    createdByUserId: null,
+  });
+  const other = await createAgentEventAccessToken(app, { suffix: randomUUID() });
+  const otherMinted = await mintAgentCredential({
+    agentId: other.agent.id,
+    scopes: ["read"],
+    name: "managed-third-party-event-report-other",
+    createdByUserId: null,
+  });
+
+  const posted = await postAgentEvent(app.baseUrl, accessToken, {
+    kind: "event",
+    summary: "Stamp: PR review requested",
+    externalEventId: "stamp-review-175",
+    payload: { pr: 175 },
+  });
+  assert.equal(posted.status, 202, `event post failed (${posted.status})`);
+  const postedBody = await posted.json() as { id: string };
+  const readRow = async () => (await getDb()
+    .select()
+    .from(thirdPartyAgentEvents)
+    .where(eq(thirdPartyAgentEvents.id, postedBody.id)))[0];
+  assert.equal((await readRow())?.status, "delivering");
+
+  const report = (apiKey: string, eventIds: unknown) => fetch(`${app.baseUrl}/internal/agent-api/third-party-events/delivered`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ eventIds }),
+  });
+
+  // Another agent cannot mark this agent's event delivered.
+  const foreign = await report(otherMinted.apiKey, [postedBody.id]);
+  assert.equal(foreign.status, 200, `foreign report failed (${foreign.status})`);
+  assert.deepEqual(await foreign.json(), { ok: true, delivered: 0 });
+  assert.equal((await readRow())?.status, "delivering");
+
+  // The daemon served the event from its Local Inbox, then reports it.
+  const reported = await report(minted.apiKey, [postedBody.id]);
+  assert.equal(reported.status, 200, `report failed (${reported.status})`);
+
+  // The next `/events` the daemon forwards (Local Inbox now empty) must not
+  // rebuild and replay the event the runtime already received.
+  const eventsRes = await fetch(`${app.baseUrl}/internal/agent-api/events?since=0`, {
+    headers: { Authorization: `Bearer ${minted.apiKey}` },
+  });
+  assert.equal(eventsRes.status, 200);
+  const eventsBody = await eventsRes.json() as { events: AgentMessage[] };
+  assert.deepEqual(eventsBody.events.map((event) => event.message_id), []);
+  const afterReport = await readRow();
+  assert.equal(afterReport?.status, "delivered");
+  assert.ok(afterReport?.deliveredAt);
+  assert.deepEqual(await reported.json(), { ok: true, delivered: 1 });
+
+  // A retried report is a no-op: status and deliveredAt are untouched.
+  const replayed = await report(minted.apiKey, [postedBody.id]);
+  assert.equal(replayed.status, 200);
+  assert.deepEqual(await replayed.json(), { ok: true, delivered: 0 });
+  assert.equal((await readRow())?.deliveredAt?.getTime(), afterReport?.deliveredAt?.getTime());
+
+  const invalid = await report(minted.apiKey, []);
+  assert.equal(invalid.status, 400);
+
+  // Upstream task #179 (follow-up to #176): the route's rejection set is the
+  // shared contract's. Ids the shared predicate rejects are refused as a
+  // batch; an id it accepts in upper case is a valid report (no rows match,
+  // delivered: 0).
+  assert.equal(isThirdPartyEventId("not-a-third-party-event-id"), false);
+  const rejected = await report(minted.apiKey, [postedBody.id, "not-a-third-party-event-id"]);
+  assert.equal(rejected.status, 400);
+  assert.equal(((await rejected.json()) as { code?: string }).code, "event_ids_invalid");
+  const upper = "EEEEEEEE-0000-4000-8000-000000000179";
+  assert.equal(isThirdPartyEventId(upper), true);
+  const accepted = await report(minted.apiKey, [upper]);
+  assert.equal(accepted.status, 200);
+  assert.deepEqual(await accepted.json(), { ok: true, delivered: 0 });
 });
