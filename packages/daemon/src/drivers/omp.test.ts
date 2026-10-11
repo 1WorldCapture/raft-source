@@ -22,12 +22,18 @@ function withTempHome(cb: (home: string) => void): void {
   }
 }
 
-function missingBinaryDeps(home: string): ProbeDeps {
+function missingBinaryDeps(
+  home: string,
+  existsSyncFn: ProbeDeps["existsSyncFn"] = () => false,
+): ProbeDeps {
   return {
     platform: "darwin",
     homeDir: home,
     env: { HOME: home },
-    // PATH lookup fails and no fallback file exists.
+    // PATH lookup fails, and — by default — no file exists at ANY fallback
+    // location (including the machine-wide Homebrew prefixes, which a real
+    // install on the host would otherwise leak into this assertion).
+    existsSyncFn,
     execFileSyncFn: (() => {
       throw new Error("not found");
     }) as unknown as ProbeDeps["execFileSyncFn"],
@@ -51,7 +57,7 @@ test("resolveOmpCommand falls back to the install locations when PATH misses", (
     mkdirSync(path.dirname(bunInstall), { recursive: true });
     writeFileSync(bunInstall, "#!/bin/sh\n", { mode: 0o755 });
 
-    const resolved = resolveOmpCommand(missingBinaryDeps(home));
+    const resolved = resolveOmpCommand(missingBinaryDeps(home, (p) => p === bunInstall));
     assert.equal(resolved, bunInstall);
   });
 });
@@ -71,7 +77,7 @@ test("probe reports an available install with its version", () => {
 
     const commands: Array<{ command: string; args: string[] }> = [];
     const deps: ProbeDeps = {
-      ...missingBinaryDeps(home),
+      ...missingBinaryDeps(home, (p) => p === localInstall),
       execFileSyncFn: ((command: string, args: string[]) => {
         commands.push({ command, args: [...args] });
         // PATH lookup misses; the resolved fallback answers --version.
@@ -98,7 +104,7 @@ test("probe refuses installs older than the supported floor", () => {
     writeFileSync(localInstall, "#!/bin/sh\n", { mode: 0o755 });
 
     const deps: ProbeDeps = {
-      ...missingBinaryDeps(home),
+      ...missingBinaryDeps(home, (p) => p === localInstall),
       execFileSyncFn: (() => "omp/18.5.2\n") as unknown as ProbeDeps["execFileSyncFn"],
     };
 
