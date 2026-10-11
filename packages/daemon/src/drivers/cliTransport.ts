@@ -1,7 +1,7 @@
-import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
-import { hydrateRuntimeConfig, runtimeConfigToLaunchFields, type AgentConfig } from "@botiverse/raft-shared";
+import { executableFileIdentity, hydrateRuntimeConfig, kPromotedSlotPath, resolveLiveExecutablePath, runtimeConfigToLaunchFields, type AgentConfig } from "@botiverse/raft-shared";
 import type { SpawnContext } from "./types.js";
 import { buildCliSystemPrompt, type SystemPromptOptions } from "./systemPrompt.js";
 import type { AxSurfaceText } from "@botiverse/raft-shared";
@@ -9,6 +9,48 @@ import { SLOCK_HOME_ENV, resolveRaftHome } from "../raftHome.js";
 import { registerAgentCredentialProxy } from "../agentCredentialProxy.js";
 import { LOOPBACK_NO_PROXY, applyLoopbackNoProxyEnv } from "../loopbackNoProxy.js";
 import { detectNodeHostKind, resolveNodeHostLaunch, type NodeHostKind } from "./nodeHostLaunch.js";
+
+// Captured at module load, i.e. before any later K promotion or staging can
+// rename or replace the file behind process.execPath.
+const STARTUP_EXECUTABLE_IDENTITY = executableFileIdentity(process.execPath);
+
+let readProcSelfExeForHost: () => string | null = () => {
+  try {
+    return readlinkSync("/proc/self/exe");
+  } catch {
+    return null;
+  }
+};
+
+/** Test seam: a test that fakes process.execPath cannot fake /proc/self/exe. */
+export { executableFileIdentity };
+
+export function setProcSelfExeReaderForTests(reader: (() => string | null) | null): void {
+  readProcSelfExeForHost = reader ?? (() => {
+    try {
+      return readlinkSync("/proc/self/exe");
+    } catch {
+      return null;
+    }
+  });
+}
+
+/**
+ * The running binary's re-execable path for a SEA / unrecognised host. A K
+ * upgrade promotes the experiment slot to stable by renaming it under the
+ * running process, so the startup `process.execPath` can name a path that no
+ * longer exists; see liveExecutablePath in shared.
+ */
+export function liveHostExecutablePath(execPath: string = process.execPath): string {
+  return resolveLiveExecutablePath({
+    execPath,
+    platform: process.platform,
+    exists: existsSync,
+    readProcSelfExe: readProcSelfExeForHost,
+    identityOf: executableFileIdentity,
+    startupIdentity: STARTUP_EXECUTABLE_IDENTITY,
+  });
+}
 
 const shellSingleQuote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;
 const powershellSingleQuote = (value: string) => `'${value.replace(/'/g, "''")}'`;
@@ -479,7 +521,7 @@ export function writeOpencliWrapper(
   // could not identify.
   const nodeHost = hostKind === "electron" || hostKind === "node"
     ? resolveNodeHostLaunch({ env: process.env, execIsElectron, seaProbe })
-    : { command: process.execPath, env: process.env };
+    : { command: liveHostExecutablePath(), env: process.env };
   const electronNodeMode = execIsElectron && nodeHost.env.ELECTRON_RUN_AS_NODE === "1";
   const fallbacks = deriveOpencliFallbackCandidates(opencliBinPath);
   // If the resolved path is already gone, bake the best existing fallback as
@@ -493,9 +535,14 @@ export function writeOpencliWrapper(
     ? ""
     : `if [ ! -e "$OPENCLI_BIN" ]; then\n${fallbacks.map((candidate, i) =>
       `  ${i === 0 ? "if" : "elif"} [ -e ${shellSingleQuote(candidate)} ]; then OPENCLI_BIN=${shellSingleQuote(candidate)};`).join("\n")}\n  fi\nfi\n`;
+  const hostPromotedPath = kPromotedSlotPath(nodeHost.command);
+  const posixHostPrelude = hostPromotedPath
+    ? `RAFT_HOST=${shellSingleQuote(nodeHost.command)}\n[ -e "$RAFT_HOST" ] || RAFT_HOST=${shellSingleQuote(hostPromotedPath)}\n`
+    : "";
+  const posixHostRef = hostPromotedPath ? '"$RAFT_HOST"' : shellSingleQuote(nodeHost.command);
   writeFileSync(
     path.join(slockDir, "opencli"),
-    `#!/usr/bin/env bash\nOPENCLI_BIN=${shellSingleQuote(binPath)}\n${posixFallbackBlock}${electronNodeMode ? "export ELECTRON_RUN_AS_NODE=1\n" : ""}exec ${shellSingleQuote(nodeHost.command)} "$OPENCLI_BIN" "$@"\n`,
+    `#!/usr/bin/env bash\nOPENCLI_BIN=${shellSingleQuote(binPath)}\n${posixFallbackBlock}${electronNodeMode ? "export ELECTRON_RUN_AS_NODE=1\n" : ""}${posixHostPrelude}exec ${posixHostRef} "$OPENCLI_BIN" "$@"\n`,
     { mode: 0o755 },
   );
   if (platform === "win32") {
@@ -509,7 +556,13 @@ export function writeOpencliWrapper(
       `set "OPENCLI_BIN=${binPath}"`,
       ...fallbacks.map((candidate) => `if not exist "%OPENCLI_BIN%" set "OPENCLI_BIN=${candidate}"`),
       ...(electronNodeMode ? [`set "ELECTRON_RUN_AS_NODE=1"`] : []),
-      `"${nodeHost.command}" "%OPENCLI_BIN%" %*`,
+      ...(hostPromotedPath
+        ? [
+          `set "RAFT_HOST=${nodeHost.command}"`,
+          `if not exist "%RAFT_HOST%" set "RAFT_HOST=${hostPromotedPath}"`,
+          `"%RAFT_HOST%" "%OPENCLI_BIN%" %*`,
+        ]
+        : [`"${nodeHost.command}" "%OPENCLI_BIN%" %*`]),
       "",
     ].join("\r\n") + "\r\n";
     writeFileSync(path.join(slockDir, "opencli.cmd"), opencliCmdBody);
@@ -659,7 +712,7 @@ export async function prepareCliTransport(
   const hostKind = detectNodeHostKind({ execIsElectron, seaProbe });
   const nodeHost = hostKind === "electron" || hostKind === "node"
     ? resolveNodeHostLaunch({ env: process.env, execIsElectron, seaProbe })
-    : { command: process.execPath, env: process.env };
+    : { command: liveHostExecutablePath(), env: process.env };
   const electronNodeMode = execIsElectron && nodeHost.env.ELECTRON_RUN_AS_NODE === "1";
   // slockCliPath is the path to the bundled `slock` CLI script, OR the literal
   // `__cli` sentinel for a SEA single-binary Computer (the daemon re-execs
@@ -797,8 +850,15 @@ export async function prepareCliTransport(
     ? ""
     : `if [ ! -e "$SLOCK_CLI" ]; then\n${cliFallbackCandidates.map((candidate, i) =>
       `  ${i === 0 ? "if" : "elif"} [ -e ${shellSingleQuote(candidate)} ]; then SLOCK_CLI=${shellSingleQuote(candidate)};`).join("\n")}\n  fi\nfi\n`;
+  // A wrapper written while the host still runs from K's experiment slot
+  // outlives the promotion that renames that slot to stable; let it follow.
+  const hostPromotedPath = kPromotedSlotPath(nodeHost.command);
+  const posixHostPrelude = hostPromotedPath
+    ? `RAFT_HOST=${shellSingleQuote(nodeHost.command)}\n[ -e "$RAFT_HOST" ] || RAFT_HOST=${shellSingleQuote(hostPromotedPath)}\n`
+    : "";
+  const posixHostRef = hostPromotedPath ? '"$RAFT_HOST"' : shellSingleQuote(nodeHost.command);
   const posixBody =
-    `#!/usr/bin/env bash\n${buildPosixLaunchForwardingGuard(slockDir)}\nunset RAFT_PROFILE SLOCK_PROFILE RAFT_PROFILE_DIR SLOCK_PROFILE_DIR\n${posixLoopbackNoProxyPrelude()}\nSLOCK_CLI=${shellSingleQuote(cliPath)}\n${posixCliFallbackBlock}${electronNodeMode ? "export ELECTRON_RUN_AS_NODE=1\n" : ""}${posixCredentialPrefix}exec ${shellSingleQuote(nodeHost.command)} "$SLOCK_CLI" "$@"\n`;
+    `#!/usr/bin/env bash\n${buildPosixLaunchForwardingGuard(slockDir)}\nunset RAFT_PROFILE SLOCK_PROFILE RAFT_PROFILE_DIR SLOCK_PROFILE_DIR\n${posixLoopbackNoProxyPrelude()}\nSLOCK_CLI=${shellSingleQuote(cliPath)}\n${posixCliFallbackBlock}${electronNodeMode ? "export ELECTRON_RUN_AS_NODE=1\n" : ""}${posixHostPrelude}${posixCredentialPrefix}exec ${posixHostRef} "$SLOCK_CLI" "$@"\n`;
   writeFileSync(posixWrapper, posixBody, { mode: 0o755 });
   writeFileSync(posixRaftWrapper, posixBody, { mode: 0o755 });
 
@@ -854,7 +914,13 @@ export async function prepareCliTransport(
       `set "SLOCK_CLI=${cliPath}"`,
       ...cmdCliFallbackLines,
       ...(electronNodeMode ? [`set "ELECTRON_RUN_AS_NODE=1"`] : []),
-      `"${nodeHost.command}" "%SLOCK_CLI%" %*`,
+      ...(hostPromotedPath
+        ? [
+          `set "RAFT_HOST=${nodeHost.command}"`,
+          `if not exist "%RAFT_HOST%" set "RAFT_HOST=${hostPromotedPath}"`,
+          `"%RAFT_HOST%" "%SLOCK_CLI%" %*`,
+        ]
+        : [`"${nodeHost.command}" "%SLOCK_CLI%" %*`]),
       "",
     ].filter((line) => line.length > 0).join("\r\n") + "\r\n";
     writeFileSync(cmdWrapper, cmdBody);
@@ -905,6 +971,7 @@ export async function prepareCliTransport(
       ...psCredentialLines,
       ...(electronNodeMode ? ["$env:ELECTRON_RUN_AS_NODE = '1'"] : []),
       `$node = ${powershellSingleQuote(nodeHost.command)}`,
+      ...(hostPromotedPath ? [`if (-not (Test-Path $node)) { $node = ${powershellSingleQuote(hostPromotedPath)} }`] : []),
       `$cli = ${powershellSingleQuote(cliPath)}`,
       ...(cliPath === "__cli" || cliFallbackCandidates.length === 0 ? [] : [
         "if (-not (Test-Path $cli)) {",
