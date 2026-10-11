@@ -24,7 +24,7 @@ import { RouteFailureError } from "../tracing/routeFailure.js";
 import { openTestApp } from "../test/integration/app.js";
 import { createHangingStorageTestHarness } from "../test/hangingStorageTestHarness.js";
 import { getDb } from "../db/index.js";
-import { agentMigrations, agents, featureFlagRules, inboxTargetMuteStates, machines, users, serverMembers, servers, subscriptions } from "../db/schema.js";
+import { agentMigrations, agents, channelAgents, featureFlagRules, inboxTargetMuteStates, machines, messages, users, serverMembers, servers, subscriptions } from "../db/schema.js";
 import {
   AgentOrchestrator,
   KimiReasoningEffortUpgradeRequiredError,
@@ -5779,4 +5779,144 @@ test("Antigravity permits existing-agent edits but rejects new agents and runtim
     assert.equal((await edit.json() as { runtime: string }).runtime, "antigravity");
   }
   assert.equal((await getAgent(other.id))?.runtime, "codex");
+});
+
+// ===========================================================================
+// Task #18: POST /api/agents channelIds — seed channel memberships atomically.
+// The parameter used to be silently dropped (agent created with no channel
+// memberships, @mentions undelivered). Now: validate everything first (400/403
+// and NO agent created on failure), then write membership rows + membership
+// system messages inside the create transaction.
+// ===========================================================================
+
+test("POST /agents channelIds seeds channel memberships with the membership system message", async ({ app }) => {
+  const owner = await seedUser("t18-channel-seed@slock.test", "t18-channel-seed");
+  const server = await createServer("T18 Channel Seed", "t18-channel-seed", owner.id);
+  const ownerToken = await tokenForHuman(owner.email);
+  const alpha = await createChannel(server.id, "t18-alpha", "seed target");
+  const beta = await createChannel(server.id, "t18-beta", "seed target 2");
+
+  const before = await fetch(`${app.baseUrl}/api/agents`, { headers: authHeaders(ownerToken, server.id) });
+  const beforeCount = ((await before.json()) as unknown[]).length;
+
+  const res = await fetch(`${app.baseUrl}/api/agents`, {
+    method: "POST",
+    headers: { ...authHeaders(ownerToken, server.id), "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name: "t18-seeded-agent",
+      runtime: "codex",
+      channelIds: [alpha.id, beta.id],
+    }),
+  });
+  assert.equal(res.status, 200);
+  const agent = await res.json() as { id: string };
+
+  // Membership rows exist for both channels (the creation flow may add others,
+  // e.g. a default channel — assert containment, not equality).
+  const db = getDb();
+  const memberships = await db
+    .select({ channelId: channelAgents.channelId })
+    .from(channelAgents)
+    .where(eq(channelAgents.agentId, agent.id));
+  const joined = new Set(memberships.map((m) => m.channelId));
+  assert.ok(joined.has(alpha.id), "agent joined the first requested channel");
+  assert.ok(joined.has(beta.id), "agent joined the second requested channel");
+
+  // Same visible effect as the manual add-member route: a membership system
+  // message in each seeded channel.
+  for (const channel of [alpha, beta]) {
+    const sys = await db
+      .select({ content: messages.content })
+      .from(messages)
+      .where(and(eq(messages.channelId, channel.id), eq(messages.messageType, "system")));
+    assert.ok(
+      (sys as Array<{ content: string }>).some((m) => m.content.includes("t18-seeded-agent")),
+      `membership system message present in ${channel.name}`,
+    );
+  }
+
+  const after = await fetch(`${app.baseUrl}/api/agents`, { headers: authHeaders(ownerToken, server.id) });
+  assert.equal(((await after.json()) as unknown[]).length, beforeCount + 1);
+});
+
+test("POST /agents channelIds with an unknown channel fails 400 and creates no agent", async ({ app }) => {
+  const owner = await seedUser("t18-unknown-channel@slock.test", "t18-unknown-channel");
+  const server = await createServer("T18 Unknown Channel", "t18-unknown-channel", owner.id);
+  const ownerToken = await tokenForHuman(owner.email);
+
+  const before = await fetch(`${app.baseUrl}/api/agents`, { headers: authHeaders(ownerToken, server.id) });
+  const beforeCount = ((await before.json()) as unknown[]).length;
+
+  const res = await fetch(`${app.baseUrl}/api/agents`, {
+    method: "POST",
+    headers: { ...authHeaders(ownerToken, server.id), "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name: "t18-never-created",
+      runtime: "codex",
+      channelIds: [randomUUID()],
+    }),
+  });
+  assert.equal(res.status, 400);
+  const body = await res.json() as { code: string };
+  assert.equal(body.code, "channels_not_found");
+
+  // Atomic: the validation failure must not leave an agent behind.
+  const after = await fetch(`${app.baseUrl}/api/agents`, { headers: authHeaders(ownerToken, server.id) });
+  assert.equal(((await after.json()) as unknown[]).length, beforeCount, "no agent created on invalid channelIds");
+});
+
+test("POST /agents channelIds to a private channel without add-member permission fails 403 and creates no agent", async ({ app }) => {
+  const owner = await seedUser("t18-private-owner@slock.test", "t18-private-owner");
+  const server = await createServer("T18 Private Channel", "t18-private-channel", owner.id);
+  const plainUser = await seedUser("t18-plain@slock.test", "t18-plain");
+  await getDb().insert(serverMembers).values({ serverId: server.id, userId: plainUser.id, role: "member" });
+  const privateChannel = await createChannel(server.id, "t18-secret", "private", "private");
+  const plainToken = await tokenForHuman(plainUser.email);
+
+  const before = await fetch(`${app.baseUrl}/api/agents`, { headers: authHeaders(plainToken, server.id) });
+  const beforeCount = ((await before.json()) as unknown[]).length;
+
+  const res = await fetch(`${app.baseUrl}/api/agents`, {
+    method: "POST",
+    headers: { ...authHeaders(plainToken, server.id), "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name: "t18-no-permission-agent",
+      runtime: "codex",
+      channelIds: [privateChannel.id],
+    }),
+  });
+  // A member lacks the createAgents capability, so the request is rejected by
+  // that earlier gate; either way the private channel must never be joined by
+  // an agent created through it.
+  assert.equal(res.status, 403);
+
+  const after = await fetch(`${app.baseUrl}/api/agents`, { headers: authHeaders(plainToken, server.id) });
+  assert.equal(((await after.json()) as unknown[]).length, beforeCount, "no agent created without permission");
+});
+
+test("POST /agents channelIds deduplicates repeated ids", async ({ app }) => {
+  const owner = await seedUser("t18-dup-channel@slock.test", "t18-dup-channel");
+  const server = await createServer("T18 Dup Channel", "t18-dup-channel", owner.id);
+  const ownerToken = await tokenForHuman(owner.email);
+  const alpha = await createChannel(server.id, "t18-dup-alpha", "dup target");
+
+  const res = await fetch(`${app.baseUrl}/api/agents`, {
+    method: "POST",
+    headers: { ...authHeaders(ownerToken, server.id), "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name: "t18-dup-agent",
+      runtime: "codex",
+      channelIds: [alpha.id, alpha.id, alpha.id],
+    }),
+  });
+  assert.equal(res.status, 200);
+  const agent = await res.json() as { id: string };
+
+  const db = getDb();
+  const memberships = await db
+    .select({ channelId: channelAgents.channelId })
+    .from(channelAgents)
+    .where(eq(channelAgents.agentId, agent.id));
+  const alphaRows = memberships.filter((m) => m.channelId === alpha.id).length;
+  assert.equal(alphaRows, 1, "duplicate ids must not create duplicate memberships");
 });

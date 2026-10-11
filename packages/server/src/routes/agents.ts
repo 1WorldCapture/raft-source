@@ -62,6 +62,8 @@ import {
   storeAgentAvatar,
 } from "../services/avatarService.js";
 import * as channelService from "../services/channelService.js";
+import * as messageService from "../services/messageService.js";
+import { actorHasChannelCapability } from "../lib/channelActorPermissions.js";
 import { addTraceEvent, createTraceDbQueryTracer, getCurrentTraceContext, tracePhase } from "../tracing/semanticTrace.js";
 import { RouteFailureError, resolveRouteFailureKind, resolveRouteFailureSubkind, sanitizeRouteErrorMessage, traceRouteFailure } from "../tracing/routeFailure.js";
 import { isPrincipalHandleConflictError } from "../services/principalHandleService.js";
@@ -1276,7 +1278,7 @@ agentRouter.post("/", async (req, res) => {
       .where(eq(servers.id, req.serverId!))
       .limit(1);
     const expectedSetupStatus = ownerSetupAtRequestStart?.status ?? null;
-    const { name, description, model, runtime, runtimeConfig, formDefinitionRef, reasoningEffort, machineId, envVars, avatarUrl } = req.body;
+    const { name, description, model, runtime, runtimeConfig, formDefinitionRef, reasoningEffort, machineId, envVars, avatarUrl, channelIds } = req.body;
     const external = req.body?.external === true;
     const onboarding = req.body?.onboarding === true;
     if (external && onboarding) {
@@ -1352,6 +1354,12 @@ agentRouter.post("/", async (req, res) => {
       }
     }
     if (external) {
+      // Task #18: external agents don't take channelIds — reject rather than
+      // silently ignoring the parameter.
+      if (Array.isArray(channelIds) && channelIds.length > 0) {
+        res.status(400).json({ error: "External agents cannot specify channelIds", code: "external_channel_ids_forbidden" });
+        return;
+      }
       const externalInput = buildExternalAgentCreateInput({
         machineId,
         runtimeConfig,
@@ -1617,6 +1625,40 @@ agentRouter.post("/", async (req, res) => {
     }
 
     let agent: Awaited<ReturnType<typeof agentService.createAgent>>;
+
+    // Task #18: seed channel memberships atomically with the agent row.
+    // Validate every channelId BEFORE creating the agent — any failure returns
+    // here with 4xx and nothing is created. The writes themselves ride the
+    // create transaction via afterCreateTx, so a partial create is impossible.
+    const requestedChannelIds = Array.isArray(channelIds)
+      ? [...new Set(channelIds.filter((id): id is string => typeof id === "string"))]
+      : [];
+    const seedChannels: Array<NonNullable<Awaited<ReturnType<typeof channelService.getChannel>>>> = [];
+    for (const channelId of requestedChannelIds) {
+      const channel = await channelService.getChannel(channelId);
+      if (!channel || channel.serverId !== req.serverId) {
+        res.status(400).json({ error: "One or more channels do not exist on this server", code: "channels_not_found", invalidChannelIds: [channelId] });
+        return;
+      }
+      if (channel.type === "thread" || channel.type === "dm") {
+        res.status(400).json({ error: "channelIds only accepts regular channels", code: "invalid_channel_type", invalidChannelIds: [channelId] });
+        return;
+      }
+      if (channel.archivedAt) {
+        res.status(409).json({ error: "This channel is archived", code: "channel_archived", invalidChannelIds: [channelId] });
+        return;
+      }
+      if (channelService.isAllSystemChannel(channel) || channelService.isAnnouncementChannel(channel)) {
+        res.status(400).json({ error: "System channels cannot be specified in channelIds", code: "system_channel_not_allowed", invalidChannelIds: [channelId] });
+        return;
+      }
+      if (!(await actorHasChannelCapability(req.serverId!, channel.id, "user", req.userId!, "addChannelMembers"))) {
+        res.status(403).json({ error: "You do not have permission to add channel members", code: "channel_members_permission", invalidChannelIds: [channelId] });
+        return;
+      }
+      seedChannels.push(channel);
+    }
+
     try {
       agent = await agentService.createAgent(req.serverId!, createName.trim(), {
         description: createDescription,
@@ -1636,6 +1678,21 @@ agentRouter.post("/", async (req, res) => {
         creatorType: "user",
         creatorId: req.userId!,
         expectedSetupStatus,
+        afterCreateTx: seedChannels.length > 0
+          ? async (tx, newAgent) => {
+            for (const channel of seedChannels) {
+              // Same write path as the manual add-member route: membership row
+              // plus the membership system message and its events.
+              await messageService.addAgentWithMembershipSystemMessage({
+                channel,
+                agentId: newAgent.id,
+                agentName: newAgent.name,
+                causalActor: { type: "user", id: req.userId! },
+                executor: tx,
+              });
+            }
+          }
+          : undefined,
         ...(providerConnection ? {
           providerConnection: {
             ...providerConnection,
