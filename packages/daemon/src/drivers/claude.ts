@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import type { AgentConfig, AxSurfaceText } from "@botiverse/raft-shared";
 import type { RuntimeDriver, SpawnContext, SpawnResult, ParsedEvent, RuntimeProbeResult } from "./types.js";
+import { guardChildStdin } from "./probe.js";
 import { buildCliTransportSystemPrompt, prepareCliTransport } from "./cliTransport.js";
 import { ClaudeEventNormalizer } from "./claudeEventNormalizer.js";
 import { assertClaudeStartupPayloadWithinBudget } from "./claudeInputBudget.js";
@@ -142,6 +143,7 @@ export class ClaudeDriver implements RuntimeDriver {
       env: spawnEnv as NodeJS.ProcessEnv,
       shell: spawnSpec.shell,
     });
+    guardChildStdin(proc);
 
     // Send initial prompt via stdin (stream-json format)
     const stdinMsg = JSON.stringify({
