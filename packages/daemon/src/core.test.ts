@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtempSync } from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -254,7 +255,7 @@ test("DaemonCore ready stamps the Computer SEA baked daemon version", async () =
 
   try {
     process.env.RAFT_DAEMON_VERSION = "42.0.0-env-must-not-win";
-    core = new DaemonCore({
+    core = newCore({
       serverUrl: "https://daemon.example.com",
       apiKey: "sk_machine_test",
       daemonVersion: "0.72.4-sea",
@@ -316,7 +317,7 @@ test("DaemonCore binds App storage to authenticated machine context and revokes 
     await writeFile(legacyReminderPath, '{"version":4,"records":[]}\n');
     await mkdir(path.dirname(scopedPath), { recursive: true });
     await writeFile(scopedPath, "{invalid-json\n");
-    core = new DaemonCore({
+    core = newCore({
       serverUrl: "https://daemon.example.com",
       apiKey: "sk_machine_test",
       dataDir: path.join(rootDir, "agents"),
@@ -447,7 +448,7 @@ test("DaemonCore refreshes one runtime usage provider and emits only the sanitiz
       }],
     }],
   };
-  const core = new DaemonCore({
+  const core = newCore({
     serverUrl: "https://daemon.example.com",
     apiKey: "sk_machine_test",
     dataDir,
@@ -510,7 +511,7 @@ test("DaemonCore refreshes one runtime usage provider and emits only the sanitiz
 test("DaemonCore advertises and executes inline Wiki workspace-pack v1 without sidecar assets", async () => {
   const dataDir = await mkdtemp(path.join(os.tmpdir(), "slock-daemon-wiki-pack-test-"));
   const sockets: FakeWebSocket[] = [];
-  const core = new DaemonCore({
+  const core = newCore({
     serverUrl: "https://daemon.example.com",
     apiKey: "sk_machine_test",
     dataDir,
@@ -572,7 +573,7 @@ test("DaemonCore advertises machine-wide Computer controls only for supervisor-r
   let core: DaemonCore | null = null;
 
   try {
-    core = new DaemonCore({
+    core = newCore({
       serverUrl: "https://daemon.example.com",
       apiKey: "sk_machine_test",
       dataDir,
@@ -613,7 +614,7 @@ test("DaemonCore marks the connection before probing and recomputes ready after 
   let core: DaemonCore | null = null;
 
   try {
-    core = new DaemonCore({
+    core = newCore({
       serverUrl: "https://daemon.example.com",
       apiKey: "sk_machine_test",
       dataDir,
@@ -675,7 +676,7 @@ test("DaemonCore reports restart completion only after the new generation sends 
   let core: DaemonCore | null = null;
 
   try {
-    core = new DaemonCore({
+    core = newCore({
       serverUrl: "https://daemon.example.com",
       apiKey: "sk_machine_test",
       dataDir,
@@ -723,6 +724,28 @@ async function flush(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+/**
+ * Task #31: every DaemonCore in this file must get a PER-TEST machines
+ * directory. The default root is dirname(dataDir)/machines — and dataDir is a
+ * mkdtemp directly under os.tmpdir(), so that default lands in the SHARED
+ * tmpdir root and two concurrent runs of this file (two people, two
+ * worktrees, even this file beside another suite) steal each other's
+ * DaemonMachineLock and fail whole batches with DaemonMachineLockConflictError.
+ * A dataDir-derived machines dir keeps cores inside one test consistent while
+ * staying isolated from every other test and run.
+ */
+function newCore(options: ConstructorParameters<typeof DaemonCore>[0]): DaemonCore {
+  if (!options.machineStateDir) {
+    options = {
+      ...options,
+      machineStateDir: options.dataDir
+        ? path.join(options.dataDir, "machines")
+        : mkdtempSync(path.join(os.tmpdir(), "slock-daemon-core-test-machines-")),
+    };
+  }
+  return new DaemonCore(options);
+}
+
 async function waitFor(predicate: () => boolean, label: string, timeoutMs = 5_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -740,7 +763,7 @@ test("snapshot-authorized scoped Reminder holds item and wake until Server accep
   const sockets: FakeWebSocket[] = [];
   const reminderId = "11111111-1111-4111-8111-111111111111";
   const legalLongMultilineTitle = `Local\n${"x".repeat(494)}`;
-  const core = new DaemonCore({
+  const core = newCore({
     serverUrl: "https://daemon.example.com",
     apiKey: "sk_machine_test",
     dataDir,
@@ -864,7 +887,7 @@ test("DaemonCore dispatches generic app-config into the built-in local App runti
   const dataDir = path.join(rootDir, "agents");
   const driver = new FakeDriver({ supportsStdinNotification: true });
   const sockets: FakeWebSocket[] = [];
-  const core = new DaemonCore({
+  const core = newCore({
     serverUrl: "https://daemon.example.com",
     apiKey: "sk_machine_test",
     dataDir,
@@ -937,7 +960,7 @@ test("DaemonCore dispatches generic app-config into the built-in local App runti
 test("unarmable Reminder emits rejection and never claims armed", async () => {
   const rootDir = await mkdtemp(path.join(os.tmpdir(), "slock-daemon-reminder-reject-test-"));
   const sockets: FakeWebSocket[] = [];
-  const core = new DaemonCore({
+  const core = newCore({
     serverUrl: "https://daemon.example.com",
     apiKey: "sk_machine_test",
     dataDir: path.join(rootDir, "agents"),
@@ -1523,7 +1546,7 @@ async function captureUploadCompleteConflictTrace(responseBody: {
       path.join(dataDir, "agent-upload-complete-trace", "notes.md"),
       "trace correlation sentinel\n",
     );
-    core = new DaemonCore({
+    core = newCore({
       serverUrl: transferServer.baseUrl,
       apiKey: "sk_machine_test",
       dataDir,
@@ -1701,7 +1724,7 @@ test("DaemonCore keeps migration ref and role exact when one Computer switches f
   let core: DaemonCore | null = null;
 
   try {
-    core = new DaemonCore({
+    core = newCore({
       serverUrl: transferServer.baseUrl,
       apiKey: "sk_machine_test",
       dataDir,
@@ -1861,7 +1884,7 @@ test("DaemonCore scopes daemon traces with daemon and computer versions", async 
 
   try {
     process.env.RAFT_COMPUTER_VERSION = "77.7.7-env-must-not-win";
-    core = new DaemonCore({
+    core = newCore({
       serverUrl: "https://daemon.example.com",
       apiKey: "sk_machine_test",
       daemonVersion: "0.55.6",
@@ -1907,7 +1930,7 @@ test("DaemonCore reports the Computer host kind in ready only for managed Comput
   const readyFor = async (options: Partial<ConstructorParameters<typeof DaemonCore>[0]>) => {
     const dataDir = await mkdtemp(path.join(os.tmpdir(), "slock-daemon-host-kind-test-"));
     const sockets: FakeWebSocket[] = [];
-    const core = new DaemonCore({
+    const core = newCore({
       serverUrl: "https://daemon.example.com",
       apiKey: "sk_machine_test",
       dataDir,
@@ -1953,7 +1976,7 @@ test("DaemonCore sends a machine shutdown notice before disconnecting", async ()
 
   try {
     process.env.RAFT_COMPUTER_VERSION = "77.7.7-env-must-not-win";
-    core = new DaemonCore({
+    core = newCore({
       serverUrl: "https://daemon.example.com",
       apiKey: "sk_machine_test",
       computerVersion: "0.0.23",
@@ -2002,7 +2025,7 @@ test("DaemonCore replays durable lifecycle acknowledgements and receipts phases 
   const receiptObserved = new Promise<void>((resolve) => { resolveReceipt = resolve; });
   let core: DaemonCore | null = null;
   try {
-    core = new DaemonCore({
+    core = newCore({
       serverUrl: "https://daemon.example.com",
       apiKey: "sk_machine_test",
       dataDir,
@@ -2061,7 +2084,7 @@ test("DaemonCore awaits fresh ready attestation instead of emitting cached lifec
   const attested = new Promise<ComputerLifecycleExecutionAck[]>((resolve) => { releaseAttestation = resolve; });
   let core: DaemonCore | null = null;
   try {
-    core = new DaemonCore({
+    core = newCore({
       serverUrl: "https://daemon.example.com",
       apiKey: "sk_machine_test",
       dataDir,
@@ -2124,7 +2147,7 @@ test("DaemonCore establishes online before legacy adoption and replays ready wit
   let core: DaemonCore | null = null;
   let reconcileCalls = 0;
   try {
-    core = new DaemonCore({
+    core = newCore({
       serverUrl: "https://daemon.example.com",
       apiKey: "sk_machine_test",
       dataDir,
@@ -2190,7 +2213,7 @@ test("DaemonCore retries one exact legacy adoption after ready visibility and re
   let core: DaemonCore | null = null;
   let reconcileCalls = 0;
   try {
-    core = new DaemonCore({
+    core = newCore({
       serverUrl: "https://daemon.example.com",
       apiKey: "sk_machine_test",
       dataDir,
@@ -2260,7 +2283,7 @@ test("DaemonCore stops a ready-pending legacy adoption when the exact operation 
   let core: DaemonCore | null = null;
   let reconcileCalls = 0;
   try {
-    core = new DaemonCore({
+    core = newCore({
       serverUrl: "https://daemon.example.com",
       apiKey: "sk_machine_test",
       dataDir,
@@ -2330,7 +2353,7 @@ test("DaemonCore bounds persistent ready-pending legacy adoption at three exact 
   let core: DaemonCore | null = null;
   let reconcileCalls = 0;
   try {
-    core = new DaemonCore({
+    core = newCore({
       serverUrl: "https://daemon.example.com",
       apiKey: "sk_machine_test",
       dataDir,
@@ -2372,7 +2395,7 @@ test("DaemonCore cancels a ready-pending legacy adoption retry when its connecti
   let core: DaemonCore | null = null;
   let reconcileCalls = 0;
   try {
-    core = new DaemonCore({
+    core = newCore({
       serverUrl: "https://daemon.example.com",
       apiKey: "sk_machine_test",
       dataDir,
@@ -2416,7 +2439,7 @@ test("DaemonCore does not retry a permanent legacy adoption rejection", async ()
   let core: DaemonCore | null = null;
   let reconcileCalls = 0;
   try {
-    core = new DaemonCore({
+    core = newCore({
       serverUrl: "https://daemon.example.com",
       apiKey: "sk_machine_test",
       dataDir,
@@ -2456,7 +2479,7 @@ test("DaemonCore executes mixed-version computer control replay only once", asyn
   const handled = new Promise<void>((resolve) => { resolveHandled = resolve; });
   let core: DaemonCore | null = null;
   try {
-    core = new DaemonCore({
+    core = newCore({
       serverUrl: "https://daemon.example.com",
       apiKey: "sk_machine_test",
       dataDir,
@@ -2496,7 +2519,7 @@ test("DaemonCore returns request-scoped closed failures when Computer control is
   const sockets: FakeWebSocket[] = [];
   let core: DaemonCore | null = null;
   try {
-    core = new DaemonCore({
+    core = newCore({
       serverUrl: "https://daemon.example.com",
       apiKey: "sk_machine_test",
       dataDir,
@@ -2544,7 +2567,7 @@ test("DaemonCore ready reports migration transport as not provisioned when no tr
   let core: DaemonCore | null = null;
 
   try {
-    core = new DaemonCore({
+    core = newCore({
       serverUrl: "https://daemon.example.com",
       apiKey: "sk_machine_test",
       dataDir,
@@ -2598,7 +2621,7 @@ test("DaemonCore archives a completed migration source workspace and returns an 
   try {
     await mkdir(source, { recursive: true });
     await writeFile(path.join(source, "MEMORY.md"), "archive-from-core\n");
-    core = new DaemonCore({
+    core = newCore({
       serverUrl: "https://daemon.example.com",
       apiKey: "sk_machine_test",
       slockHome,
@@ -2678,7 +2701,7 @@ test("DaemonCore starts configured agent migration HTTP transport and stops it w
   let core: DaemonCore | null = null;
 
   try {
-    core = new DaemonCore({
+    core = newCore({
       serverUrl: "https://daemon.example.com",
       apiKey: "sk_machine_test",
       dataDir,
@@ -2757,7 +2780,7 @@ test("DaemonCore applies object-store migration transfer lease and re-emits prov
   let core: DaemonCore | null = null;
 
   try {
-    core = new DaemonCore({
+    core = newCore({
       serverUrl: transferServer.baseUrl,
       apiKey: "sk_machine_test",
       dataDir,
@@ -2902,7 +2925,7 @@ test("DaemonCore uploads source object-store migration bundle to the leased URL"
       path.join(dataDir, "agent-source", "compressible.bin"),
       Buffer.alloc(1024 * 1024, 0x5a),
     );
-    core = new DaemonCore({
+    core = newCore({
       serverUrl: transferServer.baseUrl,
       apiKey: "sk_machine_test",
       dataDir,
@@ -3062,7 +3085,7 @@ test("DaemonCore reports a typed compressed-bundle size failure before object-st
   try {
     await mkdir(path.join(dataDir, "agent-size"), { recursive: true });
     await writeFile(path.join(dataDir, "agent-size", "notes.md"), "hello source\n");
-    core = new DaemonCore({
+    core = newCore({
       serverUrl: transferServer.baseUrl,
       apiKey: "sk_machine_test",
       dataDir,
@@ -3120,7 +3143,15 @@ test("DaemonCore reports a typed compressed-bundle size failure before object-st
 });
 
 test("DaemonCore retries target object-store bundle download until source upload becomes visible", async () => {
-  const dataDir = await mkdtemp(path.join(os.tmpdir(), "slock-daemon-migration-target-get-test-"));
+  // Task #31: the adopt plan asserts the final workspace is a direct child of
+  // <slockHome>/agents while DaemonCore defaults agentsDataDir to dataDir —
+  // without an explicit slockHome the two diverged (mkdtemp dataDir vs the
+  // ambient ~/.slock) and every target import died with
+  // MIGRATION_FINAL_WORKSPACE_PATH_OUTSIDE_AGENTS_ROOT before start-transfer
+  // ever fired. One tmp root for both keeps them consistent and hermetic.
+  const slockHome = await mkdtemp(path.join(os.tmpdir(), "slock-daemon-migration-target-home-"));
+  const dataDir = path.join(slockHome, "agents");
+  await mkdir(dataDir, { recursive: true });
   const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "slock-daemon-migration-target-source-"));
   const sockets: FakeWebSocket[] = [];
   const callbackPaths: string[] = [];
@@ -3233,10 +3264,11 @@ test("DaemonCore retries target object-store bundle download until source upload
       workspacePath: path.join(sourceRoot, "agent-target"),
       maxBytes: 104857600,
     })).bundle));
-    core = new DaemonCore({
+    core = newCore({
       serverUrl: serverBaseUrl,
       apiKey: "sk_machine_test",
       dataDir,
+      slockHome,
       runtimeDetector: () => ({ ids: [], versions: {} }),
       migrationTransport: null,
       connectionOptions: {
@@ -3298,7 +3330,10 @@ test("DaemonCore retries target object-store bundle download until source upload
 });
 
 test("DaemonCore reports transport lost when target object-store download retries expire", async () => {
-  const dataDir = await mkdtemp(path.join(os.tmpdir(), "slock-daemon-migration-target-get-expire-test-"));
+  // Same slockHome/dataDir consistency as the retry test above (task #31).
+  const slockHome = await mkdtemp(path.join(os.tmpdir(), "slock-daemon-migration-target-home-"));
+  const dataDir = path.join(slockHome, "agents");
+  await mkdir(dataDir, { recursive: true });
   const sockets: FakeWebSocket[] = [];
   const callbackPaths: string[] = [];
   const transportLostReports: Array<{ url: string; body: Record<string, unknown> }> = [];
@@ -3343,10 +3378,11 @@ test("DaemonCore reports transport lost when target object-store download retrie
   let core: DaemonCore | null = null;
 
   try {
-    core = new DaemonCore({
+    core = newCore({
       serverUrl: serverBaseUrl,
       apiKey: "sk_machine_test",
       dataDir,
+      slockHome,
       runtimeDetector: () => ({ ids: [], versions: {} }),
       migrationTransport: null,
       connectionOptions: {
@@ -3442,7 +3478,7 @@ test("DaemonCore generation-fences and idempotently acknowledges an in-flight re
   try {
     await mkdir(path.dirname(resumableResiduePath), { recursive: true });
     await writeFile(resumableResiduePath, "partial chunk");
-    core = new DaemonCore({
+    core = newCore({
       serverUrl: transferServer.baseUrl,
       apiKey: "sk_machine_test",
       dataDir,
@@ -3593,7 +3629,7 @@ test("DaemonCore removes only post-flip target migration-generation residue befo
       flipCommitted: true,
     })}\n`);
 
-    core = new DaemonCore({
+    core = newCore({
       serverUrl: transferServer.baseUrl,
       apiKey: "sk_machine_test",
       dataDir,
@@ -3703,7 +3739,7 @@ test("DaemonCore aborts a post-flip source run and removes its exact generation 
   try {
     await mkdir(path.dirname(resumableResiduePath), { recursive: true });
     await writeFile(resumableResiduePath, "source migration residue");
-    core = new DaemonCore({
+    core = newCore({
       serverUrl: transferServer.baseUrl,
       apiKey: "sk_machine_test",
       dataDir,
@@ -3783,7 +3819,7 @@ test("DaemonCore rejects malformed migration transfer leases without exposing to
   let core: DaemonCore | null = null;
 
   try {
-    core = new DaemonCore({
+    core = newCore({
       serverUrl: "https://daemon.example.com",
       apiKey: "sk_machine_test",
       dataDir,
@@ -3847,7 +3883,7 @@ test("DaemonCore starts the default agent migration HTTP transport when listen e
     process.env[AGENT_MIGRATION_TRANSPORT_HOST_ENV] = "127.0.0.1";
     delete process.env[AGENT_MIGRATION_TRANSPORT_PORT_ENV];
     delete process.env[AGENT_MIGRATION_TRANSPORT_PUBLIC_URL_ENV];
-    core = new DaemonCore({
+    core = newCore({
       serverUrl: "https://daemon.example.com",
       apiKey: "sk_machine_test",
       dataDir,
@@ -3901,7 +3937,7 @@ test("DaemonCore derives default agent dataDir from SLOCK_HOME", async () => {
 
   try {
     process.env.SLOCK_HOME = rootDir;
-    new DaemonCore({
+    newCore({
       serverUrl: "https://daemon.example.com",
       apiKey: "sk_machine_test",
       agentManagerFactory: (_sendToServer, _daemonApiKey, options) => {
@@ -3947,7 +3983,7 @@ test("DaemonCore echoes skills list requestId on success and fallback replies", 
   let core: DaemonCore | null = null;
 
   try {
-    core = new DaemonCore({
+    core = newCore({
       serverUrl: "https://daemon.example.com",
       apiKey: "sk_machine_test",
       dataDir: path.join(rootDir, "agents"),
@@ -4058,7 +4094,7 @@ test("DaemonCore prevents two daemon instances from sharing one machine key", as
   const firstSockets: FakeWebSocket[] = [];
   const secondSockets: FakeWebSocket[] = [];
 
-  const makeCore = (sockets: FakeWebSocket[]) => new DaemonCore({
+  const makeCore = (sockets: FakeWebSocket[]) => newCore({
     serverUrl: "https://daemon.example.com",
     apiKey: "sk_machine_test",
     dataDir,
@@ -4129,7 +4165,7 @@ test("DaemonCore blocks legacy daemon startup after the key is adopted by Comput
   );
 
   process.env.SLOCK_HOME = rootDir;
-  const core = new DaemonCore({
+  const core = newCore({
     serverUrl: "https://daemon.example.com",
     apiKey,
     dataDir,
@@ -4184,7 +4220,7 @@ test("DaemonCore releases machine lock even when agent shutdown fails", async ()
   const sockets: FakeWebSocket[] = [];
   const shutdownError = new Error("stop failed");
 
-  const core = new DaemonCore({
+  const core = newCore({
     serverUrl: "https://daemon.example.com",
     apiKey: "sk_machine_test",
     dataDir,
@@ -4206,7 +4242,7 @@ test("DaemonCore releases machine lock even when agent shutdown fails", async ()
     }) as unknown as AgentProcessManager,
   });
 
-  const replacement = new DaemonCore({
+  const replacement = newCore({
     serverUrl: "https://daemon.example.com",
     apiKey: "sk_machine_test",
     dataDir,
@@ -4239,7 +4275,7 @@ test("DaemonCore overrides server-provided agent serverUrl with the live daemon 
   const driver = new FakeDriver();
   const sockets: FakeWebSocket[] = [];
 
-  const core = new DaemonCore({
+  const core = newCore({
     serverUrl: "https://daemon.example.com",
     apiKey: "sk_machine_test",
     dataDir,
@@ -4286,7 +4322,7 @@ test("DaemonCore ACKs an accepted start dispatch and never spawns its replay twi
   const driver = new FakeDriver();
   const sockets: FakeWebSocket[] = [];
 
-  const core = new DaemonCore({
+  const core = newCore({
     serverUrl: "https://daemon.example.com",
     apiKey: "sk_machine_test",
     dataDir,
@@ -4394,7 +4430,7 @@ test("DaemonCore mints a runner credential before starting an agent", async () =
     });
   }) as typeof fetch);
 
-  const core = new DaemonCore({
+  const core = newCore({
     serverUrl: "https://daemon.example.com",
     apiKey: "sk_machine_test",
     dataDir,
@@ -4462,7 +4498,7 @@ test("DaemonCore hard-fails start when runner credential mint is disabled by kil
     headers: { "content-type": "application/json" },
   })) as typeof fetch);
 
-  const core = new DaemonCore({
+  const core = newCore({
     serverUrl: "https://daemon.example.com",
     apiKey: "sk_machine_test",
     dataDir,
@@ -4540,7 +4576,7 @@ test("DaemonCore retries transient runner credential mint failure before spawn",
     });
   }) as typeof fetch);
 
-  const core = new DaemonCore({
+  const core = newCore({
     serverUrl: "https://daemon.example.com",
     apiKey: "sk_machine_test",
     dataDir,
@@ -4589,7 +4625,7 @@ test("DaemonCore acknowledges direct delivery using the embedded message seq whe
   const driver = new FakeDriver();
   const sockets: FakeWebSocket[] = [];
 
-  const core = new DaemonCore({
+  const core = newCore({
     serverUrl: "https://daemon.example.com",
     apiKey: "sk_machine_test",
     dataDir,
@@ -4657,7 +4693,7 @@ test("DaemonCore exposes tracked busy transition receipts and ACKs only after tu
   const dataDir = await mkdtemp(path.join(os.tmpdir(), "slock-daemon-core-test-"));
   const driver = new FakeDriver({ supportsStdinNotification: true });
   const sockets: FakeWebSocket[] = [];
-  const core = new DaemonCore({
+  const core = newCore({
     serverUrl: "https://daemon.example.com",
     apiKey: "sk_machine_test",
     dataDir,
@@ -4748,7 +4784,7 @@ test("DaemonCore does not acknowledge delivery when no process or idle cache can
   const driver = new FakeDriver();
   const sockets: FakeWebSocket[] = [];
 
-  const core = new DaemonCore({
+  const core = newCore({
     serverUrl: "https://daemon.example.com",
     apiKey: "sk_machine_test",
     dataDir,
@@ -4817,7 +4853,7 @@ test("DaemonCore queues delivery that races with a freshly queued start", async 
   const driver = new FakeDriver();
   const sockets: FakeWebSocket[] = [];
 
-  const core = new DaemonCore({
+  const core = newCore({
     serverUrl: "https://daemon.example.com",
     apiKey: "sk_machine_test",
     dataDir,
@@ -4886,7 +4922,7 @@ test("DaemonCore completes legacy runtime profile migration without injection pa
   const driver = new FakeDriver();
   const sockets: FakeWebSocket[] = [];
 
-  const core = new DaemonCore({
+  const core = newCore({
     serverUrl: "https://daemon.example.com",
     apiKey: "sk_machine_test",
     dataDir,
@@ -4944,7 +4980,7 @@ test("DaemonCore treats legacy runtime profile wake messages as reset no-ops", a
   const driver = new FakeDriver();
   const sockets: FakeWebSocket[] = [];
 
-  const core = new DaemonCore({
+  const core = newCore({
     serverUrl: "https://daemon.example.com",
     apiKey: "sk_machine_test",
     dataDir,
@@ -5020,7 +5056,7 @@ test("DaemonCore acknowledges runtime profile control mounted in agent config", 
   const driver = new FakeDriver();
   const sockets: FakeWebSocket[] = [];
 
-  const core = new DaemonCore({
+  const core = newCore({
     serverUrl: "https://daemon.example.com",
     apiKey: "sk_machine_test",
     dataDir,
@@ -5094,7 +5130,7 @@ test("DaemonCore completes runtime profile migration immediately for idle runtim
     kind: "producer",
   });
 
-  const core = new DaemonCore({
+  const core = newCore({
     serverUrl: "https://daemon.example.com",
     apiKey: "sk_machine_test",
     dataDir,
@@ -5201,7 +5237,7 @@ test("DaemonCore logs runtime profile daemon release notices to activity after i
   const driver = new FakeDriver({ supportsStdinNotification: true });
   const sockets: FakeWebSocket[] = [];
 
-  const core = new DaemonCore({
+  const core = newCore({
     serverUrl: "https://daemon.example.com",
     apiKey: "sk_machine_test",
     dataDir,
@@ -5304,7 +5340,7 @@ test("DaemonCore preserves delivery trace context on ack", async () => {
   const { sink, tracer, traceId } = makeDeterministicTracer();
   const serverSpan = tracer.startSpan("server.agent.delivery", { surface: "server", kind: "producer" });
 
-  const core = new DaemonCore({
+  const core = newCore({
     serverUrl: "https://daemon.example.com",
     apiKey: "sk_machine_test",
     dataDir,
@@ -5393,7 +5429,7 @@ test("DaemonCore writes local rotating trace file under machine directory when e
   const sockets: FakeWebSocket[] = [];
   let stopped = false;
 
-  const core = new DaemonCore({
+  const core = newCore({
     serverUrl: "https://daemon.example.com",
     apiKey: "sk_machine_test",
     dataDir,
@@ -5480,7 +5516,7 @@ async function assertDaemonSpawnFailureProjection(options: {
   }
   const driver = new FailingDriver();
 
-  const core = new DaemonCore({
+  const core = newCore({
     serverUrl: "https://daemon.example.com",
     apiKey: "sk_machine_test",
     dataDir,
