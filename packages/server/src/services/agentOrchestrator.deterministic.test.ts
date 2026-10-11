@@ -18182,3 +18182,87 @@ test("agent:delivery:rejected never applies to a delivery another machine owns",
   );
   await orchestrator.shutdown();
 });
+
+test("agent:delivery:rejected removes the pending entry before validating, so a concurrent retry cannot double-route", async () => {
+  const orchestrator = new RejectedDeliveryWakeOrchestrator();
+  seedActiveAgent(orchestrator);
+  const ws = makeFakeWs();
+  seedMachineConnection(orchestrator, "machine-1", ws);
+  const deliver = makeAgentDeliverMessage(79);
+  (orchestrator as unknown as { trackPendingAgentDeliveryAck(machineId: string, msg: unknown): void })
+    .trackPendingAgentDeliveryAck("machine-1", deliver);
+
+  // Gate validateMachineAgentMessage so the rejection handler is observably
+  // parked inside its first await — exactly the window where an ack-timeout
+  // retry used to pass its map check and re-send the same message.
+  let releaseValidate!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    releaseValidate = resolve;
+  });
+  const inner = (orchestrator as unknown as {
+    validateMachineAgentMessage: (...args: unknown[]) => Promise<unknown>;
+  });
+  const origValidate = inner.validateMachineAgentMessage.bind(orchestrator);
+  inner.validateMachineAgentMessage = async (...args: unknown[]) => {
+    await gate;
+    return origValidate(...args);
+  };
+
+  const rejection = orchestrator.handleMachineMessage("machine-1", {
+    type: "agent:delivery:rejected",
+    agentId: "agent-1",
+    seq: 79,
+    reason: "no_process",
+  } as MachineToServerMessage);
+  await flushMicrotasks();
+
+  assert.equal(
+    (orchestrator as unknown as { pendingAgentDeliveryAcks: Map<string, unknown> }).pendingAgentDeliveryAcks.size,
+    0,
+    "the entry is removed synchronously, before the validation await",
+  );
+
+  // A retry firing inside the window must not re-send the delivery.
+  await (orchestrator as unknown as {
+    retryPendingAgentDelivery(key: string, reason: string): Promise<void>;
+  }).retryPendingAgentDelivery("seq:agent-1:79", "ack_timeout");
+  assert.equal(
+    ws.sent.filter((data) => data.includes("agent:deliver")).length,
+    0,
+    "the concurrent retry is suppressed, not double-routed",
+  );
+
+  releaseValidate();
+  await rejection;
+  await flushMicrotasks();
+
+  assert.equal(orchestrator.startAgentCalls.length, 1, "exactly one wake start after validation releases");
+  assert.equal(orchestrator.startAgentCalls[0]?.options.wakeMessage, deliver.message);
+  await orchestrator.shutdown();
+});
+
+test("agent:delivery:rejected restores the pending delivery when validation fails, so a forged rejection cannot eat it", async () => {
+  const orchestrator = new RejectedDeliveryWakeOrchestrator();
+  // The cached agent belongs to another machine, so validation returns null
+  // (no DB touch) — the shape of a rejection forged from a foreign machine.
+  seedActiveAgent(orchestrator, "agent-1", "machine-2");
+  seedMachineConnection(orchestrator, "machine-1", makeFakeWs());
+  (orchestrator as unknown as { trackPendingAgentDeliveryAck(machineId: string, msg: unknown): void })
+    .trackPendingAgentDeliveryAck("machine-1", makeAgentDeliverMessage(80));
+
+  await orchestrator.handleMachineMessage("machine-1", {
+    type: "agent:delivery:rejected",
+    agentId: "agent-1",
+    seq: 80,
+    reason: "no_process",
+  } as MachineToServerMessage);
+  await flushMicrotasks();
+
+  assert.equal(orchestrator.startAgentCalls.length, 0, "an invalid rejection starts nothing");
+  assert.equal(
+    (orchestrator as unknown as { pendingAgentDeliveryAcks: Map<string, unknown> }).pendingAgentDeliveryAcks.size,
+    1,
+    "the pending delivery is restored (retryable) after a failed validation",
+  );
+  await orchestrator.shutdown();
+});

@@ -7930,11 +7930,12 @@ export class AgentOrchestrator extends EventEmitter {
         const endWith = (outcome: string, extra: Record<string, unknown> = {}): void => {
           span.end("ok", { attrs: { outcome, ...extra } });
         };
-        const agent = await this.validateMachineAgentMessage(machineId, conn?.serverId ?? null, msg.agentId, msg.type);
-        if (!agent) {
-          endWith("invalid_agent");
-          break;
-        }
+        // Review fix 2: remove the pending entry BEFORE the first await. A
+        // retry timer that fires while validateMachineAgentMessage yields
+        // would otherwise still pass its map check and redeliver the same
+        // message on top of the wake start below (double routing). If the
+        // message turns out invalid, restore the tracker — a forged
+        // rejection must not eat a live delivery.
         const key = this.findAgentDeliveryAckKey(msg.agentId, msg.seq, msg.deliveryId);
         const pending = key ? this.pendingAgentDeliveryAcks.get(key) : undefined;
         if (!key || !pending) {
@@ -7945,11 +7946,17 @@ export class AgentOrchestrator extends EventEmitter {
           endWith("ignored_other_machine", { pending_machine_id: pending.machineId });
           break;
         }
+        if (pending.timer) this.clock.clearTimeout(pending.timer);
+        this.pendingAgentDeliveryAcks.delete(key);
+        const agent = await this.validateMachineAgentMessage(machineId, conn?.serverId ?? null, msg.agentId, msg.type);
+        if (!agent) {
+          this.trackPendingAgentDeliveryAck(machineId, pending.msg, { scheduleTimeout: false });
+          endWith("invalid_agent_restored");
+          break;
+        }
         // Settle the delivery here: the start below is its continuation, and
         // the ordinary retry-until-gave-up path must not redeliver the same
         // message on top of it.
-        if (pending.timer) this.clock.clearTimeout(pending.timer);
-        this.pendingAgentDeliveryAcks.delete(key);
         let result: AgentStartDispatchResult;
         try {
           result = await this.startAgent(msg.agentId, {
@@ -7976,8 +7983,12 @@ export class AgentOrchestrator extends EventEmitter {
           break;
         }
         // manual_stop: the agent is offline by user intent; the delivery ends
-        // here with a typed outcome instead of retrying until gave_up.
-        endWith(`start_skipped_${result.outcome === "skipped" ? result.reason : result.outcome}`);
+        // here with a typed outcome instead of retrying until gave_up. The
+        // residual cast keeps this compiling as the dispatch-result union
+        // grows; at this point only non-dispatched, non-retracked outcomes
+        // reach here.
+        const residual = result as { outcome: string; reason?: string };
+        endWith(`start_skipped_${residual.outcome === "skipped" ? (residual.reason ?? "unknown") : residual.outcome}`);
         break;
       }
 
@@ -9590,6 +9601,14 @@ export class AgentOrchestrator extends EventEmitter {
       pending.parkedReason = undefined;
       pending.attempts += 1;
       pending.lastAttemptAt = this.clock.now();
+      // Review fix 2 (companion check): the rejection handler removes the
+      // pending entry SYNCHRONOUSLY when a "no process" rejection arrives; a
+      // retry that captured this entry before one of the awaits above must
+      // not re-send on top of the wake start that rejection converted into.
+      if (!this.pendingAgentDeliveryAcks.has(key)) {
+        span.end("ok", { attrs: { outcome: "dropped", reason: "superseded_by_rejection" } });
+        return;
+      }
       let routeTraceAttrs: Record<string, unknown> = {};
       const sent = await this.sendToMachine(pending.machineId, pending.msg, {
         onRouteResult: (routeResult) => {

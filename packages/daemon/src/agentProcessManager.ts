@@ -3479,6 +3479,7 @@ export class AgentProcessManager {
         this.interruptCompactionIfActive(agentId);
         cleanupLaunchProxies(agentId);
         this.revokeManagedRunnerCredential(agentId, ap.config, ap.launchId);
+        this.releaseTrackedMentionDeliveriesForProcessExit(agentId, ap);
         this.agents.delete(agentId);
 
         if (shouldColdStartResumeSession) {
@@ -4431,6 +4432,16 @@ export class AgentProcessManager {
    * so neither ack can double-fire nor be missed.
    */
   private settleUndeliveredTrackedMentionsAtTurnEnd(agentId: string, ap: AgentProcess): void {
+    // Review fix 1: a turn that ended in a sticky terminal failure, or without
+    // a usable session, makes the inbox UNRELIABLE as evidence — the message
+    // sitting in it may still be delivered by a later turn or a restart. A
+    // still-queued mention must NOT be settled to DELIVERY_REJECTED here
+    // (that error is terminal on the server), or the mention is lost for good
+    // once this process's inbox dies with a daemon restart. Leave it pending;
+    // a later turn end, the consume-time settle, or the process-exit release
+    // owns it.
+    const inboxUnreliable = classifyStickyTerminalFailure(ap) !== null
+      || !this.canDeliverToRuntimeSession(ap);
     for (const [occurrenceId, tracked] of [...this.trackedMentionDeliveries.entries()]) {
       if (tracked.agentId !== agentId || tracked.state !== "pending") continue;
       const queued = ap.inbox.find((message) => message.message_id === tracked.messageId);
@@ -4451,11 +4462,36 @@ export class AgentProcessManager {
         : this.isVisibleMessageModelSeen(agentId, formatAgentMessageVisibleTarget(tracked.message), tracked.message);
       if (toldRuntime) {
         this.completeTrackedMentionDelivery(tracked.context);
-      } else {
-        tracked.context.onMentionTerminalError?.("DELIVERY_REJECTED");
-        // Terminal: release the entry so later turn ends do not report it again.
-        this.trackedMentionDeliveries.delete(occurrenceId);
+        continue;
       }
+      if (queued && inboxUnreliable) continue;
+      tracked.context.onMentionTerminalError?.("DELIVERY_REJECTED");
+      // Terminal: release the entry so later turn ends do not report it again.
+      this.trackedMentionDeliveries.delete(occurrenceId);
+    }
+  }
+
+  /**
+   * Review fix 3 (+ note b): release this agent's tracked mention deliveries
+   * when its process ends. A pending entry pointing at a dead process can
+   * never be settled by a turn end — every server redelivery would hit
+   * duplicate_pending forever (per_turn runtimes crash this way; the same
+   * stuck entry forms for any runtime whose process dies mid-queue). The
+   * server redelivers what it still considers undelivered, and that redelivery
+   * re-tracks against the replacement process. Drained entries of the ended
+   * process are released too: the server holds their acks, and keeping them
+   * (each now carries a full AgentMessage) only grows the map.
+   */
+  private releaseTrackedMentionDeliveriesForProcessExit(agentId: string, ap: AgentProcess): void {
+    for (const [occurrenceId, tracked] of [...this.trackedMentionDeliveries.entries()]) {
+      if (tracked.agentId !== agentId) continue;
+      if (tracked.state === "pending" && tracked.toldProcessInstanceId === ap.processInstanceId) {
+        // Named in this process's first input: the process WAS told before it
+        // ended — ack it instead of releasing.
+        this.completeTrackedMentionDelivery(tracked.context);
+        continue;
+      }
+      this.trackedMentionDeliveries.delete(occurrenceId);
     }
   }
 
