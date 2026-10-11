@@ -1573,6 +1573,7 @@ export class DaemonCore {
   private readonly acceptingStartDispatches = new Map<string, Promise<AgentStartAckMessage>>();
   private readonly runtimeModelDetectCache = new Map<string, { atMs: number; outcome: RuntimeModelSourceOutcome }>();
   private readonly runtimeModelDetectInFlight = new Map<string, Promise<RuntimeModelSourceOutcome>>();
+  private readonly lastReadyRuntimeVersions = new Map<string, string | null>();
   private readonly handledComputerControlOperationIds = new Set<string>();
   private readonly runtimeAccountUsageCollector: RuntimeAccountUsageCollector;
   private static readonly START_DISPATCH_RECEIPT_CACHE_SIZE = 1_024;
@@ -3721,6 +3722,17 @@ export class DaemonCore {
   }
 
   /**
+   * Drop cached model detections: one runtime (version change at ready) or
+   * the whole machine (credential surface / upgrade / explicit rescan — see
+   * the callers; a fresh detection is only a CLI spawn away, so clearing is
+   * cheap and always safe).
+   */
+  private clearRuntimeModelDetectCache(runtime?: string): void {
+    if (runtime) this.runtimeModelDetectCache.delete(runtime);
+    else this.runtimeModelDetectCache.clear();
+  }
+
+  /**
    * Single-flight + short-cache wrapper around one runtime's model detection
    * (B2 item 3, model-catalog re-pull storm). Detection spawns the runtime's
    * CLI (some take seconds), so concurrent `machine:runtime_models:detect`
@@ -4105,6 +4117,9 @@ export class DaemonCore {
       // as `machine:capabilities` — so re-emitting IS the answer, no bespoke
       // result message needed.
       case "machine:runtimes:rescan":
+        // The Server re-probes because the runtime surface changed (install,
+        // removal, credential grant): stale detections must not answer it.
+        this.clearRuntimeModelDetectCache();
         this.emitReadyIfConnected();
         break;
 
@@ -4141,6 +4156,9 @@ export class DaemonCore {
       case "machine:cursor_sdk:login": {
         // Owner-only upstream (server enforces machine ownership); the reply
         // carries only the validated login URL or a failure reason — the
+        // A Cursor login changes the credential surface behind the model list;
+        // drop cached detections so the next ask reflects it (task #4 item 3).
+        this.clearRuntimeModelDetectCache();
         // browser wait is observed via status polling, never held open here.
         const span = this.tracer.startSpan("daemon.cursor_sdk.login", {
           surface: "daemon",
@@ -4174,6 +4192,9 @@ export class DaemonCore {
       }
 
       case "machine:cursor_sdk:status": {
+        // Status transitions (bound -> logged out, key rotations) are part of
+        // the credential surface; drop cached detections (task #4 item 3).
+        this.clearRuntimeModelDetectCache();
         const span = this.tracer.startSpan("daemon.cursor_sdk.status", {
           surface: "daemon",
           kind: "internal",
@@ -4332,6 +4353,11 @@ export class DaemonCore {
         // launched by a Computer service (onComputerControl wired); a raw
         // daemon has no service to drive and ignores it.
         const action = msg.type === "computer:restart" ? "restart" : "upgrade";
+        if (action === "upgrade") {
+          // An upgrade swaps the binaries/runtimes themselves: every cached
+          // detection is potentially stale (task #4 item 3).
+          this.clearRuntimeModelDetectCache();
+        }
         const operationId = msg.operationId ?? msg.requestId;
         const requestId = msg.requestId ?? msg.operationId;
         const alreadyDurable = operationId
@@ -4419,6 +4445,15 @@ export class DaemonCore {
 
   private async emitReady(expectedLifecycleGeneration?: number): Promise<boolean> {
     const { ids: runtimes, versions: runtimeVersions, diagnostics: runtimeDiagnostics = {} } = this.runtimeDetector();
+    // A version change at ready means the runtime was reinstalled/upgraded:
+    // its cached model detection is stale (task #4 item 3).
+    for (const id of runtimes) {
+      const version = runtimeVersions[id] ?? null;
+      if (this.lastReadyRuntimeVersions.has(id) && this.lastReadyRuntimeVersions.get(id) !== version) {
+        this.clearRuntimeModelDetectCache(id);
+      }
+      this.lastReadyRuntimeVersions.set(id, version);
+    }
     const runtimeInfo = runtimes.map((id) => runtimeVersions[id] ? `${id} (${runtimeVersions[id]})` : id);
     logger.info(`[Daemon] Detected runtimes: ${runtimeInfo.join(", ") || "none"}`);
     for (const [runtime, diagnostic] of Object.entries(runtimeDiagnostics)) {

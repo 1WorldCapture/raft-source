@@ -317,15 +317,23 @@ async function runCallerStopThenStart(
   );
   await runtime.stop({ signal, hostLifecycleOwner: "cli" });
   signal.throwIfAborted();
-  await runtime.start(
-    {
-      foreground: opts.foreground,
-      serverId: plan.serverId,
-      serverLabel: plan.serverLabel,
-      hostLifecycleOwner: "cli",
-    },
-    { signal },
-  );
+  try {
+    await runtime.start(
+      {
+        foreground: opts.foreground,
+        serverId: plan.serverId,
+        serverLabel: plan.serverLabel,
+        hostLifecycleOwner: "cli",
+      },
+      { signal },
+    );
+  } catch (err) {
+    // The stop already succeeded, so a failed start leaves the machine DOWN.
+    // Say so explicitly — the raw error alone reads like nothing happened.
+    const detail = err instanceof Error ? err.message : String(err);
+    runtime.emitInfo(`Start failed after the stop (${detail}). The service is STOPPED — run \`raft-computer start\` to bring it back up.`);
+    throw err;
+  }
 }
 
 export async function runRestartCommand(
@@ -340,7 +348,7 @@ export async function runRestartCommand(
   const { pid } = await runtime.findLiveService(plan.slockHome);
   signal.throwIfAborted();
 
-  if (pid !== null && !runtime.callerRunnerHosted()) {
+  if (pid !== null && !runtime.callerRunnerHosted(process.env, { servicePid: pid })) {
     await runCallerStopThenStart(plan, pid, opts, signal, runtime);
     return;
   }

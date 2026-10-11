@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { test } from "vitest";
 
 import { program, runRestartCommand, type RestartCommandDeps } from "./cli.js";
+import { callerIsRunnerHosted, setParentPidReaderForTests } from "./restartReadiness.js";
 
 test("CLI lifecycle contract: ordinary command surface excludes destructive and reversal-only verbs", () => {
   const commands = program.commands.map((cmd) => cmd.name());
@@ -217,6 +218,81 @@ test("CLI restart from inside an agent process requests the IPC handoff and neve
     "info:Service restart requested (pid 4242); replacement service will take over without relying on this shell.",
     "info:Running inside an agent process: not waiting for runners to reconnect. Check with `raft-computer status`.",
   ]);
+});
+
+test("CLI restart from a service descendant WITHOUT the agent marker (in-process SDK lane) takes the IPC handoff", async () => {
+  const calls: string[] = [];
+  const signal = new AbortController().signal;
+  const deps = {
+    resolveRaftHome: () => "/tmp/raft-home",
+    listAttachedServerIds: async () => ["server-a"],
+    prepareLocalLifecycleOperations: async () => [],
+    findLiveServicePidReadOnly: async () => LIVE_SERVICE,
+    // The REAL classifier, anchored to a fake self pid whose parent IS the
+    // service — the pi/kimi-sdk bash-tool lane: daemon env (no agent marker),
+    // but the CLI still runs as a service descendant.
+    callerIsRunnerHosted: (env: NodeJS.ProcessEnv | undefined, probe?: { servicePid?: number | null; selfPid?: number }) =>
+      callerIsRunnerHosted(env ?? {}, { ...probe, selfPid: 4243 }),
+    runStop: async () => {
+      calls.push("forbidden-stop");
+    },
+    runStart: async () => {
+      calls.push("forbidden-start");
+    },
+    prepareTargetsForServiceHandoff: async () => {
+      calls.push("prepare");
+    },
+    requestServiceRestartViaIpc: async () => {
+      calls.push("ipc");
+      return { status: "accepted" as const };
+    },
+    info: (line: string) => {
+      calls.push(`info:${line}`);
+    },
+    fail: (code: string, message: string): never => {
+      throw new Error(`fail:${code}:${message}`);
+    },
+  } satisfies RestartCommandDeps;
+
+  setParentPidReaderForTests((pid) => (pid === 4243 ? 4242 : null));
+  try {
+    await runRestartCommand(undefined, {}, signal, deps);
+  } finally {
+    setParentPidReaderForTests(null);
+  }
+
+  assert.ok(calls.includes("ipc"), "a service descendant must get the IPC handoff");
+  assert.ok(!calls.includes("forbidden-stop"), "the service is never stopped from a descendant caller");
+  assert.ok(!calls.includes("forbidden-start"));
+});
+
+test("CLI restart from a terminal prints a clear stopped-machine message when the start half fails", async () => {
+  const infos: string[] = [];
+  const deps = {
+    resolveRaftHome: () => "/tmp/raft-home",
+    listAttachedServerIds: async () => ["server-a"],
+    findLiveServicePidReadOnly: async () => LIVE_SERVICE,
+    callerIsRunnerHosted: () => false,
+    runStop: async () => {},
+    runStart: async () => {
+      throw new Error("DNS resolution failed");
+    },
+    info: (line: string) => {
+      infos.push(line);
+    },
+    fail: (code: string, message: string): never => {
+      throw new Error(`${code}:${message}`);
+    },
+  } satisfies RestartCommandDeps;
+
+  await assert.rejects(
+    runRestartCommand(undefined, {}, new AbortController().signal, deps),
+    /DNS resolution failed/,
+  );
+  assert.ok(
+    infos.some((line) => line.includes("STOPPED") && line.includes("raft-computer start")),
+    `the failure must tell the user the machine is down and how to recover: ${JSON.stringify(infos)}`,
+  );
 });
 
 test("CLI restart cold-boot path remains start-only and preserves scoped target", async () => {

@@ -2,7 +2,7 @@ import { realpathSync } from "node:fs";
 import { access } from "node:fs/promises";
 import { resolve } from "node:path";
 
-import { executableFileIdentity } from "@botiverse/raft-shared";
+import { executableFileIdentity } from "./liveExecutable.js";
 
 import { kSlotBinaryPath } from "./kPaths.js";
 import {

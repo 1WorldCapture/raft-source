@@ -9,20 +9,11 @@
 // again — agent `raft` wrappers, `__run` respawns, service self-restart — must
 // resolve the live path instead of trusting the startup string.
 //
-// Pure: callers inject the filesystem probes so this module stays fs-free
-// (executableFileIdentity is the one fs-touching default, injectable too).
-
-import { statSync } from "node:fs";
-
-/** `dev:ino` of a file, or null when the platform cannot report one. */
-export function executableFileIdentity(path: string, statOf: (p: string) => { dev: number; ino: number } = statSync): string | null {
-  try {
-    const stat = statOf(path);
-    return stat.ino > 0 ? `${stat.dev}:${stat.ino}` : null;
-  } catch {
-    return null;
-  }
-}
+// Pure: callers inject the filesystem probes so this module stays fs-free.
+// shared is consumed as SOURCE by the browser web package, so no node:fs
+// import may appear here — the `dev:ino` identity helper lives in the node
+// packages (daemon drivers/cliTransport, computer liveExecutable), matching
+// the upstream layout.
 
 export interface LiveExecutablePathDeps {
   execPath: string;

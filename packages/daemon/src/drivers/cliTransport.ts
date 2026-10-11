@@ -1,7 +1,7 @@
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
-import { executableFileIdentity, hydrateRuntimeConfig, kPromotedSlotPath, resolveLiveExecutablePath, runtimeConfigToLaunchFields, type AgentConfig } from "@botiverse/raft-shared";
+import { hydrateRuntimeConfig, kPromotedSlotPath, resolveLiveExecutablePath, runtimeConfigToLaunchFields, type AgentConfig } from "@botiverse/raft-shared";
 import type { SpawnContext } from "./types.js";
 import { buildCliSystemPrompt, type SystemPromptOptions } from "./systemPrompt.js";
 import type { AxSurfaceText } from "@botiverse/raft-shared";
@@ -9,6 +9,20 @@ import { SLOCK_HOME_ENV, resolveRaftHome } from "../raftHome.js";
 import { registerAgentCredentialProxy } from "../agentCredentialProxy.js";
 import { LOOPBACK_NO_PROXY, applyLoopbackNoProxyEnv } from "../loopbackNoProxy.js";
 import { detectNodeHostKind, resolveNodeHostLaunch, type NodeHostKind } from "./nodeHostLaunch.js";
+
+/**
+ * `dev:ino` of a file, or null when the platform cannot report one. Lives
+ * here (node side) rather than in shared: shared is consumed as source by
+ * the browser web package and must stay free of node:fs imports.
+ */
+export function executableFileIdentity(path: string, statOf: (p: string) => { dev: number; ino: number } = statSync): string | null {
+  try {
+    const stat = statOf(path);
+    return stat.ino > 0 ? `${stat.dev}:${stat.ino}` : null;
+  } catch {
+    return null;
+  }
+}
 
 // Captured at module load, i.e. before any later K promotion or staging can
 // rename or replace the file behind process.execPath.
@@ -21,10 +35,6 @@ let readProcSelfExeForHost: () => string | null = () => {
     return null;
   }
 };
-
-// Re-exported for tests that assert wrapper contents against the shared
-// identity helper used to build them.
-export { executableFileIdentity };
 
 /**
  * Test seam: a test that fakes process.execPath cannot fake /proc/self/exe,
