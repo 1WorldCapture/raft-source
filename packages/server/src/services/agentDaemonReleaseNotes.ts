@@ -1681,6 +1681,13 @@ export const AGENT_DAEMON_RELEASE_NOTES: AgentDaemonReleaseNote[] = [
         whyItMatters:
           "Your workspace files are no longer at risk from a malformed workspace-delete or workspace-reset request, and a refused reset is now reported instead of silently ignored. Nothing changes for normal use.",
       },
+      {
+        category: "reliability",
+        summary:
+          "Adopting a migration bundle now refuses an agent id that is not a single path segment, and the restored workspace must land exactly one directory below the agent data directory.",
+        whyItMatters:
+          "A malformed bundle could previously aim a restore at the agent data root itself; it is now refused before anything is moved. Normal migrations are unaffected.",
+      },
     ],
   },
 ];
