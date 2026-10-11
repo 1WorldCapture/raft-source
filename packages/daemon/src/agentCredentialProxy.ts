@@ -3,7 +3,11 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { URL } from "node:url";
 import {
+  AGENT_API_EVENTS_ACK_HEADER,
+  AGENT_API_EVENTS_ACK_LEASE,
   formatTraceparent,
+  isThirdPartyEventId,
+  normalizeThirdPartyEventId,
   noopTracer,
   parseAgentApiAppSourceAckReject,
   parseTraceparent,
@@ -13,6 +17,10 @@ import {
   type TraceStatus,
   type Tracer,
 } from "@botiverse/raft-shared";
+import {
+  createThirdPartyEventDeliveryReporter,
+  thirdPartyEventIdsFromEvents,
+} from "./thirdPartyEventDeliveryReporter.js";
 import type { ApmHeldFreshnessEnvelopeBody } from "./apmStateMachine.js";
 import {
   maxInboxMessageSeq,
@@ -39,7 +47,76 @@ type ProxyRegistration = {
   tracer: Tracer;
   daemonVersion: string | null;
   computerVersion: string | null;
+  /** Task #178: third-party events served under lease, keyed by batch id. Lives with the registration, so a relaunch voids them. */
+  thirdPartyLeases?: Map<string, ThirdPartyEventLease>;
 };
+
+// Task #178 — serve = lease, ack = consume + report. A leased event stays in
+// the Local Inbox: a later /events re-serves it under a new batch (voiding the
+// old one) and an expired lease simply rejects a late ack. Leases live only in
+// memory: a daemon restart means "never acked" and the server re-pushes.
+type ThirdPartyEventLease = {
+  batchId: string;
+  eventIds: Set<string>;
+  messages: AgentProxyVisibleMessage[];
+  expiresAt: number;
+  timer: NodeJS.Timeout;
+};
+const THIRD_PARTY_EVENT_LEASE_MS = 60_000;
+let thirdPartyEventLeaseMs = THIRD_PARTY_EVENT_LEASE_MS;
+export function __setThirdPartyEventLeaseMsForTest(ms: number | undefined): void {
+  thirdPartyEventLeaseMs = ms ?? THIRD_PARTY_EVENT_LEASE_MS;
+}
+
+export function __setThirdPartyEventDeliveryReportRetryBaseMsForTest(ms: number | undefined): void {
+  thirdPartyEventDeliveryReportRetryBaseMs = ms ?? THIRD_PARTY_EVENT_DELIVERY_REPORT_RETRY_BASE_MS;
+}
+
+function thirdPartyEventIdOf(message: unknown): string | null {
+  const id = (message as { third_party_event?: { id?: unknown } | null } | null)?.third_party_event?.id;
+  return isThirdPartyEventId(id) ? normalizeThirdPartyEventId(id) : null;
+}
+
+function voidThirdPartyLeasesCovering(registration: ProxyRegistration, eventIds: Iterable<string>): void {
+  const leases = registration.thirdPartyLeases;
+  if (!leases) return;
+  const ids = new Set(eventIds);
+  for (const [batchId, lease] of leases) {
+    for (const id of lease.eventIds) {
+      if (ids.has(id)) {
+        clearTimeout(lease.timer);
+        leases.delete(batchId);
+        break;
+      }
+    }
+  }
+}
+
+function leaseThirdPartyEvents(
+  registration: ProxyRegistration,
+  messages: AgentProxyVisibleMessage[],
+): { batch_id: string; event_ids: string[]; expires_at: string } {
+  const leases = (registration.thirdPartyLeases ??= new Map());
+  const eventIds = new Set<string>();
+  for (const message of messages) {
+    const id = thirdPartyEventIdOf(message);
+    if (id) eventIds.add(id);
+  }
+  voidThirdPartyLeasesCovering(registration, eventIds);
+  const batchId = randomUUID();
+  const expiresAt = Date.now() + thirdPartyEventLeaseMs;
+  const timer = setTimeout(() => {
+    leases.delete(batchId);
+  }, thirdPartyEventLeaseMs);
+  timer.unref?.();
+  leases.set(batchId, { batchId, eventIds, messages, expiresAt, timer });
+  return { batch_id: batchId, event_ids: [...eventIds], expires_at: new Date(expiresAt).toISOString() };
+}
+
+function clearThirdPartyLeases(registration: ProxyRegistration): void {
+  for (const lease of registration.thirdPartyLeases?.values() ?? []) clearTimeout(lease.timer);
+  registration.thirdPartyLeases?.clear();
+}
 
 type ProxyHandle = {
   proxyUrl: string;
@@ -229,6 +306,27 @@ export type AgentProxyTransportNormalizedError = {
 };
 
 const registrations = new Map<string, ProxyRegistration>();
+
+const THIRD_PARTY_EVENT_DELIVERY_REPORT_RETRY_BASE_MS = 5_000;
+let thirdPartyEventDeliveryReportRetryBaseMs = THIRD_PARTY_EVENT_DELIVERY_REPORT_RETRY_BASE_MS;
+const thirdPartyEventDeliveryReporter = createThirdPartyEventDeliveryReporter({
+  // The agent's newest registration: a relaunch replaces the runner credential.
+  resolveTarget: (agentId) => {
+    let latest: ProxyRegistration | null = null;
+    for (const registration of registrations.values()) {
+      if (registration.agentId === agentId) latest = registration;
+    }
+    return latest ? { serverUrl: latest.serverUrl, apiKey: latest.apiKey } : null;
+  },
+  fetch: (url, init) => daemonFetch(url, init, process.env, { isolationKey: AGENT_CREDENTIAL_PROXY_FETCH_ISOLATION_KEY }),
+  retryBaseMs: () => thirdPartyEventDeliveryReportRetryBaseMs,
+  onOutcome: (outcome) => {
+    if (outcome.outcome === "reported") return;
+    logger.warn(
+      `[Agent ${outcome.agentId}] Third-party event delivery report ${outcome.outcome} (events=${outcome.eventCount}, pending=${outcome.pendingCount}${outcome.httpStatus ? `, http=${outcome.httpStatus}` : ""})`,
+    );
+  },
+});
 let proxyServerState: ProxyServerState | null = null;
 let proxyServerStartPromise: Promise<ProxyServerState> | null = null;
 let proxyServerFactory: ProxyServerFactory = createProxyServer;
@@ -569,12 +667,31 @@ async function handleProxyRequest(req: http.IncomingMessage, res: http.ServerRes
       return;
     }
 
+    // Task #178: the CLI acks a leased batch of third-party events after it
+    // has written them out. Never forwarded: the lease is daemon state.
+    if (method === "POST" && target.pathname === "/internal/agent-api/third-party-events/ack") {
+      const localAck = localAgentApiThirdPartyEventsAckResponse(registration, rawBodyBuffer ?? Buffer.alloc(0));
+      proxySpanStatus = localAck.status < 400 ? "ok" : "error";
+      proxySpanEndAttrs = {
+        outcome: "local_response",
+        local_response_kind: "third_party_events_ack",
+        http_status: localAck.status,
+        ...localAck.attrs,
+      };
+      res.writeHead(localAck.status, { "content-type": "application/json" });
+      res.end(JSON.stringify(localAck.body));
+      return;
+    }
+
     // Local Inbox first: a managed runner's message check is a projection of
     // the daemon's accepted-but-not-yet-visible inbox. Do not forward to the
     // server while local pending exists, or a busy runtime can receive a
     // pending notification and then see "No new messages."
     if (method === "GET" && target.pathname === "/internal/agent-api/events") {
-      const localEvents = await localAgentApiEventsResponse(registration, target);
+      // Task #178: a CLI that will ack after output declares it; only then are
+      // third-party events leased instead of consumed-and-reported on finish.
+      const leaseThirdParty = firstRequestHeader(req.headers[AGENT_API_EVENTS_ACK_HEADER])?.trim().toLowerCase() === AGENT_API_EVENTS_ACK_LEASE;
+      const localEvents = await localAgentApiEventsResponse(registration, target, { leaseThirdPartyEvents: leaseThirdParty });
       if (localEvents) {
         proxySpanStatus = "ok";
         proxySpanEndAttrs = {
@@ -582,6 +699,23 @@ async function handleProxyRequest(req: http.IncomingMessage, res: http.ServerRes
           local_response_kind: "events",
           http_status: localEvents.status,
         };
+        const servedThirdPartyEventIds = thirdPartyEventIdsFromEvents(
+          Array.isArray(localEvents.body.events) ? localEvents.body.events : [],
+        );
+        if (servedThirdPartyEventIds.length > 0) {
+          // "lease" (task #178): consumed and reported only when the CLI acks
+          // the batch after writing it out (third-party-events/ack branch).
+          // "finish_fallback" (task #175): for CLIs without the ack, reported
+          // once the response has been written. `finish` means "handed to the
+          // OS", not "the client read it", so a CLI dying mid-read loses the
+          // event; the attr lets that fallback share be read from traces
+          // until every CLI acks and the path is removed.
+          proxySpanEndAttrs.third_party_ack_mode = leaseThirdParty ? "lease" : "finish_fallback";
+          proxySpanEndAttrs.third_party_served_count = servedThirdPartyEventIds.length;
+          if (!leaseThirdParty) {
+            res.once("finish", () => thirdPartyEventDeliveryReporter.report(registration.agentId, servedThirdPartyEventIds));
+          }
+        }
         res.writeHead(localEvents.status, { "content-type": "application/json" });
         res.end(JSON.stringify(localEvents.body));
         return;
@@ -1357,6 +1491,7 @@ function parseAgentApiEventsQuery(target: URL): {
 async function localAgentApiEventsResponse(
   registration: ProxyRegistration,
   target: URL,
+  options: { leaseThirdPartyEvents: boolean } = { leaseThirdPartyEvents: false },
 ): Promise<{ status: number; body: Record<string, unknown> } | undefined> {
   const coordinator = registration.inboxCoordinator;
   if (!coordinator) return undefined;
@@ -1389,13 +1524,24 @@ async function localAgentApiEventsResponse(
   const lastSeenMsgId = newestEvent?.message_id ?? newestEvent?.id ?? null;
   const lastSeenSeq = newestEvent?.seq ?? parsedQuery.sinceSeq;
 
-  if (events.length > 0) {
+  // Task #178: under an ack lease, third-party events are neither consumed nor
+  // reported here; they stay pending until the CLI acks the batch (or are
+  // re-served under a new batch by a later /events). Ordinary messages keep
+  // their existing local consumption.
+  const leasedThirdParty = options.leaseThirdPartyEvents
+    ? events.filter((message) => thirdPartyEventIdOf(message) !== null)
+    : [];
+  const consumable = leasedThirdParty.length > 0
+    ? events.filter((message) => thirdPartyEventIdOf(message) === null)
+    : events;
+  if (consumable.length > 0) {
     // Local drain of the daemon Local Inbox is still an /events projection: it
     // can be sparse and is often reached from a wake/@mention signal. Record
     // exact ids for duplicate suppression, but do not advance model-seen
     // high-water; only verified contiguous content consumption may do that.
-    coordinator.consumeVisibleMessages({ messages: events, source: "agent_api_events_local" });
+    coordinator.consumeVisibleMessages({ messages: consumable, source: "agent_api_events_local" });
   }
+  const thirdPartyLease = leasedThirdParty.length > 0 ? leaseThirdPartyEvents(registration, leasedThirdParty) : null;
   coordinator.recordDrainOutcome?.({
     source: "daemon_pending",
     sinceCursorKind: parsedQuery.sinceCursorKind,
@@ -1414,7 +1560,65 @@ async function localAgentApiEventsResponse(
       pending_notice_ids: [] as string[],
       wake_reason: null as string | null,
       has_more: hasMore,
+      ...(thirdPartyLease ? { third_party_lease: thirdPartyLease } : {}),
     },
+  };
+}
+
+function localAgentApiThirdPartyEventsAckResponse(
+  registration: ProxyRegistration,
+  bodyRaw: Buffer,
+): { status: number; body: Record<string, unknown>; attrs: Record<string, unknown> } {
+  let parsed: { batchId?: unknown; eventIds?: unknown };
+  try {
+    parsed = JSON.parse(bodyRaw.toString("utf8") || "{}") as { batchId?: unknown; eventIds?: unknown };
+  } catch {
+    return { status: 400, body: { error: "invalid JSON body", code: "invalid_json" }, attrs: { third_party_ack_outcome: "invalid" } };
+  }
+  const batchId = typeof parsed.batchId === "string" ? parsed.batchId.trim() : "";
+  const rawIds: unknown[] = Array.isArray(parsed.eventIds) ? parsed.eventIds : [];
+  if (!batchId || rawIds.length === 0 || !rawIds.every(isThirdPartyEventId)) {
+    return {
+      status: 400,
+      body: { error: "batchId and a non-empty array of event ids are required", code: "ack_body_invalid" },
+      attrs: { third_party_ack_outcome: "invalid" },
+    };
+  }
+  const lease = registration.thirdPartyLeases?.get(batchId);
+  if (!lease || lease.expiresAt <= Date.now()) {
+    // Expired, voided by a later /events, or from another registration: the
+    // events are still pending locally and will be served again. Nothing is
+    // consumed or reported.
+    if (lease) {
+      clearTimeout(lease.timer);
+      registration.thirdPartyLeases?.delete(batchId);
+    }
+    return {
+      status: 409,
+      body: { error: "lease is not live; the events will be served again on the next check", code: "lease_not_live" },
+      attrs: { third_party_ack_outcome: "lease_not_live" },
+    };
+  }
+  clearTimeout(lease.timer);
+  registration.thirdPartyLeases?.delete(batchId);
+  const acked = new Set<string>();
+  for (const id of rawIds as string[]) {
+    const normalized = normalizeThirdPartyEventId(id);
+    if (lease.eventIds.has(normalized)) acked.add(normalized);
+  }
+  const messages = lease.messages.filter((message) => {
+    const id = thirdPartyEventIdOf(message);
+    return id !== null && acked.has(id);
+  });
+  if (messages.length > 0) {
+    registration.inboxCoordinator?.consumeVisibleMessages({ messages, source: "agent_api_events_local" });
+  }
+  const ackedIds = [...acked];
+  if (ackedIds.length > 0) thirdPartyEventDeliveryReporter.report(registration.agentId, ackedIds);
+  return {
+    status: 200,
+    body: { ok: true, batchId, acked: ackedIds },
+    attrs: { third_party_ack_outcome: "acked", third_party_ack_count: ackedIds.length },
   };
 }
 
@@ -1709,6 +1913,7 @@ export function unregisterAgentCredentialProxyForLaunch(input: {
   const launchId = input.launchId ?? null;
   for (const [token, registration] of registrations) {
     if (registration.agentId === input.agentId && registration.launchId === launchId) {
+      clearThirdPartyLeases(registration);
       registrations.delete(token);
       removed += 1;
     }
@@ -1720,6 +1925,7 @@ export function unregisterAgentCredentialProxiesForAgent(agentId: string): numbe
   let removed = 0;
   for (const [token, registration] of registrations) {
     if (registration.agentId !== agentId) continue;
+    clearThirdPartyLeases(registration);
     registrations.delete(token);
     removed += 1;
   }

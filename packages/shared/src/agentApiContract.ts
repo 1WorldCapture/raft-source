@@ -165,6 +165,13 @@ const passthroughObject = <T extends z.ZodRawShape>(shape: T) => z.object(shape)
 
 export const taskStatusSchema = z.enum(["todo", "in_progress", "in_review", "done", "closed"]);
 
+// Task #178: a managed-runner CLI that will acknowledge leased third-party
+// events after writing them out declares it on the /events request. The CLI
+// sends it only from the code path that performs the ack, so "declared but
+// never acked" cannot occur. Daemons without lease support ignore the header.
+export const AGENT_API_EVENTS_ACK_HEADER = "x-raft-events-ack";
+export const AGENT_API_EVENTS_ACK_LEASE = "lease";
+
 export const agentApiEventsQuerySchema = passthroughObject({
   since: optionalStringSchema,
   limit: optionalStringSchema,
