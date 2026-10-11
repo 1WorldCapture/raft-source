@@ -1762,7 +1762,12 @@ agentRouter.post("/", async (req, res) => {
 
     io?.to(`server:${req.serverId}`).emit("agent:created", { agent: stripEnvVars(result) });
 
-    res.json(result);
+    // Task #30: when no computer was online at creation the affinity stays
+    // empty; tell the caller explicitly instead of letting them discover it.
+    res.json({
+      ...result,
+      ...(agent.machineAffinityWarning ? { machineAffinityWarning: agent.machineAffinityWarning } : {}),
+    });
   } catch (err: any) {
     const msg = err?.message || "";
     if (

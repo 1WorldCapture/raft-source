@@ -1,12 +1,13 @@
 import { createHash } from "crypto";
 import { isDeepStrictEqual } from "node:util";
-import { eq, and, inArray, isNull, sql, asc, ne } from "drizzle-orm";
+import { eq, and, inArray, isNull, sql, asc, ne, desc } from "drizzle-orm";
 import { getDb, withDbTraceAttributes, type DatabaseExecutor, type DatabaseTransaction } from "../db/index.js";
 import { agents, machines, channels, channelAgents, servers, serverMembers, serverAgentMembers, users, agentRuntimeProfiles, messages, tasks, taskEvents, agentProviderConnections, agentCredentials, agentScopes, oauthGrants, agentChannelReadCursors, mentionDeliveryOccurrences, agentKnowledgeEvents, managedMcpAssignments, attestedSendPendingDrafts, reminders } from "../db/schema.js";
 import { ALL_CHANNEL_TEAM_THRESHOLD, EXTERNAL_AGENT_RUNTIME_ID, PLAN_CONFIG, currentDate, getEffectiveLimits, type AgentRuntimeErrorState, type AgentStatus, type ServerPlan, type ReasoningEffort, type RuntimeConfig, getDefaultModel, isExternalAgentRuntime, validateAgentName } from "@botiverse/raft-shared";
 import { assertAgentCapacityAvailable, getServerBillingEntitlement, getServerBillingUsage, withAgentCreateLock } from "./planService.js";
 import { untracedDbQuery, type DbQueryTracer } from "../tracing/dbQueryTrace.js";
 import { recordPendingAgentPurge } from "./agentPurgeService.js";
+import { MACHINE_ONLINE_CONTINUITY_MS } from "./machineService.js";
 import { assertAgentHandleAvailableInServer, lockServerPrincipalHandles, PrincipalHandleConflictError } from "./principalHandleService.js";
 import { refreshSubscriptionForServerIfStale } from "./billingService.js";
 import { evaluateFeatureFlag } from "./featureFlagService.js";
@@ -79,6 +80,40 @@ export class PmAlreadyProvisionedError extends Error {
     super("PM_ALREADY_PROVISIONED: this server already has a PM agent");
     this.name = "PmAlreadyProvisionedError";
   }
+}
+
+/**
+ * Task #30: pick the machine an agent should bind to when the caller did not
+ * name one. Only a machine whose heartbeat is inside the online continuity
+ * window qualifies — binding a fresh agent to an offline computer strands
+ * every start behind `machine_affinity_unavailable` (0.2.3 quick check).
+ * Returns null when nothing is online; the caller leaves the affinity empty
+ * and surfaces a warning instead of silently picking an offline machine.
+ * `atMs` is injectable for tests.
+ */
+export async function pickOnlineMachineForServer(
+  serverId: string,
+  executor: DatabaseExecutor = getDb(),
+  atMs: number = Date.now(),
+): Promise<{ id: string } | null> {
+  const rows = await executor
+    .select({ id: machines.id, lastHeartbeat: machines.lastHeartbeat })
+    .from(machines)
+    .where(eq(machines.serverId, serverId))
+    .orderBy(desc(machines.lastHeartbeat));
+  const online = rows.find(
+    (row) => row.lastHeartbeat !== null && atMs - row.lastHeartbeat.getTime() <= MACHINE_ONLINE_CONTINUITY_MS,
+  );
+  return online ? { id: online.id } : null;
+}
+
+/** Task #30: managed agents with no machine affinity (left empty at creation
+ * because no computer was online). Used when a computer comes online. */
+export async function listUnassignedManagedAgents(serverId: string): Promise<{ id: string; runtime: string }[]> {
+  return getDb()
+    .select({ id: agents.id, runtime: agents.runtime })
+    .from(agents)
+    .where(and(eq(agents.serverId, serverId), isNull(agents.machineId), isNull(agents.deletedAt)));
 }
 
 export async function createAgent(
@@ -163,18 +198,23 @@ export async function createAgent(
     await assertAgentHandleAvailableInServer(tx, serverId, name);
 
     const runtime = opts.runtime || "claude";
-    // Use provided machineId, or auto-assign first available machine for
-    // managed runtimes. External agents are supplied by a user-owned process,
-    // so `runtime` is the canonical discriminator for skipping assignment.
+    // Use provided machineId, or auto-assign an ONLINE machine for managed
+    // runtimes (task #30). External agents are supplied by a user-owned
+    // process, so `runtime` is the canonical discriminator for skipping
+    // assignment.
     let machineId: string | null = opts.machineId || null;
+    let machineAffinityWarning: string | null = null;
     if (!machineId && !isExternalAgentRuntime(runtime)) {
-      const [firstMachine] = await tx
-        .select({ id: machines.id })
-        .from(machines)
-        .where(eq(machines.serverId, serverId))
-        .limit(1);
-      if (firstMachine) {
-        machineId = firstMachine.id;
+      const picked = await pickOnlineMachineForServer(serverId, tx);
+      if (picked) {
+        machineId = picked.id;
+      } else {
+        // No machine is online (or none exists). Leave the affinity empty —
+        // creation must not silently bind to an offline machine (the 0.2.3
+        // quick check saw an agent pinned to an offline grok-bot-vm). The
+        // start path or a computer coming online binds it later; the caller
+        // surfaces this warning on the create response.
+        machineAffinityWarning = "No computer is online right now; this agent is not bound to a computer. It will bind when you start it or when a computer comes online.";
       }
     }
 
@@ -313,7 +353,7 @@ export async function createAgent(
       await opts.afterCreateTx(tx, newAgent);
     }
 
-    return newAgent;
+    return { ...newAgent, machineAffinityWarning };
   });
 
   return agent;
