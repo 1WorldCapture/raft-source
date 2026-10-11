@@ -2,6 +2,7 @@ import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { notifyUnreadSummaryChanged } from "./unreadSummaryNotifier.js";
 
 import { getDb, type DatabaseExecutor } from "../db/index.js";
+import { chunkForBindParameters, insertParametersPerRow } from "../db/bindParameterBudget.js";
 import {
   agentChannelReadCursors,
   channels,
@@ -381,36 +382,44 @@ export async function recordInboxNotificationFacts(
     return !suppressedByMute && !isSuppressedByUnfollowedThreadOrdinary(fact);
   });
   if (filteredFacts.length === 0) return 0;
-  await executor
-    .insert(inboxNotificationFacts)
-    .values(filteredFacts.map((fact) => ({
-      receiverType: fact.receiverType,
-      receiverId: fact.receiverId,
-      serverId: fact.serverId,
-      kind: fact.kind,
-      sourceChannelId: fact.sourceChannelId,
-      messageId: fact.messageId,
-      messageSeq: fact.messageSeq,
-      activityAt: fact.activityAt,
-      personalMention: fact.personalMention === true,
-      unreadEligible: fact.unreadEligible !== false,
-    })))
-    .onConflictDoUpdate({
-      target: [
-        inboxNotificationFacts.receiverType,
-        inboxNotificationFacts.receiverId,
-        inboxNotificationFacts.sourceChannelId,
-        inboxNotificationFacts.messageId,
-      ],
-      set: {
-        serverId: sql`excluded.server_id`,
-        kind: sql`excluded.kind`,
-        messageSeq: sql`excluded.message_seq`,
-        activityAt: sql`excluded.activity_at`,
-        personalMention: sql`${inboxNotificationFacts.personalMention} OR excluded.personal_mention`,
-        unreadEligible: sql`${inboxNotificationFacts.unreadEligible} AND excluded.unread_eligible`,
-      },
-    });
+  // PostgreSQL binds at most 65,535 parameters per statement; past that the
+  // count wraps and the Bind is rejected. A burst (many receivers × several
+  // facts each) can exceed the budget, so shard by row (upstream 1.21.2
+  // bindParameterBudget port). Conflict keys are unique per row, so chunks
+  // never conflict with each other and any chunk order is safe.
+  const factParametersPerRow = insertParametersPerRow(inboxNotificationFacts);
+  for (const factChunk of chunkForBindParameters(filteredFacts, factParametersPerRow)) {
+    await executor
+      .insert(inboxNotificationFacts)
+      .values(factChunk.map((fact) => ({
+        receiverType: fact.receiverType,
+        receiverId: fact.receiverId,
+        serverId: fact.serverId,
+        kind: fact.kind,
+        sourceChannelId: fact.sourceChannelId,
+        messageId: fact.messageId,
+        messageSeq: fact.messageSeq,
+        activityAt: fact.activityAt,
+        personalMention: fact.personalMention === true,
+        unreadEligible: fact.unreadEligible !== false,
+      })))
+      .onConflictDoUpdate({
+        target: [
+          inboxNotificationFacts.receiverType,
+          inboxNotificationFacts.receiverId,
+          inboxNotificationFacts.sourceChannelId,
+          inboxNotificationFacts.messageId,
+        ],
+        set: {
+          serverId: sql`excluded.server_id`,
+          kind: sql`excluded.kind`,
+          messageSeq: sql`excluded.message_seq`,
+          activityAt: sql`excluded.activity_at`,
+          personalMention: sql`${inboxNotificationFacts.personalMention} OR excluded.personal_mention`,
+          unreadEligible: sql`${inboxNotificationFacts.unreadEligible} AND excluded.unread_eligible`,
+        },
+      });
+  }
 
   await rebuildInboxServingRowsForReceiverTargets(filteredFacts.map((fact) => ({
     receiverType: fact.receiverType,
