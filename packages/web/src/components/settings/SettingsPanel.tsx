@@ -205,6 +205,8 @@ import { AppleLogo, GitHubLogo, GoogleLogo } from "../icons/ProviderLogos";
 import {
   useAppearanceStore,
 } from "../../store/appearanceStore";
+import { useOptionalAppTheme } from "../../hooks/useAppTheme";
+import { AppearanceThemePicker } from "./AppearanceThemePicker";
 import { useWorkspaceGridAvailability } from "../workspace/workspaceGridAvailability";
 import { useWorkspaceGridNavigationStore } from "../workspace/workspaceGridNavigationStore";
 import {
@@ -7476,8 +7478,25 @@ export const ADMINISTRATION_VISUAL_SECTIONS = {
   "member-permissions": MemberPermissionsSection,
 } as const;
 
+export function AppearanceThemeSettingsControl() {
+  const theme = useOptionalAppTheme();
+  if (!theme) return null;
+  const { preset, preferences, resolvedMode, setPreset, setMode, setThemeForMode } = theme;
+  return (
+    <AppearanceThemePicker
+      preset={preset}
+      onChange={setPreset}
+      preferences={preferences}
+      resolvedMode={resolvedMode}
+      onModeChange={setMode}
+      onThemeForModeChange={setThemeForMode}
+    />
+  );
+}
+
 function AppearanceSection() {
   const { formatMessage } = useIntl();
+  const appTheme = useOptionalAppTheme();
   const messageBodyFontSize = useAppearanceStore((s) => s.messageBodyFontSize);
   const setMessageBodyFontSize = useAppearanceStore((s) => s.setMessageBodyFontSize);
   const showLiveAgentActivityBar = useAppearanceStore((s) => s.showLiveAgentActivityBar);
@@ -7507,6 +7526,17 @@ function AppearanceSection() {
       </div>
 
       <div className="border-2 border-black bg-white shadow-brutal-sm p-4 space-y-4">
+        {appTheme ? (
+          <div className="space-y-3 border-b border-black/10 pb-4">
+            <div>
+              <div className="text-sm font-bold text-black">{formatMessage({ id: "settings.appearance.themeTitle" })}</div>
+              <p className="mt-1 text-xs text-black/55">
+                {formatMessage({ id: "settings.appearance.themeDescription" })}
+              </p>
+            </div>
+            <AppearanceThemeSettingsControl />
+          </div>
+        ) : null}
         <div>
           <div className="text-sm font-bold text-black">{formatMessage({ id: "settings.appearance.messageFontSizeTitle" })}</div>
           <p className="mt-1 text-xs text-black/55">
