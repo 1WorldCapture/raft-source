@@ -4869,6 +4869,8 @@ test("a cold wake with nothing to answer does not recycle (it would pay a fresh 
     await manager.startAgent("agent-empty-wake", makeConfig({ sessionId, constructedWakeContext: true, envVars: { RAFT_WAKE_RECYCLE: "1" } }));
     assert.equal(driver.spawnCalls.length, 1);
     assert.equal(driver.spawnCalls[0]!.config.sessionId, sessionId, "no wake message, no unread summary: plain resume");
+  });
+});
 
 // RFC 070 cold-idle sweep: an idle claude process whose prompt cache has certainly expired and whose
 // context is large is stopped on purpose, so the NEXT wake goes through the process-start path where the
