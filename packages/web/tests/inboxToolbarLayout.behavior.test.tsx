@@ -420,7 +420,8 @@ test("MessageSearchPage filter toolbar shares the horizontal rail with its resul
     </TestIntlProvider>,
   );
 
-  const toolbar = closestWithClass(screen.getByRole("button", { name: "From" }), "border-b-2");
+  const toolbar = screen.getByRole("combobox", { name: "From" }).closest('[data-slot="search-shell-filters"]') as HTMLElement;
+  assert.ok(toolbar, "expected to find [data-slot='search-shell-filters']");
   assert.ok(toolbar.classList.contains("px-4"));
   assert.ok(toolbar.classList.contains("py-3"));
   assert.ok(!toolbar.classList.contains("px-5"));

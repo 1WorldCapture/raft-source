@@ -58,6 +58,7 @@ describe("openThread payload contract", () => {
     assertSourceOccurrenceCount("components/search/MessageSearchPage.tsx",
       `parentChannelId: result.parentChannelId,
         parentMessageId: result.parentMessageId,
+        threadChannelId: result.channelId,
         focusedMessageId: result.id`,
       1,
     );
