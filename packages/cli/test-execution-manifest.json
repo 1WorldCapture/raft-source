@@ -3,8 +3,8 @@
   "package": "@botiverse/raft",
   "runner": "node --import tsx --test",
   "testFileGlob": "src/**/*.test.ts",
-  "fileCount": 106,
-  "total": 931,
+  "fileCount": 107,
+  "total": 936,
   "files": [
     {
       "file": "src/agentApiNoBypass.test.ts",
@@ -359,7 +359,7 @@
     },
     {
       "file": "src/commands/action/prepare.test.ts",
-      "count": 21,
+      "count": 22,
       "cases": [
         {
           "name": "resolveActionInput parses well-formed channel:create JSON"
@@ -423,6 +423,9 @@
         },
         {
           "name": "actionCardActionSchema rejects agent-prefilled runtime/model fields on agent:create"
+        },
+        {
+          "name": "action prepare sends a per-invocation idempotency key (explicit one wins) and hints it after an unknown outcome"
         }
       ]
     },
@@ -513,6 +516,18 @@
         },
         {
           "name": "wake-channel is the only adapter kind; old names fail closed"
+        }
+      ]
+    },
+    {
+      "file": "src/commands/agent/cliAgentCommandScopeCoverage.test.ts",
+      "count": 2,
+      "cases": [
+        {
+          "name": "every CLI agent endpoint use is covered by the least-privilege scopes"
+        },
+        {
+          "name": "the out-of-scope commands are a conscious, documented list"
         }
       ]
     },
@@ -2939,7 +2954,7 @@
     },
     {
       "file": "src/commands/task/create.test.ts",
-      "count": 7,
+      "count": 9,
       "cases": [
         {
           "name": "task create command uses injected ApiClient and writes canonical text"
@@ -2961,6 +2976,12 @@
         },
         {
           "name": "task create command maps server failures into typed CliError"
+        },
+        {
+          "name": "task create sends a fresh random idempotency key per invocation, reused by an explicit --idempotency-key"
+        },
+        {
+          "name": "task create rejects an out-of-range --idempotency-key and hints the key after an unknown-outcome failure"
         }
       ]
     },

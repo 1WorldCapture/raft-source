@@ -82,6 +82,8 @@ import {
   THIRD_PARTY_EVENT_ID_PATTERN,
   isThirdPartyEventId,
 } from "@botiverse/raft-shared";
+import { normalizeAgentApiWireValue } from "../services/agentApiWireValue.js";
+import * as idempotentAgentApiService from "../services/agentApiIdempotencyService.js";
 import * as agentService from "../services/agentService.js";
 import { resolveReadableAttachmentAuthorityContext } from "../services/attachmentAuthorityService.js";
 import * as agentMigrationService from "../services/agentMigrationService.js";
@@ -448,28 +450,53 @@ function validateAgentApiQueryMiddleware<K extends AgentApiRouteKey>(routeKey: K
   };
 }
 
-// Agent API response contracts describe the JSON wire payload. Server handlers
-// may still hand us DB/domain objects containing Date instances, which Express
-// would stringify only after this contract check. Normalize that boundary here
-// so shared schemas stay wire-only instead of accepting server-domain values.
-function normalizeAgentApiWireValue(value: unknown): unknown {
-  if (value instanceof Date) {
-    return value.toISOString();
-  }
-  if (Array.isArray(value)) {
-    return value.map(normalizeAgentApiWireValue);
-  }
-  if (value && typeof value === "object") {
-    const prototype = Object.getPrototypeOf(value);
-    if (prototype !== Object.prototype && prototype !== null) {
-      return value;
-    }
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>)
-        .map(([key, nested]) => [key, normalizeAgentApiWireValue(nested)]),
-    );
-  }
-  return value;
+/**
+ * Idempotency scope for a keyed write, or null when the request carries no
+ * usable key (behaviour then is unchanged: every request writes).
+ */
+function agentApiIdempotencyScope(
+  agentId: string,
+  route: idempotentAgentApiService.AgentApiIdempotentRoute,
+  rawKey: unknown,
+  normalizedRequest: unknown,
+): idempotentAgentApiService.AgentApiIdempotencyScope | null {
+  const idempotencyKey = idempotentAgentApiService.normalizeAgentApiIdempotencyKey(rawKey);
+  if (!idempotencyKey) return null;
+  return {
+    agentId,
+    route,
+    idempotencyKey,
+    requestFingerprint: idempotentAgentApiService.fingerprintAgentApiRequest(route, normalizedRequest),
+  };
+}
+
+/**
+ * Answer a keyed write from its ledger: the first response (status and body)
+ * when the key is bound to this same request, without any side effect.
+ * Returns false when the key is unused. A key bound to a different request
+ * throws AgentApiIdempotencyConflictError (see respondToAgentApiIdempotencyConflict).
+ */
+async function replayAgentApiIdempotentWrite(
+  scope: idempotentAgentApiService.AgentApiIdempotencyScope,
+  res: Response,
+): Promise<boolean> {
+  const stored = await idempotentAgentApiService.findAgentApiIdempotentResponse(scope);
+  if (!stored) return false;
+  res.status(stored.status);
+  sendAgentApiResponse(scope.route, res, stored.body as AgentApiResponseByRoute[typeof scope.route]);
+  return true;
+}
+
+/** Same 409 shape and code as message send's reused-key refusal. */
+function respondToAgentApiIdempotencyConflict(err: unknown, res: Response): boolean {
+  if (!(err instanceof idempotentAgentApiService.AgentApiIdempotencyConflictError)) return false;
+  res.status(err.status).json({
+    error: err.message,
+    code: err.code,
+    mismatch: err.mismatch,
+    suggestedNextAction: err.suggestedNextAction,
+  });
+  return true;
 }
 
 function sendAgentApiResponse<K extends AgentApiRouteKey>(
@@ -6117,6 +6144,33 @@ async function resolveJointTaskCreateAssignee(
   };
 }
 
+function buildTaskCreateResponse(
+  created: Awaited<ReturnType<typeof taskService.createTasks>>["tasks"],
+  assignmentReceipt?: taskService.TaskAssignmentReceipt,
+): AgentApiResponseByRoute["taskCreate"] {
+  return {
+    tasks: created.map((task) => ({
+      taskNumber: task.taskNumber,
+      messageId: task.messageId,
+      title: task.title,
+      status: task.status,
+      claimedByType: task.claimedByType,
+      claimedById: task.claimedById,
+      claimedByName: task.claimedByName,
+      claimedAt: task.claimedAt,
+      requiresResourceReceipt: task.requiresResourceReceipt,
+    })),
+    ...(assignmentReceipt && {
+      assignmentReceipt: {
+        messageId: assignmentReceipt.message.id,
+        content: assignmentReceipt.content,
+        assignee: assignmentReceipt.assignee,
+        state: assignmentReceipt.state,
+      },
+    }),
+  };
+}
+
 registerAgentApiRoute("taskCreate", ...agentApiRequestValidators("taskCreate"), async (req, res) => {
   try {
     const agentId = req.actingAgentId;
@@ -6126,11 +6180,17 @@ registerAgentApiRoute("taskCreate", ...agentApiRequestValidators("taskCreate"), 
       return;
     }
 
-    const { channel, tasks: items, assignee: assigneeRef } = req.body as AgentApiRequestBodyByRoute["taskCreate"];
+    const { channel, tasks: items, assignee: assigneeRef, idempotencyKey } = req.body as AgentApiRequestBodyByRoute["taskCreate"];
     if (items.length > 50) {
       res.status(400).json({ error: "Cannot create more than 50 tasks at once" });
       return;
     }
+    const idempotency = agentApiIdempotencyScope(agentId, "taskCreate", idempotencyKey, {
+      channel,
+      tasks: items.map((item) => ({ title: item.title.trim(), createsResource: item.creates_resource === true })),
+      assignee: assigneeRef ?? null,
+    });
+    if (idempotency && await replayAgentApiIdempotentWrite(idempotency, res)) return;
 
     const ctx = await resolveAgentApiTaskChannel(agentId, serverId, channel);
     if (!ctx) {
@@ -6164,7 +6224,15 @@ registerAgentApiRoute("taskCreate", ...agentApiRequestValidators("taskCreate"), 
           })),
           assignee,
           { assigneeName: assignee.name },
-          ctx.surface.isJoint ? { initiatingLocalChannelId: ctx.channelId } : {},
+          {
+            ...(ctx.surface.isJoint ? { initiatingLocalChannelId: ctx.channelId } : {}),
+            ...(idempotency && {
+              beforeCommit: (executor, result) => idempotentAgentApiService.recordAgentApiIdempotentResponse(executor, idempotency, {
+                status: 200,
+                body: buildTaskCreateResponse(result.tasks, result.assignmentReceipt),
+              }),
+            }),
+          },
         );
         created = result.tasks;
         hostMessages = result.hostMessages;
@@ -6178,11 +6246,25 @@ registerAgentApiRoute("taskCreate", ...agentApiRequestValidators("taskCreate"), 
             title: item.title.trim(),
             createsResource: item.creates_resource === true,
           })),
+          idempotency
+            ? {
+              beforeCommit: (executor, result) => idempotentAgentApiService.recordAgentApiIdempotentResponse(executor, idempotency, {
+                status: 200,
+                body: buildTaskCreateResponse(result.tasks),
+              }),
+            }
+            : {},
         );
         created = result.tasks;
         hostMessages = result.hostMessages;
       }
     } catch (err) {
+      if (idempotency && err instanceof idempotentAgentApiService.AgentApiIdempotencyRaceLostError) {
+        // A concurrent request with this key committed first; this request's
+        // creation rolled back. Answer with the committed first response.
+        if (await replayAgentApiIdempotentWrite(idempotency, res)) return;
+        throw err;
+      }
       if (err instanceof taskService.TaskCreationAssigneeEligibilityError) {
         res.status(403).json({ error: err.message, code: err.code });
         return;
@@ -6219,19 +6301,7 @@ registerAgentApiRoute("taskCreate", ...agentApiRequestValidators("taskCreate"), 
     const taskList = created
       .map((task) => `task #${task.taskNumber} "${messageService.summarizeForSystemMessage(task.title)}"`)
       .join(", ");
-    let assignmentReceipt: {
-      messageId: string;
-      content: string;
-      assignee: string;
-      state: "started" | "assigned";
-    } | undefined;
     if (assignee && persistedAssignmentReceipt) {
-      assignmentReceipt = {
-        messageId: persistedAssignmentReceipt.message.id,
-        content: persistedAssignmentReceipt.content,
-        assignee: persistedAssignmentReceipt.assignee,
-        state: persistedAssignmentReceipt.state,
-      };
       // The transaction committed the channel's newest durable seq. Advance
       // heartbeat catch-up before any fallible realtime/delivery fanout so a
       // missed emit remains recoverable without waiting for a later message.
@@ -6280,26 +6350,13 @@ registerAgentApiRoute("taskCreate", ...agentApiRequestValidators("taskCreate"), 
       }).catch(() => {});
     }
 
-    const responseTasks = created.map((task) => ({
-      taskNumber: task.taskNumber,
-      messageId: task.messageId,
-      title: task.title,
-      status: task.status,
-      claimedByType: task.claimedByType,
-      claimedById: task.claimedById,
-      claimedByName: task.claimedByName,
-      claimedAt: task.claimedAt,
-      requiresResourceReceipt: task.requiresResourceReceipt,
-    }));
-    sendAgentApiResponse("taskCreate", res, {
-      tasks: responseTasks,
-      ...(assignmentReceipt && { assignmentReceipt }),
-    });
+    sendAgentApiResponse("taskCreate", res, buildTaskCreateResponse(created, assignee ? persistedAssignmentReceipt : undefined));
     void recordAgentRaftAction(req, agentId, {
       title: `Created ${created.length} task${created.length === 1 ? "" : "s"}`,
       text: `target: ${channel}`,
     });
   } catch (err) {
+    if (respondToAgentApiIdempotencyConflict(err, res)) return;
     console.error("internal.agent-api.task-create error:", serializeErrorForLog(err));
     res.status(500).json({ error: "Failed to create tasks" });
   }
@@ -7664,6 +7721,11 @@ registerAgentApiRoute("actionPrepare", ...agentApiRequestValidators("actionPrepa
     if (!await requireBoundAgentScope(req, res, agentId, "action:prepare")) return;
 
     const body = req.body as AgentApiRequestBodyByRoute["actionPrepare"];
+    const idempotency = agentApiIdempotencyScope(agentId, "actionPrepare", body.idempotencyKey, {
+      target: body.target,
+      action: body.action,
+    });
+    if (idempotency && await replayAgentApiIdempotentWrite(idempotency, res)) return;
     const actionType = typeof body.action.type === "string" ? body.action.type : null;
     if (
       actionType === "integration:approve_agent_login"
@@ -7698,13 +7760,29 @@ registerAgentApiRoute("actionPrepare", ...agentApiRequestValidators("actionPrepa
     }
 
     const io = (req.app.get("io") ?? null) as Parameters<typeof actionCardsService.prepareActionCard>[0]["io"];
-    const out = await actionCardsService.prepareActionCard({
-      serverId,
-      requesterAgentId: agentId,
-      targetChannelId: resolved.channelId,
-      action: body.action,
-      io: io ?? null,
-    });
+    let out: Awaited<ReturnType<typeof actionCardsService.prepareActionCard>>;
+    try {
+      out = await actionCardsService.prepareActionCard({
+        serverId,
+        requesterAgentId: agentId,
+        targetChannelId: resolved.channelId,
+        action: body.action,
+        io: io ?? null,
+        ...(idempotency && {
+          beforeCommit: (executor, result) => idempotentAgentApiService.recordAgentApiIdempotentResponse(executor, idempotency, {
+            status: 201,
+            body: { messageId: result.messageId, metadata: { ...result.metadata } },
+          }),
+        }),
+      });
+    } catch (err) {
+      if (idempotency && err instanceof idempotentAgentApiService.AgentApiIdempotencyRaceLostError) {
+        // A concurrent request with this key committed first; this card
+        // rolled back. Answer with the committed first response.
+        if (await replayAgentApiIdempotentWrite(idempotency, res)) return;
+      }
+      throw err;
+    }
     res.status(201);
     sendAgentApiResponse("actionPrepare", res, { messageId: out.messageId, metadata: { ...out.metadata } });
     recordRaftCliActivity(req, agentId, {
@@ -7714,6 +7792,7 @@ registerAgentApiRoute("actionPrepare", ...agentApiRequestValidators("actionPrepa
       correlationId: out.messageId,
     });
   } catch (err) {
+    if (respondToAgentApiIdempotencyConflict(err, res)) return;
     if (err instanceof actionCardsService.ActionCardError) {
       res.status(err.status).json({ error: err.message, errorCode: err.code });
       return;

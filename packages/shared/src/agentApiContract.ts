@@ -474,6 +474,8 @@ export const agentApiTaskCreateBodySchema = passthroughObject({
     (value) => value.startsWith("@") && value.slice(1).trim().length > 0,
     { message: "assignee must be an @handle" },
   ).optional(),
+  // Optional retry key: same key + same request replays the first response.
+  idempotencyKey: z.string().trim().max(256).optional(),
 });
 
 export const agentApiTaskUnclaimBodySchema = passthroughObject({
@@ -768,6 +770,7 @@ export const agentApiIntegrationAppStatusQuerySchema = passthroughObject({
 export const agentApiActionPrepareBodySchema = passthroughObject({
   target: z.string().trim().min(1),
   action: actionCardActionSchema,
+  idempotencyKey: z.string().trim().max(256).optional(),
 });
 
 export const agentApiServerUpdateBodySchema = passthroughObject({

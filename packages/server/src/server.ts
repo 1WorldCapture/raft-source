@@ -16,6 +16,7 @@ import { AgentOrchestrator } from "./services/agentOrchestrator.js";
 import { startOnboardingBriefingOnActivation } from "./services/onboardingBriefingOnActivation.js";
 import { setIO as setBillingIO, cleanupWebhookEvents } from "./services/billingService.js";
 import { cleanupExpiredSessions } from "./services/sessionService.js";
+import { pruneExpiredAgentApiIdempotencyKeys } from "./services/agentApiIdempotencyService.js";
 import { serializeErrorForLog } from "./tracing/safeErrorLog.js";
 import { setStorageTracer } from "./services/storageService.js";
 import {
@@ -177,6 +178,10 @@ async function bootstrap() {
     // (`session_token_predecessors`) are only bounded by this sweep.
     cleanupExpiredSessions().catch((err) =>
       console.error("[Slock] Session cleanup failed:", serializeErrorForLog(err)));
+    // Keys are valid for 24 hours; expired ledger rows are only bounded by
+    // this sweep (bounded batches per tick).
+    pruneExpiredAgentApiIdempotencyKeys().catch((err) =>
+      console.error("[Slock] Agent API idempotency key cleanup failed:", serializeErrorForLog(err)));
   };
   setTimeout(runMaintenance, 10_000); // Run once 10s after startup
   setInterval(runMaintenance, MAINTENANCE_INTERVAL_MS);

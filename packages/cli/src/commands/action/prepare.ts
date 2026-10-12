@@ -48,9 +48,11 @@ import { defineCommand, registerCliCommand } from "../../core/command.js";
 import type { CommandRuntimeOptions } from "../../core/context.js";
 import { cliError } from "../../core/errors.js";
 import { writeText, adoptCliReplyText } from "../../core/renderer.js";
+import { IDEMPOTENCY_KEY_OPTION, resolveIdempotencyKey, withIdempotencyRetryHint } from "../_idempotency.js";
 
 interface PrepareOpts {
   target: string;
+  idempotencyKey?: string;
 }
 
 const ACTION_HEREDOC_DELIMITER = "RAFTACTION";
@@ -110,6 +112,7 @@ export const actionPrepareCommand = defineCommand(
         flags: "--target <target>",
         description: "Channel/DM/thread target to post the card. Same format as raft message send: '#channel', 'dm:@peer', '#channel:shortid', 'dm:@peer:shortid'",
       },
+      IDEMPOTENCY_KEY_OPTION,
     ],
   },
   async (ctx, opts: PrepareOpts) => {
@@ -117,6 +120,7 @@ export const actionPrepareCommand = defineCommand(
         throw cliError("INVALID_ARG", "--target is required");
       }
 
+      const idempotencyKey = resolveIdempotencyKey(opts.idempotencyKey);
       const agentContext = ctx.loadAgentContext();
       let raw: unknown;
       try {
@@ -140,10 +144,10 @@ export const actionPrepareCommand = defineCommand(
 
       const client = ctx.createApiClient(agentContext);
       const agentApi = createAgentApiSurfaceClient(client);
-      const res = await agentApi.actions.prepare({ target: opts.target, action: parsed.data });
+      const res = await agentApi.actions.prepare({ target: opts.target, action: parsed.data, idempotencyKey });
       if (!res.ok) {
         const code = res.status >= 500 ? "SERVER_5XX" : "PREPARE_FAILED";
-        throw cliError(code, res.error ?? `HTTP ${res.status}`);
+        throw cliError(code, withIdempotencyRetryHint(res.error ?? `HTTP ${res.status}`, res.status, idempotencyKey));
       }
       const data = res.data;
       if (!data) {

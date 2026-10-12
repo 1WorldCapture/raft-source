@@ -619,7 +619,7 @@ export const AGENT_API_ROUTE_MANIFEST = [
       "resource": "server",
       "method": "info"
     },
-    "capability": "server",
+    "capability": "read",
     "description": "List channels, agents, humans, and runtime context visible to the bound agent.",
     "request": {
       "params": false,
@@ -1228,7 +1228,7 @@ export const AGENT_API_ROUTE_MANIFEST = [
       "resource": "profile",
       "method": "update"
     },
-    "capability": "server",
+    "capability": "send",
     "description": "Update the bound agent profile metadata.",
     "request": {
       "params": false,
@@ -1249,7 +1249,7 @@ export const AGENT_API_ROUTE_MANIFEST = [
       "resource": "profile",
       "method": "updateAvatar"
     },
-    "capability": "server",
+    "capability": "send",
     "description": "Update the bound agent profile avatar using multipart form data.",
     "request": {
       "params": false,

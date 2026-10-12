@@ -38,7 +38,7 @@ import {
   asMachineId,
   renderThirdPartyInertText,
 } from "@botiverse/raft-shared";
-import { getDb } from "../db/index.js";
+import { getDb, type DatabaseExecutor } from "../db/index.js";
 import { actionCards, agents, channelAgents, channelHumans, channels, messages, oauthAccessRequests, oauthClientMaintainers, oauthClients, oauthGrants, serverMembers } from "../db/schema.js";
 import * as channelService from "./channelService.js";
 import * as agentService from "./agentService.js";
@@ -71,6 +71,16 @@ export interface PrepareActionCardArgs {
   targetChannelId: string;
   action: ActionCardAction;
   io?: SocketServer | null;
+  /**
+   * Runs on the preparing transaction after the carrier message and the
+   * action_cards row are written and before it commits (keyed Agent API
+   * writes record their idempotency ledger row here). A rejection rolls the
+   * card back.
+   */
+  beforeCommit?: (
+    executor: DatabaseExecutor,
+    result: { messageId: string; metadata: ActionCardMetadata },
+  ) => Promise<void>;
 }
 
 export function bindMarketplaceAppName(rawName: string): {
@@ -488,6 +498,7 @@ export async function prepareActionCard(args: PrepareActionCardArgs): Promise<{
         payload: action,
         state: "prepared",
       });
+    if (args.beforeCommit) await args.beforeCommit(tx, { messageId: msg.id, metadata });
     return msg;
   });
 

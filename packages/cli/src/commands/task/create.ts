@@ -1,5 +1,5 @@
 // `raft task create --target <ch> --title <t> [--title <t2> ...] [--assignee <@handle>]`
-// → POST /internal/agent-api/tasks  body: { channel, tasks: [{title}, ...], assignee? }
+// → POST /internal/agent-api/tasks  body: { channel, tasks: [{title}, ...], assignee?, idempotencyKey }
 
 import type { Command } from "commander";
 import { type AgentApiTaskCreateBody } from "@botiverse/raft-shared";
@@ -9,6 +9,7 @@ import { defineCommand, registerCliCommand } from "../../core/command.js";
 import type { CommandRuntimeOptions } from "../../core/context.js";
 import { cliError } from "../../core/errors.js";
 import { writeText, adoptCliReplyText } from "../../core/renderer.js";
+import { IDEMPOTENCY_KEY_OPTION, resolveIdempotencyKey, withIdempotencyRetryHint } from "../_idempotency.js";
 import { requireTargetAlias, type TargetAliasOpts } from "../_target.js";
 import { formatTasksCreated } from "./_format.js";
 
@@ -16,6 +17,7 @@ interface CreateOpts extends TargetAliasOpts {
   title?: string[];
   assignee?: string;
   createsResource?: boolean;
+  idempotencyKey?: string;
 }
 
 export const taskCreateCommand = defineCommand(
@@ -38,6 +40,7 @@ export const taskCreateCommand = defineCommand(
         flags: "--creates-resource",
         description: "Require a structured resource receipt and expiry follow-up before completion",
       },
+      IDEMPOTENCY_KEY_OPTION,
     ],
     helpAfter: [
       "Atomic assignment:",
@@ -53,8 +56,10 @@ export const taskCreateCommand = defineCommand(
     const titles = opts.title ?? [];
     if (titles.length === 0) throw cliError("INVALID_ARG", "--title is required (at least one)");
 
+    const idempotencyKey = resolveIdempotencyKey(opts.idempotencyKey);
     const body: AgentApiTaskCreateBody = {
       channel,
+      idempotencyKey,
       tasks: titles.map((title) => ({
         title,
         ...(opts.createsResource ? { creates_resource: true } : {}),
@@ -73,7 +78,7 @@ export const taskCreateCommand = defineCommand(
     const res = await agentApi.tasks.create(body);
     if (!res.ok) {
       const code = res.status >= 500 ? "SERVER_5XX" : "CREATE_FAILED";
-      throw cliError(code, res.error ?? `HTTP ${res.status}`);
+      throw cliError(code, withIdempotencyRetryHint(res.error ?? `HTTP ${res.status}`, res.status, idempotencyKey));
     }
     if (!res.data) {
       throw cliError("INVALID_JSON_RESPONSE", "Agent API taskCreate returned an empty response body");
