@@ -919,7 +919,7 @@ test("joint invite resend keeps drawer geometry stable across busy and success s
   assert.equal(status.getAttribute("aria-live"), "polite");
   assert.ok(status.classList.contains("sr-only"));
   assert.equal(status.textContent, "Invite email resent.");
-  assert.ok(resendButton.classList.contains("bg-brutal-lime"));
+  assert.ok(resendButton.classList.contains("theme-brutal:bg-brutal-lime"));
   assert.equal(screen.queryByText("Invite email resent.", { selector: "p" }), null);
 
   await act(async () => {
@@ -927,7 +927,7 @@ test("joint invite resend keeps drawer geometry stable across busy and success s
   });
   assert.equal(screen.queryByTestId("channel-settings-joint-resend-status"), null);
   assert.equal(screen.getByTestId("channel-settings-joint-resend-label").textContent, "Resend Invite");
-  assert.ok(resendButton.classList.contains("bg-white"));
+  assert.ok(resendButton.classList.contains("theme-brutal:bg-white"));
 });
 
 test("channel info save reports durable success and keeps failures visible", async () => {
@@ -980,14 +980,14 @@ test("channel info save reports durable success and keeps failures visible", asy
   const saveButton = screen.getByTestId("channel-settings-save-inline") as HTMLButtonElement;
   assert.equal(saveButton.disabled, true);
   assert.equal(saveButton.textContent?.trim(), "Changes saved");
-  assert.ok(saveButton.classList.contains("bg-brutal-lime"));
+  assert.ok(saveButton.classList.contains("theme-brutal:bg-brutal-lime"));
 
   await act(async () => {
     await new Promise((resolve) => window.setTimeout(resolve, 1600));
   });
   assert.equal(screen.queryByTestId("channel-settings-save-status"), null);
   assert.equal(saveButton.textContent?.trim(), "Save Changes");
-  assert.ok(saveButton.classList.contains("bg-brutal-pink"));
+  assert.ok(saveButton.classList.contains("theme-brutal:bg-brutal-pink"));
 
   api.patch = (async () => {
     throw new Error("network unavailable");

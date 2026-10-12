@@ -58,14 +58,14 @@ const SIZE_CLASS: Record<NonNullable<AttentionDotProps["size"]>, string> = {
 
 export default function AttentionDot({
   size = "lg",
-  tone = "bg-brutal-pink",
+  tone = "bg-accent-soft theme-brutal:bg-brutal-pink",
   className,
   ...rest
 }: AttentionDotProps) {
   return (
     <span
       {...rest}
-      className={`inline-block shrink-0 rounded-full border border-black ${SIZE_CLASS[size]} ${tone} ${className ?? ""}`}
+      className={`inline-block shrink-0 rounded-full border border-line-strong theme-brutal:border-black ${SIZE_CLASS[size]} ${tone} ${className ?? ""}`}
     />
   );
 }

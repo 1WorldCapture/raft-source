@@ -30,14 +30,14 @@ export type SpinnerSize = "xs" | "sm" | "md" | "lg";
 export type SpinnerVariant = "default" | "inverse";
 
 const SIZE_CLASS: Record<SpinnerSize, string> = {
-  xs: "size-2.5 border-2",
-  sm: "size-4 border-2",
-  md: "size-5 border-2",
-  lg: "size-8 border-2",
+  xs: "size-2.5 border theme-brutal:border-2",
+  sm: "size-4 border theme-brutal:border-2",
+  md: "size-5 border theme-brutal:border-2",
+  lg: "size-8 border theme-brutal:border-2",
 };
 
 const VARIANT_CLASS: Record<SpinnerVariant, string> = {
-  default: "border-black/20 border-t-black",
+  default: "border-line-muted theme-brutal:border-black/20 border-t-black",
   inverse: "border-white/40 border-t-white",
 };
 

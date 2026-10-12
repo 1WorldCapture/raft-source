@@ -156,14 +156,14 @@ export default function PublicServerPage({
   };
 
   if (!readback && !error) {
-    return <div className="flex min-h-screen items-center justify-center bg-brutal-cream font-display font-bold">{formatMessage({ id: "common.loading" })}</div>;
+    return <div className="flex min-h-screen items-center justify-center bg-layer-canvas-muted theme-brutal:bg-brutal-cream font-display font-bold">{formatMessage({ id: "common.loading" })}</div>;
   }
 
   const selected = readback?.channels.find((channel) => channel.id === selectedChannelId) ?? null;
   const initial = (readback?.server.name || "S").trim().charAt(0).toUpperCase() || "S";
 
   return (
-    <div className="flex h-dvh min-h-screen flex-col overflow-hidden bg-white font-display text-black" data-testid="public-server-page">
+    <div className="flex h-dvh min-h-screen flex-col overflow-hidden bg-layer-panel theme-brutal:bg-white font-display text-foreground-strong theme-brutal:text-black" data-testid="public-server-page">
       <Banner
         intent="info"
         density="sm"
@@ -180,16 +180,16 @@ export default function PublicServerPage({
       </Banner>
 
       <div className="flex min-h-0 flex-1" data-testid="public-server-existing-shell">
-        <aside className="hidden w-[52px] shrink-0 border-r-2 border-black bg-soft-signal p-2 sm:flex sm:justify-center" data-testid="public-server-app-rail">
+        <aside className="hidden w-[52px] shrink-0 border-r theme-brutal:border-r-2 border-line-strong theme-brutal:border-black bg-primary-soft theme-brutal:bg-soft-signal p-2 sm:flex sm:justify-center" data-testid="public-server-app-rail">
           {readback ? <AvatarSlot context="panel-header" type="server" serverAvatarUrl={readback.server.avatarUrl} serverInitial={initial} /> : null}
         </aside>
 
-        <nav className="w-36 shrink-0 overflow-y-auto border-r-2 border-black bg-brutal-cream sm:w-[240px]" aria-label={formatMessage({ id: "pages.publicServer.channelsLabel" })} data-testid="public-server-channel-sidebar">
-          <div className="flex h-panel-header items-center border-b-2 border-black px-4">
+        <nav className="w-36 shrink-0 overflow-y-auto border-r theme-brutal:border-r-2 border-line-strong theme-brutal:border-black bg-layer-canvas-muted theme-brutal:bg-brutal-cream sm:w-[240px]" aria-label={formatMessage({ id: "pages.publicServer.channelsLabel" })} data-testid="public-server-channel-sidebar">
+          <div className="flex h-panel-header items-center border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black px-4">
             <h1 className="truncate text-base font-bold">{readback?.server.name}</h1>
           </div>
           <div className="p-3">
-            <p className="mb-2 px-2 text-[11px] font-bold uppercase tracking-wider text-black/50">
+            <p className="mb-2 px-2 text-[11px] font-bold uppercase tracking-wider text-foreground-muted theme-brutal:text-black/50">
               {formatMessage({ id: "pages.publicServer.channelsLabel" })}
             </p>
             {readback?.channels.map((channel) => (
@@ -197,7 +197,7 @@ export default function PublicServerPage({
                 key={channel.id}
                 type="button"
                 onClick={() => dispatch({ type: "selectChannel", channelId: channel.id })}
-                className={`mb-1 flex w-full items-center gap-1.5 border-2 px-2 py-1 text-left text-sm font-medium ${selectedChannelId === channel.id ? "border-black bg-brutal-pink font-bold shadow-brutal-sm" : "border-transparent transition-colors hover:border-black hover:bg-white hover:shadow-brutal-sm"}`}
+                className={`mb-1 flex w-full items-center gap-1.5 border theme-brutal:border-2 px-2 py-1 text-left text-sm font-medium ${selectedChannelId === channel.id ? "border-line-strong theme-brutal:border-black bg-accent-soft theme-brutal:bg-brutal-pink font-bold shadow-raft-xs theme-brutal:shadow-brutal-sm" : "border-transparent transition-colors hover:border-line-strong theme-brutal:hover:border-black hover:bg-layer-panel theme-brutal:hover:bg-white hover:shadow-raft-xs theme-brutal:hover:shadow-brutal-sm"}`}
               >
                 <Hash size={15} className="shrink-0" />
                 <span className="min-w-0 truncate">{channel.name}</span>
@@ -206,14 +206,14 @@ export default function PublicServerPage({
           </div>
         </nav>
 
-        <main className="flex min-w-0 flex-1 flex-col bg-white" data-testid="public-server-channel-panel">
+        <main className="flex min-w-0 flex-1 flex-col bg-layer-panel theme-brutal:bg-white" data-testid="public-server-channel-panel">
           {selected ? (
             <>
               <PanelHeader
                 title={selected.name}
                 subtitle={selected.description}
                 icon={<Hash size={18} />}
-                iconBg="bg-soft-signal"
+                iconBg="bg-primary-soft theme-brutal:bg-soft-signal"
                 containerProps={{ "data-testid": "public-server-channel-header" }}
               />
               {error ? <Banner intent="warning" className="m-3 shrink-0">{error}</Banner> : null}
@@ -229,11 +229,11 @@ export default function PublicServerPage({
                   const senderInitial = message.senderName.trim().charAt(0).toUpperCase() || "?";
                   return (
                     <article key={message.id} className="flex gap-3 px-5 py-3 hover:bg-black/[0.025]">
-                      <span className="flex size-9 shrink-0 items-center justify-center border-2 border-black bg-brutal-cyan text-sm font-bold" aria-hidden="true">{senderInitial}</span>
+                      <span className="flex size-9 shrink-0 items-center justify-center border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-info-soft theme-brutal:bg-brutal-cyan text-sm font-bold" aria-hidden="true">{senderInitial}</span>
                       <div className="min-w-0 flex-1">
                         <div className="mb-0.5 flex flex-wrap items-baseline gap-2">
                           <span className="text-sm font-bold">{message.senderName}</span>
-                          <time className="font-mono text-[11px] text-black/45" dateTime={message.createdAt}>
+                          <time className="font-mono text-[11px] text-foreground-hint theme-brutal:text-black/45" dateTime={message.createdAt}>
                             {formatDate(message.createdAt, { year: "numeric", month: "short", day: "numeric" })} {formatTime(message.createdAt, { hour: "2-digit", minute: "2-digit" })}
                           </time>
                         </div>
@@ -243,7 +243,7 @@ export default function PublicServerPage({
                   );
                 })}
                 {!loadingMessages && messages.length === 0 ? (
-                  <div className="flex h-full items-center justify-center p-6 text-center text-sm text-black/50">
+                  <div className="flex h-full items-center justify-center p-6 text-center text-sm text-foreground-muted theme-brutal:text-black/50">
                     {formatMessage({ id: "pages.publicServer.emptyMessages" })}
                   </div>
                 ) : null}
@@ -253,7 +253,7 @@ export default function PublicServerPage({
               </div>
             </>
           ) : (
-            <div className="flex h-full items-center justify-center p-8 text-center text-sm text-black/55">
+            <div className="flex h-full items-center justify-center p-8 text-center text-sm text-foreground-muted theme-brutal:text-black/55">
               {formatMessage({ id: "pages.publicServer.emptyChannels" })}
             </div>
           )}

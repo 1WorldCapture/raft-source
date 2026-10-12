@@ -1912,7 +1912,7 @@ for (const { state, expectedProgress, expectedMessage } of [
       expectedProgress,
     );
     assert.equal(
-      screen.getByLabelText("Migration to Target Computer").querySelectorAll(".bg-brutal-pink").length,
+      screen.getByLabelText("Migration to Target Computer").querySelectorAll(".bg-brutal-pink, .theme-brutal\\:bg-brutal-pink").length,
       2,
       "active fill and current-step marker must share the migration pink intent",
     );

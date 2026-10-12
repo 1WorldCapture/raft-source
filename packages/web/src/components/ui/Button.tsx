@@ -15,15 +15,15 @@ export type ButtonEmphasis = "default" | "high";
  * re-auditing every callsite.
  */
 const BUTTON_TONE_CLASSES = {
-  white: "bg-white text-black",
-  yellow: "bg-soft-signal text-black",
-  pink: "bg-brutal-pink text-black",
-  cyan: "bg-brutal-cyan text-black",
-  lavender: "bg-brutal-lavender text-black",
-  orange: "bg-brutal-orange text-black",
-  lime: "bg-brutal-lime text-black",
-  red: "bg-brutal-red text-black",
-  stone: "bg-brutal-stone text-black",
+  white: "bg-layer-panel theme-brutal:bg-white text-foreground-strong theme-brutal:text-black",
+  yellow: "bg-primary-soft theme-brutal:bg-soft-signal text-foreground-strong theme-brutal:text-black",
+  pink: "bg-accent-soft theme-brutal:bg-brutal-pink text-foreground-strong theme-brutal:text-black",
+  cyan: "bg-info-soft theme-brutal:bg-brutal-cyan text-foreground-strong theme-brutal:text-black",
+  lavender: "bg-secondary-200 theme-brutal:bg-brutal-lavender text-foreground-strong theme-brutal:text-black",
+  orange: "bg-warning-soft theme-brutal:bg-brutal-orange text-foreground-strong theme-brutal:text-black",
+  lime: "bg-success-soft theme-brutal:bg-brutal-lime text-foreground-strong theme-brutal:text-black",
+  red: "bg-danger-soft theme-brutal:bg-brutal-red text-foreground-strong theme-brutal:text-black",
+  stone: "bg-fill-muted theme-brutal:bg-brutal-stone text-foreground-strong theme-brutal:text-black",
 } as const;
 
 export type ButtonTone = keyof typeof BUTTON_TONE_CLASSES;

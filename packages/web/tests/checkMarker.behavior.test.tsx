@@ -21,9 +21,9 @@ test("CheckMarker renders square, circle, black-fill, and yellow-fill states", (
   assert.match(view.getByTestId("form").className, /size-4/);
   assert.match(view.getByTestId("form").className, /bg-black text-white/);
   assert.match(view.getByTestId("list").className, /size-5/);
-  assert.match(view.getByTestId("list").className, /bg-soft-signal text-black/);
+  assert.match(view.getByTestId("list").className, /bg-primary-soft theme-brutal:bg-soft-signal text-foreground-strong theme-brutal:text-black/);
   assert.match(view.getByTestId("message").className, /rounded-full/);
-  assert.match(view.getByTestId("message").className, /bg-soft-signal text-black/);
+  assert.match(view.getByTestId("message").className, /bg-primary-soft theme-brutal:bg-soft-signal text-foreground-strong theme-brutal:text-black/);
 });
 
 function CheckboxHarness({ disabled = false }: { disabled?: boolean }) {

@@ -74,7 +74,7 @@ export default function DeviceLoginPage() {
           <button
             type="button"
             onClick={closePage}
-            className="btn-brutal block w-full bg-brutal-pink px-3 py-2 text-center text-sm"
+            className="btn-brutal block w-full bg-accent-soft theme-brutal:bg-brutal-pink px-3 py-2 text-center text-sm"
           >
             {formatMessage({ id: "pages.deviceLogin.closePage" })}
           </button>
@@ -113,14 +113,14 @@ export default function DeviceLoginPage() {
               placeholder={formatMessage({ id: "pages.deviceLogin.codePlaceholder" })}
               autoCapitalize="characters"
               autoComplete="one-time-code"
-              className="w-full border-2 border-black p-2 text-center font-mono text-lg font-black tracking-widest shadow-brutal-sm focus:shadow-brutal focus:outline-none"
+              className="w-full border theme-brutal:border-2 border-line-strong theme-brutal:border-black p-2 text-center font-mono text-lg font-black tracking-widest shadow-raft-xs theme-brutal:shadow-brutal-sm focus:shadow-raft-sm theme-brutal:focus:shadow-brutal focus:outline-none"
             />
           </FormField>
 
           <button
             type="submit"
             disabled={submitting || !normalizedCode}
-            className="btn-brutal w-full bg-brutal-pink px-3 py-2 text-sm disabled:opacity-50"
+            className="btn-brutal w-full bg-accent-soft theme-brutal:bg-brutal-pink px-3 py-2 text-sm disabled:opacity-50"
           >
             {submitting ? formatMessage({ id: "pages.deviceLogin.approving" }) : formatMessage({ id: "pages.deviceLogin.approve" })}
           </button>
@@ -129,7 +129,7 @@ export default function DeviceLoginPage() {
         <button
           type="button"
           onClick={() => logout()}
-          className="mt-3 w-full border-2 border-black bg-white p-2 text-sm font-bold shadow-brutal-sm transition-all duration-100 hover:-translate-y-[1px] hover:shadow-brutal active:translate-x-[1px] active:translate-y-[1px] active:shadow-brutal-active"
+          className="mt-3 w-full border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white p-2 text-sm font-bold shadow-raft-xs theme-brutal:shadow-brutal-sm transition-all duration-100 hover:-translate-y-[1px] hover:shadow-raft-sm theme-brutal:hover:shadow-brutal active:translate-x-[1px] active:translate-y-[1px] active:shadow-none theme-brutal:active:shadow-brutal-active"
         >
           {formatMessage({ id: "pages.deviceLogin.useAnotherAccount" })}
         </button>

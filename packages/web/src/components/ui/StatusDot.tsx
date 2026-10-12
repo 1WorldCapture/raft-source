@@ -69,12 +69,12 @@ export default function StatusDot({
   ...rest
 }: StatusDotProps) {
   const colorClass = external
-    ? "bg-brutal-cyan"
+    ? "bg-info-soft theme-brutal:bg-brutal-cyan"
     : activity ? getActivityDotClass(activity) : tone ?? "bg-gray-400";
   return (
     <span
       {...rest}
-      className={`inline-block shrink-0 rounded-full border border-black ${SIZE_CLASS[size]} ${colorClass} ${pulse ? "animate-pulse" : ""} ${className ?? ""}`}
+      className={`inline-block shrink-0 rounded-full border border-line-strong theme-brutal:border-black ${SIZE_CLASS[size]} ${colorClass} ${pulse ? "animate-pulse" : ""} ${className ?? ""}`}
     />
   );
 }

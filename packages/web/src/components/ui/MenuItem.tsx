@@ -52,7 +52,7 @@ export default function MenuItem({
   // Sidebar / MessageItem / SavedPanel context menus visually uniform
   // in small viewports without per-callsite opt-in.
   const base = "flex w-full items-center gap-2 px-3 py-2 [@media(max-height:600px)]:py-1 text-sm text-left transition-colors";
-  const tone = "font-medium text-black hover:bg-soft-signal/30 disabled:cursor-not-allowed disabled:text-black/30";
+  const tone = "font-medium text-foreground-strong theme-brutal:text-black hover:bg-primary-soft/30 theme-brutal:hover:bg-soft-signal/30 disabled:cursor-not-allowed disabled:text-foreground-placeholder theme-brutal:disabled:text-black/30";
 
   return (
     <button

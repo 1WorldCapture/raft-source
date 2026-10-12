@@ -163,13 +163,13 @@ export default function OfficePage() {
   const officeState = assetsReady && scene ? officeRef.current : null;
 
   return (
-    <div className="relative flex h-full min-h-0 w-full flex-col bg-black" data-testid="office-page">
+    <div className="relative flex h-full min-h-0 w-full flex-col bg-foreground-strong theme-brutal:bg-black" data-testid="office-page">
       <div className="flex items-center gap-2 px-3 py-1 text-xs text-white/80">
         <div className="flex gap-1" data-testid="members-surface-toggle">
           <button
             type="button"
             data-testid="members-surface-office"
-            className="border border-white bg-white px-2 py-0.5 font-bold text-black"
+            className="border border-white bg-layer-panel theme-brutal:bg-white px-2 py-0.5 font-bold text-foreground-strong theme-brutal:text-black"
             onClick={() => writeMembersSurface(userId, "office")}
           >
             {formatMessage({ id: "office.viewOffice" })}
@@ -188,7 +188,7 @@ export default function OfficePage() {
         <input
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          className="min-w-0 flex-1 border border-white/30 bg-black px-2 py-0.5 text-white"
+          className="min-w-0 flex-1 border border-white/30 bg-foreground-strong theme-brutal:bg-black px-2 py-0.5 text-white"
           data-testid="office-search"
         />
       </label>

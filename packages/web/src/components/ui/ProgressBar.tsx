@@ -27,10 +27,10 @@ import { en } from "../../i18n/messages/en";
 export type ProgressBarTone = "pink" | "cyan" | "lime" | "orange";
 
 const TONE_CLASS: Record<ProgressBarTone, string> = {
-  pink: "bg-brutal-pink",
-  cyan: "bg-brutal-cyan",
-  lime: "bg-brutal-lime",
-  orange: "bg-brutal-orange",
+  pink: "bg-accent-soft theme-brutal:bg-brutal-pink",
+  cyan: "bg-info-soft theme-brutal:bg-brutal-cyan",
+  lime: "bg-success-soft theme-brutal:bg-brutal-lime",
+  orange: "bg-warning-soft theme-brutal:bg-brutal-orange",
 };
 
 export interface ProgressBarProps extends Omit<HTMLAttributes<HTMLDivElement>, "role"> {
@@ -61,7 +61,7 @@ export default function ProgressBar({
   return (
     <div className={className} {...rest}>
       {(label || (showPercent && !indeterminate)) && (
-        <div className="mb-1 flex items-center justify-between text-xs font-mono text-black/60">
+        <div className="mb-1 flex items-center justify-between text-xs font-mono text-foreground-muted theme-brutal:text-black/60">
           {label ? <span className="truncate">{label}</span> : <span />}
           {showPercent && !indeterminate && <span className="shrink-0">{Math.round(pct)}%</span>}
         </div>
@@ -72,7 +72,7 @@ export default function ProgressBar({
         aria-valuemin={0}
         aria-valuemax={100}
         {...(indeterminate ? {} : { "aria-valuenow": Math.round(pct) })}
-        className="h-4 w-full overflow-hidden border-2 border-black bg-white shadow-brutal-sm"
+        className="h-4 w-full overflow-hidden border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white shadow-raft-xs theme-brutal:shadow-brutal-sm"
       >
         {indeterminate ? (
           <div className={`h-full w-2/5 ${TONE_CLASS[tone]} progress-indeterminate`} />

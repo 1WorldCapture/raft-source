@@ -137,7 +137,7 @@ export default function ConfirmDialog({
           <button
             onClick={handleClose}
             disabled={loading}
-            className="btn-brutal-sm bg-white p-1 disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-30"
+            className="btn-brutal-sm bg-layer-panel theme-brutal:bg-white p-1 disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-30"
             aria-label={formatChromeMessage(
               loading ? "common.confirm.actionInProgress" : "common.confirm.closeDialog",
             )}
@@ -152,7 +152,7 @@ export default function ConfirmDialog({
             callers retain their own layout; ordinary copy gets the shared
             compact text treatment. */}
         <div
-          className={plainMessage ? "mb-5" : "mb-5 text-sm leading-relaxed text-black/75"}
+          className={plainMessage ? "mb-5" : "mb-5 text-sm leading-relaxed text-foreground-strong theme-brutal:text-black/75"}
           data-slot="confirm-dialog-content"
         >
           {message}

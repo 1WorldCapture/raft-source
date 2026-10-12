@@ -235,8 +235,8 @@ export default function ImageLightbox() {
   // Arrow button: always visible for symmetry, but disabled style when at boundary
   const arrowBtn = (disabled: boolean) =>
     disabled
-      ? "flex items-center justify-center size-12 border-2 border-white/10 bg-white/5 text-white/20 cursor-default"
-      : `flex items-center justify-center size-12 border-2 border-black bg-white text-black transition-colors duration-100 hover:bg-soft-signal`;
+      ? "flex items-center justify-center size-12 border theme-brutal:border-2 border-white/10 bg-layer-panel/5 theme-brutal:bg-white/5 text-white/20 cursor-default"
+      : `flex items-center justify-center size-12 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white text-foreground-strong theme-brutal:text-black transition-colors duration-100 hover:bg-primary-soft theme-brutal:hover:bg-soft-signal`;
 
   return (
     <Lightbox
@@ -246,15 +246,15 @@ export default function ImageLightbox() {
     >
       {/* Title bar — in normal flow so image stage naturally starts below it */}
       <div
-        className="safe-top safe-left safe-right pointer-events-auto shrink-0 border-b-2 border-black bg-white"
+        className="safe-top safe-left safe-right pointer-events-auto shrink-0 border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex h-14 items-center gap-3 px-4">
-          <div className="min-w-0 flex-1 truncate text-sm font-bold font-display text-black">
+          <div className="min-w-0 flex-1 truncate text-sm font-bold font-display text-foreground-strong theme-brutal:text-black">
             {current.filename}
           </div>
           {hasMultiple && (
-            <div className="shrink-0 border-2 border-black bg-soft-signal px-3 py-1 text-xs font-bold font-display text-black">
+            <div className="shrink-0 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-primary-soft theme-brutal:bg-soft-signal px-3 py-1 text-xs font-bold font-display text-foreground-strong theme-brutal:text-black">
               {currentIndex + 1} / {images.length}
             </div>
           )}
@@ -399,8 +399,8 @@ export default function ImageLightbox() {
         <aside
           // inert while collapsed: controls leave tab order + a11y tree.
           inert={!commentsOpen}
-          className={`pointer-events-auto hidden h-full shrink-0 overflow-hidden border-black bg-white transition-[width] duration-300 ease-in-out sm:block ${
-            commentsOpen ? "w-80 border-l-2" : "w-0 border-l-0"
+          className={`pointer-events-auto hidden h-full shrink-0 overflow-hidden border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white transition-[width] duration-300 ease-in-out sm:block ${
+            commentsOpen ? "w-80 border-l theme-brutal:border-l-2" : "w-0 border-l-0"
           }`}
         >
           {/* Click shield lives on the inner div, not the semantic <aside>
@@ -424,7 +424,7 @@ export default function ImageLightbox() {
         <div
           inert={!commentsOpen}
           onClick={(e) => e.stopPropagation()}
-          className={`pointer-events-auto fixed bottom-0 right-0 z-20 w-full border-l-2 border-t-2 border-black bg-white transition-transform duration-300 ease-in-out sm:hidden ${
+          className={`pointer-events-auto fixed bottom-0 right-0 z-20 w-full border-l theme-brutal:border-l-2 border-t theme-brutal:border-t-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white transition-transform duration-300 ease-in-out sm:hidden ${
             commentsOpen ? "translate-x-0" : "translate-x-full"
           }`}
           style={{ top: "calc(56px + env(safe-area-inset-top, 0px))" }}
@@ -453,9 +453,9 @@ export default function ImageLightbox() {
                 key={img.id}
                 type="button"
                 onClick={() => goTo(idx)}
-                className={`pointer-events-auto size-12 border-2 transition-all duration-100 overflow-hidden ${
+                className={`pointer-events-auto size-12 border theme-brutal:border-2 transition-all duration-100 overflow-hidden ${
                   isActive
-                    ? "border-soft-signal shadow-brutal-sm"
+                    ? "border-soft-signal shadow-raft-xs theme-brutal:shadow-brutal-sm"
                     : "border-white/30 opacity-60 hover:opacity-100 hover:border-white/60"
                 }`}
               >
@@ -467,7 +467,7 @@ export default function ImageLightbox() {
                     draggable={false}
                   />
                 ) : (
-                  <div className="h-full w-full bg-white/20 flex items-center justify-center text-white/50 text-xs font-bold">
+                  <div className="h-full w-full bg-layer-panel/20 theme-brutal:bg-white/20 flex items-center justify-center text-white/50 text-xs font-bold">
                     {idx + 1}
                   </div>
                 )}

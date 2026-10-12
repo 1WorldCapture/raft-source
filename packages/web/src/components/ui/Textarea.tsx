@@ -106,7 +106,7 @@ const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(function Textare
   const overLimit = counterLimit !== undefined && length > counterLimit;
 
   const stateClass = hasError
-    ? "!border-brutal-red ring-2 ring-brutal-red/60 bg-brutal-red/5"
+    ? "!border-brutal-red ring-2 ring-brutal-red/60 bg-danger-soft/5 theme-brutal:bg-brutal-red/5"
     : "";
 
   return (
@@ -121,13 +121,13 @@ const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(function Textare
         {...rest}
       />
       <div className="flex items-start justify-between gap-3 text-xs">
-        <div className={`flex-1 min-w-0 ${hasError ? "text-brutal-red font-bold" : "text-black/60"}`}>
+        <div className={`flex-1 min-w-0 ${hasError ? "text-brutal-red font-bold" : "text-foreground-muted theme-brutal:text-black/60"}`}>
           {hasError ? error : hint}
         </div>
         {showCounter && counterLimit !== undefined && (
           <div
             className={`shrink-0 font-mono tabular-nums ${
-              overLimit || hasError ? "text-brutal-red font-bold" : "text-black/50"
+              overLimit || hasError ? "text-brutal-red font-bold" : "text-foreground-muted theme-brutal:text-black/50"
             }`}
           >
             {length}/{counterLimit}

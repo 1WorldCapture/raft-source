@@ -62,7 +62,7 @@ export default function Lightbox({
   onClose,
   children,
   zIndex = 70,
-  backdropClass = "bg-black/75",
+  backdropClass = "bg-foreground/75 theme-brutal:bg-black/75",
   dismissOnBackdrop = true,
   className = "",
   positionClass = "fixed inset-0",

@@ -29,12 +29,12 @@ export type SkeletonVariant = "line" | "block" | "circle";
 const VARIANT_CLASS: Record<SkeletonVariant, string> = {
   // A text-line stand-in. Default height matches the system's text-sm bars (h-3);
   // override via className for taller lines. No radius — brutal bars are square.
-  line: "h-3 bg-black/10",
+  line: "h-3 bg-fill-muted theme-brutal:bg-black/10",
   // A filled block (cards, thumbnails, larger regions). Sharp corners.
-  block: "bg-black/10",
+  block: "bg-fill-muted theme-brutal:bg-black/10",
   // Avatar / status-dot stand-in. The only rounded variant; bordered + lighter
   // fill to read as an avatar slot, matching existing loading avatars.
-  circle: "rounded-full border-2 border-black bg-black/5",
+  circle: "rounded-full border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-fill-muted theme-brutal:bg-black/5",
 };
 
 export interface SkeletonProps extends HTMLAttributes<HTMLDivElement> {
@@ -102,7 +102,7 @@ export function ConversationCardSkeleton({ count = 6 }: { count?: number }) {
   return (
     <div className="flex flex-col gap-2" aria-busy="true">
       {Array.from({ length: count }, (_, i) => (
-        <div key={i} className="flex w-full items-start gap-3 border-2 border-black/30 bg-white p-3">
+        <div key={i} className="flex w-full items-start gap-3 border theme-brutal:border-2 border-line-muted theme-brutal:border-black/30 bg-layer-panel theme-brutal:bg-white p-3">
           <div className="flex min-w-0 flex-1 flex-col gap-2">
             <div className="flex items-center gap-2.5">
               <Skeleton variant="line" className="w-20" />

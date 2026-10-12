@@ -134,7 +134,7 @@ function SortableServerRow({
       ref={setNodeRef}
       style={style}
       onAuxClick={(event) => onAuxSelect(event, server, targetHref)}
-      className="relative flex h-12 w-full items-stretch text-sm font-medium text-black transition-colors hover:bg-soft-signal"
+      className="relative flex h-12 w-full items-stretch text-sm font-medium text-foreground-strong theme-brutal:text-black transition-colors hover:bg-primary-soft theme-brutal:hover:bg-soft-signal"
     >
       <a
         href={targetHref}
@@ -154,12 +154,12 @@ function SortableServerRow({
         <AvatarSlot context="surface-list" type="server" serverAvatarUrl={server.avatarUrl} serverInitial={initial} />
         <div className="min-w-0 flex-1 text-left">
           <div className="truncate">{server.name}</div>
-          <div className="truncate font-mono text-xs text-black/40">/{server.slug}</div>
+          <div className="truncate font-mono text-xs text-foreground-hint theme-brutal:text-black/40">/{server.slug}</div>
         </div>
         {!isCurrent && unread !== undefined && unread > 0 && (
           isMuted ? (
             <span
-              className="ml-auto shrink-0 font-mono text-[10px] font-medium leading-none text-black/50"
+              className="ml-auto shrink-0 font-mono text-[10px] font-medium leading-none text-foreground-muted theme-brutal:text-black/50"
               title={intl.formatMessage({ id: "ui.serverSwitcher.notificationsMuted" })}
             >
               {unread > 99 ? "99+" : unread}
@@ -176,7 +176,7 @@ function SortableServerRow({
         aria-label={intl.formatMessage({ id: "ui.serverSwitcher.reorderServer" }, { name: server.name })}
         {...attributes}
         {...listeners}
-        className="flex w-6 shrink-0 touch-none cursor-grab items-center justify-center text-black/45 hover:text-black active:cursor-grabbing"
+        className="flex w-6 shrink-0 touch-none cursor-grab items-center justify-center text-foreground-hint theme-brutal:text-black/45 hover:text-foreground-strong theme-brutal:hover:text-black active:cursor-grabbing"
       >
         <GripVertical size={14} />
       </button>
@@ -321,7 +321,7 @@ export default function ServerSwitcherMenu({
       onMouseDown={(e) => e.stopPropagation()}
     >
       {hostedSwitchError ? (
-        <div role="alert" className="m-2 border-2 border-black bg-brutal-orange/20 p-2 text-xs font-bold">
+        <div role="alert" className="m-2 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-warning-soft/20 theme-brutal:bg-brutal-orange/20 p-2 text-xs font-bold">
           {hostedSwitchError}
         </div>
       ) : null}
@@ -356,7 +356,7 @@ export default function ServerSwitcherMenu({
           onClick={() => {
             void handleJoinCommunity(option.slug);
           }}
-          className="flex w-full items-center justify-start gap-2 px-3 py-2 [@media(max-height:600px)]:py-1 text-left text-sm font-bold text-black hover:bg-brutal-pink transition-colors"
+          className="flex w-full items-center justify-start gap-2 px-3 py-2 [@media(max-height:600px)]:py-1 text-left text-sm font-bold text-foreground-strong theme-brutal:text-black hover:bg-accent-soft theme-brutal:hover:bg-brutal-pink transition-colors"
         >
           <Plus size={14} />
           <span className="min-w-0 flex-1 text-left">{option.label}</span>
@@ -371,7 +371,7 @@ export default function ServerSwitcherMenu({
           serverPersistence.clearLastServerSlug();
           navigate("/");
         }}
-        className="flex w-full items-center justify-start gap-2 px-3 py-2 [@media(max-height:600px)]:py-1 text-left text-sm font-bold text-black hover:bg-brutal-pink transition-colors"
+        className="flex w-full items-center justify-start gap-2 px-3 py-2 [@media(max-height:600px)]:py-1 text-left text-sm font-bold text-foreground-strong theme-brutal:text-black hover:bg-accent-soft theme-brutal:hover:bg-brutal-pink transition-colors"
       >
         <Plus size={14} />
         <span className="min-w-0 flex-1 text-left">{intl.formatMessage({ id: "ui.serverSwitcher.switchOrCreate" })}</span>
