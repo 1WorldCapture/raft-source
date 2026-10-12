@@ -152,8 +152,8 @@ pickerTest("while Elegant dark is hidden Settings offers only the Brutal and Ele
   assert.equal(document.documentElement.classList.contains("dark"), false);
 });
 
-test("with the theme picker off Settings shows no theme controls", () => {
-  assert.equal(THEME_PICKER_ENABLED, false);
+// Only meaningful while the picker is switched off (the picker-on PR flips the constant).
+test("with the theme picker off Settings shows no theme controls", { skip: THEME_PICKER_ENABLED }, () => {
   render(<ProductAppearance />);
   assert.equal(screen.queryByTestId("appearance-theme-picker"), null);
   assert.equal(screen.queryByTestId("appearance-theme-group-light"), null);

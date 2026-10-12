@@ -178,8 +178,8 @@ test("corrupt device storage falls back to the default", () => {
   assert.equal(classes.has("dark"), false);
 });
 
-test("with the theme picker off a saved Elegant preference renders Brutal and is not cleared", () => {
-  assert.equal(THEME_PICKER_ENABLED, false);
+// Only meaningful while the picker is switched off (the picker-on PR flips the constant).
+test("with the theme picker off a saved Elegant preference renders Brutal and is not cleared", { skip: THEME_PICKER_ENABLED }, () => {
   const saved = JSON.stringify({ mode: "light", lightThemeId: "elegant", darkThemeId: "elegant" });
   const { root, classes, themeColor, storageEntries } = executeBootstrap({
     storageEntries: { [APP_THEME_PREFERENCES_STORAGE_KEY]: saved },

@@ -230,8 +230,8 @@ pickerTest("while Elegant dark is hidden a saved dark preference renders as Eleg
   assert.equal(window.localStorage.getItem(APP_THEME_STORAGE_KEY), "elegant-dark");
 });
 
-test("with the theme picker off a saved Elegant preference renders Brutal and is not cleared", async () => {
-  assert.equal(THEME_PICKER_ENABLED, false);
+// Only meaningful while the picker is switched off (the picker-on PR flips the constant).
+test("with the theme picker off a saved Elegant preference renders Brutal and is not cleared", { skip: THEME_PICKER_ENABLED }, async () => {
   const saved = JSON.stringify({ mode: "light", lightThemeId: "elegant", darkThemeId: "elegant" });
   window.localStorage.setItem(APP_THEME_PREFERENCES_STORAGE_KEY, saved);
 
