@@ -75,6 +75,10 @@ for (const file of builtFiles) {
 assert.ok(archivedFiles.includes("/dist/frontend/index.html"), "Bundled frontend missing");
 const cliPath = path.join(appRoot, "../../packages/cli/dist/index.js");
 assert.equal(hash(readFileSync(path.join(resources, "cli/index.js"))), hash(readFileSync(cliPath)), "Bundled CLI is stale");
+// The bundle is ESM: without a neighbouring package.json of type "module" it is parsed as CommonJS and
+// exits 0 silently under ELECTRON_RUN_AS_NODE (every agent-run `raft` command printed nothing).
+const bundledCliPackage = JSON.parse(readFileSync(path.join(resources, "cli/package.json"), "utf8"));
+assert.equal(bundledCliPackage.type, "module", "Bundled CLI needs a package.json with type module next to index.js");
 
 console.log(JSON.stringify({
   check: "cursor-sdk-packaged-app", result: "passed", appPath,
