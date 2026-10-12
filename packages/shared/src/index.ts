@@ -214,6 +214,7 @@ export * from "./toolDisplay.js";
 export * from "./attachmentPreview.js";
 export * from "./typeGuards.js";
 export * from "./brandedIds.js";
+export * from "./startupMemoryContract.js";
 export * from "./actionCards.js";
 export * from "./featureFlags.js";
 export * from "./externalProjection.js";
@@ -1287,6 +1288,15 @@ export interface AgentConfig {
     key: string;
     message: string;
   } | null;
+  /**
+   * Server-evaluated `constructed_wake_context` feature flag (RFC 070): at-wake
+   * session recycling with a constructed briefing, the cold-idle sweep, and the
+   * startup MEMORY.md block. Absent or false means off; older servers never
+   * send it, so the behavior stays off until a server turns it on. The
+   * `RAFT_WAKE_RECYCLE=0` / `RAFT_STARTUP_MEMORY_BLOCK=0` env vars remain local
+   * off switches and cannot turn it on.
+   */
+  constructedWakeContext?: boolean;
 }
 
 export type ProfileVisibilityMembershipStatus = "active" | "left" | "removed";

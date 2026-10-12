@@ -65,3 +65,14 @@ test("release notices are rendered; retired migration controls never enter stand
   }), options);
   expect(migration).toBe(buildCliSystemPrompt(promptConfig(), options));
 });
+
+test("the MEMORY.md size target appears only for servers with the constructed wake context flag on", () => {
+  const on = buildCliSystemPrompt(promptConfig({ constructedWakeContext: true }), options);
+  const off = buildCliSystemPrompt(promptConfig({ constructedWakeContext: false }), options);
+  const absent = buildCliSystemPrompt(promptConfig({}), options);
+  expect(on).toContain("injected into the first input of every fresh session");
+  expect(on).toContain("keep it under 16 KB");
+  expect(off).not.toContain("injected into the first input");
+  expect(absent).not.toContain("injected into the first input");
+  expect(absent).toBe(off);
+});

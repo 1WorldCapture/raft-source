@@ -124,6 +124,7 @@ import {
   type AxSurfaceText,
   type RuntimeProfileControlKind,
 } from "./agentRuntimeInput.js";
+import { applyStartupMemoryBlock, buildStartupMemoryBlock, resolveStartupMemoryBlockConfig } from "./startupMemoryBlock.js";
 import {
   buildBoundedVisibleCrashProjection,
   buildClaudeStartupCrashRuntimeError,
@@ -3134,6 +3135,21 @@ export class AgentProcessManager {
     if (!isResume && this.pendingCursorResetNotice.delete(agentId)) {
       // Fresh session after a poisoned-session reset: tell the agent its context is gone.
       prompt = composeAxSurfaces(CURSOR_SESSION_RESET_NOTICE_INPUT, prompt);
+    }
+    // Startup memory block (RFC 070 §6 follow-up, `constructed_wake_context`
+    // flag): every FRESH session gets the head of MEMORY.md pushed into its
+    // first input instead of relying on the standing-prompt read. Resumed
+    // sessions never get it (their transcript already carries an earlier read).
+    // Flag off (the default) or a missing/empty MEMORY.md leaves the prompt as is.
+    if (!runtimeConfig.sessionId) {
+      const memoryBlockConfig = resolveStartupMemoryBlockConfig(runtimeConfig.constructedWakeContext, runtimeConfig.envVars);
+      if (memoryBlockConfig.enabled) {
+        const memoryBlock = await buildStartupMemoryBlock({ workspacePath: agentDataDir, budgetTokens: memoryBlockConfig.budgetTokens });
+        if (memoryBlock) {
+          ({ prompt, promptSource } = applyStartupMemoryBlock(memoryBlock, prompt, promptSource));
+          logger.info(`[Agent ${agentId}] Startup memory block injected for fresh session (source ${promptSource})`);
+        }
+      }
     }
     const runtimeInputTraceAttrs = buildRuntimeInputTraceAttrs({
       source: promptSource,

@@ -110,7 +110,7 @@ import {
   recordComputerOfflineTransition,
   recordComputerOnlineTransition,
 } from "./computerOutageNotificationService.js";
-import { evaluateFeatureFlag } from "./featureFlagService.js";
+import { CONSTRUCTED_WAKE_CONTEXT_FEATURE_FLAG_KEY, evaluateFeatureFlag } from "./featureFlagService.js";
 import { runtimeAccountUsageCacheService } from "./runtimeAccountUsageCacheService.js";
 import { getComputerLinkedMachineAttachers } from "./computerCredentialService.js";
 import {
@@ -4175,6 +4175,21 @@ export class AgentOrchestrator extends EventEmitter {
     if (this.machineConnections.get(machineId) !== conn || conn.principalKind !== "computer") return false;
     const attachedBy = await this.loadRuntimeAccountUsageAttacher(conn.serverId, machineId);
     return this.machineConnections.get(machineId) === conn && Boolean(attachedBy);
+  }
+
+  /**
+   * RFC 070 constructed wake context, per server, default OFF. Evaluated at
+   * every agent start so turning the flag off takes effect on the next start;
+   * any evaluation failure keeps it off.
+   */
+  protected async constructedWakeContextEnabled(serverId: string | null | undefined): Promise<boolean> {
+    if (!serverId) return false;
+    try {
+      return (await evaluateFeatureFlag({ key: CONSTRUCTED_WAKE_CONTEXT_FEATURE_FLAG_KEY, serverId })).enabled === true;
+    } catch (error) {
+      console.warn(`[AgentOrchestrator] ${CONSTRUCTED_WAKE_CONTEXT_FEATURE_FLAG_KEY} evaluation failed; leaving it off`, error);
+      return false;
+    }
   }
 
   protected async isRuntimeAccountUsageFeatureEnabled(serverId: string): Promise<boolean> {
@@ -10383,6 +10398,9 @@ export class AgentOrchestrator extends EventEmitter {
     const runtimeProfileControl = await agentRuntimeProfileService.getPendingRuntimeProfileControl(agentId);
     if (runtimeProfileControl) {
       config.runtimeProfileControl = runtimeProfileControl;
+    }
+    if (await this.constructedWakeContextEnabled(agent.serverId)) {
+      config.constructedWakeContext = true;
     }
 
     // Query unread rows so resume can deterministically re-drive durable
