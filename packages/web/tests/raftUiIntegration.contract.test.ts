@@ -21,8 +21,10 @@ test("web app installs raft-ui global CSS and providers", () => {
   assert.match(css, /@source "\.\.\/node_modules\/raft-ui\/dist";/);
 
   const main = read("src/main.tsx");
-  assert.match(main, /import \{ ThemeProvider, ToastProvider, TooltipProvider \} from "raft-ui";/);
-  assert.match(main, /<ThemeProvider defaultTheme="brutal" defaultMode="light">/);
+  assert.match(main, /import \{ ToastProvider, TooltipProvider \} from "raft-ui";/);
+  // raft-ui's ThemeProvider is mounted by AppThemeProvider, which owns the device preference.
+  assert.match(main, /import \{ AppThemeProvider \} from "\.\/theme\/AppThemeProvider";/);
+  assert.match(main, /<AppThemeProvider>/);
   assert.match(main, /<TooltipProvider>/);
   assert.match(main, /<ToastProvider>/);
 });
