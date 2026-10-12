@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
+import { brutalView } from "./helpers/brutalView";
 
 const repoRoot = resolve(import.meta.dirname, "..");
-const read = (p: string) => readFileSync(resolve(repoRoot, p), "utf8");
+const read = (p: string) => brutalView(readFileSync(resolve(repoRoot, p), "utf8"));
 
 test("official mermaid replaces the limited beautiful-mermaid dependency", () => {
   const pkg = JSON.parse(read("package.json")) as {

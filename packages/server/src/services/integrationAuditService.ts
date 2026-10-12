@@ -38,6 +38,8 @@ export const INTEGRATION_AUDIT_EVENT_TYPES = [
   "provider_connection.credential_rotated",
   "provider_connection.tested",
   "provider_connection.deleted",
+  "provider_connection.probe_issued",
+  "provider_connection.probe_receipt",
 ] as const;
 
 export type IntegrationAuditEventType = (typeof INTEGRATION_AUDIT_EVENT_TYPES)[number];
@@ -86,6 +88,8 @@ const EVENT_METADATA_ALLOWLIST: Record<IntegrationAuditEventType, readonly strin
   "provider_connection.credential_rotated": ["configVersion", "credentialVersion", "status"],
   "provider_connection.tested": ["configVersion", "credentialVersion", "status"],
   "provider_connection.deleted": ["providerId", "configVersion", "credentialVersion"],
+  "provider_connection.probe_issued": ["probeId", "computerId", "runtime", "modelDigest", "configVersion", "credentialVersion", "probeKind"],
+  "provider_connection.probe_receipt": ["probeId", "computerId", "runtime", "modelDigest", "configVersion", "credentialVersion", "category", "latencyMs"],
 };
 
 const EVENT_CATEGORY: Record<IntegrationAuditEventType, IntegrationAuditEventCategory> = {
@@ -124,6 +128,8 @@ const EVENT_CATEGORY: Record<IntegrationAuditEventType, IntegrationAuditEventCat
   "provider_connection.credential_rotated": "revocation",
   "provider_connection.tested": "runtime",
   "provider_connection.deleted": "revocation",
+  "provider_connection.probe_issued": "runtime",
+  "provider_connection.probe_receipt": "runtime",
 };
 
 const DIFF_ALLOWLIST = new Set([

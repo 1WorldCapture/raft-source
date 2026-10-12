@@ -21,10 +21,41 @@ const SWEPT = [
   "src/App.tsx",
   "src/pages",
   "src/office",
+  "src/components/layout",
+  "src/components/search",
+  "src/components/thread",
+  "src/components/message",
+  "src/components/markdown",
+  "src/components/actions",
+  "src/components/settings",
+  "src/components/server",
+  "src/components/profile",
+  "src/components/member",
+  "src/components/saved",
+  "src/components/wiki",
+  "src/components/brand",
+  "src/components/agent",
+  "src/components/machine",
+  "src/components/onboarding",
+  "src/components/workspace",
+  "src/components/channel",
+  "src/components/task",
+  "src/components/auth",
+  "src/components/oauth",
+  "src/components/pwa",
+  "src/components/window",
+  "src/components/icons",
+  "src/utils",
 ];
 // Top-level files directly under src/components (area 1) are listed by name so
 // sub-folders swept later are not pulled in early.
 const SWEPT_TOP_LEVEL_COMPONENTS = true;
+// Single sources of truth whose Brutal class names are DATA (resolved to CSS variables, shared with
+// the mobile palette and pinned by taskStatusBadgeConfig): sweeping them changes what those
+// consumers read. Elegant status colours need a semantic field in the SSOT first (follow-up).
+// AppearanceThemePicker's preview mocks paint a SPECIFIC theme inside any theme (explicit isBrutal
+// branches, per its own comment), so their literal Brutal classes must not be theme-guarded.
+const EXEMPT = ["src/components/task/taskStatusUi.ts", "src/components/settings/AppearanceThemePicker.tsx"];
 
 function* walk(path: string): Generator<string> {
   const st = statSync(path);
@@ -44,7 +75,7 @@ function sweptFiles(): string[] {
       if (/\.tsx?$/.test(name) && !/\.(test|d)\.tsx?$/.test(name)) files.push(join(dir, name));
     }
   }
-  return files;
+  return files.filter((file) => !EXEMPT.some((exempt) => file.endsWith(exempt)));
 }
 
 test("swept folders keep every hard-coded Brutal colour behind a theme-brutal: guard", () => {
@@ -66,4 +97,18 @@ test("the codemod writes the semantic class first and the guarded Brutal class s
     `<div className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white text-foreground-muted theme-brutal:text-black/60 hover:bg-fill-muted theme-brutal:hover:bg-black/5 shadow-raft-xs theme-brutal:shadow-brutal-sm" />`,
   );
   assert.equal((transformSource(text) as { changes: number }).changes, 0);
+});
+
+test("a guarded base class keeps losing to its unguarded responsive override in Brutal", () => {
+  const { text } = transformSource(
+    '<div className="border-b-2 border-black md:border-b-0 md:border-r-2 lg:bg-transparent bg-white" />',
+  );
+  // `theme-brutal:` sorts after a plain responsive class, so the override needs a guarded twin
+  // or Brutal would keep the base border at md (the original markup removed it there).
+  assert.match(text, /md:border-b-0 theme-brutal:md:border-b-0/);
+  assert.match(text, /lg:bg-transparent theme-brutal:lg:bg-transparent/);
+  // The semantic half of a swept responsive pair is not an override.
+  assert.doesNotMatch(text, /theme-brutal:md:border-r(?!-2)/);
+  // Idempotent.
+  assert.equal(transformSource(text).changes, 0);
 });

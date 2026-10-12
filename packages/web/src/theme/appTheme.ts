@@ -13,13 +13,12 @@ export type AppThemePreset = (typeof APP_THEME_PRESETS)[number];
 export const DEFAULT_APP_THEME_PRESET: AppThemePreset = "brutal";
 
 /**
- * The Settings theme picker is hidden, and a saved Elegant preference has no
- * effect (the app renders Brutal; the saved value is left untouched), until the
- * component sweep makes Elegant look genuinely different on the main screens.
- * The picker-on PR flips this constant and the bootstrap script's
- * `themePickerEnabled`; ELEGANT_DARK_ENABLED comes after that.
+ * The Settings theme picker is on (Brutal and Elegant light). When false the picker is hidden
+ * and a saved Elegant preference has no effect (the app renders Brutal; the saved value is left
+ * untouched). The bootstrap script's `themePickerEnabled` must match; ELEGANT_DARK_ENABLED
+ * comes after this.
  */
-export const THEME_PICKER_ENABLED = false;
+export const THEME_PICKER_ENABLED = true;
 
 /**
  * Elegant dark is ported but hidden until the component sweep to semantic

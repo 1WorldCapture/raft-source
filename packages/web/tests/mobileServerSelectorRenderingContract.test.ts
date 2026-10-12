@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { mobileServerSelectorPolygon } from "../src/components/layout/mobileServerSelectorGeometry";
+import { brutalView } from "./helpers/brutalView";
 
-const sidebarSource = readFileSync(new URL("../src/components/layout/Sidebar.tsx", import.meta.url), "utf8");
+const sidebarSource = brutalView(readFileSync(new URL("../src/components/layout/Sidebar.tsx", import.meta.url), "utf8"));
 const stylesheetSource = readFileSync(new URL("../src/index.css", import.meta.url), "utf8");
-const geometrySource = readFileSync(new URL("../src/components/layout/mobileServerSelectorGeometry.ts", import.meta.url), "utf8");
+const geometrySource = brutalView(readFileSync(new URL("../src/components/layout/mobileServerSelectorGeometry.ts", import.meta.url), "utf8"));
 
 test("mobile server selector preserves its dimensions while vectorizing the slanted surface", () => {
   const classMatch = sidebarSource.match(/className="(mobile-server-selector-vector relative[^"]*)"/);

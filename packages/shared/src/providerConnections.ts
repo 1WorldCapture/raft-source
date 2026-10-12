@@ -24,6 +24,15 @@ export interface ProviderConnectionCatalog {
   providerOptions: ProviderConnectionProviderOption[];
 }
 
+/** Latest durable successful Computer probe for one connection. No reply body. */
+export interface ProviderConnectionLatestVerified {
+  computerId: string;
+  computerName: string | null;
+  runtime: string;
+  model: string;
+  verifiedAt: string;
+}
+
 export interface ProviderConnectionSummary {
   id: string;
   name: string;
@@ -37,6 +46,11 @@ export interface ProviderConnectionSummary {
   credentialVersion: number;
   hasCredential: boolean;
   assignedAgentCount: number;
+  /**
+   * Present on catalog reads. Omitted by older clients constructing a summary
+   * fixture; the server always sends null or a receipt.
+   */
+  latestVerified?: ProviderConnectionLatestVerified | null;
   lastCheckedAt: string | null;
   lastErrorCategory: string | null;
   createdAt: string;

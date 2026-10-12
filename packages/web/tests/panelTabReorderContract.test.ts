@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
+import { brutalView } from "./helpers/brutalView";
 
 const repoRoot = resolve(import.meta.dirname, "..");
 const srcRoot = resolve(repoRoot, "src");
@@ -16,7 +17,7 @@ function readSource(path: string): string {
   const backupSrc = strykerBackupSrc();
   const srcPath = path.replace(/^src\//, "");
   const backupPath = backupSrc ? resolve(backupSrc, srcPath) : null;
-  return readFileSync(backupPath && existsSync(backupPath) ? backupPath : resolve(srcRoot, srcPath), "utf8");
+  return brutalView(readFileSync(backupPath && existsSync(backupPath) ? backupPath : resolve(srcRoot, srcPath), "utf8"));
 }
 
 test("top panel tabs use the shared reorderable tab bar", () => {

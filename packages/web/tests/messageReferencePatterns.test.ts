@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { createChannelRefRegex, createChannelThreadRefRegex } from "../src/utils/messageReferencePatterns";
+import { brutalView } from "./helpers/brutalView";
 
 test("channel refs support CJK channel names", () => {
   const matches = Array.from("go to #对话流专修 and #android-artifacts".matchAll(createChannelRefRegex()));
@@ -19,8 +20,8 @@ test("channel thread refs support CJK channel names", () => {
 });
 
 test("MessageItem bare refs use shared Slock Ref scanners", () => {
-  const source = readFileSync(new URL("../src/components/message/MessageItem.tsx", import.meta.url), "utf8");
-  const shared = readFileSync(new URL("../../shared/src/raftRefs.ts", import.meta.url), "utf8");
+  const source = brutalView(readFileSync(new URL("../src/components/message/MessageItem.tsx", import.meta.url), "utf8"));
+  const shared = brutalView(readFileSync(new URL("../../shared/src/raftRefs.ts", import.meta.url), "utf8"));
 
   for (const factory of [
     "createRaftUserRefRegex",
@@ -41,7 +42,7 @@ test("MessageItem bare refs use shared Slock Ref scanners", () => {
 });
 
 test("MessageItem resolves bare mention labels from the canonical identity directory", () => {
-  const source = readFileSync(new URL("../src/components/message/MessageItem.tsx", import.meta.url), "utf8");
+  const source = brutalView(readFileSync(new URL("../src/components/message/MessageItem.tsx", import.meta.url), "utf8"));
 
   assert.match(source, /const safeName = name\.replace/);
   assert.match(source, /data-mention="\$\{safeName\}"/);
@@ -53,27 +54,17 @@ test("MessageItem resolves bare mention labels from the canonical identity direc
 });
 
 test("all message reference chips share one height box (MSG_REF_CHIP)", () => {
-  const chipConst = readFileSync(
-    new URL("../src/components/message/messageRefChip.ts", import.meta.url),
-    "utf8",
-  );
-  const source = readFileSync(new URL("../src/components/message/MessageItem.tsx", import.meta.url), "utf8");
-  const mention = readFileSync(
-    new URL("../src/components/message/MentionLink.tsx", import.meta.url),
-    "utf8",
-  );
-  const attachmentComments = readFileSync(
-    new URL("../src/components/message/AttachmentCommentsPanel.tsx", import.meta.url),
-    "utf8",
-  );
-  const attachmentCommentRefChip = readFileSync(
-    new URL("../src/components/message/AttachmentCommentRefChip.tsx", import.meta.url),
-    "utf8",
-  );
-  const referenceChip = readFileSync(
-    new URL("../src/components/message/ReferenceChip.tsx", import.meta.url),
-    "utf8",
-  );
+  const chipConst = brutalView(readFileSync(
+    new URL("../src/components/message/messageRefChip.ts", import.meta.url), "utf8"));
+  const source = brutalView(readFileSync(new URL("../src/components/message/MessageItem.tsx", import.meta.url), "utf8"));
+  const mention = brutalView(readFileSync(
+    new URL("../src/components/message/MentionLink.tsx", import.meta.url), "utf8"));
+  const attachmentComments = brutalView(readFileSync(
+    new URL("../src/components/message/AttachmentCommentsPanel.tsx", import.meta.url), "utf8"));
+  const attachmentCommentRefChip = brutalView(readFileSync(
+    new URL("../src/components/message/AttachmentCommentRefChip.tsx", import.meta.url), "utf8"));
+  const referenceChip = brutalView(readFileSync(
+    new URL("../src/components/message/ReferenceChip.tsx", import.meta.url), "utf8"));
   const taskRefSection = source.slice(
     source.indexOf("const taskRef"),
     source.indexOf("const raftPermalink"),

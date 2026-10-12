@@ -69,7 +69,7 @@ function PreviewAvatar({
   // a User icon on the lavender placeholder background (same look as AvatarSlot
   // type="human"). Sized to its container so all avatars stay consistent.
   return (
-    <div className="flex h-full w-full items-center justify-center bg-brutal-lavender text-black">
+    <div className="flex h-full w-full items-center justify-center bg-secondary-200 theme-brutal:bg-brutal-lavender text-foreground-strong theme-brutal:text-black">
       <GravatarAvatar gravatarHash={gravatarHash} email={email} size={size} iconSize={iconSize} />
     </div>
   );
@@ -110,11 +110,11 @@ function IdentityImpactPreview({
         <div className="w-[min(100%,520px)]">
           <div className="relative pb-24" data-testid="identity-preview-cardzone">
             <section
-              className="onboarding-identity-card-enter relative z-10 w-[min(92%,480px)] rotate-[-1deg] overflow-hidden border-2 border-black bg-white shadow-brutal-lg [--identity-card-rotate:-1deg]"
+              className="onboarding-identity-card-enter relative z-10 w-[min(92%,480px)] rotate-[-1deg] overflow-hidden border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white shadow-raft-md theme-brutal:shadow-brutal-lg [--identity-card-rotate:-1deg]"
               data-testid="identity-channel-preview"
             >
-              <header className="flex h-12 items-center gap-2 border-b-2 border-black bg-white px-4">
-                <span className="flex size-7 items-center justify-center border-2 border-black bg-soft-signal">
+              <header className="flex h-12 items-center gap-2 border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white px-4">
+                <span className="flex size-7 items-center justify-center border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-primary-soft theme-brutal:bg-soft-signal">
                   <Hash size={15} />
                 </span>
                 <span className="truncate text-sm font-black">
@@ -123,14 +123,14 @@ function IdentityImpactPreview({
               </header>
               <div className="space-y-4 p-4">
                 <div className="flex items-start gap-2.5">
-                  <div className="mt-px flex size-7 shrink-0 items-center justify-center border-2 border-black bg-brutal-lavender/70 text-[11px] font-black">
+                  <div className="mt-px flex size-7 shrink-0 items-center justify-center border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-secondary-200/70 theme-brutal:bg-brutal-lavender/70 text-[11px] font-black">
                     M
                   </div>
                   <div className="min-w-0">
-                    <div className="text-xs font-bold text-black">
+                    <div className="text-xs font-bold text-foreground-strong theme-brutal:text-black">
                       {formatMessage({ id: "pages.identitySetup.previewSenderName" })}
                     </div>
-                    <div className="mt-0.5 text-xs leading-5 text-black/80" data-testid="identity-seeded-message-copy">
+                    <div className="mt-0.5 text-xs leading-5 text-foreground-strong theme-brutal:text-black/80" data-testid="identity-seeded-message-copy">
                       {/* ONE message. The mention sits mid-sentence and zh puts it
                           elsewhere, so splitting this into "morning — can" +
                           mention + "take a look…" would bake English word order
@@ -148,7 +148,7 @@ function IdentityImpactPreview({
                             // behavior test catches it, no i18n guard would.
                             <span
                               key={previewHandle}
-                              className="onboarding-identity-pop inline-block rounded-sm bg-soft-signal px-1 font-bold text-black"
+                              className="onboarding-identity-pop inline-block rounded-sm bg-primary-soft theme-brutal:bg-soft-signal px-1 font-bold text-foreground-strong theme-brutal:text-black"
                               data-testid="identity-seeded-mention"
                             >
                               {chunks}
@@ -165,7 +165,7 @@ function IdentityImpactPreview({
                 >
                   <div
                     key={`${previewDisplayName}:${previewAvatarKey}:message-avatar`}
-                    className="onboarding-identity-pop mt-px size-7 shrink-0 overflow-hidden border-2 border-black"
+                    className="onboarding-identity-pop mt-px size-7 shrink-0 overflow-hidden border theme-brutal:border-2 border-line-strong theme-brutal:border-black"
                     data-testid="identity-user-message-avatar"
                   >
                     <PreviewAvatar
@@ -182,16 +182,16 @@ function IdentityImpactPreview({
                     <div className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
                       <span
                         key={`${previewDisplayName}:message-name`}
-                        className="onboarding-identity-pop inline-block max-w-full truncate text-xs font-bold text-black"
+                        className="onboarding-identity-pop inline-block max-w-full truncate text-xs font-bold text-foreground-strong theme-brutal:text-black"
                         data-testid="identity-user-message-name"
                       >
                         {previewDisplayName}
                       </span>
-                      <span className="font-mono text-[9.5px] font-bold uppercase text-black/35">
+                      <span className="font-mono text-[9.5px] font-bold uppercase text-foreground-placeholder theme-brutal:text-black/35">
                         {formatMessage({ id: "pages.identitySetup.previewTimestamp" })}
                       </span>
                     </div>
-                    <p className="mt-0.5 text-xs leading-5 text-black/80">
+                    <p className="mt-0.5 text-xs leading-5 text-foreground-strong theme-brutal:text-black/80">
                       {formatMessage({ id: "pages.identitySetup.previewReply" })}
                     </p>
                   </div>
@@ -200,13 +200,13 @@ function IdentityImpactPreview({
             </section>
 
             <section
-              className="onboarding-identity-card-enter absolute bottom-2 right-0 z-20 w-[min(78%,360px)] rotate-[2deg] border-2 border-black bg-white p-4 shadow-brutal-lg [--identity-card-delay:80ms] [--identity-card-rotate:2deg]"
+              className="onboarding-identity-card-enter absolute bottom-2 right-0 z-20 w-[min(78%,360px)] rotate-[2deg] border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white p-4 shadow-raft-md theme-brutal:shadow-brutal-lg [--identity-card-delay:80ms] [--identity-card-rotate:2deg]"
               data-testid="identity-profile-preview"
             >
               <div className="flex items-start gap-3">
                 <div
                   key={`${previewDisplayName}:${previewAvatarKey}:profile-avatar`}
-                  className="onboarding-identity-pop size-14 shrink-0 overflow-hidden border-2 border-black"
+                  className="onboarding-identity-pop size-14 shrink-0 overflow-hidden border theme-brutal:border-2 border-line-strong theme-brutal:border-black"
                   data-testid="identity-profile-avatar"
                 >
                   <PreviewAvatar
@@ -227,7 +227,7 @@ function IdentityImpactPreview({
                   >
                     {previewDisplayName}
                   </div>
-                  <div className="font-mono text-xs font-bold text-black/50" data-testid="identity-profile-handle">
+                  <div className="font-mono text-xs font-bold text-foreground-muted theme-brutal:text-black/50" data-testid="identity-profile-handle">
                     <span
                       key={`${previewHandle}:profile-handle`}
                       className="onboarding-identity-pop inline-block"
@@ -435,8 +435,8 @@ export default function AccountIdentitySetupPage({
 
         <form onSubmit={handleSubmit} className="space-y-4" noValidate>
               <FormField label={formatMessage({ id: "pages.identitySetup.usernameLabel" })} labelStyle="plain" error={fieldErrors.handle} htmlFor="identity-handle">
-                <div className="flex border-2 border-black bg-white shadow-brutal-sm transition-shadow duration-100 focus-within:shadow-brutal">
-                  <span className="flex items-center border-r-2 border-black bg-soft-signal px-3 font-mono text-base font-bold text-black/60">@</span>
+                <div className="flex border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white shadow-raft-xs theme-brutal:shadow-brutal-sm transition-shadow duration-100 focus-within:shadow-raft-sm theme-brutal:focus-within:shadow-brutal">
+                  <span className="flex items-center border-r theme-brutal:border-r-2 border-line-strong theme-brutal:border-black bg-primary-soft theme-brutal:bg-soft-signal px-3 font-mono text-base font-bold text-foreground-muted theme-brutal:text-black/60">@</span>
                   <input
                     id="identity-handle"
                     name="username"
@@ -459,7 +459,7 @@ export default function AccountIdentitySetupPage({
                     required
                   />
                 </div>
-                <p className="mt-1 text-xs text-black/55">
+                <p className="mt-1 text-xs text-foreground-muted theme-brutal:text-black/55">
                   {formatMessage({ id: "pages.identitySetup.usernameHelper" })}
                 </p>
               </FormField>
@@ -478,23 +478,23 @@ export default function AccountIdentitySetupPage({
                     setFieldErrors((current) => ({ ...current, displayName: undefined }));
                   }}
                   onBlur={handleDisplayNameBlur}
-                  className="w-full border-2 border-black p-2 text-base shadow-brutal-sm focus:shadow-brutal focus:outline-none"
+                  className="w-full border theme-brutal:border-2 border-line-strong theme-brutal:border-black p-2 text-base shadow-raft-xs theme-brutal:shadow-brutal-sm focus:shadow-raft-sm theme-brutal:focus:shadow-brutal focus:outline-none"
                   placeholder={formatMessage({ id: "pages.identitySetup.displayNamePlaceholder" })}
                   autoComplete="name"
                   required
                 />
-                <p className="mt-1 text-xs text-black/50">
+                <p className="mt-1 text-xs text-foreground-muted theme-brutal:text-black/50">
                   {formatMessage({ id: "pages.identitySetup.displayNameHelper" })}
                 </p>
               </FormField>
 
               <div>
-                <div className="mb-1 text-sm font-bold text-black">
+                <div className="mb-1 text-sm font-bold text-foreground-strong theme-brutal:text-black">
                   {formatMessage({ id: "pages.identitySetup.avatarLabel" })}
                 </div>
                 <div>
                   <div className="flex items-center gap-3">
-                    <div className="size-14 shrink-0 overflow-hidden border-2 border-black shadow-brutal-sm">
+                    <div className="size-14 shrink-0 overflow-hidden border theme-brutal:border-2 border-line-strong theme-brutal:border-black shadow-raft-xs theme-brutal:shadow-brutal-sm">
                       <PreviewAvatar
                         avatarPreviewUrl={avatarPreviewUrl}
                         persistedAvatarUrl={user.avatarUrl}
@@ -508,7 +508,7 @@ export default function AccountIdentitySetupPage({
                     <div className="min-w-0 flex-1">
                       <button
                         type="button"
-                        className="btn-brutal-sm inline-flex items-center gap-1.5 bg-white px-3 py-1.5 text-sm disabled:opacity-50"
+                        className="btn-brutal-sm inline-flex items-center gap-1.5 bg-layer-panel theme-brutal:bg-white px-3 py-1.5 text-sm disabled:opacity-50"
                         disabled={loading}
                         // Stryker disable next-line OptionalChaining: the visible button and hidden file input mount together; this stays defensive for ref timing.
                         onClick={() => avatarInputRef.current?.click()}
@@ -528,7 +528,7 @@ export default function AccountIdentitySetupPage({
                         className="sr-only"
                         onChange={handleAvatarChange}
                       />
-                      <p className="mt-1 text-xs text-black/50">
+                      <p className="mt-1 text-xs text-foreground-muted theme-brutal:text-black/50">
                         {formatMessage({
                           id: provider
                             ? "pages.identitySetup.avatarOauthHelper"

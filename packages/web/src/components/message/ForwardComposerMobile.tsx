@@ -116,7 +116,7 @@ export default function ForwardComposerMobile({
 
   return (
     <div
-      className="fixed bottom-0 left-0 right-0 top-0 z-40 flex min-h-0 flex-col bg-white text-black"
+      className="fixed bottom-0 left-0 right-0 top-0 z-40 flex min-h-0 flex-col bg-layer-panel theme-brutal:bg-white text-foreground-strong theme-brutal:text-black"
       style={visualViewportStyle}
       data-testid={mobileStep === "detail"
         ? "forward-mobile-detail-page"
@@ -126,13 +126,13 @@ export default function ForwardComposerMobile({
     >
       {mobileStep === "detail" ? (
         <>
-          <header className="flex min-h-14 shrink-0 items-center gap-3 border-b-2 border-black px-3 py-2">
+          <header className="flex min-h-14 shrink-0 items-center gap-3 border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black px-3 py-2">
             <Button type="button" shape="icon" tone="white" onClick={() => setMobileStep("preview")} aria-label={formatMessage({ id: "message.forwardComposer.backToPreview" })}>
               <ArrowLeft size={18} />
             </Button>
             <div className="min-w-0">
               <h1 className="text-base font-bold">{formatMessage({ id: "message.forwardComposer.forwardedMessages" })}</h1>
-              <p className="truncate text-xs font-mono text-black/55">{selectedFrom}</p>
+              <p className="truncate text-xs font-mono text-foreground-muted theme-brutal:text-black/55">{selectedFrom}</p>
             </div>
           </header>
           <main className="min-h-0 flex-1 overflow-y-auto p-3 pb-[max(12px,env(safe-area-inset-bottom))]">
@@ -141,13 +141,13 @@ export default function ForwardComposerMobile({
         </>
       ) : mobileStep === "preview" ? (
         <>
-          <header className="flex min-h-14 shrink-0 items-center gap-3 border-b-2 border-black px-3 py-2">
+          <header className="flex min-h-14 shrink-0 items-center gap-3 border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black px-3 py-2">
             <Button type="button" shape="icon" tone="white" onClick={() => setMobileStep("targets")} disabled={sending || joinInFlight} aria-label={formatMessage({ id: "message.forwardComposer.backToDestinations" })}>
               <ArrowLeft size={18} />
             </Button>
             <div className="min-w-0 flex-1">
               <h1 className="text-base font-bold">{formatMessage({ id: "message.forwardComposer.addNoteTitle" })}</h1>
-              <p className="truncate text-xs font-mono text-black/55">{formatMessage({ id: "message.forwardComposer.sendTo" }, { targets: selectedLabels })}</p>
+              <p className="truncate text-xs font-mono text-foreground-muted theme-brutal:text-black/55">{formatMessage({ id: "message.forwardComposer.sendTo" }, { targets: selectedLabels })}</p>
             </div>
           </header>
           <main className="flex min-h-0 flex-1 flex-col overflow-hidden" data-testid="forward-mobile-note-layout">
@@ -162,7 +162,7 @@ export default function ForwardComposerMobile({
               </div>
             </div>
             <div
-              className="shrink-0 border-t-2 border-black bg-white p-3 pb-[max(12px,env(safe-area-inset-bottom))]"
+              className="shrink-0 border-t theme-brutal:border-t-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white p-3 pb-[max(12px,env(safe-area-inset-bottom))]"
               data-testid="forward-mobile-preview-actions"
             >
               <Field>
@@ -193,7 +193,7 @@ export default function ForwardComposerMobile({
         </>
       ) : (
         <>
-          <header className="flex min-h-14 shrink-0 items-center gap-3 border-b-2 border-black px-3 py-2">
+          <header className="flex min-h-14 shrink-0 items-center gap-3 border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black px-3 py-2">
             {mobileMultiSelect ? (
               <Button type="button" shape="icon" tone="white" onClick={() => { setSelectedDestinations(new Map()); setMobileMultiSelect(false); }} disabled={sending || joinInFlight} aria-label={formatMessage({ id: "common.confirm.cancel" })}>
                 <Undo2 size={14} />
@@ -205,7 +205,7 @@ export default function ForwardComposerMobile({
             )}
             <div className="min-w-0 flex-1">
               <h1 className="text-base font-bold">{formatMessage({ id: "message.forwardComposer.selectDestinations" })}</h1>
-              <p className="truncate text-xs font-mono text-black/55">{selectedFrom}</p>
+              <p className="truncate text-xs font-mono text-foreground-muted theme-brutal:text-black/55">{selectedFrom}</p>
             </div>
             {mobileMultiSelect ? (
               <Button type="button" tone="pink" size="sm" shape="icon" onClick={openMobilePreview} disabled={!hasSelection || sending || joinInFlight} aria-label={formatMessage({ id: "message.forwardComposer.done" })}>
@@ -219,7 +219,7 @@ export default function ForwardComposerMobile({
           </header>
           <main className="flex min-h-0 flex-1 flex-col p-3">
             <div className="relative mb-3 w-full shrink-0">
-              <Search size={14} className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-black/50" />
+              <Search size={14} className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-foreground-muted theme-brutal:text-black/50" />
               <Input
                 value={query}
                 onChange={(event) => {
@@ -229,7 +229,7 @@ export default function ForwardComposerMobile({
                   if (trimmed) search(trimmed); else resetSearch();
                 }}
                 placeholder={formatMessage({ id: "message.forwardComposer.searchPlaceholder" })}
-                className="pl-9 placeholder:text-black/35"
+                className="pl-9 placeholder:text-foreground-placeholder theme-brutal:placeholder:text-black/35"
                 autoFocus
               />
             </div>

@@ -5,7 +5,7 @@ import { useTimeFormatter } from "../../hooks/useTimeFormatter";
 import { useIntl } from "react-intl";
 
 import { useLegacyTaskPanelStore } from "../../store/legacyTaskPanelStore";
-import { TASK_STATUS_UI } from "./taskStatusUi";
+import { TASK_STATUS_UI, taskStatusBgClass } from "./taskStatusUi";
 import Button from "../ui/Button";
 import Tooltip from "../ui/Tooltip";
 
@@ -68,11 +68,11 @@ export default function LegacyTaskPanel({
   //                   per stdrc 2026-05-20 #proj-task:287f18ce.
   const panelClassName = presentation === "modal"
     ? mobilePage
-      ? "flex h-full min-h-0 w-full flex-col overflow-hidden border-0 bg-white shadow-none sm:h-[min(78vh,720px)] sm:max-h-[calc(100dvh-2rem)] sm:w-[min(760px,calc(100vw-2rem))] sm:border-2 sm:shadow-brutal"
-      : "flex h-full min-h-full max-h-none w-full flex-col overflow-hidden border-0 bg-white shadow-none sm:h-[min(78vh,720px)] sm:max-h-[calc(100dvh-2rem)] sm:w-[min(760px,calc(100vw-2rem))] sm:border-2 sm:shadow-brutal"
+      ? "flex h-full min-h-0 w-full flex-col overflow-hidden border-0 bg-layer-panel theme-brutal:bg-white shadow-none sm:h-[min(78vh,720px)] sm:max-h-[calc(100dvh-2rem)] sm:w-[min(760px,calc(100vw-2rem))] sm:border theme-brutal:sm:border-2 sm:shadow-raft-sm theme-brutal:sm:shadow-brutal"
+      : "flex h-full min-h-full max-h-none w-full flex-col overflow-hidden border-0 bg-layer-panel theme-brutal:bg-white shadow-none sm:h-[min(78vh,720px)] sm:max-h-[calc(100dvh-2rem)] sm:w-[min(760px,calc(100vw-2rem))] sm:border theme-brutal:sm:border-2 sm:shadow-raft-sm theme-brutal:sm:shadow-brutal"
     : presentation === "mobile-modal"
-    ? "absolute inset-0 z-30 flex flex-col bg-white"
-    : "absolute inset-0 z-30 flex flex-col bg-white lg:relative lg:inset-auto lg:z-auto lg:border-l-2 lg:border-black";
+    ? "absolute inset-0 z-30 flex flex-col bg-layer-panel theme-brutal:bg-white"
+    : "absolute inset-0 z-30 flex flex-col bg-layer-panel theme-brutal:bg-white lg:relative lg:inset-auto lg:z-auto lg:border-l theme-brutal:lg:border-l-2 lg:border-line-strong theme-brutal:lg:border-black";
   const panelStyle = presentation === "side" && isDesktop ? { width } : undefined;
   const showResizeHandle = presentation === "side";
   // X close button visibility (mirrors ThreadPanel) per stdrc 2026-05-21
@@ -81,8 +81,8 @@ export default function LegacyTaskPanel({
   //   mobile-modal — NO X (full-screen overlay, back chevron handles close)
   //   side         — X on desktop (lg+) only; mobile uses back chevron
   const closeButtonClassName = presentation === "modal"
-    ? "btn-brutal-sm flex size-7 items-center justify-center bg-white"
-    : "btn-brutal-sm hidden size-7 items-center justify-center bg-white lg:flex";
+    ? "btn-brutal-sm flex size-7 items-center justify-center bg-layer-panel theme-brutal:bg-white"
+    : "btn-brutal-sm hidden size-7 items-center justify-center bg-layer-panel theme-brutal:bg-white lg:flex";
 
   return (
     <div
@@ -100,7 +100,7 @@ export default function LegacyTaskPanel({
         />
       )}
 
-      <div data-testid="legacy-task-panel-header" className="flex h-panel-header items-center gap-3 border-b-2 border-black bg-white px-5">
+      <div data-testid="legacy-task-panel-header" className="flex h-panel-header items-center gap-3 border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white px-5">
         <Button
           type="button"
           onClick={handleClose}
@@ -113,14 +113,14 @@ export default function LegacyTaskPanel({
         >
           <ArrowLeft size={14} />
         </Button>
-        <div className="flex size-icon-header shrink-0 items-center justify-center border-2 border-black bg-soft-signal text-black">
+        <div className="flex size-icon-header shrink-0 items-center justify-center border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-primary-soft theme-brutal:bg-soft-signal text-foreground-strong theme-brutal:text-black">
           <FileText size={18} />
         </div>
         <div className="min-w-0 flex-1">
-          <h2 className="truncate font-bold text-black text-base">
+          <h2 className="truncate font-bold text-foreground-strong theme-brutal:text-black text-base">
             #{task.channelName || formatMessage({ id: "task.legacyPanel.unknownChannel" })}
           </h2>
-          <p className="text-xs text-black/50 font-mono">
+          <p className="text-xs text-foreground-muted theme-brutal:text-black/50 font-mono">
             {formatMessage({ id: "task.legacyPanel.taskNumberLegacy" }, { taskNumber: task.taskNumber })}
           </p>
         </div>
@@ -137,7 +137,7 @@ export default function LegacyTaskPanel({
               <Tooltip
                 content={formatMessage({ id: "message.threadPanel.viewInChannel" })}
                 disableHoverablePopup
-                contentProps={{ className: "pointer-events-none bg-white" }}
+                contentProps={{ className: "pointer-events-none bg-layer-panel theme-brutal:bg-white" }}
               >
                 <button
                   type="button"
@@ -153,7 +153,7 @@ export default function LegacyTaskPanel({
             <Tooltip
               content={formatMessage({ id: "task.modal.close" })}
               disableHoverablePopup
-              contentProps={{ className: "pointer-events-none bg-white" }}
+              contentProps={{ className: "pointer-events-none bg-layer-panel theme-brutal:bg-white" }}
             >
               <button
                 type="button"
@@ -169,48 +169,48 @@ export default function LegacyTaskPanel({
         )}
       </div>
 
-      <div className="flex-1 overflow-y-auto bg-white px-5 py-4 space-y-4 safe-bottom">
+      <div className="flex-1 overflow-y-auto bg-layer-panel theme-brutal:bg-white px-5 py-4 space-y-4 safe-bottom">
         <div className="flex flex-wrap items-center gap-2">
-          <span className={`shrink-0 border border-black px-1 py-0.5 text-[10px] font-bold leading-none ${status.bg}`}>
+          <span className={`shrink-0 border border-line-strong theme-brutal:border-black px-1 py-0.5 text-[10px] font-bold leading-none ${taskStatusBgClass(task.status)}`}>
             {formatMessage({ id: status.labelId })}
           </span>
         </div>
 
-        <section className="card-brutal bg-white p-4 space-y-3">
+        <section className="card-brutal bg-layer-panel theme-brutal:bg-white p-4 space-y-3">
           <div>
-            <p className="text-xs font-mono text-black/40 mb-1">{formatMessage({ id: "task.legacyPanel.title" })}</p>
+            <p className="text-xs font-mono text-foreground-hint theme-brutal:text-black/40 mb-1">{formatMessage({ id: "task.legacyPanel.title" })}</p>
             <h3 className="text-lg font-bold break-words">{task.title}</h3>
           </div>
           <div>
-            <p className="text-xs font-mono text-black/40 mb-1">{formatMessage({ id: "task.legacyPanel.description" })}</p>
-            <p className="text-sm whitespace-pre-wrap break-words text-black/80">
+            <p className="text-xs font-mono text-foreground-hint theme-brutal:text-black/40 mb-1">{formatMessage({ id: "task.legacyPanel.description" })}</p>
+            <p className="text-sm whitespace-pre-wrap break-words text-foreground-strong theme-brutal:text-black/80">
               {task.description?.trim() || formatMessage({ id: "task.legacyPanel.noDescription" })}
             </p>
           </div>
         </section>
 
-        <section className="card-brutal bg-white p-4 space-y-2 text-sm">
+        <section className="card-brutal bg-layer-panel theme-brutal:bg-white p-4 space-y-2 text-sm">
           <div className="flex items-start justify-between gap-3">
-            <span className="text-black/50 font-mono">{formatMessage({ id: "task.legacyPanel.createdBy" })}</span>
+            <span className="text-foreground-muted theme-brutal:text-black/50 font-mono">{formatMessage({ id: "task.legacyPanel.createdBy" })}</span>
             <span className="text-right">@{task.createdByName || formatMessage({ id: "task.legacyPanel.unknown" })}</span>
           </div>
           <div className="flex items-start justify-between gap-3">
-            <span className="text-black/50 font-mono">{formatMessage({ id: "task.legacyPanel.createdAt" })}</span>
+            <span className="text-foreground-muted theme-brutal:text-black/50 font-mono">{formatMessage({ id: "task.legacyPanel.createdAt" })}</span>
             <span className="text-right">{formatShortDateTime(task.createdAt) || formatMessage({ id: "task.legacyPanel.unknown" })}</span>
           </div>
           <div className="flex items-start justify-between gap-3">
-            <span className="text-black/50 font-mono">{formatMessage({ id: "task.legacyPanel.assignee" })}</span>
+            <span className="text-foreground-muted theme-brutal:text-black/50 font-mono">{formatMessage({ id: "task.legacyPanel.assignee" })}</span>
             <span className="text-right">{task.claimedByName ? `@${task.claimedByName}` : formatMessage({ id: "task.filter.unassigned" })}</span>
           </div>
           <div className="flex items-start justify-between gap-3">
-            <span className="text-black/50 font-mono">{formatMessage({ id: "task.legacyPanel.completed" })}</span>
+            <span className="text-foreground-muted theme-brutal:text-black/50 font-mono">{formatMessage({ id: "task.legacyPanel.completed" })}</span>
             <span className="text-right">{formatShortDateTime(task.completedAt) || formatMessage({ id: "task.legacyPanel.notDone" })}</span>
           </div>
         </section>
 
-        <section className="border-2 border-black bg-soft-signal/30 shadow-brutal-sm p-4">
+        <section className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-primary-soft/30 theme-brutal:bg-soft-signal/30 shadow-raft-xs theme-brutal:shadow-brutal-sm p-4">
           <p className="text-sm font-bold">{formatMessage({ id: "task.legacyPanel.readOnly" })}</p>
-          <p className="mt-1 text-sm text-black/70">
+          <p className="mt-1 text-sm text-foreground-muted theme-brutal:text-black/70">
             {formatMessage({ id: "task.legacyPanel.metadataOnlyHint" })}
           </p>
         </section>

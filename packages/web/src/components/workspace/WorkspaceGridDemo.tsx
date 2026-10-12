@@ -104,11 +104,11 @@ interface WorkspaceRecentlyClosedTab {
 
 const WORKSPACE_RECENTLY_CLOSED_LIMIT = 10;
 const WORKSPACE_OVERVIEW_ICON_TONE: Record<WorkspacePanelConfig["accent"], string> = {
-  yellow: "bg-soft-signal",
-  cyan: "bg-brutal-cyan",
-  lavender: "bg-brutal-lavender",
-  pink: "bg-brutal-pink",
-  lime: "bg-brutal-lime",
+  yellow: "bg-primary-soft theme-brutal:bg-soft-signal",
+  cyan: "bg-info-soft theme-brutal:bg-brutal-cyan",
+  lavender: "bg-secondary-200 theme-brutal:bg-brutal-lavender",
+  pink: "bg-accent-soft theme-brutal:bg-brutal-pink",
+  lime: "bg-success-soft theme-brutal:bg-brutal-lime",
 };
 
 function workspaceTabsetsInVisualOrder(model: Model): TabSetNode[] {
@@ -931,7 +931,7 @@ export default function WorkspaceGridDemo({ initialPanel }: WorkspaceGridDemoPro
   }, [recentlyClosedTabs, reopenRecentlyClosedTab]);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-white">
+    <div className="flex min-h-0 flex-1 flex-col bg-layer-panel theme-brutal:bg-white">
       <div className="min-h-0 flex-1 bg-[#1f2328]">
         <div
           ref={layoutRootRef}
@@ -956,13 +956,13 @@ export default function WorkspaceGridDemo({ initialPanel }: WorkspaceGridDemoPro
           />
           {!hasOpenPanels && (
             <div
-              className="pointer-events-none absolute inset-x-0 bottom-0 top-12 z-10 flex items-center justify-center bg-white p-8 text-center"
+              className="pointer-events-none absolute inset-x-0 bottom-0 top-12 z-10 flex items-center justify-center bg-layer-panel theme-brutal:bg-white p-8 text-center"
               data-testid="workspace-grid-empty-state"
             >
               <div className="max-w-[360px]">
                 <Columns3 className="mx-auto" size={30} strokeWidth={2.5} />
                 <h2 className="mt-4 text-lg font-extrabold">{formatMessage({ id: "workspace.grid.demo.noPanelsOpen" })}</h2>
-                <p className="mt-1 text-sm leading-6 text-black/60">
+                <p className="mt-1 text-sm leading-6 text-foreground-muted theme-brutal:text-black/60">
                   {formatMessage({ id: "workspace.grid.demo.emptyHint" })}
                 </p>
               </div>
@@ -973,7 +973,7 @@ export default function WorkspaceGridDemo({ initialPanel }: WorkspaceGridDemoPro
       {tabMenu ? createPortal(
         <div
           ref={tabMenuRef}
-          className="fixed z-[100] min-w-36 border-2 border-black bg-white p-1 shadow-brutal-sm"
+          className="fixed z-[100] min-w-36 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white p-1 shadow-raft-xs theme-brutal:shadow-brutal-sm"
           style={{ left: tabMenu.x, top: tabMenu.y }}
           onPointerDown={(event) => event.stopPropagation()}
           role="menu"
@@ -993,17 +993,17 @@ export default function WorkspaceGridDemo({ initialPanel }: WorkspaceGridDemoPro
         >
           <button
             type="button"
-            className="flex w-full items-center justify-between gap-8 px-3 py-2 text-left text-sm font-bold hover:bg-soft-signal focus-visible:outline focus-visible:outline-1 focus-visible:outline-black disabled:cursor-not-allowed disabled:opacity-40"
+            className="flex w-full items-center justify-between gap-8 px-3 py-2 text-left text-sm font-bold hover:bg-primary-soft theme-brutal:hover:bg-soft-signal focus-visible:outline focus-visible:outline-1 focus-visible:outline-line-strong theme-brutal:focus-visible:outline-black disabled:cursor-not-allowed disabled:opacity-40"
             onClick={closeContextTab}
             disabled={!tabMenu.node.isEnableClose()}
             role="menuitem"
           >
             <span>{formatMessage({ id: "common.close" })}</span>
-            <kbd className="font-mono text-xs font-medium text-black/45">⌘W</kbd>
+            <kbd className="font-mono text-xs font-medium text-foreground-hint theme-brutal:text-black/45">⌘W</kbd>
           </button>
           <button
             type="button"
-            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-bold hover:bg-soft-signal focus-visible:outline focus-visible:outline-1 focus-visible:outline-black disabled:cursor-not-allowed disabled:opacity-40"
+            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-bold hover:bg-primary-soft theme-brutal:hover:bg-soft-signal focus-visible:outline focus-visible:outline-1 focus-visible:outline-line-strong theme-brutal:focus-visible:outline-black disabled:cursor-not-allowed disabled:opacity-40"
             onClick={closeOtherContextTabs}
             disabled={!tabMenu.node.getParent()?.getChildren().some((candidate) => candidate instanceof TabNode && candidate.getId() !== tabMenu.node.getId() && !(candidate.getConfig() as WorkspacePanelConfig | undefined)?.pinned && candidate.isEnableClose())}
             role="menuitem"
@@ -1012,17 +1012,17 @@ export default function WorkspaceGridDemo({ initialPanel }: WorkspaceGridDemoPro
           </button>
           <button
             type="button"
-            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-bold hover:bg-soft-signal focus-visible:outline focus-visible:outline-1 focus-visible:outline-black disabled:cursor-not-allowed disabled:opacity-40"
+            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-bold hover:bg-primary-soft theme-brutal:hover:bg-soft-signal focus-visible:outline focus-visible:outline-1 focus-visible:outline-line-strong theme-brutal:focus-visible:outline-black disabled:cursor-not-allowed disabled:opacity-40"
             onClick={closeAllContextTabs}
             disabled={!tabMenu.node.getParent()?.getChildren().some((candidate) => candidate instanceof TabNode && !(candidate.getConfig() as WorkspacePanelConfig | undefined)?.pinned && candidate.isEnableClose())}
             role="menuitem"
           >
             {formatMessage({ id: "workspace.grid.demo.closeAll" })}
           </button>
-          <div className="my-1 h-px bg-black/20" role="separator" />
+          <div className="my-1 h-px bg-foreground/20 theme-brutal:bg-black/20" role="separator" />
           <button
             type="button"
-            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-bold hover:bg-soft-signal focus-visible:outline focus-visible:outline-1 focus-visible:outline-black"
+            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-bold hover:bg-primary-soft theme-brutal:hover:bg-soft-signal focus-visible:outline focus-visible:outline-1 focus-visible:outline-line-strong theme-brutal:focus-visible:outline-black"
             onClick={togglePinnedTab}
             role="menuitem"
           >
@@ -1032,7 +1032,7 @@ export default function WorkspaceGridDemo({ initialPanel }: WorkspaceGridDemoPro
           </button>
           <button
             type="button"
-            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-bold hover:bg-soft-signal focus-visible:outline focus-visible:outline-1 focus-visible:outline-black disabled:cursor-not-allowed disabled:opacity-40"
+            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-bold hover:bg-primary-soft theme-brutal:hover:bg-soft-signal focus-visible:outline focus-visible:outline-1 focus-visible:outline-line-strong theme-brutal:focus-visible:outline-black disabled:cursor-not-allowed disabled:opacity-40"
             onClick={moveContextTabToOtherPane}
             disabled={!workspaceOtherTabset(model, tabMenu.node)}
             role="menuitem"
@@ -1059,21 +1059,21 @@ export default function WorkspaceGridDemo({ initialPanel }: WorkspaceGridDemoPro
             aria-label={formatMessage({ id: "workspace.grid.demo.tabOverview" })}
             data-testid="workspace-tab-overflow-menu"
           >
-            <div className="flex items-center gap-2 border-b border-black/15 px-3 py-2">
-              <Search size={18} className="shrink-0 text-black/65" aria-hidden="true" />
+            <div className="flex items-center gap-2 border-b border-line-muted theme-brutal:border-black/15 px-3 py-2">
+              <Search size={18} className="shrink-0 text-foreground-muted theme-brutal:text-black/65" aria-hidden="true" />
               <input
                 autoFocus
                 value={overflowQuery}
                 onChange={(event) => setOverflowQuery(event.target.value)}
                 onKeyDown={(event) => event.stopPropagation()}
-                className="min-w-0 flex-1 bg-transparent text-sm font-medium outline-none placeholder:text-black/45"
+                className="min-w-0 flex-1 bg-transparent text-sm font-medium outline-none placeholder:text-foreground-hint theme-brutal:placeholder:text-black/45"
                 placeholder={formatMessage({ id: "workspace.grid.demo.searchPlaceholder" })}
                 aria-label={formatMessage({ id: "workspace.grid.demo.searchTabs" })}
                 data-testid="workspace-tab-search-input"
               />
             </div>
             <div className="max-h-[min(560px,calc(100vh-96px))] overflow-y-auto py-1">
-              <div className="px-3 pb-1 pt-2 font-mono text-[11px] font-bold uppercase text-black/50">{formatMessage({ id: "workspace.grid.demo.openSection" })}</div>
+              <div className="px-3 pb-1 pt-2 font-mono text-[11px] font-bold uppercase text-foreground-muted theme-brutal:text-black/50">{formatMessage({ id: "workspace.grid.demo.openSection" })}</div>
               {filteredOverviewItems.map((item) => {
                 const config = item.node.getConfig() as WorkspacePanelConfig | undefined;
                 if (!config) return null;
@@ -1090,20 +1090,20 @@ export default function WorkspaceGridDemo({ initialPanel }: WorkspaceGridDemoPro
                       setOverflowMenu(null);
                     }}
                   >
-                    <span className={`flex size-9 shrink-0 items-center justify-center border-2 border-black ${WORKSPACE_OVERVIEW_ICON_TONE[config.accent]}`} aria-hidden="true">
+                    <span className={`flex size-9 shrink-0 items-center justify-center border theme-brutal:border-2 border-line-strong theme-brutal:border-black ${WORKSPACE_OVERVIEW_ICON_TONE[config.accent]}`} aria-hidden="true">
                       {workspacePanelIcon(config, 17)}
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-bold" title={config.title || item.node.getName()}>{config.title || item.node.getName()}</span>
-                      <span className="mt-0.5 flex items-center gap-2 text-xs text-black/55">
+                      <span className="mt-0.5 flex items-center gap-2 text-xs text-foreground-muted theme-brutal:text-black/55">
                         {parent ? <span className="min-w-0 truncate">{parent}</span> : null}
-                        <span className="inline-flex size-5 shrink-0 items-center justify-center border border-black bg-white font-mono text-[10px] font-bold text-black">{item.paneLabel}</span>
+                        <span className="inline-flex size-5 shrink-0 items-center justify-center border border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white font-mono text-[10px] font-bold text-foreground-strong theme-brutal:text-black">{item.paneLabel}</span>
                       </span>
                     </span>
                     {!config.pinned ? (
                       <button
                         type="button"
-                        className="flex size-7 shrink-0 items-center justify-center text-black/35 hover:bg-black/5 hover:text-black focus-visible:outline focus-visible:outline-1 focus-visible:outline-black"
+                        className="flex size-7 shrink-0 items-center justify-center text-foreground-placeholder theme-brutal:text-black/35 hover:bg-fill-muted theme-brutal:hover:bg-black/5 hover:text-foreground-strong theme-brutal:hover:text-black focus-visible:outline focus-visible:outline-1 focus-visible:outline-line-strong theme-brutal:focus-visible:outline-black"
                         aria-label={formatMessage({ id: "workspace.grid.demo.closeNamed" }, { name: item.node.getName() })}
                         onPointerDown={(event) => {
                           event.preventDefault();
@@ -1121,9 +1121,9 @@ export default function WorkspaceGridDemo({ initialPanel }: WorkspaceGridDemoPro
                   </DropdownMenuItem>
                 );
               })}
-              <div className="px-3 pb-1 pt-3 font-mono text-[11px] font-bold uppercase text-black/50">{formatMessage({ id: "workspace.grid.demo.recentlyClosed" })}</div>
+              <div className="px-3 pb-1 pt-3 font-mono text-[11px] font-bold uppercase text-foreground-muted theme-brutal:text-black/50">{formatMessage({ id: "workspace.grid.demo.recentlyClosed" })}</div>
               {recentlyClosedTabs.length === 0 && !overviewQuery ? (
-                <div className="px-3 py-2 text-sm text-black/45">{formatMessage({ id: "workspace.grid.demo.noRecentlyClosed" })}</div>
+                <div className="px-3 py-2 text-sm text-foreground-hint theme-brutal:text-black/45">{formatMessage({ id: "workspace.grid.demo.noRecentlyClosed" })}</div>
               ) : null}
               {filteredRecentlyClosedTabs.map((entry) => {
                 const config = entry.tab.config as WorkspacePanelConfig | undefined;
@@ -1135,19 +1135,19 @@ export default function WorkspaceGridDemo({ initialPanel }: WorkspaceGridDemoPro
                     className="group min-w-0 gap-3 px-3 py-2"
                     onClick={() => reopenRecentlyClosedTab(entry)}
                   >
-                    <span className={`flex size-9 shrink-0 items-center justify-center border-2 border-black ${WORKSPACE_OVERVIEW_ICON_TONE[config.accent]}`} aria-hidden="true">
+                    <span className={`flex size-9 shrink-0 items-center justify-center border theme-brutal:border-2 border-line-strong theme-brutal:border-black ${WORKSPACE_OVERVIEW_ICON_TONE[config.accent]}`} aria-hidden="true">
                       {workspacePanelIcon(config, 17)}
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-bold" title={config.title || entry.tab.name}>{config.title || entry.tab.name}</span>
-                      <span className="mt-0.5 flex items-center gap-2 text-xs text-black/55">
+                      <span className="mt-0.5 flex items-center gap-2 text-xs text-foreground-muted theme-brutal:text-black/55">
                         {parent ? <span className="min-w-0 truncate">{parent}</span> : null}
-                        <span className="inline-flex size-5 shrink-0 items-center justify-center border border-black bg-white font-mono text-[10px] font-bold text-black">{entry.paneLabel}</span>
+                        <span className="inline-flex size-5 shrink-0 items-center justify-center border border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white font-mono text-[10px] font-bold text-foreground-strong theme-brutal:text-black">{entry.paneLabel}</span>
                       </span>
                     </span>
                     <button
                       type="button"
-                      className="flex size-7 shrink-0 items-center justify-center text-black/35 hover:bg-black/5 hover:text-black focus-visible:outline focus-visible:outline-1 focus-visible:outline-black"
+                      className="flex size-7 shrink-0 items-center justify-center text-foreground-placeholder theme-brutal:text-black/35 hover:bg-fill-muted theme-brutal:hover:bg-black/5 hover:text-foreground-strong theme-brutal:hover:text-black focus-visible:outline focus-visible:outline-1 focus-visible:outline-line-strong theme-brutal:focus-visible:outline-black"
                       aria-label={formatMessage({ id: "workspace.grid.demo.forgetNamed" }, { name: entry.tab.name })}
                       onPointerDown={(event) => {
                         event.preventDefault();
@@ -1166,7 +1166,7 @@ export default function WorkspaceGridDemo({ initialPanel }: WorkspaceGridDemoPro
               })}
             </div>
             {filteredOverviewItems.length === 0 && filteredRecentlyClosedTabs.length === 0 ? (
-              <div className="px-3 py-4 text-sm text-black/55">{formatMessage({ id: "workspace.grid.demo.noMatchingTabs" })}</div>
+              <div className="px-3 py-4 text-sm text-foreground-muted theme-brutal:text-black/55">{formatMessage({ id: "workspace.grid.demo.noMatchingTabs" })}</div>
             ) : null}
           </DropdownMenuContent>
         </DropdownMenu>

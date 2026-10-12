@@ -180,7 +180,7 @@ export default function SelectShareLightbox({
     <Lightbox
       onClose={onClose}
       zIndex={100}
-      backdropClass="bg-black/60"
+      backdropClass="bg-foreground/60 theme-brutal:bg-black/60"
       className="flex items-center justify-center p-4"
       data-testid="select-share-lightbox"
     >
@@ -188,8 +188,8 @@ export default function SelectShareLightbox({
         className="card-brutal flex max-h-[90vh] w-full max-w-3xl flex-col"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex h-panel-header shrink-0 items-center justify-between border-b-2 border-black bg-white px-5">
-          <h2 className="text-base font-bold text-black">{formatMessage({ id: "message.selectShare.title" })}</h2>
+        <div className="flex h-panel-header shrink-0 items-center justify-between border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white px-5">
+          <h2 className="text-base font-bold text-foreground-strong theme-brutal:text-black">{formatMessage({ id: "message.selectShare.title" })}</h2>
           <Button
             type="button"
             onClick={onClose}
@@ -201,16 +201,16 @@ export default function SelectShareLightbox({
             <X size={14} />
           </Button>
         </div>
-        <div className="flex-1 overflow-auto bg-white p-4">
+        <div className="flex-1 overflow-auto bg-layer-panel theme-brutal:bg-white p-4">
           <img
             src={dataUrl}
             alt={formatMessage({ id: "message.selectShare.alt" })}
-            className="mx-auto block max-w-full border-2 border-black shadow-brutal"
+            className="mx-auto block max-w-full border theme-brutal:border-2 border-line-strong theme-brutal:border-black shadow-raft-sm theme-brutal:shadow-brutal"
             onLoad={handlePreviewImageLoad}
             style={previewSourceWidth ? { width: `${previewSourceWidth}px` } : undefined}
           />
         </div>
-        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t-2 border-black bg-white px-4 py-3 sm:px-5">
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t theme-brutal:border-t-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white px-4 py-3 sm:px-5">
           {copyError && (
             <p
               role="alert"

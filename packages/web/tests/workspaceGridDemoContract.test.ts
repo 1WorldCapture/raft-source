@@ -36,6 +36,7 @@ import {
   serializeWorkspaceGridLayoutIntent,
   WORKSPACE_GRID_URL_PARAM,
 } from "../src/components/workspace/workspaceGridUrlState";
+import { brutalView } from "./helpers/brutalView";
 
 const webRoot = resolve(import.meta.dirname, "..");
 const srcRoot = resolve(webRoot, "src");
@@ -50,7 +51,7 @@ function readSource(path: string): string {
   const backupSrc = strykerBackupSrc();
   const srcPath = path.replace(/^src\//, "");
   const backupPath = backupSrc ? resolve(backupSrc, srcPath) : null;
-  return readFileSync(backupPath && existsSync(backupPath) ? backupPath : resolve(srcRoot, srcPath), "utf8");
+  return brutalView(readFileSync(backupPath && existsSync(backupPath) ? backupPath : resolve(srcRoot, srcPath), "utf8"));
 }
 
 const workspaceGridCss = readSource("src/components/workspace/WorkspaceGridDemo.css");

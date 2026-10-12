@@ -19,8 +19,8 @@ test("Elegant dark is hidden: dark and system preferences resolve to light", () 
   assert.equal(resolveAppThemePreset("elegant-dark").resolvedMode, "light");
 });
 
-test("with the picker off a saved Elegant preference resolves to Brutal and nothing rewrites it", () => {
-  assert.equal(THEME_PICKER_ENABLED, false);
+// Only meaningful while the picker is switched off (the picker-on PR flips the constant).
+test("with the picker off a saved Elegant preference resolves to Brutal and nothing rewrites it", { skip: THEME_PICKER_ENABLED }, () => {
   const saved = { mode: "light" as const, lightThemeId: "elegant" as const, darkThemeId: "elegant" as const };
   const resolved = resolveAppThemePreferences(saved, "light");
   assert.equal(resolved.themeId, "brutal");

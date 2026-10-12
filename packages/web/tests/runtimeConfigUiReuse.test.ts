@@ -3,19 +3,14 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
+import { brutalView } from "./helpers/brutalView";
 
-const createAgentSource = readFileSync(
-  new URL("../src/components/agent/CreateAgentDialog.tsx", import.meta.url),
-  "utf8",
-);
-const agentDetailSource = readFileSync(
-  new URL("../src/components/agent/AgentDetailPanel.tsx", import.meta.url),
-  "utf8",
-);
-const runtimeConfigFieldsSource = readFileSync(
-  new URL("../src/components/agent/RuntimeConfigFields.tsx", import.meta.url),
-  "utf8",
-);
+const createAgentSource = brutalView(readFileSync(
+  new URL("../src/components/agent/CreateAgentDialog.tsx", import.meta.url), "utf8"));
+const agentDetailSource = brutalView(readFileSync(
+  new URL("../src/components/agent/AgentDetailPanel.tsx", import.meta.url), "utf8"));
+const runtimeConfigFieldsSource = brutalView(readFileSync(
+  new URL("../src/components/agent/RuntimeConfigFields.tsx", import.meta.url), "utf8"));
 const webSrcRoot = fileURLToPath(new URL("../src", import.meta.url));
 
 function listSourceFiles(dir: string): string[] {
@@ -46,7 +41,7 @@ test("web runtime picker surfaces do not import the raw runtime registry directl
   const offenders = listSourceFiles(webSrcRoot)
     .filter((file) => /\/components\/(agent|machine|onboarding)\//.test(file))
     .filter((file) => {
-      const source = readFileSync(file, "utf8");
+      const source = brutalView(readFileSync(file, "utf8"));
       return /import\s*\{[^}]*\bRUNTIMES\b[^}]*\}\s*from\s*["']@botiverse\/raft-shared["']/.test(source);
     })
     .map((file) => relative(webSrcRoot, file));

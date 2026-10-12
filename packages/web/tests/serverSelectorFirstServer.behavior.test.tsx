@@ -9,6 +9,7 @@ import { useAuthStore } from "../src/store/authStore";
 import type { User } from "../src/store/authStore";
 import { useServerStore } from "../src/store/serverStore";
 import type { Server } from "../src/store/serverStore";
+import { brutalView } from "./helpers/brutalView";
 
 const user: User = {
   id: "user-1",
@@ -134,24 +135,24 @@ test("first-server flow always renders Screen A", () => {
   const formPanel = grid?.firstElementChild;
   const dotGrid = dotPane?.firstElementChild;
 
-  assert.ok(shell?.className.includes("min-h-screen"));
-  assert.ok(shell?.className.includes("font-display"));
-  assert.ok(grid?.className.includes("lg:grid-cols-[minmax(320px,2fr)_minmax(0,3fr)]"));
-  assert.ok(formPanel?.className.includes("overflow-y-auto"));
-  assert.ok(formPanel?.className.includes("bg-white"));
-  assert.ok(dotGrid?.className.includes("radial-gradient(#111_1px,transparent_1px)"));
-  assert.ok(dotGrid?.className.includes("[background-size:16px_16px]"));
+  assert.ok(brutalView(shell?.className ?? "").includes("min-h-screen"));
+  assert.ok(brutalView(shell?.className ?? "").includes("font-display"));
+  assert.ok(brutalView(grid?.className ?? "").includes("lg:grid-cols-[minmax(320px,2fr)_minmax(0,3fr)]"));
+  assert.ok(brutalView(formPanel?.className ?? "").includes("overflow-y-auto"));
+  assert.ok(brutalView(formPanel?.className ?? "").includes("bg-white"));
+  assert.ok(brutalView(dotGrid?.className ?? "").includes("radial-gradient(#111_1px,transparent_1px)"));
+  assert.ok(brutalView(dotGrid?.className ?? "").includes("[background-size:16px_16px]"));
   assert.ok(screen.getByTestId("server-create-preview"));
-  assert.ok(preview.className.includes("rotate-[-1deg]"));
-  assert.ok(preview.className.includes("border-2"));
-  assert.ok(preview.className.includes("shadow-brutal-lg"));
+  assert.ok(brutalView(preview.className).includes("rotate-[-1deg]"));
+  assert.ok(brutalView(preview.className).includes("border-2"));
+  assert.ok(brutalView(preview.className).includes("shadow-brutal-lg"));
   assert.ok(screen.getByTestId("server-preview-sidebar-badge").className.includes("onboarding-preview-pop"));
   const channelsSection = screen.getByTestId("server-preview-section-channels");
   const dmsSection = screen.getByTestId("server-preview-section-dms");
   assert.equal(channelsSection.tagName, "BUTTON");
   assert.equal(dmsSection.tagName, "BUTTON");
-  assert.ok(channelsSection.className.includes("focus-visible:outline"));
-  assert.ok(dmsSection.className.includes("hover:-translate-y-px"));
+  assert.ok(brutalView(channelsSection.className).includes("focus-visible:outline"));
+  assert.ok(brutalView(dmsSection.className).includes("hover:-translate-y-px"));
   assert.equal(channelsSection.getAttribute("aria-expanded"), "true");
   assert.equal(dmsSection.getAttribute("aria-expanded"), "true");
   assert.equal(channelsSection.getAttribute("aria-controls"), "server-preview-channel-rows");
@@ -168,7 +169,7 @@ test("first-server flow always renders Screen A", () => {
   // preview that disagrees with the real UI is the bug. Flagged for @AngLee.
   assert.ok(within(dmsSection).getByText("Direct Messages"));
   assert.equal(
-    screen.getByTestId("server-preview-address-slug").className,
+    brutalView(screen.getByTestId("server-preview-address-slug").className),
     "min-w-0 truncate font-bold text-black ",
   );
   assert.ok(within(preview).getAllByText("Alex Chen Studio").length >= 1);
@@ -190,8 +191,8 @@ test("first-server flow always renders Screen A", () => {
   assert.ok(within(sessionFooter).getByRole("button", { name: "Log out" }));
   // The primary action is full-width on every onboarding page.
   const createButton = screen.getByRole("button", { name: "Create Server" });
-  assert.ok(createButton.className.includes("bg-brutal-pink"));
-  assert.ok(createButton.className.includes("w-full"));
+  assert.ok(brutalView(createButton.className).includes("bg-brutal-pink"));
+  assert.ok(brutalView(createButton.className).includes("w-full"));
 
   fireEvent.click(channelsSection);
   assert.equal(channelsSection.getAttribute("aria-expanded"), "false");
@@ -227,7 +228,7 @@ test("Screen A preview reflects server name and slug before create", () => {
   assert.ok(within(preview).getByText("launch-lab"));
   assert.ok(screen.getByTestId("server-preview-sidebar-badge").className.includes("onboarding-preview-pop"));
   const liveMessageBeforeSlugEdit = within(preview).getByText("I am getting Launch Lab ready.");
-  assert.ok(liveMessageBeforeSlugEdit.className.includes("onboarding-live-message"));
+  assert.ok(brutalView(liveMessageBeforeSlugEdit.className).includes("onboarding-live-message"));
 
   fireEvent.change(screen.getByLabelText("Server URL"), { target: { value: "alpha beta" } });
   assert.ok(within(preview).getByText("alpha-beta"));
@@ -258,15 +259,15 @@ test("existing users keep the compact create-server flow", () => {
   assert.equal(screen.queryByTestId("server-create-preview"), null);
   assert.equal(document.body.querySelector("aside"), null);
   assert.equal(
-    elements.some((element) => element.className.includes("lg:grid-cols-[minmax(320px,2fr)_minmax(0,3fr)]")),
+    elements.some((element) => brutalView(element.className).includes("lg:grid-cols-[minmax(320px,2fr)_minmax(0,3fr)]")),
     false,
   );
   assert.equal(
-    elements.some((element) => element.className.includes("radial-gradient(#111_1px,transparent_1px)")),
+    elements.some((element) => brutalView(element.className).includes("radial-gradient(#111_1px,transparent_1px)")),
     false,
   );
   assert.equal(
-    elements.some((element) => element.className.includes("min-h-screen") && element.className.includes("font-display")),
+    elements.some((element) => brutalView(element.className).includes("min-h-screen") && brutalView(element.className).includes("font-display")),
     false,
   );
   // A heading, not a button: the Title Case rule covers controls, not page titles.

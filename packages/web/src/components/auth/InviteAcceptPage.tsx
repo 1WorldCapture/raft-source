@@ -246,7 +246,7 @@ export default function InviteAcceptPage({
                   )}
             >
               {insidePreview && (
-                <p className="mt-2 text-sm text-black/60">
+                <p className="mt-2 text-sm text-foreground-muted theme-brutal:text-black/60">
                   {insidePreview}
                 </p>
               )}
@@ -254,15 +254,15 @@ export default function InviteAcceptPage({
             {inviteInfo.agreement && (
               <div className="card-brutal mb-4 p-4 text-left">
                 <div className="mb-3">
-                  <div className="text-sm font-bold text-black">{inviteInfo.agreement.title}</div>
-                  <div className="mt-0.5 text-xs text-black/50">
+                  <div className="text-sm font-bold text-foreground-strong theme-brutal:text-black">{inviteInfo.agreement.title}</div>
+                  <div className="mt-0.5 text-xs text-foreground-muted theme-brutal:text-black/50">
                     {formatMessage(
                       { id: "pages.invite.agreementVersion" },
                       { version: inviteInfo.agreement.version },
                     )}
                   </div>
                 </div>
-                <div className="max-h-56 overflow-y-auto border-2 border-black/30 bg-brutal-cream p-3 text-sm">
+                <div className="max-h-56 overflow-y-auto border theme-brutal:border-2 border-line-muted theme-brutal:border-black/30 bg-layer-canvas-muted theme-brutal:bg-brutal-cream p-3 text-sm">
                   <AgreementBody source={inviteInfo.agreement.bodyMarkdown} />
                 </div>
               </div>
@@ -276,7 +276,7 @@ export default function InviteAcceptPage({
         ) : null}
 
         {accepting && (
-          <div className="mb-4 text-center text-sm text-black/60">
+          <div className="mb-4 text-center text-sm text-foreground-muted theme-brutal:text-black/60">
             {formatMessage({ id: "pages.invite.joiningServer" })}
           </div>
         )}
@@ -297,7 +297,7 @@ export default function InviteAcceptPage({
 
         {!user && inviteInfo && !errorText && !humanSeatLimitReached && (
           <div className="space-y-3">
-            <p className="text-center text-sm text-black/60 mb-4">
+            <p className="text-center text-sm text-foreground-muted theme-brutal:text-black/60 mb-4">
               {formatMessage({ id: "pages.invite.signInPrompt" })}
             </p>
             <Button
@@ -321,7 +321,7 @@ export default function InviteAcceptPage({
                 clearInviteUrl();
                 onSwitchToRegister();
               }}
-              className="btn-brutal-sm flex w-full items-center justify-center gap-2 bg-white p-2 text-sm"
+              className="btn-brutal-sm flex w-full items-center justify-center gap-2 bg-layer-panel theme-brutal:bg-white p-2 text-sm"
             >
               <UserPlus size={14} />
               {formatMessage({ id: "pages.invite.createAccount" })}
@@ -335,7 +335,7 @@ export default function InviteAcceptPage({
               clearInviteUrl();
               window.location.reload();
             }}
-            className="btn-brutal flex w-full items-center justify-center gap-2 bg-white px-3 py-2 text-sm"
+            className="btn-brutal flex w-full items-center justify-center gap-2 bg-layer-panel theme-brutal:bg-white px-3 py-2 text-sm"
           >
             <ArrowLeft size={16} />
             {formatMessage({ id: "pages.invite.goToRaft" })}

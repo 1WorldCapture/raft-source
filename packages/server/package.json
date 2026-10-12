@@ -23,6 +23,7 @@
     "test:agent-migration-legacy-repair-real-pg": "AGENT_MIGRATION_LEGACY_REPAIR_REAL_PG_REQUIRED=1 vitest run src/services/agentMigrationLegacyRepairService.realPg.test.ts",
     "test:task-assignment-real-pg": "TASK_ASSIGNMENT_REAL_PG_REQUIRED=1 vitest run src/services/taskService.assignment.realPg.test.ts",
     "test:external-inbound-real-pg": "EXTERNAL_INBOUND_REAL_PG_REQUIRED=1 vitest run src/services/externalInboundWorkerService.realPg.test.ts",
+    "test:probe-concurrency-real-pg": "PROBE_CONCURRENCY_REAL_PG_REQUIRED=1 vitest run src/services/providerProbeConcurrency.realPg.test.ts",
     "test:e2e:server": "tsx src/test/startPlaywrightServer.ts",
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",

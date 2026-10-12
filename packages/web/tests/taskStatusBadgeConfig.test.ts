@@ -43,18 +43,41 @@ test("STATUS_BADGE_CONFIG and STATUS_STYLES are the same source, not divergent c
 
 test("canonical task backgrounds resolve to final CSS variables from the same SSOT", () => {
   assert.deepEqual(getTaskStatusBackgroundStyle("todo"), {
-    backgroundColor: "var(--color-brutal-orange)",
+    "--task-status-bg": "var(--color-brutal-orange)",
   });
   assert.deepEqual(getTaskStatusBackgroundStyle("in_progress"), {
-    backgroundColor: "var(--color-brutal-cyan)",
+    "--task-status-bg": "var(--color-brutal-cyan)",
   });
   assert.deepEqual(getTaskStatusBackgroundStyle("in_review"), {
-    backgroundColor: "var(--color-brutal-lavender)",
+    "--task-status-bg": "var(--color-brutal-lavender)",
   });
   assert.deepEqual(getTaskStatusBackgroundStyle("done"), {
-    backgroundColor: "var(--color-brutal-lime)",
+    "--task-status-bg": "var(--color-brutal-lime)",
   });
   assert.deepEqual(getTaskStatusBackgroundStyle("closed"), {
-    backgroundColor: "var(--color-brutal-stone)",
+    "--task-status-bg": "var(--color-brutal-stone)",
   });
+});
+
+test("every status has an Elegant semantic background and class callsites keep Brutal's canonical one", async () => {
+  const { taskStatusBgClass } = await import("../src/components/task/taskStatusUi");
+  for (const status of Object.keys(TASK_STATUS_UI) as Array<keyof typeof TASK_STATUS_UI>) {
+    const cfg = TASK_STATUS_UI[status];
+    assert.match(cfg.bgElegant, /^bg-(warning|info|secondary|success|fill)-/, `${status} needs a semantic Elegant background`);
+    assert.doesNotMatch(cfg.bgElegant, /brutal/);
+    assert.equal(taskStatusBgClass(status), `${cfg.bgElegant} theme-brutal:${cfg.bg}`);
+  }
+});
+
+test("StatusBadge paints Brutal's canonical colour only under theme-brutal and never inline", async () => {
+  const { createElement } = await import("react");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { StatusBadge } = await import("../src/components/task/StatusBadge");
+  const html = renderToStaticMarkup(createElement(StatusBadge, { status: "todo" }, "Todo"));
+  assert.match(html, /theme-brutal:bg-brutal-orange/);
+  assert.match(html, /theme-brutal:bg-\(--task-status-bg\)!/);
+  assert.match(html, /--task-status-bg:var\(--color-brutal-orange\)/);
+  // A plain class or an inline background-color would paint every theme with Brutal colours.
+  assert.doesNotMatch(html, /(^|[\s"])bg-brutal-orange/);
+  assert.doesNotMatch(html, /background-color/);
 });

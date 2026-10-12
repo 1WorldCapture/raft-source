@@ -14,6 +14,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
+import { brutalView } from "./helpers/brutalView";
 
 const repoRoot = resolve(import.meta.dirname, "..");
 
@@ -37,11 +38,11 @@ test("main panel surfaces keep the canonical PanelHeader adoption contract", () 
   ];
 
   for (const path of panelHeaderFiles) {
-    const source = readFileSync(resolve(repoRoot, path), "utf8");
+    const source = brutalView(readFileSync(resolve(repoRoot, path), "utf8"));
     assert.match(source, /<PanelHeader\b/, `${path} should use PanelHeader's canonical padding`);
   }
 
-  const legacySource = readFileSync(resolve(repoRoot, "src/components/task/LegacyTaskPanel.tsx"), "utf8");
+  const legacySource = brutalView(readFileSync(resolve(repoRoot, "src/components/task/LegacyTaskPanel.tsx"), "utf8"));
   assert.match(
     legacySource,
     /className="flex h-panel-header items-center gap-3 border-b-2 border-black bg-(?:white|soft-signal) px-5/,

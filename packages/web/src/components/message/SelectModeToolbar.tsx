@@ -139,12 +139,12 @@ export default function SelectModeToolbar({
   // forward, common copy-link, and a More menu for lower-frequency actions.
   return (
     <div
-      className="border-t-2 border-black bg-soft-signal safe-bottom"
+      className="border-t theme-brutal:border-t-2 border-line-strong theme-brutal:border-black bg-primary-soft theme-brutal:bg-soft-signal safe-bottom"
       data-testid="select-mode-toolbar"
     >
       <div className="flex items-center gap-1 px-2 py-2 sm:gap-1.5 sm:px-2">
         <span
-          className="font-mono text-xs font-bold text-black/70 whitespace-nowrap"
+          className="font-mono text-xs font-bold text-foreground-muted theme-brutal:text-black/70 whitespace-nowrap"
           data-testid="select-mode-count"
         >
           {formatMessage({ id: "message.selectModeToolbar.selectedCount" }, { count })}
@@ -232,7 +232,7 @@ export default function SelectModeToolbar({
             </Button>
             {moreOpen && (
               <div
-                className="absolute bottom-[calc(100%+8px)] right-0 z-20 min-w-44 border-2 border-black bg-white shadow-brutal"
+                className="absolute bottom-[calc(100%+8px)] right-0 z-20 min-w-44 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white shadow-raft-sm theme-brutal:shadow-brutal"
                 role="menu"
                 data-testid="select-mode-more-menu"
               >

@@ -90,6 +90,16 @@ import { DaemonTraceBundleUploader } from "./traceBundleUpload.js";
 import { SLOCK_HOME_ENV, listLegacyRaftStatePaths, resolveRaftHome, resolveRaftHomePath } from "./raftHome.js";
 import { regenerateExistingOpencliWrappers } from "./drivers/cliTransport.js";
 import { daemonFetch } from "./daemonFetch.js";
+import {
+  buildProviderProbeResultMessage,
+  buildUnclaimedProviderProbeResult,
+  claimProbeMaterialization,
+  discardProbeMaterialization,
+  runProviderProbeCanary,
+  type ProbeMaterialization,
+} from "./providerProbe.js";
+import { asProviderProbeId, isProviderProbeRuntime } from "@botiverse/raft-shared";
+import { PI_SDK_VERSION } from "./drivers/piSdk.js";
 import { assertLegacyDaemonKeyNotAdoptedByComputer } from "./computerMigrationGuard.js";
 import { ensureWikiAgentWorkspace } from "./wikiAgentWorkspace.js";
 import { buildRuntimeModelSourceResultMessage } from "./runtimeModelSourceProjection.js";
@@ -1472,6 +1482,8 @@ function summarizeIncomingMessage(msg: ServerToMachineMessage): string {
       return `(agent=${msg.agentId}, probe=${msg.probeId.slice(0, 8)}, purpose=${msg.purpose})`;
     case "machine:workspace:delete":
       return `(directory=${msg.directoryName})`;
+    case "machine:provider_probe:request":
+      return `(runtime=${msg.runtime}, req=${msg.requestId})`;
     case "machine:runtime_models:detect":
       return `(runtime=${msg.runtime}, req=${msg.requestId})`;
     case "machine:cursor_sdk:login":
@@ -2104,6 +2116,52 @@ export class DaemonCore {
         lease_present: true,
         error_class: err instanceof Error ? err.name : typeof err,
       }, "error");
+    }
+  }
+
+  /**
+   * Computer-scoped provider probe. The command carries no credential: the
+   * daemon claims a one-time materialization with its own machine auth, runs
+   * the bounded canary, then drops the env object before returning. A claim
+   * failure still produces a failure result so the Server does not wait out
+   * the relay budget. Nothing on this path is written to the log.
+   */
+  private async handleProviderProbe(
+    msg: Extract<ServerToMachineMessage, { type: "machine:provider_probe:request" }>,
+  ): Promise<void> {
+    const probeId = asProviderProbeId(msg.probeId);
+    if (!isProviderProbeRuntime(msg.runtime)) {
+      this.connection.send(await buildUnclaimedProviderProbeResult({
+        requestId: msg.requestId,
+        probeId,
+      }));
+      return;
+    }
+    let materialization: ProbeMaterialization | null = null;
+    try {
+      materialization = await claimProbeMaterialization({
+        serverUrl: this.options.serverUrl,
+        daemonApiKey: this.options.apiKey,
+        probeId,
+        claimRequestId: msg.requestId,
+      });
+      const execution = await runProviderProbeCanary({ materialization, model: msg.model });
+      this.connection.send(await buildProviderProbeResultMessage({
+        requestId: msg.requestId,
+        probeId,
+        execution,
+        authority: materialization.authority,
+        daemonVersion: this.daemonVersion,
+        computerVersion: this.computerVersion,
+        runtimeVersion: PI_SDK_VERSION,
+      }));
+    } catch {
+      this.connection.send(await buildUnclaimedProviderProbeResult({
+        requestId: msg.requestId,
+        probeId,
+      }));
+    } finally {
+      if (materialization) discardProbeMaterialization(materialization);
     }
   }
 
@@ -4290,6 +4348,11 @@ export class DaemonCore {
             });
             span.end("error", { attrs: { error_class: err instanceof Error ? err.name : typeof err } });
           });
+        break;
+      }
+
+      case "machine:provider_probe:request": {
+        void this.handleProviderProbe(msg);
         break;
       }
 

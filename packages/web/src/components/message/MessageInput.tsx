@@ -432,13 +432,13 @@ function SortableAttachment({
         className={preview && onPreview ? "cursor-zoom-in" : "cursor-grab active:cursor-grabbing"}
       >
         {preview ? (
-          <img src={preview} alt={fileName} className={`size-16 object-cover border-2 border-black ${transparentImageBackgroundClass}`} />
+          <img src={preview} alt={fileName} className={`size-16 object-cover border theme-brutal:border-2 border-line-strong theme-brutal:border-black ${transparentImageBackgroundClass}`} />
         ) : (
-          <div className="flex h-16 w-32 items-center gap-2 border-2 border-black bg-white px-2">
-            <FileText size={16} className="shrink-0 text-black/70" />
+          <div className="flex h-16 w-32 items-center gap-2 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white px-2">
+            <FileText size={16} className="shrink-0 text-foreground-muted theme-brutal:text-black/70" />
             <div className="min-w-0">
-              <div className="truncate text-xs font-bold text-black">{fileName}</div>
-              <div className="truncate text-[10px] text-black/50">{mimeType || formatMessage({ id: "message.composer.fileFallback" })}</div>
+              <div className="truncate text-xs font-bold text-foreground-strong theme-brutal:text-black">{fileName}</div>
+              <div className="truncate text-[10px] text-foreground-muted theme-brutal:text-black/50">{mimeType || formatMessage({ id: "message.composer.fileFallback" })}</div>
             </div>
           </div>
         )}
@@ -451,13 +451,13 @@ function SortableAttachment({
           16px — still small but big enough for thumb tap on a 64px
           chip without enlarging the chip itself. */}
       {uploadStatus === "validating" && (
-        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center border-2 border-black bg-white/85 px-1 text-center text-[10px] font-bold text-black">
+        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel/85 theme-brutal:bg-white/85 px-1 text-center text-[10px] font-bold text-foreground-strong theme-brutal:text-black">
           <Spinner size="sm" className="mb-1" />
           <span>{formatMessage({ id: "message.composer.checkingAttachment" })}</span>
         </div>
       )}
       {uploadStatus === "uploading" && (
-        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center border-2 border-black bg-white/85 px-1 text-center text-[10px] font-bold text-black">
+        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel/85 theme-brutal:bg-white/85 px-1 text-center text-[10px] font-bold text-foreground-strong theme-brutal:text-black">
           <Spinner size="sm" className="mb-1" />
           <span>
             {uploadProgress >= 99
@@ -466,9 +466,9 @@ function SortableAttachment({
                 ? `${uploadProgress}%`
                 : formatMessage({ id: "message.composer.uploading" })}
           </span>
-          <div className="absolute bottom-0 left-0 h-1 w-full bg-black/15">
+          <div className="absolute bottom-0 left-0 h-1 w-full bg-foreground/15 theme-brutal:bg-black/15">
             <div
-              className="h-full bg-brutal-pink"
+              className="h-full bg-accent-soft theme-brutal:bg-brutal-pink"
               style={{ width: `${Math.max(4, Math.min(uploadProgress, 100))}%` }}
             />
           </div>
@@ -476,7 +476,7 @@ function SortableAttachment({
       )}
       {uploadStatus === "error" && (
         <div
-          className="absolute inset-0 z-10 flex flex-col items-center justify-center border-2 border-black bg-brutal-orange/90 px-1 text-center text-[10px] font-bold leading-3 text-black"
+          className="absolute inset-0 z-10 flex flex-col items-center justify-center border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-warning-soft/90 theme-brutal:bg-brutal-orange/90 px-1 text-center text-[10px] font-bold leading-3 text-foreground-strong theme-brutal:text-black"
         >
           <span>{formatMessage({ id: "message.composer.uploadFailed" })}</span>
         </div>
@@ -485,7 +485,7 @@ function SortableAttachment({
         type="button"
         onClick={onRemove}
         aria-label={formatMessage({ id: "message.composer.removeAttachment" }, { file: fileName })}
-        className="absolute -top-1.5 -right-1.5 z-20 flex size-4 items-center justify-center rounded-full bg-black text-white opacity-0 transition-opacity group-hover:opacity-100 [@media(hover:none)]:h-6 [@media(hover:none)]:w-6 [@media(hover:none)]:opacity-100"
+        className="absolute -top-1.5 -right-1.5 z-20 flex size-4 items-center justify-center rounded-full bg-foreground-strong theme-brutal:bg-black text-white opacity-0 transition-opacity group-hover:opacity-100 [@media(hover:none)]:h-6 [@media(hover:none)]:w-6 [@media(hover:none)]:opacity-100"
       >
         <X size={10} />
       </button>
@@ -506,14 +506,14 @@ function MentionCandidateBody({
   const description = getMentionCandidateDescription(candidate);
   const serverLabel = getMentionCandidateServerLabel(candidate);
   const nameClass = muted
-    ? selected ? "text-black/70" : "text-black/50"
-    : "text-black";
+    ? selected ? "text-foreground-muted theme-brutal:text-black/70" : "text-foreground-muted theme-brutal:text-black/50"
+    : "text-foreground-strong theme-brutal:text-black";
   const handleClass = muted
-    ? selected ? "text-black/40" : "text-black/30"
-    : "text-black/40";
+    ? selected ? "text-foreground-hint theme-brutal:text-black/40" : "text-foreground-placeholder theme-brutal:text-black/30"
+    : "text-foreground-hint theme-brutal:text-black/40";
   const descriptionClass = muted
-    ? selected ? "text-black/50" : "text-black/40"
-    : selected ? "text-black/70" : "text-black/50";
+    ? selected ? "text-foreground-muted theme-brutal:text-black/50" : "text-foreground-hint theme-brutal:text-black/40"
+    : selected ? "text-foreground-muted theme-brutal:text-black/70" : "text-foreground-muted theme-brutal:text-black/50";
   const nameWidthClass = description ? "max-w-[45%] shrink-0 sm:max-w-[35%]" : "min-w-0";
   const actorTypeLabel = candidate.type === "user"
     ? formatMessage({ id: "message.composer.actorType.human" })
@@ -556,7 +556,7 @@ function MentionCandidateAvatar({
 }) {
   if (candidate.type === "computer") {
     return (
-      <span data-mention-candidate-avatar="computer" className="flex size-5 shrink-0 items-center justify-center border border-black bg-brutal-cyan/30">
+      <span data-mention-candidate-avatar="computer" className="flex size-5 shrink-0 items-center justify-center border border-line-strong theme-brutal:border-black bg-info-soft/30 theme-brutal:bg-brutal-cyan/30">
         <Monitor size={12} aria-hidden />
       </span>
     );
@@ -564,7 +564,7 @@ function MentionCandidateAvatar({
 
   if (candidate.type === "app") {
     return (
-      <span data-mention-candidate-avatar="app" className="flex size-5 shrink-0 items-center justify-center border border-black bg-soft-signal/40">
+      <span data-mention-candidate-avatar="app" className="flex size-5 shrink-0 items-center justify-center border border-line-strong theme-brutal:border-black bg-primary-soft/40 theme-brutal:bg-soft-signal/40">
         <Blocks size={12} aria-hidden />
       </span>
     );
@@ -577,7 +577,7 @@ function MentionCandidateAvatar({
         type="agent"
         agentAvatarUrl={candidate.avatarUrl}
         badge={muted ? undefined : <MentionCandidateActivityBadge agentId={candidate.id} />}
-        className={muted ? "!border-black/40 opacity-60" : undefined}
+        className={muted ? "!border-line-strong theme-brutal:!border-black/40 opacity-60" : undefined}
       />
     );
   }
@@ -590,7 +590,7 @@ function MentionCandidateAvatar({
       gravatarHash={candidate.gravatarHash}
       email={candidate.email}
       humanPlaceholder={!candidate.avatarUrl && !candidate.gravatarHash && !candidate.email}
-      className={muted ? "!border-black/40 opacity-60 [&_svg]:opacity-50" : undefined}
+      className={muted ? "!border-line-strong theme-brutal:!border-black/40 opacity-60 [&_svg]:opacity-50" : undefined}
     />
   );
 }
@@ -2374,8 +2374,8 @@ export default function MessageInput({
       onDrop={handleDrop}
       className={
         variant === "compact"
-          ? "relative flex items-center bg-white"
-          : "relative flex items-center border-t-2 border-black bg-white px-3 pt-3 safe-bottom"
+          ? "relative flex items-center bg-layer-panel theme-brutal:bg-white"
+          : "relative flex items-center border-t theme-brutal:border-t-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white px-3 pt-3 safe-bottom"
       }
     >
       {/* Drop overlay — only visible while a file drag is in progress over
@@ -2386,9 +2386,9 @@ export default function MessageInput({
         <div
           aria-hidden
           data-testid="composer-drop-overlay"
-          className="absolute inset-0 z-30 flex items-center justify-center border-2 border-dashed border-brutal-pink bg-brutal-pink/15"
+          className="absolute inset-0 z-30 flex items-center justify-center border theme-brutal:border-2 border-dashed border-brutal-pink bg-accent-soft/15 theme-brutal:bg-brutal-pink/15"
         >
-          <span className="border-2 border-black bg-white px-3 py-1.5 text-sm font-bold text-black shadow-brutal-sm">
+          <span className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white px-3 py-1.5 text-sm font-bold text-foreground-strong theme-brutal:text-black shadow-raft-xs theme-brutal:shadow-brutal-sm">
             {formatMessage({ id: "message.composer.dropToAttach" })}
           </span>
         </div>
@@ -2414,8 +2414,8 @@ export default function MessageInput({
               onClick={() => doInsertMention(candidate)}
               className={`flex w-full items-center gap-2 px-3 py-2 text-sm font-medium transition-colors ${
                 i === mention.index
-                  ? "bg-soft-signal text-black font-bold"
-                  : "text-black hover:bg-soft-signal/50"
+                  ? "bg-primary-soft theme-brutal:bg-soft-signal text-foreground-strong theme-brutal:text-black font-bold"
+                  : "text-foreground-strong theme-brutal:text-black hover:bg-primary-soft/50 theme-brutal:hover:bg-soft-signal/50"
               }`}
             >
               <MentionCandidateAvatar candidate={candidate} muted={false} />
@@ -2423,7 +2423,7 @@ export default function MessageInput({
             </button>
           ))}
           {filteredMentions.notInChannel.length > 0 && (
-            <SectionEyebrow as="div" className={`px-3 py-1.5 ${filteredMentions.inChannel.length > 0 ? "border-t-2 border-black" : ""}`}>
+            <SectionEyebrow as="div" className={`px-3 py-1.5 ${filteredMentions.inChannel.length > 0 ? "border-t theme-brutal:border-t-2 border-line-strong theme-brutal:border-black" : ""}`}>
               {formatMessage({ id: "message.composer.notInThisChannel" })}
             </SectionEyebrow>
           )}
@@ -2439,18 +2439,18 @@ export default function MessageInput({
                 onClick={() => doInsertMention(candidate)}
                 className={`flex w-full items-center gap-2 px-3 py-2 text-sm font-medium transition-colors ${
                   isSelected
-                    ? "bg-black/10 text-black/70 font-bold"
-                    : "text-black/50 hover:bg-black/5"
+                    ? "bg-fill-muted theme-brutal:bg-black/10 text-foreground-muted theme-brutal:text-black/70 font-bold"
+                    : "text-foreground-muted theme-brutal:text-black/50 hover:bg-fill-muted theme-brutal:hover:bg-black/5"
                 }`}
               >
                 <MentionCandidateAvatar candidate={candidate} muted />
-                <UserX size={12} className="shrink-0 text-black/40 -ml-1" />
+                <UserX size={12} className="shrink-0 text-foreground-hint theme-brutal:text-black/40 -ml-1" />
                 <MentionCandidateBody candidate={candidate} selected={isSelected} muted />
               </button>
             );
           })}
           {filteredMentions.computers.length > 0 && (
-            <SectionEyebrow as="div" className="border-t-2 border-black px-3 py-1.5">
+            <SectionEyebrow as="div" className="border-t theme-brutal:border-t-2 border-line-strong theme-brutal:border-black px-3 py-1.5">
               {formatMessage({ id: "message.composer.computers" })}
             </SectionEyebrow>
           )}
@@ -2464,7 +2464,7 @@ export default function MessageInput({
                 data-ac-index={flatIndex}
                 onMouseDown={preventAutocompleteOptionMouseDown}
                 onClick={() => doInsertMention(candidate)}
-                className={`flex w-full items-center gap-2 px-3 py-2 text-sm font-medium transition-colors ${isSelected ? "bg-brutal-cyan/30 font-bold text-black" : "text-black hover:bg-brutal-cyan/15"}`}
+                className={`flex w-full items-center gap-2 px-3 py-2 text-sm font-medium transition-colors ${isSelected ? "bg-info-soft/30 theme-brutal:bg-brutal-cyan/30 font-bold text-foreground-strong theme-brutal:text-black" : "text-foreground-strong theme-brutal:text-black hover:bg-info-soft/15 theme-brutal:hover:bg-brutal-cyan/15"}`}
               >
                 <MentionCandidateAvatar candidate={candidate} muted={false} />
                 <MentionCandidateBody candidate={candidate} selected={isSelected} muted={false} />
@@ -2472,7 +2472,7 @@ export default function MessageInput({
             );
           })}
           {filteredMentions.apps.length > 0 && (
-            <SectionEyebrow as="div" className="border-t-2 border-black px-3 py-1.5">
+            <SectionEyebrow as="div" className="border-t theme-brutal:border-t-2 border-line-strong theme-brutal:border-black px-3 py-1.5">
               {formatMessage({ id: "message.composer.apps" })}
             </SectionEyebrow>
           )}
@@ -2486,7 +2486,7 @@ export default function MessageInput({
                 data-ac-index={flatIndex}
                 onMouseDown={preventAutocompleteOptionMouseDown}
                 onClick={() => doInsertMention(candidate)}
-                className={`flex w-full items-center gap-2 px-3 py-2 text-sm font-medium transition-colors ${isSelected ? "bg-soft-signal/40 font-bold text-black" : "text-black hover:bg-soft-signal/20"}`}
+                className={`flex w-full items-center gap-2 px-3 py-2 text-sm font-medium transition-colors ${isSelected ? "bg-primary-soft/40 theme-brutal:bg-soft-signal/40 font-bold text-foreground-strong theme-brutal:text-black" : "text-foreground-strong theme-brutal:text-black hover:bg-primary-soft/20 theme-brutal:hover:bg-soft-signal/20"}`}
               >
                 <MentionCandidateAvatar candidate={candidate} muted={false} />
                 <MentionCandidateBody candidate={candidate} selected={isSelected} muted={false} />
@@ -2516,16 +2516,16 @@ export default function MessageInput({
                 className={`flex w-full items-center gap-2 px-3 py-2 text-sm font-medium transition-colors ${
                   isSelected
                     ? isArchived
-                      ? "bg-black/10 text-black/70 font-bold"
-                      : "bg-brutal-pink text-black font-bold"
+                      ? "bg-fill-muted theme-brutal:bg-black/10 text-foreground-muted theme-brutal:text-black/70 font-bold"
+                      : "bg-accent-soft theme-brutal:bg-brutal-pink text-foreground-strong theme-brutal:text-black font-bold"
                     : isArchived
-                      ? `${ARCHIVED_CHANNEL_TEXT_CLASS} hover:bg-black/5`
-                      : "text-black hover:bg-soft-signal"
+                      ? `${ARCHIVED_CHANNEL_TEXT_CLASS} hover:bg-fill-muted theme-brutal:hover:bg-black/5`
+                      : "text-foreground-strong theme-brutal:text-black hover:bg-primary-soft theme-brutal:hover:bg-soft-signal"
                 }`}
               >
                 <div
                   className={`flex size-5 shrink-0 items-center justify-center border ${
-                    isArchived ? ARCHIVED_CHANNEL_ICON_CLASS : "border-black bg-soft-signal text-black"
+                    isArchived ? ARCHIVED_CHANNEL_ICON_CLASS : "border-line-strong theme-brutal:border-black bg-primary-soft theme-brutal:bg-soft-signal text-foreground-strong theme-brutal:text-black"
                   }`}
                 >
                   <Hash size={12} />
@@ -2533,7 +2533,7 @@ export default function MessageInput({
                 <span className="flex min-w-0 flex-1 items-baseline gap-2 text-left">
                   <span className="max-w-[50%] flex-none truncate">{ch.name}</span>
                   {ch.description && (
-                    <span className={`min-w-0 flex-1 truncate text-xs ${isArchived ? ARCHIVED_CHANNEL_MUTED_TEXT_CLASS : "text-black/40"}`}>
+                    <span className={`min-w-0 flex-1 truncate text-xs ${isArchived ? ARCHIVED_CHANNEL_MUTED_TEXT_CLASS : "text-foreground-hint theme-brutal:text-black/40"}`}>
                       {ch.description}
                     </span>
                   )}
@@ -2588,7 +2588,7 @@ export default function MessageInput({
         )}
 
         {mentionActionNotice && (
-          <div className="border-2 border-black/35 bg-black/[0.04] px-2 py-1 text-[11px] font-bold leading-4 text-black/70">
+          <div className="border theme-brutal:border-2 border-line-muted theme-brutal:border-black/35 bg-black/[0.04] px-2 py-1 text-[11px] font-bold leading-4 text-foreground-muted theme-brutal:text-black/70">
             {mentionActionNotice}
           </div>
         )}
@@ -2602,7 +2602,7 @@ export default function MessageInput({
               <button
                 type="button"
                 onClick={dismissUnresolvedMentionWarning}
-                className="btn-brutal-sm bg-white p-1"
+                className="btn-brutal-sm bg-layer-panel theme-brutal:bg-white p-1"
                 aria-label={formatMessage({ id: "message.composer.dismissUnresolvedMentions" })}
                 title={formatMessage({ id: "message.composer.dismissUnresolvedMentions" })}
               >
@@ -2674,7 +2674,7 @@ export default function MessageInput({
           <div
             key={`upload-error-${pf.id}`}
             role="alert"
-            className="flex w-full flex-wrap items-center gap-2 border-2 border-black bg-brutal-orange px-2 py-1.5 text-xs text-black"
+            className="flex w-full flex-wrap items-center gap-2 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-warning-soft theme-brutal:bg-brutal-orange px-2 py-1.5 text-xs text-foreground-strong theme-brutal:text-black"
           >
             <div className="min-w-0 flex-[1_1_14rem]">
               <div className="break-all font-bold">{pf.file.name}</div>
@@ -2693,7 +2693,7 @@ export default function MessageInput({
                   type="button"
                   onClick={() => retryFile(pf.id)}
                   aria-label={formatMessage({ id: "message.composer.retryUploadAttachment" }, { file: pf.file.name })}
-                  className="border-2 border-black bg-white px-2 py-1 font-bold underline shadow-brutal-xs hover:bg-soft-signal"
+                  className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white px-2 py-1 font-bold underline shadow-raft-xs theme-brutal:shadow-brutal-xs hover:bg-primary-soft theme-brutal:hover:bg-soft-signal"
                 >
                   {formatMessage({ id: "message.composer.tapToRetry" })}
                 </button>
@@ -2702,7 +2702,7 @@ export default function MessageInput({
                 type="button"
                 onClick={() => removeFile(pendingFiles.findIndex((candidate) => candidate.id === pf.id))}
                 aria-label={formatMessage({ id: "message.composer.removeAttachment" }, { file: pf.file.name })}
-                className="flex size-7 items-center justify-center border-2 border-black bg-black text-white"
+                className="flex size-7 items-center justify-center border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-foreground-strong theme-brutal:bg-black text-white"
               >
                 <X size={12} />
               </button>
@@ -2722,7 +2722,7 @@ export default function MessageInput({
         {accessoryRow ? (
           <div className="flex flex-wrap items-center gap-1">{accessoryRow}</div>
         ) : null}
-        <div className="flex flex-col gap-2 border-2 border-black bg-white p-2 shadow-brutal-sm focus-within:shadow-brutal">
+        <div className="flex flex-col gap-2 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white p-2 shadow-raft-xs theme-brutal:shadow-brutal-sm focus-within:shadow-raft-sm theme-brutal:focus-within:shadow-brutal">
           <textarea
             id={textareaId}
             ref={composerTextareaRef}
@@ -2744,7 +2744,7 @@ export default function MessageInput({
                   type="button"
                   onPointerDown={preventToolbarButtonPointerDownBlur}
                   onClick={() => imageInputRef.current!.click()}
-                  className="btn-brutal-sm bg-white p-1"
+                  className="btn-brutal-sm bg-layer-panel theme-brutal:bg-white p-1"
                   title={formatMessage({ id: "message.composer.attachImage" })}
                 >
                   <ImagePlus size={14} />
@@ -2753,7 +2753,7 @@ export default function MessageInput({
                   type="button"
                   onPointerDown={preventToolbarButtonPointerDownBlur}
                   onClick={() => fileInputRef.current!.click()}
-                  className="btn-brutal-sm bg-white p-1"
+                  className="btn-brutal-sm bg-layer-panel theme-brutal:bg-white p-1"
                   title={formatMessage({ id: "message.composer.attachFile" })}
                 >
                   <Paperclip size={14} />
@@ -2775,14 +2775,14 @@ export default function MessageInput({
                   <CheckMarker
                     checked={alsoCreateTask}
                   />
-                  <span className="text-xs font-bold text-black/60">{formatMessage({ id: "message.composer.asTask" })}</span>
+                  <span className="text-xs font-bold text-foreground-muted theme-brutal:text-black/60">{formatMessage({ id: "message.composer.asTask" })}</span>
                 </button>
               )}
               <button
                 type="submit"
                 onPointerDown={preventSendButtonPointerDownBlur}
                 disabled={submitBlocked}
-                className="btn-brutal-sm flex size-7 shrink-0 items-center justify-center bg-brutal-pink p-0 disabled:opacity-30 disabled:pointer-events-none"
+                className="btn-brutal-sm flex size-7 shrink-0 items-center justify-center bg-accent-soft theme-brutal:bg-brutal-pink p-0 disabled:opacity-30 disabled:pointer-events-none"
                 title={submitTitle}
                 aria-label={submitLabel}
               >

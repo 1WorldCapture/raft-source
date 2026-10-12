@@ -47,23 +47,23 @@ export default function ServerSetupHandoffStep({
   };
   return (
     <section
-      className="flex w-full max-w-[560px] flex-col overflow-hidden border-2 border-black bg-white shadow-brutal"
+      className="flex w-full max-w-[560px] flex-col overflow-hidden border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white shadow-raft-sm theme-brutal:shadow-brutal"
       data-testid="server-setup-handoff"
     >
       <div className="flex flex-col items-center px-8 pb-7 pt-9 text-center">
         <div className="relative mb-6">
           <span
-            className="onboarding-cindy-pop-mark absolute -right-5 top-1 size-3 rotate-12 border-2 border-black bg-brutal-lime"
+            className="onboarding-cindy-pop-mark absolute -right-5 top-1 size-3 rotate-12 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-success-soft theme-brutal:bg-brutal-lime"
             aria-hidden="true"
           />
           <span
-            className="onboarding-cindy-pop-mark absolute -left-5 top-8 size-2.5 -rotate-12 border-2 border-black bg-soft-signal [animation-delay:70ms]"
+            className="onboarding-cindy-pop-mark absolute -left-5 top-8 size-2.5 -rotate-12 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-primary-soft theme-brutal:bg-soft-signal [animation-delay:70ms]"
             aria-hidden="true"
           />
           <PixelAvatar
             avatarKey="mug"
             size={104}
-            className="onboarding-cindy-entrance relative z-10 border-2 border-black shadow-brutal-lg"
+            className="onboarding-cindy-entrance relative z-10 border theme-brutal:border-2 border-line-strong theme-brutal:border-black shadow-raft-md theme-brutal:shadow-brutal-lg"
           />
         </div>
 
@@ -75,13 +75,13 @@ export default function ServerSetupHandoffStep({
             filling greedily and dumping the remainder. Fixed here and not in the copy: the
             sentence was never wrong, and a container that only fits THIS wording would strand
             the next one (@Cat owns the copy contract; @Josh called the same fix). */}
-        <p className="mt-3 max-w-[42ch] text-balance text-base leading-relaxed text-black/70">
+        <p className="mt-3 max-w-[42ch] text-balance text-base leading-relaxed text-foreground-muted theme-brutal:text-black/70">
           {formatMessage({ id: "layout.onboarding.handoffBody" }, { agentName })}
         </p>
 
       </div>
 
-      <div className="flex flex-col-reverse gap-3 border-t-2 border-black px-8 py-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col-reverse gap-3 border-t theme-brutal:border-t-2 border-line-strong theme-brutal:border-black px-8 py-4 sm:flex-row sm:items-center sm:justify-between">
         <SetupSessionFooter disabled={handingOff} />
         <Button
           type="button"

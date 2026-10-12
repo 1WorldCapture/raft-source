@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createElement } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
+import { renderToStaticMarkup as renderToStaticMarkupRaw } from "react-dom/server";
 import { LiveAgentActivityBarPresentation } from "../src/components/layout/LiveAgentActivityBar";
+import { brutalView } from "./helpers/brutalView";
 import { TestIntlProvider } from "./helpers/intl";
+
+const renderToStaticMarkup = (element: Parameters<typeof renderToStaticMarkupRaw>[0]) => brutalView(renderToStaticMarkupRaw(element));
 
 test("LiveAgentActivityBar matches agent header status typography and hides when inactive", () => {
   const inactive = renderToStaticMarkup(

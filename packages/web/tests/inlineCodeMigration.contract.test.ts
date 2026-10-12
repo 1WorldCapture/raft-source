@@ -2,11 +2,12 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
+import { brutalView } from "./helpers/brutalView";
 
 const repoRoot = resolve(import.meta.dirname, "..");
 
 function readSource(path: string) {
-  return readFileSync(resolve(repoRoot, path), "utf8");
+  return brutalView(readFileSync(resolve(repoRoot, path), "utf8"));
 }
 
 test("markdown inline code renderers use raft-ui InlineCode directly", () => {

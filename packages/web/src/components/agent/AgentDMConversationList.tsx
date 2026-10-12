@@ -46,7 +46,7 @@ export function AgentDMConversationList({
             { name: item.peerDisplayName || item.peerName },
           )}
           title={formatMessage({ id: "agent.dmConversation.activityTitle" })}
-          footer={<span className="text-[11px] font-mono uppercase tracking-wide text-black/45">{formatMessage({ id: "agent.dmConversation.activityOnly" })}</span>}
+          footer={<span className="text-[11px] font-mono uppercase tracking-wide text-foreground-hint theme-brutal:text-black/45">{formatMessage({ id: "agent.dmConversation.activityOnly" })}</span>}
         />
       ))}
     </div>

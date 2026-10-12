@@ -52,7 +52,7 @@ export function StatusBadge({
       variant={cfg.variant}
       // Stryker disable next-line BooleanLiteral: task status badges intentionally keep source-cased labels; source contract pins uppercase=false.
       uppercase={false}
-      className={`${cfg.bg} ${className}`.trim()}
+      className={`theme-brutal:${cfg.bg} theme-brutal:bg-(--task-status-bg)! ${className}`.trim()}
       style={{ ...style, ...getTaskStatusBackgroundStyle(status) }}
       data-status={status}
       {...rest}

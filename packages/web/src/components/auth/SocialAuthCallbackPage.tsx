@@ -199,13 +199,13 @@ export default function SocialAuthCallbackPage() {
             <button
               type="button"
               onClick={() => window.location.replace("/")}
-              className="btn-brutal bg-white px-4 py-2 text-sm"
+              className="btn-brutal bg-layer-panel theme-brutal:bg-white px-4 py-2 text-sm"
             >
               {formatMessage({ id: "auth.backToSignIn.button" })}
             </button>
           </div>
         ) : (
-          <div className="text-sm font-bold text-black/70">{formatMessage({ id: "pages.socialCallback.finishingSignIn" })}</div>
+          <div className="text-sm font-bold text-foreground-muted theme-brutal:text-black/70">{formatMessage({ id: "pages.socialCallback.finishingSignIn" })}</div>
         )}
       </div>
     </CenteredCardFrame>

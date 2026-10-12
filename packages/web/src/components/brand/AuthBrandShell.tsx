@@ -2,13 +2,13 @@ import type { ReactNode } from "react";
 import RaftBrandLockup from "./RaftBrandLockup";
 
 export const AUTH_BRAND_SHELL_CLASS =
-  "min-h-0 flex-1 overflow-y-auto bg-white font-display safe-top safe-bottom";
+  "min-h-0 flex-1 overflow-y-auto bg-layer-panel theme-brutal:bg-white font-display safe-top safe-bottom";
 
 export const AUTH_BRAND_STACK_CLASS =
   "flex min-h-full w-full flex-col";
 
 export const AUTH_BRAND_TOP_BAR_CLASS =
-  "flex h-panel-header shrink-0 items-center border-b-2 border-black bg-soft-signal px-4 sm:px-6 md:px-8";
+  "flex h-panel-header shrink-0 items-center border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black bg-primary-soft theme-brutal:bg-soft-signal px-4 sm:px-6 md:px-8";
 
 const AUTH_BRAND_CONTENT_CLASS =
   "flex min-h-0 flex-1 items-center justify-center px-5 pb-10 pt-10 sm:px-8 sm:pb-14 sm:pt-14";
@@ -48,7 +48,7 @@ export function AuthBrandIntro({
       />
       <h1 className="text-xl font-bold">{title}</h1>
       {description ? (
-        <p className="mt-2 text-sm text-black/60">{description}</p>
+        <p className="mt-2 text-sm text-foreground-muted theme-brutal:text-black/60">{description}</p>
       ) : null}
       {children}
     </div>

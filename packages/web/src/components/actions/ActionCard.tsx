@@ -112,26 +112,26 @@ function ActionScopeList({ scopes, agentName }: { scopes: readonly string[]; age
   const { formatMessage } = useIntl();
   const visibleScopes = normalizeVisibleOAuthScopes(scopes);
   if (visibleScopes.length === 0) {
-    return <span className="text-black/75">{scopes.length > 0 ? scopes.join(", ") : "-"}</span>;
+    return <span className="text-foreground-strong theme-brutal:text-black/75">{scopes.length > 0 ? scopes.join(", ") : "-"}</span>;
   }
   return (
     <div className="mt-1 space-y-1.5">
       {visibleScopes.map((scope) => {
         const detail = OAUTH_SCOPE_PRESENTATION[scope];
         return (
-          <div key={scope} className="border border-black/15 bg-white p-1.5">
-            <div className="break-all font-mono text-[11px] font-bold text-black/55">{scope}</div>
-            <div className="text-black/60">{formatMessage({ id: detail.copyId })}</div>
+          <div key={scope} className="border border-line-muted theme-brutal:border-black/15 bg-layer-panel theme-brutal:bg-white p-1.5">
+            <div className="break-all font-mono text-[11px] font-bold text-foreground-muted theme-brutal:text-black/55">{scope}</div>
+            <div className="text-foreground-muted theme-brutal:text-black/60">{formatMessage({ id: detail.copyId })}</div>
           </div>
         );
       })}
       {agentName && hasAgentInboundOAuthScope(visibleScopes) ? (
-        <div className="font-bold text-black/70">
+        <div className="font-bold text-foreground-muted theme-brutal:text-black/70">
           {formatMessage({ id: "actionCard.willSendTo" }, { agent: agentName })}
         </div>
       ) : null}
       {hasAgentInboundOAuthScope(visibleScopes) ? (
-        <div className="border border-black/15 bg-soft-signal/15 p-1.5 font-bold text-black/65">
+        <div className="border border-line-muted theme-brutal:border-black/15 bg-primary-soft/15 theme-brutal:bg-soft-signal/15 p-1.5 font-bold text-foreground-muted theme-brutal:text-black/65">
           {formatMessage({ id: AGENT_INBOUND_CANNOT_SUMMARY_ID })}
         </div>
       ) : null}
@@ -378,7 +378,7 @@ export function ActionCard({ messageId, metadata, channelId }: Props) {
   }
 
   return (
-    <div className="action-card relative mt-1 flex w-full items-start gap-3 border-2 border-black/30 bg-white p-3 text-left">
+    <div className="action-card relative mt-1 flex w-full items-start gap-3 border theme-brutal:border-2 border-line-muted theme-brutal:border-black/30 bg-layer-panel theme-brutal:bg-white p-3 text-left">
       <div className="min-w-0 flex-1">
         {/* Bold action title with optional Done pill on the right. */}
         <div className="flex flex-wrap items-center gap-2 text-sm font-bold leading-snug">
@@ -392,23 +392,23 @@ export function ActionCard({ messageId, metadata, channelId }: Props) {
         </div>
 
         {/* Compact readonly summary of agent-prefilled fields. */}
-        <div className="mt-1 text-xs text-black/55">
+        <div className="mt-1 text-xs text-foreground-muted theme-brutal:text-black/55">
           <ActionDetail action={action} />
         </div>
 
         {action.draftHint ? (
-          <div className="mt-1 border-l-2 border-black/20 pl-2 text-xs italic text-black/55">
+          <div className="mt-1 border-l theme-brutal:border-l-2 border-line-muted theme-brutal:border-black/20 pl-2 text-xs italic text-foreground-muted theme-brutal:text-black/55">
             {action.draftHint}
           </div>
         ) : null}
 
         {isExecuted && metadata.executedByUserName ? (
-          <div className="mt-1 text-xs text-black/55">
+          <div className="mt-1 text-xs text-foreground-muted theme-brutal:text-black/55">
             {formatMessage(
               { id: "actionCard.committedBy" },
               {
                 user: metadata.executedByUserName,
-                n: (c: ReactNode) => <span key="n" className="font-bold text-black/70">{c}</span>,
+                n: (c: ReactNode) => <span key="n" className="font-bold text-foreground-muted theme-brutal:text-black/70">{c}</span>,
               },
             )}
             {metadata.result ? (
@@ -428,7 +428,7 @@ export function ActionCard({ messageId, metadata, channelId }: Props) {
           <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
             <button
               type="button"
-              className="btn-brutal bg-brutal-pink px-3 py-1.5 text-xs"
+              className="btn-brutal bg-accent-soft theme-brutal:bg-brutal-pink px-3 py-1.5 text-xs"
               disabled={busy || !canOperateCard}
               aria-describedby={blockedReasonText ? blockedReasonId : undefined}
               onClick={handleClick}
@@ -436,7 +436,7 @@ export function ActionCard({ messageId, metadata, channelId }: Props) {
               {busy ? "…" : formatMessage({ id: actionVerb(action) })}
             </button>
             {blockedReasonText ? (
-              <span id={blockedReasonId} className="text-xs text-black/70">
+              <span id={blockedReasonId} className="text-xs text-foreground-muted theme-brutal:text-black/70">
                 {blockedReasonText}
               </span>
             ) : null}
@@ -596,20 +596,20 @@ function ActionDetail({ action }: { action: ActionCardAction }) {
         <div className="space-y-0.5">
           {action.description ? (
             <div>
-              <span className="text-black/45">{formatMessage({ id: "actionCard.field.description" })}</span>{" "}
-              <span className="text-black/75">{action.description}</span>
+              <span className="text-foreground-hint theme-brutal:text-black/45">{formatMessage({ id: "actionCard.field.description" })}</span>{" "}
+              <span className="text-foreground-strong theme-brutal:text-black/75">{action.description}</span>
             </div>
           ) : null}
           {humans.length > 0 ? (
             <div>
-              <span className="text-black/45">{formatMessage({ id: "actionCard.field.humans" })}</span>{" "}
-              <span className="text-black/75">{humans.join(", ")}</span>
+              <span className="text-foreground-hint theme-brutal:text-black/45">{formatMessage({ id: "actionCard.field.humans" })}</span>{" "}
+              <span className="text-foreground-strong theme-brutal:text-black/75">{humans.join(", ")}</span>
             </div>
           ) : null}
           {initialAgents.length > 0 ? (
             <div>
-              <span className="text-black/45">{formatMessage({ id: "actionCard.field.agents" })}</span>{" "}
-              <span className="text-black/75">{initialAgents.join(", ")}</span>
+              <span className="text-foreground-hint theme-brutal:text-black/45">{formatMessage({ id: "actionCard.field.agents" })}</span>{" "}
+              <span className="text-foreground-strong theme-brutal:text-black/75">{initialAgents.join(", ")}</span>
             </div>
           ) : null}
         </div>
@@ -624,20 +624,20 @@ function ActionDetail({ action }: { action: ActionCardAction }) {
         <div className="space-y-0.5">
           {action.description ? (
             <div>
-              <span className="text-black/45">{formatMessage({ id: "actionCard.field.description" })}</span>{" "}
-              <span className="text-black/75">{action.description}</span>
+              <span className="text-foreground-hint theme-brutal:text-black/45">{formatMessage({ id: "actionCard.field.description" })}</span>{" "}
+              <span className="text-foreground-strong theme-brutal:text-black/75">{action.description}</span>
             </div>
           ) : (
-            <div className="text-black/45">{formatMessage({ id: "actionCard.noDescription" })}</div>
+            <div className="text-foreground-hint theme-brutal:text-black/45">{formatMessage({ id: "actionCard.noDescription" })}</div>
           )}
           {targetComputer ? (
             <div>
-              <span className="text-black/45">
+              <span className="text-foreground-hint theme-brutal:text-black/45">
                 {formatMessage({ id: action.requiredComputer
                   ? "actionCard.field.requiredComputer"
                   : "actionCard.field.suggestedComputer" })}
               </span>{" "}
-              <span className="text-black/75">
+              <span className="text-foreground-strong theme-brutal:text-black/75">
                 {targetMachine?.name ?? targetComputer.slice(0, 8)}
               </span>
             </div>
@@ -656,20 +656,20 @@ function ActionDetail({ action }: { action: ActionCardAction }) {
         <div className="space-y-0.5">
           {channel?.name ? (
             <div>
-              <span className="text-black/45">{formatMessage({ id: "actionCard.field.channel" })}</span>{" "}
-              <span className="text-black/75">#{channel.name}</span>
+              <span className="text-foreground-hint theme-brutal:text-black/45">{formatMessage({ id: "actionCard.field.channel" })}</span>{" "}
+              <span className="text-foreground-strong theme-brutal:text-black/75">#{channel.name}</span>
             </div>
           ) : null}
           {humans.length > 0 ? (
             <div>
-              <span className="text-black/45">{formatMessage({ id: "actionCard.field.humans" })}</span>{" "}
-              <span className="text-black/75">{humans.join(", ")}</span>
+              <span className="text-foreground-hint theme-brutal:text-black/45">{formatMessage({ id: "actionCard.field.humans" })}</span>{" "}
+              <span className="text-foreground-strong theme-brutal:text-black/75">{humans.join(", ")}</span>
             </div>
           ) : null}
           {addAgents.length > 0 ? (
             <div>
-              <span className="text-black/45">{formatMessage({ id: "actionCard.field.agents" })}</span>{" "}
-              <span className="text-black/75">{addAgents.join(", ")}</span>
+              <span className="text-foreground-hint theme-brutal:text-black/45">{formatMessage({ id: "actionCard.field.agents" })}</span>{" "}
+              <span className="text-foreground-strong theme-brutal:text-black/75">{addAgents.join(", ")}</span>
             </div>
           ) : null}
         </div>
@@ -679,15 +679,15 @@ function ActionDetail({ action }: { action: ActionCardAction }) {
       return (
         <div className="space-y-0.5">
           <div>
-            <span className="text-black/45">{formatMessage({ id: "actionCard.field.service" })}</span>{" "}
-            <span className="text-black/75">{action.clientName}</span>
+            <span className="text-foreground-hint theme-brutal:text-black/45">{formatMessage({ id: "actionCard.field.service" })}</span>{" "}
+            <span className="text-foreground-strong theme-brutal:text-black/75">{action.clientName}</span>
           </div>
           <div>
-            <span className="text-black/45">{formatMessage({ id: "actionCard.field.agent" })}</span>{" "}
-            <span className="text-black/75">@{action.agentName}</span>
+            <span className="text-foreground-hint theme-brutal:text-black/45">{formatMessage({ id: "actionCard.field.agent" })}</span>{" "}
+            <span className="text-foreground-strong theme-brutal:text-black/75">@{action.agentName}</span>
           </div>
           <div>
-            <span className="text-black/45">{formatMessage({ id: "actionCard.field.scopes" })}</span>{" "}
+            <span className="text-foreground-hint theme-brutal:text-black/45">{formatMessage({ id: "actionCard.field.scopes" })}</span>{" "}
             <ActionScopeList scopes={action.scopes} agentName={action.agentName} />
           </div>
         </div>
@@ -697,17 +697,17 @@ function ActionDetail({ action }: { action: ActionCardAction }) {
       return (
         <div className="space-y-0.5">
           <div>
-            <span className="text-black/45">{formatMessage({ id: "actionCard.field.service" })}</span>{" "}
-            <span className="text-black/75">{action.clientName}</span>
+            <span className="text-foreground-hint theme-brutal:text-black/45">{formatMessage({ id: "actionCard.field.service" })}</span>{" "}
+            <span className="text-foreground-strong theme-brutal:text-black/75">{action.clientName}</span>
           </div>
           <div>
-            <span className="text-black/45">{formatMessage({ id: "actionCard.field.agent" })}</span>{" "}
-            <span className="text-black/75">
+            <span className="text-foreground-hint theme-brutal:text-black/45">{formatMessage({ id: "actionCard.field.agent" })}</span>{" "}
+            <span className="text-foreground-strong theme-brutal:text-black/75">
               {formatMessage({ id: "actionCard.agentHandle" }, { agent: action.agentName })}
             </span>
           </div>
           <div>
-            <span className="text-black/45">{formatMessage({ id: "actionCard.field.scopes" })}</span>{" "}
+            <span className="text-foreground-hint theme-brutal:text-black/45">{formatMessage({ id: "actionCard.field.scopes" })}</span>{" "}
             <ActionScopeList scopes={action.scopes} agentName={action.agentName} />
           </div>
           <div className="font-bold text-brutal-orange">
@@ -720,30 +720,30 @@ function ActionDetail({ action }: { action: ActionCardAction }) {
       return (
         <div className="space-y-0.5">
           <div>
-            <span className="text-black/45">{formatMessage({ id: "actionCard.field.clientKey" })}</span>{" "}
-            <span className="text-black/75">{action.clientKey ?? formatMessage({ id: "actionCard.autoGeneratedOnCommit" })}</span>
+            <span className="text-foreground-hint theme-brutal:text-black/45">{formatMessage({ id: "actionCard.field.clientKey" })}</span>{" "}
+            <span className="text-foreground-strong theme-brutal:text-black/75">{action.clientKey ?? formatMessage({ id: "actionCard.autoGeneratedOnCommit" })}</span>
           </div>
           <div>
-            <span className="text-black/45">{formatMessage({ id: "actionCard.field.redirectUrl" })}</span>{" "}
-            <span className="text-black/75 break-all">{action.returnUrl}</span>
+            <span className="text-foreground-hint theme-brutal:text-black/45">{formatMessage({ id: "actionCard.field.redirectUrl" })}</span>{" "}
+            <span className="text-foreground-strong theme-brutal:text-black/75 break-all">{action.returnUrl}</span>
           </div>
           {action.homepageUrl ? (
             <div>
-              <span className="text-black/45">{formatMessage({ id: "actionCard.field.appUrl" })}</span>{" "}
-              <span className="text-black/75 break-all">{action.homepageUrl}</span>
+              <span className="text-foreground-hint theme-brutal:text-black/45">{formatMessage({ id: "actionCard.field.appUrl" })}</span>{" "}
+              <span className="text-foreground-strong theme-brutal:text-black/75 break-all">{action.homepageUrl}</span>
             </div>
           ) : null}
           {action.agentManifestUrl ? (
             <div>
-              <span className="text-black/45">{formatMessage({ id: "actionCard.field.agentManifest" })}</span>{" "}
-              <span className="text-black/75 break-all">{action.agentManifestUrl}</span>
+              <span className="text-foreground-hint theme-brutal:text-black/45">{formatMessage({ id: "actionCard.field.agentManifest" })}</span>{" "}
+              <span className="text-foreground-strong theme-brutal:text-black/75 break-all">{action.agentManifestUrl}</span>
             </div>
           ) : null}
           <div>
-            <span className="text-black/45">{formatMessage({ id: "actionCard.field.scopes" })}</span>{" "}
+            <span className="text-foreground-hint theme-brutal:text-black/45">{formatMessage({ id: "actionCard.field.scopes" })}</span>{" "}
             <ActionScopeList scopes={action.scopes} />
           </div>
-          <div className="font-bold text-black/75">
+          <div className="font-bold text-foreground-strong theme-brutal:text-black/75">
             {formatMessage({ id: "actionCard.registerOwnerNote" })}
           </div>
           {action.unsafeDemoUrlOverride ? (
@@ -756,36 +756,36 @@ function ActionDetail({ action }: { action: ActionCardAction }) {
       return (
         <div className="space-y-0.5">
           <div>
-            <span className="text-black/45">{formatMessage({ id: "actionCard.field.clientKey" })}</span>{" "}
-            <span className="text-black/75">{action.clientKey}</span>
+            <span className="text-foreground-hint theme-brutal:text-black/45">{formatMessage({ id: "actionCard.field.clientKey" })}</span>{" "}
+            <span className="text-foreground-strong theme-brutal:text-black/75">{action.clientKey}</span>
           </div>
           {action.name ? (
             <div>
-              <span className="text-black/45">{formatMessage({ id: "actionCard.field.name" })}</span>{" "}
-              <span className="text-black/75">{action.name}</span>
+              <span className="text-foreground-hint theme-brutal:text-black/45">{formatMessage({ id: "actionCard.field.name" })}</span>{" "}
+              <span className="text-foreground-strong theme-brutal:text-black/75">{action.name}</span>
             </div>
           ) : null}
           {action.returnUrl ? (
             <div>
-              <span className="text-black/45">{formatMessage({ id: "actionCard.field.redirectUrl" })}</span>{" "}
-              <span className="text-black/75 break-all">{action.returnUrl}</span>
+              <span className="text-foreground-hint theme-brutal:text-black/45">{formatMessage({ id: "actionCard.field.redirectUrl" })}</span>{" "}
+              <span className="text-foreground-strong theme-brutal:text-black/75 break-all">{action.returnUrl}</span>
             </div>
           ) : null}
           {action.homepageUrl ? (
             <div>
-              <span className="text-black/45">{formatMessage({ id: "actionCard.field.appUrl" })}</span>{" "}
-              <span className="text-black/75 break-all">{action.homepageUrl}</span>
+              <span className="text-foreground-hint theme-brutal:text-black/45">{formatMessage({ id: "actionCard.field.appUrl" })}</span>{" "}
+              <span className="text-foreground-strong theme-brutal:text-black/75 break-all">{action.homepageUrl}</span>
             </div>
           ) : null}
           {action.agentManifestUrl ? (
             <div>
-              <span className="text-black/45">{formatMessage({ id: "actionCard.field.agentManifest" })}</span>{" "}
-              <span className="text-black/75 break-all">{action.agentManifestUrl}</span>
+              <span className="text-foreground-hint theme-brutal:text-black/45">{formatMessage({ id: "actionCard.field.agentManifest" })}</span>{" "}
+              <span className="text-foreground-strong theme-brutal:text-black/75 break-all">{action.agentManifestUrl}</span>
             </div>
           ) : null}
           {action.scopes ? (
             <div>
-              <span className="text-black/45">{formatMessage({ id: "actionCard.field.scopes" })}</span>{" "}
+              <span className="text-foreground-hint theme-brutal:text-black/45">{formatMessage({ id: "actionCard.field.scopes" })}</span>{" "}
               <ActionScopeList scopes={action.scopes} />
             </div>
           ) : null}
@@ -800,12 +800,12 @@ function ActionDetail({ action }: { action: ActionCardAction }) {
       return (
         <div className="space-y-0.5">
           <div>
-            <span className="text-black/45">{formatMessage({ id: "actionCard.field.clientKey" })}</span>{" "}
-            <span className="text-black/75">{action.clientKey}</span>
+            <span className="text-foreground-hint theme-brutal:text-black/45">{formatMessage({ id: "actionCard.field.clientKey" })}</span>{" "}
+            <span className="text-foreground-strong theme-brutal:text-black/75">{action.clientKey}</span>
           </div>
           <div>
-            <span className="text-black/45">{formatMessage({ id: "actionCard.field.recoveryOwner" })}</span>{" "}
-            <span className="text-black/75">@{target?.name ?? action.targetAgent.slice(0, 8)}</span>
+            <span className="text-foreground-hint theme-brutal:text-black/45">{formatMessage({ id: "actionCard.field.recoveryOwner" })}</span>{" "}
+            <span className="text-foreground-strong theme-brutal:text-black/75">@{target?.name ?? action.targetAgent.slice(0, 8)}</span>
           </div>
           <div className="font-bold text-amber-700">
             {formatMessage({ id: "actionCard.adminRecoveryOnly" })}
@@ -818,7 +818,7 @@ function ActionDetail({ action }: { action: ActionCardAction }) {
 
 function ResultLink({ result }: { result: ActionCardResult }) {
   const { formatMessage } = useIntl();
-  const cls = "font-bold text-black/70";
+  const cls = "font-bold text-foreground-muted theme-brutal:text-black/70";
   // The leading arrow is punctuation shared by every arm, so it stays in JSX
   // rather than being duplicated into seven translations.
   const arrow = (body: ReactNode) => <span className={cls}>→ {body}</span>;

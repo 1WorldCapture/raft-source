@@ -223,18 +223,18 @@ export default function AddMembersDialog({
 
   return (
     <DialogCard title={formatMessage({ id: "channel.addMembers.title" })} onClose={onClose}>
-        <div className="mb-3 flex items-center gap-2 border-2 border-black/15 bg-brutal-cream p-2 text-sm">
+        <div className="mb-3 flex items-center gap-2 border theme-brutal:border-2 border-line-muted theme-brutal:border-black/15 bg-layer-canvas-muted theme-brutal:bg-brutal-cream p-2 text-sm">
           {channel?.type === "private" ? (
             <Lock size={14} className="shrink-0" />
           ) : (
             <Hash size={14} className="shrink-0" />
           )}
           <span className="font-bold">{channel?.name ?? formatMessage({ id: "channel.addMembers.unknownChannel" })}</span>
-          <span className="text-black/55">{formatMessage({ id: "channel.addMembers.targetChannelSuffix" })}</span>
+          <span className="text-foreground-muted theme-brutal:text-black/55">{formatMessage({ id: "channel.addMembers.targetChannelSuffix" })}</span>
         </div>
 
         {draftHint ? (
-          <div className="mb-3 border-l-2 border-black/20 pl-2 text-xs italic text-black/55">
+          <div className="mb-3 border-l theme-brutal:border-l-2 border-line-muted theme-brutal:border-black/20 pl-2 text-xs italic text-foreground-muted theme-brutal:text-black/55">
             {draftHint}
           </div>
         ) : null}
@@ -246,7 +246,7 @@ export default function AddMembersDialog({
         ) : null}
 
         {nothingToAdd ? (
-          <div className="mb-4 border-2 border-black/15 bg-white p-3 text-sm text-black/55">
+          <div className="mb-4 border theme-brutal:border-2 border-line-muted theme-brutal:border-black/15 bg-layer-panel theme-brutal:bg-white p-3 text-sm text-foreground-muted theme-brutal:text-black/55">
             {formatMessage({ id: "channel.addMembers.nothingToAdd" })}
           </div>
         ) : (
@@ -314,7 +314,7 @@ export default function AddMembersDialog({
             type="button"
             onClick={onClose}
             disabled={submitting}
-            className="btn-brutal bg-white px-4 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+            className="btn-brutal bg-layer-panel theme-brutal:bg-white px-4 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {formatMessage({ id: "common.confirm.cancel" })}
           </button>
@@ -322,7 +322,7 @@ export default function AddMembersDialog({
             type="button"
             onClick={handleSubmit}
             disabled={!canSubmit}
-            className="btn-brutal bg-brutal-pink px-4 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+            className="btn-brutal bg-accent-soft theme-brutal:bg-brutal-pink px-4 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {submitting
               ? formatMessage({ id: "channel.addMembers.adding" })

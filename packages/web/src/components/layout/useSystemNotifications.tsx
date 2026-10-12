@@ -256,7 +256,7 @@ export function useSystemNotifications(surface: SystemNotificationSurface = "des
       out.push({
         id: "plan-downgrade",
         kind: graceExpired ? "error" : "warning",
-        icon: <AlertTriangle size={16} className="text-black" />,
+        icon: <AlertTriangle size={16} className="text-foreground-strong theme-brutal:text-black" />,
         // Dismissal fingerprint: anchor on which phase + how much of an excess
         // remains so the notification re-surfaces if the user adds more resources
         // or grace expires.
@@ -328,10 +328,10 @@ export function useSystemNotifications(surface: SystemNotificationSurface = "des
         out.push({
           id: "computer-attention",
           kind: "warning",
-          icon: <Monitor size={16} className="text-black" />,
+          icon: <Monitor size={16} className="text-foreground-strong theme-brutal:text-black" />,
           dismissalKey: `computer-attention:${versionFingerprint}:${problemIds}:${computerAttention.upgradeCount}:${computerAttention.offlineCount}`,
           title: formatMessage({ id: "layout.systemNotifications.computersNeedAttention" }),
-          body: <span className="text-black/60">{counts}</span>,
+          body: <span className="text-foreground-muted theme-brutal:text-black/60">{counts}</span>,
           action: {
             label: formatMessage({ id: "layout.systemNotifications.view" }),
             onClick: () => {
@@ -369,7 +369,7 @@ export function useSystemNotifications(surface: SystemNotificationSurface = "des
         out.push({
           id: "machine-offline",
           kind: offlineKind,
-          icon: <WifiOff size={16} className="text-black" />,
+          icon: <WifiOff size={16} className="text-foreground-strong theme-brutal:text-black" />,
           // Fingerprint = which machines are offline. If a different set goes
           // offline (different machine id, or the count changes), the
           // dismissal no longer matches and the notification shows again.
@@ -380,14 +380,14 @@ export function useSystemNotifications(surface: SystemNotificationSurface = "des
           ),
           body:
             activeAgentsOnOffline.length > 0 ? (
-              <span className="text-black/60">
+              <span className="text-foreground-muted theme-brutal:text-black/60">
                 {formatMessage(
                   { id: "layout.systemNotifications.machineOfflineActiveAgentsBody" },
                   { count: activeAgentsOnOffline.length },
                 )}
               </span>
             ) : (
-              <span className="text-black/60">
+              <span className="text-foreground-muted theme-brutal:text-black/60">
                 {formatMessage({ id: "layout.systemNotifications.machineOfflineNoActiveAgentsBody" })}
               </span>
             ),
@@ -409,13 +409,13 @@ export function useSystemNotifications(surface: SystemNotificationSurface = "des
         out.push({
           id: "machine-outdated",
           kind: "warning",
-          icon: <ArrowUpCircle size={16} className="text-black" />,
+          icon: <ArrowUpCircle size={16} className="text-foreground-strong theme-brutal:text-black" />,
           dismissalKey: `machine-outdated:${versionFingerprint}`,
           title: formatMessage(
             { id: "layout.systemNotifications.machineOutdatedTitle" },
             { names, count: outdatedMachines.length },
           ),
-          body: <span className="text-black/60">{formatMessage({ id: "layout.systemNotifications.machineOutdatedBody" })}</span>,
+          body: <span className="text-foreground-muted theme-brutal:text-black/60">{formatMessage({ id: "layout.systemNotifications.machineOutdatedBody" })}</span>,
           action: {
             label: formatMessage({ id: "layout.systemNotifications.view" }),
             onClick: () => nav.toMachine(outdatedMachines[0].id),
@@ -436,9 +436,9 @@ export function useSystemNotifications(surface: SystemNotificationSurface = "des
       out.push({
         id: "pwa-install",
         kind: "info",
-        icon: <Download size={16} className="text-black" />,
+        icon: <Download size={16} className="text-foreground-strong theme-brutal:text-black" />,
         title: formatMessage({ id: "layout.systemNotifications.installRaftTitle" }),
-        body: <span className="text-black/60">{formatMessage({ id: "layout.systemNotifications.installRaftBody" })}</span>,
+        body: <span className="text-foreground-muted theme-brutal:text-black/60">{formatMessage({ id: "layout.systemNotifications.installRaftBody" })}</span>,
         action: {
           label: formatMessage({ id: pwaInstallBusy ? "layout.systemNotifications.opening" : "layout.systemNotifications.install" }),
           onClick: () => {

@@ -36,6 +36,138 @@ unverified environment*:
 Every guard **fails loudly**. A drill whose identity or isolation cannot be
 proven is worse than no drill.
 
+## Running the Desktop app against an isolated root
+
+Bringing the Computer up on a scratch root is the fiddliest part of a drill, and
+most of the traps look like product bugs. They are not.
+
+### Order matters: prepare the root BEFORE the app starts
+
+The Computer can only converge if the root already has a **user session** and a
+**server attachment**. Do them first, from the CLI, then launch the app:
+
+```bash
+# with HOME + RAFT_HOME + SLOCK_HOME all pointing at the scratch root
+raft-computer attach /<slug> --server-url "$BASE_URL" --no-start
+raft-computer doctor          # attach + preflight green, service still stopped
+# only now launch the app
+```
+
+If the root has no session and no attachment, the app's Computer page offers
+`Start`, and pressing it can fail with
+`HOST_LIFECYCLE_LAST_KNOWN_GOOD_UNVERIFIED` — a *last-known-good carrier*
+complaint that is really a missing-prerequisite symptom.
+
+**Do not run `raft-computer start` before the app.** It writes a `cli` owner
+record into the root, and you can no longer tell which code path brought the
+Computer up. On a prepared root the app starts it by itself and the page shows
+`Restart`/`Stop` instead of `Start`.
+
+### The app's default server is not 8443
+
+A fresh `userData` has no server configured, so the app logs in against its
+default server. With a 8443-only test account that surfaces as
+**"email or password incorrect"** — which reads like bad credentials and is not.
+Point it at 8443 explicitly before logging in:
+
+```bash
+# write to a temp file, then rename — otherwise a relaunch can race the write
+printf '{\n  "origin": "https://<host>.ts.net:8443",\n  "generation": 2,\n  "updatedAt": "%s"\n}\n' \
+  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$ROOT/userData/server-origin.json.tmp"
+mv "$ROOT/userData/server-origin.json.tmp" "$ROOT/userData/server-origin.json"
+cat "$ROOT/userData/server-origin.json"   # CONFIRM it landed…
+# …then restart the app, so it re-reads the origin.
+```
+
+**Do not relaunch in the same breath as the write.** Relaunching before the
+origin is durably on disk races it: the app starts against the old (or no)
+server and the login comes back **401**, which reads as a credential problem
+rather than a timing one. Reproduced independently on 2026-10-12; the second
+attempt, after confirming the file was written, worked. **Verify the file
+before you relaunch** — a re-read is enough, no need to trust the exit status.
+
+### Every raft-computer call needs all three home variables
+
+`HOME` alone is **not** enough. Without `RAFT_HOME` and `SLOCK_HOME` it reads the
+operator's real `~/.slock` and cheerfully reports *that* as healthy — a passing
+`doctor` that says nothing about your root. Always check the `Using state at …`
+line names the root you meant.
+
+### Capture the owner record on BOTH sides of the click
+
+`computer/host-lifecycle-owner.json` is cheap to snapshot and impossible to
+recover later. If it is read only *after* a failure you cannot tell whether the
+record was `cli` at the moment of the throw and got rewritten to `app`
+afterwards — which is exactly the ambiguity that left one 0.2.5 investigation
+open. Snapshot before you click, snapshot after, and diff.
+
+### Archive the evidence BEFORE you delete the root
+
+`--cleanup` removes the whole staging root, and the evidence lives inside it.
+Copy anything you intend to argue from to a durable location **first** — Anna's
+0.2.6 root B run archived its 7 screenshots under
+`notes/drill-logs/<root>/` *before* teardown; an earlier run of mine deleted the
+root with its evidence still inside, leaving only quoted text in the thread.
+
+Worth keeping, at minimum: the owner record snapshots from both sides of the
+click, the app/service log tails, and the exact command output a verdict rests
+on. Sanity-check it before deleting: **is every claim I am about to make still
+backed by a file that exists?**
+
+### Deleting the disposable server leaves its `computers` row behind
+
+Observed on 8443 (2026-10-12): after `DELETE /api/servers/<id>` returns
+`{"ok":true}` and `/api/servers` lists nothing, the machine's attach row in
+`computers` survives. One drill root was left behind this way, and the machine
+had accumulated 26 historical rows from earlier drills.
+
+**This may well be by design** — machines belong to the user, not to a server —
+so treat it as a fact to plan around rather than a defect to file. PM's read was
+exactly that.
+
+Either way the consequence for a drill is the same: `POST /api/servers` in the
+setup needs a matching **explicit row cleanup** in teardown, or every drill
+permanently adds a machine row. Verify it rather than assuming a cascade —
+re-query afterwards, and say so in the report if a row cannot be removed.
+
+### Traces do not upload from an isolated root
+
+An isolated home has no trace-ingest credentials, so the Computer logs trace
+upload 401s. That is expected there, not a fault to chase — but it means
+**trace-based observation does not work inside a drill**. Collect what you need
+from local state and log files instead.
+
+## What is still unexplained
+
+A 0.2.5 drill saw the app's `Start` fail with
+`HOST_LIFECYCLE_LAST_KNOWN_GOOD_UNVERIFIED`. On 0.2.6 with a prepared root it
+did **not** reproduce, and `host-lifecycle-owner.json` came out byte-identical
+before and after — so the owner record's *shape* is not the trigger. The exact
+trigger in that 0.2.5 run is **unknown**; the difference in outcomes coincided
+with the root having (or lacking) a session and attachment, but that was never
+isolated to the single variable.
+
+**Do not record it as "caused by missing prerequisites."** If it reappears on a
+real install, capture the owner record immediately before the click and the app
+log after the `converge:` line — those two artefacts are the whole reason this
+section exists.
+
+`services/start.ts` and `services/stop.ts` call `convergeCliHostLifecycle` for
+owner `app` as well; it works only because of that early return. Recorded as
+fragile, deliberately **not** changed.
+
+## Shell traps that cost real time here
+
+- `ditto src dst` where `dst` **does not exist** makes `dst` *become* the copy.
+  Create the destination directory first, or pass the full `…/Name.app` path.
+- `set -e` aborts **before** `$?` is read when a command fails, so a check whose
+  *expected* result is a non-zero exit needs `set +e` around it.
+- `ps … | grep "$ROOT"` matches the checking script's own command line when the
+  root path appears in it, and can SIGTERM the script doing the cleanup. Filter
+  the grep out (`grep -v grep`) or match on a narrower pattern.
+- An apostrophe inside `${var:?message}` (`May's`) is parsed as a quote
+  delimiter and the whole script fails to parse.
+
 ## Why it builds in your worktree instead of a separate `git worktree`
 
 This is a real trade-off, not an oversight.

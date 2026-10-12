@@ -55,7 +55,7 @@ export default function AgentProfileOverflowMenu({
   // can keep the popup inside the viewport by moving it back over the
   // trigger. Use the documented panel-header direction so the label always
   // clears the action button instead of occluding it.
-  const profileTooltipContentProps = { side: "bottom" as const, className: "bg-white" };
+  const profileTooltipContentProps = { side: "bottom" as const, className: "bg-layer-panel theme-brutal:bg-white" };
 
   const inlineActions = (
     <div

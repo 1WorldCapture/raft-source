@@ -15,7 +15,7 @@ import { Badge, DescriptionDetails, DescriptionItem, DescriptionList, Descriptio
 import InlineBadgeEditor from "../InlineBadgeEditor";
 import Timeline from "../ui/Timeline";
 
-import { STATUS_STYLES, canEditTaskStatus, getTaskStatusOptions } from "./taskStatusUi";
+import { STATUS_STYLES, canEditTaskStatus, getTaskStatusOptions, taskStatusBgClass } from "./taskStatusUi";
 import { StatusBadge } from "./StatusBadge";
 import { dedupeTaskAssigneeMembers } from "./taskAssigneeCandidates";
 
@@ -77,18 +77,19 @@ export default function TaskProperties({ task }: { task: Task }) {
   // useful in the person-facing task timeline, so keep those internal events
   // out of the UI while the API remains available to CLI clients.
   const visibleHistory = history.filter((event) => event.eventType !== "resource_receipt_recorded");
-  const historyColor = (event: TaskHistoryEvent): string | undefined => {
+  const historyStatus = (event: TaskHistoryEvent): TaskStatus | undefined => {
     const candidate = [event.payload.to, event.payload.status, event.payload.from].find(
       (value): value is string => typeof value === "string" && ["todo", "in_progress", "in_review", "done", "closed"].includes(value),
     );
     const status = candidate ?? (event.eventType === "closed" ? "closed" : event.eventType === "reopened" ? "in_progress" : undefined);
-    return status ? STATUS_STYLES[status as TaskStatus]?.bg : undefined;
+    return status && STATUS_STYLES[status as TaskStatus] ? (status as TaskStatus) : undefined;
   };
   let timelineStatus: TaskStatus | undefined;
   const timelineItems = visibleHistory.map((event) => {
-    const pointColor = historyColor(event);
-    if (pointColor) timelineStatus = (Object.keys(STATUS_STYLES) as TaskStatus[]).find((s) => STATUS_STYLES[s].bg === pointColor);
-    return { event, pointColor, lineColor: timelineStatus ? STATUS_STYLES[timelineStatus].bg : undefined };
+    const pointStatus = historyStatus(event);
+    const pointColor = pointStatus ? taskStatusBgClass(pointStatus) : undefined;
+    if (pointStatus) timelineStatus = pointStatus;
+    return { event, pointColor, lineColor: timelineStatus ? taskStatusBgClass(timelineStatus) : undefined };
   });
 
   const canManageServer = capabilities.deleteAnyTask;
@@ -196,8 +197,8 @@ export default function TaskProperties({ task }: { task: Task }) {
   // @artin asked for one horizontal facts row in #proj-task:142b9b9a. Keep
   // each label/value pair together, but let the row wrap on narrow panels.
   return (<>
-    <div className="mb-4 border-b border-black/10 pb-3"><button type="button" className="mb-1 flex w-full items-center gap-1 text-left text-xs font-bold" aria-expanded={historyOpen} onClick={() => setHistoryOpen((v) => !v)}><span>{formatMessage({ id: "task.properties.history" })}</span>{historyOpen ? <ChevronDown size={14} aria-hidden="true" /> : <ChevronRight size={14} aria-hidden="true" />}</button>
-      {historyOpen && <div className="mt-3 w-full">{historyError ? <p className="text-xs text-red-700">{formatMessage({ id: "task.history.error" })}</p> : visibleHistory.length === 0 ? <p className="text-xs text-black/50">{formatMessage({ id: "task.history.empty" })}</p> : <Timeline items={timelineItems.map(({ event, pointColor, lineColor }) => ({ id: event.id, title: <TimelineText text={historyTitle(event, formatMessage)} bold />, meta: `${event.actorName ?? event.actorType} · ${formatShortDateTime(event.createdAt)}`, colorClass: pointColor, lineColorClass: lineColor, children: <TimelineDetail event={event} resolveName={(type, id) => displayNameFor(type, id)} formatMessage={formatMessage} /> }))} />}</div>}
+    <div className="mb-4 border-b border-line-muted theme-brutal:border-black/10 pb-3"><button type="button" className="mb-1 flex w-full items-center gap-1 text-left text-xs font-bold" aria-expanded={historyOpen} onClick={() => setHistoryOpen((v) => !v)}><span>{formatMessage({ id: "task.properties.history" })}</span>{historyOpen ? <ChevronDown size={14} aria-hidden="true" /> : <ChevronRight size={14} aria-hidden="true" />}</button>
+      {historyOpen && <div className="mt-3 w-full">{historyError ? <p className="text-xs text-red-700">{formatMessage({ id: "task.history.error" })}</p> : visibleHistory.length === 0 ? <p className="text-xs text-foreground-muted theme-brutal:text-black/50">{formatMessage({ id: "task.history.empty" })}</p> : <Timeline items={timelineItems.map(({ event, pointColor, lineColor }) => ({ id: event.id, title: <TimelineText text={historyTitle(event, formatMessage)} bold />, meta: `${event.actorName ?? event.actorType} · ${formatShortDateTime(event.createdAt)}`, colorClass: pointColor, lineColorClass: lineColor, children: <TimelineDetail event={event} resolveName={(type, id) => displayNameFor(type, id)} formatMessage={formatMessage} /> }))} />}</div>}
     </div>
     <DescriptionList
       className="flex flex-wrap items-center gap-x-6 gap-y-2"
@@ -212,7 +213,7 @@ export default function TaskProperties({ task }: { task: Task }) {
           open={openEditor === "status"}
           onToggle={() => setOpenEditor((cur) => (cur === "status" ? null : "status"))}
           onRequestClose={() => setOpenEditor(null)}
-          badgeClassName={STATUS_STYLES[task.status].bg}
+          badgeClassName={taskStatusBgClass(task.status)}
           disabled={busy}
           buttonTestId="task-properties-status"
           optionTestIdPrefix="task-properties-status-option"
@@ -238,7 +239,7 @@ export default function TaskProperties({ task }: { task: Task }) {
             setOpenEditor((cur) => (cur === "assignee" ? null : "assignee"));
           }}
           onRequestClose={() => setOpenEditor(null)}
-          badgeClassName="bg-white"
+          badgeClassName="bg-layer-panel theme-brutal:bg-white"
           uppercase={false}
           disabled={busy}
           buttonTestId="task-properties-assignee"
@@ -268,8 +269,8 @@ function TimelineText({ text, bold = false, className = "" }: { text: string; bo
 
 function TimelineDetail({ event, resolveName, formatMessage }: { event: TaskHistoryEvent; resolveName: (type: "agent" | "user", id: string) => string | null; formatMessage: ReturnType<typeof useIntl>["formatMessage"] }) {
   const p = event.payload;
-  if (["status_changed", "closed", "reopened"].includes(event.eventType) && p.from && p.to) { const from = String(p.from) as TaskStatus; const to = String(p.to) as TaskStatus; return <div className="mt-1 flex items-center gap-1 text-black/60"><Badge variant="accent" uppercase={false} className={STATUS_STYLES[from]?.bg}>{formatMessage({ id: STATUS_STYLES[from]?.labelId ?? "task.status.todo" })}</Badge> → <Badge variant="accent" uppercase={false} className={STATUS_STYLES[to]?.bg}>{formatMessage({ id: STATUS_STYLES[to]?.labelId ?? "task.status.todo" })}</Badge></div>; }
-  return <TimelineText text={historyDetail(event, resolveName, formatMessage)} className="mt-1 text-black/60" />;
+  if (["status_changed", "closed", "reopened"].includes(event.eventType) && p.from && p.to) { const from = String(p.from) as TaskStatus; const to = String(p.to) as TaskStatus; return <div className="mt-1 flex items-center gap-1 text-foreground-muted theme-brutal:text-black/60"><Badge variant="accent" uppercase={false} className={STATUS_STYLES[from]?.bg}>{formatMessage({ id: STATUS_STYLES[from]?.labelId ?? "task.status.todo" })}</Badge> → <Badge variant="accent" uppercase={false} className={STATUS_STYLES[to]?.bg}>{formatMessage({ id: STATUS_STYLES[to]?.labelId ?? "task.status.todo" })}</Badge></div>; }
+  return <TimelineText text={historyDetail(event, resolveName, formatMessage)} className="mt-1 text-foreground-muted theme-brutal:text-black/60" />;
 }
 
 function historyTitle(event: TaskHistoryEvent, formatMessage: ReturnType<typeof useIntl>["formatMessage"]): string {

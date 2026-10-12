@@ -180,7 +180,7 @@ function renderSelectItems(options: readonly RuntimeOption[]) {
         {option.description ? (
           <span className="flex flex-col">
             <span>{option.label}</span>
-            <span className="text-xs font-normal text-black/50">{option.description}</span>
+            <span className="text-xs font-normal text-foreground-muted theme-brutal:text-black/50">{option.description}</span>
           </span>
         ) : (
           option.label
@@ -625,13 +625,13 @@ function SchemaDrivenRuntimeFields({
               type="button"
               onClick={() => onAdvancedOpenChange?.(!advancedOpen)}
               aria-expanded={advancedOpen}
-              className="flex items-center gap-1 text-sm font-bold uppercase tracking-wide text-black/60 hover:text-black"
+              className="flex items-center gap-1 text-sm font-bold uppercase tracking-wide text-foreground-muted theme-brutal:text-black/60 hover:text-foreground-strong theme-brutal:hover:text-black"
             >
               {advancedOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
               {formatMessage({ id: "agent.runtimeConfig.advanced" })}
             </button>
             {advancedOpen && (
-              <div className="mt-3 border-l-2 border-black/10 pl-3">
+              <div className="mt-3 border-l theme-brutal:border-l-2 border-line-muted theme-brutal:border-black/10 pl-3">
                 <RuntimeEnvVarsField
                   entries={envVarEntries}
                   onChange={onEnvVarEntriesChange}
@@ -790,13 +790,13 @@ function SchemaDrivenRuntimeFields({
             type="button"
             onClick={() => onAdvancedOpenChange?.(!advancedOpen)}
             aria-expanded={advancedOpen}
-            className="flex items-center gap-1 text-sm font-bold uppercase tracking-wide text-black/60 hover:text-black"
+            className="flex items-center gap-1 text-sm font-bold uppercase tracking-wide text-foreground-muted theme-brutal:text-black/60 hover:text-foreground-strong theme-brutal:hover:text-black"
           >
             {advancedOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
             {formatMessage({ id: "agent.runtimeConfig.advanced" })}
           </button>
           {advancedOpen && (
-            <div className="mt-3 border-l-2 border-black/10 pl-3">
+            <div className="mt-3 border-l theme-brutal:border-l-2 border-line-muted theme-brutal:border-black/10 pl-3">
               <RuntimeEnvVarsField
                 entries={envVarEntries}
                 onChange={onEnvVarEntriesChange}
@@ -827,7 +827,7 @@ function ClaudeCommandInfo() {
       <button
         type="button"
         aria-label={formatMessage({ id: "agent.runtimeConfig.claudeCommandRequirements" })}
-        className="inline-flex size-4 items-center justify-center text-black/45 transition-colors hover:text-black focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-black"
+        className="inline-flex size-4 items-center justify-center text-foreground-hint theme-brutal:text-black/45 transition-colors hover:text-foreground-strong theme-brutal:hover:text-black focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-line-strong theme-brutal:focus-visible:outline-black"
       >
         <Info size={14} aria-hidden="true" />
       </button>
@@ -849,7 +849,7 @@ function RuntimeEnvVarsField({
   const { formatMessage } = useIntl();
   return (
     <Field label={formatMessage({ id: "agent.runtimeConfig.envVars" })} optional={optional} adopt={false}>
-      {hint && <p className="mb-2 -mt-1 text-xs text-black/50">{hint}</p>}
+      {hint && <p className="mb-2 -mt-1 text-xs text-foreground-muted theme-brutal:text-black/50">{hint}</p>}
       <div className="space-y-2">
         {entries.map((entry, index) => (
           <KeyValueInputRow
@@ -1046,7 +1046,7 @@ export default function RuntimeConfigFields({
       type="button"
       onClick={runtimeModels.rescan}
       disabled={rescanDisabled || runtimeModels.loading}
-      className="font-bold text-black underline underline-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+      className="font-bold text-foreground-strong theme-brutal:text-black underline underline-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
     >
       {intl.formatMessage({ id: "agent.runtimeModels.retry" })}
     </FieldAction>
@@ -1245,7 +1245,7 @@ export default function RuntimeConfigFields({
               type="button"
               onClick={onRescanRuntimes}
               disabled={runtimesRescanning}
-              className="ml-auto text-black/40 transition-colors hover:text-black disabled:cursor-not-allowed disabled:opacity-50"
+              className="ml-auto text-foreground-hint theme-brutal:text-black/40 transition-colors hover:text-foreground-strong theme-brutal:hover:text-black disabled:cursor-not-allowed disabled:opacity-50"
               title={formatMessage({ id: "agent.runtimeConfig.rescanRuntimesTitle" })}
               aria-label={formatMessage({ id: "agent.runtimeConfig.rescanRuntimesAria" })}
             >
@@ -1261,10 +1261,10 @@ export default function RuntimeConfigFields({
             portalContainer={selectPortalContainer}
           />
           {runtimeInstallHint && (
-            <div className="mt-2 border-l-2 border-black/20 pl-2 text-xs text-black/60">
+            <div className="mt-2 border-l theme-brutal:border-l-2 border-line-muted theme-brutal:border-black/20 pl-2 text-xs text-foreground-muted theme-brutal:text-black/60">
               <p>{formatMessage({ id: runtimeInstallHint.introId })}</p>
               {runtimeInstallHint.commands.map((command) => (
-                <code key={command} className="mt-1 block font-mono text-[11px] text-black/80">{command}</code>
+                <code key={command} className="mt-1 block font-mono text-[11px] text-foreground-strong theme-brutal:text-black/80">{command}</code>
               ))}
             </div>
           )}
@@ -1298,7 +1298,7 @@ export default function RuntimeConfigFields({
             showValidationErrors={showValidationErrors}
           />
         ) : (
-          <p className="border-2 border-black bg-soft-signal p-3 text-sm font-bold" data-testid="schema-runtime-unavailable">
+          <p className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-primary-soft theme-brutal:bg-soft-signal p-3 text-sm font-bold" data-testid="schema-runtime-unavailable">
             {formatMessage({
               id: runtimeFormUnavailableMessageId(
                 formDefinitionLoading,
@@ -1460,7 +1460,7 @@ export default function RuntimeConfigFields({
             type="button"
             onClick={runtimeModels.rescan}
             disabled={rescanDisabled || runtimeModels.loading}
-            className="ml-auto text-black/40 hover:text-black transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="ml-auto text-foreground-hint theme-brutal:text-black/40 hover:text-foreground-strong theme-brutal:hover:text-black transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             title={intl.formatMessage({ id: "agent.runtimeModels.rescan" })}
             aria-label={intl.formatMessage({ id: "agent.runtimeModels.rescan" })}
           >
@@ -1470,7 +1470,7 @@ export default function RuntimeConfigFields({
         belowControl={<>
           {modelSourceStatusContent && (
             <div
-              className="mt-2 border-l-2 border-black/20 pl-2 text-xs text-black/60"
+              className="mt-2 border-l theme-brutal:border-l-2 border-line-muted theme-brutal:border-black/20 pl-2 text-xs text-foreground-muted theme-brutal:text-black/60"
               data-testid="runtime-model-source-status"
             >
               {/* The retry belongs INSIDE the sentence it acts on: "Models could
@@ -1490,7 +1490,7 @@ export default function RuntimeConfigFields({
             </div>
           )}
           {selectedModelSuggestionOnly && (
-            <p className="mt-1.5 text-xs text-black/50">
+            <p className="mt-1.5 text-xs text-foreground-muted theme-brutal:text-black/50">
               {formatMessage({ id: "agent.runtimeConfig.modelSuggestionOnly" })}
             </p>
           )}
@@ -1550,7 +1550,7 @@ export default function RuntimeConfigFields({
             type="button"
             onClick={() => onAdvancedOpenChange?.(!advancedOpen)}
             aria-expanded={advancedOpen}
-            className="flex items-center gap-1 text-sm font-bold uppercase tracking-wide text-black/60 hover:text-black"
+            className="flex items-center gap-1 text-sm font-bold uppercase tracking-wide text-foreground-muted theme-brutal:text-black/60 hover:text-foreground-strong theme-brutal:hover:text-black"
           >
             {advancedOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
             {formatMessage({ id: "agent.runtimeConfig.more" })}

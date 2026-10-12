@@ -320,7 +320,7 @@ export function MobileTabBar() {
       // 界面背景色都应该相应地变成白色". MobileTabBar bg cream → white;
       // active tab pill stays bg-soft-signal (brand on selected); inactive
       // active-pressed feedback dropped from cream → black/5.
-      className="md:hidden shrink-0 border-t-2 border-black bg-white"
+      className="md:hidden shrink-0 border-t theme-brutal:border-t-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white"
       style={{ paddingBottom: MOBILE_TAB_BAR_SAFE_BOTTOM }}
     >
       <div className="flex">
@@ -330,8 +330,8 @@ export function MobileTabBar() {
             type="button"
             onClick={tab.onClick}
             className={`flex flex-1 flex-col items-center justify-center gap-0.5 py-2 [@media(max-height:600px)]:py-2 [@media(max-height:600px)]:min-h-9 text-[10px] font-bold tracking-wider transition-colors ${
-              i < tabs.length - 1 ? "border-r-2 border-black" : ""
-            } ${tab.active ? "bg-soft-signal" : "bg-white active:bg-black/5"}`}
+              i < tabs.length - 1 ? "border-r theme-brutal:border-r-2 border-line-strong theme-brutal:border-black" : ""
+            } ${tab.active ? "bg-primary-soft theme-brutal:bg-soft-signal" : "bg-layer-panel theme-brutal:bg-white active:bg-fill-muted theme-brutal:active:bg-black/5"}`}
           >
             {/* stdrc 2026-05-02 #proj-uiux:648f8735 16b2ec7b 3(a): on
                 short viewports drop the icon and keep just the text label
@@ -402,7 +402,7 @@ function ChannelById({ channelId }: { channelId: string }) {
   // (stdrc msg=71334a2d 2026-05-27 "闪一下然后错位").
   if (!channel && missingChannelId !== channelId) {
     return (
-      <div className="flex flex-1 flex-col items-center justify-center text-black/40 font-display text-lg font-bold uppercase">
+      <div className="flex flex-1 flex-col items-center justify-center text-foreground-hint theme-brutal:text-black/40 font-display text-lg font-bold uppercase">
         {formatMessage({ id: "layout.main.loadingChannel" })}
       </div>
     );
@@ -452,7 +452,7 @@ function DmById({ dmId }: { dmId: string }) {
 
   if (!channel && missingDmId !== dmId) {
     return (
-      <div className="flex flex-1 flex-col items-center justify-center text-black/40 font-display text-lg font-bold uppercase">
+      <div className="flex flex-1 flex-col items-center justify-center text-foreground-hint theme-brutal:text-black/40 font-display text-lg font-bold uppercase">
         {formatMessage({ id: "layout.main.loadingChannel" })}
       </div>
     );
@@ -474,7 +474,7 @@ function DmRoute() {
 function PanelFallback() {
   const { formatMessage } = useIntl();
   return (
-    <div className="flex flex-1 items-center justify-center text-black/40 font-display text-lg font-bold">
+    <div className="flex flex-1 items-center justify-center text-foreground-hint theme-brutal:text-black/40 font-display text-lg font-bold">
       {formatMessage({ id: "layout.main.loading" })}
     </div>
   );
@@ -492,7 +492,7 @@ function PanelFallback() {
 function OverlayPanelFallback() {
   const { formatMessage } = useIntl();
   return (
-    <div className="absolute inset-0 z-30 flex items-center justify-center bg-white text-black/40 font-display text-lg font-bold md:relative md:inset-auto md:z-auto md:flex-1 md:border-l-2 md:border-black">
+    <div className="absolute inset-0 z-30 flex items-center justify-center bg-layer-panel theme-brutal:bg-white text-foreground-hint theme-brutal:text-black/40 font-display text-lg font-bold md:relative md:inset-auto md:z-auto md:flex-1 md:border-l theme-brutal:md:border-l-2 md:border-line-strong theme-brutal:md:border-black">
       {formatMessage({ id: "layout.main.loading" })}
     </div>
   );
@@ -543,7 +543,7 @@ function MachineById({ machineId }: { machineId: string }) {
   const machine = machines.find((m) => m.id === machineId);
   if (!machine) {
     return (
-      <div className="flex flex-1 items-center justify-center text-black/40 font-display text-lg font-bold uppercase">
+      <div className="flex flex-1 items-center justify-center text-foreground-hint theme-brutal:text-black/40 font-display text-lg font-bold uppercase">
         {formatMessage({ id: "layout.main.computerNotFound" })}
       </div>
     );
@@ -613,7 +613,7 @@ function HumanById({ userId, onBack }: { userId: string; onBack?: () => void }) 
   }
   if (fallbackLoading) return <PanelFallback />;
   return (
-    <div className="flex flex-1 items-center justify-center text-black/40 font-display text-lg font-bold uppercase">
+    <div className="flex flex-1 items-center justify-center text-foreground-hint theme-brutal:text-black/40 font-display text-lg font-bold uppercase">
       {formatMessage({ id: "layout.main.humanNotFound" })}
     </div>
   );
@@ -670,11 +670,11 @@ function MemberGraphRoute() {
         title={formatMessage({ id: "layout.memberGraph.title" })}
         titleSuffix={<Badge.Experimental className="-translate-y-px" />}
         icon={<GitBranch size={18} />}
-        iconBg="bg-soft-signal text-black"
+        iconBg="bg-primary-soft theme-brutal:bg-soft-signal text-foreground-strong theme-brutal:text-black"
         onMobileBack={onMobileBack}
         mobileBackProps={{ "data-testid": "member-graph-mobile-back", title: formatMessage({ id: "layout.memberGraph.back" }) }}
       />
-      <div className="flex-1 overflow-y-auto bg-white px-5 py-4">
+      <div className="flex-1 overflow-y-auto bg-layer-panel theme-brutal:bg-white px-5 py-4">
         <Suspense fallback={<PanelFallback />}>
           <MemberGraphSection sectionLabel={formatMessage({ id: "layout.memberGraph.connectionsSectionLabel" })} />
         </Suspense>
@@ -849,10 +849,10 @@ export function ActivityThreadContentRoute({ slot, closeSlot }: { slot: SearchCo
 
   if (!threadIdentity) {
     return (
-      <div className="flex h-full min-h-0 w-full flex-col bg-white">
+      <div className="flex h-full min-h-0 w-full flex-col bg-layer-panel theme-brutal:bg-white">
         <PanelHeader title={formatMessage({ id: "message.threadPanel.thread" })} containerProps={{ className: "shrink-0" }} />
         <div className="flex flex-1 items-center justify-center p-6">
-          <div className="text-black/40 font-mono text-sm">
+          <div className="text-foreground-hint theme-brutal:text-black/40 font-mono text-sm">
             {loaded
               ? formatMessage({ id: "layout.main.threadNotInActivity" })
               : formatMessage({ id: "common.loading" })}
@@ -1055,14 +1055,14 @@ function TaskModalBar({
     // whole two-line block, so it centres on that block. I had left items-start
     // from when the bar was a single line, which parked the X against the first
     // line's top edge.
-    <div className="flex shrink-0 items-center gap-3 border-b-2 border-black bg-white px-4 py-2">
+    <div className="flex shrink-0 items-center gap-3 border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white px-4 py-2">
       {mobile && (
         <button
           type="button"
           onClick={onClose}
           aria-label={formatMessage({ id: "task.modal.close" })}
           data-testid="task-modal-mobile-back"
-          className="btn-brutal-sm flex size-7 shrink-0 items-center justify-center bg-white"
+          className="btn-brutal-sm flex size-7 shrink-0 items-center justify-center bg-layer-panel theme-brutal:bg-white"
         >
           <ArrowLeft size={14} />
         </button>
@@ -1071,7 +1071,7 @@ function TaskModalBar({
           Both are stable facts — the task's own title stays in the scrolling
           body, because a long one cannot be bounded by a fixed bar. */}
       <div className="min-w-0 flex-1">
-        <div className="truncate text-xs font-bold text-black/60">
+        <div className="truncate text-xs font-bold text-foreground-muted theme-brutal:text-black/60">
           {channelSigil(task.channelName || formatMessage({ id: "task.properties.unknownChannel" }))}
         </div>
         <div className="truncate text-sm font-bold" data-testid="task-modal-bar-label">
@@ -1084,7 +1084,7 @@ function TaskModalBar({
           onClick={onClose}
           aria-label={formatMessage({ id: "task.modal.close" })}
           data-testid="task-modal-close"
-          className="btn-brutal-sm flex size-7 shrink-0 items-center justify-center bg-white"
+          className="btn-brutal-sm flex size-7 shrink-0 items-center justify-center bg-layer-panel theme-brutal:bg-white"
         >
           <X size={14} />
         </button>
@@ -1111,26 +1111,26 @@ function ThreadPanelWrapper({ presentation = "side" }: { presentation?: "side" |
   if (presentation === "modal") {
     return (
       <div
-        className="flex h-[min(86vh,900px)] max-h-[calc(100dvh-2rem)] w-[min(960px,calc(100vw-2rem))] flex-col overflow-hidden border-2 border-black bg-white shadow-brutal"
+        className="flex h-[min(86vh,900px)] max-h-[calc(100dvh-2rem)] w-[min(960px,calc(100vw-2rem))] flex-col overflow-hidden border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white shadow-raft-sm theme-brutal:shadow-brutal"
         data-testid="task-thread-modal"
       >
         {hostTask && <TaskModalBar task={hostTask} onClose={closeThread} />}
         <div className="flex min-h-0 flex-1 flex-col">
           <ThreadPanel key={parentMessageId} presentation="modal" hideHeader={!!hostTask} hideParentMessage={!!hostTask}
-            parentSlot={hostTask ? <Suspense fallback={<div className="space-y-3 border-b-2 border-black bg-white p-4"><Skeleton className="h-6 w-2/3" /><Skeleton className="h-4 w-full" /><Skeleton className="h-4 w-4/5" /></div>}><TaskModalHead task={hostTask} /></Suspense> : undefined} />
+            parentSlot={hostTask ? <Suspense fallback={<div className="space-y-3 border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white p-4"><Skeleton className="h-6 w-2/3" /><Skeleton className="h-4 w-full" /><Skeleton className="h-4 w-4/5" /></div>}><TaskModalHead task={hostTask} /></Suspense> : undefined} />
         </div>
       </div>
     );
   }
   if (presentation === "mobile-modal") {
     return (
-      <div className="absolute inset-0 z-30 flex flex-col bg-white" data-testid="task-thread-modal">
+      <div className="absolute inset-0 z-30 flex flex-col bg-layer-panel theme-brutal:bg-white" data-testid="task-thread-modal">
         {hostTask && (
           <TaskModalBar task={hostTask} onClose={mobileTaskBack} mobile />
         )}
         <div className="flex min-h-0 flex-1 flex-col">
           <ThreadPanel key={parentMessageId} presentation="mobile-modal" hideHeader={!!hostTask} hideParentMessage={!!hostTask}
-            parentSlot={hostTask ? <Suspense fallback={<div className="space-y-3 border-b-2 border-black bg-white p-4"><Skeleton className="h-6 w-2/3" /><Skeleton className="h-4 w-full" /><Skeleton className="h-4 w-4/5" /></div>}><TaskModalHead task={hostTask} /></Suspense> : undefined} />
+            parentSlot={hostTask ? <Suspense fallback={<div className="space-y-3 border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white p-4"><Skeleton className="h-6 w-2/3" /><Skeleton className="h-4 w-full" /><Skeleton className="h-4 w-4/5" /></div>}><TaskModalHead task={hostTask} /></Suspense> : undefined} />
         </div>
       </div>
     );
@@ -1171,7 +1171,7 @@ function SideThreadColumn() {
   return (
     <div
       ref={panelRef}
-      className="thread-side-column flex flex-col bg-white"
+      className="thread-side-column flex flex-col bg-layer-panel theme-brutal:bg-white"
       data-testid="thread-side-column"
       style={{ "--thread-panel-width": `${width}px` } as React.CSSProperties}
     >
@@ -2086,7 +2086,7 @@ export default function MainLayout() {
 
   const renderWorkspaceSidebarContent = (side: "left" | "right") => {
     const workspaceRailMode = workspaceSidebars[side].activeItem;
-    const borderClass = side === "left" ? "border-r border-black/25" : "border-l border-black/25";
+    const borderClass = side === "left" ? "border-r border-line-muted theme-brutal:border-black/25" : "border-l border-line-muted theme-brutal:border-black/25";
     if (workspaceRailMode === "activity") {
       return (
         <WorkspaceRailPanelFrame mode="activity" borderClass={borderClass}>
@@ -2156,7 +2156,7 @@ export default function MainLayout() {
       //   cannot be applied reliably
       // - mobile detail routes still update theme-color and this wrapper to match
       //   their white top surface
-      className={`flex min-h-0 flex-1 flex-col font-display ${isMobileTabRoot ? "bg-soft-signal" : "bg-white md:bg-brutal-cream"}`}
+      className={`flex min-h-0 flex-1 flex-col font-display ${isMobileTabRoot ? "bg-primary-soft theme-brutal:bg-soft-signal" : "bg-layer-panel theme-brutal:bg-white md:bg-layer-canvas-muted theme-brutal:md:bg-brutal-cream"}`}
       style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}
     >
       {/* System notifications live in the Notification Center popup, hung off the LeftRail
@@ -2218,7 +2218,7 @@ export default function MainLayout() {
             // uses h-full on its own root so adding flex flex-col to the
             // wrapper doesn't change its layout — but we still scope it to
             // master-detail to keep the non-search wrapper byte-identical.
-            className={`bg-brutal-cream relative min-w-0 ${mobileShowSidebarInline ? "flex-1" : "shrink-0"} ${searchMasterDetail ? "flex flex-col border-r-2 border-black" : ""}`}
+            className={`bg-layer-canvas-muted theme-brutal:bg-brutal-cream relative min-w-0 ${mobileShowSidebarInline ? "flex-1" : "shrink-0"} ${searchMasterDetail ? "flex flex-col border-r theme-brutal:border-r-2 border-line-strong theme-brutal:border-black" : ""}`}
             style={
               mobileShowSidebarInline
                 ? undefined
@@ -2271,7 +2271,7 @@ export default function MainLayout() {
                 onDoubleClick={leftWorkspaceSidebarResize.resetWidth}
                 data-testid="workspace-left-sidebar-resize-handle"
               >
-                <span className="pointer-events-none absolute bottom-0 left-1/2 top-0 w-px -translate-x-1/2 bg-black/25 group-hover:bg-black" />
+                <span className="pointer-events-none absolute bottom-0 left-1/2 top-0 w-px -translate-x-1/2 bg-foreground/25 theme-brutal:bg-black/25 group-hover:bg-foreground-strong theme-brutal:group-hover:bg-black" />
               </div>
             ) : (
               <div
@@ -2311,12 +2311,12 @@ export default function MainLayout() {
 
         {/* Main content — hidden on mobile root views (sidebar is the content),
             visible on mobile detail views and always on desktop.
-            stdrc 2026-05-02 #proj-uiux:95e25b5b ec1523d9: bg-white on
+            stdrc 2026-05-02 #proj-uiux:95e25b5b ec1523d9: bg-layer-panel theme-brutal:bg-white on
             desktop so the whole main column reads as bright white,
             inverted with sidebar's warm cream. Mobile keeps the
             inherited cream so sidebar↔main aren't visually separated
             on small screens where they aren't side-by-side. */}
-        <div className={`relative min-h-0 min-w-0 flex-1 flex-col overflow-hidden ${mobileShowSidebarInline ? "hidden" : "flex"} md:bg-white`}>
+        <div className={`relative min-h-0 min-w-0 flex-1 flex-col overflow-hidden ${mobileShowSidebarInline ? "hidden" : "flex"} md:bg-layer-panel theme-brutal:md:bg-white`}>
           <div
             className="thread-layout-container flex min-h-0 min-w-0 flex-1"
             data-testid="thread-layout-container"
@@ -2370,7 +2370,7 @@ export default function MainLayout() {
         {workspaceEnabled && !isWikiRoute && !showMembersOffice && !workspaceSidebars.right.collapsed && workspaceSidebars.right.activeItem !== null ? (
           <div
             ref={rightWorkspaceSidebarResize.panelRef}
-            className="relative hidden min-w-0 shrink-0 bg-brutal-cream md:block"
+            className="relative hidden min-w-0 shrink-0 bg-layer-canvas-muted theme-brutal:bg-brutal-cream md:block"
             style={{
               width: workspaceSidebarWidths.right,
               minWidth: MIN_WORKSPACE_GRID_SIDEBAR_WIDTH,
@@ -2388,7 +2388,7 @@ export default function MainLayout() {
               onDoubleClick={rightWorkspaceSidebarResize.resetWidth}
               data-testid="workspace-right-sidebar-resize-handle"
             >
-              <span className="pointer-events-none absolute bottom-0 left-1/2 top-0 w-px -translate-x-1/2 bg-black/25 group-hover:bg-black" />
+              <span className="pointer-events-none absolute bottom-0 left-1/2 top-0 w-px -translate-x-1/2 bg-foreground/25 theme-brutal:bg-black/25 group-hover:bg-foreground-strong theme-brutal:group-hover:bg-black" />
             </div>
           </div>
         ) : null}
@@ -2406,7 +2406,7 @@ export default function MainLayout() {
       {workspaceEnabled && workspaceSettingsModalOpen ? (
         <Modal onClose={handleCloseWorkspaceSettings} closeOnBackdrop>
           <div
-            className="relative flex h-[min(86vh,880px)] w-[min(1040px,calc(100vw-2rem))] min-h-0 flex-col overflow-hidden border-2 border-black bg-white shadow-brutal"
+            className="relative flex h-[min(86vh,880px)] w-[min(1040px,calc(100vw-2rem))] min-h-0 flex-col overflow-hidden border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white shadow-raft-sm theme-brutal:shadow-brutal"
             role="dialog"
             aria-modal="true"
             aria-label={formatMessage({ id: "layout.main.settingsAria" })}
@@ -2418,7 +2418,7 @@ export default function MainLayout() {
             </Suspense>
             <button
               type="button"
-              className="absolute right-3 top-3 z-20 inline-flex size-8 items-center justify-center text-black/55 outline-none hover:bg-black/[0.08] hover:text-black focus-visible:outline focus-visible:outline-1 focus-visible:outline-black"
+              className="absolute right-3 top-3 z-20 inline-flex size-8 items-center justify-center text-foreground-muted theme-brutal:text-black/55 outline-none hover:bg-black/[0.08] hover:text-foreground-strong theme-brutal:hover:text-black focus-visible:outline focus-visible:outline-1 focus-visible:outline-line-strong theme-brutal:focus-visible:outline-black"
               onClick={handleCloseWorkspaceSettings}
               aria-label={formatMessage({ id: "layout.main.closeSettingsAria" })}
               title={formatMessage({ id: "common.close" })}

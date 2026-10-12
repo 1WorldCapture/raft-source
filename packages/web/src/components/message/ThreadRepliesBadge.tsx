@@ -30,7 +30,7 @@ export function ThreadRepliesBadge({
       uppercase={false}
       appearance="solid"
       variant="default"
-      className={`${hasUnreadReplies ? "bg-brutal-cyan/20" : "bg-white"} text-black transition-colors hover:bg-brutal-cyan/40`}
+      className={`${hasUnreadReplies ? "bg-info-soft/20 theme-brutal:bg-brutal-cyan/20" : "bg-layer-panel theme-brutal:bg-white"} text-foreground-strong theme-brutal:text-black transition-colors hover:bg-info-soft/40 theme-brutal:hover:bg-brutal-cyan/40`}
     >
       {hasReplies ? (
         <>
@@ -38,11 +38,11 @@ export function ThreadRepliesBadge({
           {formatMessage({ id: "message.inlineThreadReplies.replyCount" }, { count: replyCount })}
         </>
       ) : (
-        <Pencil size={12} className="shrink-0 text-black/55" />
+        <Pencil size={12} className="shrink-0 text-foreground-muted theme-brutal:text-black/55" />
       )}
       {hasUnreadReplies ? (
         <>
-          <span className="text-black/45">·</span>
+          <span className="text-foreground-hint theme-brutal:text-black/45">·</span>
           <span>
             {formatMessage({ id: "message.inlineThreadReplies.newReplyCount" }, { count: unreadCount })}
           </span>
@@ -51,12 +51,12 @@ export function ThreadRepliesBadge({
       {hasDraft ? (
         <>
           {shouldShowDraftSeparator ? (
-            <span className="text-black/45">·</span>
+            <span className="text-foreground-hint theme-brutal:text-black/45">·</span>
           ) : null}
           {hasReplies ? (
-            <Pencil size={12} className="shrink-0 text-black/55" />
+            <Pencil size={12} className="shrink-0 text-foreground-muted theme-brutal:text-black/55" />
           ) : null}
-          <span className="text-black/55">
+          <span className="text-foreground-muted theme-brutal:text-black/55">
             {formatMessage({ id: "message.threadRepliesBadge.draft" })}
           </span>
         </>

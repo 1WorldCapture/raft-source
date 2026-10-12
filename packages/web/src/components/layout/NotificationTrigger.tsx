@@ -38,7 +38,7 @@ export default function NotificationTrigger({
       ariaLabel={ariaLabel}
       testId={flavor === "rail-bottom" ? "notification-trigger-rail" : "notification-trigger-mobile"}
       sizeClass={flavor === "rail-bottom" ? "size-10" : "size-8"}
-      icon={<Bell size={flavor === "rail-bottom" ? 18 : 16} className="text-black" />}
+      icon={<Bell size={flavor === "rail-bottom" ? 18 : 16} className="text-foreground-strong theme-brutal:text-black" />}
     />
   );
 
@@ -48,7 +48,7 @@ export default function NotificationTrigger({
         {flavor === "mobile-navbar" ? (
           <Tooltip
             content={formatMessage({ id: "layout.notifications.centerTooltip" })}
-            contentProps={{ side: "bottom", className: "bg-white" }}
+            contentProps={{ side: "bottom", className: "bg-layer-panel theme-brutal:bg-white" }}
           >
             <PopoverTrigger render={button} />
           </Tooltip>
@@ -94,17 +94,17 @@ const NotificationTriggerButton = forwardRef<HTMLButtonElement, NotificationTrig
       data-state={open ? "open" : "closed"}
       data-has-unread={hasUnread ? "true" : "false"}
       data-testid={testId}
-      className={`relative inline-flex ${sizeClass} items-center justify-center border-2 transition-colors ${
+      className={`relative inline-flex ${sizeClass} items-center justify-center border theme-brutal:border-2 transition-colors ${
         open
-          ? "border-black bg-white shadow-brutal-sm"
-          : "border-transparent bg-transparent hover:border-black hover:bg-white"
+          ? "border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white shadow-raft-xs theme-brutal:shadow-brutal-sm"
+          : "border-transparent bg-transparent hover:border-line-strong theme-brutal:hover:border-black hover:bg-layer-panel theme-brutal:hover:bg-white"
       } ${className}`}
     >
       <span className="relative inline-flex items-center justify-center">
         {icon}
         {hasUnread ? (
           <span
-            className="pointer-events-none absolute -top-1 -end-1 size-2.5 rounded-full border border-black bg-brutal-pink"
+            className="pointer-events-none absolute -top-1 -end-1 size-2.5 rounded-full border border-line-strong theme-brutal:border-black bg-accent-soft theme-brutal:bg-brutal-pink"
             data-testid={`${testId}-unread-dot`}
             aria-hidden="true"
           />

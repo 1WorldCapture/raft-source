@@ -3,9 +3,10 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
+import { brutalView } from "./helpers/brutalView";
 
 const repoRoot = resolve(import.meta.dirname, "..");
-const read = (path: string) => readFileSync(resolve(repoRoot, path), "utf8");
+const read = (path: string) => brutalView(readFileSync(resolve(repoRoot, path), "utf8"));
 
 test("left rail and mobile sidebar use the notification trigger", () => {
   const leftRail = read("src/components/layout/LeftRail.tsx");

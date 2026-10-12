@@ -2,11 +2,12 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
+import { brutalView } from "./helpers/brutalView";
 
 const repoRoot = resolve(import.meta.dirname, "..");
 
 test("desktop chat sidebar has a compact max width to avoid empty right gutter", () => {
-  const source = readFileSync(resolve(repoRoot, "src/components/layout/MainLayout.tsx"), "utf8");
+  const source = brutalView(readFileSync(resolve(repoRoot, "src/components/layout/MainLayout.tsx"), "utf8"));
 
   assert.match(
     source,
@@ -16,7 +17,7 @@ test("desktop chat sidebar has a compact max width to avoid empty right gutter",
 });
 
 test("desktop chat sidebar uses shrink-0 so the resize handle changes visible width", () => {
-  const source = readFileSync(resolve(repoRoot, "src/components/layout/MainLayout.tsx"), "utf8");
+  const source = brutalView(readFileSync(resolve(repoRoot, "src/components/layout/MainLayout.tsx"), "utf8"));
 
   assert.match(
     source,
@@ -89,8 +90,8 @@ test("activity thread plus profile uses compact master width inside 1470px viewp
 });
 
 test("thread side panel browser resize path stays CSS-only", () => {
-  const source = readFileSync(resolve(repoRoot, "src/components/layout/MainLayout.tsx"), "utf8");
-  const threadPanelSource = readFileSync(resolve(repoRoot, "src/components/message/ThreadPanel.tsx"), "utf8");
+  const source = brutalView(readFileSync(resolve(repoRoot, "src/components/layout/MainLayout.tsx"), "utf8"));
+  const threadPanelSource = brutalView(readFileSync(resolve(repoRoot, "src/components/message/ThreadPanel.tsx"), "utf8"));
   const styles = readFileSync(resolve(repoRoot, "src/index.css"), "utf8");
   const sideThreadColumn = source.match(/function SideThreadColumn\(\) \{[\s\S]*?\n\}/)?.[0] ?? "";
 
@@ -171,7 +172,7 @@ test("thread side panel browser resize path stays CSS-only", () => {
 });
 
 test("sidebar section headers share row, toggle, and icon-button geometry", () => {
-  const source = readFileSync(resolve(repoRoot, "src/components/layout/Sidebar.tsx"), "utf8");
+  const source = brutalView(readFileSync(resolve(repoRoot, "src/components/layout/Sidebar.tsx"), "utf8"));
 
   assert.match(
     source,

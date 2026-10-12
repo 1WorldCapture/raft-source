@@ -26,7 +26,7 @@ const enActivityIntl = createIntl(
 export function getActivityDotClass(activity: AgentActivity): string {
   switch (activity) {
     case "online":
-      return "bg-brutal-lime";
+      return "bg-success-soft theme-brutal:bg-brutal-lime";
     // Status lights are fixed semantic colors — bg-status-busy, not the
     // skinnable soft-signal accent (see index.css token comment).
     case "thinking":
@@ -34,7 +34,7 @@ export function getActivityDotClass(activity: AgentActivity): string {
     case "working":
       return "bg-status-busy animate-pulse";
     case "error":
-      return "bg-brutal-orange";
+      return "bg-warning-soft theme-brutal:bg-brutal-orange";
     case "offline":
     default:
       return "bg-gray-400";

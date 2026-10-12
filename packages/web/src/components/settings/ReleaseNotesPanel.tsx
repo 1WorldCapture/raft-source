@@ -15,11 +15,11 @@ interface ReleaseEntry {
 }
 
 const RELEASE_TYPE_CONFIG = {
-  feature: { label: "NEW", bg: "bg-brutal-cyan", text: "text-black" },
-  fix: { label: "FIX", bg: "bg-brutal-orange", text: "text-black" },
-  improvement: { label: "IMPROVED", bg: "bg-brutal-lime", text: "text-black" },
-  breaking: { label: "BREAKING", bg: "bg-brutal-pink", text: "text-black" },
-  deprecated: { label: "DEPRECATED", bg: "bg-brutal-stone", text: "text-black" },
+  feature: { label: "NEW", bg: "bg-info-soft theme-brutal:bg-brutal-cyan", text: "text-foreground-strong theme-brutal:text-black" },
+  fix: { label: "FIX", bg: "bg-warning-soft theme-brutal:bg-brutal-orange", text: "text-foreground-strong theme-brutal:text-black" },
+  improvement: { label: "IMPROVED", bg: "bg-success-soft theme-brutal:bg-brutal-lime", text: "text-foreground-strong theme-brutal:text-black" },
+  breaking: { label: "BREAKING", bg: "bg-accent-soft theme-brutal:bg-brutal-pink", text: "text-foreground-strong theme-brutal:text-black" },
+  deprecated: { label: "DEPRECATED", bg: "bg-fill-muted theme-brutal:bg-brutal-stone", text: "text-foreground-strong theme-brutal:text-black" },
 };
 
 // Fixed reading order for the per-date category groups. Categories with no
@@ -1781,14 +1781,14 @@ export default function ReleaseNotesPanel() {
       <PanelHeader
         title="Release Notes"
         icon={<FileText size={18} />}
-        iconBg="bg-soft-signal"
+        iconBg="bg-primary-soft theme-brutal:bg-soft-signal"
         onMobileBack={onMobileBack}
       />
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto bg-white px-5 py-4">
+      <div className="flex-1 overflow-y-auto bg-layer-panel theme-brutal:bg-white px-5 py-4">
         <div className="flex items-center gap-2 mb-4">
-          <FileText size={16} className="text-black/60" />
+          <FileText size={16} className="text-foreground-muted theme-brutal:text-black/60" />
           <SectionEyebrow>
             What&apos;s New
           </SectionEyebrow>
@@ -1801,12 +1801,12 @@ export default function ReleaseNotesPanel() {
               <div
                 key={release.version ?? `${release.date}-${releaseIndex}`}
                 data-testid="release-entry"
-                className={`border-2 border-black p-4 shadow-brutal-sm ${
-                  isCurrentRelease ? "bg-soft-signal/35" : "bg-white"
+                className={`border theme-brutal:border-2 border-line-strong theme-brutal:border-black p-4 shadow-raft-xs theme-brutal:shadow-brutal-sm ${
+                  isCurrentRelease ? "bg-primary-soft/35 theme-brutal:bg-soft-signal/35" : "bg-layer-panel theme-brutal:bg-white"
                 }`}
               >
                 <div className="mb-4 flex flex-wrap items-center gap-2">
-                  <span className="border-2 border-black bg-soft-signal px-2.5 py-0.5 text-sm font-bold font-mono">
+                  <span className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-primary-soft theme-brutal:bg-soft-signal px-2.5 py-0.5 text-sm font-bold font-mono">
                     {release.version ? `${release.version} (${release.date})` : release.date}
                   </span>
                   {isCurrentRelease ? (
@@ -1823,12 +1823,12 @@ export default function ReleaseNotesPanel() {
                     const config = RELEASE_TYPE_CONFIG[type];
                     return (
                       <div key={type}>
-                        <span className={`inline-flex border-2 border-black px-1.5 py-0.5 text-[10px] font-bold uppercase ${config.bg} ${config.text}`}>
+                        <span className={`inline-flex border theme-brutal:border-2 border-line-strong theme-brutal:border-black px-1.5 py-0.5 text-[10px] font-bold uppercase ${config.bg} ${config.text}`}>
                           {config.label}
                         </span>
-                        <ul className="mt-1.5 list-disc space-y-1.5 pl-5 marker:text-black/70">
+                        <ul className="mt-1.5 list-disc space-y-1.5 pl-5 marker:text-foreground-muted theme-brutal:marker:text-black/70">
                           {items.map((item, i) => (
-                            <li key={i} className={`text-sm ${item.emphasis ? "text-black font-bold" : "text-black/80"}`}>
+                            <li key={i} className={`text-sm ${item.emphasis ? "text-foreground-strong theme-brutal:text-black font-bold" : "text-foreground-strong theme-brutal:text-black/80"}`}>
                               {item.text}
                             </li>
                           ))}

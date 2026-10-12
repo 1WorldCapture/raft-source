@@ -235,7 +235,7 @@ export default function InviteHumanDialog({
                       onClose();
                       nav.toSettings("billing");
                     }}
-                    className="font-bold text-black underline"
+                    className="font-bold text-foreground-strong theme-brutal:text-black underline"
                   >
                     {formatMessage({ id: "member.invite.viewBilling" })}
                   </button>
@@ -253,7 +253,7 @@ export default function InviteHumanDialog({
                   onClose();
                   nav.toSettings("billing");
                 }}
-                className="font-bold text-black underline"
+                className="font-bold text-foreground-strong theme-brutal:text-black underline"
               >
                 {formatMessage({ id: "member.invite.viewBilling" })}
               </button>
@@ -352,10 +352,10 @@ export default function InviteHumanDialog({
             </div>
           </div>
 
-          <div className="flex items-center gap-3 text-[11px] font-bold uppercase tracking-widest text-black/40">
-            <div className="h-px flex-1 bg-black/20" />
+          <div className="flex items-center gap-3 text-[11px] font-bold uppercase tracking-widest text-foreground-hint theme-brutal:text-black/40">
+            <div className="h-px flex-1 bg-foreground/20 theme-brutal:bg-black/20" />
             <span>{formatMessage({ id: "member.invite.or" })}</span>
-            <div className="h-px flex-1 bg-black/20" />
+            <div className="h-px flex-1 bg-foreground/20 theme-brutal:bg-black/20" />
           </div>
 
           <div>
@@ -364,7 +364,7 @@ export default function InviteHumanDialog({
             </label>
             <div className="flex items-center gap-2">
               {/* readOnly Input rather than a bordered div: `border-2
-                  border-black` was a literal, so this box kept its heavy brutal
+                  border-line-strong theme-brutal:border-black` was a literal, so this box kept its heavy brutal
                   edge under the elegant theme while everything around it went
                   soft (@cindyz). The Input follows the theme and picks up the
                   same field metrics as the rows above. */}
@@ -403,14 +403,14 @@ export default function InviteHumanDialog({
             <button
               type="button"
               onClick={onClose}
-              className="btn-brutal bg-white px-4 py-2 text-sm"
+              className="btn-brutal bg-layer-panel theme-brutal:bg-white px-4 py-2 text-sm"
             >
               {formatMessage({ id: "common.confirm.cancel" })}
             </button>
             <button
               type="submit"
               disabled={sending || humanSeatLimitReached}
-              className="btn-brutal bg-brutal-pink px-4 py-2 text-sm flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="btn-brutal bg-accent-soft theme-brutal:bg-brutal-pink px-4 py-2 text-sm flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Mail size={14} />
               {sending

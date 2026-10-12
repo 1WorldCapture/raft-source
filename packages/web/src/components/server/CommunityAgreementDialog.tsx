@@ -48,21 +48,21 @@ export default function CommunityAgreementDialog({
         <div className="mb-4 flex items-start justify-between gap-3">
           <div>
             <h2 className="text-lg font-bold">{agreement.title}</h2>
-            <div className="mt-0.5 text-xs text-black/50">
+            <div className="mt-0.5 text-xs text-foreground-muted theme-brutal:text-black/50">
               {formatMessage({ id: "server.communityAgreement.version" }, { version: agreement.version })}
             </div>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="btn-brutal-sm shrink-0 bg-white p-1"
+            className="btn-brutal-sm shrink-0 bg-layer-panel theme-brutal:bg-white p-1"
             title={formatMessage({ id: "common.close" })}
           >
             <X size={18} />
           </button>
         </div>
 
-        <div className="max-h-[50vh] overflow-y-auto border-2 border-black bg-white p-4 text-sm">
+        <div className="max-h-[50vh] overflow-y-auto border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white p-4 text-sm">
           <AgreementBody source={agreement.bodyMarkdown} />
         </div>
 
@@ -77,7 +77,7 @@ export default function CommunityAgreementDialog({
             type="button"
             onClick={onClose}
             disabled={submitting}
-            className="btn-brutal bg-white px-3 py-1.5 text-xs disabled:opacity-50"
+            className="btn-brutal bg-layer-panel theme-brutal:bg-white px-3 py-1.5 text-xs disabled:opacity-50"
           >
             {formatMessage({ id: "server.communityAgreement.cancel" })}
           </button>
@@ -85,7 +85,7 @@ export default function CommunityAgreementDialog({
             type="button"
             onClick={handleAgree}
             disabled={submitting}
-            className="btn-brutal bg-brutal-pink px-3 py-1.5 text-xs disabled:opacity-50"
+            className="btn-brutal bg-accent-soft theme-brutal:bg-brutal-pink px-3 py-1.5 text-xs disabled:opacity-50"
           >
             {submitting
               ? formatMessage({ id: "server.communityAgreement.joining" })

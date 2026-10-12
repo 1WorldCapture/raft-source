@@ -101,23 +101,23 @@ const SavedItem = memo(function SavedItem({ entry, onOpenEntry, onRemoveMessage,
         draggable={!!onDragEntry}
         onDragStart={onDragEntry ? handleDragStart : undefined}
         onContextMenu={handleContextMenu}
-        className={`relative flex items-start gap-3 border-2 transition-colors p-3 bg-white text-left w-full ${
+        className={`relative flex items-start gap-3 border theme-brutal:border-2 transition-colors p-3 bg-layer-panel theme-brutal:bg-white text-left w-full ${
           ctxMenu
-            ? "border-black shadow-brutal-sm"
-            : "border-black/30 hover:border-black hover:shadow-brutal-sm active:border-black active:shadow-brutal-sm"
+            ? "border-line-strong theme-brutal:border-black shadow-raft-xs theme-brutal:shadow-brutal-sm"
+            : "border-line-muted theme-brutal:border-black/30 hover:border-line-strong theme-brutal:hover:border-black hover:shadow-raft-xs theme-brutal:hover:shadow-brutal-sm active:border-line-strong theme-brutal:active:border-black active:shadow-raft-xs theme-brutal:active:shadow-brutal-sm"
         }`}
       >
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 mb-1 text-xs">
-            <span className="font-bold text-black/50">{channelLabel}</span>
+            <span className="font-bold text-foreground-muted theme-brutal:text-black/50">{channelLabel}</span>
             {isThread && (
-              <span className="inline-flex items-center gap-1 font-bold text-black/40">
+              <span className="inline-flex items-center gap-1 font-bold text-foreground-hint theme-brutal:text-black/40">
                 <MessageSquare size={10} />
                 {formatMessage({ id: "saved.threadLabel" })}
               </span>
             )}
             {senderName && (
-              <span className="inline-flex items-center gap-1 font-bold text-black">
+              <span className="inline-flex items-center gap-1 font-bold text-foreground-strong theme-brutal:text-black">
                 {senderAgent ? (
                   <AvatarSlot context="preview-mini" type="agent" agentAvatarUrl={senderAgent.avatarUrl ?? null} />
                 ) : entry.senderType === "external_projection" ? (
@@ -128,7 +128,7 @@ const SavedItem = memo(function SavedItem({ entry, onOpenEntry, onRemoveMessage,
                 <span>{senderName}</span>
               </span>
             )}
-            <span className="text-xs text-black/40 font-mono">
+            <span className="text-xs text-foreground-hint theme-brutal:text-black/40 font-mono">
               {formatRelativeTime(entry.createdAt, locale) ?? ""}
             </span>
           </div>
@@ -139,14 +139,14 @@ const SavedItem = memo(function SavedItem({ entry, onOpenEntry, onRemoveMessage,
         <div className="group relative shrink-0">
           <div
             onClick={handleRemoveButtonClick}
-            className="btn-brutal-sm inline-flex size-7 items-center justify-center bg-brutal-orange/15 p-0 text-brutal-orange transition-[filter] duration-100 hover:brightness-90"
+            className="btn-brutal-sm inline-flex size-7 items-center justify-center bg-warning-soft/15 theme-brutal:bg-brutal-orange/15 p-0 text-brutal-orange transition-[filter] duration-100 hover:brightness-90"
             title={formatMessage({ id: "saved.remove" })}
             aria-label={formatMessage({ id: "saved.remove" })}
             role="button"
           >
             <Bookmark size={14} fill="currentColor" />
           </div>
-          <span className="pointer-events-none absolute right-full top-1/2 mr-2 hidden -translate-y-1/2 whitespace-nowrap border-2 border-black bg-brutal-orange/15 px-2 py-1 text-xs font-bold text-black shadow-brutal-sm group-hover:inline">
+          <span className="pointer-events-none absolute right-full top-1/2 mr-2 hidden -translate-y-1/2 whitespace-nowrap border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-warning-soft/15 theme-brutal:bg-brutal-orange/15 px-2 py-1 text-xs font-bold text-foreground-strong theme-brutal:text-black shadow-raft-xs theme-brutal:shadow-brutal-sm group-hover:inline">
             {formatMessage({ id: "saved.remove" })}
           </span>
         </div>
@@ -265,7 +265,7 @@ export default function SavedPanel({ onOpenEntry, onDragEntry, embedded = false 
           title={formatMessage({ id: "saved.header.title" })}
           subtitle={formatMessage({ id: "saved.header.subtitle" }, { count: savedTotal })}
           icon={<Bookmark size={18} />}
-          iconBg="bg-soft-signal"
+          iconBg="bg-primary-soft theme-brutal:bg-soft-signal"
           onMobileBack={onMobileBack}
         />
       ) : null}
@@ -274,7 +274,7 @@ export default function SavedPanel({ onOpenEntry, onDragEntry, embedded = false 
       <div
         ref={scrollerRef}
         data-testid="saved-list-scroller"
-        className="flex-1 overflow-y-auto bg-white p-4 safe-bottom"
+        className="flex-1 overflow-y-auto bg-layer-panel theme-brutal:bg-white p-4 safe-bottom"
       >
         {loading && saved.length === 0 ? (
           <ConversationCardSkeleton />
@@ -305,7 +305,7 @@ export default function SavedPanel({ onOpenEntry, onDragEntry, embedded = false 
                 aria-live="polite"
               >
                 {loading ? (
-                  <span className="text-xs font-bold text-black/50">{formatMessage({ id: "common.loading" })}</span>
+                  <span className="text-xs font-bold text-foreground-muted theme-brutal:text-black/50">{formatMessage({ id: "common.loading" })}</span>
                 ) : (
                   <span className="sr-only">{formatMessage({ id: "saved.loadingMore" })}</span>
                 )}
