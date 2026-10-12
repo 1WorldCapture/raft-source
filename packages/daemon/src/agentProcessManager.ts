@@ -125,7 +125,7 @@ import {
   type RuntimeProfileControlKind,
 } from "./agentRuntimeInput.js";
 import { applyStartupMemoryBlock, buildStartupMemoryBlock, resolveStartupMemoryBlockConfig } from "./startupMemoryBlock.js";
-import { applyWakeRecycleBriefing, describeAppliedWakeRecycle, planWakeSessionRecycle } from "./wakeSessionRecycle.js";
+import { COLD_IDLE_SWEEP_MS, applyWakeRecycleBriefing, describeAppliedWakeRecycle, planWakeSessionRecycle, selectColdIdleRecycleStops } from "./wakeSessionRecycle.js";
 import {
   buildBoundedVisibleCrashProjection,
   buildClaudeStartupCrashRuntimeError,
@@ -211,6 +211,7 @@ import {
   reduceApmGatedTurnEnd,
   reduceApmToolUse,
   reduceApmIdleState,
+  reduceApmColdIdleRecycleTermination,
   reduceApmStalledRecoveryTermination,
   reduceApmStartupRequestErrorTermination,
   reduceApmStartupTimeoutTermination,
@@ -219,6 +220,7 @@ import {
   projectApmRuntimeTerminationTrace,
   type ApmGatedFlushReason,
   type ApmGatedSteeringEffect,
+  type ApmExpectedTerminationReason,
   type ApmGatedSteeringDecisionState,
 } from "./apmStateMachine.js";
 
@@ -1211,6 +1213,7 @@ export class AgentProcessManager {
   private slockHome: string;
   private dataDir: string;
   private runtimeSessionHomeDir: string;
+  private coldIdleSweepTimer: ReturnType<typeof setInterval> | null = null;
   private driverResolver: (runtimeId: string) => RuntimeDriver;
   private defaultAgentEnvVarsProvider: ((config: Pick<AgentConfig, "runtime" | "model" | "envVars">) => Promise<Record<string, string> | null> | Record<string, string> | null) | null;
   private tracer: Tracer;
@@ -1348,6 +1351,77 @@ export class AgentProcessManager {
       () => this.clockNow(),
       (config) => this.runtimeLaunchPolicyTraceAttrs(config),
     );
+    this.coldIdleSweepTimer = setInterval(
+      () => void this.sweepColdIdleRuntimes(),
+      readPositiveIntegerEnv("RAFT_WAKE_RECYCLE_SWEEP_MS", COLD_IDLE_SWEEP_MS),
+    );
+    this.coldIdleSweepTimer.unref?.();
+  }
+
+  /** RFC 070: an idle claude process past the cache TTL with a large context
+   * provides no warmth; stop it so the next wake takes the process-start path,
+   * where the at-wake recycle decides between resume and a fresh briefing.
+   * Without the `constructed_wake_context` flag no candidate is ever selected. */
+  private async sweepColdIdleRuntimes(): Promise<void> {
+    const views = [...this.agents.entries()].map(([agentId, ap]) => ({
+      agentId,
+      config: ap.config,
+      idle: this.isApmIdle(ap) && !this.hasUntoldInboxWork(ap) && ap.exit.kind === "live",
+      lastEventAtMs: ap.runtimeProgress.lastEventAt,
+      liveSessionId: ap.sessionId,
+    }));
+    for (const stop of await selectColdIdleRecycleStops(views, { homeDir: this.runtimeSessionHomeDir })) {
+      const ap = this.agents.get(stop.agentId);
+      if (!ap || !this.isApmIdle(ap) || this.hasUntoldInboxWork(ap) || ap.exit.kind !== "live") continue;
+      logger.info(`[Agent ${stop.agentId}] Stopping cold idle runtime (idle ${Math.round(stop.idleMs / 60_000)}m, ~${Math.round(stop.priorContextTokens / 1000)}k context, session ${stop.sessionId}, ${ap.inbox.length} notified unread); next wake decides resume vs fresh briefing`);
+      this.recordDaemonTrace("daemon.agent.cold_idle_stop", {
+        agentId: stop.agentId,
+        session_id: stop.sessionId,
+        idle_ms: stop.idleMs,
+        prior_context_tokens: stop.priorContextTokens,
+        notified_unread_count: ap.inbox.length,
+      });
+      this.commitGatedSteeringDecisionState(stop.agentId, ap, reduceApmColdIdleRecycleTermination(ap.gatedSteering).nextState);
+      void ap.runtime.stop({ signal: "SIGTERM", reason: "cold_idle_recycle" }).catch((err) => {
+        logger.warn(`[Agent ${stop.agentId}] Cold idle stop failed: ${err instanceof Error ? err.message : String(err)}`);
+      });
+    }
+  }
+
+  /** Work the runtime has not been told about yet: a notice still waiting to
+   * be written, or a queued message whose notice never reached this session.
+   * Messages the agent was notified about and chose to leave unread are its own
+   * deferral, not pending work. */
+  private hasUntoldInboxWork(ap: AgentProcess): boolean {
+    return ap.notifications.pendingCount > 0
+      || ap.notifications.filterUncontributedMessages(ap.inbox, ap.sessionId).length > 0;
+  }
+
+  /** A cold-idle sweep stop must not turn the agent's deliberately-unread,
+   * already-notified messages into an immediate restart wake: they stay unread
+   * on the server and surface at the next real wake. Anything not yet told to
+   * the session still wakes it as before. */
+  private isNotifiedDeferralAtColdIdleStop(
+    ap: AgentProcess,
+    terminationReason: ApmExpectedTerminationReason,
+    message: AgentMessage,
+  ): boolean {
+    return terminationReason === "cold_idle_recycle"
+      && ap.notifications.hasContributedMessage(message, ap.sessionId);
+  }
+
+  private recordInboxDroppedOnExit(agentId: string, ap: AgentProcess, exitPath: string, messages: AgentMessage[]): void {
+    const dropped = messages.filter((message) => !this.isTransientDelivery(message));
+    if (dropped.length === 0) return;
+    logger.info(`[Agent ${agentId}] Runtime closed via ${exitPath} with ${dropped.length} unconsumed queued message(s); not carried by the daemon, they stay unread on the server`);
+    this.recordDaemonTrace("daemon.agent.inbox.dropped_on_exit", {
+      agentId,
+      launchId: ap.launchId || undefined,
+      runtime: ap.config.runtime,
+      exit_reason: exitPath,
+      dropped_count: dropped.length,
+      expected: true,
+    });
   }
 
   setTracer(tracer: Tracer): void {
@@ -3501,7 +3575,13 @@ export class AgentProcessManager {
         // it with a masking "online / Process idle" (Antigravity startup-timeout
         // status-masking bug: a timed-out `agy` killed by the daemon closes with
         // code 0, and the clean-exit path then hid the failure on the status dot).
-        const processEndedCleanly = !stickyTerminalFailureDetail && !startupTimeoutTermination && !startupRequestErrorTermination && ((finalCode === 0 && turnBoundarySatisfied) || (expectedTermination && !ap.lastRuntimeError));
+        // A cold-idle sweep stop ignores `lastRuntimeError`: that field is only cleared when an
+        // ordinary message is delivered, so an error the runtime has long since recovered from
+        // (e.g. a rate limit that lifted hours ago) would otherwise turn a deliberate stop into a
+        // "crash" and mark a healthy agent inactive. The sweep only stops processes that completed
+        // a turn and then idled past the cache TTL; genuinely sticky failures are excluded above.
+        const staleRuntimeErrorIgnored = expectedTerminationReason === "cold_idle_recycle";
+        const processEndedCleanly = !stickyTerminalFailureDetail && !startupTimeoutTermination && !startupRequestErrorTermination && ((finalCode === 0 && turnBoundarySatisfied) || (expectedTermination && (!ap.lastRuntimeError || staleRuntimeErrorIgnored)));
         const terminalFailureDetail = processEndedCleanly ? null : (stickyTerminalFailureDetail ?? classifyTerminalFailure(ap));
         const resumeRecoveryReason = this.limitCursorSessionReset(agentId, ap, resumeSessionRecoveryReason(ap));
         const shouldColdStartResumeSession = resumeRecoveryReason !== null;
@@ -3575,7 +3655,7 @@ export class AgentProcessManager {
           let queuedWakeMessage: AgentMessage | undefined;
           const bufferedRestartMessages: AgentMessage[] = [];
           for (const message of pendingRestartMessages) {
-            if (!queuedWakeMessage && !this.shouldDeferWakeMessage(agentId, ap.driver, message)) {
+            if (!queuedWakeMessage && !this.isNotifiedDeferralAtColdIdleStop(ap, expectedTerminationReason, message) && !this.shouldDeferWakeMessage(agentId, ap.driver, message)) {
               queuedWakeMessage = message;
             } else {
               bufferedRestartMessages.push(message);
@@ -3635,6 +3715,11 @@ export class AgentProcessManager {
             return;
           }
 
+          // A cold-idle stop carries no messages forward: the notified-but-unread ones stay unread on
+          // the server and ride the next real wake's catch-up.
+          if (expectedTerminationReason === "cold_idle_recycle") {
+            this.recordInboxDroppedOnExit(agentId, ap, "cold_idle_recycle", bufferedRestartMessages);
+          }
           // Normal exit (turn completed, idle timeout) — daemon is still online and can
           // restart the process on next message, so keep status active.
           // Cache config so we can auto-restart when a new message arrives.
@@ -5225,6 +5310,8 @@ export class AgentProcessManager {
   }
 
   async stopAll() {
+    if (this.coldIdleSweepTimer) clearInterval(this.coldIdleSweepTimer);
+    this.coldIdleSweepTimer = null;
     // Clear idle configs so no auto-restarts happen during shutdown.
     // Use silent: true so agents stay "active" in DB — on daemon reconnect,
     // the server's ready handler will auto-restart them.
