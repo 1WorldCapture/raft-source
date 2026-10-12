@@ -15,6 +15,22 @@ import { fileURLToPath } from "node:url";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const tsc = spawnSync("npx", ["tsc", "--noEmit", "-p", "frontend/tsconfig.json"], { cwd: root, encoding: "utf8" });
 const output = `${tsc.stdout ?? ""}${tsc.stderr ?? ""}`;
+
+// A guard that did not actually check must not pass: tsc failed to spawn, was
+// killed by a signal, or exited non-zero without printing a single TS diagnostic
+// (e.g. npx could not resolve tsc).
+if (tsc.error) {
+  console.error(`Desktop frontend name check could not run tsc: ${tsc.error.message}`);
+  process.exit(2);
+}
+if (tsc.status === null) {
+  console.error(`Desktop frontend name check: tsc was terminated (${tsc.signal ?? "unknown signal"}) before finishing`);
+  process.exit(2);
+}
+if (tsc.status !== 0 && !/error TS\d+:/.test(output)) {
+  console.error(`Desktop frontend name check: tsc exited ${tsc.status} without any TypeScript diagnostics, so nothing was verified:\n${output.trim().slice(0, 2_000)}`);
+  process.exit(2);
+}
 const offenders = output.split("\n").filter((line) => /error TS(2304|2552|2503|2305):/.test(line));
 if (offenders.length > 0) {
   console.error("Desktop frontend references names that do not exist:\n" + offenders.join("\n"));
