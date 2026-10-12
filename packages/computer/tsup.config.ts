@@ -1,5 +1,13 @@
 import { defineConfig } from "tsup";
 
+import { buildCommitDefines } from "../../scripts/build-provenance.mjs";
+
+// Bake the commit this dist was built from. `package.json`'s version is the
+// same across commits and so cannot prove build provenance; see
+// scripts/build-provenance.mjs (task #32). Never throws outside a git
+// checkout — the value falls back to an explicit "unknown".
+const commitDefines = buildCommitDefines("RAFT_COMPUTER");
+
 // Two build configs share one tsup invocation:
 //   1. CLI bin (`src/index.ts` → `dist/index.js`) — keeps the shebang +
 //      createRequire shim banner so the `raft-computer` bin is directly
@@ -47,6 +55,7 @@ export default defineConfig([
       "@botiverse/raft-trace-client",
       "@botiverse/k-carrier",
     ],
+    define: commitDefines,
     banner: {
       js:
         "#!/usr/bin/env node\n" +

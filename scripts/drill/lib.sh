@@ -13,7 +13,9 @@ set -euo pipefail
 
 : "${RAFT_DRILL_REQUIRE_CLEAN_TREE:=1}"
 
-drill::log() { printf '[drill] %s\n' "$*"; }
+# Logs go to STDERR so that stdout carries only function return values. Mixing
+# the two silently corrupts every caller that does ORIGINAL_HEAD="$(drill::...)".
+drill::log() { printf '[drill] %s\n' "$*" >&2; }
 drill::warn() { printf '[drill] WARN: %s\n' "$*" >&2; }
 drill::fail() { printf '[drill] FAIL: %s\n' "$*" >&2; exit 1; }
 
