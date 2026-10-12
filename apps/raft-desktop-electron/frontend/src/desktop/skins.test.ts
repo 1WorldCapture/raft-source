@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { JSDOM } from "jsdom";
 
-import { applySkin, currentSkinId, initSkin } from "./skins.ts";
+import { applySkin, clearSkin, currentSkinId, initSkin, syncSkinToTheme } from "./skins.ts";
 
 function installDom(): void {
   const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "https://raft.local/" });
@@ -40,4 +40,28 @@ test("a saved skin still wins over the rose default", () => {
   initSkin();
   assert.equal(document.documentElement.dataset.raftSkin, "amber");
   assert.equal(document.documentElement.style.getPropertyValue("--color-soft-signal"), "#FBE08C");
+});
+
+test("skins colour Brutal only: Elegant clears every skin token and ignores applySkin", () => {
+  installDom();
+  localStorage.setItem("raft-desktop-skin", "amber");
+  initSkin();
+  const root = document.documentElement;
+  assert.equal(root.dataset.raftSkin, "amber");
+
+  root.dataset.theme = "elegant";
+  syncSkinToTheme();
+  assert.equal(root.dataset.raftSkin, undefined);
+  for (const property of ["--color-soft-signal", "--soft-signal-rgb", "--color-brutal-yellow", "--color-brutal-yellow-400", "--brutal-yellow-rgb"]) {
+    assert.equal(root.style.getPropertyValue(property), "", `${property} must not survive on Elegant`);
+  }
+  applySkin("sky");
+  assert.equal(root.dataset.raftSkin, undefined, "a skin pick cannot recolour Elegant");
+  assert.equal(localStorage.getItem("raft-desktop-skin"), "amber", "the saved skin is untouched");
+
+  root.dataset.theme = "brutal";
+  syncSkinToTheme();
+  assert.equal(root.dataset.raftSkin, "amber", "back on Brutal the saved skin returns");
+  clearSkin();
+  assert.equal(root.dataset.raftSkin, undefined);
 });

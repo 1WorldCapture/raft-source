@@ -102,6 +102,10 @@ test("agent credential proxy reports versions from its live daemon process witho
       assert.deepEqual(await response.json(), {
         daemonVersion: "1.0.15",
         computerVersion: "1.0.16",
+        // This suite runs the daemon from source, so nothing is baked in and the
+        // endpoint must say so explicitly rather than omit the fields (task #32).
+        daemonCommit: "unknown",
+        daemonCommitShort: "unknown",
         observation: "live_daemon_process",
       });
       assert.equal(upstreamRequests, 0);

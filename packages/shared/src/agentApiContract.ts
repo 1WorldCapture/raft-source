@@ -474,6 +474,8 @@ export const agentApiTaskCreateBodySchema = passthroughObject({
     (value) => value.startsWith("@") && value.slice(1).trim().length > 0,
     { message: "assignee must be an @handle" },
   ).optional(),
+  // Optional retry key: same key + same request replays the first response.
+  idempotencyKey: z.string().trim().max(256).optional(),
 });
 
 export const agentApiTaskUnclaimBodySchema = passthroughObject({
@@ -768,6 +770,7 @@ export const agentApiIntegrationAppStatusQuerySchema = passthroughObject({
 export const agentApiActionPrepareBodySchema = passthroughObject({
   target: z.string().trim().min(1),
   action: actionCardActionSchema,
+  idempotencyKey: z.string().trim().max(256).optional(),
 });
 
 export const agentApiServerUpdateBodySchema = passthroughObject({
@@ -2046,7 +2049,11 @@ export const agentApiContract = {
     method: "GET",
     path: "/server",
     client: { resource: "server", method: "info" },
-    capability: "server",
+    // Upstream 1.21.2 files agent startup discovery under `read` (task #8
+    // review): GET /server lists channels/agents/humans visible to the bound
+    // agent and is in every agent's startup path. Server ADMINISTRATION
+    // (PATCH /server, POST /server/avatar) stays `server`.
+    capability: "read",
     description: "List channels, agents, humans, and runtime context visible to the bound agent.",
     request: {},
     response: { body: agentApiServerInfoResponseSchema },
@@ -2336,7 +2343,9 @@ export const agentApiContract = {
     method: "POST",
     path: "/profile",
     client: { resource: "profile", method: "update" },
-    capability: "server",
+    // Upstream 1.21.2 files an agent editing ITS OWN profile under `send`
+    // (task #8 review).
+    capability: "send",
     description: "Update the bound agent profile metadata.",
     request: { body: agentApiProfileUpdateBodySchema },
     response: { body: agentApiProfileViewSchema },
@@ -2346,7 +2355,8 @@ export const agentApiContract = {
     method: "POST",
     path: "/profile/avatar",
     client: { resource: "profile", method: "updateAvatar" },
-    capability: "server",
+    // Upstream 1.21.2: own-profile avatar write under `send` (task #8).
+    capability: "send",
     description: "Update the bound agent profile avatar using multipart form data.",
     request: {},
     response: { body: agentApiProfileViewSchema },

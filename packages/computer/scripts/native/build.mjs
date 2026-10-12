@@ -43,6 +43,7 @@ import { createGzip } from "node:zlib";
 
 import { assertBuildOutputFresh } from "./dependency-freshness.mjs";
 import { warnPiAssetGaps } from "./pi-asset-scan.mjs";
+import { buildCommitDefines } from "../../../../scripts/build-provenance.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const COMPUTER_ROOT = resolve(HERE, "..", "..");
@@ -198,6 +199,10 @@ async function bundleCjs({ version, daemonVersion, cliVersion, workDir }) {
       __RAFT_COMPUTER_VERSION__: JSON.stringify(version),
       __RAFT_DAEMON_VERSION__: JSON.stringify(daemonVersion),
       __RAFT_CLI_VERSION__: JSON.stringify(cliVersion),
+      // Build provenance (task #32): this bundle inlines the daemon, so stamp
+      // both. Falls back to `unknown` outside a git checkout — never throws.
+      ...buildCommitDefines("RAFT_COMPUTER"),
+      ...buildCommitDefines("RAFT_DAEMON"),
       // The source is ESM and uses `import.meta.url` (e.g. service.ts's
       // top-level `createRequire(import.meta.url)` for SEA detection). In CJS
       // output esbuild lowers `import.meta.url` to `undefined`, so

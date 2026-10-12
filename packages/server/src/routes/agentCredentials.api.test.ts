@@ -155,6 +155,62 @@ test("owner of agent's server mints sk_agent_* without X-Server-Id header", asyn
   });
 });
 
+test("mint without scopes now issues the least-privilege default (no server/mcp), and an explicit request is honored", async () => {
+  await withDeviceAuthGateOn(async () => {
+    const app = await openTestApp("pglite://", 0, { humanActivityMuteFlagDefaultEnabled: true, onboardingOpenerFlagDefaultEnabled: false });
+    try {
+      const owner = await seedUser("scopes-owner@slock.test", "scopes-owner");
+      const server = await createServer("Scopes Test", "scopes-test", owner.id);
+      const agent = await createAgent(server.id, "scopes-agent", { runtime: "codex" });
+      const token = await login(app.baseUrl, owner.email);
+
+      // Omitted scopes → least-privilege default (task #8 / upstream 1.21.2).
+      const defaulted = await fetch(`${app.baseUrl}/api/agents/${agent.id}/credentials`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({}),
+      });
+      assert.equal(defaulted.status, 201);
+      const defaultBody = (await defaulted.json()) as { scopes: string[]; apiKey: string };
+      assert.deepEqual([...defaultBody.scopes].sort(),
+        ["channels", "knowledge", "mentions", "reactions", "read", "send", "tasks"],
+        "default must be the least-privilege set without server/mcp");
+      assert.ok(!defaultBody.scopes.includes("server") && !defaultBody.scopes.includes("mcp"));
+
+      // The least-privilege credential works for the ordinary agent surface,
+      // including startup discovery and own-profile writes — upstream 1.21.2
+      // files GET /server under `read` and POST /profile under `send`
+      // (task #8 review); our v1.13 fork had both under `server`.
+      const whoami = await fetch(`${app.baseUrl}/internal/agent-api/`, {
+        headers: { Authorization: `Bearer ${defaultBody.apiKey}` },
+      });
+      assert.equal(whoami.status, 200);
+      const serverInfo = await fetch(`${app.baseUrl}/internal/agent-api/server`, {
+        headers: { Authorization: `Bearer ${defaultBody.apiKey}` },
+      });
+      assert.equal(serverInfo.status, 200, "agent startup discovery (GET /server) must work with the least-privilege set");
+      const profileUpdate = await fetch(`${app.baseUrl}/internal/agent-api/profile`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${defaultBody.apiKey}` },
+        body: JSON.stringify({ description: "least-privilege self-description" }),
+      });
+      assert.equal(profileUpdate.status, 200, "own-profile write (POST /profile) must work with the least-privilege set");
+
+      // An explicit full-scope request is still honored (runner/migration flows).
+      const explicit = await fetch(`${app.baseUrl}/api/agents/${agent.id}/credentials`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ scopes: ["send", "read", "server", "mcp"] }),
+      });
+      assert.equal(explicit.status, 201);
+      const explicitBody = (await explicit.json()) as { scopes: string[] };
+      assert.ok(explicitBody.scopes.includes("server") && explicitBody.scopes.includes("mcp"));
+    } finally {
+      await app.close();
+    }
+  });
+});
+
 test("agent creator keeps issueAgentCredentials authority after demotion to member", async () => {
   await withDeviceAuthGateOn(async () => {
     const app = await openTestApp("pglite://", 0, { humanActivityMuteFlagDefaultEnabled: true, onboardingOpenerFlagDefaultEnabled: false });

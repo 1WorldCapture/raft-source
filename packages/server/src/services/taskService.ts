@@ -1547,6 +1547,17 @@ export async function createTasks(
   createdByType: "user" | "agent",
   createdById: string,
   items: { title: string; description?: string; createsResource?: boolean }[],
+  opts: {
+    /**
+     * Runs on the creating transaction after every row is written and before
+     * it commits (keyed Agent API writes record their idempotency ledger row
+     * here). A rejection rolls the whole creation back.
+     */
+    beforeCommit?: (
+      executor: DatabaseExecutor,
+      result: { tasks: Awaited<ReturnType<typeof enrichTaskRows>>; hostMessages: MessageRow[] },
+    ) => Promise<void>;
+  } = {},
 ) {
   if (items.length === 0) return { tasks: [], hostMessages: [] };
   const db = getDb();
@@ -1629,6 +1640,9 @@ export async function createTasks(
       taskRows.push(taskRow);
     }
 
+    if (opts.beforeCommit) {
+      await opts.beforeCommit(tx, { tasks: await enrichTaskRows(taskRows, tx), hostMessages });
+    }
     return { hostMessages, taskRows };
   });
 
@@ -1665,7 +1679,22 @@ export async function createTasksWithAssignmentReceipt(
   items: { title: string; description?: string; createsResource?: boolean }[],
   assignee: TaskCreationAssignee,
   receiptRequest: TaskAssignmentReceiptRequest,
-  opts: { initiatingLocalChannelId?: string } = {},
+  opts: {
+    initiatingLocalChannelId?: string;
+    /**
+     * Runs on the creating transaction after the tasks and the assignment
+     * receipt are written and before it commits. A rejection rolls the whole
+     * creation back.
+     */
+    beforeCommit?: (
+      executor: DatabaseExecutor,
+      result: {
+        tasks: Awaited<ReturnType<typeof enrichTaskRows>>;
+        hostMessages: MessageRow[];
+        assignmentReceipt: TaskAssignmentReceipt;
+      },
+    ) => Promise<void>;
+  } = {},
 ): Promise<{
   tasks: Awaited<ReturnType<typeof enrichTaskRows>>;
   hostMessages: MessageRow[];
@@ -1883,7 +1912,7 @@ export async function createTasksWithAssignmentReceipt(
     }, async () => undefined);
 
     const enriched = await enrichTaskRows(taskRows, tx);
-    return {
+    const result = {
       tasks: enriched,
       hostMessages: created,
       assignmentReceipt: {
@@ -1893,6 +1922,8 @@ export async function createTasksWithAssignmentReceipt(
         state,
       },
     };
+    if (opts.beforeCommit) await opts.beforeCommit(tx, result);
+    return result;
   });
 }
 

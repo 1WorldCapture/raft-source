@@ -48,6 +48,10 @@ import {
   syncRightPanelUrlFromStores,
 } from "./rightPanelUrlSync";
 import { isGlobalSearchShortcut } from "../../utils/keyboardShortcuts";
+import { isElectronDesktopShell } from "../../utils/desktopShell";
+import { useRecordRecentConversation } from "../search/useRecordRecentConversation";
+import SearchOverlay from "../search/SearchOverlay";
+import { overlayCloseTarget, rememberNonSearchLocation, resolveSearchOverlayBackground } from "../search/searchOverlayLocation";
 import {
   routeGlobalSearchShortcut,
   SEARCH_FOCUS_REQUEST_EVENT,
@@ -359,6 +363,9 @@ function ChannelById({ channelId }: { channelId: string }) {
   const [missingChannelId, setMissingChannelId] = useState<string | null>(null);
   const all = [...channels, ...dmChannels];
   const channel = all.find((c) => c.id === channelId);
+  // ⌘K "recent conversations": a resolved, non-thread conversation the user is
+  // looking at is by definition the most recent one.
+  useRecordRecentConversation(channel && channel.type !== "thread" ? channel.id : null);
 
   // Async resolution: when `channelId` is new and not yet in stores, ensure
   // it (server fetch) and set `missingChannelId` sentinel if it can't be
@@ -419,6 +426,7 @@ function DmById({ dmId }: { dmId: string }) {
   const ensureChannel = useChannelStore((s) => s.ensureChannel);
   const [missingDmId, setMissingDmId] = useState<string | null>(null);
   const channel = dmChannels.find((c) => c.id === dmId);
+  useRecordRecentConversation(channel?.id ?? null);
 
   // Same async-resolution sentinel pattern as ChannelById above.
   // oxlint-disable-next-line react-doctor/no-cascading-set-state
@@ -1284,8 +1292,11 @@ function RightPanel() {
   // Both /search and /activity are master/detail content routes (the
   // rail-vs-sidebar placement A/B was dropped 2026-06-30 — Activity is always
   // the rail master/detail surface now).
-  const isSearchRoute = /\/search(\/|$)/.test(location.pathname);
-  const isActivityRoute = /\/activity(\/|$)/.test(location.pathname);
+  // In search-overlay mode the URL is /search but this panel must behave for the
+  // frozen background channel, so key off the background location when present.
+  const rightPanelPath = (resolveSearchOverlayBackground(location) ?? location).pathname;
+  const isSearchRoute = /\/search(\/|$)/.test(rightPanelPath);
+  const isActivityRoute = /\/activity(\/|$)/.test(rightPanelPath);
   const isContentRoute = isSearchRoute || isActivityRoute;
   const searchSlotKind = useSearchContentStore((s) => s.slot?.kind ?? null);
   const renderTaskThreadPanel = () => {
@@ -1458,6 +1469,11 @@ function useSearchContentUrlSync() {
   const location = useLocation();
   const navigate = useNavigate();
   const serverSlug = useServerStore((s) => s.current?.slug ?? null);
+  // Search-overlay mode: the URL is /search (the overlay's own query) but the
+  // background must be left exactly as it was, so this whole sync is ISOLATED
+  // while overlaying (both effects early-return): we must not read the overlay's
+  // ?open=/?msg=, clear the background's slot, or write the overlay URL.
+  const isSearchOverlay = resolveSearchOverlayBackground(location) !== null;
   const onContentRoute =
     !!serverSlug
     && (location.pathname === `/s/${serverSlug}/search`
@@ -1468,6 +1484,7 @@ function useSearchContentUrlSync() {
   // URL → Store. Clears the slot when leaving the content routes or when ?open
   // is removed.
   useEffect(() => {
+    if (isSearchOverlay) return;
     if (!onContentRoute) {
       if (useSearchContentStore.getState().slot) {
         useSearchContentStore.getState().close();
@@ -1494,7 +1511,7 @@ function useSearchContentUrlSync() {
     ) {
       useSearchContentStore.getState().open({ ...parsed, messageId: nextMessageId });
     }
-  }, [location.pathname, location.search, onContentRoute]);
+  }, [location.pathname, location.search, onContentRoute, isSearchOverlay]);
 
   // Store → URL. Only writes when on a content route; off-route the URL→Store
   // branch above is authoritative.
@@ -1510,7 +1527,7 @@ function useSearchContentUrlSync() {
   // `parentMessageId === null` — which renders blank for one click and is
   // why task #330's "first-click col-3 blank" repro'd on thread hits.
   useEffect(() => {
-    if (!onContentRoute) return;
+    if (isSearchOverlay || !onContentRoute) return;
     return useSearchContentStore.subscribe((state, prev) => {
       if (state.slot === prev.slot) return;
       const params = new URLSearchParams(window.location.search);
@@ -1536,7 +1553,7 @@ function useSearchContentUrlSync() {
         { replace: true },
       );
     });
-  }, [onContentRoute, navigate]);
+  }, [onContentRoute, navigate, isSearchOverlay]);
 }
 
 
@@ -1562,6 +1579,20 @@ export default function MainLayout() {
   const setShowCreateAgent = useAgentStore((s) => s.setShowCreateAgent);
   const navigate = useNavigate();
   const location = useLocation();
+  // Desktop ⌘K search overlay (background-location modal route): when the topbar
+  // Search / ⌘K navigates to /search it carries the current location as
+  // `backgroundLocation`. While set, the whole layout below renders for that
+  // BACKGROUND location (the channel stays frozen behind) and the search floats in
+  // a SearchOverlay on top. Web never sets backgroundLocation, so every branch
+  // gated on it is dead there and behaviour is unchanged.
+  // Desktop invariant: /search is ALWAYS the overlay — entries that carry no
+  // backgroundLocation (rail, "search this channel", deep links, history
+  // traversal) get one synthesized from searchFrom / the last non-search
+  // location / server home instead of rendering the full page.
+  const backgroundLocation = resolveSearchOverlayBackground(location);
+  useEffect(() => {
+    rememberNonSearchLocation({ pathname: location.pathname, search: location.search });
+  }, [location.pathname, location.search]);
   const workspaceAvailability = useWorkspaceGridAvailability();
   const workspacePreferenceEnabled = useWorkspaceGridNavigationStore((s) => s.enabled);
   const workspaceHydratedUserId = useWorkspaceGridNavigationStore((s) => s.hydratedUserId);
@@ -1757,7 +1788,15 @@ export default function MainLayout() {
           searchPath,
           focusMountedSearch: () => document.dispatchEvent(new Event(SEARCH_FOCUS_REQUEST_EVENT)),
           navigateToSearch: () => navigate(`/s/${serverSlug}/search`, {
-            state: { searchFrom: `${location.pathname}${location.search}` },
+            state: {
+              searchFrom: `${location.pathname}${location.search}`,
+              // Desktop: float the search over the current view (⌘K overlay);
+              // web omits this and keeps the full-page /search behaviour. A minimal
+              // {pathname,search} avoids nesting the location.state chain.
+              ...(isElectronDesktopShell()
+                ? { backgroundLocation: { pathname: location.pathname, search: location.search } }
+                : {}),
+            },
           }),
         });
         return;
@@ -1816,7 +1855,10 @@ export default function MainLayout() {
 
   useMainLayoutRealtimeBridge(mainLayoutRealtimeBridgeDriver);
 
-  const path = location.pathname;
+  // In search-overlay mode the URL is /search but the layout must render the
+  // BACKGROUND channel behind the overlay, so all route checks below key off the
+  // background location's path. Without an overlay this is exactly location.pathname.
+  const path = (backgroundLocation ?? location).pathname;
   const pathBase = serverSlug ? `/s/${serverSlug}` : "";
 
   // Show sidebar inline as main content on mobile when the URL is one of
@@ -2290,7 +2332,7 @@ export default function MainLayout() {
                   <WorkspaceGridDemo initialPanel={workspaceInitialPanel} />
                 </Suspense>
               ) : (
-                <Routes>
+                <Routes location={backgroundLocation ?? location}>
                   <Route path="channel/:channelId" element={<ChannelRoute />} />
                   <Route path="dm/:dmId" element={<DmRoute />} />
                   <Route path="agent/:agentId" element={<AgentRoute />} />
@@ -2402,6 +2444,12 @@ export default function MainLayout() {
         />
       )}
       <AnnouncementModal suppressed={shouldSuppressAnnouncements(announcementGateState, sawOnboardingThisSession)} />
+      {/* Desktop ⌘K search overlay: floats the real /search over the frozen
+          background channel. Dismiss (Esc/backdrop) navigates back to it. A hit
+          selection navigates away on its own (clearing backgroundLocation). */}
+      {backgroundLocation ? (
+        <SearchOverlay onClose={() => navigate(overlayCloseTarget(backgroundLocation))} />
+      ) : null}
     </div>
   );
 }
@@ -2412,4 +2460,5 @@ export const __testInternals = {
   AgentById,
   DefaultRoute,
   renderContentSlot,
+  useSearchContentUrlSync,
 };

@@ -47,8 +47,8 @@ test("search sort uses the filter-chip pattern (Sort dropdown, not SegmentedCont
   assert.doesNotMatch(source, /import SegmentedControl from "\.\.\/ui\/SegmentedControl";/);
   assert.doesNotMatch(source, /<SegmentedControl<SearchSort>/);
   assert.match(source, /data-testid="search-sort-chip"/);
-  assert.match(source, /title=\{formatMessage\(\{ id: "search\.sort" \}\)\}/);
-  assert.match(source, /\["relevance", "recent"\] as SearchSort\[\]/);
+  assert.match(source, /(?:aria-label|title)=\{formatMessage\(\{ id: "search\.sort" \}\)\}/);
+  assert.match(source, /SEARCH_SORTS/);
 });
 
 // GAP, RECORDED ON PURPOSE — do not read this space as "nothing to cover here".

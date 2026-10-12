@@ -23,6 +23,12 @@ files:
 extraResources:
   - from: ../../packages/cli/dist/index.js
     to: cli/index.js
+  # The CLI bundle is ESM. Next to `cli/index.js` it needs the package.json that says
+  # `"type": "module"`, or Node/Electron parse it as CommonJS and (under
+  # ELECTRON_RUN_AS_NODE) exit 0 silently on the first `import`: every `raft` command run
+  # by a Desktop-hosted agent printed nothing (0.2.4 / 0.2.5 packages).
+  - from: ../../packages/cli/dist/package.json
+    to: cli/package.json
   # Cursor SDK runtime assets, staged for linux by
   # `pnpm --filter @botiverse/raft-daemon build:cursor-assets -- --target linux-x64`.
   # Keep the version segment in step with packages/daemon/cursor-sdk-assets.lock.json.

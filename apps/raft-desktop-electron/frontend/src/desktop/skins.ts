@@ -42,7 +42,33 @@ export function currentSkinId(): string {
   }
 }
 
+/** Skins colour the Brutal theme only; Elegant paints from its own tokens. */
+function skinsApply(): boolean {
+  return document.documentElement.dataset.theme !== "elegant";
+}
+
+/** Remove every inline skin token so a non-Brutal theme renders unmodified. */
+export function clearSkin(): void {
+  const root = document.documentElement;
+  delete root.dataset.raftSkin;
+  root.style.removeProperty("--color-soft-signal");
+  root.style.removeProperty("--soft-signal-rgb");
+  for (const { step } of SIGNAL_SCALE) root.style.removeProperty(`--color-brutal-yellow-${step}`);
+  root.style.removeProperty("--color-brutal-yellow");
+  root.style.removeProperty("--brutal-yellow-rgb");
+}
+
+/** Re-evaluate after the app theme changed: apply the saved skin on Brutal, clear it otherwise. */
+export function syncSkinToTheme(): void {
+  if (skinsApply()) applySkin(currentSkinId());
+  else clearSkin();
+}
+
 export function applySkin(id: string): void {
+  if (!skinsApply()) {
+    clearSkin();
+    return;
+  }
   const skin = skinById(id);
   const [cr, cg, cb] = chromeChannels(skin.chrome);
   const root = document.documentElement;

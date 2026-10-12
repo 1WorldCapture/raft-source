@@ -15,6 +15,8 @@ export interface RaftVersionInfo {
   cli: string;
   daemon: string;
   computer: string | null;
+  /** Commit the live daemon's dist was built from; "unknown" when unavailable. */
+  daemonCommit: string | null;
   observation: "live_daemon_process";
 }
 
@@ -30,6 +32,9 @@ export function formatVersionInfo(info: RaftVersionInfo): string {
   return [
     `Raft CLI: ${info.cli}`,
     `Raft daemon (live): ${info.daemon}`,
+    // The version string comes from package.json and is the same across commits,
+    // so name the commit too — that is what proves WHICH build is live (task #32).
+    `Raft daemon commit: ${info.daemonCommit ?? "unknown"}`,
     `Raft Computer (live): ${info.computer ?? "not present"}`,
   ].join("\n");
 }
@@ -49,6 +54,11 @@ export function parseLiveVersionInfo(cliVersion: unknown, payload: unknown): Raf
     cli,
     daemon,
     computer,
+    // A daemon that predates this field reports nothing; keep that as "unknown"
+    // rather than failing the whole command.
+    daemonCommit: typeof data.daemonCommit === "string" && data.daemonCommit.length > 0
+      ? data.daemonCommit
+      : null,
     observation: "live_daemon_process",
   };
 }

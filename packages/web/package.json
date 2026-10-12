@@ -41,7 +41,7 @@
     "lucide-react": "^0.575.0",
     "mermaid": "11.16.0",
     "posthog-js": "^1.393.4",
-    "raft-ui": "0.5.11",
+    "raft-ui": "0.5.27",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "react-intl": "^7.1.11",

@@ -16,7 +16,8 @@
 import { Component, StrictMode } from "react";
 import type { ErrorInfo, ReactNode } from "react";
 import { createRoot } from "react-dom/client";
-import { ThemeProvider, ToastProvider, TooltipProvider } from "raft-ui";
+import { ToastProvider, TooltipProvider } from "raft-ui";
+import { AppThemeProvider } from "@web/theme/AppThemeProvider";
 import { BrowserRouter } from "react-router-dom";
 import { LocaleProvider } from "@web/i18n/LocaleProvider";
 import { IntlProviderWrapper } from "@web/i18n/IntlProviderWrapper";
@@ -129,7 +130,7 @@ if (container) {
   createRoot(container).render(
     <StrictMode>
       <DesktopErrorBoundary>
-        <ThemeProvider defaultTheme="brutal" defaultMode="light">
+        <AppThemeProvider>
           <TooltipProvider>
             <ToastProvider>
               <ForwardToastProvider>
@@ -152,7 +153,7 @@ if (container) {
               </ForwardToastProvider>
             </ToastProvider>
           </TooltipProvider>
-        </ThemeProvider>
+        </AppThemeProvider>
       </DesktopErrorBoundary>
     </StrictMode>,
   );

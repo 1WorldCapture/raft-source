@@ -473,11 +473,11 @@
   },
   {
     "path": "src/components/search/MessageSearchPage.tsx",
-    "rule": "formatjs/no-literal-string-in-object",
-    "source": "`#${ch.name}`",
+    "rule": "formatjs/no-literal-string-in-jsx",
+    "source": "#",
     "count": 1,
     "classification": "protocol",
-    "reason": "Search channel filter chip/menu shows channel refs as #name protocol form."
+    "reason": "Search channel filter combobox shows channel refs with # prefix."
   },
   {
     "path": "src/components/search/MessageSearchPage.tsx",

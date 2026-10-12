@@ -4008,6 +4008,29 @@ export const agentMigrationReceiptChannels = pgTable("agent_migration_receipt_ch
   index("idx_agent_migration_receipt_channels_agent").on(t.agentId, t.channelId),
 ]);
 
+// Idempotency ledger for keyed Agent API writes that have no natural
+// per-request row to carry the key (task create, action prepare). One row per
+// (agent, route, idempotency key), written in the same transaction as the
+// write it records: the request fingerprint that bound the key and the exact
+// first response, which a same-key same-request retry replays verbatim. A key
+// is valid for 24 hours; an older row counts as absent.
+// Message send keeps its key on the message row (messages.agent_send_key).
+export const agentApiIdempotencyKeys = pgTable("agent_api_idempotency_keys", {
+  agentId: uuid("agent_id").notNull().references(() => agents.id, { onDelete: "cascade" }),
+  route: text("route").notNull(),
+  idempotencyKey: text("idempotency_key").notNull(),
+  requestFingerprint: text("request_fingerprint").notNull(),
+  responseStatus: integer("response_status").notNull(),
+  responseBody: jsonb("response_body").$type<Record<string, unknown>>().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  primaryKey({ columns: [t.agentId, t.route, t.idempotencyKey] }),
+  check("agent_api_idempotency_keys_route_valid", sql`${t.route} IN ('taskCreate', 'actionPrepare')`),
+  // Keys are valid for 24 hours; the hourly maintenance sweep deletes expired
+  // rows oldest-first in bounded batches through this index.
+  index("idx_agent_api_idempotency_keys_created_at").on(t.createdAt),
+]);
+
 export const agentMigrationReceiptOutbox = pgTable("agent_migration_receipt_outbox", {
   id: uuid("id").primaryKey().$defaultFn(() => randomUUID()),
   migrationId: uuid("migration_id").notNull().references(() => agentMigrations.id, { onDelete: "cascade" }),

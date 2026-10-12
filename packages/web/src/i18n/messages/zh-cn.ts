@@ -2427,6 +2427,15 @@ export const zhCn: Record<MessageId, string> = {
   "search.grpThreadDiscussion": "消息列讨论",
   "search.grpUnknownTime": "未知时间",
   "search.unknownSource": "#未知",
+  "search.overlay.searchFor": "搜索「{query}」",
+  "search.overlay.viewAllResults": "查看全部结果",
+  "search.overlay.viewAllResultsHint": "打开完整结果页，可筛选并预览上下文",
+  "search.overlay.placeholder": "频道、成员、消息…",
+  "search.overlay.recentConversations": "最近的会话",
+  "search.overlay.footerSelect": "选择",
+  "search.overlay.footerOpen": "打开",
+  "search.beyondHistory": "升级后可查看",
+  "search.queryTooBroadSortRecent": "按最新排序",
 
   // --- settings: display language ---
   "settings.language.displayLanguageTitle": "显示语言",
@@ -2638,6 +2647,22 @@ export const zhCn: Record<MessageId, string> = {
 
   // --- settings: appearance (inherited from #3874 b41c72b4f, AngLee-reviewed) ---
   "settings.appearance.sectionLabel": "外观",
+  "settings.appearance.themeTitle": "主题",
+  "settings.appearance.themeDescription": "选择此浏览器使用的视觉风格。选择会保存在此设备上。",
+  "settings.appearance.themeAria": "主题预设",
+  "settings.appearance.themeBrutal": "Brutal",
+  "settings.appearance.themeElegant": "Elegant",
+  "settings.appearance.themeElegantDark": "Elegant Dark",
+  "settings.appearance.themeElegantSystem": "跟随系统",
+  "settings.appearance.modeTitle": "明暗模式",
+  "settings.appearance.modeDescription": "跟随系统会随设备切换明暗，同时保留各自的主题选择。",
+  "settings.appearance.modeAria": "明暗模式",
+  "settings.appearance.modeLight": "浅色",
+  "settings.appearance.modeDark": "深色",
+  "settings.appearance.modeSystem": "系统",
+  "settings.appearance.lightThemeTitle": "浅色外观",
+  "settings.appearance.darkThemeTitle": "深色外观",
+  "settings.appearance.currentTheme": "当前",
   "settings.appearance.messageFontSizeTitle": "消息字号",
   "settings.appearance.messageFontSizeDescription":
     "调整此设备上渲染的消息文本，包括标题、代码块、内联代码和引用标签。按钮、标签和侧栏保持其固定的界面尺寸。",

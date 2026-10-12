@@ -9,7 +9,11 @@ import {
   validateActionCardAction,
 } from "@botiverse/raft-shared";
 
-import { resolveActionInput, PrepareActionInputError } from "./prepare.js";
+import type { ApiResponse } from "../../client.js";
+import type { AgentContext } from "../../auth/env.js";
+import { createCommandContext } from "../../core/context.js";
+import { CliError } from "../../core/errors.js";
+import { actionPrepareCommand, resolveActionInput, PrepareActionInputError } from "./prepare.js";
 
 test("resolveActionInput parses well-formed channel:create JSON", async () => {
   const input = Readable.from([
@@ -266,4 +270,46 @@ test("actionCardActionSchema rejects agent-prefilled runtime/model fields on age
     assert.equal((result.data as Record<string, unknown>).runtime, undefined);
     assert.equal((result.data as Record<string, unknown>).model, undefined);
   }
+});
+
+const prepareAgentContext: AgentContext = {
+  agentId: "agent-1",
+  serverUrl: "https://slock.example",
+  serverId: "server-1",
+  token: "secret-token",
+  clientMode: "self-hosted-runner",
+  secretSource: "profile-credential-file",
+  activeCapabilities: null,
+};
+
+function prepareCtx(respond: () => ApiResponse<unknown>, bodies: unknown[]) {
+  return createCommandContext({
+    io: {
+      stdout: { write: () => true },
+      stderr: { write: () => true },
+      stdin: Readable.from([JSON.stringify({ type: "channel:create", name: "demo", visibility: "public" })]),
+    } as any,
+    loadAgentContext: () => prepareAgentContext,
+    createApiClient: () => ({
+      request: async (_m: string, _p: string, body?: unknown): Promise<ApiResponse<unknown>> => {
+        bodies.push(body);
+        return respond();
+      },
+    }) as any,
+  });
+}
+
+test("action prepare sends a per-invocation idempotency key (explicit one wins) and hints it after an unknown outcome", async () => {
+  const bodies: Array<{ idempotencyKey?: string }> = [];
+  const ok = () => ({ ok: true, status: 201, error: null, data: { messageId: "abcdef123456", metadata: { kind: "action-card" } } }) as ApiResponse<unknown>;
+  await actionPrepareCommand.handler(prepareCtx(ok, bodies), { target: "#general" });
+  await actionPrepareCommand.handler(prepareCtx(ok, bodies), { target: "#general", idempotencyKey: " retry-9 " });
+  assert.match(bodies[0].idempotencyKey ?? "", /^[0-9a-f-]{36}$/);
+  assert.equal(bodies[1].idempotencyKey, "retry-9");
+
+  const fail = () => ({ ok: false, status: 503, error: "unavailable", data: null }) as ApiResponse<unknown>;
+  await assert.rejects(
+    async () => { await actionPrepareCommand.handler(prepareCtx(fail, []), { target: "#general", idempotencyKey: "k-2" }); },
+    (err: unknown) => err instanceof CliError && err.message.includes("--idempotency-key k-2"),
+  );
 });

@@ -1,5 +1,6 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import { useLocation, useNavigate, useNavigationType } from "react-router-dom";
+import { searchEntryState } from "../components/search/searchOverlayLocation";
 import { useServerStore } from "../store/serverStore";
 import { buildSidebarChannelFocusState } from "../components/layout/sidebarChannelFocus";
 
@@ -413,6 +414,11 @@ export function useAppNavigate() {
   const navigate = useNavigate();
   const navigateRef = useRef(navigate);
   navigateRef.current = navigate;
+  // Current router location for search entries (kept in a ref so the returned
+  // callbacks stay referentially stable across location changes).
+  const currentLocation = useLocation();
+  const currentLocationRef = useRef(currentLocation);
+  currentLocationRef.current = currentLocation;
   const slug = useServerStore((s) => s.current?.slug);
   const base = slug ? `/s/${slug}` : "";
   // Memoized so the returned object has a STABLE identity across renders
@@ -467,9 +473,14 @@ export function useAppNavigate() {
       navigateRef.current(
         opts?.filter ? `${base}/computers?filter=${opts.filter}` : `${base}/computers`,
       ),
+    // Desktop: every search entry floats as the ⌘K overlay over the current
+    // view — carry it as backgroundLocation. Web: full-page /search.
     toSearch: (query?: string, opts?: SearchNavOptions) => navigateRef.current(
       buildSearchPath(base, query, opts),
-      opts?.flushSync ? { flushSync: true } : undefined,
+      {
+        state: searchEntryState({ pathname: currentLocationRef.current.pathname, search: currentLocationRef.current.search }),
+        ...(opts?.flushSync ? { flushSync: true } : {}),
+      },
     ),
     toSettings: (tab?: string) => navigateRef.current(tab ? `${base}/settings/${tab}` : `${base}/settings`),
     toReleaseNotes: () => navigateRef.current(`${base}/release-notes`),

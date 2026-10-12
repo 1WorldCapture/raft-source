@@ -1550,6 +1550,7 @@ test("GET /api/attachments/:id/html-preview allows configured web origin framing
     const res = await fetch(url, { redirect: "manual" });
     assert.equal(res.status, 200, `expected 200, got ${res.status}`);
     assert.equal(res.headers.get("x-frame-options"), null, "HTML preview must not inherit Helmet SAMEORIGIN");
+    assert.equal(res.headers.get("cross-origin-resource-policy"), "cross-origin", "Desktop (app://raft) embeds the preview cross-origin");
     assert.match(
       res.headers.get("content-security-policy") || "",
       /frame-ancestors 'self' http:\/\/127\.0\.0\.1:4173/,

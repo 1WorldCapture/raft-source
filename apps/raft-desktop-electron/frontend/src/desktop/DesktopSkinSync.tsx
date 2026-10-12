@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import { useAuthStore } from "@web/store/authStore";
-import { SKINS, adoptSyncedSkin, currentSkinId, explicitSkinId, onUserSkinChange } from "./skins";
+import { useOptionalAppTheme } from "@web/hooks/useAppTheme";
+import { SKINS, adoptSyncedSkin, currentSkinId, explicitSkinId, onUserSkinChange, syncSkinToTheme } from "./skins";
 import { createSkinSync } from "@botiverse/raft-shared/src/skinSync.ts";
 
 const PENDING_KEY = "raft-desktop-skin-pending";
@@ -39,6 +40,11 @@ export function DesktopSkinSync() {
     adopt: adoptSyncedSkin,
     push: (id) => useAuthStore.getState().updateProfile({ preferredSkin: id }),
   }), []);
+
+  // Skins colour Brutal only: re-apply or clear them when the app theme changes.
+  // The provider has already set <html data-theme> in its layout effect.
+  const themePreset = useOptionalAppTheme()?.preset ?? null;
+  useEffect(() => { syncSkinToTheme(); }, [themePreset]);
 
   const reconciledFor = useRef<string | null>(null);
   useEffect(() => {

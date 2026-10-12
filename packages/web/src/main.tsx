@@ -3,7 +3,8 @@ import type { ErrorInfo, ReactNode } from "react";
 import ReactDOM from "react-dom/client";
 import { currentTimeMs } from "@botiverse/raft-shared";
 import { installGlobalClientErrorReporters, reportClientError } from "./utils/clientErrorTrace";
-import { ThemeProvider, ToastProvider, TooltipProvider } from "raft-ui";
+import { ToastProvider, TooltipProvider } from "raft-ui";
+import { AppThemeProvider } from "./theme/AppThemeProvider";
 import { BrowserRouter } from "react-router-dom";
 import { LocaleProvider } from "./i18n/LocaleProvider";
 import { IntlProviderWrapper } from "./i18n/IntlProviderWrapper";
@@ -324,7 +325,7 @@ installGlobalClientErrorReporters();
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <RootErrorBoundary>
-      <ThemeProvider defaultTheme="brutal" defaultMode="light">
+      <AppThemeProvider>
         <TooltipProvider>
           <ToastProvider>
             <ForwardToastProvider>
@@ -339,7 +340,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             </ForwardToastProvider>
           </ToastProvider>
         </TooltipProvider>
-      </ThemeProvider>
+      </AppThemeProvider>
     </RootErrorBoundary>
   </StrictMode>
 );

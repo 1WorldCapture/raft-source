@@ -74,6 +74,7 @@ test("task create command uses injected ApiClient and writes canonical text", as
   });
 
   await taskCreateCommand.handler(ctx, {
+    idempotencyKey: "fixed-key",
     target: "  #proj-runtime  ",
     title: ["Ship typed surface", "Add drift tests"],
   });
@@ -84,6 +85,7 @@ test("task create command uses injected ApiClient and writes canonical text", as
       path: "/internal/agent-api/tasks",
       body: {
         channel: "#proj-runtime",
+        idempotencyKey: "fixed-key",
         tasks: [
           { title: "Ship typed surface" },
           { title: "Add drift tests" },
@@ -145,6 +147,7 @@ test("task create sends one atomic create-and-assign request", async () => {
   });
 
   await taskCreateCommand.handler(ctx, {
+    idempotencyKey: "fixed-key",
     target: "#proj-runtime",
     title: ["Atomic dispatch"],
     assignee: "  @ApplePI  ",
@@ -155,6 +158,7 @@ test("task create sends one atomic create-and-assign request", async () => {
     path: "/internal/agent-api/tasks",
     body: {
       channel: "#proj-runtime",
+      idempotencyKey: "fixed-key",
       tasks: [{ title: "Atomic dispatch" }],
       assignee: "@ApplePI",
     },
@@ -209,6 +213,7 @@ test("task create marks every batch item as resource-creating", async () => {
   });
 
   await taskCreateCommand.handler(ctx, {
+    idempotencyKey: "fixed-key",
     target: "#proj-runtime",
     title: ["Create staging bucket"],
     createsResource: true,
@@ -216,6 +221,7 @@ test("task create marks every batch item as resource-creating", async () => {
 
   assert.deepEqual(requests, [{
     channel: "#proj-runtime",
+    idempotencyKey: "fixed-key",
     tasks: [{ title: "Create staging bucket", creates_resource: true }],
   }]);
   assert.match(stdout.join(""), /resource-receipt=pending/);
@@ -291,5 +297,54 @@ test("task create command maps server failures into typed CliError", async () =>
       assert.equal(err.message, "agent cannot post");
       return true;
     },
+  );
+});
+
+test("task create sends a fresh random idempotency key per invocation, reused by an explicit --idempotency-key", async () => {
+  const bodies: Array<{ idempotencyKey?: string }> = [];
+  const make = () => createCommandContext({
+    io: memoryIo().io,
+    loadAgentContext: () => agentContext,
+    createApiClient: () => ({
+      request: async (_m: string, _p: string, body?: unknown): Promise<ApiResponse<unknown>> => {
+        bodies.push(body as { idempotencyKey?: string });
+        return { ok: true, status: 200, error: null, data: { tasks: [] } };
+      },
+    }) as any,
+  });
+  await taskCreateCommand.handler(make(), { target: "#engineering", title: ["A"] });
+  await taskCreateCommand.handler(make(), { target: "#engineering", title: ["A"] });
+  await taskCreateCommand.handler(make(), { target: "#engineering", title: ["A"], idempotencyKey: " retry-1 " });
+  assert.match(bodies[0].idempotencyKey ?? "", /^[0-9a-f-]{36}$/);
+  assert.notEqual(bodies[0].idempotencyKey, bodies[1].idempotencyKey);
+  assert.equal(bodies[2].idempotencyKey, "retry-1");
+});
+
+test("task create rejects an out-of-range --idempotency-key and hints the key after an unknown-outcome failure", async () => {
+  const ctx = createCommandContext({
+    io: memoryIo().io,
+    loadAgentContext: () => agentContext,
+    createApiClient: () => ({
+      request: async (): Promise<ApiResponse<unknown>> => ({ ok: false, status: 502, error: "bad gateway", data: null }),
+    }) as any,
+  });
+  await assert.rejects(
+    async () => { await taskCreateCommand.handler(ctx, { target: "#e", title: ["A"], idempotencyKey: "x".repeat(257) }); },
+    (err: unknown) => err instanceof CliError && err.code === "INVALID_ARG",
+  );
+  await assert.rejects(
+    async () => { await taskCreateCommand.handler(ctx, { target: "#e", title: ["A"], idempotencyKey: "k-1" }); },
+    (err: unknown) => err instanceof CliError && err.code === "SERVER_5XX" && err.message.includes("--idempotency-key k-1"),
+  );
+  const client4xx = createCommandContext({
+    io: memoryIo().io,
+    loadAgentContext: () => agentContext,
+    createApiClient: () => ({
+      request: async (): Promise<ApiResponse<unknown>> => ({ ok: false, status: 403, error: "forbidden", data: null }),
+    }) as any,
+  });
+  await assert.rejects(
+    async () => { await taskCreateCommand.handler(client4xx, { target: "#e", title: ["A"] }); },
+    (err: unknown) => err instanceof CliError && !err.message.includes("--idempotency-key"),
   );
 });

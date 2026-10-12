@@ -172,10 +172,12 @@ test("runtime catalog is derived from the shared registry with Screen B filterin
   const catalog = getServerSetupRuntimeCatalog(setupRuntimeOptions([]));
   assert.deepEqual(catalog.recommended.map((runtime) => runtime.displayName), ["Claude Code", "Codex CLI"]);
   assert.deepEqual(catalog.supported.map((runtime) => runtime.displayName), [
+    "Antigravity",
     "Copilot CLI",
-    "Cursor CLI",
+    "Cursor SDK",
     "Grok Build",
     "Kimi Code",
+    "OMP",
     "OpenCode",
     "Pi",
   ]);

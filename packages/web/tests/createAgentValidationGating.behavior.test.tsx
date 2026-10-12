@@ -91,7 +91,7 @@ function stubCreateAgentGet(modelPayload: unknown) {
  */
 function stubSubmittableRuntime() {
   useMachineStore.setState((state) => ({
-    machines: state.machines.map((machine) => ({ ...machine, runtimes: ["cursor"] })),
+    machines: state.machines.map((machine) => ({ ...machine, runtimes: ["cursor-sdk"] })),
   }));
   stubCreateAgentGet({ models: [{ id: "auto", label: "Auto" }] });
 }
@@ -105,7 +105,7 @@ async function openDialogOnSubmittableRuntime() {
     </MemoryRouter>,
   );
   await waitFor(() => assert.equal(
-    screen.getAllByRole("combobox").some((select) => select.textContent?.trim() === "Cursor CLI"),
+    screen.getAllByRole("combobox").some((select) => select.textContent?.trim() === "Cursor SDK"),
     true,
   ));
 }

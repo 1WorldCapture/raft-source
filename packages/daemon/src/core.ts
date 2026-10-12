@@ -3,6 +3,8 @@ import os from "node:os";
 import { createHash, randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { accessSync, createReadStream, createWriteStream, readFileSync } from "node:fs";
+
+import { formatCommitShort, readDaemonProvenance, type BuildProvenance } from "./buildProvenance.js";
 import { mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { Readable } from "node:stream";
@@ -1526,6 +1528,8 @@ export function selectWakeDeliveryIndex(deliveries: readonly AgentDeliverMessage
 export class DaemonCore {
   private readonly options: DaemonCoreOptions;
   private readonly daemonVersion: string;
+  /** Commit this dist was built from; `unknown` when built without git (task #32). */
+  private readonly daemonProvenance: BuildProvenance;
   private readonly daemonInstanceId = randomUUID();
   // When this runner is launched by a managed Computer service, the service
   // passes the Computer bundle version explicitly. Reported in `ready` so the
@@ -1581,6 +1585,7 @@ export class DaemonCore {
   constructor(options: DaemonCoreOptions) {
     this.options = options;
     this.daemonVersion = options.daemonVersion ?? readDaemonVersion();
+    this.daemonProvenance = readDaemonProvenance();
     this.computerVersion = options.computerVersion?.trim() || null;
     // Resolve eagerly but NON-FATALLY: the slock CLI path is only needed when
     // an agent actually spawns (cliTransport injects it + throws a clear error
@@ -1766,6 +1771,12 @@ export class DaemonCore {
   start() {
     logger.info("[Slock Daemon] Starting...");
     logger.info(`[Slock Daemon] ${SLOCK_HOME_ENV}=${this.slockHome}`);
+    // Build provenance, not just version: the version string comes from
+    // package.json and cannot prove which commit this dist came from (task #32).
+    logger.info(
+      `[Slock Daemon] build=${this.daemonVersion}+${formatCommitShort(this.daemonProvenance)}` +
+        (this.daemonProvenance.known ? "" : " (commit unknown: built without git)"),
+    );
     for (const legacy of listLegacyRaftStatePaths(this.slockHome)) {
       logger.warn(
         `[Slock Daemon] Legacy Slock state exists outside ${SLOCK_HOME_ENV}: ${legacy.path}. ` +
@@ -3291,6 +3302,14 @@ export class DaemonCore {
       resource: {
         daemonVersion: this.daemonVersion,
         computerVersion: this.computerVersion,
+        // Lets a trace bundle prove which build produced it. `daemonVersion`
+        // alone is read from package.json and is identical across commits.
+        // `serviceRevision` is the existing revision attribute (the trace upload
+        // worker fills it from SLOCK_RELEASE_SHA), so reuse it rather than
+        // inventing a parallel field (task #32).
+        serviceRevision: this.daemonProvenance.known
+          ? this.daemonProvenance.short
+          : null,
       },
       actor: {
         serverId: this.observedServerId,

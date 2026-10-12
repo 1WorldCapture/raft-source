@@ -27,7 +27,7 @@ const agentApiSendBodyKnownSchema = z.object({
   target: z.string().optional(),
   content: z.string().optional(),
   attachmentIds: optionalStringArraySchema,
-  idempotencyKey: optionalStringSchema,
+  idempotencyKey: z.string().trim().max(256).optional(),
   continue: optionalBooleanSchema,
   sendDraft: optionalBooleanSchema,
   continueAnyway: optionalBooleanSchema,

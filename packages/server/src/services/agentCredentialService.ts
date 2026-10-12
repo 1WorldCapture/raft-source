@@ -22,7 +22,7 @@
 import { randomBytes, createHmac } from "node:crypto";
 import argon2 from "argon2";
 import { eq, and, isNull, desc } from "drizzle-orm";
-import { makeIsMember } from "@botiverse/raft-shared";
+import { makeIsMember, DEFAULT_EXTERNAL_AGENT_CAPABILITIES } from "@botiverse/raft-shared";
 import { getDb, type DatabaseExecutor } from "../db/index.js";
 import { agentCredentials, agentBootstrapTokens, agents, servers } from "../db/schema.js";
 import { addTraceEvent } from "../tracing/semanticTrace.js";
@@ -48,6 +48,7 @@ export const ALLOWED_AGENT_CAPABILITIES = [
   "mcp",
 ] as const;
 export type AgentCapability = (typeof ALLOWED_AGENT_CAPABILITIES)[number];
+export { DEFAULT_EXTERNAL_AGENT_CAPABILITIES } from "@botiverse/raft-shared";
 const isAgentCapability = makeIsMember(ALLOWED_AGENT_CAPABILITIES);
 
 // Exported so the device-code grant (task #30 PR-A2, deviceAuthService.ts)

@@ -9,7 +9,7 @@
 // reserves the left inset for the traffic lights and opts interactive children
 // back out of dragging. Every control maps to a real action — no dead buttons.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useIntl } from "react-intl";
 import { useServerStore } from "@web/store/serverStore";
 import { useServerUnreadSummaryStore } from "@web/store/serverUnreadSummaryStore";
@@ -17,7 +17,9 @@ import { useAuthStore } from "@web/store/authStore";
 import { useAppNavigate } from "@web/hooks/useAppNavigate";
 import { AvatarImageWithFallback } from "@web/components/ui/AvatarSlot";
 import ServerSwitcherMenu from "@web/components/ui/ServerSwitcherMenu";
+import { useOptionalAppTheme } from "@web/hooks/useAppTheme";
 import { SKINS, currentSkinId, setSkin, skinById, subscribeSkin } from "./skins";
+import { trackSearchAnchor } from "./searchAnchor";
 import { DesktopUpdatePill } from "./appUpdate";
 import { PrivateUpdatePill } from "./privateUpdate";
 import { ServerOriginDialog, serverOriginSettingsAvailable } from "./ServerOriginDialog";
@@ -81,6 +83,7 @@ function PaletteIcon({ fill }: { fill: string }) {
 // The trigger is a palette icon filled with the current chrome — clearly a
 // "theme" control, and it shows the active skin at a glance.
 function SkinSwitcher() {
+  const appTheme = useOptionalAppTheme();
   const [open, setOpen] = useState(false);
   const [skinId, setSkinId] = useState(() => currentSkinId());
 
@@ -100,6 +103,9 @@ function SkinSwitcher() {
       document.removeEventListener("keydown", onKey);
     };
   }, [open]);
+
+  // Skins colour Brutal only; Elegant has none to offer.
+  if (appTheme && appTheme.preset !== "brutal") return null;
 
   return (
     <div data-skin-switcher className="relative w-fit">
@@ -165,6 +171,9 @@ export function DesktopTopBar() {
   // the web sidebar's switcher (#unread-badges task #5/#7).
   const serverUnreadCounts = useServerUnreadSummaryStore((s) => s.byServer);
   const nav = useAppNavigate();
+  // The search field is the anchor of the ⌘K overlay (see searchAnchor.ts).
+  const searchFieldRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => (searchFieldRef.current ? trackSearchAnchor(searchFieldRef.current) : undefined), []);
   const [serverMenuOpen, setServerMenuOpen] = useState(false);
   // Deployment server-address settings (phase 3-1). Rendered only when the
   // native bridge exposes the serverOrigin API — old preloads hide it.
@@ -208,6 +217,7 @@ export function DesktopTopBar() {
           cluster underlap and clip it on narrower windows. */}
       <button
         type="button"
+        ref={searchFieldRef}
         onClick={() => nav.toSearch(undefined, { flushSync: true })}
         className="flex h-8 w-[min(520px,42vw)] shrink-0 items-center gap-2 border-2 border-black bg-white px-3 text-neutral-500 shadow-brutal-sm transition-all hover:shadow-brutal focus-visible:shadow-brutal"
       >
