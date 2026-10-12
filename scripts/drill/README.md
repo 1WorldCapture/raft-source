@@ -71,10 +71,20 @@ default server. With a 8443-only test account that surfaces as
 Point it at 8443 explicitly before logging in:
 
 ```bash
+# write to a temp file, then rename — otherwise a relaunch can race the write
 printf '{\n  "origin": "https://<host>.ts.net:8443",\n  "generation": 2,\n  "updatedAt": "%s"\n}\n' \
-  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$ROOT/userData/server-origin.json"
-# restart the app afterwards so it re-reads the origin
+  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$ROOT/userData/server-origin.json.tmp"
+mv "$ROOT/userData/server-origin.json.tmp" "$ROOT/userData/server-origin.json"
+cat "$ROOT/userData/server-origin.json"   # CONFIRM it landed…
+# …then restart the app, so it re-reads the origin.
 ```
+
+**Do not relaunch in the same breath as the write.** Relaunching before the
+origin is durably on disk races it: the app starts against the old (or no)
+server and the login comes back **401**, which reads as a credential problem
+rather than a timing one. Reproduced independently on 2026-10-12; the second
+attempt, after confirming the file was written, worked. **Verify the file
+before you relaunch** — a re-read is enough, no need to trust the exit status.
 
 ### Every raft-computer call needs all three home variables
 
