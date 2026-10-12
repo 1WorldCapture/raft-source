@@ -218,7 +218,7 @@ function renderInbox(options: { compactActivitySidebar?: boolean } = {}) {
 }
 
 function closestWithClass(element: Element, className: string): HTMLElement {
-  const match = element.closest(`.${className}`);
+  const match = element.closest(`.${CSS.escape(className)}, .${CSS.escape(`theme-brutal:${className}`)}`);
   assert.ok(match instanceof HTMLElement, `expected an ancestor carrying .${className}`);
   return match;
 }

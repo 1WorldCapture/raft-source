@@ -102,7 +102,7 @@ export default function TaskModalHead({ task }: { task: Task }) {
 
 
   return (
-    <PanelSection className="border-b-2 border-black bg-white">
+    <PanelSection className="border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white">
       {/* Number sits inline with the title, GitHub/Linear style: it is part of
           how the task is named, not separate metadata. Kept non-bold and muted
           so it reads as an identifier rather than competing with the title. */}
@@ -118,7 +118,7 @@ export default function TaskModalHead({ task }: { task: Task }) {
           <p
             ref={descriptionRef}
             id={`task-modal-description-${task.id}`}
-            className={`whitespace-pre-wrap break-words text-sm text-black/70 ${
+            className={`whitespace-pre-wrap break-words text-sm text-foreground-muted theme-brutal:text-black/70 ${
               descriptionCollapsed ? "line-clamp-3" : ""
             }`}
             data-testid="task-modal-description"

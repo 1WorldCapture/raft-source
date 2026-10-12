@@ -51,7 +51,7 @@ function TaskChipListInner({ tasks, onOpenTask }: TaskChipListProps) {
           // made them louder than the message they belong to.
           //
           // Hover is a quiet border darken + background tint rather than a lift.
-          className="group flex w-full items-center gap-2 border border-black/20 bg-white px-3 py-1.5 text-left transition-colors hover:border-black/50 hover:bg-black/[0.03]"
+          className="group flex w-full items-center gap-2 border border-line-muted theme-brutal:border-black/20 bg-layer-panel theme-brutal:bg-white px-3 py-1.5 text-left transition-colors hover:border-line-strong theme-brutal:hover:border-black/50 hover:bg-black/[0.03]"
           data-testid="message-task-chip"
           data-task-id={task.id}
           aria-label={formatMessage(
@@ -59,11 +59,11 @@ function TaskChipListInner({ tasks, onOpenTask }: TaskChipListProps) {
             { taskNumber: task.taskNumber, title: task.title },
           )}
         >
-          <span className="shrink-0 font-mono text-xs text-black/40" data-testid="message-task-chip-number">
+          <span className="shrink-0 font-mono text-xs text-foreground-hint theme-brutal:text-black/40" data-testid="message-task-chip-number">
             {taskNumberLabel(task.taskNumber)}
           </span>
           <span
-            className="min-w-0 flex-1 truncate text-sm text-black"
+            className="min-w-0 flex-1 truncate text-sm text-foreground-strong theme-brutal:text-black"
             data-testid="message-task-chip-title"
             title={task.title}
           >

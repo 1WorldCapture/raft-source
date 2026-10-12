@@ -255,7 +255,7 @@ export default function CreateChannelDialog({
                   onClose();
                   nav.toSettings("billing");
                 }}
-                className="font-bold text-black underline"
+                className="font-bold text-foreground-strong theme-brutal:text-black underline"
               >
                 {formatMessage({ id: "channel.create.upgradeForMore" })}
               </button>
@@ -282,7 +282,7 @@ export default function CreateChannelDialog({
                   },
                 )}
               </p>
-              <p className="text-xs text-black/70">
+              <p className="text-xs text-foreground-muted theme-brutal:text-black/70">
                 {formatMessage({
                   id: archivedCollision.canUnarchiveArchivedChannel
                     ? "channel.create.archivedCanManage"
@@ -295,7 +295,7 @@ export default function CreateChannelDialog({
                     type="button"
                     onClick={handleUnarchiveCollision}
                     disabled={unarchiving}
-                    className="btn-brutal-sm bg-brutal-lime px-2 py-1 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="btn-brutal-sm bg-success-soft theme-brutal:bg-brutal-lime px-2 py-1 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {unarchiving ? formatMessage({ id: "channel.create.unarchiving" }) : formatMessage({ id: "channel.create.unarchive" })}
                   </button>
@@ -306,7 +306,7 @@ export default function CreateChannelDialog({
                     setArchivedCollision(null);
                     setName("");
                   }}
-                  className="btn-brutal-sm bg-white px-2 py-1 text-xs"
+                  className="btn-brutal-sm bg-layer-panel theme-brutal:bg-white px-2 py-1 text-xs"
                 >
                   {formatMessage({ id: "channel.create.changeName" })}
                 </button>
@@ -353,7 +353,7 @@ export default function CreateChannelDialog({
             {hasMembers ? (
               <div className="space-y-2">
                 <div className="relative">
-                  <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-black/40" />
+                  <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-foreground-hint theme-brutal:text-black/40" />
                   <input
                     type="text"
                     value={memberSearch}
@@ -363,11 +363,11 @@ export default function CreateChannelDialog({
                   />
                 </div>
 
-                <div className="border-2 border-black bg-white shadow-brutal-sm max-h-48 overflow-y-auto">
+                <div className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white shadow-raft-xs theme-brutal:shadow-brutal-sm max-h-48 overflow-y-auto">
                   {/* Agents section */}
                   {filteredAgents.length > 0 && (
                     <>
-                      <SectionEyebrow as="div" className="px-3 py-1.5 bg-white/50">
+                      <SectionEyebrow as="div" className="px-3 py-1.5 bg-layer-panel/50 theme-brutal:bg-white/50">
                         {formatMessage({ id: "channel.create.agents" })}
                       </SectionEyebrow>
                       {filteredAgents.map((agent) => {
@@ -377,8 +377,8 @@ export default function CreateChannelDialog({
                             key={agent.id}
                             type="button"
                             onClick={() => toggleAgent(agent.id)}
-                            className={`flex w-full items-center gap-2 px-3 py-1.5 text-sm font-medium text-black transition-colors ${
-                              selected ? "bg-brutal-pink/20" : "hover:bg-soft-signal"
+                            className={`flex w-full items-center gap-2 px-3 py-1.5 text-sm font-medium text-foreground-strong theme-brutal:text-black transition-colors ${
+                              selected ? "bg-accent-soft/20 theme-brutal:bg-brutal-pink/20" : "hover:bg-primary-soft theme-brutal:hover:bg-soft-signal"
                             }`}
                           >
                             <AvatarSlot context="sidebar-list" type="agent" agentAvatarUrl={agent.avatarUrl} />
@@ -393,7 +393,7 @@ export default function CreateChannelDialog({
                   {/* Humans section */}
                   {filteredHumans.length > 0 && (
                     <>
-                      <SectionEyebrow as="div" className="px-3 py-1.5 bg-white/50">
+                      <SectionEyebrow as="div" className="px-3 py-1.5 bg-layer-panel/50 theme-brutal:bg-white/50">
                         {formatMessage({ id: "channel.create.humans" })}
                       </SectionEyebrow>
                       {filteredHumans.map((human) => {
@@ -403,8 +403,8 @@ export default function CreateChannelDialog({
                             key={human.userId}
                             type="button"
                             onClick={() => toggleHuman(human.userId)}
-                            className={`flex w-full items-center gap-2 px-3 py-1.5 text-sm font-medium text-black transition-colors ${
-                              selected ? "bg-brutal-pink/20" : "hover:bg-soft-signal"
+                            className={`flex w-full items-center gap-2 px-3 py-1.5 text-sm font-medium text-foreground-strong theme-brutal:text-black transition-colors ${
+                              selected ? "bg-accent-soft/20 theme-brutal:bg-brutal-pink/20" : "hover:bg-primary-soft theme-brutal:hover:bg-soft-signal"
                             }`}
                           >
                             <AvatarSlot context="sidebar-list" type="human" humanPlaceholder />
@@ -417,14 +417,14 @@ export default function CreateChannelDialog({
                   )}
 
                   {!hasFilteredMembers && (
-                    <div className="px-3 py-4 text-sm text-black/50 font-mono text-center">
+                    <div className="px-3 py-4 text-sm text-foreground-muted theme-brutal:text-black/50 font-mono text-center">
                       {formatMessage({ id: "channel.create.noMatchesFor" }, { query: memberSearch.trim() })}
                     </div>
                   )}
                 </div>
               </div>
             ) : (
-              <div className="text-sm text-black/50 font-mono">{formatMessage({ id: "channel.create.noMembersAvailable" })}</div>
+              <div className="text-sm text-foreground-muted theme-brutal:text-black/50 font-mono">{formatMessage({ id: "channel.create.noMembersAvailable" })}</div>
             )}
           </FormField>
           <ChannelSlackBridgeField editor={bridgeEditor} visibility={visibility} disabled={submitting || !!createdChannelForBridge} />
@@ -433,14 +433,14 @@ export default function CreateChannelDialog({
               type="button"
               onClick={onClose}
               disabled={submitting}
-              className="btn-brutal bg-white px-4 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+              className="btn-brutal bg-layer-panel theme-brutal:bg-white px-4 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {formatMessage({ id: "settings.common.cancel" })}
             </button>
             <button
               type="submit"
               disabled={atLimit || submitting}
-              className="btn-brutal bg-brutal-pink px-4 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+              className="btn-brutal bg-accent-soft theme-brutal:bg-brutal-pink px-4 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {submitting ? formatMessage({ id: "channel.create.creating" }) : formatMessage({ id: "channel.create.title" })}
             </button>

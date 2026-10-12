@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { brutalView } from "./helpers/brutalView";
 import {
   ARCHIVED_CHANNEL_BADGE_CLASS,
   ARCHIVED_CHANNEL_ICON_CLASS,
@@ -205,11 +206,11 @@ test("entity search returns archived channels (same ranking rules, no archive fi
 });
 
 test("archived channel muted treatment tokens stay pinned", () => {
-  assert.equal(ARCHIVED_CHANNEL_TEXT_CLASS, "text-black/45");
-  assert.equal(ARCHIVED_CHANNEL_MUTED_TEXT_CLASS, "text-black/30");
-  assert.equal(ARCHIVED_CHANNEL_ICON_CLASS, "border-black/40 bg-black/5 text-black/45");
+  assert.equal(brutalView(ARCHIVED_CHANNEL_TEXT_CLASS), "text-black/45");
+  assert.equal(brutalView(ARCHIVED_CHANNEL_MUTED_TEXT_CLASS), "text-black/30");
+  assert.equal(brutalView(ARCHIVED_CHANNEL_ICON_CLASS), "border-black/40 bg-black/5 text-black/45");
   assert.equal(
-    ARCHIVED_CHANNEL_BADGE_CLASS,
+    brutalView(ARCHIVED_CHANNEL_BADGE_CLASS),
     "border border-black/40 bg-black/5 px-1 py-0.5 text-[9px] font-bold leading-none text-black/45",
   );
 });

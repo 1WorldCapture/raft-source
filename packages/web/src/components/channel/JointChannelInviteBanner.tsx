@@ -45,19 +45,19 @@ export function JointChannelInviteList({
         const error = errors[invite.id];
         return (
           <div key={invite.id} className="space-y-1.5" data-testid="joint-invite-item">
-            <p className="text-xs font-bold text-black">
+            <p className="text-xs font-bold text-foreground-strong theme-brutal:text-black">
               {formatMessage(
                 { id: "channel.jointInvite.banner" },
                 { server: invite.fromServerName, channel: invite.channelName },
               )}
             </p>
-            {error ? <p className="text-[11px] font-bold text-black" data-testid="joint-invite-error">{error}</p> : null}
+            {error ? <p className="text-[11px] font-bold text-foreground-strong theme-brutal:text-black" data-testid="joint-invite-error">{error}</p> : null}
             <div className="flex gap-1.5">
               <button
                 type="button"
                 disabled={busy}
                 data-testid="joint-invite-accept"
-                className="btn-brutal-sm bg-brutal-pink px-2 py-1 text-xs disabled:opacity-50"
+                className="btn-brutal-sm bg-accent-soft theme-brutal:bg-brutal-pink px-2 py-1 text-xs disabled:opacity-50"
                 onClick={() => void accept(invite.id)}
               >
                 {busy
@@ -69,7 +69,7 @@ export function JointChannelInviteList({
                   type="button"
                   disabled={busy}
                   data-testid="joint-invite-later"
-                  className="btn-brutal-sm bg-white px-2 py-1 text-xs disabled:opacity-50"
+                  className="btn-brutal-sm bg-layer-panel theme-brutal:bg-white px-2 py-1 text-xs disabled:opacity-50"
                   onClick={() => useJointChannelInviteStore.getState().dismiss(invite.id)}
                 >
                   {formatMessage({ id: "channel.jointInvite.later" })}
@@ -93,7 +93,7 @@ export function JointChannelInviteBanner({
   const visible = invites.some((invite) => !dismissedIds.includes(invite.id));
   if (!visible) return null;
   return (
-    <div className="shrink-0 border-b-2 border-black bg-soft-signal px-3 py-2">
+    <div className="shrink-0 border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black bg-primary-soft theme-brutal:bg-soft-signal px-3 py-2">
       <JointChannelInviteList onOpenChannel={onOpenChannel} allowDismiss />
     </div>
   );
