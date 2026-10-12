@@ -2680,6 +2680,22 @@ export const en = {
 
   // --- settings: appearance (inherited from #3874 b41c72b4f, AngLee-reviewed) ---
   "settings.appearance.sectionLabel": "Appearance",
+  "settings.appearance.themeTitle": "Theme",
+  "settings.appearance.themeDescription": "Choose the visual style for this browser. Your choice is saved on this device.",
+  "settings.appearance.themeAria": "Theme preset",
+  "settings.appearance.themeBrutal": "Brutal",
+  "settings.appearance.themeElegant": "Elegant",
+  "settings.appearance.themeElegantDark": "Elegant dark",
+  "settings.appearance.themeElegantSystem": "Follow system",
+  "settings.appearance.modeTitle": "Color mode",
+  "settings.appearance.modeDescription": "System follows your device while keeping separate Light and Dark theme choices.",
+  "settings.appearance.modeAria": "Color mode",
+  "settings.appearance.modeLight": "Light",
+  "settings.appearance.modeDark": "Dark",
+  "settings.appearance.modeSystem": "System",
+  "settings.appearance.lightThemeTitle": "Light appearance",
+  "settings.appearance.darkThemeTitle": "Dark appearance",
+  "settings.appearance.currentTheme": "Current",
   "settings.appearance.messageFontSizeTitle": "Message font size",
   "settings.appearance.messageFontSizeDescription":
     "Adjust rendered message text on this device, including headings, code blocks, inline code, and reference chips. Buttons, labels, and sidebar keep their fixed UI sizes.",

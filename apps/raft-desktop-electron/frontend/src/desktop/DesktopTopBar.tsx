@@ -17,6 +17,7 @@ import { useAuthStore } from "@web/store/authStore";
 import { useAppNavigate } from "@web/hooks/useAppNavigate";
 import { AvatarImageWithFallback } from "@web/components/ui/AvatarSlot";
 import ServerSwitcherMenu from "@web/components/ui/ServerSwitcherMenu";
+import { useOptionalAppTheme } from "@web/hooks/useAppTheme";
 import { SKINS, currentSkinId, setSkin, skinById, subscribeSkin } from "./skins";
 import { DesktopUpdatePill } from "./appUpdate";
 import { PrivateUpdatePill } from "./privateUpdate";
@@ -81,6 +82,7 @@ function PaletteIcon({ fill }: { fill: string }) {
 // The trigger is a palette icon filled with the current chrome — clearly a
 // "theme" control, and it shows the active skin at a glance.
 function SkinSwitcher() {
+  const appTheme = useOptionalAppTheme();
   const [open, setOpen] = useState(false);
   const [skinId, setSkinId] = useState(() => currentSkinId());
 
@@ -100,6 +102,9 @@ function SkinSwitcher() {
       document.removeEventListener("keydown", onKey);
     };
   }, [open]);
+
+  // Skins colour Brutal only; Elegant has none to offer.
+  if (appTheme && appTheme.preset !== "brutal") return null;
 
   return (
     <div data-skin-switcher className="relative w-fit">
