@@ -1765,7 +1765,18 @@ export class DaemonCore {
   private async runDiskJanitorPass(): Promise<void> {
     const startedAtMs = currentTimeMs();
     try {
-      const result = await runRaftDiskJanitor({ slockHome: this.slockHome });
+      const lease = this.migrationTransferLease;
+      const result = await runRaftDiskJanitor({
+        slockHome: this.slockHome,
+        dataDir: this.agentsDataDir,
+        // A lease held in memory marks its migration as in use even after the
+        // lease's own expiry: the janitor skips rather than trusting a clock.
+        activeMigrationSegments: new Set(lease
+          ? [migrationStatePathSegment(lease.migrationId), migrationStatePathSegment(lease.sessionId)]
+          : []),
+      });
+      for (const removedPath of result.removedPaths) logger.info(`[Slock Daemon] Disk janitor removed ${removedPath}`);
+      for (const kept of result.keptPaths) logger.warn(`[Slock Daemon] Disk janitor kept ${kept.path} (${kept.reason})`);
       for (const removal of result.backupsRemoved) {
         this.recordDaemonTrace("daemon.disk_janitor.backup_removed", {
           owner_agent_id: removal.ownerAgentId,

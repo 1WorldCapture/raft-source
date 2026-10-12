@@ -1,8 +1,9 @@
-import { lstat, readdir, rm } from "node:fs/promises";
+import { lstat, readdir, realpath, rm } from "node:fs/promises";
 import path from "node:path";
 import { currentDate, currentTimeMs } from "@botiverse/raft-shared";
 import {
   AGENT_MIGRATION_WORKSPACE_BACKUP_DIRECTORY,
+  AGENT_MIGRATION_WORKSPACE_BACKUP_MAX_PER_AGENT,
   pruneAgentMigrationWorkspaceBackups,
 } from "./agentMigrationWorkspaceArchive.js";
 
@@ -27,6 +28,23 @@ export const RAFT_AGENT_PROXY_TOKENS_DIRECTORY = "agent-proxy-tokens";
 export const RAFT_MIGRATION_GENERATION_IDLE_MS = 7 * 24 * 60 * 60 * 1_000;
 /** Bulk transfer data inside a generation; the JSON reports stay. */
 const MIGRATION_GENERATION_BULK_ENTRY = /^(chunks|source-spool|extracting-.+)$/u;
+
+const OBJECT_STORE_STAGING_WORKSPACE = "workspace";
+export const RAFT_DISK_JANITOR_MAX_BACKUPS_PER_AGENT = 1_000;
+
+/** The backup root must be a real directory (not a symlink) and sit outside the agent data dir. */
+async function isSafeBackupRoot(backupRoot: string, dataDir?: string): Promise<boolean> {
+  const info = await lstat(backupRoot).catch(() => null);
+  if (!info || !info.isDirectory() || info.isSymbolicLink()) return false;
+  if (!dataDir) return true;
+  const [realBackup, realData] = await Promise.all([
+    realpath(backupRoot).catch(() => null),
+    realpath(dataDir).catch(() => path.resolve(dataDir)),
+  ]);
+  if (!realBackup) return false;
+  const relative = path.relative(realData, realBackup);
+  return !(relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative)));
+}
 
 export const RAFT_DISK_WALK_MAX_ENTRIES = 200_000;
 export const RAFT_DISK_WALK_DEADLINE_MS = 30_000;
@@ -123,13 +141,25 @@ export async function measureRaftDiskFootprint(
   };
 }
 
+export interface RaftDiskJanitorHooks {
+  /** Called once per path actually removed. */
+  onRemoved?: (removedPath: string, freedBytes: number) => void;
+  /** Called for data deliberately left in place that a human may want to know about. */
+  onKept?: (keptPath: string, reason: string) => void;
+}
+
 /**
  * Removes the bulk transfer data of one migration transport generation and
  * keeps its JSON reports. Returns the bytes freed (bounded measurement).
+ *
+ * An `extracting-*` root that holds a `workspace` directory is the full,
+ * un-adopted workspace copy from a failed final rename: it is kept and
+ * reported, never deleted. Nothing is removed once the budget is exhausted.
  */
 export async function removeMigrationGenerationBulk(
   generationRoot: string,
   budget: RaftDiskWalkBudget,
+  hooks: RaftDiskJanitorHooks = {},
 ): Promise<number> {
   let freed = 0;
   let names: string[];
@@ -140,9 +170,25 @@ export async function removeMigrationGenerationBulk(
   }
   for (const name of names) {
     if (!MIGRATION_GENERATION_BULK_ENTRY.test(name)) continue;
+    if (budgetExhausted(budget)) break;
     const target = path.join(generationRoot, name);
-    freed += await measureDirectoryBytes(target, budget);
+    const info = await lstat(target).catch(() => null);
+    if (!info || !info.isDirectory()) continue;
+    if (name.startsWith("extracting-")) {
+      const holdsWorkspace = await lstat(path.join(target, "workspace")).then(() => true, () => false);
+      if (holdsWorkspace) {
+        hooks.onKept?.(target, "un-adopted extracted workspace");
+        continue;
+      }
+    }
+    const bytes = await measureDirectoryBytes(target, budget);
+    // A truncated measurement means the directory is bigger than what we are
+    // allowed to walk in one pass; leave it for a pass with a fresh budget
+    // rather than deleting something we could not even size.
+    if (budget.outcome !== "complete") break;
     await rm(target, { recursive: true, force: true });
+    freed += bytes;
+    hooks.onRemoved?.(target, bytes);
   }
   return freed;
 }
@@ -169,6 +215,10 @@ export interface RaftDiskJanitorBackupRemoval {
 }
 
 export interface RaftDiskJanitorResult {
+  /** Every path removed (generation bulk entries and backup directories). */
+  removedPaths: string[];
+  /** Data left in place on purpose that deserves a human look. */
+  keptPaths: Array<{ path: string; reason: string }>;
   migrationGenerationsCleaned: number;
   migrationFreedBytes: number;
   backupsRemoved: RaftDiskJanitorBackupRemoval[];
@@ -186,10 +236,16 @@ export async function runRaftDiskJanitor(input: {
   slockHome: string;
   now?: Date;
   budget?: RaftDiskWalkBudget;
+  /** Path segments of migrations the daemon currently holds a transfer lease for; never touched. */
+  activeMigrationSegments?: ReadonlySet<string>;
+  /** Agent data root; a backup root resolving inside it is refused. */
+  dataDir?: string;
 }): Promise<RaftDiskJanitorResult> {
   const now = input.now ?? currentDate();
   const budget = input.budget ?? createRaftDiskWalkBudget();
   const result: RaftDiskJanitorResult = {
+    removedPaths: [],
+    keptPaths: [],
     migrationGenerationsCleaned: 0,
     migrationFreedBytes: 0,
     backupsRemoved: [],
@@ -197,39 +253,60 @@ export async function runRaftDiskJanitor(input: {
     sweepOutcome: "complete",
   };
 
+  const hooks: RaftDiskJanitorHooks = {
+    onRemoved: (removedPath) => result.removedPaths.push(removedPath),
+    onKept: (keptPath, reason) => result.keptPaths.push({ path: keptPath, reason }),
+  };
   const migrationsRoot = path.join(input.slockHome, RAFT_MIGRATIONS_DIRECTORY);
   const idleBeforeMs = now.getTime() - RAFT_MIGRATION_GENERATION_IDLE_MS;
   for (const migration of await listDirectories(migrationsRoot)) {
-    for (const generation of await listDirectories(path.join(migrationsRoot, migration))) {
+    if (input.activeMigrationSegments?.has(migration)) continue;
+    const generations = await listDirectories(path.join(migrationsRoot, migration));
+    // `migrations/<session>/workspace` is the object-store staging area for an
+    // agent's workspace, not a transport generation. Its contents are user
+    // data (a workspace may well contain a `chunks` directory), so a migration
+    // directory shaped like that is skipped whole.
+    if (generations.includes(OBJECT_STORE_STAGING_WORKSPACE)) continue;
+    for (const generation of generations) {
       if (budgetExhausted(budget)) break;
       const generationRoot = path.join(migrationsRoot, migration, generation);
       const names = await readdir(generationRoot).catch(() => [] as string[]);
       if (!names.some((name) => MIGRATION_GENERATION_BULK_ENTRY.test(name))) continue;
       const lastActivityMs = await generationLastActivityMs(generationRoot);
       if (lastActivityMs === null || lastActivityMs >= idleBeforeMs) continue;
-      result.migrationFreedBytes += await removeMigrationGenerationBulk(generationRoot, budget);
-      result.migrationGenerationsCleaned += 1;
+      const freed = await removeMigrationGenerationBulk(generationRoot, budget, hooks);
+      result.migrationFreedBytes += freed;
+      if (freed > 0) result.migrationGenerationsCleaned += 1;
     }
   }
 
   const backupRoot = path.join(input.slockHome, AGENT_MIGRATION_WORKSPACE_BACKUP_DIRECTORY);
-  for (const ownerAgentId of await listDirectories(backupRoot)) {
-    if (budgetExhausted(budget)) break;
-    const agentBackupRoot = path.join(backupRoot, ownerAgentId);
-    await pruneAgentMigrationWorkspaceBackups({
-      agentBackupRoot,
-      now,
-      beforeRemove: async (entry) => {
-        const freedBytes = await measureDirectoryBytes(path.join(agentBackupRoot, entry.name), budget);
-        result.backupsFreedBytes += freedBytes;
-        result.backupsRemoved.push({
-          ownerAgentId,
-          backupKind: entry.name.startsWith("preexisting-") ? "preexisting" : "migration",
-          ageDays: Math.floor((now.getTime() - entry.modifiedAtMs) / (24 * 60 * 60 * 1_000)),
-          freedBytes,
-        });
-      },
-    });
+  if (await isSafeBackupRoot(backupRoot, input.dataDir)) {
+    for (const ownerAgentId of await listDirectories(backupRoot)) {
+      if (budgetExhausted(budget)) break;
+      const agentBackupRoot = path.join(backupRoot, ownerAgentId);
+      await pruneAgentMigrationWorkspaceBackups({
+        agentBackupRoot,
+        now,
+        keepNewestRegardlessOfAge: AGENT_MIGRATION_WORKSPACE_BACKUP_MAX_PER_AGENT,
+        maxEntries: RAFT_DISK_JANITOR_MAX_BACKUPS_PER_AGENT,
+        shouldStop: () => budgetExhausted(budget),
+        beforeRemove: async (entry) => {
+          const removedPath = path.join(agentBackupRoot, entry.name);
+          const freedBytes = await measureDirectoryBytes(removedPath, budget);
+          result.backupsFreedBytes += freedBytes;
+          result.removedPaths.push(removedPath);
+          result.backupsRemoved.push({
+            ownerAgentId,
+            backupKind: entry.name.startsWith("preexisting-") ? "preexisting" : "migration",
+            ageDays: Math.floor((now.getTime() - entry.modifiedAtMs) / (24 * 60 * 60 * 1_000)),
+            freedBytes,
+          });
+        },
+      }).catch(() => {
+        // One unreadable agent directory must not abort the rest of the pass.
+      });
+    }
   }
   result.sweepOutcome = budget.outcome;
   return result;
