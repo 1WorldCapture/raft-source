@@ -36,6 +36,92 @@ unverified environment*:
 Every guard **fails loudly**. A drill whose identity or isolation cannot be
 proven is worse than no drill.
 
+## Running the Desktop app against an isolated root
+
+Bringing the Computer up on a scratch root is the fiddliest part of a drill, and
+most of the traps look like product bugs. They are not.
+
+### Order matters: prepare the root BEFORE the app starts
+
+The Computer can only converge if the root already has a **user session** and a
+**server attachment**. Do them first, from the CLI, then launch the app:
+
+```bash
+# with HOME + RAFT_HOME + SLOCK_HOME all pointing at the scratch root
+raft-computer attach /<slug> --server-url "$BASE_URL" --no-start
+raft-computer doctor          # attach + preflight green, service still stopped
+# only now launch the app
+```
+
+If the root has no session and no attachment, the app's Computer page offers
+`Start`, and pressing it can fail with
+`HOST_LIFECYCLE_LAST_KNOWN_GOOD_UNVERIFIED` — a *last-known-good carrier*
+complaint that is really a missing-prerequisite symptom.
+
+**Do not run `raft-computer start` before the app.** It writes a `cli` owner
+record into the root, and you can no longer tell which code path brought the
+Computer up. On a prepared root the app starts it by itself and the page shows
+`Restart`/`Stop` instead of `Start`.
+
+### The app's default server is not 8443
+
+A fresh `userData` has no server configured, so the app logs in against its
+default server. With a 8443-only test account that surfaces as
+**"email or password incorrect"** — which reads like bad credentials and is not.
+Point it at 8443 explicitly before logging in:
+
+```bash
+printf '{\n  "origin": "https://<host>.ts.net:8443",\n  "generation": 2,\n  "updatedAt": "%s"\n}\n' \
+  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$ROOT/userData/server-origin.json"
+# restart the app afterwards so it re-reads the origin
+```
+
+### Every raft-computer call needs all three home variables
+
+`HOME` alone is **not** enough. Without `RAFT_HOME` and `SLOCK_HOME` it reads the
+operator's real `~/.slock` and cheerfully reports *that* as healthy — a passing
+`doctor` that says nothing about your root. Always check the `Using state at …`
+line names the root you meant.
+
+### Capture the owner record on BOTH sides of the click
+
+`computer/host-lifecycle-owner.json` is cheap to snapshot and impossible to
+recover later. If it is read only *after* a failure you cannot tell whether the
+record was `cli` at the moment of the throw and got rewritten to `app`
+afterwards — which is exactly the ambiguity that left one 0.2.5 investigation
+open. Snapshot before you click, snapshot after, and diff.
+
+## What is still unexplained
+
+A 0.2.5 drill saw the app's `Start` fail with
+`HOST_LIFECYCLE_LAST_KNOWN_GOOD_UNVERIFIED`. On 0.2.6 with a prepared root it
+did **not** reproduce, and `host-lifecycle-owner.json` came out byte-identical
+before and after — so the owner record's *shape* is not the trigger. The exact
+trigger in that 0.2.5 run is **unknown**; the difference in outcomes coincided
+with the root having (or lacking) a session and attachment, but that was never
+isolated to the single variable.
+
+**Do not record it as "caused by missing prerequisites."** If it reappears on a
+real install, capture the owner record immediately before the click and the app
+log after the `converge:` line — those two artefacts are the whole reason this
+section exists.
+
+`services/start.ts` and `services/stop.ts` call `convergeCliHostLifecycle` for
+owner `app` as well; it works only because of that early return. Recorded as
+fragile, deliberately **not** changed.
+
+## Shell traps that cost real time here
+
+- `ditto src dst` where `dst` **does not exist** makes `dst` *become* the copy.
+  Create the destination directory first, or pass the full `…/Name.app` path.
+- `set -e` aborts **before** `$?` is read when a command fails, so a check whose
+  *expected* result is a non-zero exit needs `set +e` around it.
+- `ps … | grep "$ROOT"` matches the checking script's own command line when the
+  root path appears in it, and can SIGTERM the script doing the cleanup. Filter
+  the grep out (`grep -v grep`) or match on a narrower pattern.
+- An apostrophe inside `${var:?message}` (`May's`) is parsed as a quote
+  delimiter and the whole script fails to parse.
+
 ## Why it builds in your worktree instead of a separate `git worktree`
 
 This is a real trade-off, not an oversight.
