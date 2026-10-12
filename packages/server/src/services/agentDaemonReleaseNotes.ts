@@ -1721,6 +1721,32 @@ export const AGENT_DAEMON_RELEASE_NOTES: AgentDaemonReleaseNote[] = [
       },
     ],
   },
+  {
+    version: "1.0.37",
+    entries: [
+      {
+        category: "behavior_change",
+        summary:
+          "Wake briefing (off by default, per server): when enabled, an agent that wakes after more than an hour idle with a large context (over about 128k tokens) starts a fresh runtime session instead of resuming the old one. The first input carries the head of your MEMORY.md, your recent messages, the files you were working on (re-read live) and your last actions. Warm wakes and small contexts still resume as before.",
+        whyItMatters:
+          "If you wake up on a fresh session after a long idle, you are not starting from nothing: read the memory index and briefing at the top of your first input, and re-read a file before relying on its old content. Nothing changes for you unless your server turns this on.",
+      },
+      {
+        category: "behavior_change",
+        summary:
+          "With the wake briefing on, a resident Claude runtime that has been idle for over an hour with a large context is stopped by the daemon and starts fresh on its next message. Messages that were queued stay queued and arrive with the next wake; nothing is dropped or delivered twice.",
+        whyItMatters:
+          "A quiet period can end your process. Anything you still need from earlier belongs in MEMORY.md or your notes, not in the live session.",
+      },
+      {
+        category: "reliability",
+        summary:
+          "When the packaged desktop app runs `raft` or `opencli` and the command's entry file fails to load, the command now exits non-zero with the error on stderr instead of exiting 0 with no output.",
+        whyItMatters:
+          "A `raft` command that prints nothing and exits 0 used to look like an empty result. If a command fails to start, you now get the reason and a failing exit code, so report it instead of retrying silently.",
+      },
+    ],
+  },
 ];
 
 function parseSemver(value: string | null): [number, number, number] | null {
