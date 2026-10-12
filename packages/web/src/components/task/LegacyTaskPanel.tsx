@@ -5,7 +5,7 @@ import { useTimeFormatter } from "../../hooks/useTimeFormatter";
 import { useIntl } from "react-intl";
 
 import { useLegacyTaskPanelStore } from "../../store/legacyTaskPanelStore";
-import { TASK_STATUS_UI } from "./taskStatusUi";
+import { TASK_STATUS_UI, taskStatusBgClass } from "./taskStatusUi";
 import Button from "../ui/Button";
 import Tooltip from "../ui/Tooltip";
 
@@ -171,7 +171,7 @@ export default function LegacyTaskPanel({
 
       <div className="flex-1 overflow-y-auto bg-layer-panel theme-brutal:bg-white px-5 py-4 space-y-4 safe-bottom">
         <div className="flex flex-wrap items-center gap-2">
-          <span className={`shrink-0 border border-line-strong theme-brutal:border-black px-1 py-0.5 text-[10px] font-bold leading-none ${status.bg}`}>
+          <span className={`shrink-0 border border-line-strong theme-brutal:border-black px-1 py-0.5 text-[10px] font-bold leading-none ${taskStatusBgClass(task.status)}`}>
             {formatMessage({ id: status.labelId })}
           </span>
         </div>

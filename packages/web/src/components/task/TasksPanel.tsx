@@ -26,7 +26,7 @@ import { useAgentStore } from "../../store/agentStore";
 import { useAuthStore } from "../../store/authStore";
 import TaskCard from "./TaskCard";
 import CreateTaskDialog from "./CreateTaskDialog";
-import { TASK_STATUS_UI } from "./taskStatusUi";
+import { TASK_STATUS_UI, taskStatusBgClass } from "./taskStatusUi";
 import EmptyState from "../ui/EmptyState";
 import { SkeletonRow } from "../ui/Skeleton";
 import AvatarSlot from "../ui/AvatarSlot";
@@ -139,7 +139,7 @@ function TaskSection({
         className={`flex w-full items-center justify-between gap-3 text-left ${onToggleCollapsed ? "" : "cursor-default"}`}
       >
         <div className="flex items-center gap-2">
-          <span className={`border border-line-strong theme-brutal:border-black px-2 py-0.5 text-[10px] font-bold uppercase ${TASK_STATUS_UI[status].bg}`}>
+          <span className={`border border-line-strong theme-brutal:border-black px-2 py-0.5 text-[10px] font-bold uppercase ${taskStatusBgClass(status)}`}>
             {formatMessage({ id: TASK_STATUS_UI[status].labelId })}
           </span>
           <span className="text-xs font-mono text-foreground-muted theme-brutal:text-black/50">{tasks.length}</span>
@@ -268,7 +268,7 @@ function DroppableColumn({
         className={`flex w-full items-center justify-between gap-3 text-left ${collapsed ? "" : "mb-3"}`}
       >
         <div className="flex items-center gap-2">
-          <span className={`border border-line-strong theme-brutal:border-black px-2 py-0.5 text-[10px] font-bold uppercase ${TASK_STATUS_UI[status].bg}`}>
+          <span className={`border border-line-strong theme-brutal:border-black px-2 py-0.5 text-[10px] font-bold uppercase ${taskStatusBgClass(status)}`}>
             {formatMessage({ id: TASK_STATUS_UI[status].labelId })}
           </span>
           <span className="text-xs font-mono text-foreground-muted theme-brutal:text-black/50">{statusTasks.length}</span>

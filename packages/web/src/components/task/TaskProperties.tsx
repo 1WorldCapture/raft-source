@@ -15,7 +15,7 @@ import { Badge, DescriptionDetails, DescriptionItem, DescriptionList, Descriptio
 import InlineBadgeEditor from "../InlineBadgeEditor";
 import Timeline from "../ui/Timeline";
 
-import { STATUS_STYLES, canEditTaskStatus, getTaskStatusOptions } from "./taskStatusUi";
+import { STATUS_STYLES, canEditTaskStatus, getTaskStatusOptions, taskStatusBgClass } from "./taskStatusUi";
 import { StatusBadge } from "./StatusBadge";
 import { dedupeTaskAssigneeMembers } from "./taskAssigneeCandidates";
 
@@ -77,18 +77,19 @@ export default function TaskProperties({ task }: { task: Task }) {
   // useful in the person-facing task timeline, so keep those internal events
   // out of the UI while the API remains available to CLI clients.
   const visibleHistory = history.filter((event) => event.eventType !== "resource_receipt_recorded");
-  const historyColor = (event: TaskHistoryEvent): string | undefined => {
+  const historyStatus = (event: TaskHistoryEvent): TaskStatus | undefined => {
     const candidate = [event.payload.to, event.payload.status, event.payload.from].find(
       (value): value is string => typeof value === "string" && ["todo", "in_progress", "in_review", "done", "closed"].includes(value),
     );
     const status = candidate ?? (event.eventType === "closed" ? "closed" : event.eventType === "reopened" ? "in_progress" : undefined);
-    return status ? STATUS_STYLES[status as TaskStatus]?.bg : undefined;
+    return status && STATUS_STYLES[status as TaskStatus] ? (status as TaskStatus) : undefined;
   };
   let timelineStatus: TaskStatus | undefined;
   const timelineItems = visibleHistory.map((event) => {
-    const pointColor = historyColor(event);
-    if (pointColor) timelineStatus = (Object.keys(STATUS_STYLES) as TaskStatus[]).find((s) => STATUS_STYLES[s].bg === pointColor);
-    return { event, pointColor, lineColor: timelineStatus ? STATUS_STYLES[timelineStatus].bg : undefined };
+    const pointStatus = historyStatus(event);
+    const pointColor = pointStatus ? taskStatusBgClass(pointStatus) : undefined;
+    if (pointStatus) timelineStatus = pointStatus;
+    return { event, pointColor, lineColor: timelineStatus ? taskStatusBgClass(timelineStatus) : undefined };
   });
 
   const canManageServer = capabilities.deleteAnyTask;
@@ -212,7 +213,7 @@ export default function TaskProperties({ task }: { task: Task }) {
           open={openEditor === "status"}
           onToggle={() => setOpenEditor((cur) => (cur === "status" ? null : "status"))}
           onRequestClose={() => setOpenEditor(null)}
-          badgeClassName={STATUS_STYLES[task.status].bg}
+          badgeClassName={taskStatusBgClass(task.status)}
           disabled={busy}
           buttonTestId="task-properties-status"
           optionTestIdPrefix="task-properties-status-option"

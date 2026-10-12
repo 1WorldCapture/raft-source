@@ -31,6 +31,14 @@ export interface TaskStatusUi {
    * direct-style callsites such as InlineBadgeEditor consume it as well.
    */
   bg: string;
+  /**
+   * Elegant counterpart of `bg`: a semantic raft-ui token. `bg` stays Brutal DATA
+   * (resolved to a CSS variable below, shared with the mobile palette and pinned by
+   * taskStatusBadgeConfig), so callsites that apply a background CLASS use
+   * `taskStatusBgClass`, which writes `<bgElegant> theme-brutal:<bg>`. StatusBadge
+   * does not use it: outside Brutal it lets the raft-ui Badge variant colour itself.
+   */
+  bgElegant: string;
   variant: BadgeVariant;
   appearance: BadgeAppearance;
   icon: ComponentType<{ size?: number; className?: string }>;
@@ -40,6 +48,7 @@ export const TASK_STATUS_UI: Record<TaskStatus, TaskStatusUi> = {
   todo: {
     labelId: "task.status.todo",
     bg: "bg-brutal-orange",
+    bgElegant: "bg-warning-soft",
     variant: "warning",
     appearance: "solid",
     icon: Circle,
@@ -47,6 +56,7 @@ export const TASK_STATUS_UI: Record<TaskStatus, TaskStatusUi> = {
   in_progress: {
     labelId: "task.status.inProgress",
     bg: "bg-brutal-cyan",
+    bgElegant: "bg-info-soft",
     variant: "information",
     appearance: "solid",
     icon: Play,
@@ -54,6 +64,7 @@ export const TASK_STATUS_UI: Record<TaskStatus, TaskStatusUi> = {
   in_review: {
     labelId: "task.status.inReview",
     bg: "bg-brutal-lavender",
+    bgElegant: "bg-secondary-200",
     variant: "accent",
     appearance: "solid",
     icon: Eye,
@@ -61,6 +72,7 @@ export const TASK_STATUS_UI: Record<TaskStatus, TaskStatusUi> = {
   done: {
     labelId: "task.status.done",
     bg: "bg-brutal-lime",
+    bgElegant: "bg-success-soft",
     variant: "success",
     appearance: "solid",
     icon: CheckCircle,
@@ -78,6 +90,7 @@ export const TASK_STATUS_UI: Record<TaskStatus, TaskStatusUi> = {
   closed: {
     labelId: "task.status.closed",
     bg: "bg-brutal-stone",
+    bgElegant: "bg-fill-muted",
     variant: "muted",
     appearance: "solid",
     icon: Ban,
@@ -89,7 +102,17 @@ export const TASK_STATUS_UI: Record<TaskStatus, TaskStatusUi> = {
  * utility directly. Keep it as a typed view over TASK_STATUS_UI, not a second
  * source of truth.
  */
-export const STATUS_STYLES: Record<TaskStatus, { bg: string; labelId: MessageId }> = TASK_STATUS_UI;
+export const STATUS_STYLES: Record<TaskStatus, { bg: string; bgElegant: string; labelId: MessageId }> = TASK_STATUS_UI;
+
+/**
+ * The status background as a class string for callsites that paint it directly:
+ * the semantic Elegant token, with Brutal keeping its canonical `bg-brutal-*`
+ * through the `theme-brutal:` variant.
+ */
+export function taskStatusBgClass(status: TaskStatus): string {
+  const cfg = TASK_STATUS_UI[status] ?? TASK_STATUS_UI.todo;
+  return `${cfg.bgElegant} theme-brutal:${cfg.bg}`;
+}
 
 /**
  * Shared per-status badge config for the message-side task badge in MessageItem.
@@ -108,23 +131,26 @@ export const STATUS_STYLES: Record<TaskStatus, { bg: string; labelId: MessageId 
  * `closed` uses `bg-brutal-stone` (NOT `bg-brutal-red`) per #proj-uiux task
  * #145 / PR #1464. See TASK_STATUS_UI.closed for the full rationale.
  */
-export type StatusBadgeConfig = Pick<TaskStatusUi, "appearance" | "bg" | "icon" | "variant">;
+export type StatusBadgeConfig = Pick<TaskStatusUi, "appearance" | "bg" | "bgElegant" | "icon" | "variant">;
 export const STATUS_BADGE_CONFIG: Record<TaskStatus, StatusBadgeConfig> = TASK_STATUS_UI;
 
 /**
- * Resolve the canonical status background to an inline color.
+ * The canonical status background as a CSS variable on the badge element.
  *
  * raft-ui Badge variants also contribute a semantic background utility
  * (`warning` → `bg-warning-base`, for example). Depending on the compiled CSS
  * order, that utility can win over `cfg.bg` even though both Activity and Chat
- * read TASK_STATUS_UI. Applying the same canonical token as an inline style
- * makes TASK_STATUS_UI the final pixel authority as well as the TypeScript
- * authority.
+ * read TASK_STATUS_UI, so Brutal applies the variable with an important class
+ * (`theme-brutal:bg-(--task-status-bg)!`, see StatusBadge): TASK_STATUS_UI stays
+ * the final pixel authority in Brutal. Any other theme never reads the variable
+ * and lets the Badge variant colour itself (an inline `background-color` here
+ * would paint every theme with Brutal colours).
  */
+export const TASK_STATUS_BG_VAR = "--task-status-bg";
 export function getTaskStatusBackgroundStyle(status: TaskStatus): CSSProperties {
   const cfg = TASK_STATUS_UI[status] ?? TASK_STATUS_UI.todo;
   const token = cfg.bg.startsWith("bg-") ? cfg.bg.slice(3) : "";
-  return token ? { backgroundColor: `var(--color-${token})` } : {};
+  return token ? ({ [TASK_STATUS_BG_VAR]: `var(--color-${token})` } as CSSProperties) : {};
 }
 
 // Mirror of taskService.VALID_TRANSITIONS — kept in sync so the menu only
