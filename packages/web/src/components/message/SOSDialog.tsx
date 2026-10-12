@@ -64,7 +64,7 @@ export default function SOSDialog({
 
         {phase === "confirm" && (
           <>
-            <p className="mb-5 text-sm leading-relaxed text-black/75" data-slot="sos-dialog-content">
+            <p className="mb-5 text-sm leading-relaxed text-foreground-strong theme-brutal:text-black/75" data-slot="sos-dialog-content">
               {formatMessage({ id: "message.sos.confirmWarning" }, { channel: channelName })}
             </p>
 

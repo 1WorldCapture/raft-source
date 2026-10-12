@@ -30,6 +30,7 @@ import { useServerStore } from "../src/store/serverStore";
 import { useTaskStore } from "../src/store/taskStore";
 import { useThreadStore } from "../src/store/threadStore";
 import type { FollowedThread } from "../src/store/threadStore";
+import { brutalView } from "./helpers/brutalView";
 
 const originalGet = api.get.bind(api);
 const originalPost = api.post.bind(api);
@@ -664,7 +665,7 @@ test("closing thread search removes the active result and text highlights", asyn
     const matchedMessage = document.getElementById("message-reply-message");
     assert.ok(matchedMessage);
     await waitFor(() => {
-      assert.ok(matchedMessage.className.includes("bg-brutal-cyan/25"));
+      assert.ok(brutalView(matchedMessage.className).includes("bg-brutal-cyan/25"));
       assert.ok(matchedMessage.querySelector("mark"));
     });
 
@@ -672,7 +673,7 @@ test("closing thread search removes the active result and text highlights", asyn
 
     await waitFor(() => {
       assert.equal(screen.queryByTestId("thread-search-bar"), null);
-      assert.equal(matchedMessage.className.includes("bg-brutal-cyan/25"), false);
+      assert.equal(brutalView(matchedMessage.className).includes("bg-brutal-cyan/25"), false);
       assert.equal(matchedMessage.querySelector("mark"), null);
     });
   } finally {
@@ -709,7 +710,7 @@ test("thread search highlights a match rendered inside inline code", async () =>
         "[data-testid='thread-search-fragment-highlight']",
       );
       assert.equal(highlight?.textContent, "read_receipts_v0");
-      assert.equal(highlight?.classList.contains("bg-soft-signal/70"), true);
+      assert.equal(brutalView(highlight?.className).split(/\s+/).includes("bg-soft-signal/70"), true);
     });
   } finally {
     HTMLElement.prototype.scrollIntoView = originalScrollIntoView;

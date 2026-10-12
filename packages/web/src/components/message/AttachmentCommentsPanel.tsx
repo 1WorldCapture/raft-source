@@ -263,9 +263,9 @@ export function AttachmentCommentsPanel({
     .map(({ c }) => c);
 
   return (
-    <div className="flex h-full w-full flex-col bg-white">
-      <div className="flex shrink-0 items-center gap-2 border-b-2 border-black px-3 py-2">
-        <span className="min-w-0 flex-1 truncate text-xs font-bold text-black" title={formatMessage({ id: "message.attachmentComments.titleTooltip" }, { filename })}>
+    <div className="flex h-full w-full flex-col bg-layer-panel theme-brutal:bg-white">
+      <div className="flex shrink-0 items-center gap-2 border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black px-3 py-2">
+        <span className="min-w-0 flex-1 truncate text-xs font-bold text-foreground-strong theme-brutal:text-black" title={formatMessage({ id: "message.attachmentComments.titleTooltip" }, { filename })}>
           {formatMessage({ id: "message.attachmentComments.header" }, { filename })}
         </span>
         {sheetControls ? (
@@ -274,7 +274,7 @@ export function AttachmentCommentsPanel({
             title={formatMessage({ id: sheetControls.expanded ? "message.attachmentComments.collapse" : "message.attachmentComments.expand" })}
             aria-expanded={sheetControls.expanded}
             onClick={sheetControls.onToggle}
-            className="btn-brutal-sm bg-white p-0.5 text-black"
+            className="btn-brutal-sm bg-layer-panel theme-brutal:bg-white p-0.5 text-foreground-strong theme-brutal:text-black"
             data-message-affordance="attachment-comments-sheet-toggle"
           >
             {sheetControls.expanded ? <ChevronDown size={10} /> : <ChevronUp size={10} />}
@@ -286,7 +286,7 @@ export function AttachmentCommentsPanel({
         {comments === null ? (
           <div className="flex h-full items-center justify-center"><Spinner size="sm" /></div>
         ) : visible.length === 0 ? (
-          <p className="px-1 py-3 text-[11px] leading-relaxed text-black/45">
+          <p className="px-1 py-3 text-[11px] leading-relaxed text-foreground-hint theme-brutal:text-black/45">
             {formatMessage(
               { id: "message.attachmentComments.emptyHint" },
               {
@@ -319,24 +319,24 @@ export function AttachmentCommentsPanel({
                       humanAvatarUrl={c.senderType === "user" ? c.senderAvatarUrl : undefined}
                       gravatarHash={c.senderType === "user" ? c.senderGravatarHash : undefined}
                     />
-                    <span className="min-w-0 flex-1 truncate text-[11px] font-bold text-black">{c.senderName}</span>
-                    <span className="shrink-0 text-[10px] text-black/40">
+                    <span className="min-w-0 flex-1 truncate text-[11px] font-bold text-foreground-strong theme-brutal:text-black">{c.senderName}</span>
+                    <span className="shrink-0 text-[10px] text-foreground-hint theme-brutal:text-black/40">
                       {formatMessageTime(c.createdAt)}
                     </span>
                   </div>
                   <span
                     data-message-affordance="attachment-comment-anchor"
-                    className="mt-1 inline-flex max-w-full items-center gap-1 overflow-hidden border border-black bg-brutal-stone/25 px-1.5 py-0.5 text-[10px] font-display font-bold text-black"
+                    className="mt-1 inline-flex max-w-full items-center gap-1 overflow-hidden border border-line-strong theme-brutal:border-black bg-fill-muted/25 theme-brutal:bg-brutal-stone/25 px-1.5 py-0.5 text-[10px] font-display font-bold text-foreground-strong theme-brutal:text-black"
                   >
                     {c.anchor ? <MapPin size={9} className="shrink-0" /> : <FileText size={9} className="shrink-0" />}
                     <span className="min-w-0 truncate">{c.anchor ? anchorLabel(c.anchor, formatMessage) : filename}</span>
                   </span>
                   {c.anchor && typeof (c.anchor.data as Record<string, unknown>)?.quote === "string" && (c.anchor.data as Record<string, unknown>).quote ? (
-                    <div className="mt-1 whitespace-pre-wrap break-words border-l-2 border-black/20 pl-2 text-[11px] italic text-black/50">
+                    <div className="mt-1 whitespace-pre-wrap break-words border-l theme-brutal:border-l-2 border-line-muted theme-brutal:border-black/20 pl-2 text-[11px] italic text-foreground-muted theme-brutal:text-black/50">
                       {(c.anchor.data as Record<string, unknown>).quote as string}
                     </div>
                   ) : null}
-                  <div className="mt-1 text-xs leading-relaxed text-black/80">
+                  <div className="mt-1 text-xs leading-relaxed text-foreground-strong theme-brutal:text-black/80">
                     <MarkdownContent source={c.content} density="compact" enableMermaid />
                   </div>
                 </>
@@ -348,12 +348,12 @@ export function AttachmentCommentsPanel({
                       type="button"
                       onClick={jump}
                       title={anchorQuote(c.anchor!) ?? formatMessage({ id: "message.attachmentComments.jumpToLocation" })}
-                      className="block w-full rounded border border-black/15 bg-white px-2.5 py-2 text-left transition-colors hover:border-black/40 hover:bg-brutal-stone/10"
+                      className="block w-full rounded border border-line-muted theme-brutal:border-black/15 bg-layer-panel theme-brutal:bg-white px-2.5 py-2 text-left transition-colors hover:border-line-strong theme-brutal:hover:border-black/40 hover:bg-fill-muted/10 theme-brutal:hover:bg-brutal-stone/10"
                     >
                       {inner}
                     </button>
                   ) : (
-                    <div className="rounded border border-black/15 bg-white px-2.5 py-2">{inner}</div>
+                    <div className="rounded border border-line-muted theme-brutal:border-black/15 bg-layer-panel theme-brutal:bg-white px-2.5 py-2">{inner}</div>
                   )}
                 </li>
               );
@@ -362,7 +362,7 @@ export function AttachmentCommentsPanel({
         )}
       </div>
 
-      <div className={`shrink-0 border-t-2 border-black p-2 ${collapsedBody ? "hidden" : ""}`} data-message-affordance="attachment-comment-composer">
+      <div className={`shrink-0 border-t theme-brutal:border-t-2 border-line-strong theme-brutal:border-black p-2 ${collapsedBody ? "hidden" : ""}`} data-message-affordance="attachment-comment-composer">
         {canComment ? (
           <>
             {/* Inherited composer (task #20, cindyz + Dozy): the channel/
@@ -385,12 +385,12 @@ export function AttachmentCommentsPanel({
                    so no re: chip here (cindyz task #21); only the location
                    anchor rides above the input, attachment-strip style.
                    Box + tint synced with the thread re: chip (Option A,
-                   bg-brutal-stone/25 — cindyz 6/11). */
+                   bg-fill-muted/25 theme-brutal:bg-brutal-stone/25 — cindyz 6/11). */
                 activeAnchor ? (
                   <span
                     title={anchorQuote(activeAnchor) ?? undefined}
                     data-message-affordance="attachment-comment-pending-anchor"
-                    className="inline-flex max-w-full items-center gap-1 overflow-hidden border border-black bg-brutal-stone/25 px-1.5 py-0.5 text-[10px] font-display font-bold text-black"
+                    className="inline-flex max-w-full items-center gap-1 overflow-hidden border border-line-strong theme-brutal:border-black bg-fill-muted/25 theme-brutal:bg-brutal-stone/25 px-1.5 py-0.5 text-[10px] font-display font-bold text-foreground-strong theme-brutal:text-black"
                   >
                     <MapPin size={9} className="shrink-0" />
                     <span className="min-w-0 truncate">{anchorLabel(activeAnchor, formatMessage)}</span>
@@ -398,7 +398,7 @@ export function AttachmentCommentsPanel({
                       type="button"
                       title={formatMessage({ id: "message.attachmentComments.removeAnchor" })}
                       onClick={clearActiveAnchor}
-                      className="shrink-0 text-black/50 hover:text-black"
+                      className="shrink-0 text-foreground-muted theme-brutal:text-black/50 hover:text-foreground-strong theme-brutal:hover:text-black"
                     >
                       <X size={9} />
                     </button>
@@ -411,7 +411,7 @@ export function AttachmentCommentsPanel({
         ) : (
           <p
             data-message-affordance="attachment-comment-composer-disabled"
-            className="px-1 py-1.5 text-[11px] font-bold text-black/45"
+            className="px-1 py-1.5 text-[11px] font-bold text-foreground-hint theme-brutal:text-black/45"
           >
             {writeBlockedCopy}
           </p>

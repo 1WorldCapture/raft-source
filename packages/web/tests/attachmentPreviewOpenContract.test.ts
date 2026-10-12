@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
+import { brutalView } from "./helpers/brutalView";
 
 const repoRoot = resolve(import.meta.dirname, "..");
 const srcRoot = resolve(repoRoot, "src");
@@ -14,7 +15,7 @@ const strykerBackupSrc = () => {
 const readSource = (path: string) => {
   const backupSrc = strykerBackupSrc();
   const backupPath = backupSrc ? resolve(backupSrc, path) : null;
-  return readFileSync(backupPath && existsSync(backupPath) ? backupPath : resolve(srcRoot, path), "utf8");
+  return brutalView(readFileSync(backupPath && existsSync(backupPath) ? backupPath : resolve(srcRoot, path), "utf8"));
 };
 
 test("document previews do not fetch signed URLs for markdown csv or text before opening", () => {

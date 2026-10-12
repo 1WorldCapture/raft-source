@@ -32,7 +32,7 @@ export default function AttachmentTooltip({
     <TooltipProvider delay={ATTACHMENT_TOOLTIP_DELAY_MS}>
       <Tooltip
         content={content}
-        contentProps={{ className: "bg-white", container: container ?? undefined, ...contentProps }}
+        contentProps={{ className: "bg-layer-panel theme-brutal:bg-white", container: container ?? undefined, ...contentProps }}
       >
         {children}
       </Tooltip>

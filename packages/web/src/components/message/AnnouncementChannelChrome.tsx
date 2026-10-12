@@ -26,15 +26,15 @@ export function AnnouncementMemberFilter({
   const { formatMessage } = useIntl();
   return (
     <div
-      className="flex shrink-0 items-center gap-2 border-b-2 border-black bg-white px-3 py-2"
+      className="flex shrink-0 items-center gap-2 border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white px-3 py-2"
       data-testid="announcement-member-filter"
     >
-      <label htmlFor="announcement-member-filter" className="text-xs font-bold text-black">
+      <label htmlFor="announcement-member-filter" className="text-xs font-bold text-foreground-strong theme-brutal:text-black">
         {formatMessage({ id: "message.announcement.filterLabel" })}
       </label>
       <select
         id="announcement-member-filter"
-        className="min-w-0 flex-1 border-2 border-black bg-white px-2 py-1 text-xs"
+        className="min-w-0 flex-1 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white px-2 py-1 text-xs"
         value={value ?? ""}
         onChange={(event) => onChange(event.target.value || null)}
       >
@@ -130,14 +130,14 @@ export function AnnouncementSenderTimeline({
 
   if (loading) {
     return (
-      <div className="flex h-full items-center justify-center text-sm text-black/40" data-testid="announcement-sender-loading">
+      <div className="flex h-full items-center justify-center text-sm text-foreground-hint theme-brutal:text-black/40" data-testid="announcement-sender-loading">
         {formatMessage({ id: "message.chatPanel.loading" })}
       </div>
     );
   }
   if (error) {
     return (
-      <div className="flex h-full items-center justify-center px-4 text-sm text-black/60" data-testid="announcement-sender-error">
+      <div className="flex h-full items-center justify-center px-4 text-sm text-foreground-muted theme-brutal:text-black/60" data-testid="announcement-sender-error">
         {formatMessage({ id: "message.announcement.filterFailed" })}
       </div>
     );
@@ -147,14 +147,14 @@ export function AnnouncementSenderTimeline({
       {hasOlder && (
         <button
           type="button"
-          className="btn-brutal-sm mx-auto my-2 block bg-white px-3 py-1 text-xs"
+          className="btn-brutal-sm mx-auto my-2 block bg-layer-panel theme-brutal:bg-white px-3 py-1 text-xs"
           onClick={() => void loadOlder()}
         >
           {formatMessage({ id: "message.announcement.loadOlder" })}
         </button>
       )}
       {messages.length === 0 ? (
-        <div className="flex h-full items-center justify-center text-sm text-black/40">
+        <div className="flex h-full items-center justify-center text-sm text-foreground-hint theme-brutal:text-black/40">
           {formatMessage({ id: "message.announcement.filterEmpty" })}
         </div>
       ) : messages.map((message) => (

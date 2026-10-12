@@ -186,7 +186,7 @@ const QUICK_REACTION_GLYPH_SIZE = 18;
 const SENDER_AVATAR_LONG_PRESS_MS = 500;
 const SENDER_AVATAR_LONG_PRESS_MOVE_TOLERANCE_PX = 10;
 const THREAD_SEARCH_FRAGMENT_HIGHLIGHT_CLASS =
-  "bg-soft-signal/70 text-inherit [font:inherit]";
+  "bg-primary-soft/70 theme-brutal:bg-soft-signal/70 text-inherit [font:inherit]";
 
 function ThreadSearchFragmentHighlight({ children }: { children?: ReactNode }) {
   return (
@@ -853,7 +853,7 @@ function renderContent(
                     event.preventDefault();
                     onNavigateComputer(target.machineId);
                   }}
-                  className={`${MSG_REF_CHIP} bg-brutal-cyan/30 text-black cursor-default hover:bg-brutal-cyan/60`}
+                  className={`${MSG_REF_CHIP} bg-info-soft/30 theme-brutal:bg-brutal-cyan/30 text-foreground-strong theme-brutal:text-black cursor-default hover:bg-info-soft/60 theme-brutal:hover:bg-brutal-cyan/60`}
                 >
                   {children}
                 </a>
@@ -864,7 +864,7 @@ function renderContent(
               return (
                 <span
                   data-testid={`app-reference-${target.appId}`}
-                  className={`${MSG_REF_CHIP} bg-soft-signal/40 text-black`}
+                  className={`${MSG_REF_CHIP} bg-primary-soft/40 theme-brutal:bg-soft-signal/40 text-foreground-strong theme-brutal:text-black`}
                   title={formatMessage?.({ id: "message.messageItem.appReferenceOnly" })}
                 >
                   {children}
@@ -894,7 +894,7 @@ function renderContent(
                       e.preventDefault();
                       onNavigateChannel(channel);
                     }}
-                    className={`${MSG_REF_CHIP} bg-brutal-pink/30 text-black cursor-default hover:bg-brutal-pink/60`}
+                    className={`${MSG_REF_CHIP} bg-accent-soft/30 theme-brutal:bg-brutal-pink/30 text-foreground-strong theme-brutal:text-black cursor-default hover:bg-accent-soft/60 theme-brutal:hover:bg-brutal-pink/60`}
                   >
                     {children}
                   </a>
@@ -923,7 +923,7 @@ function renderContent(
                         shortId: target.threadShortId,
                       });
                     }}
-                    className={`${MSG_REF_CHIP} bg-brutal-cyan/30 text-black ${isResolvingThreadRef ? "cursor-wait opacity-80" : "cursor-default hover:bg-brutal-cyan/60"}`}
+                    className={`${MSG_REF_CHIP} bg-info-soft/30 theme-brutal:bg-brutal-cyan/30 text-foreground-strong theme-brutal:text-black ${isResolvingThreadRef ? "cursor-wait opacity-80" : "cursor-default hover:bg-info-soft/60 theme-brutal:hover:bg-brutal-cyan/60"}`}
                   >
                     <span>{children}</span>
                     {isResolvingThreadRef ? (
@@ -950,7 +950,7 @@ function renderContent(
                         focusedMessageId: target.messageId,
                       });
                     }}
-                    className={`${MSG_REF_CHIP} bg-soft-signal/40 text-black cursor-default hover:bg-soft-signal`}
+                    className={`${MSG_REF_CHIP} bg-primary-soft/40 theme-brutal:bg-soft-signal/40 text-foreground-strong theme-brutal:text-black cursor-default hover:bg-primary-soft theme-brutal:hover:bg-soft-signal`}
                   >
                     {children}
                   </a>
@@ -966,7 +966,7 @@ function renderContent(
                     e.preventDefault();
                     void onOpenMessageRef?.(channel, target.messageId, target.threadParentShortId);
                   }}
-                  className={`${MSG_REF_CHIP} bg-soft-signal/40 text-black cursor-default hover:bg-soft-signal`}
+                  className={`${MSG_REF_CHIP} bg-primary-soft/40 theme-brutal:bg-soft-signal/40 text-foreground-strong theme-brutal:text-black cursor-default hover:bg-primary-soft theme-brutal:hover:bg-soft-signal`}
                 >
                   {children}
                 </a>
@@ -993,7 +993,7 @@ function renderContent(
                       e.preventDefault();
                       onNavigateDm(dm);
                     }}
-                    className={`${MSG_REF_CHIP} bg-brutal-pink/30 text-black cursor-default hover:bg-brutal-pink/60`}
+                    className={`${MSG_REF_CHIP} bg-accent-soft/30 theme-brutal:bg-brutal-pink/30 text-foreground-strong theme-brutal:text-black cursor-default hover:bg-accent-soft/60 theme-brutal:hover:bg-brutal-pink/60`}
                   >
                     {children}
                   </a>
@@ -1016,7 +1016,7 @@ function renderContent(
                       shortId: target.threadShortId,
                     });
                   }}
-                  className={`${MSG_REF_CHIP} bg-brutal-cyan/30 text-black cursor-default hover:bg-brutal-cyan/60`}
+                  className={`${MSG_REF_CHIP} bg-info-soft/30 theme-brutal:bg-brutal-cyan/30 text-foreground-strong theme-brutal:text-black cursor-default hover:bg-info-soft/60 theme-brutal:hover:bg-brutal-cyan/60`}
                 >
                   {children}
                 </a>
@@ -1031,7 +1031,7 @@ function renderContent(
                     e.preventDefault();
                     onOpenTaskRef(target.taskNumber);
                   }}
-                  className={`${MSG_REF_CHIP} bg-soft-signal/40 text-black cursor-default hover:bg-soft-signal`}
+                  className={`${MSG_REF_CHIP} bg-primary-soft/40 theme-brutal:bg-soft-signal/40 text-foreground-strong theme-brutal:text-black cursor-default hover:bg-primary-soft theme-brutal:hover:bg-soft-signal`}
                 >
                   {children}
                 </a>
@@ -1049,7 +1049,7 @@ function renderContent(
 
             if (!mentionId || (mentionType !== "agent" && mentionType !== "user")) {
               return (
-                <span className="font-bold text-black underline decoration-black/30 decoration-2 underline-offset-2 select-text">
+                <span className="font-bold text-foreground-strong theme-brutal:text-black underline decoration-black/30 decoration-2 underline-offset-2 select-text">
                   {children}
                 </span>
               );
@@ -1083,7 +1083,7 @@ function renderContent(
               && refAuthorityServerSlug !== currentServerSlug;
             if (!routeServerSlug || !parentName || (!parentId && !crossServerAuthority)) {
               return (
-                <span className={`${MSG_REF_CHIP} bg-brutal-cyan/30 text-black opacity-60`}>
+                <span className={`${MSG_REF_CHIP} bg-info-soft/30 theme-brutal:bg-brutal-cyan/30 text-foreground-strong theme-brutal:text-black opacity-60`}>
                   {children}
                 </span>
               );
@@ -1105,7 +1105,7 @@ function renderContent(
                     shortId: threadRef,
                   });
                 }}
-                className={`${MSG_REF_CHIP} bg-brutal-cyan/30 text-black ${isResolvingThreadRef ? "cursor-wait opacity-80" : "cursor-default hover:bg-brutal-cyan/60"}`}
+                className={`${MSG_REF_CHIP} bg-info-soft/30 theme-brutal:bg-brutal-cyan/30 text-foreground-strong theme-brutal:text-black ${isResolvingThreadRef ? "cursor-wait opacity-80" : "cursor-default hover:bg-info-soft/60 theme-brutal:hover:bg-brutal-cyan/60"}`}
               >
                 <span>{children}</span>
                 {isResolvingThreadRef ? (
@@ -1122,7 +1122,7 @@ function renderContent(
             );
             if (!channel) {
               return (
-                <span className={`${MSG_REF_CHIP} bg-brutal-pink/30 text-black opacity-60`}>
+                <span className={`${MSG_REF_CHIP} bg-accent-soft/30 theme-brutal:bg-brutal-pink/30 text-foreground-strong theme-brutal:text-black opacity-60`}>
                   {children}
                 </span>
               );
@@ -1134,7 +1134,7 @@ function renderContent(
                   e.preventDefault();
                   onNavigateChannel(channel);
                 }}
-                className={`${MSG_REF_CHIP} bg-brutal-pink/30 text-black cursor-default hover:bg-brutal-pink/60`}
+                className={`${MSG_REF_CHIP} bg-accent-soft/30 theme-brutal:bg-brutal-pink/30 text-foreground-strong theme-brutal:text-black cursor-default hover:bg-accent-soft/60 theme-brutal:hover:bg-brutal-pink/60`}
               >
                 {children}
               </a>
@@ -1146,7 +1146,7 @@ function renderContent(
             const taskNumber = Number(taskRef);
             if (!Number.isInteger(taskNumber) || taskNumber <= 0) {
               return (
-                <span className={`${MSG_REF_CHIP} bg-soft-signal/30 text-black opacity-60`}>
+                <span className={`${MSG_REF_CHIP} bg-primary-soft/30 theme-brutal:bg-soft-signal/30 text-foreground-strong theme-brutal:text-black opacity-60`}>
                   {children}
                 </span>
               );
@@ -1158,7 +1158,7 @@ function renderContent(
                   e.preventDefault();
                   onOpenTaskRef(taskNumber);
                 }}
-                className={`${MSG_REF_CHIP} bg-soft-signal/40 text-black cursor-default hover:bg-soft-signal`}
+                className={`${MSG_REF_CHIP} bg-primary-soft/40 theme-brutal:bg-soft-signal/40 text-foreground-strong theme-brutal:text-black cursor-default hover:bg-primary-soft theme-brutal:hover:bg-soft-signal`}
               >
                 {children}
               </a>
@@ -1206,12 +1206,12 @@ function renderContent(
                 icon={Link}
                 colorClass={
                   isCurrentServer
-                    ? "bg-soft-signal/40 text-black hover:bg-soft-signal"
-                    : "bg-white text-blue-700 hover:bg-black/5"
+                    ? "bg-primary-soft/40 theme-brutal:bg-soft-signal/40 text-foreground-strong theme-brutal:text-black hover:bg-primary-soft theme-brutal:hover:bg-soft-signal"
+                    : "bg-layer-panel theme-brutal:bg-white text-blue-700 hover:bg-fill-muted theme-brutal:hover:bg-black/5"
                 }
                 label={channelLabel}
                 trailing={quotedMessageUnavailable ? undefined : (
-                  <span className="text-[10px] font-normal leading-none text-black/50">msg</span>
+                  <span className="text-[10px] font-normal leading-none text-foreground-muted theme-brutal:text-black/50">msg</span>
                 )}
               />
             );
@@ -1370,7 +1370,7 @@ export function AttachmentMetaText({
       <span data-message-affordance="attachment-meta-label" className="min-w-0 flex-1 truncate">{label}</span>
       {sizeBytes && sizeBytes > 0 ? (
         <>
-          <span className="shrink-0 text-black/35">·</span>
+          <span className="shrink-0 text-foreground-placeholder theme-brutal:text-black/35">·</span>
           <span data-message-affordance="attachment-meta-size" className="shrink-0">{formatFileSizeBytes(sizeBytes, formatMessage)}</span>
         </>
       ) : null}
@@ -1381,14 +1381,14 @@ export function AttachmentMetaText({
 function DiffPatchStatsLine({ preview }: { preview: DiffAttachmentPreview | null }) {
   const { formatMessage } = useIntl();
   if (!preview) {
-    return <span className="text-black/70">{formatMessage({ id: "message.messageItem.diffPreview" })}</span>;
+    return <span className="text-foreground-muted theme-brutal:text-black/70">{formatMessage({ id: "message.messageItem.diffPreview" })}</span>;
   }
 
   const { files, hunks, additions, deletions } = preview.stats;
 
   return (
     <>
-      <span className="text-black/70">{formatMessage({ id: "message.messageItem.diffStats" }, { fileCount: files, hunkCount: hunks })}</span>
+      <span className="text-foreground-muted theme-brutal:text-black/70">{formatMessage({ id: "message.messageItem.diffStats" }, { fileCount: files, hunkCount: hunks })}</span>
       <span className="text-[#1f883d]">+{additions}</span>
       <span className="text-[#cf222e]">-{deletions}</span>
     </>
@@ -1398,25 +1398,25 @@ function DiffPatchStatsLine({ preview }: { preview: DiffAttachmentPreview | null
 function DocumentPreviewSummaryLine({ preview }: { preview: DocumentAttachmentPreviewState | null }) {
   const { formatMessage } = useIntl();
   if (!preview) {
-    return <span className="min-w-0 truncate text-black/70">{formatMessage({ id: "message.messageItem.documentPreview" })}</span>;
+    return <span className="min-w-0 truncate text-foreground-muted theme-brutal:text-black/70">{formatMessage({ id: "message.messageItem.documentPreview" })}</span>;
   }
 
   if (preview.preview.kind === "csv") {
     const id = preview.truncated
       ? "message.messageItem.documentSummaryFirst"
       : "message.messageItem.documentSummaryPreview";
-    return <span className="min-w-0 truncate text-black/70">{formatMessage({ id }, { rowCount: preview.preview.rows.length, columnCount: preview.preview.columnCount })}</span>;
+    return <span className="min-w-0 truncate text-foreground-muted theme-brutal:text-black/70">{formatMessage({ id }, { rowCount: preview.preview.rows.length, columnCount: preview.preview.columnCount })}</span>;
   }
   if (preview.preview.kind === "markdown") {
-    return <span className="min-w-0 truncate text-black/70">{formatMessage({ id: "message.messageItem.markdownDocument" })}</span>;
+    return <span className="min-w-0 truncate text-foreground-muted theme-brutal:text-black/70">{formatMessage({ id: "message.messageItem.markdownDocument" })}</span>;
   }
   if (preview.preview.kind === "text") {
-    return <span className="min-w-0 truncate text-black/70">{formatMessage({ id: "message.messageItem.plainTextDocument" })}</span>;
+    return <span className="min-w-0 truncate text-foreground-muted theme-brutal:text-black/70">{formatMessage({ id: "message.messageItem.plainTextDocument" })}</span>;
   }
   if (preview.preview.kind === "xlsx") {
-    return <span className="min-w-0 truncate text-black/70">{formatMessage({ id: "message.messageItem.xlsxDocument" })}</span>;
+    return <span className="min-w-0 truncate text-foreground-muted theme-brutal:text-black/70">{formatMessage({ id: "message.messageItem.xlsxDocument" })}</span>;
   }
-  return <span className="min-w-0 truncate text-black/70">{formatMessage({ id: "message.messageItem.pdfDocument" })}</span>;
+  return <span className="min-w-0 truncate text-foreground-muted theme-brutal:text-black/70">{formatMessage({ id: "message.messageItem.pdfDocument" })}</span>;
 }
 
 // Locale-aware document-preview label for attachment card metadata. The modal
@@ -1541,7 +1541,7 @@ function AttachmentCard({
       onClick={primaryOnClick}
       affordance={primaryAffordance}
       affordanceName={primaryAffordanceName}
-      icon={isVideo ? <Play size={16} className="text-black/70" /> : isAudio ? <Music size={16} className="text-black/70" /> : undefined}
+      icon={isVideo ? <Play size={16} className="text-foreground-muted theme-brutal:text-black/70" /> : isAudio ? <Music size={16} className="text-foreground-muted theme-brutal:text-black/70" /> : undefined}
       meta={<AttachmentMetaText label={primaryMetaLabel} sizeBytes={attachment.sizeBytes} />}
       secondaryDownload={isAudio ? { onClick: onDownload, label: formatMessage({ id: "message.messageItem.downloadFile" }, { filename: attachment.filename }), affordanceName: "audio-download" } : undefined}
     />
@@ -1629,10 +1629,10 @@ function InlineVideoAttachmentCard({
     <div
       ref={containerRef}
       data-message-affordance="inline-video-preview"
-      className="group/video relative w-full max-w-[min(28rem,calc(100vw-7rem))] overflow-hidden border-2 border-black bg-black text-left"
+      className="group/video relative w-full max-w-[min(28rem,calc(100vw-7rem))] overflow-hidden border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-foreground-strong theme-brutal:bg-black text-left"
       title={attachment.filename}
     >
-      <div className="relative aspect-video w-full bg-black">
+      <div className="relative aspect-video w-full bg-foreground-strong theme-brutal:bg-black">
         {inlineUrl && !loadFailed ? (
           <>
             <video
@@ -1642,7 +1642,7 @@ function InlineVideoAttachmentCard({
               controls
               playsInline
               preload="metadata"
-              className="block h-full w-full bg-black object-contain"
+              className="block h-full w-full bg-foreground-strong theme-brutal:bg-black object-contain"
               onError={() => setLoadFailed(true)}
             />
           </>
@@ -1650,7 +1650,7 @@ function InlineVideoAttachmentCard({
           <button
             type="button"
             onClick={loadFailed ? onDownload : undefined}
-            className={`flex h-full w-full items-center justify-center bg-black text-white ${loadFailed ? "hover:bg-black/90" : "cursor-default"}`}
+            className={`flex h-full w-full items-center justify-center bg-foreground-strong theme-brutal:bg-black text-white ${loadFailed ? "hover:bg-foreground/90 theme-brutal:hover:bg-black/90" : "cursor-default"}`}
             aria-label={loadFailed ? formatMessage({ id: "message.messageItem.downloadFile" }, { filename: attachment.filename }) : formatMessage({ id: "message.messageItem.loadingFile" }, { filename: attachment.filename })}
           >
             {isOptimistic || loadingUrl ? (
@@ -1674,7 +1674,7 @@ function InlineVideoAttachmentCard({
             type="button"
             onClick={onOpenPreview}
             title={formatMessage({ id: "message.messageItem.openInPreview" }, { filename: attachment.filename })}
-            className="absolute right-1.5 top-1.5 flex size-6 items-center justify-center border border-black bg-white/80 text-black/60 hover:bg-white hover:text-black"
+            className="absolute right-1.5 top-1.5 flex size-6 items-center justify-center border border-line-strong theme-brutal:border-black bg-layer-panel/80 theme-brutal:bg-white/80 text-foreground-muted theme-brutal:text-black/60 hover:bg-layer-panel theme-brutal:hover:bg-white hover:text-foreground-strong theme-brutal:hover:text-black"
             aria-label={formatMessage({ id: "message.messageItem.openInPreview" }, { filename: attachment.filename })}
             data-message-affordance="inline-video-expand"
           >
@@ -1761,13 +1761,13 @@ function InlineAudioPlayer({
   }, []);
 
   return (
-    <div data-message-affordance="inline-audio-player" className="w-full border border-black bg-brutal-cream p-2">
+    <div data-message-affordance="inline-audio-player" className="w-full border border-line-strong theme-brutal:border-black bg-layer-canvas-muted theme-brutal:bg-brutal-cream p-2">
       <div className="flex min-w-0 items-center gap-2">
         <button
           type="button"
           data-message-affordance="audio-play-toggle"
           aria-label={formatMessage({ id: playing ? "message.messageItem.pauseAudio" : "message.messageItem.playAudio" }, { filename })}
-          className="flex size-7 shrink-0 items-center justify-center border border-black bg-white text-black transition-colors hover:bg-soft-signal focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-black"
+          className="flex size-7 shrink-0 items-center justify-center border border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white text-foreground-strong theme-brutal:text-black transition-colors hover:bg-primary-soft theme-brutal:hover:bg-soft-signal focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-line-strong theme-brutal:focus-visible:outline-black"
           onClick={handleTogglePlayback}
         >
           {playing ? <Pause size={14} fill="currentColor" /> : <Play size={14} fill="currentColor" />}
@@ -1788,24 +1788,24 @@ function InlineAudioPlayer({
           />
           <div
             data-message-affordance="audio-seek-rail"
-            className="pointer-events-none absolute left-0 right-0 top-1/2 h-2 -translate-y-1/2 border border-black bg-white peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-black"
+            className="pointer-events-none absolute left-0 right-0 top-1/2 h-2 -translate-y-1/2 border border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-line-strong theme-brutal:peer-focus-visible:outline-black"
             aria-hidden="true"
           >
-            <div className="h-full bg-brutal-cyan" style={{ width: `${progress}%` }} />
+            <div className="h-full bg-info-soft theme-brutal:bg-brutal-cyan" style={{ width: `${progress}%` }} />
           </div>
           <span
             data-message-affordance="audio-seek-thumb"
-            className="pointer-events-none absolute top-1/2 size-3 -translate-x-1/2 -translate-y-1/2 border border-black bg-white peer-focus-visible:bg-soft-signal peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-1 peer-focus-visible:outline-black"
+            className="pointer-events-none absolute top-1/2 size-3 -translate-x-1/2 -translate-y-1/2 border border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white peer-focus-visible:bg-primary-soft theme-brutal:peer-focus-visible:bg-soft-signal peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-1 peer-focus-visible:outline-line-strong theme-brutal:peer-focus-visible:outline-black"
             style={{ left: `${progress}%` }}
             aria-hidden="true"
           />
         </div>
-        <div data-message-affordance="audio-time" className="w-[4.75rem] shrink-0 text-right font-mono text-[11px] font-bold tabular-nums text-black/60">
+        <div data-message-affordance="audio-time" className="w-[4.75rem] shrink-0 text-right font-mono text-[11px] font-bold tabular-nums text-foreground-muted theme-brutal:text-black/60">
           {timeLabel}
         </div>
       </div>
       <div data-message-affordance="audio-volume-control" className="mt-1.5 flex items-center gap-2 pl-9">
-        <Volume2 size={13} className="shrink-0 text-black/60" aria-hidden="true" />
+        <Volume2 size={13} className="shrink-0 text-foreground-muted theme-brutal:text-black/60" aria-hidden="true" />
         <div className="relative h-6 min-w-0 flex-1">
           <input
             type="range"
@@ -1821,14 +1821,14 @@ function InlineAudioPlayer({
           />
           <div
             data-message-affordance="audio-volume-rail"
-            className="pointer-events-none absolute left-0 right-0 top-1/2 h-1.5 -translate-y-1/2 border border-black bg-white peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-black"
+            className="pointer-events-none absolute left-0 right-0 top-1/2 h-1.5 -translate-y-1/2 border border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-line-strong theme-brutal:peer-focus-visible:outline-black"
             aria-hidden="true"
           >
-            <div className="h-full bg-soft-signal" style={{ width: `${volumeProgress}%` }} />
+            <div className="h-full bg-primary-soft theme-brutal:bg-soft-signal" style={{ width: `${volumeProgress}%` }} />
           </div>
           <span
             data-message-affordance="audio-volume-thumb"
-            className="pointer-events-none absolute top-1/2 size-2.5 -translate-x-1/2 -translate-y-1/2 border border-black bg-white peer-focus-visible:bg-soft-signal peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-1 peer-focus-visible:outline-black"
+            className="pointer-events-none absolute top-1/2 size-2.5 -translate-x-1/2 -translate-y-1/2 border border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white peer-focus-visible:bg-primary-soft theme-brutal:peer-focus-visible:bg-soft-signal peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-1 peer-focus-visible:outline-line-strong theme-brutal:peer-focus-visible:outline-black"
             style={{ left: `${volumeProgress}%` }}
             aria-hidden="true"
           />
@@ -1930,7 +1930,7 @@ function InlineAudioAttachmentCard({
       data-message-affordance="audio-download"
       aria-label={formatMessage({ id: "message.messageItem.downloadFile" }, { filename: attachment.filename })}
       title={formatMessage({ id: "message.messageItem.downloadFile" }, { filename: attachment.filename })}
-      className="flex size-7 items-center justify-center border border-black bg-white text-black/60 hover:bg-soft-signal hover:text-black focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-black"
+      className="flex size-7 items-center justify-center border border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white text-foreground-muted theme-brutal:text-black/60 hover:bg-primary-soft theme-brutal:hover:bg-soft-signal hover:text-foreground-strong theme-brutal:hover:text-black focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-line-strong theme-brutal:focus-visible:outline-black"
       onClick={(event) => {
         event.preventDefault();
         event.stopPropagation();
@@ -1951,12 +1951,12 @@ function InlineAudioAttachmentCard({
         <div className={INLINE_AUDIO_PREVIEW_CARD_CLASS}>
           <div className="mb-2 flex items-center justify-between gap-2">
             <div className="flex min-w-0 items-center gap-2">
-              <div className="flex size-8 shrink-0 items-center justify-center border-2 border-black bg-soft-signal">
-                <Music size={16} className="text-black" />
+              <div className="flex size-8 shrink-0 items-center justify-center border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-primary-soft theme-brutal:bg-soft-signal">
+                <Music size={16} className="text-foreground-strong theme-brutal:text-black" />
               </div>
               <div className="min-w-0">
-                <div className="truncate text-sm font-bold text-black" title={attachment.filename}>{attachment.filename}</div>
-                <div className="text-xs font-bold text-black/50">{formatMessage({ id: "message.messageItem.audioFile" })}</div>
+                <div className="truncate text-sm font-bold text-foreground-strong theme-brutal:text-black" title={attachment.filename}>{attachment.filename}</div>
+                <div className="text-xs font-bold text-foreground-muted theme-brutal:text-black/50">{formatMessage({ id: "message.messageItem.audioFile" })}</div>
               </div>
             </div>
             {downloadButton}
@@ -1972,19 +1972,19 @@ function InlineAudioAttachmentCard({
         <div className={INLINE_AUDIO_PREVIEW_CARD_CLASS}>
           <div className="mb-2 flex items-center justify-between gap-2">
             <div className="flex min-w-0 items-center gap-2">
-              <div className="flex size-8 shrink-0 items-center justify-center border-2 border-black bg-soft-signal">
-                <Music size={16} className="text-black" />
+              <div className="flex size-8 shrink-0 items-center justify-center border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-primary-soft theme-brutal:bg-soft-signal">
+                <Music size={16} className="text-foreground-strong theme-brutal:text-black" />
               </div>
               <div className="min-w-0">
-                <div className="truncate text-sm font-bold text-black" title={attachment.filename}>{attachment.filename}</div>
-                <div className="text-xs font-bold text-black/50">{formatMessage({ id: "message.messageItem.audioFile" })}</div>
+                <div className="truncate text-sm font-bold text-foreground-strong theme-brutal:text-black" title={attachment.filename}>{attachment.filename}</div>
+                <div className="text-xs font-bold text-foreground-muted theme-brutal:text-black/50">{formatMessage({ id: "message.messageItem.audioFile" })}</div>
               </div>
             </div>
             {!isOptimistic && !loadFailed ? downloadButton : null}
           </div>
           <button
             type="button"
-            className={`flex h-10 w-full items-center justify-center border border-black bg-brutal-cream text-xs font-bold text-black/70 ${loadFailed ? "hover:bg-soft-signal" : "cursor-default"}`}
+            className={`flex h-10 w-full items-center justify-center border border-line-strong theme-brutal:border-black bg-layer-canvas-muted theme-brutal:bg-brutal-cream text-xs font-bold text-foreground-muted theme-brutal:text-black/70 ${loadFailed ? "hover:bg-primary-soft theme-brutal:hover:bg-soft-signal" : "cursor-default"}`}
             onClick={loadFailed ? onDownload : undefined}
             aria-label={loadFailed ? formatMessage({ id: "message.messageItem.downloadFile" }, { filename: attachment.filename }) : formatMessage({ id: "message.messageItem.loadingFile" }, { filename: attachment.filename })}
           >
@@ -2454,7 +2454,7 @@ function TranslationIndicator({
   return (
     <div
       className={`inline-flex items-center gap-1.5 text-[11px] font-mono ${
-        text.tone === "failed" ? "text-brutal-orange" : "text-black/45"
+        text.tone === "failed" ? "text-brutal-orange" : "text-foreground-hint theme-brutal:text-black/45"
       }`}
       data-testid={`message-translation-indicator-${entry.messageId}`}
       title={action ? undefined : text.title}
@@ -4192,8 +4192,8 @@ const MessageItem = memo(function MessageItem({ message, mentionMap, channels, p
     const systemContentTitle = formatReminderReceiptContentTitle(message.content, timeFormatOptions);
     return (
       <div className="flex items-center justify-center gap-2 py-1.5 px-2 mb-1 min-w-0">
-        <span className="text-xs text-black/40 font-mono whitespace-nowrap shrink-0">{time}</span>
-        <span className="text-xs text-black/50 truncate min-w-0" title={systemContentTitle}>
+        <span className="text-xs text-foreground-hint theme-brutal:text-black/40 font-mono whitespace-nowrap shrink-0">{time}</span>
+        <span className="text-xs text-foreground-muted theme-brutal:text-black/50 truncate min-w-0" title={systemContentTitle}>
           {systemContentParts.map((part, index) => (
             part.type === "reminderFireAt" ? (
               <span key={`${part.value}-${index}`} title={formatReminderReceiptTooltip(part.value, timeFormatOptions)}>
@@ -4222,14 +4222,14 @@ const MessageItem = memo(function MessageItem({ message, mentionMap, channels, p
       onMouseLeave={handleReactionPickerBoundaryLeave}
       className={`group/message relative flex h-fit gap-3 py-1 ${showSelectedGroupedHeader ? "mt-1.5 min-h-[3rem]" : ""} px-2 ${
         isHighlighted
-          ? "border-2 border-black bg-brutal-cyan/25 shadow-brutal mb-1"
+          ? "border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-info-soft/25 theme-brutal:bg-brutal-cyan/25 shadow-raft-sm theme-brutal:shadow-brutal mb-1"
           : ctxMenu || reactionPicker
-          ? "border-2 border-black bg-white mb-1"
+          ? "border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white mb-1"
           : isSelectedAsThreadParent
-          ? "border-2 border-black bg-white mb-1"
+          ? "border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white mb-1"
           : selectionScopedHere
-          ? "border-2 border-transparent hover:bg-white active:bg-white mb-1"
-          : "border-2 border-transparent hover:border-black hover:bg-white active:border-black active:bg-white mb-1"
+          ? "border theme-brutal:border-2 border-transparent hover:bg-layer-panel theme-brutal:hover:bg-white active:bg-layer-panel theme-brutal:active:bg-white mb-1"
+          : "border theme-brutal:border-2 border-transparent hover:border-line-strong theme-brutal:hover:border-black hover:bg-layer-panel theme-brutal:hover:bg-white active:border-line-strong theme-brutal:active:border-black active:bg-layer-panel theme-brutal:active:bg-white mb-1"
       }`}
     >
       {selectionScopedHere && (
@@ -4313,7 +4313,7 @@ const MessageItem = memo(function MessageItem({ message, mentionMap, channels, p
               type="button"
               onClick={handleSenderNameMention}
               onContextMenu={handleSenderContextMenu}
-              className="min-w-0 shrink-0 [cursor:pointer] truncate text-sm font-bold text-black hover:underline hover:decoration-2 hover:underline-offset-2"
+              className="min-w-0 shrink-0 [cursor:pointer] truncate text-sm font-bold text-foreground-strong theme-brutal:text-black hover:underline hover:decoration-2 hover:underline-offset-2"
               title={formatMessage({ id: "message.messageItem.mentionSender" }, { name: senderMention.name })}
               data-testid={`message-sender-mention-${message.id}`}
             >
@@ -4321,7 +4321,7 @@ const MessageItem = memo(function MessageItem({ message, mentionMap, channels, p
             </button>
           ) : (
             <span
-              className="min-w-0 shrink-0 truncate text-sm font-bold text-black"
+              className="min-w-0 shrink-0 truncate text-sm font-bold text-foreground-strong theme-brutal:text-black"
               onContextMenu={handleSenderContextMenu}
             >
               {senderDisplayName}
@@ -4329,7 +4329,7 @@ const MessageItem = memo(function MessageItem({ message, mentionMap, channels, p
           )}
           {agentModelLabelText && (
             <span
-              className="shrink-0 whitespace-nowrap font-mono text-[11px] leading-none text-black/40"
+              className="shrink-0 whitespace-nowrap font-mono text-[11px] leading-none text-foreground-hint theme-brutal:text-black/40"
               title={agentModelLabelText}
               data-testid={`message-sender-model-${message.id}`}
             >
@@ -4338,30 +4338,30 @@ const MessageItem = memo(function MessageItem({ message, mentionMap, channels, p
           )}
           {isSystemPostedAnnouncement(message) && (
             <span
-              className="inline-flex shrink-0 items-center whitespace-nowrap border border-black bg-brutal-yellow px-1.5 py-0.5 text-[10px] font-bold"
+              className="inline-flex shrink-0 items-center whitespace-nowrap border border-line-strong theme-brutal:border-black bg-brutal-yellow px-1.5 py-0.5 text-[10px] font-bold"
               data-testid={`message-system-posted-${message.id}`}
             >
               {formatMessage({ id: "message.announcement.systemPosted" })}
             </span>
           )}
           {isDeactivatedAgent && (
-            <span className="inline-flex shrink-0 items-center whitespace-nowrap px-1.5 py-0.5 text-[10px] font-bold uppercase border border-black bg-gray-300 text-black/60">
+            <span className="inline-flex shrink-0 items-center whitespace-nowrap px-1.5 py-0.5 text-[10px] font-bold uppercase border border-line-strong theme-brutal:border-black bg-gray-300 text-foreground-muted theme-brutal:text-black/60">
               {formatMessage({ id: "message.messageItem.deletedBadge" })}
             </span>
           )}
           {humanDepartureLabel && (
-            <span className="inline-flex shrink-0 items-center whitespace-nowrap px-1.5 py-0.5 text-[10px] font-bold uppercase border border-black bg-gray-300 text-black/60">
+            <span className="inline-flex shrink-0 items-center whitespace-nowrap px-1.5 py-0.5 text-[10px] font-bold uppercase border border-line-strong theme-brutal:border-black bg-gray-300 text-foreground-muted theme-brutal:text-black/60">
               {humanDepartureLabel}
             </span>
           )}
           {senderSubtitle && (
-            <span className="min-w-0 truncate text-xs text-black/40 font-mono" title={senderSubtitle}>
+            <span className="min-w-0 truncate text-xs text-foreground-hint theme-brutal:text-black/40 font-mono" title={senderSubtitle}>
               {senderSubtitle}
             </span>
           )}
-          <span className="shrink-0 text-xs text-black/40 font-mono whitespace-nowrap">{time}</span>
+          <span className="shrink-0 text-xs text-foreground-hint theme-brutal:text-black/40 font-mono whitespace-nowrap">{time}</span>
           {converting && (
-            <span className="text-[10px] font-bold text-black/40">{formatMessage({ id: "message.messageItem.converting" })}</span>
+            <span className="text-[10px] font-bold text-foreground-hint theme-brutal:text-black/40">{formatMessage({ id: "message.messageItem.converting" })}</span>
           )}
           </div>
         )}
@@ -4384,7 +4384,7 @@ const MessageItem = memo(function MessageItem({ message, mentionMap, channels, p
           data-message-id={message.id}
           data-quote-channel-id={quoteComposerChannelId}
           data-message-font-size={messageBodyFontSize}
-          className={`${messageBodyFontSizeClass} text-black break-words select-text [&_*]:select-text`}
+          className={`${messageBodyFontSizeClass} text-foreground-strong theme-brutal:text-black break-words select-text [&_*]:select-text`}
           style={{ userSelect: "text", WebkitUserSelect: "text" }}
         >
           {(() => {
@@ -4443,10 +4443,10 @@ const MessageItem = memo(function MessageItem({ message, mentionMap, channels, p
         </div>
         {showBilingualOriginal ? (
           <div
-            className="mt-1.5 border-l-2 border-black/20 pl-2 text-black/70"
+            className="mt-1.5 border-l theme-brutal:border-l-2 border-line-muted theme-brutal:border-black/20 pl-2 text-foreground-muted theme-brutal:text-black/70"
             data-testid={`message-translation-bilingual-original-${message.id}`}
           >
-            <div className="mb-0.5 text-[10px] font-bold uppercase tracking-normal text-black/40">{formatMessage({ id: "message.messageItem.bilingualOriginal" })}</div>
+            <div className="mb-0.5 text-[10px] font-bold uppercase tracking-normal text-foreground-hint theme-brutal:text-black/40">{formatMessage({ id: "message.messageItem.bilingualOriginal" })}</div>
             <div className={`${messageBodyFontSizeClass} break-words select-text [&_*]:select-text`}>
               <MessageMarkdownBody
                 readReceiptChannelId={message.channelId}
@@ -4499,7 +4499,7 @@ const MessageItem = memo(function MessageItem({ message, mentionMap, channels, p
           </div>
         ) : null}
         {threadRefNotice ? (
-          <div className="mt-1 inline-flex max-w-full border border-black bg-soft-signal/40 px-2 py-1 text-xs font-bold text-black/70">
+          <div className="mt-1 inline-flex max-w-full border border-line-strong theme-brutal:border-black bg-primary-soft/40 theme-brutal:bg-soft-signal/40 px-2 py-1 text-xs font-bold text-foreground-muted theme-brutal:text-black/70">
             {formatMessage({ id: threadRefNotice })}
           </div>
         ) : null}
@@ -4557,9 +4557,9 @@ const MessageItem = memo(function MessageItem({ message, mentionMap, channels, p
                         return (
                           <div
                             key={att.id}
-                            className={`group/img relative overflow-hidden border-2 border-black text-left ${
+                            className={`group/img relative overflow-hidden border theme-brutal:border-2 border-line-strong theme-brutal:border-black text-left ${
                               isSingleImage ? "inline-block w-fit max-w-[26rem] justify-self-start" : row.heightClass
-                            } bg-brutal-cream/60 ${isOptimistic ? "opacity-70" : "hover:brightness-95"}`}
+                            } bg-layer-canvas-muted/60 theme-brutal:bg-brutal-cream/60 ${isOptimistic ? "opacity-70" : "hover:brightness-95"}`}
                             style={imageReserveStyle}
                             title={att.filename}
                           >
@@ -4587,7 +4587,7 @@ const MessageItem = memo(function MessageItem({ message, mentionMap, channels, p
                               <button
                                 type="button"
                                 onClick={handleOpenImage}
-                                className="absolute inset-0 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-black"
+                                className="absolute inset-0 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-line-strong theme-brutal:focus-visible:outline-black"
                                 aria-label={formatMessage({ id: "message.messageItem.previewFile" }, { filename: att.filename })}
                               />
                             )}
@@ -4596,7 +4596,7 @@ const MessageItem = memo(function MessageItem({ message, mentionMap, channels, p
                                 type="button"
                                 onClick={handleDownloadImage}
                                 data-message-affordance="image-download"
-                                className="absolute bottom-1 right-1 z-10 hidden size-6 items-center justify-center border border-black bg-white/80 text-black/50 group-hover/img:flex hover:text-black focus:flex focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-black"
+                                className="absolute bottom-1 right-1 z-10 hidden size-6 items-center justify-center border border-line-strong theme-brutal:border-black bg-layer-panel/80 theme-brutal:bg-white/80 text-foreground-muted theme-brutal:text-black/50 group-hover/img:flex hover:text-foreground-strong theme-brutal:hover:text-black focus:flex focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-line-strong theme-brutal:focus-visible:outline-black"
                                 aria-label={formatMessage({ id: "message.messageItem.downloadFile" }, { filename: att.filename })}
                               >
                                 <Download size={12} />
@@ -4769,7 +4769,7 @@ const MessageItem = memo(function MessageItem({ message, mentionMap, channels, p
             {isSaved ? (
               <button
                 type="button"
-                className="inline-flex h-5 min-w-0 max-w-full items-center gap-1 overflow-hidden whitespace-nowrap border border-black bg-brutal-orange/15 px-1.5 text-[10px] font-bold leading-none text-black transition-[filter] duration-100 hover:brightness-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-black"
+                className="inline-flex h-5 min-w-0 max-w-full items-center gap-1 overflow-hidden whitespace-nowrap border border-line-strong theme-brutal:border-black bg-warning-soft/15 theme-brutal:bg-brutal-orange/15 px-1.5 text-[10px] font-bold leading-none text-foreground-strong theme-brutal:text-black transition-[filter] duration-100 hover:brightness-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-line-strong theme-brutal:focus-visible:outline-black"
                 data-message-affordance="saved-badge"
                 title={formatMessage({ id: "message.messageItem.removeFromSaved" })}
                 aria-label={formatMessage({ id: "message.messageItem.removeFromSaved" })}
@@ -4806,11 +4806,11 @@ const MessageItem = memo(function MessageItem({ message, mentionMap, channels, p
                   <ReactionCount count={reaction.count} />
                 </>
               );
-              const reactionClassName = `inline-flex h-5 min-w-0 max-w-full items-center gap-1 overflow-hidden whitespace-nowrap rounded px-1.5 text-[12px] font-bold leading-none text-black ${
+              const reactionClassName = `inline-flex h-5 min-w-0 max-w-full items-center gap-1 overflow-hidden whitespace-nowrap rounded px-1.5 text-[12px] font-bold leading-none text-foreground-strong theme-brutal:text-black ${
                 showFailureFlash
-                  ? "bg-brutal-orange/30"
+                  ? "bg-warning-soft/30 theme-brutal:bg-brutal-orange/30"
                   : currentViewerReacted
-                    ? "bg-brutal-pink/20"
+                    ? "bg-accent-soft/20 theme-brutal:bg-brutal-pink/20"
                     : "bg-black/[0.03]"
               }`;
               return (
@@ -4827,7 +4827,7 @@ const MessageItem = memo(function MessageItem({ message, mentionMap, channels, p
                       onFocus={(event) => showReactionPopover(reaction, event.currentTarget)}
                       onBlur={hideReactionPopover}
                       className={`${reactionClassName} transition-colors ${
-                        currentViewerReacted ? "hover:bg-brutal-pink/30" : "hover:bg-black/[0.08]"
+                        currentViewerReacted ? "hover:bg-accent-soft/30 theme-brutal:hover:bg-brutal-pink/30" : "hover:bg-black/[0.08]"
                       }`}
                       aria-label={formatMessage({ id: "message.messageItem.reactionAria" }, { emoji: reaction.emoji, reactors: reactorSummary })}
                     >
@@ -4858,7 +4858,7 @@ const MessageItem = memo(function MessageItem({ message, mentionMap, channels, p
                         openReactionPicker(event.currentTarget);
                       }
                     }}
-                    className="inline-flex h-5 min-w-0 items-center justify-center rounded bg-black/[0.03] px-1.5 text-black transition-colors hover:bg-black/[0.08] active:bg-black/[0.08]"
+                    className="inline-flex h-5 min-w-0 items-center justify-center rounded bg-black/[0.03] px-1.5 text-foreground-strong theme-brutal:text-black transition-colors hover:bg-black/[0.08] active:bg-black/[0.08]"
                     title={formatMessage({ id: "message.messageItem.addReaction" })}
                     aria-label={formatMessage({ id: "message.messageItem.addReaction" })}
                     data-message-affordance="mobile-reaction-add"
@@ -4874,7 +4874,7 @@ const MessageItem = memo(function MessageItem({ message, mentionMap, channels, p
               // content. It must be the last child, so it is emitted here after
               // every other footer affordance.
               <span
-                className="ml-auto inline-flex h-5 shrink-0 items-center gap-1 whitespace-nowrap text-[10px] font-bold leading-none text-black/45"
+                className="ml-auto inline-flex h-5 shrink-0 items-center gap-1 whitespace-nowrap text-[10px] font-bold leading-none text-foreground-hint theme-brutal:text-black/45"
                 data-message-affordance="read-receipt"
                 title={formatMessage({ id: "message.messageItem.read" })}
                 aria-label={formatMessage({ id: "message.messageItem.read" })}
@@ -4909,7 +4909,7 @@ const MessageItem = memo(function MessageItem({ message, mentionMap, channels, p
     </div>
     {reactionPicker && typeof document !== "undefined" && createPortal(
       <div
-        className="fixed z-[80] flex items-center gap-0.5 border-2 border-black bg-white px-1.5 py-1 shadow-soft-popover"
+        className="fixed z-[80] flex items-center gap-0.5 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white px-1.5 py-1 shadow-soft-popover"
         data-message-affordance="reaction-picker"
         style={{
           left: reactionPicker.x,
@@ -4924,7 +4924,7 @@ const MessageItem = memo(function MessageItem({ message, mentionMap, channels, p
             key={emoji}
             type="button"
             onClick={() => handleQuickReactionClick(emoji)}
-            className="flex size-7 items-center justify-center rounded bg-transparent transition-colors hover:bg-brutal-pink/20"
+            className="flex size-7 items-center justify-center rounded bg-transparent transition-colors hover:bg-accent-soft/20 theme-brutal:hover:bg-brutal-pink/20"
             title={formatMessage({ id: "message.messageItem.reactWith" }, { emoji })}
           >
             <ReactionGlyph emoji={emoji} size={QUICK_REACTION_GLYPH_SIZE} className="block" />
@@ -4937,7 +4937,7 @@ const MessageItem = memo(function MessageItem({ message, mentionMap, channels, p
         <div
         role="tooltip"
         data-message-affordance="reaction-reactors-popover"
-        className="pointer-events-none fixed z-[80] max-w-[280px] border-2 border-black bg-white px-2 py-1.5 text-xs font-bold text-black"
+        className="pointer-events-none fixed z-[80] max-w-[280px] border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white px-2 py-1.5 text-xs font-bold text-foreground-strong theme-brutal:text-black"
         style={{
           left: reactionPopover.x,
           top: reactionPopover.y,
@@ -4949,12 +4949,12 @@ const MessageItem = memo(function MessageItem({ message, mentionMap, channels, p
               <span key={`${reactionPopover.emoji}-${index}-${name}`} className="inline-flex min-w-0 items-baseline leading-5">
                 <span className="max-w-28 truncate">{name}</span>
                 {index < reactionPopover.visibleNames.length - 1 || reactionPopover.hiddenCount > 0 ? (
-                  <span className="shrink-0 text-black/45">, </span>
+                  <span className="shrink-0 text-foreground-hint theme-brutal:text-black/45">, </span>
                 ) : null}
               </span>
             ))}
             {reactionPopover.hiddenCount > 0 && (
-              <span className="leading-5 text-black/50">{formatMessage({ id: "message.messageItem.reactionHiddenMore" }, { count: reactionPopover.hiddenCount })}</span>
+              <span className="leading-5 text-foreground-muted theme-brutal:text-black/50">{formatMessage({ id: "message.messageItem.reactionHiddenMore" }, { count: reactionPopover.hiddenCount })}</span>
             )}
           </div>
         ) : (
@@ -4988,13 +4988,13 @@ const MessageItem = memo(function MessageItem({ message, mentionMap, channels, p
               `<ContextMenuDivider />` matching the other in-menu section
               dividers (CLAUDE.md "Menu dividers" token) — the row itself
               no longer carries `border-b
-              border-black/20` because that produced a thinner, lighter
+              border-line-muted theme-brutal:border-black/20` because that produced a thinner, lighter
               line than other section dividers in the same menu (stdrc
               msg=ed2eee8c "只要一样就行，说白了就分 section"). */}
           {!isSystem && canReact && (
             <>
               <div
-                className="flex h-9 items-center gap-1 bg-white px-2"
+                className="flex h-9 items-center gap-1 bg-layer-panel theme-brutal:bg-white px-2"
                 data-message-affordance="reaction-quick-row"
               >
                 {QUICK_REACTION_EMOJIS.map((emoji) => (
@@ -5005,7 +5005,7 @@ const MessageItem = memo(function MessageItem({ message, mentionMap, channels, p
                       event.stopPropagation();
                       handleQuickReactionClick(emoji);
                     }}
-                    className="flex size-7 items-center justify-center rounded bg-transparent transition-colors hover:bg-brutal-pink/20 active:bg-brutal-pink/20"
+                    className="flex size-7 items-center justify-center rounded bg-transparent transition-colors hover:bg-accent-soft/20 theme-brutal:hover:bg-brutal-pink/20 active:bg-accent-soft/20 theme-brutal:active:bg-brutal-pink/20"
                     title={formatMessage({ id: "message.messageItem.reactWith" }, { emoji })}
                     aria-label={formatMessage({ id: "message.messageItem.reactWith" }, { emoji })}
                   >

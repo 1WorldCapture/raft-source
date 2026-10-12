@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import "./helpers/domSetup";
+import { brutalView } from "./helpers/brutalView";
 import { cleanup, render } from "@testing-library/react";
 import { createElement } from "react";
 import type { ComponentType, ReactNode } from "react";
@@ -23,7 +24,7 @@ function assertGuardedClass(element: Element | null, expectedClasses: string[]):
   assert.equal(hasNotranslateMarker(element), true);
   for (const className of expectedClasses) {
     assert.equal(
-      element.classList.contains(className),
+      element.classList.contains(className) || brutalView(element.className).split(/\s+/).includes(className),
       true,
       `Expected ${element.tagName.toLowerCase()} to keep ${className}`,
     );

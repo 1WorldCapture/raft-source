@@ -24,6 +24,9 @@ const SWEPT = [
   "src/components/layout",
   "src/components/search",
   "src/components/thread",
+  "src/components/message",
+  "src/components/markdown",
+  "src/components/actions",
 ];
 // Top-level files directly under src/components (area 1) are listed by name so
 // sub-folders swept later are not pulled in early.
@@ -69,4 +72,18 @@ test("the codemod writes the semantic class first and the guarded Brutal class s
     `<div className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white text-foreground-muted theme-brutal:text-black/60 hover:bg-fill-muted theme-brutal:hover:bg-black/5 shadow-raft-xs theme-brutal:shadow-brutal-sm" />`,
   );
   assert.equal((transformSource(text) as { changes: number }).changes, 0);
+});
+
+test("a guarded base class keeps losing to its unguarded responsive override in Brutal", () => {
+  const { text } = transformSource(
+    '<div className="border-b-2 border-black md:border-b-0 md:border-r-2 lg:bg-transparent bg-white" />',
+  );
+  // `theme-brutal:` sorts after a plain responsive class, so the override needs a guarded twin
+  // or Brutal would keep the base border at md (the original markup removed it there).
+  assert.match(text, /md:border-b-0 theme-brutal:md:border-b-0/);
+  assert.match(text, /lg:bg-transparent theme-brutal:lg:bg-transparent/);
+  // The semantic half of a swept responsive pair is not an override.
+  assert.doesNotMatch(text, /theme-brutal:md:border-r(?!-2)/);
+  // Idempotent.
+  assert.equal(transformSource(text).changes, 0);
 });

@@ -79,7 +79,7 @@ class MarkdownContentErrorBoundary extends Component<
           data-markdown-dom-fallback=""
           translate={EXTERNAL_TRANSLATION_GUARD_TRANSLATE}
           className={withExternalTranslationGuardClass(
-            "whitespace-pre-wrap break-words font-mono text-[0.875em] leading-relaxed text-black",
+            "whitespace-pre-wrap break-words font-mono text-[0.875em] leading-relaxed text-foreground-strong theme-brutal:text-black",
           )}
           data-immersive-translate-ignore=""
         >
@@ -99,7 +99,7 @@ function BaseCodePre({ children }: { children?: ReactNode }) {
   const language = extractCodeBlockLanguage(children);
   return (
     <CodeBlock
-      className="overflow-x-auto border-2 border-black bg-[#07111f] p-3 pr-12 text-[#f5f7ff] [font-size:inherit] font-mono [&>code]:border-0 [&>code]:bg-transparent [&>code]:p-0"
+      className="overflow-x-auto border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-[#07111f] p-3 pr-12 text-[#f5f7ff] [font-size:inherit] font-mono [&>code]:border-0 [&>code]:bg-transparent [&>code]:p-0"
       code={codeText}
       language={language}
     >
@@ -160,7 +160,7 @@ export function extractCodeBlockLanguage(node: ReactNode): string | null {
  *  Centralizing this keeps tuning like #proj-uiux task #299 single-source
  *  — stdrc 2026-05-24 audit follow-up. */
 export const MARKDOWN_BLOCKQUOTE_BASE_CLASS =
-  "border-l-2 border-black/40 pl-3 italic text-black/70";
+  "border-l theme-brutal:border-l-2 border-line-strong theme-brutal:border-black/40 pl-3 italic text-foreground-muted theme-brutal:text-black/70";
 
 type ExternalTranslationGuardProps = {
   translate: typeof EXTERNAL_TRANSLATION_GUARD_TRANSLATE;
@@ -188,7 +188,7 @@ export function MarkdownCode({
   // Inline code (no language class)
   if (!className) {
     return (
-      <InlineCode className="rounded-none border-0 bg-black/[0.05] px-1 py-0 [font-size:0.875em] font-mono font-normal leading-[1.3em] text-black [overflow-wrap:break-word]">
+      <InlineCode className="rounded-none border-0 bg-black/[0.05] px-1 py-0 [font-size:0.875em] font-mono font-normal leading-[1.3em] text-foreground-strong theme-brutal:text-black [overflow-wrap:break-word]">
         {children}
       </InlineCode>
     );
@@ -229,20 +229,20 @@ export const BASE_MARKDOWN_COMPONENTS: Components = {
   ),
   table: ({ children }) => (
     <div {...externalTranslationGuardProps("my-2 overflow-x-auto")}>
-      <table className="border-collapse border-2 border-black text-sm">{children}</table>
+      <table className="border-collapse border theme-brutal:border-2 border-line-strong theme-brutal:border-black text-sm">{children}</table>
     </div>
   ),
   th: ({ children }) => (
     <th
       {...externalTranslationGuardProps(
-        "border-2 border-black bg-brutal-cyan px-2 py-1 text-left font-bold whitespace-nowrap",
+        "border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-info-soft theme-brutal:bg-brutal-cyan px-2 py-1 text-left font-bold whitespace-nowrap",
       )}
     >
       {children}
     </th>
   ),
   td: ({ children }) => (
-    <td {...externalTranslationGuardProps("border border-black px-2 py-1")}>
+    <td {...externalTranslationGuardProps("border border-line-strong theme-brutal:border-black px-2 py-1")}>
       {children}
     </td>
   ),
@@ -272,13 +272,13 @@ export const BASE_MARKDOWN_COMPONENTS: Components = {
     </h5>
   ),
   h6: ({ children }) => (
-    <h6 {...externalTranslationGuardProps("text-[1em] font-bold mt-1 mb-0.5 leading-tight text-black/70")}>
+    <h6 {...externalTranslationGuardProps("text-[1em] font-bold mt-1 mb-0.5 leading-tight text-foreground-muted theme-brutal:text-black/70")}>
       {children}
     </h6>
   ),
-  hr: () => <hr className="my-2 border-t-2 border-black" />,
+  hr: () => <hr className="my-2 border-t theme-brutal:border-t-2 border-line-strong theme-brutal:border-black" />,
   img: ({ src, alt }) => (
-    <img src={src} alt={alt || ""} className={`my-2 max-w-full border-2 border-black ${transparentImageBackgroundClass}`} />
+    <img src={src} alt={alt || ""} className={`my-2 max-w-full border theme-brutal:border-2 border-line-strong theme-brutal:border-black ${transparentImageBackgroundClass}`} />
   ),
   // Default link renderer — opens in a new tab. Chat surface overrides this
   // to handle @mention / #channel / task / thread / slock permalink markup.

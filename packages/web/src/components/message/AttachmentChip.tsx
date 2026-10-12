@@ -123,15 +123,15 @@ export function AttachmentChip({
   const stateClassName = isOptimistic
     ? "opacity-70"
     : loading
-      ? "!bg-soft-signal/30 cursor-wait"
+      ? "!bg-primary-soft/30 theme-brutal:!bg-soft-signal/30 cursor-wait"
       : "";
   // Single canonical affordance box: bottom-right, no border, fixed 20px tap
   // boxes so sibling preview/download icons share the same baseline.
-  const affordanceClassName = "absolute bottom-1.5 flex size-5 shrink-0 items-center justify-center text-black/60 group-hover/img:text-black";
+  const affordanceClassName = "absolute bottom-1.5 flex size-5 shrink-0 items-center justify-center text-foreground-muted theme-brutal:text-black/60 group-hover/img:text-black";
   const loadingBar = (
     <div
       data-message-affordance="attachment-preview-loading"
-      className="absolute inset-x-0 bottom-0 flex h-6 items-center gap-1.5 border-t-2 border-black bg-soft-signal px-2 text-[10px] font-bold uppercase tracking-wide text-black"
+      className="absolute inset-x-0 bottom-0 flex h-6 items-center gap-1.5 border-t theme-brutal:border-t-2 border-line-strong theme-brutal:border-black bg-primary-soft theme-brutal:bg-soft-signal px-2 text-[10px] font-bold uppercase tracking-wide text-foreground-strong theme-brutal:text-black"
     >
       <Spinner size="xs" />
       <span className="truncate">{resolvedLoadingLabel}</span>
@@ -149,12 +149,12 @@ export function AttachmentChip({
         <TruncatedAttachmentTooltip
           content={attachment.filename}
           affordance="attachment-filename"
-          className="block w-full max-w-full truncate text-xs font-bold text-black"
+          className="block w-full max-w-full truncate text-xs font-bold text-foreground-strong theme-brutal:text-black"
         >
           {attachment.filename}
         </TruncatedAttachmentTooltip>
         {meta || (attachment.commentCount ?? 0) > 0 ? (
-          <div className="mt-0.5 flex min-w-0 max-w-full items-center overflow-hidden text-[10px] text-black/45">
+          <div className="mt-0.5 flex min-w-0 max-w-full items-center overflow-hidden text-[10px] text-foreground-hint theme-brutal:text-black/45">
             {meta}
             {/* Scoped attachment-comment count (MVP §5): rendered inside the
                 existing meta line — text-language badge, no new chip layer.
@@ -164,7 +164,7 @@ export function AttachmentChip({
               && !attachment.mimeType?.startsWith("image/")
               && attachment.mimeType?.split(";")[0]?.trim().toLowerCase() !== "application/pdf" ? (
               <span data-message-affordance="attachment-comment-count" className="inline-flex items-center gap-1 pl-1">
-                {meta ? <span className="text-black/35">·</span> : null}
+                {meta ? <span className="text-foreground-placeholder theme-brutal:text-black/35">·</span> : null}
                 <MessageSquare size={9} className="shrink-0" />
                 {attachment.commentCount}
               </span>
@@ -215,7 +215,7 @@ export function AttachmentChip({
         type="button"
         data-message-affordance={secondaryDownload.affordanceName ?? "file-download"}
         aria-label={secondaryDownload.label}
-        className={`${affordanceClassName} right-7 hover:text-black`}
+        className={`${affordanceClassName} right-7 hover:text-foreground-strong theme-brutal:hover:text-black`}
         onClick={(event) => {
           event.preventDefault();
           event.stopPropagation();

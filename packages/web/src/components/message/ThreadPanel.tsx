@@ -81,7 +81,7 @@ import ThreadAgentFollowers from "../thread/ThreadAgentFollowers";
 const EMPTY_MESSAGES: Message[] = [];
 const SELECTION_TOAST_OPTIONS = { icon: false, dismissible: false } as const;
 const THREAD_SEARCH_HYDRATION_DEBOUNCE_MS = 250;
-const THREAD_PANEL_PARENT_CLASS_NAME = "border-b-2 border-black bg-white px-3 py-3";
+const THREAD_PANEL_PARENT_CLASS_NAME = "border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white px-3 py-3";
 /** Discriminator for HistoryTopState catalog keys — keep out of JSX string attrs. */
 const THREAD_HISTORY_NOUN = "replies" as const;
 export const THREAD_LATEST_WINDOW_LIMIT = 50;
@@ -1933,7 +1933,7 @@ export default function ThreadPanel({
           loadingOlder={loadingOlder}
           noun={THREAD_HISTORY_NOUN}
         />
-        <div className="border-b border-black/10 pb-2 mb-1 text-xs text-black/40 font-mono text-center">
+        <div className="border-b border-line-muted theme-brutal:border-black/10 pb-2 mb-1 text-xs text-foreground-hint theme-brutal:text-black/40 font-mono text-center">
           {formatMessage({ id: "message.inlineThreadReplies.replyCount" }, { count: messages.length })}
         </div>
       </div>
@@ -1944,7 +1944,7 @@ export default function ThreadPanel({
   const threadFooter = useMemo(() => (
     <div className="px-3 pb-3">
       {loadingNewer && (
-        <div className="py-2 text-center text-black/40 font-mono text-xs">
+        <div className="py-2 text-center text-foreground-hint theme-brutal:text-black/40 font-mono text-xs">
           {formatMessage({ id: "message.threadPanel.loadingNewerReplies" })}
         </div>
       )}
@@ -1962,8 +1962,8 @@ export default function ThreadPanel({
   // above adjacent flex siblings after history scroll; keep thread chrome in
   // explicit stack layers so back/input remain reachable.
   const panelClassName = mobilePage
-    ? "isolate flex h-full min-h-0 w-full flex-col bg-white"
-    : "isolate flex h-full min-h-0 w-full flex-col bg-white";
+    ? "isolate flex h-full min-h-0 w-full flex-col bg-layer-panel theme-brutal:bg-white"
+    : "isolate flex h-full min-h-0 w-full flex-col bg-layer-panel theme-brutal:bg-white";
   const threadChromeLayerClassName = "relative z-20 shrink-0";
   const threadContentLayerClassName = mobilePage
     ? "relative z-0 min-h-0 flex-1 overflow-hidden"
@@ -1974,8 +1974,8 @@ export default function ThreadPanel({
   //   mobile-modal — NO X (full-screen overlay, back chevron handles close)
   //   side         — X on desktop (lg+) only; mobile uses back chevron
   const closeButtonClassName = presentation === "modal"
-    ? "btn-brutal-sm flex size-7 items-center justify-center bg-white"
-    : "btn-brutal-sm hidden size-7 items-center justify-center bg-white lg:flex";
+    ? "btn-brutal-sm flex size-7 items-center justify-center bg-layer-panel theme-brutal:bg-white"
+    : "btn-brutal-sm hidden size-7 items-center justify-center bg-layer-panel theme-brutal:bg-white lg:flex";
 
   // Show a loading shell while threadChannelId is being fetched (first-open
   // case). If resolution actually failed for *this* parent (e.g. the permalink
@@ -2013,22 +2013,22 @@ export default function ThreadPanel({
         <div className="flex flex-1 items-center justify-center p-6">
           {resolveFailed ? (
             <div className="flex flex-col items-center gap-3 text-center">
-              <div className="font-display text-lg font-bold text-black">
+              <div className="font-display text-lg font-bold text-foreground-strong theme-brutal:text-black">
                 {formatMessage({ id: "message.threadPanel.loadFailedTitle" })}
               </div>
-              <div className="max-w-xs text-sm text-black/60">
+              <div className="max-w-xs text-sm text-foreground-muted theme-brutal:text-black/60">
                 {formatMessage({ id: "message.threadPanel.loadFailedBody" })}
               </div>
               <button
                 onClick={() => { void retryOpenThread(); }}
-                className="btn-brutal-sm bg-white px-3 py-1.5 text-sm font-bold"
+                className="btn-brutal-sm bg-layer-panel theme-brutal:bg-white px-3 py-1.5 text-sm font-bold"
                 data-testid="thread-retry"
               >
                 {formatMessage({ id: "message.threadPanel.retry" })}
               </button>
             </div>
           ) : (
-            <div className="text-black/40 font-mono text-sm">{formatMessage({ id: "message.chatPanel.loading" })}</div>
+            <div className="text-foreground-hint theme-brutal:text-black/40 font-mono text-sm">{formatMessage({ id: "message.chatPanel.loading" })}</div>
           )}
         </div>
       </div>
@@ -2130,7 +2130,7 @@ export default function ThreadPanel({
           event.stopPropagation();
           handleClose();
         }}
-        className="btn-brutal-sm flex size-7 shrink-0 items-center justify-center bg-white"
+        className="btn-brutal-sm flex size-7 shrink-0 items-center justify-center bg-layer-panel theme-brutal:bg-white"
         aria-label={openParentChannelLabel}
         data-testid="thread-view-in-channel"
       >
@@ -2153,7 +2153,7 @@ export default function ThreadPanel({
     <>
       <button
         onClick={() => openThreadSearch()}
-        className="btn-brutal-sm flex size-7 shrink-0 items-center justify-center bg-white"
+        className="btn-brutal-sm flex size-7 shrink-0 items-center justify-center bg-layer-panel theme-brutal:bg-white"
         title={formatMessage({ id: "message.threadPanel.searchInThread" })}
         aria-label={formatMessage({ id: "message.threadPanel.searchInThread" })}
         data-testid="thread-search-open"
@@ -2162,7 +2162,7 @@ export default function ThreadPanel({
       </button>
       <button
         onClick={handleOpenInNewTab}
-        className="btn-brutal-sm flex size-7 shrink-0 items-center justify-center bg-white"
+        className="btn-brutal-sm flex size-7 shrink-0 items-center justify-center bg-layer-panel theme-brutal:bg-white"
         title={formatMessage({ id: "message.threadPanel.openInNewTab" })}
         aria-label={formatMessage({ id: "message.threadPanel.openInNewTab" })}
         data-testid="thread-open-new-tab"
@@ -2176,7 +2176,7 @@ export default function ThreadPanel({
   const composerContainerClassName = mobilePage
     ? threadChromeLayerClassName
     : overlayComposer
-    ? "absolute inset-x-0 bottom-0 bg-white shadow-brutal"
+    ? "absolute inset-x-0 bottom-0 bg-layer-panel theme-brutal:bg-white shadow-raft-sm theme-brutal:shadow-brutal"
     : threadChromeLayerClassName;
   const composerTestId = workspaceComposer
     ? "workspace-panel-composer"
@@ -2214,7 +2214,7 @@ export default function ThreadPanel({
           <button
             type="button"
             onClick={() => { void jumpToThreadStart(); }}
-            className="flex h-panel-header w-full min-w-0 items-center font-bold text-black text-base truncate text-left"
+            className="flex h-panel-header w-full min-w-0 items-center font-bold text-foreground-strong theme-brutal:text-black text-base truncate text-left"
             title={formatMessage({ id: "message.threadPanel.scrollToFirst" })}
             aria-label={formatMessage({ id: "message.threadPanel.scrollThreadToFirst" })}
             data-testid="thread-scroll-to-top"
@@ -2226,7 +2226,7 @@ export default function ThreadPanel({
               if (!ch) return null;
               const label = ch.type === "dm" ? `@${ch.peerDisplayName || ch.peerName || ch.name}` : `#${ch.name}`;
               // Stryker restore all
-              return <span className="font-normal text-black/50"> — {label}</span>;
+              return <span className="font-normal text-foreground-muted theme-brutal:text-black/50"> — {label}</span>;
             })()}
           </button>
         }
@@ -2259,10 +2259,10 @@ export default function ThreadPanel({
       {/* Stryker restore all */}
       {threadSearchOpen && (
         <div
-          className={`${threadChromeLayerClassName} flex items-center gap-1.5 border-b-2 border-black bg-white px-2 py-2`}
+          className={`${threadChromeLayerClassName} flex items-center gap-1.5 border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white px-2 py-2`}
           data-testid="thread-search-bar"
         >
-          <Search size={14} className="shrink-0 text-black/50" />
+          <Search size={14} className="shrink-0 text-foreground-muted theme-brutal:text-black/50" />
           <input
             ref={threadSearchInputRef}
             value={threadSearchQuery}
@@ -2287,12 +2287,12 @@ export default function ThreadPanel({
                 goToThreadSearchMatch(event.shiftKey ? -1 : 1);
               }
             }}
-            className="min-w-0 flex-1 border-2 border-black bg-white px-2 py-1 text-sm font-medium outline-none focus:shadow-brutal-sm"
+            className="min-w-0 flex-1 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white px-2 py-1 text-sm font-medium outline-none focus:shadow-raft-xs theme-brutal:focus:shadow-brutal-sm"
             placeholder={formatMessage({ id: "message.threadPanel.searchThisThread" })}
             aria-label={formatMessage({ id: "message.threadPanel.searchThisThread" })}
             data-testid="thread-search-input"
           />
-          <div className="w-20 shrink-0 text-center font-mono text-xs text-black/50" data-testid="thread-search-count">
+          <div className="w-20 shrink-0 text-center font-mono text-xs text-foreground-muted theme-brutal:text-black/50" data-testid="thread-search-count">
             {normalizeThreadSearchQuery(threadSearchQuery) && threadSearchLoading
               ? formatMessage({ id: "message.threadPanel.searchLoading" })
               : normalizeThreadSearchQuery(threadSearchQuery)
@@ -2304,7 +2304,7 @@ export default function ThreadPanel({
           <button
             onClick={() => goToThreadSearchMatch(-1)}
             disabled={threadSearchMatches.length === 0}
-            className="btn-brutal-sm flex size-7 items-center justify-center bg-white disabled:opacity-40"
+            className="btn-brutal-sm flex size-7 items-center justify-center bg-layer-panel theme-brutal:bg-white disabled:opacity-40"
             title={formatMessage({ id: "message.threadPanel.previousMatch" })}
             aria-label={formatMessage({ id: "message.threadPanel.previousMatch" })}
           >
@@ -2313,7 +2313,7 @@ export default function ThreadPanel({
           <button
             onClick={() => goToThreadSearchMatch(1)}
             disabled={threadSearchMatches.length === 0}
-            className="btn-brutal-sm flex size-7 items-center justify-center bg-white disabled:opacity-40"
+            className="btn-brutal-sm flex size-7 items-center justify-center bg-layer-panel theme-brutal:bg-white disabled:opacity-40"
             title={formatMessage({ id: "message.threadPanel.nextMatch" })}
             aria-label={formatMessage({ id: "message.threadPanel.nextMatch" })}
           >
@@ -2321,7 +2321,7 @@ export default function ThreadPanel({
           </button>
           <button
             onClick={closeThreadSearch}
-            className="btn-brutal-sm flex size-7 items-center justify-center bg-white"
+            className="btn-brutal-sm flex size-7 items-center justify-center bg-layer-panel theme-brutal:bg-white"
             title={formatMessage({ id: "message.threadPanel.closeThreadSearch" })}
             aria-label={formatMessage({ id: "message.threadPanel.closeThreadSearch" })}
           >
@@ -2359,7 +2359,7 @@ export default function ThreadPanel({
               </div>
             )}
             <div className="flex flex-1 items-center justify-center">
-              <div className="text-black/40 font-mono text-sm">{formatMessage({ id: "message.chatPanel.loading" })}</div>
+              <div className="text-foreground-hint theme-brutal:text-black/40 font-mono text-sm">{formatMessage({ id: "message.chatPanel.loading" })}</div>
             </div>
           </div>
         ) : messages.length === 0 ? (
@@ -2412,7 +2412,7 @@ export default function ThreadPanel({
         {showBottomButton && (
           <button
             onClick={handleBottomButton}
-            className="btn-brutal-sm absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-1.5 bg-white px-3 py-1.5 text-xs font-bold z-10"
+            className="btn-brutal-sm absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-1.5 bg-layer-panel theme-brutal:bg-white px-3 py-1.5 text-xs font-bold z-10"
           >
             <ArrowDown size={12} />
             {/* Stryker disable all: pre-existing scroll-status copy is outside the workspace mutation corpus. */}
@@ -2443,12 +2443,12 @@ export default function ThreadPanel({
             onSelectAll={handleSelectAllInThread}
           />
         ) : parentJointFeatureLocked ? (
-          <div className="border-t-2 border-black bg-white p-3">
+          <div className="border-t theme-brutal:border-t-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white p-3">
             <Banner intent="warning" className="justify-center text-center font-bold">
               {formatMessage({ id: "message.chatPanel.jointLocked" })}
               <button
                 onClick={() => nav.toSettings("billing")}
-                className="font-bold text-black underline"
+                className="font-bold text-foreground-strong theme-brutal:text-black underline"
               >
                 {formatMessage({ id: "message.chatPanel.viewBilling" })}
               </button>
@@ -2470,10 +2470,10 @@ export default function ThreadPanel({
             autoFocus={composerAutoFocus}
           />
         ) : showJoinParentChannel ? (
-          <div className="flex items-center border-t-2 border-black bg-white p-3">
+          <div className="flex items-center border-t theme-brutal:border-t-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white p-3">
             <button
               onClick={handleJoinParentChannel}
-              className="btn-brutal flex w-full items-center justify-center gap-1.5 bg-brutal-pink px-3 py-1.5 text-sm font-bold"
+              className="btn-brutal flex w-full items-center justify-center gap-1.5 bg-accent-soft theme-brutal:bg-brutal-pink px-3 py-1.5 text-sm font-bold"
             >
               <LogIn size={14} />
               {formatMessage({ id: "message.threadPanel.joinChannelToReply" })}
@@ -2504,7 +2504,7 @@ export default function ThreadPanel({
       {picError && (
         <div
           role="alert"
-          className="fixed bottom-20 left-1/2 z-[110] -translate-x-1/2 border-2 border-black bg-brutal-orange px-3 py-2 text-xs font-bold shadow-brutal-sm"
+          className="fixed bottom-20 left-1/2 z-[110] -translate-x-1/2 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-warning-soft theme-brutal:bg-brutal-orange px-3 py-2 text-xs font-bold shadow-raft-xs theme-brutal:shadow-brutal-sm"
           onClick={() => setPicError(null)}
           data-testid="thread-select-share-error"
         >

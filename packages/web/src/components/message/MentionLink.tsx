@@ -67,8 +67,8 @@ export default function MentionLink({ mentionType, mentionId, onNavigate, childr
         // glyphs (line-height), which made a `-top-1` badge read as floating
         // above the row rather than sitting on the mention's corner. Anchor it
         // down onto the corner and slightly further right (artin, 7-28).
-        className={`pointer-events-none absolute -right-1.5 top-0 size-2 shrink-0 rounded-full border border-black ${
-          agentReadState === "read" ? "bg-brutal-lime" : "bg-white"
+        className={`pointer-events-none absolute -right-1.5 top-0 size-2 shrink-0 rounded-full border border-line-strong theme-brutal:border-black ${
+          agentReadState === "read" ? "bg-success-soft theme-brutal:bg-brutal-lime" : "bg-layer-panel theme-brutal:bg-white"
         }`}
       />
     );
@@ -84,9 +84,9 @@ export default function MentionLink({ mentionType, mentionId, onNavigate, childr
           previewActionsRef.current?.close();
           onNavigate();
         }}
-        className={`cursor-default select-text font-bold text-black ${
+        className={`cursor-default select-text font-bold text-foreground-strong theme-brutal:text-black ${
           isSelfMention
-            ? `${MSG_REF_CHIP} bg-soft-signal hover:bg-soft-signal/80`
+            ? `${MSG_REF_CHIP} bg-primary-soft theme-brutal:bg-soft-signal hover:bg-primary-soft/80 theme-brutal:hover:bg-soft-signal/80`
             : "underline decoration-black/30 decoration-2 underline-offset-2 hover:text-brutal-pink hover:decoration-brutal-pink"
         }`}
       >

@@ -32,7 +32,7 @@ export function DateDivider({
   if (!label) return null;
 
   const chip = (
-    <span className="inline-flex items-center bg-white px-2 text-[10px] font-bold uppercase tracking-widest text-black/50">
+    <span className="inline-flex items-center bg-layer-panel theme-brutal:bg-white px-2 text-[10px] font-bold uppercase tracking-widest text-foreground-muted theme-brutal:text-black/50">
       {label}
     </span>
   );
@@ -49,8 +49,8 @@ export function DateDivider({
   // Inline divider: centered chip over a full-width rule.
   return (
     <div className="relative flex select-none items-center justify-center px-3 py-2" data-testid={testId}>
-      <div className="absolute inset-x-3 top-1/2 border-t-2 border-black/15" aria-hidden />
-      <div className="relative bg-white">{chip}</div>
+      <div className="absolute inset-x-3 top-1/2 border-t theme-brutal:border-t-2 border-line-muted theme-brutal:border-black/15" aria-hidden />
+      <div className="relative bg-layer-panel theme-brutal:bg-white">{chip}</div>
     </div>
   );
 }

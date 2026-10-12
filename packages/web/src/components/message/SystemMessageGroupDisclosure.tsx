@@ -19,7 +19,7 @@ export default function SystemMessageGroupDisclosure({
       <div className="flex justify-center py-1.5">
         <button
           type="button"
-          className="group flex max-w-full items-center gap-1.5 px-2 py-1 text-xs text-black/50 hover:text-black/75"
+          className="group flex max-w-full items-center gap-1.5 px-2 py-1 text-xs text-foreground-muted theme-brutal:text-black/50 hover:text-foreground-strong theme-brutal:hover:text-black/75"
           onClick={onToggle}
           aria-expanded={expanded}
           title={summary}
@@ -28,7 +28,7 @@ export default function SystemMessageGroupDisclosure({
           <span className="truncate">{summary}</span>
           <ChevronRight
             aria-hidden
-            className={`size-3 shrink-0 text-black/35 transition-transform ${expanded ? "-rotate-90" : "rotate-90"}`}
+            className={`size-3 shrink-0 text-foreground-placeholder theme-brutal:text-black/35 transition-transform ${expanded ? "-rotate-90" : "rotate-90"}`}
           />
         </button>
       </div>
