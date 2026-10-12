@@ -114,6 +114,13 @@ click, the app/service log tails, and the exact command output a verdict rests
 on. Sanity-check it before deleting: **is every claim I am about to make still
 backed by a file that exists?**
 
+### Traces do not upload from an isolated root
+
+An isolated home has no trace-ingest credentials, so the Computer logs trace
+upload 401s. That is expected there, not a fault to chase — but it means
+**trace-based observation does not work inside a drill**. Collect what you need
+from local state and log files instead.
+
 ## What is still unexplained
 
 A 0.2.5 drill saw the app's `Start` fail with
