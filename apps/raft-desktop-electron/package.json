@@ -11,6 +11,7 @@
     "build:computer-lib": "pnpm --filter @botiverse/raft-computer run build",
     "pretypecheck": "pnpm run build:computer-lib",
     "typecheck": "tsc --noEmit",
+    "check:frontend-names": "node scripts/check-frontend-undefined-names.mjs",
     "build:deps": "pnpm --filter \"@botiverse/raft-desktop-electron^...\" --if-present build",
     "build:main": "rm -f dist/*.js dist/*.cjs dist/*.map && tsup --config tsup.config.ts",
     "build:frontend": "vite build --config frontend/vite.config.ts",
