@@ -581,8 +581,14 @@ export function parseAttachmentByteRange(rangeHeader: string | string[] | undefi
   return { start, end: Math.min(end, size - 1), size };
 }
 
+// The Desktop app's bundled frontend runs on the app://raft origin. It is not a
+// CORS origin (the Desktop main process rewrites CORS for it), so it is added
+// here, to frame-ancestors only, or Chromium blocks every preview iframe.
+const DESKTOP_APP_FRAME_ANCESTOR = "app://raft";
+
 function getHtmlPreviewFrameAncestorOrigins(raw = process.env.CORS_ORIGIN): string[] {
-  return getWebFrameAncestorOrigins(raw);
+  const origins = getWebFrameAncestorOrigins(raw);
+  return origins.includes(DESKTOP_APP_FRAME_ANCESTOR) ? origins : [...origins, DESKTOP_APP_FRAME_ANCESTOR];
 }
 
 export function buildAttachmentInlinePreviewContentSecurityPolicy(frameAncestorOrigins = getHtmlPreviewFrameAncestorOrigins()): string {
