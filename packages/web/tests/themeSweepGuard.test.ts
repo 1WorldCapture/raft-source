@@ -53,7 +53,9 @@ const SWEPT_TOP_LEVEL_COMPONENTS = true;
 // Single sources of truth whose Brutal class names are DATA (resolved to CSS variables, shared with
 // the mobile palette and pinned by taskStatusBadgeConfig): sweeping them changes what those
 // consumers read. Elegant status colours need a semantic field in the SSOT first (follow-up).
-const EXEMPT = ["src/components/task/taskStatusUi.ts"];
+// AppearanceThemePicker's preview mocks paint a SPECIFIC theme inside any theme (explicit isBrutal
+// branches, per its own comment), so their literal Brutal classes must not be theme-guarded.
+const EXEMPT = ["src/components/task/taskStatusUi.ts", "src/components/settings/AppearanceThemePicker.tsx"];
 
 function* walk(path: string): Generator<string> {
   const st = statSync(path);
