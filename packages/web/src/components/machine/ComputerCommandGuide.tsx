@@ -98,15 +98,15 @@ function CommandRows({
     <div className="space-y-3">
       {steps.map(({ target, label, command, copyCommand, copyAriaLabel }) => (
         <div key={target}>
-          {label ? <div className="mb-1 text-xs font-bold text-black/60">{label}</div> : null}
+          {label ? <div className="mb-1 text-xs font-bold text-foreground-muted theme-brutal:text-black/60">{label}</div> : null}
           <div className="flex items-center gap-2">
-            <code className="min-w-0 flex-1 border-2 border-black bg-black px-3 py-2 font-mono text-xs text-brutal-lime shadow-brutal-sm break-all">
+            <code className="min-w-0 flex-1 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-foreground-strong theme-brutal:bg-black px-3 py-2 font-mono text-xs text-brutal-lime shadow-raft-xs theme-brutal:shadow-brutal-sm break-all">
               {command}
             </code>
             <button
               type="button"
               onClick={() => onCopy(target, copyCommand ?? command)}
-              className="btn-brutal-sm shrink-0 bg-white px-2 py-1.5"
+              className="btn-brutal-sm shrink-0 bg-layer-panel theme-brutal:bg-white px-2 py-1.5"
               title={copyAriaLabel}
               aria-label={copyAriaLabel}
             >
@@ -143,7 +143,7 @@ function ComputerStepsArea({
   if (mode === "loading") {
     return (
       <div
-        className="border-2 border-black/30 bg-white px-3 py-2 text-xs font-bold text-black/50"
+        className="border theme-brutal:border-2 border-line-muted theme-brutal:border-black/30 bg-layer-panel theme-brutal:bg-white px-3 py-2 text-xs font-bold text-foreground-muted theme-brutal:text-black/50"
         data-testid="computer-commands-pending"
       >
         {pendingLabel}
@@ -155,7 +155,7 @@ function ComputerStepsArea({
       <CommandRows steps={steps} copiedCommand={copiedCommand} onCopy={onCopy} />
       {mode === "unknown" ? (
         <p
-          className="border-2 border-amber-500 bg-amber-50 px-3 py-2 text-xs font-bold leading-5 text-amber-800"
+          className="border theme-brutal:border-2 border-amber-500 bg-amber-50 px-3 py-2 text-xs font-bold leading-5 text-amber-800"
           data-testid="computer-commands-mode-unknown"
         >
           {notice}
@@ -240,7 +240,7 @@ export default function ComputerCommandGuide({
     <div className={className}>
       <div className="mb-2 flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
         <div className="flex items-center gap-2">
-          <Terminal size={16} className="text-black" />
+          <Terminal size={16} className="text-foreground-strong theme-brutal:text-black" />
           <SectionEyebrow as="div">{formatMessage({ id: "machine.commandGuide.connectCommand" })}</SectionEyebrow>
         </div>
         <SegmentedControl<ComputerCommandPlatform>
@@ -265,7 +265,7 @@ export default function ComputerCommandGuide({
         </SegmentedControl>
       </div>
 
-      <p className="mb-2 text-xs leading-5 text-black/60">
+      <p className="mb-2 text-xs leading-5 text-foreground-muted theme-brutal:text-black/60">
         {isComputerGuide
           ? platform === "windows"
             ? formatMessage({ id: "machine.commandGuide.windowsComputerDescription" })
@@ -281,7 +281,7 @@ export default function ComputerCommandGuide({
         <div className="space-y-4">
           <div className="space-y-3" data-testid="windows-computer-command-block">
             <div className="flex flex-wrap items-center gap-2">
-              <div className="text-xs font-bold uppercase tracking-wide text-black/70">
+              <div className="text-xs font-bold uppercase tracking-wide text-foreground-muted theme-brutal:text-black/70">
                 {formatMessage({ id: "machine.commandGuide.raftComputerWindowsX64" })}
               </div>
               <Badge.Experimental />
@@ -296,18 +296,18 @@ export default function ComputerCommandGuide({
                 notice={formatMessage({ id: "machine.commandGuide.deploymentModeUnknown" })}
               />
             ) : (
-              <div className="border-2 border-black/30 bg-white px-3 py-2 text-xs font-bold text-black/50">
+              <div className="border theme-brutal:border-2 border-line-muted theme-brutal:border-black/30 bg-layer-panel theme-brutal:bg-white px-3 py-2 text-xs font-bold text-foreground-muted theme-brutal:text-black/50">
                 {formatMessage({ id: "machine.commandGuide.generateFreshComputerConnect" })}
               </div>
             )}
           </div>
 
           {!showLegacyDaemon ? null : (
-            <div className="border-t-2 border-black/20 pt-3" data-testid="windows-daemon-command-block">
-              <div className="mb-1 text-xs font-bold uppercase tracking-wide text-black/70">
+            <div className="border-t theme-brutal:border-t-2 border-line-muted theme-brutal:border-black/20 pt-3" data-testid="windows-daemon-command-block">
+              <div className="mb-1 text-xs font-bold uppercase tracking-wide text-foreground-muted theme-brutal:text-black/70">
                 {formatMessage({ id: "machine.commandGuide.daemonLegacy" })}
               </div>
-              <p className="mb-2 text-xs leading-5 text-black/55">
+              <p className="mb-2 text-xs leading-5 text-foreground-muted theme-brutal:text-black/55">
                 {formatMessage({ id: "machine.commandGuide.daemonLegacyDescription" })}
               </p>
               {windowsDaemonCommand ? (
@@ -321,7 +321,7 @@ export default function ComputerCommandGuide({
                   type="button"
                   onClick={requestWindowsDaemonCommand}
                   disabled={windowsDaemonCommandPending}
-                  className="btn-brutal-sm bg-white px-3 py-1.5 disabled:cursor-wait disabled:opacity-60"
+                  className="btn-brutal-sm bg-layer-panel theme-brutal:bg-white px-3 py-1.5 disabled:cursor-wait disabled:opacity-60"
                   data-testid="computer-windows-daemon-request"
                 >
                   {windowsDaemonCommandPending
@@ -329,7 +329,7 @@ export default function ComputerCommandGuide({
                     : formatMessage({ id: "machine.commandGuide.showLegacyDaemonCommand" })}
                 </button>
               ) : (
-                <div className="border-2 border-black/30 bg-white px-3 py-2 text-xs font-bold text-black/50">
+                <div className="border theme-brutal:border-2 border-line-muted theme-brutal:border-black/30 bg-layer-panel theme-brutal:bg-white px-3 py-2 text-xs font-bold text-foreground-muted theme-brutal:text-black/50">
                   {formatMessage({ id: "machine.commandGuide.generateFreshDaemonConnect" })}
                 </div>
               )}
@@ -356,7 +356,7 @@ export default function ComputerCommandGuide({
           type="button"
           onClick={requestWindowsDaemonCommand}
           disabled={windowsDaemonCommandPending}
-          className="btn-brutal-sm bg-white px-3 py-1.5 disabled:cursor-wait disabled:opacity-60"
+          className="btn-brutal-sm bg-layer-panel theme-brutal:bg-white px-3 py-1.5 disabled:cursor-wait disabled:opacity-60"
           data-testid="computer-windows-daemon-request"
         >
           {windowsDaemonCommandPending
@@ -364,7 +364,7 @@ export default function ComputerCommandGuide({
             : formatMessage({ id: "machine.commandGuide.generateLegacyDaemonCommand" })}
         </button>
       ) : (
-        <div className="border-2 border-black/30 bg-white px-3 py-2 text-xs font-bold text-black/50">
+        <div className="border theme-brutal:border-2 border-line-muted theme-brutal:border-black/30 bg-layer-panel theme-brutal:bg-white px-3 py-2 text-xs font-bold text-foreground-muted theme-brutal:text-black/50">
           {formatMessage({ id: "machine.commandGuide.generateFreshConnect" })}
         </div>
       )}

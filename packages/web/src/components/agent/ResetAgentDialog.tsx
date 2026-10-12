@@ -39,14 +39,14 @@ export default function ResetAgentDialog({
 
   const options: { mode: ResetMode; labelId: MessageId; descId: MessageId; color: string }[] = memberRuntimeOnly
     ? [
-        { mode: "restart", labelId: "agent.reset.restartModel", descId: "agent.reset.restartModelDesc", color: "bg-brutal-cyan/20" },
-        { mode: "session", labelId: "agent.reset.model", descId: "agent.reset.modelDesc", color: "bg-brutal-orange/20" },
+        { mode: "restart", labelId: "agent.reset.restartModel", descId: "agent.reset.restartModelDesc", color: "bg-info-soft/20 theme-brutal:bg-brutal-cyan/20" },
+        { mode: "session", labelId: "agent.reset.model", descId: "agent.reset.modelDesc", color: "bg-warning-soft/20 theme-brutal:bg-brutal-orange/20" },
       ]
     : [
-        { mode: "restart", labelId: "agent.reset.restart", descId: "agent.reset.restartDesc", color: "bg-brutal-cyan/20" },
-        { mode: "session", labelId: "agent.reset.session", descId: "agent.reset.sessionDesc", color: "bg-brutal-orange/20" },
+        { mode: "restart", labelId: "agent.reset.restart", descId: "agent.reset.restartDesc", color: "bg-info-soft/20 theme-brutal:bg-brutal-cyan/20" },
+        { mode: "session", labelId: "agent.reset.session", descId: "agent.reset.sessionDesc", color: "bg-warning-soft/20 theme-brutal:bg-brutal-orange/20" },
         ...(canFullReset
-          ? [{ mode: "full" as const, labelId: "agent.reset.full" as const, descId: "agent.reset.fullDesc" as const, color: "bg-brutal-red/20" }]
+          ? [{ mode: "full" as const, labelId: "agent.reset.full" as const, descId: "agent.reset.fullDesc" as const, color: "bg-danger-soft/20 theme-brutal:bg-brutal-red/20" }]
           : []),
       ];
 
@@ -66,14 +66,14 @@ export default function ResetAgentDialog({
                 key={opt.mode}
                 type="button"
                 onClick={() => setMode(opt.mode)}
-                className={`w-full text-left border-2 p-4 transition-colors ${
+                className={`w-full text-left border theme-brutal:border-2 p-4 transition-colors ${
                   mode === opt.mode
-                    ? `border-black ${opt.color} shadow-brutal-sm`
-                    : "border-black/30 hover:border-black"
+                    ? `border-line-strong theme-brutal:border-black ${opt.color} shadow-raft-xs theme-brutal:shadow-brutal-sm`
+                    : "border-line-muted theme-brutal:border-black/30 hover:border-line-strong theme-brutal:hover:border-black"
                 }`}
               >
                 <div className="font-bold text-sm uppercase">{formatMessage({ id: opt.labelId })}</div>
-                <p className="mt-1 text-xs text-black/60">{formatMessage({ id: opt.descId })}</p>
+                <p className="mt-1 text-xs text-foreground-muted theme-brutal:text-black/60">{formatMessage({ id: opt.descId })}</p>
               </button>
             ))}
           </div>

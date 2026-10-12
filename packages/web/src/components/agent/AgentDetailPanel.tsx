@@ -244,8 +244,8 @@ const PUBLIC_AGENT_TABS = new Set<AgentTab>(["profile"]);
 // no longer exposed from Agent detail; old saved tab orders are ignored because
 // they no longer match AGENT_TABS.
 const AGENT_ROLE_CONFIG: Record<Extract<ServerRole, "admin" | "member">, { labelId: MessageId; color: string }> = {
-  admin: { labelId: "agent.detail.roleAdmin", color: "bg-brutal-pink" },
-  member: { labelId: "agent.detail.roleMember", color: "bg-brutal-lavender" },
+  admin: { labelId: "agent.detail.roleAdmin", color: "bg-accent-soft theme-brutal:bg-brutal-pink" },
+  member: { labelId: "agent.detail.roleMember", color: "bg-secondary-200 theme-brutal:bg-brutal-lavender" },
 };
 const EDITABLE_AGENT_ROLE_OPTIONS: { id: Extract<ServerRole, "admin" | "member">; labelId: MessageId }[] = [
   { id: "admin", labelId: "agent.detail.roleAdmin" },
@@ -310,11 +310,11 @@ function visibleAgentChatChannels(items: AgentChannelMembership[]): AgentChannel
 function AgentChatInlineEmpty({ icon, title, description }: { icon: ReactNode; title: string; description: string }) {
   return (
     <div className="px-4 pb-4">
-      <div className="flex items-center gap-3 border border-black/15 bg-black/[0.015] px-3 py-2">
-        <div className="shrink-0 text-black/35">{icon}</div>
+      <div className="flex items-center gap-3 border border-line-muted theme-brutal:border-black/15 bg-black/[0.015] px-3 py-2">
+        <div className="shrink-0 text-foreground-placeholder theme-brutal:text-black/35">{icon}</div>
         <div className="min-w-0">
-          <div className="text-sm font-bold text-black/65">{title}</div>
-          <div className="mt-0.5 text-xs text-black/45">{description}</div>
+          <div className="text-sm font-bold text-foreground-muted theme-brutal:text-black/65">{title}</div>
+          <div className="mt-0.5 text-xs text-foreground-hint theme-brutal:text-black/45">{description}</div>
         </div>
       </div>
     </div>
@@ -380,8 +380,8 @@ function AgentChatTab({ agentId }: { agentId: string }) {
     : channels.items.slice(0, AGENT_CHAT_CHANNEL_PREVIEW_LIMIT);
 
   return (
-    <div className="flex-1 overflow-y-auto bg-white">
-      <div className="border-b-2 border-black bg-white px-5 py-3">
+    <div className="flex-1 overflow-y-auto bg-layer-panel theme-brutal:bg-white">
+      <div className="border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white px-5 py-3">
         <SectionEyebrow as="div">{formatMessage({ id: "agent.detail.channelsAndDms" })}</SectionEyebrow>
       </div>
 
@@ -399,15 +399,15 @@ function AgentChatTab({ agentId }: { agentId: string }) {
         />
       ) : (
         <>
-          <section className="border-b border-black/10">
+          <section className="border-b border-line-muted theme-brutal:border-black/10">
             <div className="px-5 py-3">
               <SectionHeader label={formatMessage({ id: "agent.detail.channels" })} />
-              <div className="mt-1 text-xs text-black/60">
+              <div className="mt-1 text-xs text-foreground-muted theme-brutal:text-black/60">
                 {formatMessage({ id: "agent.detail.channelsDescription" })}
               </div>
             </div>
             {channels.loading ? (
-              <div className="px-5 pb-4 font-mono text-xs text-black/40">
+              <div className="px-5 pb-4 font-mono text-xs text-foreground-hint theme-brutal:text-black/40">
                 {formatMessage({ id: "agent.detail.loadingAgentChannels" })}
               </div>
             ) : channels.error ? (
@@ -434,14 +434,14 @@ function AgentChatTab({ agentId }: { agentId: string }) {
                         <div className="min-w-0">
                           <div className="flex min-w-0 items-center gap-2">
                             {item.type === "private" ? (
-                              <Lock size={14} className="shrink-0 text-black/45" aria-label={formatMessage({ id: "agent.detail.privateChannel" })} />
+                              <Lock size={14} className="shrink-0 text-foreground-hint theme-brutal:text-black/45" aria-label={formatMessage({ id: "agent.detail.privateChannel" })} />
                             ) : (
-                              <Hash size={14} className="shrink-0 text-black/45" aria-label={formatMessage({ id: "agent.detail.channel" })} />
+                              <Hash size={14} className="shrink-0 text-foreground-hint theme-brutal:text-black/45" aria-label={formatMessage({ id: "agent.detail.channel" })} />
                             )}
-                            <span className="truncate text-sm font-bold text-black">{item.name}</span>
+                            <span className="truncate text-sm font-bold text-foreground-strong theme-brutal:text-black">{item.name}</span>
                             {item.activityMuted && (
                               <span
-                                className="inline-flex shrink-0 items-center text-black/45"
+                                className="inline-flex shrink-0 items-center text-foreground-hint theme-brutal:text-black/45"
                                 title={item.muteFromSeq != null
                                   ? formatMessage({ id: "agent.detail.activityMutedFromSeq" }, { seq: item.muteFromSeq })
                                   : formatMessage({ id: "agent.detail.activityMuted" })}
@@ -454,11 +454,11 @@ function AgentChatTab({ agentId }: { agentId: string }) {
                             )}
                           </div>
                           {item.description && (
-                            <div className="mt-1 line-clamp-2 text-xs text-black/60">{item.description}</div>
+                            <div className="mt-1 line-clamp-2 text-xs text-foreground-muted theme-brutal:text-black/60">{item.description}</div>
                           )}
                         </div>
                         {item.type !== "channel" && (
-                          <div className="shrink-0 border border-black/20 px-2 py-0.5 text-[11px] font-mono text-black/55">
+                          <div className="shrink-0 border border-line-muted theme-brutal:border-black/20 px-2 py-0.5 text-[11px] font-mono text-foreground-muted theme-brutal:text-black/55">
                             {item.type === "private"
                               ? formatMessage({ id: "agent.detail.private" })
                               : formatMessage({ id: "agent.detail.joint" })}
@@ -485,12 +485,12 @@ function AgentChatTab({ agentId }: { agentId: string }) {
           <section>
             <div className="px-5 py-3">
               <SectionHeader label={formatMessage({ id: "agent.detail.agentDms" })} />
-              <div className="mt-1 text-xs text-black/60">
+              <div className="mt-1 text-xs text-foreground-muted theme-brutal:text-black/60">
                 {formatMessage({ id: "agent.detail.agentDmsDescription" })}
               </div>
             </div>
             {dms.loading ? (
-              <div className="px-5 pb-4 font-mono text-xs text-black/40">
+              <div className="px-5 pb-4 font-mono text-xs text-foreground-hint theme-brutal:text-black/40">
                 {formatMessage({ id: "agent.detail.loadingAgentDms" })}
               </div>
             ) : dms.error ? (
@@ -557,7 +557,7 @@ function AgentIntegrationsTab({ agentId, canManageServer }: { agentId: string; c
   const active = items.filter((item) => item.type === "active");
 
   return (
-    <div className="flex-1 overflow-y-auto bg-white px-5 py-4 space-y-4">
+    <div className="flex-1 overflow-y-auto bg-layer-panel theme-brutal:bg-white px-5 py-4 space-y-4">
       {error && (
         <Banner intent="warning" density="sm" className="font-bold">{error}</Banner>
       )}
@@ -566,48 +566,48 @@ function AgentIntegrationsTab({ agentId, canManageServer }: { agentId: string; c
         <div>
           <SectionHeader
             label={formatMessage({ id: "agent.detail.applications" })}
-            action={loading ? <span className="text-xs font-bold text-black/50">{formatMessage({ id: "common.loading" })}</span> : null}
+            action={loading ? <span className="text-xs font-bold text-foreground-muted theme-brutal:text-black/50">{formatMessage({ id: "common.loading" })}</span> : null}
           />
-          <div className="mt-1 text-xs text-black/60">
+          <div className="mt-1 text-xs text-foreground-muted theme-brutal:text-black/60">
             {formatMessage({ id: "agent.detail.applicationsDescription" })}
           </div>
         </div>
         {active.length === 0 ? (
-          <div className="text-sm text-black/50">{formatMessage({ id: "agent.detail.noConnectedApps" })}</div>
+          <div className="text-sm text-foreground-muted theme-brutal:text-black/50">{formatMessage({ id: "agent.detail.noConnectedApps" })}</div>
         ) : (
           <div className="space-y-3">
             {active.map((item) => (
               <SurfaceListItem key={item.id} className="space-y-2" interactive={false}>
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <div className="font-bold text-black">{item.clientName}</div>
-                    <div className="text-xs text-black/60">{formatShortDateTime(item.createdAt)}</div>
+                    <div className="font-bold text-foreground-strong theme-brutal:text-black">{item.clientName}</div>
+                    <div className="text-xs text-foreground-muted theme-brutal:text-black/60">{formatShortDateTime(item.createdAt)}</div>
                   </div>
-                  <span className="inline-flex border border-black bg-brutal-lime px-1.5 py-0.5 text-[10px] font-bold uppercase">
+                  <span className="inline-flex border border-line-strong theme-brutal:border-black bg-success-soft theme-brutal:bg-brutal-lime px-1.5 py-0.5 text-[10px] font-bold uppercase">
                     {formatMessage({ id: "agent.detail.active" })}
                   </span>
                 </div>
-                {item.clientDescription && <div className="text-sm text-black/70">{item.clientDescription}</div>}
+                {item.clientDescription && <div className="text-sm text-foreground-muted theme-brutal:text-black/70">{item.clientDescription}</div>}
                 {item.clientAgentManifestUrl && (
-                  <div className="break-all font-mono text-xs text-black/60">
+                  <div className="break-all font-mono text-xs text-foreground-muted theme-brutal:text-black/60">
                     {formatMessage({ id: "agent.detail.agentManifest" }, { url: item.clientAgentManifestUrl })}
                   </div>
                 )}
                 <div className="flex flex-wrap gap-1">
                   {item.scopes.map((scope) => (
-                    <span key={scope} className="inline-flex border border-black bg-white px-1.5 py-0.5 text-[10px] font-bold uppercase">
+                    <span key={scope} className="inline-flex border border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white px-1.5 py-0.5 text-[10px] font-bold uppercase">
                       {scope}
                     </span>
                   ))}
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {canManageServer && (
-                    <button onClick={() => handleRevoke(item.id)} className="btn-brutal bg-white px-3 py-1.5 text-xs">
+                    <button onClick={() => handleRevoke(item.id)} className="btn-brutal bg-layer-panel theme-brutal:bg-white px-3 py-1.5 text-xs">
                       {formatMessage({ id: "agent.detail.revoke" })}
                     </button>
                   )}
                   {item.clientHomepageUrl && (
-                    <a href={item.clientHomepageUrl} target="_blank" rel="noreferrer" className="text-xs font-bold underline text-black/70 self-center">
+                    <a href={item.clientHomepageUrl} target="_blank" rel="noreferrer" className="text-xs font-bold underline text-foreground-muted theme-brutal:text-black/70 self-center">
                       {formatMessage({ id: "agent.detail.viewService" })}
                     </a>
                   )}
@@ -664,7 +664,7 @@ function EnvVarsSection({ agent, canManageAgent }: { agent: Agent; canManageAgen
           <button
             type="button"
             onClick={startEditing}
-            className="text-black/40 hover:text-black transition-colors"
+            className="text-foreground-hint theme-brutal:text-black/40 hover:text-foreground-strong theme-brutal:hover:text-black transition-colors"
             title={formatMessage({ id: "agent.detail.editEnvironmentVariables" })}
           >
             <Pencil size={12} />
@@ -683,10 +683,10 @@ function EnvVarsSection({ agent, canManageAgent }: { agent: Agent; canManageAgen
                   updated[i] = { ...updated[i], key: e.target.value };
                   setEntries(updated);
                 }}
-                className="border-2 border-black px-2 py-1 text-xs font-mono shadow-brutal-sm focus:outline-none w-1/3"
+                className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black px-2 py-1 text-xs font-mono shadow-raft-xs theme-brutal:shadow-brutal-sm focus:outline-none w-1/3"
                 placeholder={formatMessage({ id: "agent.runtimeConfig.envVarName" })}
               />
-              <span className="text-black/40">=</span>
+              <span className="text-foreground-hint theme-brutal:text-black/40">=</span>
               <input
                 type="text"
                 value={entry.value}
@@ -695,13 +695,13 @@ function EnvVarsSection({ agent, canManageAgent }: { agent: Agent; canManageAgen
                   updated[i] = { ...updated[i], value: e.target.value };
                   setEntries(updated);
                 }}
-                className="border-2 border-black px-2 py-1 text-xs font-mono shadow-brutal-sm focus:outline-none flex-1"
+                className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black px-2 py-1 text-xs font-mono shadow-raft-xs theme-brutal:shadow-brutal-sm focus:outline-none flex-1"
                 placeholder={formatMessage({ id: "agent.runtimeConfig.envVarFallback" })}
               />
               <button
                 type="button"
                 onClick={() => setEntries(entries.filter((_, j) => j !== i))}
-                className="btn-brutal-sm bg-white p-1"
+                className="btn-brutal-sm bg-layer-panel theme-brutal:bg-white p-1"
               >
                 <Trash2 size={12} />
               </button>
@@ -711,7 +711,7 @@ function EnvVarsSection({ agent, canManageAgent }: { agent: Agent; canManageAgen
             <button
               type="button"
               onClick={() => setEntries([...entries, { key: "", value: "" }])}
-              className="flex items-center gap-1 text-xs font-bold text-black/60 hover:text-black"
+              className="flex items-center gap-1 text-xs font-bold text-foreground-muted theme-brutal:text-black/60 hover:text-foreground-strong theme-brutal:hover:text-black"
             >
               <Plus size={12} />
               {formatMessage({ id: "agent.runtimeConfig.addVariable" })}
@@ -720,13 +720,13 @@ function EnvVarsSection({ agent, canManageAgent }: { agent: Agent; canManageAgen
           <div className="flex items-center gap-1.5">
             <button
               onClick={handleSave}
-              className="btn-brutal-sm bg-brutal-pink px-2 py-1 text-xs"
+              className="btn-brutal-sm bg-accent-soft theme-brutal:bg-brutal-pink px-2 py-1 text-xs"
             >
               {formatMessage({ id: "machine.detail.save" })}
             </button>
             <button
               onClick={() => setEditing(false)}
-              className="btn-brutal-sm bg-white px-2 py-1 text-xs"
+              className="btn-brutal-sm bg-layer-panel theme-brutal:bg-white px-2 py-1 text-xs"
             >
               {formatMessage({ id: "common.confirm.cancel" })}
             </button>
@@ -737,15 +737,15 @@ function EnvVarsSection({ agent, canManageAgent }: { agent: Agent; canManageAgen
           {Object.entries(envVars!).map(([key, value]) => (
             <span
               key={key}
-              className="inline-block border-2 border-black bg-white px-2 py-0.5 text-xs font-mono text-black"
+              className="inline-block border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white px-2 py-0.5 text-xs font-mono text-foreground-strong theme-brutal:text-black"
               title={`${key}=${value}`}
             >
-              {key}=<span className="text-black/40">{"•".repeat(Math.min(value.length, 8))}</span>
+              {key}=<span className="text-foreground-hint theme-brutal:text-black/40">{"•".repeat(Math.min(value.length, 8))}</span>
             </span>
           ))}
         </div>
       ) : (
-        <p className="text-xs italic text-black/40">
+        <p className="text-xs italic text-foreground-hint theme-brutal:text-black/40">
           {formatMessage({ id: "agent.detail.noEnvironmentVariables" })}
         </p>
       )}
@@ -1214,21 +1214,21 @@ function AgentProfileInfo({ agent, canManageAgent, canChangeAgentRole, onOpenPro
         : formatMessage({ id: "agent.detail.updateOfficialIdentity" }),
       message: (
         <div className="space-y-4">
-          <p className="text-sm text-black/60">
+          <p className="text-sm text-foreground-muted theme-brutal:text-black/60">
             {formatMessage({ id: "agent.detail.reviewOfficialIdentityChanges" })}
           </p>
-          <dl className="divide-y divide-black/10">
+          <dl className="divide-y divide-line-muted theme-brutal:divide-black/10">
             {onboardingIdentityPreview.changes.map((change) => (
               <div
                 key={change.field}
                 data-onboarding-identity-change={change.field}
                 className="grid grid-cols-[96px_minmax(0,1fr)] items-baseline gap-3 py-3 first:pt-0 last:pb-0"
               >
-                <dt className="text-xs font-bold uppercase tracking-wide text-black/50">{change.label}</dt>
+                <dt className="text-xs font-bold uppercase tracking-wide text-foreground-muted theme-brutal:text-black/50">{change.label}</dt>
                 <dd className="flex min-w-0 items-center gap-2 font-mono text-sm">
-                  <span className="min-w-0 break-words text-black/50">{formatIdentityValue(change.before)}</span>
-                  <MoveRight aria-hidden="true" size={16} className="shrink-0 text-black/30" />
-                  <span className="min-w-0 break-words font-bold text-black">{formatIdentityValue(change.after)}</span>
+                  <span className="min-w-0 break-words text-foreground-muted theme-brutal:text-black/50">{formatIdentityValue(change.before)}</span>
+                  <MoveRight aria-hidden="true" size={16} className="shrink-0 text-foreground-placeholder theme-brutal:text-black/30" />
+                  <span className="min-w-0 break-words font-bold text-foreground-strong theme-brutal:text-black">{formatIdentityValue(change.after)}</span>
                 </dd>
               </div>
             ))}
@@ -1238,7 +1238,7 @@ function AgentProfileInfo({ agent, canManageAgent, canChangeAgentRole, onOpenPro
               {formatMessage({ id: "agent.detail.grantsAdminWarning" })}
             </Banner>
           )}
-          <p className="text-xs text-black/50">{formatMessage({ id: "agent.detail.customizeAfterIdentityUpdate" })}</p>
+          <p className="text-xs text-foreground-muted theme-brutal:text-black/50">{formatMessage({ id: "agent.detail.customizeAfterIdentityUpdate" })}</p>
         </div>
       ),
       confirmLabel: grantsServerAdmin
@@ -1721,7 +1721,7 @@ function AgentProfileInfo({ agent, canManageAgent, canChangeAgentRole, onOpenPro
                 setDisplayNameError("");
                 setEditingDisplayName(true);
               }}
-              className="text-black/40 hover:text-black transition-colors"
+              className="text-foreground-hint theme-brutal:text-black/40 hover:text-foreground-strong theme-brutal:hover:text-black transition-colors"
               title={formatMessage({ id: "agent.detail.editDisplayName" })}
             >
               <Pencil size={12} />
@@ -1738,7 +1738,7 @@ function AgentProfileInfo({ agent, canManageAgent, canChangeAgentRole, onOpenPro
                 if (displayNameError) setDisplayNameError("");
               }}
               placeholder={formatMessage({ id: "agent.detail.displayName" })}
-              className="h-8 w-full border-2 border-black px-2 py-1 text-sm shadow-brutal-sm focus:outline-none focus:shadow-brutal-sm"
+              className="h-8 w-full border theme-brutal:border-2 border-line-strong theme-brutal:border-black px-2 py-1 text-sm shadow-raft-xs theme-brutal:shadow-brutal-sm focus:outline-none focus:shadow-raft-xs theme-brutal:focus:shadow-brutal-sm"
               autoFocus
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
@@ -1755,7 +1755,7 @@ function AgentProfileInfo({ agent, canManageAgent, canChangeAgentRole, onOpenPro
               <button
                 onClick={() => void handleSaveDisplayName()}
                 disabled={savingDisplayName}
-                className="btn-brutal-sm bg-brutal-pink px-2 py-1 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
+                className="btn-brutal-sm bg-accent-soft theme-brutal:bg-brutal-pink px-2 py-1 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {formatMessage({ id: "machine.detail.save" })}
               </button>
@@ -1765,7 +1765,7 @@ function AgentProfileInfo({ agent, canManageAgent, canChangeAgentRole, onOpenPro
                   setEditingDisplayName(false);
                 }}
                 disabled={savingDisplayName}
-                className="btn-brutal-sm bg-white px-2 py-1 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
+                className="btn-brutal-sm bg-layer-panel theme-brutal:bg-white px-2 py-1 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {formatMessage({ id: "common.confirm.cancel" })}
               </button>
@@ -1778,14 +1778,14 @@ function AgentProfileInfo({ agent, canManageAgent, canChangeAgentRole, onOpenPro
           </div>
         ) : (
           <div className="flex flex-wrap items-center gap-2">
-            <p className="text-sm text-black">
+            <p className="text-sm text-foreground-strong theme-brutal:text-black">
               {agent.displayName || agent.name}
             </p>
             {currentOnboardingIdentityPreview?.canAdopt && (
               <button
                 type="button"
                 onClick={handleAdoptOnboardingIdentity}
-                className="btn-brutal-sm bg-brutal-pink px-2 py-1 text-xs"
+                className="btn-brutal-sm bg-accent-soft theme-brutal:bg-brutal-pink px-2 py-1 text-xs"
               >
                 {formatMessage({ id: "agent.detail.updateOfficialIdentity" })}
               </button>
@@ -1811,7 +1811,7 @@ function AgentProfileInfo({ agent, canManageAgent, canChangeAgentRole, onOpenPro
                 setRoleError("");
                 setEditingRole(true);
               }}
-              className="text-black/40 hover:text-black transition-colors"
+              className="text-foreground-hint theme-brutal:text-black/40 hover:text-foreground-strong theme-brutal:hover:text-black transition-colors"
               title={formatMessage({ id: "agent.detail.editDescription" })}
             >
               <Pencil size={12} />
@@ -1828,7 +1828,7 @@ function AgentProfileInfo({ agent, canManageAgent, canChangeAgentRole, onOpenPro
                 if (roleError) setRoleError("");
               }}
               placeholder={formatMessage({ id: "agent.detail.describeAgentPlaceholder" })}
-              className="m-0 min-h-10 w-full border-2 border-black px-2 py-1 text-sm leading-4 shadow-brutal-sm focus:outline-none focus:shadow-brutal-sm resize-none overflow-hidden"
+              className="m-0 min-h-10 w-full border theme-brutal:border-2 border-line-strong theme-brutal:border-black px-2 py-1 text-sm leading-4 shadow-raft-xs theme-brutal:shadow-brutal-sm focus:outline-none focus:shadow-raft-xs theme-brutal:focus:shadow-brutal-sm resize-none overflow-hidden"
               rows={2}
               autoFocus
               maxLength={MAX_AGENT_DESCRIPTION_LENGTH}
@@ -1843,7 +1843,7 @@ function AgentProfileInfo({ agent, canManageAgent, canChangeAgentRole, onOpenPro
               <button
                 onClick={() => void handleSaveRole()}
                 disabled={savingRole}
-                className="btn-brutal-sm bg-brutal-pink px-2 py-1 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
+                className="btn-brutal-sm bg-accent-soft theme-brutal:bg-brutal-pink px-2 py-1 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {formatMessage({ id: "machine.detail.save" })}
               </button>
@@ -1853,7 +1853,7 @@ function AgentProfileInfo({ agent, canManageAgent, canChangeAgentRole, onOpenPro
                   setEditingRole(false);
                 }}
                 disabled={savingRole}
-                className="btn-brutal-sm bg-white px-2 py-1 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
+                className="btn-brutal-sm bg-layer-panel theme-brutal:bg-white px-2 py-1 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {formatMessage({ id: "common.confirm.cancel" })}
               </button>
@@ -1866,28 +1866,28 @@ function AgentProfileInfo({ agent, canManageAgent, canChangeAgentRole, onOpenPro
               ) : (
                 <span />
               )}
-              <span className="font-mono text-black/50">
+              <span className="font-mono text-foreground-muted theme-brutal:text-black/50">
                 {roleValue.trim().length}/{MAX_AGENT_DESCRIPTION_LENGTH}
               </span>
             </div>
           </div>
         ) : (
-          <p className="text-sm text-black">
+          <p className="text-sm text-foreground-strong theme-brutal:text-black">
             {agent.description || (
-              <span className="italic text-black/40">{formatMessage({ id: "machine.detail.noDescription" })}</span>
+              <span className="italic text-foreground-hint theme-brutal:text-black/40">{formatMessage({ id: "machine.detail.noDescription" })}</span>
             )}
           </p>
         )}
       </div>
 
       {showOperationalInfo && isExternalAgent && canManageAgent && (
-        <div className="border-t border-black/10 px-5 py-4">
+        <div className="border-t border-line-muted theme-brutal:border-black/10 px-5 py-4">
           <SectionEyebrow as="div" className="mb-2">
             {formatMessage({ id: "agent.detail.externalSetup" })}
           </SectionEyebrow>
-          <div className="space-y-3 border-2 border-black bg-brutal-cyan/15 p-3 shadow-brutal-sm">
+          <div className="space-y-3 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-info-soft/15 theme-brutal:bg-brutal-cyan/15 p-3 shadow-raft-xs theme-brutal:shadow-brutal-sm">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="inline-flex border-2 border-black bg-white px-2 py-0.5 text-xs font-bold uppercase text-black">
+              <span className="inline-flex border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white px-2 py-0.5 text-xs font-bold uppercase text-foreground-strong theme-brutal:text-black">
                 {externalStatus?.setupState === "connected"
                   ? formatMessage({ id: "machine.detail.connected" })
                   : externalStatus?.setupState === "credential_minted"
@@ -1895,7 +1895,7 @@ function AgentProfileInfo({ agent, canManageAgent, canChangeAgentRole, onOpenPro
                     : formatMessage({ id: "agent.detail.waitingForLogin" })}
               </span>
               {externalStatus?.credentialLastUsedAt && (
-                <span className="text-xs font-mono text-black/50">
+                <span className="text-xs font-mono text-foreground-muted theme-brutal:text-black/50">
                   {formatMessage(
                     { id: "agent.detail.lastUsed" },
                     { time: formatShortDateTime(externalStatus.credentialLastUsedAt) },
@@ -1915,7 +1915,7 @@ function AgentProfileInfo({ agent, canManageAgent, canChangeAgentRole, onOpenPro
             />
             {externalStepSetupSteps ? (
               <div className="space-y-3">
-                <p className="text-xs font-bold text-black/70">
+                <p className="text-xs font-bold text-foreground-muted theme-brutal:text-black/70">
                     {formatMessage({ id: "agent.detail.runStepsInTerminal" })}
                 </p>
                 <ol className="space-y-4">
@@ -1924,49 +1924,49 @@ function AgentProfileInfo({ agent, canManageAgent, canChangeAgentRole, onOpenPro
                     return (
                       <li key={step.title} className="space-y-1.5">
                         <div className="flex flex-wrap items-center justify-between gap-2">
-                          <span className="text-xs font-bold uppercase text-black/60">
+                          <span className="text-xs font-bold uppercase text-foreground-muted theme-brutal:text-black/60">
                             {formatMessage({ id: "agent.detail.stepNumber" }, { step: idx + 1 })}
                           </span>
                           <button
                             type="button"
                             onClick={() => void handleCopyExternalCommand(step.command, copyTarget)}
-                            className="btn-brutal-sm bg-white px-2 py-1 text-xs"
+                            className="btn-brutal-sm bg-layer-panel theme-brutal:bg-white px-2 py-1 text-xs"
                           >
                             {externalCopiedTarget === copyTarget
                               ? formatMessage({ id: "agent.detail.copied" })
                               : formatMessage({ id: "agent.detail.copyStep" })}
                           </button>
                         </div>
-                        <p className="text-sm font-bold text-black">{step.title}</p>
-                        <div className="break-all border border-black/20 bg-white/80 p-2 font-mono text-xs text-black whitespace-pre-wrap">
+                        <p className="text-sm font-bold text-foreground-strong theme-brutal:text-black">{step.title}</p>
+                        <div className="break-all border border-line-muted theme-brutal:border-black/20 bg-layer-panel/80 theme-brutal:bg-white/80 p-2 font-mono text-xs text-foreground-strong theme-brutal:text-black whitespace-pre-wrap">
                           {step.command}
                         </div>
                         {step.description && (
-                          <p className="text-xs text-black/60">{step.description}</p>
+                          <p className="text-xs text-foreground-muted theme-brutal:text-black/60">{step.description}</p>
                         )}
                       </li>
                     );
                   })}
                 </ol>
-                <p className="text-xs text-black/60">
+                <p className="text-xs text-foreground-muted theme-brutal:text-black/60">
                     {formatMessage({ id: "agent.detail.raftProfileRequired" })}
                 </p>
                 {effectiveExternalSetupTab === "claude-code" ? (
-                  <p className="text-xs text-black/60">
+                  <p className="text-xs text-foreground-muted theme-brutal:text-black/60">
                     {formatMessage({ id: "agent.detail.claudeCodeKeepRunning" })}
                   </p>
                 ) : effectiveExternalSetupTab === "hermes" ? (
-                  <p className="text-xs text-black/60">
+                  <p className="text-xs text-foreground-muted theme-brutal:text-black/60">
                     {formatMessage({ id: "agent.detail.hermesGatewayDescription" })}
                   </p>
                 ) : null}
               </div>
             ) : (
               <div className="space-y-2">
-                <div className="break-all border-2 border-black bg-white p-2 font-mono text-xs text-black whitespace-pre-wrap">
+                <div className="break-all border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white p-2 font-mono text-xs text-foreground-strong theme-brutal:text-black whitespace-pre-wrap">
                   {externalOtherSetupInstruction}
                 </div>
-                <p className="text-xs text-black/60">
+                <p className="text-xs text-foreground-muted theme-brutal:text-black/60">
                       {formatMessage({ id: "agent.detail.otherAgentRuntimeDescription" })}
                 </p>
               </div>
@@ -1976,7 +1976,7 @@ function AgentProfileInfo({ agent, canManageAgent, canChangeAgentRole, onOpenPro
                 <button
                   type="button"
                   onClick={() => void handleCopyExternalCommand()}
-                  className="btn-brutal-sm bg-white px-2 py-1 text-xs"
+                  className="btn-brutal-sm bg-layer-panel theme-brutal:bg-white px-2 py-1 text-xs"
                 >
                   {externalCopiedTarget === "setup"
                     ? formatMessage({ id: "agent.detail.copied" })
@@ -1994,7 +1994,7 @@ function AgentProfileInfo({ agent, canManageAgent, canChangeAgentRole, onOpenPro
       {showOperationalInfo && (
         <>
           {/* Info */}
-          <div className="px-5 py-4 border-t border-black/10">
+          <div className="px-5 py-4 border-t border-line-muted theme-brutal:border-black/10">
             <SectionEyebrow as="div" className="mb-3">
               {formatMessage({ id: "machine.detail.info" })}
             </SectionEyebrow>
@@ -2002,11 +2002,11 @@ function AgentProfileInfo({ agent, canManageAgent, canChangeAgentRole, onOpenPro
               {/* Role */}
               <div>
                 <div className="mb-1 flex items-center gap-2">
-                  <div className="text-xs text-black/50">{formatMessage({ id: "agent.detail.role" })}</div>
+                  <div className="text-xs text-foreground-muted theme-brutal:text-black/50">{formatMessage({ id: "agent.detail.role" })}</div>
                   <button
                     type="button"
                     onClick={() => setShowRoleHelp(true)}
-                    className="text-black/35 transition-colors hover:text-black"
+                    className="text-foreground-placeholder theme-brutal:text-black/35 transition-colors hover:text-foreground-strong theme-brutal:hover:text-black"
                     title={formatMessage({ id: "agent.detail.rolePermissions" })}
                   >
                     <HelpCircle size={12} />
@@ -2020,7 +2020,7 @@ function AgentProfileInfo({ agent, canManageAgent, canChangeAgentRole, onOpenPro
                         setServerRoleError("");
                         setEditingServerRole(true);
                       }}
-                      className="text-black/40 transition-colors hover:text-black"
+                      className="text-foreground-hint theme-brutal:text-black/40 transition-colors hover:text-foreground-strong theme-brutal:hover:text-black"
                       title={formatMessage({ id: "agent.detail.editRole" })}
                     >
                       <Pencil size={12} />
@@ -2052,7 +2052,7 @@ function AgentProfileInfo({ agent, canManageAgent, canChangeAgentRole, onOpenPro
                             type="button"
                             onClick={() => void handleSaveServerRole()}
                             disabled={serverRoleSaving || serverRoleValue === currentAgentServerRole}
-                            className="btn-brutal-sm bg-brutal-pink px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                            className="btn-brutal-sm bg-accent-soft theme-brutal:bg-brutal-pink px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             {formatMessage({ id: "machine.detail.save" })}
                           </button>
@@ -2065,7 +2065,7 @@ function AgentProfileInfo({ agent, canManageAgent, canChangeAgentRole, onOpenPro
                               setEditingServerRole(false);
                             }}
                             disabled={serverRoleSaving}
-                            className="btn-brutal-sm bg-white px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                            className="btn-brutal-sm bg-layer-panel theme-brutal:bg-white px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             {formatMessage({ id: "common.confirm.cancel" })}
                           </button>
@@ -2075,18 +2075,18 @@ function AgentProfileInfo({ agent, canManageAgent, canChangeAgentRole, onOpenPro
                         )}
                       </>
                     ) : (
-                      <span className={`inline-block border-2 border-black px-2 py-0.5 text-xs font-bold text-black ${currentAgentServerRoleInfo.color}`}>
+                      <span className={`inline-block border theme-brutal:border-2 border-line-strong theme-brutal:border-black px-2 py-0.5 text-xs font-bold text-foreground-strong theme-brutal:text-black ${currentAgentServerRoleInfo.color}`}>
                         {formatMessage({ id: currentAgentServerRoleInfo.labelId })}
                       </span>
                     )}
                   </div>
                 ) : currentAgentServerRoleInfo ? (
-                  <span className={`inline-block border-2 border-black px-2 py-0.5 text-xs font-bold text-black ${currentAgentServerRoleInfo.color}`}>
+                  <span className={`inline-block border theme-brutal:border-2 border-line-strong theme-brutal:border-black px-2 py-0.5 text-xs font-bold text-foreground-strong theme-brutal:text-black ${currentAgentServerRoleInfo.color}`}>
                     {formatMessage({ id: currentAgentServerRoleInfo.labelId })}
                   </span>
                 ) : serverRoleDisplay.kind === "unrecognized" ? (
                   <span
-                    className="inline-block border-2 border-black bg-gray-100 px-2 py-0.5 text-xs font-bold text-black"
+                    className="inline-block border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-gray-100 px-2 py-0.5 text-xs font-bold text-foreground-strong theme-brutal:text-black"
                     title={agent.serverRole ?? undefined}
                   >
                     {serverRoleDisplay.label}
@@ -2095,21 +2095,21 @@ function AgentProfileInfo({ agent, canManageAgent, canChangeAgentRole, onOpenPro
               </div>
               {/* Computer */}
               <div>
-                <div className="text-xs text-black/50 mb-1">{formatMessage({ id: "machine.detail.computer" })}</div>
+                <div className="text-xs text-foreground-muted theme-brutal:text-black/50 mb-1">{formatMessage({ id: "machine.detail.computer" })}</div>
                 <div className="min-w-0 space-y-1.5 text-sm">
                   {isExternalAgent ? (
-                    <span className="text-xs text-black/40 italic">{formatMessage({ id: "agent.detail.externalRuntime" })}</span>
+                    <span className="text-xs text-foreground-hint theme-brutal:text-black/40 italic">{formatMessage({ id: "agent.detail.externalRuntime" })}</span>
                   ) : agentMachineRow.kind === "pending" ? null : agentMachine ? (
                     <>
                       <button
                         onClick={() => { useProfileStore.getState().closeProfile(); useThreadStore.getState().closeThread(); nav.toMachine(agentMachine.id); }}
-                        className="block max-w-full break-all text-left font-mono font-semibold text-black hover:underline"
+                        className="block max-w-full break-all text-left font-mono font-semibold text-foreground-strong theme-brutal:text-black hover:underline"
                       >
                         {agentMachine.name}
                       </button>
-                      <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-black/50">
+                      <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-foreground-muted theme-brutal:text-black/50">
                         <StatusDot
-                          tone={machineStatus === "online" ? "bg-brutal-lime" : "bg-gray-400"}
+                          tone={machineStatus === "online" ? "bg-success-soft theme-brutal:bg-brutal-lime" : "bg-gray-400"}
                           className="shrink-0"
                         />
                         <span>
@@ -2123,7 +2123,7 @@ function AgentProfileInfo({ agent, canManageAgent, canChangeAgentRole, onOpenPro
                       </div>
                     </>
                   ) : (
-                    <span className="text-xs text-black/40 italic">
+                    <span className="text-xs text-foreground-hint theme-brutal:text-black/40 italic">
                       {formatMessage({ id: "agent.detail.noComputerAssigned" })}
                     </span>
                   )}
@@ -2144,7 +2144,7 @@ function AgentProfileInfo({ agent, canManageAgent, canChangeAgentRole, onOpenPro
                           const type = agent.creator!.type === "human" ? "human" : "agent";
                           (onOpenProfile ?? openProfile)(type, agent.creator!.id);
                         }}
-                        className="flex items-center gap-2 text-sm text-black hover:underline"
+                        className="flex items-center gap-2 text-sm text-foreground-strong theme-brutal:text-black hover:underline"
                       >
                         {agent.creator.type === "human" ? (
                           <AvatarSlot
@@ -2161,10 +2161,10 @@ function AgentProfileInfo({ agent, canManageAgent, canChangeAgentRole, onOpenPro
                           />
                         )}
                         <span className="font-bold">{agent.creator.displayName || agent.creator.name}</span>
-                        <span className="font-mono text-xs text-black/50">@{agent.creator.name}</span>
+                        <span className="font-mono text-xs text-foreground-muted theme-brutal:text-black/50">@{agent.creator.name}</span>
                       </button>
                     ) : (
-                      <span className="text-sm italic text-black/40">
+                      <span className="text-sm italic text-foreground-hint theme-brutal:text-black/40">
                         {formatMessage({ id: "agent.detail.noCreatorAssigned" })}
                       </span>
                     )
@@ -2175,7 +2175,7 @@ function AgentProfileInfo({ agent, canManageAgent, canChangeAgentRole, onOpenPro
           </div>
 
           {!isExternalAgent && (
-            <div ref={configRef} className="px-5 py-4 border-t border-black/10">
+            <div ref={configRef} className="px-5 py-4 border-t border-line-muted theme-brutal:border-black/10">
               <div className="w-full">
                 <div className="flex items-center gap-2 mb-1">
                   <SectionEyebrow as="div">
@@ -2185,7 +2185,7 @@ function AgentProfileInfo({ agent, canManageAgent, canChangeAgentRole, onOpenPro
                     <button
                       type="button"
                       onClick={startRuntimeConfigEditing}
-                      className="text-black/40 hover:text-black transition-colors"
+                      className="text-foreground-hint theme-brutal:text-black/40 hover:text-foreground-strong theme-brutal:hover:text-black transition-colors"
                       title={formatMessage({ id: "agent.detail.editRuntimeConfig" })}
                     >
                       <Pencil size={12} />
@@ -2202,7 +2202,7 @@ function AgentProfileInfo({ agent, canManageAgent, canChangeAgentRole, onOpenPro
                         runtimeVersion={agentMachine?.runtimeVersions?.[currentRuntimeConfig.runtime]}
                         serverId={currentServer?.id ?? null}
                         machineId={agentMachine?.id ?? ""}
-                        className="h-6 border-2 border-black bg-brutal-cyan px-2 py-0.5 text-xs font-bold text-black"
+                        className="h-6 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-info-soft theme-brutal:bg-brutal-cyan px-2 py-0.5 text-xs font-bold text-foreground-strong theme-brutal:text-black"
                       >
                         {formatRuntimeLabelWithStatus(currentRuntimeConfig.runtime, formatMessage)}
                       </RuntimeAccountUsageGateChip>
@@ -2218,7 +2218,7 @@ function AgentProfileInfo({ agent, canManageAgent, canChangeAgentRole, onOpenPro
                   <KeyValueRow
                     label={formatMessage({ id: "agent.runtimeConfig.model" })}
                     value={
-                      <span className="inline-block border-2 border-black bg-brutal-lavender px-2 py-0.5 text-xs font-bold text-black">
+                      <span className="inline-block border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-secondary-200 theme-brutal:bg-brutal-lavender px-2 py-0.5 text-xs font-bold text-foreground-strong theme-brutal:text-black">
                         {currentRuntimeModelLabel}
                       </span>
                     }
@@ -2227,7 +2227,7 @@ function AgentProfileInfo({ agent, canManageAgent, canChangeAgentRole, onOpenPro
                     <KeyValueRow
                       label={formatMessage({ id: "agent.runtimeConfig.reasoning" })}
                       value={
-                        <span className="inline-block border-2 border-black bg-soft-signal px-2 py-0.5 text-xs font-bold capitalize text-black">
+                        <span className="inline-block border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-primary-soft theme-brutal:bg-soft-signal px-2 py-0.5 text-xs font-bold capitalize text-foreground-strong theme-brutal:text-black">
                           {currentRuntimeConfig.reasoningEffort
                             ? formatMessage({ id: reasoningEffortLabelId(currentRuntimeConfig.reasoningEffort) ?? "agent.runtimeConfig.default" })
                             : formatMessage({ id: "agent.runtimeConfig.default" })}
@@ -2239,7 +2239,7 @@ function AgentProfileInfo({ agent, canManageAgent, canChangeAgentRole, onOpenPro
                     <KeyValueRow
                       label={formatMessage({ id: "agent.runtimeConfig.mode" })}
                       value={
-                        <span className="inline-block border-2 border-black bg-brutal-orange px-2 py-0.5 text-xs font-bold text-black">
+                        <span className="inline-block border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-warning-soft theme-brutal:bg-brutal-orange px-2 py-0.5 text-xs font-bold text-foreground-strong theme-brutal:text-black">
                           {runtimeConfigFastMode(currentRuntimeConfig)
                             ? formatMessage({ id: "agent.runtimeConfig.fastMode" })
                             : formatMessage({ id: "agent.runtimeConfig.default" })}
@@ -2253,16 +2253,16 @@ function AgentProfileInfo({ agent, canManageAgent, canChangeAgentRole, onOpenPro
                         label={formatMessage({ id: "agent.runtimeConfig.provider" })}
                         value={
                           currentProviderApiUrl
-                            ? <span className="font-mono text-xs text-black">{currentProviderApiUrl}</span>
-                            : <span className="text-xs italic text-black/40">{formatMessage({ id: "agent.runtimeConfig.default" })}</span>
+                            ? <span className="font-mono text-xs text-foreground-strong theme-brutal:text-black">{currentProviderApiUrl}</span>
+                            : <span className="text-xs italic text-foreground-hint theme-brutal:text-black/40">{formatMessage({ id: "agent.runtimeConfig.default" })}</span>
                         }
                       />
                       <KeyValueRow
                         label={formatMessage({ id: "agent.runtimeConfig.command" })}
                         value={
                           currentCommand
-                            ? <span className="font-mono text-xs text-black">{currentCommand}</span>
-                            : <span className="text-xs italic text-black/40">{formatMessage({ id: "agent.runtimeConfig.default" })}</span>
+                            ? <span className="font-mono text-xs text-foreground-strong theme-brutal:text-black">{currentCommand}</span>
+                            : <span className="text-xs italic text-foreground-hint theme-brutal:text-black/40">{formatMessage({ id: "agent.runtimeConfig.default" })}</span>
                         }
                       />
                     </>
@@ -2310,7 +2310,7 @@ function AgentProfileInfo({ agent, canManageAgent, canChangeAgentRole, onOpenPro
           <div ref={runtimeConfigModalRef} className="w-full max-w-md card-brutal p-6">
             <div className="mb-4 flex items-center justify-between">
               <h2 className="text-lg font-bold uppercase">{formatMessage({ id: "agent.detail.editRuntimeConfig" })}</h2>
-              <button onClick={closeRuntimeConfigEditor} className="btn-brutal-sm bg-white p-1">
+              <button onClick={closeRuntimeConfigEditor} className="btn-brutal-sm bg-layer-panel theme-brutal:bg-white p-1">
                 <X size={20} />
               </button>
             </div>
@@ -2515,14 +2515,14 @@ function AgentProfileInfo({ agent, canManageAgent, canChangeAgentRole, onOpenPro
                   type="button"
                   onClick={closeRuntimeConfigEditor}
                   disabled={savingRuntimeConfig}
-                  className="btn-brutal bg-white px-4 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+                  className="btn-brutal bg-layer-panel theme-brutal:bg-white px-4 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {formatMessage({ id: "common.confirm.cancel" })}
                 </button>
                 <button
                   type="submit"
                   disabled={runtimeConfigSaveDisabled}
-                  className="btn-brutal bg-brutal-pink px-4 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+                  className="btn-brutal bg-accent-soft theme-brutal:bg-brutal-pink px-4 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {formatMessage({ id: "agent.detail.saveRuntimeConfig" })}
                 </button>
@@ -2539,7 +2539,7 @@ function AgentCreatedAgentsSection({ createdAgents, onOpenProfile }: { createdAg
   const { formatMessage } = useIntl();
   const openProfile = useProfileStore((s) => s.openProfile);
   return (
-    <div className="px-5 py-4 border-t border-black/10">
+    <div className="px-5 py-4 border-t border-line-muted theme-brutal:border-black/10">
       <SectionHeader
         className="mb-3"
         label={formatMessage({ id: "agent.detail.createdAgents" })}
@@ -2559,7 +2559,7 @@ function AgentCreatedAgentsSection({ createdAgents, onOpenProfile }: { createdAg
           ))}
         </div>
       ) : (
-        <span className="text-sm italic text-black/40">{formatMessage({ id: "agent.detail.noCreatedAgents" })}</span>
+        <span className="text-sm italic text-foreground-hint theme-brutal:text-black/40">{formatMessage({ id: "agent.detail.noCreatedAgents" })}</span>
       )}
     </div>
   );
@@ -2586,7 +2586,7 @@ function AgentStartStopButton({ agentId, onShowStopConfirm }: { agentId: string;
   return (
     <button
       onClick={isOnline ? onShowStopConfirm : () => startAgent(agentId)}
-      className="btn-brutal flex w-full items-center justify-center gap-2 bg-white px-4 py-2 text-sm font-bold"
+      className="btn-brutal flex w-full items-center justify-center gap-2 bg-layer-panel theme-brutal:bg-white px-4 py-2 text-sm font-bold"
     >
       {isOnline ? <Square size={14} /> : <Play size={14} />}
       {isOnline
@@ -2611,19 +2611,19 @@ function AgentStatusBadge({ agentId, showDetail, fallbackStatus, externalStatus 
     const lastAt = externalStatus.lastActivityAt ? new Date(externalStatus.lastActivityAt).getTime() : null;
     const ageMs = lastAt ? Date.now() - lastAt : null;
     const activityTone = ageMs !== null && ageMs < ACTIVE_THRESHOLD_MS
-      ? "bg-brutal-lime"
+      ? "bg-success-soft theme-brutal:bg-brutal-lime"
       : ageMs !== null && ageMs < RECENT_THRESHOLD_MS
-        ? "bg-brutal-cyan"
+        ? "bg-info-soft theme-brutal:bg-brutal-cyan"
         : setupState === "waiting_for_login"
           ? "bg-gray-400"
-          : "bg-brutal-cyan";
+          : "bg-info-soft theme-brutal:bg-brutal-cyan";
 
     // showDetail=false: external agents show only "External" (withhold timestamp detail)
     if (!showDetail) {
       return (
         <div className="flex min-w-0 items-center gap-1.5">
           <StatusDot tone={activityTone} className="shrink-0" />
-          <span className="min-w-0 truncate text-sm text-black/60 font-mono">
+          <span className="min-w-0 truncate text-sm text-foreground-muted theme-brutal:text-black/60 font-mono">
             {formatMessage({ id: "agent.detail.external" })}
           </span>
         </div>
@@ -2647,7 +2647,7 @@ function AgentStatusBadge({ agentId, showDetail, fallbackStatus, externalStatus 
     return (
       <div className="flex min-w-0 items-center gap-1.5">
         <StatusDot tone={activityTone} className="shrink-0" />
-        <span className="min-w-0 truncate text-sm text-black/60 font-mono" title={externalText}>
+        <span className="min-w-0 truncate text-sm text-foreground-muted theme-brutal:text-black/60 font-mono" title={externalText}>
           {externalText}
         </span>
       </div>
@@ -2665,7 +2665,7 @@ function AgentStatusBadge({ agentId, showDetail, fallbackStatus, externalStatus 
   return (
     <div className="flex min-w-0 items-center gap-1.5">
       <StatusDot activity={displayState.activity} className="shrink-0" />
-      <span className="min-w-0 truncate text-sm text-black/60 font-mono" title={activityText}>
+      <span className="min-w-0 truncate text-sm text-foreground-muted theme-brutal:text-black/60 font-mono" title={activityText}>
         {activityText}
       </span>
     </div>
@@ -2809,7 +2809,7 @@ function MigrationErrorContent({ presentation }: { presentation: MigrationErrorP
         </ul>
       ) : null}
       {presentation.technicalCode || presentation.diagnosticRef ? (
-        <details className="text-xs text-black/60">
+        <details className="text-xs text-foreground-muted theme-brutal:text-black/60">
           <summary className="font-bold">{formatMessage({ id: "agent.detail.technicalDetails" })}</summary>
           <div className="space-y-0.5">
             {presentation.technicalCode ? (
@@ -2865,13 +2865,13 @@ function MigrationReference({ notice }: { notice: MigrationNotice }) {
     }
   };
   return (
-    <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-[11px] text-black/55">
+    <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-[11px] text-foreground-muted theme-brutal:text-black/55">
       <span className="font-bold">{formatMessage({ id: "agent.migration.referenceLabel" })}</span>
       <code className="min-w-0 break-all font-mono">{ref}</code>
       <button
         type="button"
         onClick={() => void copy()}
-        className="btn-brutal-sm flex size-6 shrink-0 items-center justify-center bg-white"
+        className="btn-brutal-sm flex size-6 shrink-0 items-center justify-center bg-layer-panel theme-brutal:bg-white"
         title={copied
           ? formatMessage({ id: "agent.migration.referenceCopied" })
           : formatMessage({ id: "agent.migration.referenceCopy" })}
@@ -3078,19 +3078,19 @@ function MigrationProgressPanel({
       <div className="flex min-w-0 items-start justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
           {completed ? (
-            <CircleCheck size={18} className="shrink-0 text-black" aria-hidden="true" />
+            <CircleCheck size={18} className="shrink-0 text-foreground-strong theme-brutal:text-black" aria-hidden="true" />
           ) : canceled ? (
-            <X size={18} className="shrink-0 text-black" aria-hidden="true" />
+            <X size={18} className="shrink-0 text-foreground-strong theme-brutal:text-black" aria-hidden="true" />
           ) : failed ? (
-            <TriangleAlert size={18} className="shrink-0 text-black" aria-hidden="true" />
+            <TriangleAlert size={18} className="shrink-0 text-foreground-strong theme-brutal:text-black" aria-hidden="true" />
           ) : (
             <Spinner size="md" aria-hidden="true" />
           )}
           <div className="min-w-0">
-            <h3 className="break-words text-sm font-bold leading-tight text-black">
+            <h3 className="break-words text-sm font-bold leading-tight text-foreground-strong theme-brutal:text-black">
               {formatMessage({ id: headerMessageId }, { target })}
             </h3>
-            <p className="text-xs text-black/55">{formatMessage({ id: "agent.detail.workspaceAndAgentState" })}</p>
+            <p className="text-xs text-foreground-muted theme-brutal:text-black/55">{formatMessage({ id: "agent.detail.workspaceAndAgentState" })}</p>
           </div>
         </div>
         <Badge appearance="outline" variant={badgeVariant} uppercase className="shrink-0">
@@ -3113,20 +3113,20 @@ function MigrationProgressPanel({
           return (
             <li key={labelId} className="flex min-w-0 items-center gap-1.5 text-[11px] font-bold">
               <span
-                className={`flex size-4 shrink-0 items-center justify-center border border-black text-[9px] ${
+                className={`flex size-4 shrink-0 items-center justify-center border border-line-strong theme-brutal:border-black text-[9px] ${
                   stepComplete
-                    ? "bg-brutal-lime"
+                    ? "bg-success-soft theme-brutal:bg-brutal-lime"
                     : stepCurrent
                       ? failed
-                        ? "bg-brutal-orange"
-                        : "bg-brutal-pink"
-                      : "bg-white text-black/35"
+                        ? "bg-warning-soft theme-brutal:bg-brutal-orange"
+                        : "bg-accent-soft theme-brutal:bg-brutal-pink"
+                      : "bg-layer-panel theme-brutal:bg-white text-foreground-placeholder theme-brutal:text-black/35"
                 }`}
                 aria-hidden="true"
               >
                 {stepComplete ? <Check size={10} strokeWidth={3} /> : index + 1}
               </span>
-              <span className={stepCurrent || stepComplete ? "text-black" : "text-black/40"}>
+              <span className={stepCurrent || stepComplete ? "text-foreground-strong theme-brutal:text-black" : "text-foreground-hint theme-brutal:text-black/40"}>
                 {formatMessage({ id: labelId })}
               </span>
             </li>
@@ -3146,10 +3146,10 @@ function MigrationProgressPanel({
       </Banner>
       {completed ? (
         <div
-          className="space-y-2 border border-black/15 bg-black/[0.03] p-2.5 text-xs text-black/70"
+          className="space-y-2 border border-line-muted theme-brutal:border-black/15 bg-black/[0.03] p-2.5 text-xs text-foreground-muted theme-brutal:text-black/70"
           data-testid="migration-completion-summary"
         >
-          <p className="font-bold text-black">
+          <p className="font-bold text-foreground-strong theme-brutal:text-black">
             {formatMessage({ id: "agent.detail.migrationCompletionRoute" }, { source, target })}
           </p>
           <p>{formatMessage({ id: "agent.detail.migrationCompletionAuthority" })}</p>
@@ -3158,14 +3158,14 @@ function MigrationProgressPanel({
       ) : null}
       {active ? (
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <p className="text-[11px] text-black/45">
+          <p className="text-[11px] text-foreground-hint theme-brutal:text-black/45">
             {formatMessage({ id: "agent.detail.updatesAutomatically" })}
           </p>
           {canCancelMigration(notice) ? (
             <button
               type="button"
               onClick={onShowCancel}
-              className="btn-brutal-sm flex items-center gap-1.5 bg-white px-2 py-1 text-xs font-bold"
+              className="btn-brutal-sm flex items-center gap-1.5 bg-layer-panel theme-brutal:bg-white px-2 py-1 text-xs font-bold"
             >
               <X size={12} aria-hidden="true" />
               {formatMessage({ id: "agent.migration.cancelAction" })}
@@ -3242,7 +3242,7 @@ function AgentMigrationCancelDialog({
             {formatMessage({ id: "agent.migration.cancelDialogSafeMessage" }, { source, target })}
           </Banner>
           <MigrationReference notice={notice} />
-          <p className="text-xs text-black/60">
+          <p className="text-xs text-foreground-muted theme-brutal:text-black/60">
             {formatMessage({ id: "agent.migration.cancelDialogExplanation" })}
           </p>
         </div>
@@ -3319,16 +3319,16 @@ function AgentMigrationDialog({
     <Modal onClose={onClose} closeOnBackdrop>
       <form
         onSubmit={handleSubmit}
-        className="w-full max-w-md border-2 border-black bg-white shadow-brutal"
+        className="w-full max-w-md border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white shadow-raft-sm theme-brutal:shadow-brutal"
       >
-        <div className="flex items-center justify-between border-b-2 border-black px-4 py-3">
-          <h2 className="text-base font-bold text-black">
+        <div className="flex items-center justify-between border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black px-4 py-3">
+          <h2 className="text-base font-bold text-foreground-strong theme-brutal:text-black">
             {formatMessage({ id: "agent.detail.moveToAnotherComputer" })}
           </h2>
           <button
             type="button"
             onClick={onClose}
-            className="btn-brutal-sm flex size-7 items-center justify-center bg-white"
+            className="btn-brutal-sm flex size-7 items-center justify-center bg-layer-panel theme-brutal:bg-white"
             title={formatMessage({ id: "common.close" })}
           >
             <X size={14} />
@@ -3338,7 +3338,7 @@ function AgentMigrationDialog({
           <div>
             <label
               id="agent-migration-target-computer-label"
-              className="mb-1 block text-xs font-bold uppercase tracking-wide text-black/55"
+              className="mb-1 block text-xs font-bold uppercase tracking-wide text-foreground-muted theme-brutal:text-black/55"
             >
               {formatMessage({ id: "agent.detail.targetComputer" })}
             </label>
@@ -3370,10 +3370,10 @@ function AgentMigrationDialog({
               </SelectContent>
             </Select>
           </div>
-          <div className="border border-black/15 bg-black/[0.03] p-2 text-xs font-bold text-black/60">
+          <div className="border border-line-muted theme-brutal:border-black/15 bg-black/[0.03] p-2 text-xs font-bold text-foreground-muted theme-brutal:text-black/60">
             {formatMessage({ id: "agent.detail.migrationModeStopBeforeExport" })}
           </div>
-          <div className="border border-black/15 bg-black/[0.03] p-2 text-xs font-bold text-black/60">
+          <div className="border border-line-muted theme-brutal:border-black/15 bg-black/[0.03] p-2 text-xs font-bold text-foreground-muted theme-brutal:text-black/60">
             {formatMessage({ id: "agent.detail.migrationSessionResetDetailed" })}
           </div>
           {error ? (
@@ -3382,7 +3382,7 @@ function AgentMigrationDialog({
             </Banner>
           ) : null}
         </div>
-        <div className="flex justify-end gap-2 border-t-2 border-black bg-gray-50 px-4 py-3">
+        <div className="flex justify-end gap-2 border-t theme-brutal:border-t-2 border-line-strong theme-brutal:border-black bg-gray-50 px-4 py-3">
           {error?.recovery === "open_computers_and_retry" ? (
             <button
               type="button"
@@ -3394,7 +3394,7 @@ function AgentMigrationDialog({
                   nav.toComputers();
                 }
               }}
-              className="btn-brutal bg-white px-3 py-2 text-sm font-bold"
+              className="btn-brutal bg-layer-panel theme-brutal:bg-white px-3 py-2 text-sm font-bold"
               disabled={submitting}
             >
               {formatMessage({ id: "agent.migration.error.openComputers" })}
@@ -3403,14 +3403,14 @@ function AgentMigrationDialog({
           <button
             type="button"
             onClick={onClose}
-            className="btn-brutal bg-white px-3 py-2 text-sm font-bold"
+            className="btn-brutal bg-layer-panel theme-brutal:bg-white px-3 py-2 text-sm font-bold"
             disabled={submitting}
           >
             {formatMessage({ id: "agent.detail.cancel" })}
           </button>
           <button
             type="submit"
-            className="btn-brutal bg-brutal-lime px-3 py-2 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-50"
+            className="btn-brutal bg-success-soft theme-brutal:bg-brutal-lime px-3 py-2 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-50"
             disabled={submitting || !selectedTargetComputer}
           >
             {submitting
@@ -3437,9 +3437,9 @@ function AgentMigrationUpgradeDialog({
     <ConfirmDialog
       title={formatMessage({ id: "agent.migration.proRequired.title" })}
       message={(
-        <div className="space-y-3 text-sm leading-relaxed text-black/75">
+        <div className="space-y-3 text-sm leading-relaxed text-foreground-strong theme-brutal:text-black/75">
           <p>{formatMessage({ id: "agent.migration.proRequired.description" })}</p>
-          <p className="font-bold text-black">
+          <p className="font-bold text-foreground-strong theme-brutal:text-black">
             {formatMessage({ id: "agent.migration.proRequired.preservedAccess" })}
           </p>
         </div>
@@ -3543,7 +3543,7 @@ function AgentDetailHeader({ agent, canControlAgentRuntime, canMessageAgent, onM
       {canMessageAgent && (
         <button
           onClick={onMessage}
-          className="btn-brutal-sm flex size-7 items-center justify-center bg-white"
+          className="btn-brutal-sm flex size-7 items-center justify-center bg-layer-panel theme-brutal:bg-white"
           title={formatMessage({ id: "agent.detail.messages" })}
           aria-label={formatMessage({ id: "agent.detail.messages" })}
         >
@@ -3556,20 +3556,20 @@ function AgentDetailHeader({ agent, canControlAgentRuntime, canMessageAgent, onM
             <button
               type="button"
               onClick={() => setShowMobileActions((value) => !value)}
-              className="btn-brutal-sm flex size-7 items-center justify-center bg-white"
+              className="btn-brutal-sm flex size-7 items-center justify-center bg-layer-panel theme-brutal:bg-white"
               title={formatMessage({ id: "agent.detail.moreActions" })}
             >
               <Menu size={14} />
             </button>
             {showMobileActions && (
-              <div ref={mobileActionsPopupRef} className="absolute right-0 top-full z-20 mt-2 min-w-[180px] border-2 border-black bg-white shadow-brutal">
+              <div ref={mobileActionsPopupRef} className="absolute right-0 top-full z-20 mt-2 min-w-[180px] border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white shadow-raft-sm theme-brutal:shadow-brutal">
                 <button
                   type="button"
                   onClick={() => {
                     setShowMobileActions(false);
                     handleStartStop();
                   }}
-                  className="flex w-full items-center gap-2 border-b border-black/10 px-3 py-2 text-left text-sm font-bold hover:bg-black/5"
+                  className="flex w-full items-center gap-2 border-b border-line-muted theme-brutal:border-black/10 px-3 py-2 text-left text-sm font-bold hover:bg-fill-muted theme-brutal:hover:bg-black/5"
                 >
                   {isOnline ? <Square size={14} /> : <Play size={14} />}
                   <span>
@@ -3584,7 +3584,7 @@ function AgentDetailHeader({ agent, canControlAgentRuntime, canMessageAgent, onM
                     setShowMobileActions(false);
                     onShowResetDialog();
                   }}
-                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-bold hover:bg-black/5"
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-bold hover:bg-fill-muted theme-brutal:hover:bg-black/5"
                 >
                   <RotateCcw size={14} />
                   <span>{formatMessage({ id: "agent.detail.restartReset" })}</span>
@@ -3594,7 +3594,7 @@ function AgentDetailHeader({ agent, canControlAgentRuntime, canMessageAgent, onM
           </div>
           <button
             onClick={handleStartStop}
-            className="btn-brutal-sm hidden size-7 items-center justify-center bg-white md:flex"
+            className="btn-brutal-sm hidden size-7 items-center justify-center bg-layer-panel theme-brutal:bg-white md:flex"
             title={isOnline
               ? formatMessage({ id: "agent.detail.stopAgent" })
               : formatMessage({ id: "agent.detail.startAgent" })}
@@ -3603,7 +3603,7 @@ function AgentDetailHeader({ agent, canControlAgentRuntime, canMessageAgent, onM
           </button>
           <button
             onClick={onShowResetDialog}
-            className="btn-brutal-sm hidden size-7 items-center justify-center bg-white md:flex"
+            className="btn-brutal-sm hidden size-7 items-center justify-center bg-layer-panel theme-brutal:bg-white md:flex"
             title={formatMessage({ id: "agent.detail.restartReset" })}
           >
             <RotateCcw size={14} />
@@ -3630,7 +3630,7 @@ function AgentDetailHeader({ agent, canControlAgentRuntime, canMessageAgent, onM
       {onClose && (
         <button
           onClick={onClose}
-          className={`btn-brutal-sm size-7 items-center justify-center bg-white ${onBack ? "flex" : "hidden md:flex"}`}
+          className={`btn-brutal-sm size-7 items-center justify-center bg-layer-panel theme-brutal:bg-white ${onBack ? "flex" : "hidden md:flex"}`}
           title={formatMessage({ id: "common.close" })}
         >
           <X size={14} />
@@ -3659,7 +3659,7 @@ function AgentDetailHeader({ agent, canControlAgentRuntime, canMessageAgent, onM
             {!isDeleted && canMessageAgent && (
               <button
                 onClick={onMessage}
-                className="btn-brutal-sm flex size-7 items-center justify-center bg-white"
+                className="btn-brutal-sm flex size-7 items-center justify-center bg-layer-panel theme-brutal:bg-white"
                 title={formatMessage({ id: "agent.detail.message" })}
                 aria-label={formatMessage({ id: "agent.detail.message" })}
               >
@@ -3670,7 +3670,7 @@ function AgentDetailHeader({ agent, canControlAgentRuntime, canMessageAgent, onM
               <>
                 <button
                   onClick={handleStartStop}
-                  className="btn-brutal-sm flex size-7 items-center justify-center bg-white"
+                  className="btn-brutal-sm flex size-7 items-center justify-center bg-layer-panel theme-brutal:bg-white"
                   title={isOnline
                     ? formatMessage({ id: "agent.detail.stopAgent" })
                     : formatMessage({ id: "agent.detail.startAgent" })}
@@ -3682,7 +3682,7 @@ function AgentDetailHeader({ agent, canControlAgentRuntime, canMessageAgent, onM
                 </button>
                 <button
                   onClick={onShowResetDialog}
-                  className="btn-brutal-sm flex size-7 items-center justify-center bg-white"
+                  className="btn-brutal-sm flex size-7 items-center justify-center bg-layer-panel theme-brutal:bg-white"
                   title={formatMessage({ id: "agent.detail.restartReset" })}
                   aria-label={formatMessage({ id: "agent.detail.restartReset" })}
                 >
@@ -3717,7 +3717,7 @@ function AgentDetailHeader({ agent, canControlAgentRuntime, canMessageAgent, onM
       titleSuffix={
         isDeleted ? (
           <div className="flex min-w-0 items-center gap-1.5">
-            <span className="inline-flex shrink-0 items-center px-1.5 py-0.5 text-[10px] font-bold uppercase border border-black bg-gray-300 text-black/60">
+            <span className="inline-flex shrink-0 items-center px-1.5 py-0.5 text-[10px] font-bold uppercase border border-line-strong theme-brutal:border-black bg-gray-300 text-foreground-muted theme-brutal:text-black/60">
               {formatMessage({ id: "agent.detail.deleted" })}
             </span>
           </div>
@@ -4220,11 +4220,11 @@ export default function AgentDetailPanel({ agent, onClose, onBack, onOpenProfile
 
       {/* Start error */}
       {startError && (
-        <div className="border-b-2 border-black bg-brutal-orange/20 px-5 py-2 flex items-center gap-2">
-          <span className="min-w-0 flex-1 truncate text-sm font-bold text-black" title={startError}>{startError}</span>
+        <div className="border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black bg-warning-soft/20 theme-brutal:bg-brutal-orange/20 px-5 py-2 flex items-center gap-2">
+          <span className="min-w-0 flex-1 truncate text-sm font-bold text-foreground-strong theme-brutal:text-black" title={startError}>{startError}</span>
           <button
             onClick={() => setStartError("")}
-            className="shrink-0 text-black/40 hover:text-black transition-colors"
+            className="shrink-0 text-foreground-hint theme-brutal:text-black/40 hover:text-foreground-strong theme-brutal:hover:text-black transition-colors"
           >
             <X size={14} />
           </button>
@@ -4235,9 +4235,9 @@ export default function AgentDetailPanel({ agent, onClose, onBack, onOpenProfile
           `agent:activity` to all server members, so for non-creators we
           fall back to a generic message and hide the "View logs" link. */}
       {hasRuntimeError && (
-        <div className="flex items-start gap-2 border-b-2 border-black bg-brutal-orange/20 px-5 py-2">
-          <StatusDot tone="bg-brutal-orange" className="mt-[0.1875rem] shrink-0" />
-          <span className="min-w-0 flex-1 line-clamp-2 break-words text-sm font-bold leading-snug text-black" title={canViewPrivateAgentSurfaces ? activityErrorText : activityFallbackErrorText}>
+        <div className="flex items-start gap-2 border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black bg-warning-soft/20 theme-brutal:bg-brutal-orange/20 px-5 py-2">
+          <StatusDot tone="bg-warning-soft theme-brutal:bg-brutal-orange" className="mt-[0.1875rem] shrink-0" />
+          <span className="min-w-0 flex-1 line-clamp-2 break-words text-sm font-bold leading-snug text-foreground-strong theme-brutal:text-black" title={canViewPrivateAgentSurfaces ? activityErrorText : activityFallbackErrorText}>
             {canViewPrivateAgentSurfaces
               ? activityErrorText
               : activityFallbackErrorText}
@@ -4255,7 +4255,7 @@ export default function AgentDetailPanel({ agent, onClose, onBack, onOpenProfile
                     onClick={onClick}
                     onMouseDown={onMouseDown}
                     disabled={disabled}
-                    className="inline-flex items-center gap-1 text-xs font-bold text-black/60 hover:text-black underline whitespace-nowrap"
+                    className="inline-flex items-center gap-1 text-xs font-bold text-foreground-muted theme-brutal:text-black/60 hover:text-foreground-strong theme-brutal:hover:text-black underline whitespace-nowrap"
                   >
                     {copied ? <Check size={12} /> : <Clipboard size={12} />}
                     {copied
@@ -4268,7 +4268,7 @@ export default function AgentDetailPanel({ agent, onClose, onBack, onOpenProfile
                 <button
                   type="button"
                   onClick={() => setActiveTab("activity")}
-                  className="text-xs font-bold text-black/60 hover:text-black underline whitespace-nowrap"
+                  className="text-xs font-bold text-foreground-muted theme-brutal:text-black/60 hover:text-foreground-strong theme-brutal:hover:text-black underline whitespace-nowrap"
                 >
                   {formatMessage({ id: "agent.detail.viewLogs" })}
                 </button>
@@ -4283,11 +4283,11 @@ export default function AgentDetailPanel({ agent, onClose, onBack, onOpenProfile
         ref={agentTabsRef}
         className={`min-w-0 max-w-full overflow-hidden ${workspaceEmbedded ? "workspace-grid-agent-secondary-nav" : ""}`}
       >
-        <Tabs<AgentTab> value={activeTab} onValueChange={setActiveTab} className="border-b-2 border-black bg-white">
+        <Tabs<AgentTab> value={activeTab} onValueChange={setActiveTab} className="border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white">
           <SortableTabsList<AgentTab>
             value={orderedAgentTabIds}
             onReorder={reorderAgentTabs}
-            className="max-w-full border-y-0 border-l-0 border-r-2 border-black bg-white"
+            className="max-w-full border-y-0 border-l-0 border-r theme-brutal:border-r-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white"
           >
             {orderedAgentTabs.map((tab) => {
               const Icon = tab.icon;
@@ -4309,13 +4309,13 @@ export default function AgentDetailPanel({ agent, onClose, onBack, onOpenProfile
 
       {/* Tab content — fills remaining space */}
       {activeTab === "profile" ? (
-        <div className="flex-1 overflow-y-auto bg-white">
+        <div className="flex-1 overflow-y-auto bg-layer-panel theme-brutal:bg-white">
           {isRemoteJointAgent && (agent.serverName || agent.serverSlug) && (
-            <div className="border-b border-black/10 px-5 py-3">
+            <div className="border-b border-line-muted theme-brutal:border-black/10 px-5 py-3">
               <SectionEyebrow as="div" className="mb-1">
                 {formatMessage({ id: "agent.detail.from" })}
               </SectionEyebrow>
-              <div className="text-sm font-bold text-black">{agent.serverName || agent.serverSlug}</div>
+              <div className="text-sm font-bold text-foreground-strong theme-brutal:text-black">{agent.serverName || agent.serverSlug}</div>
             </div>
           )}
           {/* Profile header — avatar + name + status */}
@@ -4331,7 +4331,7 @@ export default function AgentDetailPanel({ agent, onClose, onBack, onOpenProfile
                 title={formatMessage({ id: "agent.detail.changeAvatar" })}
               >
                 <AvatarSlot context="profile-tile" type="agent" agentAvatarUrl={agent.avatarUrl} />
-                <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div className="absolute inset-0 flex items-center justify-center bg-foreground/40 theme-brutal:bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity">
                   <Pencil size={18} className="text-white" />
                 </div>
               </button>
@@ -4355,32 +4355,32 @@ export default function AgentDetailPanel({ agent, onClose, onBack, onOpenProfile
             )}
             <div className="min-w-0 flex-1">
               <div className="flex min-w-0 items-center gap-2">
-                <div className="min-w-0 truncate text-lg font-bold leading-tight text-black" title={agent.displayName || agent.name}>{agent.displayName || agent.name}</div>
+                <div className="min-w-0 truncate text-lg font-bold leading-tight text-foreground-strong theme-brutal:text-black" title={agent.displayName || agent.name}>{agent.displayName || agent.name}</div>
                 {!agent.deletedAt && <AgentStatusBadge agentId={agent.id} fallbackStatus={agent.status} showDetail={canViewPrivateAgentSurfaces} externalStatus={isExternalAgent ? panelExternalStatus : undefined} />}
               </div>
-              <div className="truncate text-sm text-black/50 font-mono" title={`@${agent.name}`}>@{agent.name}</div>
+              <div className="truncate text-sm text-foreground-muted theme-brutal:text-black/50 font-mono" title={`@${agent.name}`}>@{agent.name}</div>
             </div>
           </div>
 
           {/* Avatar picker — inline below avatar */}
           {canManageAgent && showAvatarPicker && (
-            <div className="px-5 py-3 border-t border-black/10">
+            <div className="px-5 py-3 border-t border-line-muted theme-brutal:border-black/10">
               <SectionEyebrow as="div" className="mb-2">
                 {formatMessage({ id: "agent.detail.chooseAvatar" })}
               </SectionEyebrow>
               <div className="flex flex-wrap gap-2 justify-center">
                 {/* Upload custom image */}
                 <label
-                  className={`flex size-10 items-center justify-center border-2 transition-colors ${isCustomAvatar(agent.avatarUrl)
-                    ? "border-brutal-pink bg-brutal-pink/20"
-                    : "border-black hover:border-brutal-pink"
+                  className={`flex size-10 items-center justify-center border theme-brutal:border-2 transition-colors ${isCustomAvatar(agent.avatarUrl)
+                    ? "border-brutal-pink bg-accent-soft/20 theme-brutal:bg-brutal-pink/20"
+                    : "border-line-strong theme-brutal:border-black hover:border-brutal-pink"
                   }`}
                   title={formatMessage({ id: "agent.detail.uploadImage" })}
                 >
                   {isCustomAvatar(agent.avatarUrl) ? (
                     <img src={agent.avatarUrl!} alt="" className="h-full w-full object-cover" />
                   ) : (
-                    <Upload size={16} className="text-black/60" />
+                    <Upload size={16} className="text-foreground-muted theme-brutal:text-black/60" />
                   )}
                   <input
                     type="file"
@@ -4396,9 +4396,9 @@ export default function AgentDetailPanel({ agent, onClose, onBack, onOpenProfile
                 <button
                   type="button"
                   onClick={handleClearAvatar}
-                  className={`flex size-10 items-center justify-center border-2 overflow-hidden transition-colors ${!currentPixelKey && !isCustomAvatar(agent.avatarUrl)
-                    ? "border-brutal-pink bg-brutal-pink/20"
-                    : "border-black hover:border-brutal-pink"
+                  className={`flex size-10 items-center justify-center border theme-brutal:border-2 overflow-hidden transition-colors ${!currentPixelKey && !isCustomAvatar(agent.avatarUrl)
+                    ? "border-brutal-pink bg-accent-soft/20 theme-brutal:bg-brutal-pink/20"
+                    : "border-line-strong theme-brutal:border-black hover:border-brutal-pink"
                     }`}
                   title={formatMessage({ id: "agent.detail.defaultRobotAvatar" })}
                 >
@@ -4409,9 +4409,9 @@ export default function AgentDetailPanel({ agent, onClose, onBack, onOpenProfile
                     key={key}
                     type="button"
                     onClick={() => handleSelectAvatar(key)}
-                    className={`flex size-10 items-center justify-center border-2 overflow-hidden transition-colors ${currentPixelKey === key
-                      ? "border-brutal-pink bg-brutal-pink/20"
-                      : "border-black hover:border-brutal-pink"
+                    className={`flex size-10 items-center justify-center border theme-brutal:border-2 overflow-hidden transition-colors ${currentPixelKey === key
+                      ? "border-brutal-pink bg-accent-soft/20 theme-brutal:bg-brutal-pink/20"
+                      : "border-line-strong theme-brutal:border-black hover:border-brutal-pink"
                       }`}
                     title={key}
                   >
@@ -4438,14 +4438,14 @@ export default function AgentDetailPanel({ agent, onClose, onBack, onOpenProfile
 
           {/* Skills */}
           {canViewPrivateAgentSurfaces && (
-            <div className="border-t border-black/10">
+            <div className="border-t border-line-muted theme-brutal:border-black/10">
               <AgentSkills agentId={agent.id} embedded />
             </div>
           )}
 
           {/* Actions */}
           {canManageAgent && !agent.deletedAt && (
-            <div className="px-5 py-4 border-t border-black/10">
+            <div className="px-5 py-4 border-t border-line-muted theme-brutal:border-black/10">
               <SectionEyebrow as="div" className="mb-3">
                 {formatMessage({ id: "agent.detail.actions" })}
               </SectionEyebrow>
@@ -4465,7 +4465,7 @@ export default function AgentDetailPanel({ agent, onClose, onBack, onOpenProfile
                           }}
                           disabled={currentAgentMigrationActive || migrationBillingChecking}
                           aria-busy={migrationBillingChecking}
-                          className="btn-brutal flex w-full items-center justify-center gap-2 bg-brutal-lime px-4 py-2 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-55"
+                          className="btn-brutal flex w-full items-center justify-center gap-2 bg-success-soft theme-brutal:bg-brutal-lime px-4 py-2 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-55"
                         >
                           {currentAgentMigrationActive ? (
                             <Spinner size="sm" aria-hidden="true" />
@@ -4499,7 +4499,7 @@ export default function AgentDetailPanel({ agent, onClose, onBack, onOpenProfile
                     <AgentStartStopButton agentId={agent.id} onShowStopConfirm={() => setShowStopConfirm(true)} />
                     <button
                       onClick={() => setShowResetDialog(true)}
-                      className="btn-brutal flex w-full items-center justify-center gap-2 bg-white px-4 py-2 text-sm font-bold"
+                      className="btn-brutal flex w-full items-center justify-center gap-2 bg-layer-panel theme-brutal:bg-white px-4 py-2 text-sm font-bold"
                     >
                       <RotateCcw size={14} />
                       {formatMessage({ id: "agent.detail.restartReset" })}
@@ -4516,7 +4516,7 @@ export default function AgentDetailPanel({ agent, onClose, onBack, onOpenProfile
                       onClick={onClick}
                       onMouseDown={onMouseDown}
                       disabled={disabled}
-                      className="btn-brutal flex w-full items-center justify-center gap-2 bg-white px-4 py-2 text-sm font-bold"
+                      className="btn-brutal flex w-full items-center justify-center gap-2 bg-layer-panel theme-brutal:bg-white px-4 py-2 text-sm font-bold"
                     >
                       {copied ? <Check size={14} /> : <Clipboard size={14} />}
                       {copied
@@ -4528,7 +4528,7 @@ export default function AgentDetailPanel({ agent, onClose, onBack, onOpenProfile
                 {FEEDBACK_EXPORT_ENABLED && (
                   <button
                     onClick={() => setShowReportDialog(true)}
-                    className="btn-brutal flex w-full items-center justify-center gap-2 bg-brutal-orange px-4 py-2 text-sm font-bold"
+                    className="btn-brutal flex w-full items-center justify-center gap-2 bg-warning-soft theme-brutal:bg-brutal-orange px-4 py-2 text-sm font-bold"
                   >
                     <Bug size={14} />
                     {formatMessage({ id: "agent.reportIssue.title" })}
@@ -4536,7 +4536,7 @@ export default function AgentDetailPanel({ agent, onClose, onBack, onOpenProfile
                 )}
                 <button
                   onClick={() => setShowDeleteConfirm(true)}
-                  className="btn-brutal flex w-full items-center justify-center gap-2 bg-brutal-red px-4 py-2 text-sm font-bold"
+                  className="btn-brutal flex w-full items-center justify-center gap-2 bg-danger-soft theme-brutal:bg-brutal-red px-4 py-2 text-sm font-bold"
                 >
                   <Trash2 size={14} />
                   {formatMessage({ id: "agent.detail.deleteAgent" })}
@@ -4559,8 +4559,8 @@ export default function AgentDetailPanel({ agent, onClose, onBack, onOpenProfile
       ) : activeTab === "workspace" ? (
         <AgentWorkspace agentId={agent.id} compact={!!onClose} />
       ) : activeTab === "activity" ? (
-        <div className="flex min-h-0 flex-1 flex-col bg-white">
-          <div className="flex items-center justify-between border-b-2 border-black bg-white px-5 py-2">
+        <div className="flex min-h-0 flex-1 flex-col bg-layer-panel theme-brutal:bg-white">
+          <div className="flex items-center justify-between border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white px-5 py-2">
             <SectionEyebrow as="div">{formatMessage({ id: "agent.detail.activityDiagnostics" })}</SectionEyebrow>
             <CopyButton
               controller={diagnosticCopyController}
@@ -4573,7 +4573,7 @@ export default function AgentDetailPanel({ agent, onClose, onBack, onOpenProfile
                   onClick={onClick}
                   onMouseDown={onMouseDown}
                   disabled={disabled}
-                  className="btn-brutal-sm flex items-center gap-1.5 bg-white px-2 py-1 text-xs font-bold"
+                  className="btn-brutal-sm flex items-center gap-1.5 bg-layer-panel theme-brutal:bg-white px-2 py-1 text-xs font-bold"
                 >
                   {copied ? <Check size={12} /> : <Clipboard size={12} />}
                   {copied

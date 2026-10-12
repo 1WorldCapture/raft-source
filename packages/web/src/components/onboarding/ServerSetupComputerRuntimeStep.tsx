@@ -279,9 +279,9 @@ export default function ServerSetupComputerRuntimeStep({
   }, [computerOnline]);
 
   return (
-    <section className="flex w-full max-w-[960px] flex-col border-2 border-black bg-white shadow-brutal md:h-[min(720px,calc(100dvh-3rem))] md:min-h-[520px] md:overflow-hidden">
-      <header className="shrink-0 border-b-2 border-black px-6 pb-4 pt-6 sm:px-9">
-        <p className="font-mono text-[10px] font-bold uppercase tracking-wide text-black/55">
+    <section className="flex w-full max-w-[960px] flex-col border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white shadow-raft-sm theme-brutal:shadow-brutal md:h-[min(720px,calc(100dvh-3rem))] md:min-h-[520px] md:overflow-hidden">
+      <header className="shrink-0 border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black px-6 pb-4 pt-6 sm:px-9">
+        <p className="font-mono text-[10px] font-bold uppercase tracking-wide text-foreground-muted theme-brutal:text-black/55">
           {formatMessage({ id: "onboarding.computerRuntime.eyebrow" })}
         </p>
         {/* Do not ask a returning user who they are. "Connect a computer" is the right
@@ -298,7 +298,7 @@ export default function ServerSetupComputerRuntimeStep({
                 : "onboarding.computerRuntime.titleConnect",
           })}
         </h1>
-        <p className="mt-1 text-xs leading-5 text-black/60">
+        <p className="mt-1 text-xs leading-5 text-foreground-muted theme-brutal:text-black/60">
           {formatMessage({
             id: recoveringMany
               ? "onboarding.computerRuntime.bodyRecoverMany"
@@ -393,12 +393,12 @@ export default function ServerSetupComputerRuntimeStep({
             "Detecting runtime…" spinner is the honest thing to show while we wait. */}
         {runtimeVisible && !ready && runtimeAnswered ? (
         <div
-          className={`border-2 border-black ${connectionMotionPhase === "handoff" ? "onboarding-runtime-reveal" : ""}`}
+          className={`border theme-brutal:border-2 border-line-strong theme-brutal:border-black ${connectionMotionPhase === "handoff" ? "onboarding-runtime-reveal" : ""}`}
           data-motion-state={connectionMotionPhase}
         >
           <div className="px-4 py-3">
             <h2 className="text-sm font-bold">{formatMessage({ id: "onboarding.computerRuntime.noRuntimeTitle" })}</h2>
-            <p className="mt-1 text-xs text-black/55">
+            <p className="mt-1 text-xs text-foreground-muted theme-brutal:text-black/55">
               {formatMessage({ id: "onboarding.computerRuntime.noRuntimeBody" })}
             </p>
           </div>
@@ -442,7 +442,7 @@ export default function ServerSetupComputerRuntimeStep({
         ) : null}
       </div>
 
-      <footer className="flex shrink-0 flex-col-reverse gap-3 border-t-2 border-black px-5 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-9">
+      <footer className="flex shrink-0 flex-col-reverse gap-3 border-t theme-brutal:border-t-2 border-line-strong theme-brutal:border-black px-5 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-9">
         <div className="flex min-w-0 items-center gap-3">
           <SetupSessionFooter disabled={loading} />
         </div>
@@ -499,7 +499,7 @@ function RecoveryCommandRow({
   return (
     <div className="flex items-center gap-2">
       <code
-        className="min-w-0 flex-1 border-2 border-black bg-black px-3 py-2 font-mono text-xs text-brutal-lime shadow-brutal-sm break-all"
+        className="min-w-0 flex-1 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-foreground-strong theme-brutal:bg-black px-3 py-2 font-mono text-xs text-brutal-lime shadow-raft-xs theme-brutal:shadow-brutal-sm break-all"
         data-testid={testId}
       >
         {command}
@@ -507,7 +507,7 @@ function RecoveryCommandRow({
       <button
         type="button"
         onClick={() => onCopy(command)}
-        className="btn-brutal-sm shrink-0 bg-white px-2 py-1.5"
+        className="btn-brutal-sm shrink-0 bg-layer-panel theme-brutal:bg-white px-2 py-1.5"
         title={formatMessage({ id: "onboarding.computerRuntime.copyCommand" }, { command })}
         aria-label={formatMessage({ id: "onboarding.computerRuntime.copyCommand" }, { command })}
       >
@@ -555,8 +555,8 @@ function OfflineComputerRecovery({
   return (
     <div className="space-y-4" data-testid="onboarding-offline-recovery">
       <div className="flex items-center gap-2">
-        <Terminal size={16} className="text-black" />
-        <p className="font-mono text-[10px] font-bold uppercase tracking-wide text-black/55">
+        <Terminal size={16} className="text-foreground-strong theme-brutal:text-black" />
+        <p className="font-mono text-[10px] font-bold uppercase tracking-wide text-foreground-muted theme-brutal:text-black/55">
           {many
             ? formatMessage({ id: "onboarding.computerRuntime.titleRecoverMany" })
             : formatMessage(
@@ -571,12 +571,12 @@ function OfflineComputerRecovery({
           {computers.map((c) => {
             const lastSeen = formatRelativeTime(c.lastHeartbeat, locale);
             return (
-              <li key={c.id} className="flex items-center gap-3 border-2 border-black bg-white px-3 py-2">
-                <Monitor size={16} className="shrink-0 text-black/60" />
+              <li key={c.id} className="flex items-center gap-3 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white px-3 py-2">
+                <Monitor size={16} className="shrink-0 text-foreground-muted theme-brutal:text-black/60" />
                 <div className="min-w-0">
                   <p className="truncate text-xs font-bold">{c.name}</p>
                   {/* Only what we actually know. No last-seen row rather than a made-up one. */}
-                  <p className="text-[11px] text-black/50">
+                  <p className="text-[11px] text-foreground-muted theme-brutal:text-black/50">
                     {/* `lastSeen` is app-locale correct: task #53 (#5848) gave
                         formatRelativeTime an explicit locale parameter, and this
                         call site passes the one from useIntl. */}
@@ -593,7 +593,7 @@ function OfflineComputerRecovery({
 
       {anyLegacyDaemon ? (
         <div data-testid="onboarding-recovery-legacy-daemon">
-          <p className="mb-2 text-xs leading-5 text-black/60">
+          <p className="mb-2 text-xs leading-5 text-foreground-muted theme-brutal:text-black/60">
             {formatMessage({ id: "onboarding.computerRuntime.legacyDaemon" })}
           </p>
           <ComputerCommandGuide
@@ -608,7 +608,7 @@ function OfflineComputerRecovery({
       ) : (
         <>
           <div>
-            <p className="mb-2 text-xs leading-5 text-black/60">
+            <p className="mb-2 text-xs leading-5 text-foreground-muted theme-brutal:text-black/60">
               {many
                 ? formatMessage({ id: "onboarding.computerRuntime.recoverManyHint" })
                 : formatMessage(
@@ -620,7 +620,7 @@ function OfflineComputerRecovery({
           </div>
 
           <div>
-            <p className="mb-2 text-xs leading-5 text-black/60">
+            <p className="mb-2 text-xs leading-5 text-foreground-muted theme-brutal:text-black/60">
               {/* REUSED from the Computer detail page rather than minted again: it is the
                   same prompt, and this whole recovery card exists because
                   MachineDetailPanel worked the problem out first (see the note at
@@ -755,18 +755,18 @@ function ConnectProgressLog({
         >
           <span className="mt-0.5 flex size-4 shrink-0 items-center justify-center" aria-hidden="true">
             {line.done ? (
-              <span className="flex size-4 items-center justify-center border-2 border-black bg-brutal-lime">
+              <span className="flex size-4 items-center justify-center border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-success-soft theme-brutal:bg-brutal-lime">
                 <Check size={10} strokeWidth={4} />
               </span>
             ) : line.failed ? (
-              <span className="flex size-4 items-center justify-center border-2 border-black bg-brutal-orange">
+              <span className="flex size-4 items-center justify-center border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-warning-soft theme-brutal:bg-brutal-orange">
                 <X size={10} strokeWidth={4} />
               </span>
             ) : line.pending ? (
               <Spinner size="sm" />
             ) : null}
           </span>
-          <span className={line.done || line.failed ? "font-bold text-black" : "text-black/60"}>{line.text}</span>
+          <span className={line.done || line.failed ? "font-bold text-foreground-strong theme-brutal:text-black" : "text-foreground-muted theme-brutal:text-black/60"}>{line.text}</span>
         </li>
       ))}
     </ol>
@@ -801,7 +801,7 @@ function ConnectComputerInstructions({ platform }: { platform: "mac-linux" | "wi
 
   return (
     <ol
-      className="space-y-1.5 text-xs leading-5 text-black/65"
+      className="space-y-1.5 text-xs leading-5 text-foreground-muted theme-brutal:text-black/65"
       aria-label={formatMessage({ id: "onboarding.computerRuntime.instructionsAria" })}
       data-testid="onboarding-computer-instructions"
     >
@@ -809,7 +809,7 @@ function ConnectComputerInstructions({ platform }: { platform: "mac-linux" | "wi
         <li key={label} className="flex gap-2">
           <span
             aria-hidden="true"
-            className="mt-px flex size-4 shrink-0 items-center justify-center border border-black/30 font-mono text-[9px] font-bold text-black/60"
+            className="mt-px flex size-4 shrink-0 items-center justify-center border border-line-muted theme-brutal:border-black/30 font-mono text-[9px] font-bold text-foreground-muted theme-brutal:text-black/60"
           >
             {index + 1}
           </span>
@@ -823,9 +823,9 @@ function ConnectComputerInstructions({ platform }: { platform: "mac-linux" | "wi
 
 function RuntimeGroupLabel({ children, note }: { children: ReactNode; note?: string }) {
   return (
-    <div className="border-t border-black/15 px-3.5 pb-1 pt-2.5 first:border-t-0">
-      <span className="font-mono text-[10px] font-bold uppercase tracking-widest text-black/45">{children}</span>
-      {note ? <span className="ml-2 text-[10px] text-black/40">{note}</span> : null}
+    <div className="border-t border-line-muted theme-brutal:border-black/15 px-3.5 pb-1 pt-2.5 first:border-t-0">
+      <span className="font-mono text-[10px] font-bold uppercase tracking-widest text-foreground-hint theme-brutal:text-black/45">{children}</span>
+      {note ? <span className="ml-2 text-[10px] text-foreground-hint theme-brutal:text-black/40">{note}</span> : null}
     </div>
   );
 }
@@ -850,20 +850,20 @@ function RuntimeRow({
   // Says so where the click happened, instead of throwing a toast across the screen.
   const [copied, setCopied] = useState(false);
   return (
-    <div className={`border-t border-black/10 ${expanded ? "bg-soft-signal/20" : ""}`}>
+    <div className={`border-t border-line-muted theme-brutal:border-black/10 ${expanded ? "bg-primary-soft/20 theme-brutal:bg-soft-signal/20" : ""}`}>
       <button
         type="button"
-        className={`flex w-full items-center gap-2.5 px-3.5 py-2 text-left ${quiet ? "text-black/50" : ""}`}
+        className={`flex w-full items-center gap-2.5 px-3.5 py-2 text-left ${quiet ? "text-foreground-muted theme-brutal:text-black/50" : ""}`}
         aria-expanded={expanded}
         onClick={onToggle}
       >
-        <span className={`flex shrink-0 items-center justify-center border-2 border-black bg-white font-mono text-[9px] font-bold ${runtime.recommended ? "size-7" : "size-6"}`}>
+        <span className={`flex shrink-0 items-center justify-center border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white font-mono text-[9px] font-bold ${runtime.recommended ? "size-7" : "size-6"}`}>
           {runtime.abbreviation}
         </span>
         <span className={`min-w-0 flex-1 font-bold ${runtime.recommended ? "text-[13px]" : "text-xs"}`}>
           {runtime.displayName}
         </span>
-        <span className={`shrink-0 border-2 px-2 py-0.5 font-mono text-[9px] font-bold uppercase ${runtime.detected ? "border-black bg-brutal-lime text-black" : "border-black/20 bg-white text-black/40"}`}>
+        <span className={`shrink-0 border theme-brutal:border-2 px-2 py-0.5 font-mono text-[9px] font-bold uppercase ${runtime.detected ? "border-line-strong theme-brutal:border-black bg-success-soft theme-brutal:bg-brutal-lime text-foreground-strong theme-brutal:text-black" : "border-line-muted theme-brutal:border-black/20 bg-layer-panel theme-brutal:bg-white text-foreground-hint theme-brutal:text-black/40"}`}>
           {formatMessage({
             id: runtime.detected
               ? "onboarding.computerRuntime.detected"
@@ -873,7 +873,7 @@ function RuntimeRow({
         <ChevronRight size={15} className={`shrink-0 transition-transform ${expanded ? "rotate-90" : ""}`} />
       </button>
       {expanded ? (
-        <div className="px-3.5 pb-3 pl-12 text-[11px] leading-5 text-black/65">
+        <div className="px-3.5 pb-3 pl-12 text-[11px] leading-5 text-foreground-muted theme-brutal:text-black/65">
           {runtime.detected ? (
             <p>
               {/* Was a sentence plus a leading-space fragment concatenated in JSX.
@@ -887,7 +887,7 @@ function RuntimeRow({
                 },
                 {
                   computer: computerName ?? formatMessage({ id: "onboarding.computerRuntime.yourComputer" }),
-                  b: (chunks: ReactNode) => <strong key="b" className="text-black">{chunks}</strong>,
+                  b: (chunks: ReactNode) => <strong key="b" className="text-foreground-strong theme-brutal:text-black">{chunks}</strong>,
                 },
               )}
             </p>
@@ -898,7 +898,7 @@ function RuntimeRow({
                   { id: "onboarding.computerRuntime.runtimeInstallHint" },
                   {
                     runtime: runtime.displayName,
-                    b: (chunks: ReactNode) => <strong key="b" className="text-black">{chunks}</strong>,
+                    b: (chunks: ReactNode) => <strong key="b" className="text-foreground-strong theme-brutal:text-black">{chunks}</strong>,
                   },
                 )}
               </p>
@@ -910,7 +910,7 @@ function RuntimeRow({
                     setCopied(true);
                     setClockTimeout(() => setCopied(false), 2_000);
                   }}
-                  className="inline-flex items-center gap-1 font-bold text-black underline underline-offset-2"
+                  className="inline-flex items-center gap-1 font-bold text-foreground-strong theme-brutal:text-black underline underline-offset-2"
                 >
                   {copied ? <Check size={12} strokeWidth={3} /> : <Copy size={12} />}
                   {formatMessage({
@@ -939,26 +939,26 @@ function OwnApiKeyRow({
 }) {
   const { formatMessage } = useIntl();
   return (
-    <div className={`border-t border-black/10 ${expanded ? "bg-soft-signal/20" : ""}`}>
+    <div className={`border-t border-line-muted theme-brutal:border-black/10 ${expanded ? "bg-primary-soft/20 theme-brutal:bg-soft-signal/20" : ""}`}>
       <button type="button" className="flex w-full items-center gap-2.5 px-3.5 py-2 text-left" aria-expanded={expanded} onClick={onToggle}>
-        <span className="flex size-6 shrink-0 items-center justify-center border-2 border-black bg-white">
+        <span className="flex size-6 shrink-0 items-center justify-center border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white">
           <KeyRound size={13} />
         </span>
         <span className="min-w-0 flex-1 text-xs font-bold">
           {formatMessage({ id: "onboarding.computerRuntime.ownApiKey" })}
         </span>
-        <span className="shrink-0 border-2 border-black/20 bg-white px-2 py-0.5 font-mono text-[9px] font-bold uppercase text-black/40">
+        <span className="shrink-0 border theme-brutal:border-2 border-line-muted theme-brutal:border-black/20 bg-layer-panel theme-brutal:bg-white px-2 py-0.5 font-mono text-[9px] font-bold uppercase text-foreground-hint theme-brutal:text-black/40">
           {formatMessage({ id: "onboarding.computerRuntime.notSet" })}
         </span>
         <ChevronRight size={15} className={`shrink-0 transition-transform ${expanded ? "rotate-90" : ""}`} />
       </button>
       {expanded ? (
-        <div className="flex flex-wrap items-center justify-between gap-2 px-3.5 pb-3 pl-12 text-[11px] leading-5 text-black/65">
+        <div className="flex flex-wrap items-center justify-between gap-2 px-3.5 pb-3 pl-12 text-[11px] leading-5 text-foreground-muted theme-brutal:text-black/65">
           <p>
             {formatMessage({ id: "onboarding.computerRuntime.ownApiKeyHint" })}
           </p>
           {onOpenSettings ? (
-            <button type="button" onClick={onOpenSettings} className="font-bold text-black underline underline-offset-2">
+            <button type="button" onClick={onOpenSettings} className="font-bold text-foreground-strong theme-brutal:text-black underline underline-offset-2">
               {formatMessage({ id: "onboarding.computerRuntime.addApiKey" })}
             </button>
           ) : null}

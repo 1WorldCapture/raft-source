@@ -70,7 +70,7 @@ function TreeNode({
   const isSelected = selectedPath === node.path;
   const isMemory = node.name === "memory.md";
   const isLoading = loadingDirs.has(node.path);
-  const hiddenTextClass = node.isHidden ? "text-black/55" : "";
+  const hiddenTextClass = node.isHidden ? "text-foreground-muted theme-brutal:text-black/55" : "";
 
   if (node.isDirectory) {
     const children = isExpanded ? getChildren(node.path) : undefined;
@@ -79,8 +79,8 @@ function TreeNode({
         <button
           type="button"
           onClick={() => onToggleDir(node.path)}
-          className={`flex w-full items-center gap-1 py-1 pr-2 text-sm text-left hover:bg-black/5 transition-colors ${
-            isSelected ? "bg-brutal-pink/20" : ""
+          className={`flex w-full items-center gap-1 py-1 pr-2 text-sm text-left hover:bg-fill-muted theme-brutal:hover:bg-black/5 transition-colors ${
+            isSelected ? "bg-accent-soft/20 theme-brutal:bg-brutal-pink/20" : ""
           }`}
           style={{ paddingLeft: `${depth * 16 + 8}px` }}
         >
@@ -99,7 +99,7 @@ function TreeNode({
           <div>
             {isLoading ? (
               <div
-                className="flex items-center gap-1.5 py-1 text-xs text-black/40 font-mono"
+                className="flex items-center gap-1.5 py-1 text-xs text-foreground-hint theme-brutal:text-black/40 font-mono"
                 style={{ paddingLeft: `${(depth + 1) * 16 + 22}px` }}
               >
                 <Spinner size="xs" />
@@ -133,12 +133,12 @@ function TreeNode({
       onClick={() => onSelectFile(node.path)}
       className={`flex w-full items-center gap-1 py-1 pr-2 text-sm text-left transition-colors ${
         isSelected
-          ? "bg-brutal-pink/20 border-r-2 border-brutal-pink"
-          : "hover:bg-black/5"
+          ? "bg-accent-soft/20 theme-brutal:bg-brutal-pink/20 border-r theme-brutal:border-r-2 border-brutal-pink"
+          : "hover:bg-fill-muted theme-brutal:hover:bg-black/5"
       }`}
       style={{ paddingLeft: `${depth * 16 + 22}px` }}
     >
-      <FileText size={14} className="shrink-0 text-black/50" />
+      <FileText size={14} className="shrink-0 text-foreground-muted theme-brutal:text-black/50" />
       <span className={`truncate ${isMemory ? "font-bold" : ""} ${hiddenTextClass}`}>
         {node.name}
       </span>
@@ -383,10 +383,10 @@ export default function AgentWorkspace({ agentId, compact }: { agentId: string; 
   }, [workspacePath]);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-brutal-cream">
+    <div className="flex min-h-0 flex-1 flex-col bg-layer-canvas-muted theme-brutal:bg-brutal-cream">
       {/* Workspace path bar */}
-      <div className="flex items-center gap-2 border-b border-black/10 bg-white px-3 py-1.5">
-        <span className="min-w-0 truncate text-xs font-mono text-black/50">
+      <div className="flex items-center gap-2 border-b border-line-muted theme-brutal:border-black/10 bg-layer-panel theme-brutal:bg-white px-3 py-1.5">
+        <span className="min-w-0 truncate text-xs font-mono text-foreground-muted theme-brutal:text-black/50">
           {workspacePath}
         </span>
         <CopyIconButton
@@ -403,7 +403,7 @@ export default function AgentWorkspace({ agentId, compact }: { agentId: string; 
       <div className="flex min-h-0 flex-1">
       {/* Left pane: file tree — full width when compact/mobile and no file selected, resizable on desktop */}
       <div
-        className={`${selectedPath ? (compact ? "hidden" : "hidden md:flex") : "flex"} relative ${compact ? "min-w-full" : "min-w-full md:min-w-0"} shrink-0 flex-col ${compact ? "" : "border-r-2 border-black"} bg-white`}
+        className={`${selectedPath ? (compact ? "hidden" : "hidden md:flex") : "flex"} relative ${compact ? "min-w-full" : "min-w-full md:min-w-0"} shrink-0 flex-col ${compact ? "" : "border-r theme-brutal:border-r-2 border-line-strong theme-brutal:border-black"} bg-layer-panel theme-brutal:bg-white`}
         style={compact ? undefined : { width: treeWidth }}
       >
         {/* Resize handle (desktop only, not in compact mode) */}
@@ -417,7 +417,7 @@ export default function AgentWorkspace({ agentId, compact }: { agentId: string; 
         />
         )}
         {/* Tree header */}
-        <div className="flex items-center justify-between border-b border-black/10 px-3 py-2">
+        <div className="flex items-center justify-between border-b border-line-muted theme-brutal:border-black/10 px-3 py-2">
           <SectionEyebrow>
             {formatMessage({ id: "agent.workspace.title" })}
           </SectionEyebrow>
@@ -425,8 +425,8 @@ export default function AgentWorkspace({ agentId, compact }: { agentId: string; 
             <button
               type="button"
               onClick={() => handleToggleHiddenFiles(!showHiddenFiles)}
-              className={`flex size-7 shrink-0 items-center justify-center transition-colors hover:text-black ${
-                showHiddenFiles ? "text-black" : "text-black/40"
+              className={`flex size-7 shrink-0 items-center justify-center transition-colors hover:text-foreground-strong theme-brutal:hover:text-black ${
+                showHiddenFiles ? "text-foreground-strong theme-brutal:text-black" : "text-foreground-hint theme-brutal:text-black/40"
               }`}
               title={showHiddenFiles
                 ? formatMessage({ id: "agent.workspace.hiddenFilesShown" })
@@ -441,7 +441,7 @@ export default function AgentWorkspace({ agentId, compact }: { agentId: string; 
             <button
               type="button"
               onClick={handleRefresh}
-              className="text-black/40 hover:text-black transition-colors"
+              className="text-foreground-hint theme-brutal:text-black/40 hover:text-foreground-strong theme-brutal:hover:text-black transition-colors"
               title={formatMessage({ id: "agent.workspace.refresh" })}
             >
               <RefreshCw size={12} />
@@ -452,25 +452,25 @@ export default function AgentWorkspace({ agentId, compact }: { agentId: string; 
         {/* Tree content */}
         <div className="flex-1 overflow-y-auto py-1">
           {loading ? (
-            <div className="px-3 py-4 text-center text-sm text-black/40 font-mono">
+            <div className="px-3 py-4 text-center text-sm text-foreground-hint theme-brutal:text-black/40 font-mono">
               {formatMessage({ id: "agent.workspace.loading" })}
             </div>
           ) : loadError ? (
             <div className="px-3 py-4 text-center">
               <AlertTriangle size={20} className="mx-auto mb-1.5 text-brutal-orange" />
-              <div className="text-sm text-black/60 font-mono mb-2">
+              <div className="text-sm text-foreground-muted theme-brutal:text-black/60 font-mono mb-2">
                 {formatMessage({ id: "agent.workspace.filesLoadFailed" })}
               </div>
               <button
                 type="button"
                 onClick={handleRefresh}
-                className="btn-brutal-sm px-2 py-1 text-xs bg-white"
+                className="btn-brutal-sm px-2 py-1 text-xs bg-layer-panel theme-brutal:bg-white"
               >
                 {formatMessage({ id: "agent.workspace.retry" })}
               </button>
             </div>
           ) : rootFiles.length === 0 ? (
-            <div className="px-3 py-4 text-center text-sm text-black/40 font-mono">
+            <div className="px-3 py-4 text-center text-sm text-foreground-hint theme-brutal:text-black/40 font-mono">
               {formatMessage({ id: "agent.workspace.noFiles" })}
             </div>
           ) : (
@@ -495,28 +495,28 @@ export default function AgentWorkspace({ agentId, compact }: { agentId: string; 
       {/* Right pane: file content viewer — hidden on mobile/compact when no file selected */}
       <div className={`${!selectedPath ? (compact ? "hidden" : "hidden md:flex") : "flex"} min-w-0 flex-1 flex-col`}>
         {!selectedPath ? (
-          <div className="flex flex-1 items-center justify-center text-black/30 font-mono text-sm">
+          <div className="flex flex-1 items-center justify-center text-foreground-placeholder theme-brutal:text-black/30 font-mono text-sm">
             <div className="text-center">
               <File size={32} className="mx-auto mb-2 opacity-30" />
               {formatMessage({ id: "agent.workspace.selectFile" })}
             </div>
           </div>
         ) : loadingFile ? (
-          <div className="flex flex-1 items-center justify-center text-black/40 font-mono text-sm">
+          <div className="flex flex-1 items-center justify-center text-foreground-hint theme-brutal:text-black/40 font-mono text-sm">
             {formatMessage({ id: "agent.workspace.loading" })}
           </div>
         ) : !fileContent ? (
-          <div className="flex flex-1 items-center justify-center text-black/40 font-mono text-sm">
+          <div className="flex flex-1 items-center justify-center text-foreground-hint theme-brutal:text-black/40 font-mono text-sm">
             {fileError || formatMessage({ id: "agent.workspace.fileLoadFailed" })}
           </div>
         ) : (
           <>
             {/* File header — name + back + view mode toggle */}
-            <div className="flex items-center gap-2 border-b border-black/10 bg-white px-4 py-2">
+            <div className="flex items-center gap-2 border-b border-line-muted theme-brutal:border-black/10 bg-layer-panel theme-brutal:bg-white px-4 py-2">
               <button
                 type="button"
                 onClick={() => { setSelectedPath(null); setFileContent(null); setFileError(null); }}
-                className={`${compact ? "" : "md:hidden"} shrink-0 text-black/60 hover:text-black transition-colors`}
+                className={`${compact ? "" : "md:hidden"} shrink-0 text-foreground-muted theme-brutal:text-black/60 hover:text-foreground-strong theme-brutal:hover:text-black transition-colors`}
               >
                 <ArrowLeft size={16} />
               </button>
@@ -524,7 +524,7 @@ export default function AgentWorkspace({ agentId, compact }: { agentId: string; 
                   it, a long unbreakable path keeps its intrinsic width and
                   pushes the right-side toggle/buttons past the panel edge.
                   #proj-uiux task #133. */}
-              <span className="min-w-0 flex-1 font-mono text-sm font-medium text-black truncate">
+              <span className="min-w-0 flex-1 font-mono text-sm font-medium text-foreground-strong theme-brutal:text-black truncate">
                 {fileContent.path}
               </span>
               {fileContent.path.endsWith(".md") && (
@@ -551,27 +551,27 @@ export default function AgentWorkspace({ agentId, compact }: { agentId: string; 
                   <img
                     src={`data:${fileContent.mimeType};base64,${fileContent.content}`}
                     alt={fileContent.path}
-                    className={`max-h-full max-w-full border-2 border-black object-contain ${transparentImageBackgroundClass}`}
+                    className={`max-h-full max-w-full border theme-brutal:border-2 border-line-strong theme-brutal:border-black object-contain ${transparentImageBackgroundClass}`}
                   />
                 </div>
               ) : fileContent.binary ? (
-                <div className="flex h-full items-center justify-center text-black/40 font-mono text-sm">
+                <div className="flex h-full items-center justify-center text-foreground-hint theme-brutal:text-black/40 font-mono text-sm">
                   {formatMessage({ id: "agent.workspace.binaryCannotDisplay" })}
                 </div>
               ) : fileContent.path.endsWith(".md") && viewMode === "preview" ? (
-                <div className="text-sm text-black break-words">
+                <div className="text-sm text-foreground-strong theme-brutal:text-black break-words">
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm]}
                     components={{
                       pre: ({ children }) => (
-                        <CodeBlock className="overflow-x-auto border-2 border-black bg-[#07111f] p-3 pr-12 text-sm text-[#f5f7ff] font-mono [&>code]:border-0 [&>code]:bg-transparent [&>code]:p-0">
+                        <CodeBlock className="overflow-x-auto border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-[#07111f] p-3 pr-12 text-sm text-[#f5f7ff] font-mono [&>code]:border-0 [&>code]:bg-transparent [&>code]:p-0">
                           {children}
                         </CodeBlock>
                       ),
                       code: ({ children, className }) => {
                         if (!className) {
                           return (
-                            <InlineCode className="bg-soft-signal/40 text-sm [overflow-wrap:anywhere]">
+                            <InlineCode className="bg-primary-soft/40 theme-brutal:bg-soft-signal/40 text-sm [overflow-wrap:anywhere]">
                               {children}
                             </InlineCode>
                           );
@@ -620,28 +620,28 @@ export default function AgentWorkspace({ agentId, compact }: { agentId: string; 
                       ),
                       table: ({ children }) => (
                         <div className="my-2 overflow-x-auto">
-                          <table className="border-collapse border-2 border-black text-sm">
+                          <table className="border-collapse border theme-brutal:border-2 border-line-strong theme-brutal:border-black text-sm">
                             {children}
                           </table>
                         </div>
                       ),
                       th: ({ children }) => (
-                        <th className="border-2 border-black bg-brutal-cyan px-2 py-1 text-left font-bold whitespace-nowrap">
+                        <th className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-info-soft theme-brutal:bg-brutal-cyan px-2 py-1 text-left font-bold whitespace-nowrap">
                           {children}
                         </th>
                       ),
                       td: ({ children }) => (
-                        <td className="border border-black px-2 py-1">{children}</td>
+                        <td className="border border-line-strong theme-brutal:border-black px-2 py-1">{children}</td>
                       ),
                       h1: ({ children }) => <h1 className="text-xl font-bold mt-4 mb-2">{children}</h1>,
                       h2: ({ children }) => <h2 className="text-lg font-bold mt-3 mb-1.5">{children}</h2>,
                       h3: ({ children }) => <h3 className="text-base font-bold mt-2 mb-1">{children}</h3>,
                       h4: ({ children }) => <h4 className="text-sm font-bold mt-2 mb-1">{children}</h4>,
                       h5: ({ children }) => <h5 className="text-sm font-bold mt-1.5 mb-0.5">{children}</h5>,
-                      h6: ({ children }) => <h6 className="text-sm font-bold mt-1.5 mb-0.5 text-black/70">{children}</h6>,
-                      hr: () => <hr className="my-3 border-t-2 border-black" />,
+                      h6: ({ children }) => <h6 className="text-sm font-bold mt-1.5 mb-0.5 text-foreground-muted theme-brutal:text-black/70">{children}</h6>,
+                      hr: () => <hr className="my-3 border-t theme-brutal:border-t-2 border-line-strong theme-brutal:border-black" />,
                       img: ({ src, alt }) => (
-                        <img src={src} alt={alt || ""} className={`my-2 max-w-full border-2 border-black ${transparentImageBackgroundClass}`} />
+                        <img src={src} alt={alt || ""} className={`my-2 max-w-full border theme-brutal:border-2 border-line-strong theme-brutal:border-black ${transparentImageBackgroundClass}`} />
                       ),
                     }}
                   >
@@ -649,14 +649,14 @@ export default function AgentWorkspace({ agentId, compact }: { agentId: string; 
                   </ReactMarkdown>
                 </div>
               ) : (
-                <pre className="whitespace-pre-wrap break-words text-sm font-mono text-black">
+                <pre className="whitespace-pre-wrap break-words text-sm font-mono text-foreground-strong theme-brutal:text-black">
                   {fileContent.content || ""}
                 </pre>
               )}
             </div>
 
             {/* Bottom bar — file size + modified date */}
-            <div className="flex items-center gap-3 border-t border-black/10 bg-white px-4 py-1.5 text-xs text-black/40 font-mono">
+            <div className="flex items-center gap-3 border-t border-line-muted theme-brutal:border-black/10 bg-layer-panel theme-brutal:bg-white px-4 py-1.5 text-xs text-foreground-hint theme-brutal:text-black/40 font-mono">
               <span>{formatSize(fileContent.size)}</span>
               <span>{formatShortDateTime(fileContent.modifiedAt)}</span>
             </div>

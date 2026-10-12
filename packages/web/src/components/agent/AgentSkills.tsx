@@ -16,15 +16,15 @@ function SkillCard({ skill }: { skill: SkillInfo }) {
   return (
     <SurfaceListItem>
       <div className="flex items-center gap-2">
-        <span className="font-bold text-sm text-black">{skill.displayName}</span>
+        <span className="font-bold text-sm text-foreground-strong theme-brutal:text-black">{skill.displayName}</span>
         {skill.userInvocable && (
-          <span className="inline-block border border-black bg-brutal-lime px-1.5 py-0 text-[10px] font-bold uppercase">
+          <span className="inline-block border border-line-strong theme-brutal:border-black bg-success-soft theme-brutal:bg-brutal-lime px-1.5 py-0 text-[10px] font-bold uppercase">
             /{skill.name}
           </span>
         )}
       </div>
       {skill.description && (
-        <p className="text-xs text-black/60 mt-1 line-clamp-2">{skill.description}</p>
+        <p className="text-xs text-foreground-muted theme-brutal:text-black/60 mt-1 line-clamp-2">{skill.description}</p>
       )}
     </SurfaceListItem>
   );
@@ -45,8 +45,8 @@ function PathGroup({ path, skills }: { path: string; skills: SkillInfo[] }) {
   return (
     <div>
       <div className="flex items-center gap-2 mb-2">
-        <InlineCode className="text-[11px] text-black/40">{path}</InlineCode>
-        <span className="text-[11px] text-black/30 font-mono">({skills.length})</span>
+        <InlineCode className="text-[11px] text-foreground-hint theme-brutal:text-black/40">{path}</InlineCode>
+        <span className="text-[11px] text-foreground-placeholder theme-brutal:text-black/30 font-mono">({skills.length})</span>
       </div>
       <div className="space-y-2">
         {skills.map((skill) => (
@@ -68,11 +68,11 @@ function SkillSubSection({ label, icon: Icon, skills, emptyText }: {
   return (
     <div>
       <div className="flex items-center gap-1.5 mb-2">
-        <Icon size={12} className="text-black/40" />
-        <span className="text-xs text-black/50 font-medium">
+        <Icon size={12} className="text-foreground-hint theme-brutal:text-black/40" />
+        <span className="text-xs text-foreground-muted theme-brutal:text-black/50 font-medium">
           {label}
         </span>
-        <span className="text-xs text-black/30 font-mono">({skills.length})</span>
+        <span className="text-xs text-foreground-placeholder theme-brutal:text-black/30 font-mono">({skills.length})</span>
       </div>
       {skills.length > 0 ? (
         <div className="space-y-4">
@@ -81,7 +81,7 @@ function SkillSubSection({ label, icon: Icon, skills, emptyText }: {
           ))}
         </div>
       ) : (
-        <p className="text-xs italic text-black/40">{emptyText}</p>
+        <p className="text-xs italic text-foreground-hint theme-brutal:text-black/40">{emptyText}</p>
       )}
     </div>
   );
@@ -119,17 +119,17 @@ export default function AgentSkills({ agentId, embedded }: { agentId: string; em
 
   if (loading) {
     return (
-      <div className={embedded ? "px-5 py-4" : "flex flex-1 items-center justify-center bg-white"}>
-        <span className="text-sm text-black/40 font-mono">{formatMessage({ id: "agent.skills.loading" })}</span>
+      <div className={embedded ? "px-5 py-4" : "flex flex-1 items-center justify-center bg-layer-panel theme-brutal:bg-white"}>
+        <span className="text-sm text-foreground-hint theme-brutal:text-black/40 font-mono">{formatMessage({ id: "agent.skills.loading" })}</span>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className={embedded ? "px-5 py-4 flex flex-col items-center gap-3" : "flex flex-1 flex-col items-center justify-center gap-3 bg-white"}>
-        <span className="text-sm text-black/60 font-mono">{error}</span>
-        <button onClick={fetchSkills} className="btn-brutal-sm px-2 py-1 bg-white flex items-center gap-1 text-xs font-bold">
+      <div className={embedded ? "px-5 py-4 flex flex-col items-center gap-3" : "flex flex-1 flex-col items-center justify-center gap-3 bg-layer-panel theme-brutal:bg-white"}>
+        <span className="text-sm text-foreground-muted theme-brutal:text-black/60 font-mono">{error}</span>
+        <button onClick={fetchSkills} className="btn-brutal-sm px-2 py-1 bg-layer-panel theme-brutal:bg-white flex items-center gap-1 text-xs font-bold">
           <RefreshCw size={12} />
           {formatMessage({ id: "agent.skills.retry" })}
         </button>
@@ -140,7 +140,7 @@ export default function AgentSkills({ agentId, embedded }: { agentId: string; em
   const totalSkills = (data?.global?.length || 0) + (data?.workspace?.length || 0);
 
   return (
-    <div className={embedded ? "" : "flex-1 overflow-y-auto bg-white"}>
+    <div className={embedded ? "" : "flex-1 overflow-y-auto bg-layer-panel theme-brutal:bg-white"}>
       <div className="px-5 py-4">
         <SectionEyebrow as="div" className="mb-3">
           {formatMessage({ id: "agent.skills.title" }, { count: totalSkills })}

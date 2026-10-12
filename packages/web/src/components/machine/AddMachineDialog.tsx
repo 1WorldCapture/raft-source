@@ -234,7 +234,7 @@ export default function AddMachineDialog({ onClose }: { onClose: () => void }) {
           </h2>
           <button
             onClick={canFinishConnectedStep ? handleDone : handleCancel}
-            className="btn-brutal-sm bg-white p-1"
+            className="btn-brutal-sm bg-layer-panel theme-brutal:bg-white p-1"
           >
             <X size={20} />
           </button>
@@ -252,7 +252,7 @@ export default function AddMachineDialog({ onClose }: { onClose: () => void }) {
                 onClose();
                 nav.toSettings("billing");
               }}
-              className="font-bold text-black underline"
+              className="font-bold text-foreground-strong theme-brutal:text-black underline"
             >
               {formatMessage({ id: "machine.add.upgradeForMore" })}
             </button>
@@ -270,7 +270,7 @@ export default function AddMachineDialog({ onClose }: { onClose: () => void }) {
                     onClose();
                     nav.toSettings("billing");
                   }}
-                  className="font-bold text-black underline"
+                  className="font-bold text-foreground-strong theme-brutal:text-black underline"
                 >
                   {formatMessage({ id: "machine.add.viewPlans" })}
                 </button>
@@ -286,29 +286,29 @@ export default function AddMachineDialog({ onClose }: { onClose: () => void }) {
               <button
                 type="button"
                 onClick={() => setMachineType("local")}
-                className={`flex-1 flex items-center gap-2 border-2 p-3 text-left transition-colors ${
+                className={`flex-1 flex items-center gap-2 border theme-brutal:border-2 p-3 text-left transition-colors ${
                   machineType === "local"
-                    ? "border-black bg-soft-signal font-bold shadow-brutal-sm"
-                    : "border-black/30 bg-white hover:border-black"
+                    ? "border-line-strong theme-brutal:border-black bg-primary-soft theme-brutal:bg-soft-signal font-bold shadow-raft-xs theme-brutal:shadow-brutal-sm"
+                    : "border-line-muted theme-brutal:border-black/30 bg-layer-panel theme-brutal:bg-white hover:border-line-strong theme-brutal:hover:border-black"
                 }`}
               >
-                <Monitor size={18} className="text-black" />
+                <Monitor size={18} className="text-foreground-strong theme-brutal:text-black" />
                 <div>
                   <div className="text-sm font-bold uppercase">
                     {formatMessage({ id: "machine.add.yourComputer" })}
                   </div>
-                  <div className="text-xs text-black/50 font-normal normal-case">
+                  <div className="text-xs text-foreground-muted theme-brutal:text-black/50 font-normal normal-case">
                     {formatMessage({ id: "machine.add.yourComputerDescription" })}
                   </div>
                 </div>
               </button>
               <div
-                className="flex-1 flex items-center gap-2 border-2 border-dashed border-black/30 bg-white p-3 text-left cursor-not-allowed"
+                className="flex-1 flex items-center gap-2 border theme-brutal:border-2 border-dashed border-line-muted theme-brutal:border-black/30 bg-layer-panel theme-brutal:bg-white p-3 text-left cursor-not-allowed"
               >
-                <Cloud size={18} className="text-black/25" />
+                <Cloud size={18} className="text-foreground-placeholder theme-brutal:text-black/25" />
                 <div>
-                  <div className="text-sm font-bold uppercase text-black/30">{formatMessage({ id: "machine.add.cloudComputer" })}</div>
-                  <div className="text-xs text-black/25 font-normal normal-case">{formatMessage({ id: "machine.add.comingSoon" })}</div>
+                  <div className="text-sm font-bold uppercase text-foreground-placeholder theme-brutal:text-black/30">{formatMessage({ id: "machine.add.cloudComputer" })}</div>
+                  <div className="text-xs text-foreground-placeholder theme-brutal:text-black/25 font-normal normal-case">{formatMessage({ id: "machine.add.comingSoon" })}</div>
                 </div>
               </div>
             </div>
@@ -317,7 +317,7 @@ export default function AddMachineDialog({ onClose }: { onClose: () => void }) {
               <button
                 type="button"
                 onClick={handleCancel}
-                className="btn-brutal bg-white px-4 py-2 text-sm"
+                className="btn-brutal bg-layer-panel theme-brutal:bg-white px-4 py-2 text-sm"
               >
                 {formatMessage({ id: "common.confirm.cancel" })}
               </button>
@@ -325,7 +325,7 @@ export default function AddMachineDialog({ onClose }: { onClose: () => void }) {
                 type="button"
                 onClick={handleSelectType}
                 disabled={registering || atLimit}
-                className="btn-brutal bg-brutal-pink px-4 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                className="btn-brutal bg-accent-soft theme-brutal:bg-brutal-pink px-4 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {registering
                   ? formatMessage({ id: "machine.add.settingUp" })
@@ -353,9 +353,9 @@ export default function AddMachineDialog({ onClose }: { onClose: () => void }) {
             <Banner
               intent="info"
               className="mb-4"
-              icon={<StatusDot tone="bg-brutal-orange" pulse className="self-center" />}
+              icon={<StatusDot tone="bg-warning-soft theme-brutal:bg-brutal-orange" pulse className="self-center" />}
             >
-              <span className="font-bold text-black">
+              <span className="font-bold text-foreground-strong theme-brutal:text-black">
                 {formatMessage({ id: "machine.add.waitingForConnect" })}
               </span>
             </Banner>
@@ -364,14 +364,14 @@ export default function AddMachineDialog({ onClose }: { onClose: () => void }) {
               <button
                 type="button"
                 onClick={handleCancel}
-                className="btn-brutal bg-white px-4 py-2 text-sm"
+                className="btn-brutal bg-layer-panel theme-brutal:bg-white px-4 py-2 text-sm"
               >
                 {formatMessage({ id: "common.confirm.cancel" })}
               </button>
               <button
                 type="button"
                 disabled
-                className="btn-brutal bg-brutal-lime/50 px-4 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                className="btn-brutal bg-success-soft/50 theme-brutal:bg-brutal-lime/50 px-4 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {formatMessage({ id: "machine.add.done" })}
               </button>
@@ -382,14 +382,14 @@ export default function AddMachineDialog({ onClose }: { onClose: () => void }) {
         {/* Step 3: Connected — name the machine */}
         {step === "connected" && (
           <div>
-            <div className="mb-4 flex items-center gap-3 border-2 border-black bg-brutal-lime/30 p-4">
-              <CheckCircle size={24} className="text-black shrink-0" />
+            <div className="mb-4 flex items-center gap-3 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-success-soft/30 theme-brutal:bg-brutal-lime/30 p-4">
+              <CheckCircle size={24} className="text-foreground-strong theme-brutal:text-black shrink-0" />
               <div>
-                <div className="font-bold text-sm text-black">
+                <div className="font-bold text-sm text-foreground-strong theme-brutal:text-black">
                   {formatMessage({ id: "machine.add.connectedSuccessfully" })}
                 </div>
                 {pendingMachine?.hostname && (
-                  <div className="text-xs text-black/60 font-mono mt-0.5">
+                  <div className="text-xs text-foreground-muted theme-brutal:text-black/60 font-mono mt-0.5">
                     {pendingMachine.hostname} — {pendingMachine.os || formatMessage({ id: "machine.add.unknownOs" })}
                   </div>
                 )}
@@ -412,7 +412,7 @@ export default function AddMachineDialog({ onClose }: { onClose: () => void }) {
             </FormField>
 
             {needsComputerMatchConfirmation && (
-              <label className="mb-4 flex items-start gap-2 border-2 border-black bg-white p-3 text-sm font-bold">
+              <label className="mb-4 flex items-start gap-2 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white p-3 text-sm font-bold">
                 <input
                   type="checkbox"
                   checked={confirmedComputerMatch}
@@ -433,7 +433,7 @@ export default function AddMachineDialog({ onClose }: { onClose: () => void }) {
                 type="button"
                 onClick={handleDone}
                 disabled={saving || (needsComputerMatchConfirmation && !confirmedComputerMatch)}
-                className="btn-brutal bg-brutal-lime px-4 py-2 text-sm disabled:opacity-50"
+                className="btn-brutal bg-success-soft theme-brutal:bg-brutal-lime px-4 py-2 text-sm disabled:opacity-50"
               >
                 {saving
                   ? formatMessage({ id: "machine.add.saving" })
