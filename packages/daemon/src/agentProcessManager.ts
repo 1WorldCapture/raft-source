@@ -125,6 +125,7 @@ import {
   type RuntimeProfileControlKind,
 } from "./agentRuntimeInput.js";
 import { applyStartupMemoryBlock, buildStartupMemoryBlock, resolveStartupMemoryBlockConfig } from "./startupMemoryBlock.js";
+import { applyWakeRecycleBriefing, describeAppliedWakeRecycle, planWakeSessionRecycle } from "./wakeSessionRecycle.js";
 import {
   buildBoundedVisibleCrashProjection,
   buildClaudeStartupCrashRuntimeError,
@@ -3029,7 +3030,19 @@ export class AgentProcessManager {
         "runtime_starting",
       );
     });
-    const isResume = !!runtimeConfig.sessionId;
+    // RFC 070 phase 1 (`constructed_wake_context` flag): at a cold wake with a large
+    // prior context, retire the session (drop driver `--resume`) but keep the
+    // ladder's resume semantics, so catch-up messages and unread summaries still
+    // deliver. Flag off (default), warm cache, small context or unreadable facts
+    // all resolve to a plain resume.
+    const wakeRecycle = await planWakeSessionRecycle({ config: runtimeConfig, hasResumePrompt: Boolean(resumePrompt), homeDir: this.runtimeSessionHomeDir });
+    if (wakeRecycle.action === "recycle") {
+      runtimeConfig = { ...runtimeConfig, sessionId: null };
+      const applied = describeAppliedWakeRecycle(agentId, wakeRecycle);
+      this.recordDaemonTrace("daemon.agent.wake_recycle", applied.traceAttrs);
+      logger.info(`[Agent ${agentId}] ${applied.logLine}`);
+    }
+    const isResume = !!runtimeConfig.sessionId || wakeRecycle.action === "recycle";
     const standingPrompt = driver.buildSystemPrompt(runtimeConfig, agentId);
     let prompt: AxSurfaceText;
     let promptSource: string;
@@ -3141,7 +3154,10 @@ export class AgentProcessManager {
     // first input instead of relying on the standing-prompt read. Resumed
     // sessions never get it (their transcript already carries an earlier read).
     // Flag off (the default) or a missing/empty MEMORY.md leaves the prompt as is.
-    if (!runtimeConfig.sessionId) {
+    ({ prompt, promptSource } = applyWakeRecycleBriefing(wakeRecycle, prompt, promptSource));
+    // The recycle path injects its own copy of the MEMORY.md block inside the briefing
+    // (so it lands between the briefing chrome and the constructed panel).
+    if (!runtimeConfig.sessionId && wakeRecycle.action !== "recycle") {
       const memoryBlockConfig = resolveStartupMemoryBlockConfig(runtimeConfig.constructedWakeContext, runtimeConfig.envVars);
       if (memoryBlockConfig.enabled) {
         const memoryBlock = await buildStartupMemoryBlock({ workspacePath: agentDataDir, budgetTokens: memoryBlockConfig.budgetTokens });

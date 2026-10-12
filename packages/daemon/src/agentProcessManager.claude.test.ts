@@ -4783,3 +4783,81 @@ test("the startup memory block respects the local kill switch", async () => {
     assert.doesNotMatch(driver.spawnCalls[0]!.prompt, /<memory-index/, "RAFT_STARTUP_MEMORY_BLOCK=0 turns the block off");
   });
 });
+
+// RFC 070 phase 1: at-wake session recycling. A cold wake (>1h since the last transcript
+// activity) whose prior Claude session context exceeds the threshold starts WITHOUT --resume
+// (spawn config sessionId null) while warm, small, flag-off or kill-switched wakes resume the
+// prior session unchanged. RED proof: drop the planWakeSessionRecycle hook in startAgentNow and
+// the first test fails with spawn config sessionId "session-recycle-1" !== null.
+async function writeClaudeSessionTranscript(
+  homeDir: string,
+  sessionId: string,
+  args: { lastActivityAtMs: number; contextTokens: number },
+): Promise<void> {
+  const projectDir = path.join(homeDir, ".claude", "projects", "-workspace-agent");
+  await mkdir(projectDir, { recursive: true });
+  const record = {
+    type: "assistant",
+    timestamp: new Date(args.lastActivityAtMs).toISOString(),
+    message: {
+      usage: {
+        input_tokens: 12,
+        cache_read_input_tokens: args.contextTokens - 12,
+        cache_creation_input_tokens: 0,
+      },
+    },
+  };
+  await writeFile(path.join(homeDir, ".claude", "projects", "-workspace-agent", `${sessionId}.jsonl`), JSON.stringify(record) + "\n");
+}
+
+const RECYCLE_HOUR_MS = 3_600_000;
+
+test("cold wake with large prior context spawns fresh with a context-only first input", async () => {
+  await withManager(async ({ driver, manager, dataDir }) => {
+    const sessionId = "session-recycle-1";
+    await writeClaudeSessionTranscript(dataDir, sessionId, { lastActivityAtMs: Date.now() - 3 * RECYCLE_HOUR_MS, contextTokens: 500_000 });
+    await mkdir(path.join(dataDir, "agent-recycle"), { recursive: true });
+    await writeFile(path.join(dataDir, "agent-recycle", "MEMORY.md"), "# Memory marker recycle\n- durable fact\n");
+    await manager.startAgent(
+      "agent-recycle",
+      makeConfig({ sessionId, constructedWakeContext: true, envVars: { RAFT_WAKE_RECYCLE: "1" } }),
+      undefined,
+      { "#general": 3 },
+    );
+
+    assert.equal(driver.spawnCalls.length, 1);
+    const spawn = driver.spawnCalls[0]!;
+    assert.equal(spawn.config.sessionId, null, "recycled start must not resume the prior session");
+    assert.match(spawn.prompt, /<memory-index file="MEMORY\.md"/, "the briefing carries the MEMORY.md head");
+    assert.match(spawn.prompt, /Memory marker recycle/);
+    assert.doesNotMatch(spawn.prompt, /retired|fresh session|~\d+k tokens/, "v2: no announcement and no stats");
+    // The resume-shaped ladder still delivers the unread summary after the briefing.
+    assert.match(spawn.prompt, /#general: 3 unread/);
+  });
+});
+
+test("warm wake and kill-switched wake resume the prior session unchanged", async () => {
+  await withManager(async ({ driver, manager, dataDir }) => {
+    await writeClaudeSessionTranscript(dataDir, "session-warm-1", { lastActivityAtMs: Date.now() - 10 * 60_000, contextTokens: 500_000 });
+    await manager.startAgent("agent-warm", makeConfig({ sessionId: "session-warm-1", constructedWakeContext: true, envVars: { RAFT_WAKE_RECYCLE: "1" } }));
+    await writeClaudeSessionTranscript(dataDir, "session-killed-1", { lastActivityAtMs: Date.now() - 3 * RECYCLE_HOUR_MS, contextTokens: 500_000 });
+    await manager.startAgent("agent-killed", makeConfig({ sessionId: "session-killed-1", constructedWakeContext: true, envVars: { RAFT_WAKE_RECYCLE: "0" } }));
+
+    assert.equal(driver.spawnCalls.length, 2);
+    assert.equal(driver.spawnCalls[0]!.config.sessionId, "session-warm-1", "warm cache: resume");
+    assert.equal(driver.spawnCalls[1]!.config.sessionId, "session-killed-1", "kill switch: resume");
+  });
+});
+
+test("without the server flag a cold wake with a large context resumes, even with the env set to 1", async () => {
+  await withManager(async ({ driver, manager, dataDir }) => {
+    await writeClaudeSessionTranscript(dataDir, "session-no-flag", { lastActivityAtMs: Date.now() - 3 * RECYCLE_HOUR_MS, contextTokens: 500_000 });
+    await manager.startAgent(
+      "agent-no-flag",
+      makeConfig({ sessionId: "session-no-flag", envVars: { RAFT_WAKE_RECYCLE: "1", RAFT_STARTUP_MEMORY_BLOCK: "1" } }),
+    );
+    assert.equal(driver.spawnCalls.length, 1);
+    assert.equal(driver.spawnCalls[0]!.config.sessionId, "session-no-flag");
+    assert.doesNotMatch(driver.spawnCalls[0]!.prompt, /<memory-index/);
+  });
+});
