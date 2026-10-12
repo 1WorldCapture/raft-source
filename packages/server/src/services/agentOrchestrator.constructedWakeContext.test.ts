@@ -11,8 +11,6 @@ import { dbTest as test } from "../test/integration/dbTest.js";
 import { closeTestDatabase } from "../test/integration/database.js";
 import assert from "node:assert/strict";
 
-import type { ServerToMachineMessage } from "@botiverse/raft-shared";
-
 import { getDb } from "../db/index.js";
 import { agents, machines, serverMembers, servers, users } from "../db/schema.js";
 import { AgentOrchestrator } from "./agentOrchestrator.js";
@@ -22,12 +20,9 @@ afterEach(async () => {
   await closeTestDatabase();
 });
 
-class CapturingOrchestrator extends AgentOrchestrator {
-  readonly starts: Array<Extract<ServerToMachineMessage, { type: "agent:start" }>> = [];
-
-  protected override async sendToMachine(_machineId: string, msg: ServerToMachineMessage): Promise<boolean> {
-    if (msg.type === "agent:start") this.starts.push(msg);
-    return true;
+class FlagProbeOrchestrator extends AgentOrchestrator {
+  evaluate(serverId: string | null | undefined): Promise<boolean> {
+    return this.constructedWakeContextEnabled(serverId);
   }
 }
 
@@ -59,52 +54,45 @@ async function seed(slug: string) {
   return { server: server!, machine: machine!, agent: agent! };
 }
 
-function bindMachine(orchestrator: AgentOrchestrator, machineId: string, serverId: string): void {
-  (orchestrator as any).machineConnections.set(machineId, {
-    ws: {},
-    machineId,
-    serverId,
-    principalKind: "computer",
-    connectionEpochId: `epoch-${machineId}`,
-    heartbeatTimer: null,
-    runtimeAccountUsageTimer: null,
-    lastPong: Date.now(),
-    lastIngressAt: Date.now(),
-    daemonVersion: "1.0.40",
-    capabilities: new Set<string>(),
-    runtimes: ["claude"],
-    migrationTransport: null,
-    shutdownIntent: null,
-    computerVersion: "1.0.40",
-  });
-}
-
-async function startConfig(slug: string) {
-  const { server, machine, agent } = await seed(slug);
-  const orchestrator = new CapturingOrchestrator();
+async function evaluateFor(slug: string): Promise<boolean> {
+  const { server } = await seed(slug);
+  const orchestrator = new FlagProbeOrchestrator();
   try {
-    bindMachine(orchestrator, machine.id, server.id);
-    assert.equal((await orchestrator.startAgent(agent.id)).outcome, "dispatched");
-    assert.equal(orchestrator.starts.length, 1);
-    return orchestrator.starts[0]!.config;
+    return await orchestrator.evaluate(server.id);
   } finally {
     await orchestrator.shutdown();
   }
 }
 
-test("constructed wake context: no flag means the start config leaves it off", async ({ db: _db }) => {
-  const config = await startConfig("cwc-missing");
-  assert.equal(config.constructedWakeContext, undefined);
+// The agent:start config gets `constructedWakeContext: true` exactly when this evaluates true
+// (agentOrchestrator.ts: `if (await this.constructedWakeContextEnabled(agent.serverId)) config.constructedWakeContext = true`).
+// The decision is tested directly: driving a full `startAgent` leaves the dispatch/ack retry
+// machinery spinning after the assertion, which pins a CPU and stalls the DB teardown.
+
+test("constructed wake context: no flag means it is off", async ({ db }) => {
+  void db;
+  assert.equal(await evaluateFor("cwc-missing"), false);
 });
 
-test("constructed wake context: a flag that evaluates off leaves it off", async ({ db: _db }) => {
+test("constructed wake context: a flag that evaluates off leaves it off", async ({ db }) => {
+  void db;
   await createFeatureFlag({ key: CONSTRUCTED_WAKE_CONTEXT_FEATURE_FLAG_KEY, randomizationUnit: "server", defaultEnabled: false });
-  const config = await startConfig("cwc-off");
-  assert.equal(config.constructedWakeContext, undefined);
+  assert.equal(await evaluateFor("cwc-off"), false);
 });
 
-test("constructed wake context: a flag that evaluates on for the server turns it on", async ({ db: _db }) => {
+test("constructed wake context: a flag that evaluates on for the server turns it on", async ({ db }) => {
+  void db;
   await createFeatureFlag({ key: CONSTRUCTED_WAKE_CONTEXT_FEATURE_FLAG_KEY, randomizationUnit: "server", defaultEnabled: true });
-  const config = await startConfig("cwc-on");
-  assert.equal(config.constructedWakeContext, true);
+  assert.equal(await evaluateFor("cwc-on"), true);
+});
+
+test("constructed wake context: no server id means off", async ({ db }) => {
+  void db;
+  const orchestrator = new FlagProbeOrchestrator();
+  try {
+    assert.equal(await orchestrator.evaluate(null), false);
+    assert.equal(await orchestrator.evaluate(undefined), false);
+  } finally {
+    await orchestrator.shutdown();
+  }
 });
