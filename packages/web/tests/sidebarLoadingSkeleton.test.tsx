@@ -44,6 +44,7 @@ function installApiStub() {
 function seedOwner() {
   installApiStub();
   localStorage.clear();
+  localStorage.setItem("raft.members.surface.user-1", "list");
   useAuthStore.setState({
     user: {
       id: "user-1",

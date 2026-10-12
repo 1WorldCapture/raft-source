@@ -172,7 +172,7 @@ function seedStores(role: Server["role"], options: { addChannelMembers?: boolean
       status: "online",
       statusVersion: 1,
       apiKeyPrefix: null,
-      runtimes: ["cursor"],
+      runtimes: ["cursor-sdk"],
       hostname: "mac.local",
       os: "darwin",
       daemonVersion: "0.72.6",
@@ -188,7 +188,7 @@ function seedStores(role: Server["role"], options: { addChannelMembers?: boolean
           context: "new_agent",
           machineId,
           options: getCreatableRuntimeOptions()
-            .filter((runtime) => runtime.id === "cursor")
+            .filter((runtime) => runtime.id === "cursor-sdk")
             .map((runtime) => ({
               runtimeId: runtime.id,
               capabilityStatus: "available",
