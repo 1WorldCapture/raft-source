@@ -1,7 +1,7 @@
-import { open, readFile, stat } from "node:fs/promises";
+import { lstat, open, readFile, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import type { AxSurfaceText } from "@botiverse/raft-shared";
-import { indentAgentBodyContinuationLines } from "@botiverse/raft-shared";
+import { indentAgentBodyContinuationLines, redactDiagnosticText } from "@botiverse/raft-shared";
 import { axSurface } from "./agentRuntimeInput.js";
 
 /**
@@ -100,7 +100,10 @@ function actionLine(action: TranscriptAction): string {
   // (R2 bench, b0), and a second format would reintroduce the clock-style
   // mismatch fixed in R3.
   const when = cliClock(action.ts);
-  return `s${String(action.i).padEnd(5)}${mark} ${when ? `${when} ` : ""}${callForm(action)}${result}`;
+  // Commands and the first bytes of their output can carry credentials
+  // (`export TOKEN=...`, an API response); the shared diagnostic redaction
+  // masks them before the line leaves the daemon.
+  return `s${String(action.i).padEnd(5)}${mark} ${when ? `${when} ` : ""}${redactDiagnosticText(`${callForm(action)}${result}`)}`;
 }
 
 /** Read the transcript tail as JSONL lines (partial first record dropped). */
@@ -512,11 +515,22 @@ export function hotObjects(actions: readonly TranscriptAction[]): HotObject[] {
   return [...index.values()];
 }
 
-async function rereadFile(filePath: string): Promise<string | null> {
+/**
+ * Live re-read of a file a retired session touched. The path comes from old
+ * transcript commands, so it is untrusted: it must resolve (symlinks
+ * included) inside this agent's own workspace, and hidden files and
+ * directories (.env, .ssh, .git, ...) are never read.
+ */
+export async function rereadFile(filePath: string, workspacePath: string | undefined): Promise<string | null> {
+  if (!workspacePath) return null;
   try {
-    const info = await stat(filePath);
+    const [realWorkspace, realFile] = await Promise.all([realpath(workspacePath), realpath(filePath)]);
+    const relative = path.relative(realWorkspace, realFile);
+    if (relative === "" || relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return null;
+    if (relative.split(path.sep).some((segment) => segment.startsWith("."))) return null;
+    const info = await lstat(realFile);
     if (!info.isFile() || info.size > REREAD_FILE_MAX_BYTES) return null;
-    return await readFile(filePath, "utf8");
+    return await readFile(realFile, "utf8");
   } catch {
     return null;
   }
@@ -671,13 +685,21 @@ export async function buildConstructedPanel(args: {
   budgetTokens?: number;
   /** Max messages in the recent-messages section; 0 disables the section. */
   recentMessagesMax?: number;
+  /**
+   * 8-char ids of messages the wake input already carries (the ladder's wake
+   * message, catch-up and starting inbox). A message told to the retired
+   * process that died before handling it is both there and in the old
+   * transcript; it must appear once.
+   */
+  excludeMessageIds?: ReadonlySet<string>;
 }): Promise<AxSurfaceText | null> {
   const budget = args.budgetTokens ?? DEFAULT_PANEL_BUDGET_TOKENS;
   const actions = await parseTranscriptActions(args.transcriptPath);
   if (actions.length < 5) return null;
   const recentMessagesMax = args.recentMessagesMax ?? RECENT_MESSAGES_DEFAULT;
   const messages = recentMessagesMax > 0
-    ? await collectRecentMessages(args.transcriptPath, recentMessagesMax)
+    ? (await collectRecentMessages(args.transcriptPath, recentMessagesMax))
+      .filter((message) => !(message.msgId && args.excludeMessageIds?.has(message.msgId)))
     : [];
 
   const maxIndex = Math.max(1, ...actions.map((a) => a.i));
@@ -703,12 +725,13 @@ export async function buildConstructedPanel(args: {
     // owned by the memory-index section — a second copy here is pure
     // duplication. Sensitive files never contribute content.
     const rereadable = inPlay && object.isFile
-      && (path.isAbsolute(object.name) || args.workspacePath !== undefined)
+      && args.workspacePath !== undefined
       && !/(^|\/)MEMORY\.md$/.test(object.name)
       && !SENSITIVE_PATH_RE.test(object.name);
     if (rereadable) {
       rereadBody = await rereadFile(
         path.isAbsolute(object.name) ? object.name : path.join(args.workspacePath ?? "", object.name),
+        args.workspacePath,
       );
     }
     objects.push({

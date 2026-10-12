@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { buildConstructedPanel, collectRecentMessages, hotObjects, parseMessageChunks, parseSentMessage, parseTranscriptActions } from "./wakeBriefingPanel.js";
+import { buildConstructedPanel, collectRecentMessages, rereadFile, hotObjects, parseMessageChunks, parseSentMessage, parseTranscriptActions } from "./wakeBriefingPanel.js";
 
 function record(type: "assistant" | "user", blocks: unknown[], ts = "2026-08-30T00:00:00.000Z") {
   return JSON.stringify({ type, timestamp: ts, message: { content: blocks } });
@@ -279,4 +279,72 @@ test("panel respects its token budget", async () => {
   const panel = await buildConstructedPanel({ transcriptPath: writeTranscript(lines), budgetTokens: 4000 });
   assert.ok(panel);
   assert.ok(panel!.length / 4 < 4000 * 1.25, `panel too large: ~${Math.round(panel!.length / 4)} tokens`);
+});
+
+function fiveActionTranscript(firstCommand: string, firstResult = "ok", extra: unknown[] = []): string {
+  const lines = [
+    record("assistant", [toolUse("t1", "Bash", { command: firstCommand })]),
+    record("user", [toolResult("t1", firstResult)]),
+    ...extra.map((line) => String(line)),
+  ];
+  for (const [index, command] of ["echo a", "echo b", "echo c", "echo d"].entries()) {
+    lines.push(record("assistant", [toolUse(`f${index}`, "Bash", { command })]));
+    lines.push(record("user", [toolResult(`f${index}`, "ok")]));
+  }
+  return writeTranscript(lines);
+}
+
+test("live re-read is confined to the agent's workspace: outside files, ../ escapes and symlinks are never read", async () => {
+  const outside = mkdtempSync(path.join(os.tmpdir(), "wake-panel-outside-"));
+  writeFileSync(path.join(outside, "other-agent-notes.md"), "OTHER-AGENT-PRIVATE");
+  const ws = mkdtempSync(path.join(os.tmpdir(), "wake-panel-ws-"));
+  symlinkSync(path.join(outside, "other-agent-notes.md"), path.join(ws, "link.md"));
+  assert.equal(await rereadFile(path.join(outside, "other-agent-notes.md"), ws), null);
+  assert.equal(await rereadFile(path.join(ws, "..", path.basename(outside), "other-agent-notes.md"), ws), null);
+  assert.equal(await rereadFile(path.join(ws, "link.md"), ws), null);
+  assert.equal(await rereadFile(path.join(outside, "other-agent-notes.md"), undefined), null);
+
+  const panel = await buildConstructedPanel({
+    transcriptPath: fiveActionTranscript(`cat ${path.join(outside, "other-agent-notes.md")} && cat link.md`),
+    workspacePath: ws,
+  });
+  assert.ok(panel);
+  assert.doesNotMatch(panel!, /OTHER-AGENT-PRIVATE/);
+});
+
+test("hidden files and directories inside the workspace are never re-read", async () => {
+  const ws = mkdtempSync(path.join(os.tmpdir(), "wake-panel-ws-"));
+  mkdirSync(path.join(ws, ".config"));
+  writeFileSync(path.join(ws, ".env"), "HIDDEN-ENV");
+  writeFileSync(path.join(ws, ".config", "settings.json"), "HIDDEN-JSON");
+  writeFileSync(path.join(ws, "visible.md"), "VISIBLE-BODY");
+  assert.equal(await rereadFile(path.join(ws, ".env"), ws), null);
+  assert.equal(await rereadFile(path.join(ws, ".config", "settings.json"), ws), null);
+  assert.equal(await rereadFile(path.join(ws, "visible.md"), ws), "VISIBLE-BODY");
+});
+
+test("recent-actions lines are redacted: secrets in commands and output never reach the briefing", async () => {
+  const panel = await buildConstructedPanel({
+    transcriptPath: fiveActionTranscript(
+      "curl -H 'Authorization: Bearer sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789' https://x.example/api?token=abc123secret",
+      "{\"api_key\":\"sk-live-0123456789abcdefghijklmn\"}",
+    ),
+  });
+  assert.ok(panel);
+  assert.doesNotMatch(panel!, /sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789/);
+  assert.doesNotMatch(panel!, /abc123secret/);
+  assert.doesNotMatch(panel!, /sk-live-0123456789abcdefghijklmn/);
+});
+
+test("messages the wake input already carries are not repeated in the panel", async () => {
+  const lines = [
+    record("assistant", [toolUse("t1", "Bash", { command: "raft message check" })]),
+    record("user", [toolResult("t1", "[target=#proj-x msg=aaaa1111 time=2026-09-01T01:00Z] @alice: first duplicate-candidate\n[target=#proj-x msg=bbbb2222 time=2026-09-01T01:01Z] @alice: second kept message")]),
+  ];
+  const transcriptPath = fiveActionTranscript("echo start", "ok", lines);
+  const both = await buildConstructedPanel({ transcriptPath });
+  assert.match(both!, /first duplicate-candidate/);
+  const deduped = await buildConstructedPanel({ transcriptPath, excludeMessageIds: new Set(["aaaa1111"]) });
+  assert.doesNotMatch(deduped!, /first duplicate-candidate/);
+  assert.match(deduped!, /second kept message/);
 });

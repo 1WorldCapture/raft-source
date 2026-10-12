@@ -508,6 +508,8 @@ export interface PlanWakeSessionRecycleArgs {
   nowMs?: number;
   homeDir?: string;
   processEnv?: NodeJS.ProcessEnv;
+  /** 8-char ids of messages the wake input already delivers; kept out of the panel. */
+  ladderMessageIds?: ReadonlySet<string>;
 }
 
 /** Async entry point for AgentProcessManager: resolve knobs, read transcript
@@ -580,6 +582,7 @@ export async function planWakeSessionRecycle(args: PlanWakeSessionRecycleArgs): 
         workspacePath: workspacePath ?? undefined,
         budgetTokens: panelBudget,
         recentMessagesMax,
+        excludeMessageIds: args.ladderMessageIds,
       });
       if (panel) return { ...plan, briefing: composeWakeSections(briefing, panel) };
     } catch (err) {

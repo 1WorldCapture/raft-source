@@ -3041,7 +3041,11 @@ export class AgentProcessManager {
       || Boolean(unreadSummary && Object.keys(unreadSummary).length > 0)
       || (resumeMessages?.length ?? 0) > 0
       || Boolean(runtimeConfig.runtimeProfileControl);
-    const wakeRecycle = await planWakeSessionRecycle({ config: runtimeConfig, hasResumePrompt: Boolean(resumePrompt), hasWakeInput, homeDir: this.runtimeSessionHomeDir });
+    const ladderMessageIds = new Set<string>();
+    for (const message of [wakeMessage, ...(resumeMessages ?? []), ...this.startingInboxes.values(agentId)]) {
+      if (message?.message_id) ladderMessageIds.add(message.message_id.slice(0, 8));
+    }
+    const wakeRecycle = await planWakeSessionRecycle({ config: runtimeConfig, hasResumePrompt: Boolean(resumePrompt), hasWakeInput, homeDir: this.runtimeSessionHomeDir, ladderMessageIds });
     if (wakeRecycle.action === "recycle") {
       runtimeConfig = { ...runtimeConfig, sessionId: null };
       const applied = describeAppliedWakeRecycle(agentId, wakeRecycle);
