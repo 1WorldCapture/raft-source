@@ -1,4 +1,4 @@
-import type { AgentConfig } from "@botiverse/raft-shared";
+import { RECOMMENDED_MEMORY_MD_BYTES, type AgentConfig } from "@botiverse/raft-shared";
 import { axSurface } from "../agentRuntimeInput.js";
 import { exampleAgentConfig, exampleSystemPromptOptions } from "../axExampleFixtures.js";
 import { buildRaftCliGuideSections } from "./raftCliGuide.js";
@@ -96,10 +96,15 @@ function buildPrompt(
       ]
     : [];
 
+  // `constructed_wake_context` servers inject the head of MEMORY.md into the first input of every
+  // fresh session; tell the agent the size at which its index stops fitting.
+  const memoryInjectionNote = config.constructedWakeContext === true
+    ? ` MEMORY.md is injected into the first input of every fresh session (a note in that input says whether it arrived in full); keep it under ${Math.round(RECOMMENDED_MEMORY_MD_BYTES / 1024)} KB, because past that only the head is shown. When it grows past that, move detail into \`notes/\` and keep only the pointers.`
+    : "";
   const startupSteps = [
     ...runtimeProfileControlStartupStep,
     "1. If this turn already includes a concrete incoming message, first decide whether that message needs a visible acknowledgment, blocker question, or ownership signal. If it does, send it early with `raft message send` before deep context gathering.",
-    "2. Read MEMORY.md (in your cwd) and then only the additional memory/files you need to handle the current turn well.",
+    `2. Read MEMORY.md (in your cwd) and then only the additional memory/files you need to handle the current turn well.${memoryInjectionNote}`,
     "3. Handle the input supplied for this turn. If there is no pending work, stop.",
     "4. When a message needs a reply, send it with `raft message send`.",
     "5. **Complete ALL your work before stopping.** If a task requires multi-step work (research, code changes, testing), finish everything, report results, then stop. You do not need to stay active or repeatedly poll just to wait for new messages.",

@@ -22,7 +22,7 @@
 
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "vitest";
@@ -4746,4 +4746,40 @@ test("task #27: a mention flushed to stdin then consumed is settled, never acked
       `a consumed mention must end drained or still pending (got state=${String(state)}, acks=${q.ackCount()})`,
     );
   }, { tracer });
+});
+
+// RFC 070 startup memory block: a FRESH session's first input carries the head
+// of the agent's MEMORY.md only when the server's `constructed_wake_context`
+// flag is on for the agent; resumed sessions and flag-off starts are untouched.
+test("fresh start injects the MEMORY.md block only when the server flag is on", async () => {
+  await withManager(async ({ driver, manager, dataDir }) => {
+    for (const id of ["agent-mem-on", "agent-mem-off", "agent-mem-resumed"]) {
+      await mkdir(path.join(dataDir, id), { recursive: true });
+      await writeFile(path.join(dataDir, id, "MEMORY.md"), `# Memory marker ${id}\n- durable fact\n`);
+    }
+    await manager.startAgent("agent-mem-on", makeConfig({ sessionId: null, constructedWakeContext: true }));
+    await manager.startAgent("agent-mem-off", makeConfig({ sessionId: null }));
+    await manager.startAgent("agent-mem-resumed", makeConfig({ sessionId: "session-resumed", constructedWakeContext: true }));
+
+    assert.equal(driver.spawnCalls.length, 3);
+    const [on, off, resumed] = driver.spawnCalls;
+    assert.match(on!.prompt, /<memory-index file="MEMORY\.md"/);
+    assert.match(on!.prompt, /Memory marker agent-mem-on/);
+    assert.doesNotMatch(off!.prompt, /<memory-index/, "flag off: no block");
+    assert.doesNotMatch(resumed!.prompt, /<memory-index/, "a resumed session never gets the block");
+  });
+});
+
+test("the startup memory block respects the local kill switch", async () => {
+  await withManager(async ({ driver, manager, dataDir }) => {
+    await mkdir(path.join(dataDir, "agent-mem-killed"), { recursive: true });
+    await writeFile(path.join(dataDir, "agent-mem-killed", "MEMORY.md"), "# Memory marker killed\n");
+    await manager.startAgent(
+      "agent-mem-killed",
+      makeConfig({ sessionId: null, constructedWakeContext: true, envVars: { RAFT_STARTUP_MEMORY_BLOCK: "0" } }),
+    );
+
+    assert.equal(driver.spawnCalls.length, 1);
+    assert.doesNotMatch(driver.spawnCalls[0]!.prompt, /<memory-index/, "RAFT_STARTUP_MEMORY_BLOCK=0 turns the block off");
+  });
 });
