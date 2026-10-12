@@ -144,6 +144,39 @@ drill::fingerprint() {
 }
 
 # ---------------------------------------------------------------------------
+# Endpoint policy
+# ---------------------------------------------------------------------------
+# Owner directive (2026-10-12): our environments are reached over tailscale
+# ONLY, by their `*.ts.net` name — never the public `*.1wc.io` names. This is
+# not cosmetic. A drill pointed at 1wc.io can be cut off mid-handshake by a local
+# proxy (observed 2026-10-12: mihomo/TUN fake-IP killed TLS right after
+# ClientHello, which looked exactly like a broken server). A drill that fails
+# that way is indistinguishable from a real finding, so we refuse to start one.
+#
+# Loopback stays allowed: drills also run against a throwaway server we host
+# ourselves in an isolated root, which is the whole point of the isolation work.
+drill::assert_tailscale_endpoint() {
+  local url="$1" host
+  [[ -n "$url" ]] || drill::fail "empty endpoint"
+  # `[0-9][0-9]*` rather than `[0-9]\+`: BSD sed (macOS) does not support the
+  # GNU `\+` repetition operator and reads it as a literal plus, which silently
+  # leaves the port attached and then rejects a perfectly good tailnet host.
+  host="$(printf '%s' "$url" | sed -e 's|^[a-zA-Z][a-zA-Z0-9+.-]*://||' -e 's|/.*$||' -e 's|^.*@||' -e 's|:\([0-9][0-9]*\)$||')"
+  case "$host" in
+    *.ts.net|localhost|127.0.0.1|::1|'[::1]') return 0 ;;
+  esac
+  # Escape hatch is explicit and loud, so nobody "fixes" a guard by widening it.
+  if [[ "${RAFT_DRILL_ALLOW_ANY_ENDPOINT:-}" == "1" ]]; then
+    drill::warn "endpoint $host is off-tailnet — allowed because RAFT_DRILL_ALLOW_ANY_ENDPOINT=1"
+    return 0
+  fi
+  drill::fail "endpoint host '$host' is not a *.ts.net tailnet name or loopback.
+    Owner policy: environments are reached over tailscale only, not *.1wc.io.
+    Point RAFT_TEST_BASE_URL at https://<host>.ts.net:<port>, or set
+    RAFT_DRILL_ALLOW_ANY_ENDPOINT=1 if you really mean to bypass this."
+}
+
+# ---------------------------------------------------------------------------
 # Owner isolation
 # ---------------------------------------------------------------------------
 
