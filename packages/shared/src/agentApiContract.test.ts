@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   agentApiContract,
+  agentApiActionPrepareBodySchema,
   agentApiIntegrationAppStatusResponseSchema,
   agentApiIntegrationAppPrepareBodySchema,
   agentApiIntegrationAppTransferOwnerResponseSchema,
@@ -1214,4 +1215,18 @@ test("agent-api message envelopes accept toISOString timestamp strings", () => {
     has_newer: false,
     last_read_seq: null,
   });
+});
+
+test("idempotencyKey is capped at 256 characters on task create, action prepare and message send", () => {
+  const ok = "k".repeat(256);
+  const tooLong = "k".repeat(257);
+  const action = { type: "channel:create", name: "demo", visibility: "public" };
+  for (const parse of [
+    (key: string) => agentApiTaskCreateBodySchema.safeParse({ channel: "#c", tasks: [{ title: "t" }], idempotencyKey: key }),
+    (key: string) => agentApiActionPrepareBodySchema.safeParse({ target: "#c", action, idempotencyKey: key }),
+    (key: string) => agentApiSendBodySchema.safeParse({ target: "#c", content: "hi", idempotencyKey: key }),
+  ]) {
+    assert.equal(parse(ok).success, true);
+    assert.equal(parse(tooLong).success, false);
+  }
 });
