@@ -133,6 +133,20 @@ test("resolveAttachmentMimeType recovers supported media from filename", () => {
   assert.equal(resolveAttachmentMimeType("voice.FLAC", "application/octet-stream"), "audio/flac");
 });
 
+test("preview CSPs frame-ancestors include the Desktop app://raft origin without touching CORS", () => {
+  const saved = process.env.CORS_ORIGIN;
+  process.env.CORS_ORIGIN = "https://app.slock.ai";
+  try {
+    assert.equal(buildAttachmentInlinePreviewContentSecurityPolicy(), "frame-ancestors 'self' https://app.slock.ai app://raft");
+    assert.match(buildHtmlPreviewContentSecurityPolicy(), /frame-ancestors 'self' https:\/\/app\.slock\.ai app:\/\/raft$/);
+    process.env.CORS_ORIGIN = "";
+    assert.match(buildHtmlPreviewContentSecurityPolicy(), /frame-ancestors 'self' .*app:\/\/raft$/);
+  } finally {
+    if (saved === undefined) delete process.env.CORS_ORIGIN;
+    else process.env.CORS_ORIGIN = saved;
+  }
+});
+
 test("inline attachment preview CSP only allows configured frame ancestors", () => {
   assert.equal(
     buildAttachmentInlinePreviewContentSecurityPolicy(["https://app.slock.ai"]),
