@@ -4861,3 +4861,13 @@ test("without the server flag a cold wake with a large context resumes, even wit
     assert.doesNotMatch(driver.spawnCalls[0]!.prompt, /<memory-index/);
   });
 });
+
+test("a cold wake with nothing to answer does not recycle (it would pay a fresh session just to say stop)", async () => {
+  await withManager(async ({ driver, manager, dataDir }) => {
+    const sessionId = "session-empty-wake";
+    await writeClaudeSessionTranscript(dataDir, sessionId, { lastActivityAtMs: Date.now() - 3 * RECYCLE_HOUR_MS, contextTokens: 500_000 });
+    await manager.startAgent("agent-empty-wake", makeConfig({ sessionId, constructedWakeContext: true, envVars: { RAFT_WAKE_RECYCLE: "1" } }));
+    assert.equal(driver.spawnCalls.length, 1);
+    assert.equal(driver.spawnCalls[0]!.config.sessionId, sessionId, "no wake message, no unread summary: plain resume");
+  });
+});

@@ -190,6 +190,10 @@ export async function readClaudeSessionResumeFacts(
 
 export interface WakeRecycleDecisionInput {
   config: WakeRecycleConfig;
+  /** False when the wake carries nothing to answer (no wake message, resume prompt, catch-up or unread
+   * summary: the ladder would resolve to `resume_empty`). Recycling then buys nothing: it would pay the
+   * fresh-session cost only to say "stop". Defaults to true. */
+  hasWakeInput?: boolean;
   runtime: string | undefined;
   sessionId: string | null | undefined;
   hasResumePrompt: boolean;
@@ -234,6 +238,7 @@ export function decideWakeRecycle(input: WakeRecycleDecisionInput): WakeRecycleP
   if (!input.sessionId) return { action: "resume", reason: "no_prior_session" };
   if (input.hasResumePrompt) return { action: "resume", reason: "explicit_resume_prompt" };
   if (input.hasRuntimeProfileControl) return { action: "resume", reason: "runtime_profile_control" };
+  if (input.hasWakeInput === false) return { action: "resume", reason: "no_wake_input" };
   if (facts.lastActivityAtMs === null || facts.lastContextTokens === null) {
     return { action: "resume", reason: "session_facts_unavailable" };
   }
@@ -402,6 +407,10 @@ interface BackgroundTaskScanState {
 }
 
 const backgroundTaskScans = new Map<string, BackgroundTaskScanState>();
+/** The scan state is only a cache of an append-only file's accounting; bound it so a long-lived daemon
+ * that sees many sessions does not keep one entry per transcript forever (oldest entry is dropped and
+ * simply rescanned from the start if its session comes back). */
+export const BACKGROUND_TASK_SCAN_CACHE_MAX = 256;
 const MARKER_SCAN_CHUNK = 4 * 1024 * 1024;
 const MARKER_OVERLAP = 512;
 
@@ -440,7 +449,13 @@ export async function transcriptOutstandingBackgroundTasks(transcriptPath: strin
     } finally {
       await fd.close();
     }
+    backgroundTaskScans.delete(transcriptPath);
     backgroundTaskScans.set(transcriptPath, state);
+    while (backgroundTaskScans.size > BACKGROUND_TASK_SCAN_CACHE_MAX) {
+      const oldest = backgroundTaskScans.keys().next().value;
+      if (oldest === undefined) break;
+      backgroundTaskScans.delete(oldest);
+    }
     return state.live.size;
   } catch {
     return null;
@@ -488,6 +503,8 @@ export function applyWakeRecycleBriefing(
 export interface PlanWakeSessionRecycleArgs {
   config: AgentConfig;
   hasResumePrompt: boolean;
+  /** See WakeRecycleDecisionInput.hasWakeInput. */
+  hasWakeInput?: boolean;
   nowMs?: number;
   homeDir?: string;
   processEnv?: NodeJS.ProcessEnv;
@@ -503,6 +520,7 @@ export async function planWakeSessionRecycle(args: PlanWakeSessionRecycleArgs): 
       runtime: args.config.runtime,
       sessionId: args.config.sessionId,
       hasResumePrompt: args.hasResumePrompt,
+      hasWakeInput: args.hasWakeInput,
       hasRuntimeProfileControl: runtimeProfileControlBlocksRecycle(args.config.runtimeProfileControl),
       facts: { transcriptPath: null, lastActivityAtMs: null, lastContextTokens: null },
       nowMs: args.nowMs ?? Date.now(),
@@ -514,6 +532,7 @@ export async function planWakeSessionRecycle(args: PlanWakeSessionRecycleArgs): 
     runtime: args.config.runtime,
     sessionId: args.config.sessionId,
     hasResumePrompt: args.hasResumePrompt,
+    hasWakeInput: args.hasWakeInput,
     hasRuntimeProfileControl: runtimeProfileControlBlocksRecycle(args.config.runtimeProfileControl),
     facts,
     nowMs: args.nowMs ?? Date.now(),

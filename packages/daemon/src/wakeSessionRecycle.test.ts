@@ -83,6 +83,7 @@ test("every failed gate resolves to resume with its own reason", () => {
     [{ sessionId: null }, "no_prior_session"],
     [{ hasResumePrompt: true }, "explicit_resume_prompt"],
     [{ hasRuntimeProfileControl: true }, "runtime_profile_control"],
+    [{ hasWakeInput: false }, "no_wake_input"],
     [{ facts: facts({ lastActivityAtMs: null }) }, "session_facts_unavailable"],
     [{ facts: facts({ lastContextTokens: null }) }, "session_facts_unavailable"],
     [{ nowMs: HOUR_MS - 1 }, "cache_possibly_warm"],
@@ -277,4 +278,19 @@ test("planWakeSessionRecycle recycles end to end from a real transcript tail", a
     processEnv: {},
   });
   assert.equal(disabledPlan.action, "resume");
+});
+
+test("the background-task scan cache is bounded and an evicted transcript is rescanned correctly", async () => {
+  const { BACKGROUND_TASK_SCAN_CACHE_MAX, transcriptOutstandingBackgroundTasks } = await import("./wakeSessionRecycle.js");
+  const dir = mkdtempSync(path.join(os.tmpdir(), "slock-bg-scan-"));
+  const first = path.join(dir, "first.jsonl");
+  writeFileSync(first, JSON.stringify({ type: "user", text: "Monitor started (task abc123 on a thing)" }) + "\n");
+  assert.equal(await transcriptOutstandingBackgroundTasks(first), 1);
+  for (let i = 0; i < BACKGROUND_TASK_SCAN_CACHE_MAX + 5; i += 1) {
+    const file = path.join(dir, `t${i}.jsonl`);
+    writeFileSync(file, "{}\n");
+    await transcriptOutstandingBackgroundTasks(file);
+  }
+  // `first` was evicted; scanning it again from byte 0 gives the same accounting.
+  assert.equal(await transcriptOutstandingBackgroundTasks(first), 1);
 });

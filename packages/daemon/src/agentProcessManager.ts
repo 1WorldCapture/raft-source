@@ -3035,7 +3035,13 @@ export class AgentProcessManager {
     // ladder's resume semantics, so catch-up messages and unread summaries still
     // deliver. Flag off (default), warm cache, small context or unreadable facts
     // all resolve to a plain resume.
-    const wakeRecycle = await planWakeSessionRecycle({ config: runtimeConfig, hasResumePrompt: Boolean(resumePrompt), homeDir: this.runtimeSessionHomeDir });
+    // A wake with nothing to answer (the ladder would resolve to `resume_empty`) never recycles.
+    const hasWakeInput = Boolean(wakeMessage)
+      || Boolean(resumePrompt)
+      || Boolean(unreadSummary && Object.keys(unreadSummary).length > 0)
+      || (resumeMessages?.length ?? 0) > 0
+      || Boolean(runtimeConfig.runtimeProfileControl);
+    const wakeRecycle = await planWakeSessionRecycle({ config: runtimeConfig, hasResumePrompt: Boolean(resumePrompt), hasWakeInput, homeDir: this.runtimeSessionHomeDir });
     if (wakeRecycle.action === "recycle") {
       runtimeConfig = { ...runtimeConfig, sessionId: null };
       const applied = describeAppliedWakeRecycle(agentId, wakeRecycle);
