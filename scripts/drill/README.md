@@ -31,6 +31,7 @@ unverified environment*:
 | `drill::snapshot_launchagents` / `drill::diff_launchagents` | Snapshot the owner's LaunchAgents before, and **prove they are restored** after. |
 | `drill::remove_tmp_loginitems` | Remove **only** `/tmp`-rooted login items; warn loudly about anything else and leave it alone. |
 | `drill::kill_pid_tree` | Kill by pid tree. Relative-path cmdlines (`node packages/computer/dist/…`) are the case an absolute-only `pkill` silently misses. |
+| `drill::assert_tailscale_endpoint` | Only tailnet (`*.ts.net`) or loopback endpoints. Our environments are reached over tailscale, never the public `*.1wc.io` names — where a local proxy can cut TLS mid-handshake and the resulting failure is indistinguishable from a real server fault. Bypass is possible via `RAFT_DRILL_ALLOW_ANY_ENDPOINT=1` but **warns loudly**. |
 
 Every guard **fails loudly**. A drill whose identity or isolation cannot be
 proven is worse than no drill.

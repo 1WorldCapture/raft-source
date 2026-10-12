@@ -139,6 +139,30 @@ fi
 drill::restore_ref_trap "$FAKE_REPO" "$NOW" "$NOW_BRANCH" >/dev/null 2>&1 \
   && ok "restore_ref_trap is a no-op when already correct" || bad "restore_ref_trap failed on a no-op"
 
+echo "== endpoint policy: tailnet only =="
+drill::assert_tailscale_endpoint "https://raft.tailf3efbe.ts.net:8443" >/dev/null 2>&1 \
+  && ok "accepts a *.ts.net tailnet endpoint" || bad "rejected the tailnet endpoint we actually use"
+
+# Loopback must stay open, or isolated self-hosted drills become impossible.
+drill::assert_tailscale_endpoint "https://127.0.0.1:8443" >/dev/null 2>&1 \
+  && ok "accepts loopback (self-hosted isolated server)" || bad "loopback rejected — isolated drills would break"
+
+drill::assert_tailscale_endpoint "https://localhost:8443" >/dev/null 2>&1 \
+  && ok "accepts localhost" || bad "localhost rejected"
+
+drill::assert_tailscale_endpoint "https://raft.tailf3efbe.ts.net:8443/base" >/dev/null 2>&1 \
+  && ok "strips path before checking the host" || bad "path in the URL confused the host check"
+
+# The case that actually bit us: 1wc.io gets TLS-cut by a local proxy, which
+# looks identical to a broken server. Run in a subshell — drill::fail exits.
+expect_fail "refuses the public 1wc.io endpoint" drill::assert_tailscale_endpoint "https://8443.raft-dev.1wc.io"
+expect_fail "refuses an arbitrary public host" drill::assert_tailscale_endpoint "https://example.com"
+
+# The bypass must be loud, not silent — otherwise the next person widens the guard.
+out="$( RAFT_DRILL_ALLOW_ANY_ENDPOINT=1 drill::assert_tailscale_endpoint 'https://8443.raft-dev.1wc.io' 2>&1 )" \
+  && grep -q "WARN" <<<"$out" \
+  && ok "bypass works but warns loudly" || bad "bypass did not warn, or failed"
+
 echo
 printf 'selftest: %d passed, %d failed\n' "$PASS" "$FAIL"
 [[ "$FAIL" -eq 0 ]] || exit 1
