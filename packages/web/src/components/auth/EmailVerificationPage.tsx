@@ -99,7 +99,7 @@ export default function EmailVerificationPage({ initialToken }: EmailVerificatio
     <CenteredCardFrame>
       <div className="w-full">
         <AuthPageIntro title={formatMessage({ id: "pages.emailVerification.checkEmailTitle" })}>
-          <p className="mt-2 text-sm text-black/60">
+          <p className="mt-2 text-sm text-foreground-muted theme-brutal:text-black/60">
             {formatMessage({ id: "pages.emailVerification.sentLinkTo" })}
           </p>
           <p className="mt-1 font-mono text-sm font-bold">{user?.email}</p>
@@ -112,13 +112,13 @@ export default function EmailVerificationPage({ initialToken }: EmailVerificatio
         )}
 
         {resendSuccess && (
-          <div className="mb-4 border-2 border-black bg-brutal-lime/30 p-3 text-sm font-bold">
+          <div className="mb-4 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-success-soft/30 theme-brutal:bg-brutal-lime/30 p-3 text-sm font-bold">
             {formatMessage({ id: "pages.emailVerification.resent" })}
           </div>
         )}
 
         {verifying && (
-          <div className="mb-4 text-center text-sm text-black/60">
+          <div className="mb-4 text-center text-sm text-foreground-muted theme-brutal:text-black/60">
             {formatMessage({ id: "pages.emailVerification.verifying" })}
           </div>
         )}
@@ -143,7 +143,7 @@ export default function EmailVerificationPage({ initialToken }: EmailVerificatio
             <button
               type="button"
               onClick={() => setShowManualInput(!showManualInput)}
-              className="text-sm text-black/50 underline hover:text-black"
+              className="text-sm text-foreground-muted theme-brutal:text-black/50 underline hover:text-foreground-strong theme-brutal:hover:text-black"
             >
               <KeyRound size={12} className="inline mr-1" />
               {showManualInput
@@ -159,12 +159,12 @@ export default function EmailVerificationPage({ initialToken }: EmailVerificatio
                 value={manualToken}
                 onChange={(e) => setManualToken(e.target.value)}
                 placeholder={formatMessage({ id: "pages.emailVerification.tokenPlaceholder" })}
-                className="flex-1 border-2 border-black p-2 text-base shadow-brutal-sm focus:shadow-brutal focus:outline-none"
+                className="flex-1 border theme-brutal:border-2 border-line-strong theme-brutal:border-black p-2 text-base shadow-raft-xs theme-brutal:shadow-brutal-sm focus:shadow-raft-sm theme-brutal:focus:shadow-brutal focus:outline-none"
               />
               <button
                 type="submit"
                 disabled={verifying || !manualToken.trim()}
-                className="btn-brutal border-2 border-black bg-brutal-lime px-3 py-1.5 text-sm font-bold disabled:opacity-50"
+                className="btn-brutal border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-success-soft theme-brutal:bg-brutal-lime px-3 py-1.5 text-sm font-bold disabled:opacity-50"
               >
                 {verifying ? "…" : formatMessage({ id: "pages.emailVerification.verifyAction" })}
               </button>
@@ -173,7 +173,7 @@ export default function EmailVerificationPage({ initialToken }: EmailVerificatio
 
           <button
             onClick={() => logout()}
-            className="flex w-full items-center justify-center gap-2 border-2 border-black bg-white p-2 font-bold text-sm shadow-brutal-sm transition-all duration-100 hover:-translate-y-[1px] hover:shadow-brutal active:translate-x-[1px] active:translate-y-[1px] active:shadow-brutal-active"
+            className="flex w-full items-center justify-center gap-2 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white p-2 font-bold text-sm shadow-raft-xs theme-brutal:shadow-brutal-sm transition-all duration-100 hover:-translate-y-[1px] hover:shadow-raft-sm theme-brutal:hover:shadow-brutal active:translate-x-[1px] active:translate-y-[1px] active:shadow-none theme-brutal:active:shadow-brutal-active"
           >
             <LogOut size={14} />
             {formatMessage({ id: "pages.emailVerification.logOut" })}

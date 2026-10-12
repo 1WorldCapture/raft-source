@@ -40,7 +40,7 @@ export default function ForgotPasswordPage({ onBack }: ForgotPasswordPageProps) 
       <AuthPageFrame>
         <div className="w-full">
           <AuthPageIntro title={formatMessage({ id: "pages.forgotPassword.checkEmailTitle" })}>
-            <p className="mt-2 text-sm text-black/60">
+            <p className="mt-2 text-sm text-foreground-muted theme-brutal:text-black/60">
               {formatMessage(
                 { id: "pages.forgotPassword.sentTo" },
                 {
@@ -91,7 +91,7 @@ export default function ForgotPasswordPage({ onBack }: ForgotPasswordPageProps) 
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full border-2 border-black p-2 text-base shadow-brutal-sm focus:shadow-brutal focus:outline-none"
+              className="w-full border theme-brutal:border-2 border-line-strong theme-brutal:border-black p-2 text-base shadow-raft-xs theme-brutal:shadow-brutal-sm focus:shadow-raft-sm theme-brutal:focus:shadow-brutal focus:outline-none"
               required
             />
           </FormField>

@@ -139,11 +139,11 @@ export default function ThreadWindowRoute() {
     : null;
   const taskPageSlot = task ? (
     <>
-      <div className="flex shrink-0 items-center justify-between gap-3 border-b-2 border-black bg-white px-4 py-2">
+      <div className="flex shrink-0 items-center justify-between gap-3 border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white px-4 py-2">
         <Tooltip
           content={task.title}
           disableHoverablePopup
-          contentProps={{ className: "pointer-events-none bg-white" }}
+          contentProps={{ className: "pointer-events-none bg-layer-panel theme-brutal:bg-white" }}
         >
           <strong className="truncate text-sm" data-testid="task-page-identity">
             {formatMessage({ id: "task.modal.taskWithNumber" }, { taskNumber: task.taskNumber })}
@@ -153,12 +153,12 @@ export default function ThreadWindowRoute() {
           <Tooltip
             content={formatMessage({ id: "message.threadPanel.viewInChannel" })}
             disableHoverablePopup
-            contentProps={{ className: "pointer-events-none bg-white" }}
+            contentProps={{ className: "pointer-events-none bg-layer-panel theme-brutal:bg-white" }}
           >
             <button
               type="button"
               onClick={() => viewInChannel(task.channelId, task.messageId, false, task.channelType === "dm" ? "dm" : undefined)}
-              className="btn-brutal-sm flex size-7 items-center justify-center bg-white"
+              className="btn-brutal-sm flex size-7 items-center justify-center bg-layer-panel theme-brutal:bg-white"
               aria-label={formatMessage({ id: "message.threadPanel.viewInChannel" })}
               data-testid="task-view-in-channel"
             >
@@ -168,12 +168,12 @@ export default function ThreadWindowRoute() {
           <Tooltip
             content={formatMessage({ id: "task.modal.close" })}
             disableHoverablePopup
-            contentProps={{ className: "pointer-events-none bg-white" }}
+            contentProps={{ className: "pointer-events-none bg-layer-panel theme-brutal:bg-white" }}
           >
             <button
               type="button"
               onClick={closeWindow}
-              className="btn-brutal-sm flex size-7 items-center justify-center bg-white"
+              className="btn-brutal-sm flex size-7 items-center justify-center bg-layer-panel theme-brutal:bg-white"
               aria-label={formatMessage({ id: "task.modal.close" })}
               data-testid="task-close"
             >
@@ -187,12 +187,12 @@ export default function ThreadWindowRoute() {
   ) : undefined;
 
   return (
-    <main className="flex h-dvh max-h-dvh min-h-0 w-full flex-col overflow-hidden bg-brutal-cream font-display" data-testid="thread-window-route">
-      <div className="flex min-h-0 flex-1 justify-center bg-white p-0 sm:bg-transparent sm:p-3">
+    <main className="flex h-dvh max-h-dvh min-h-0 w-full flex-col overflow-hidden bg-layer-canvas-muted theme-brutal:bg-brutal-cream font-display" data-testid="thread-window-route">
+      <div className="flex min-h-0 flex-1 justify-center bg-layer-panel theme-brutal:bg-white p-0 sm:bg-transparent theme-brutal:sm:bg-transparent sm:p-3">
         {invalidTarget || asyncError ? (
-          <div className="flex w-full max-w-2xl flex-col items-center justify-center gap-4 border-2 border-black bg-white p-8 text-center shadow-brutal">
-            <p className="font-bold text-black">{asyncError ?? formatMessage({ id: "message.threadPanel.loadFailedTitle" })}</p>
-            <button type="button" onClick={closeWindow} className="btn-brutal-sm bg-white px-3 py-1.5 font-bold">
+          <div className="flex w-full max-w-2xl flex-col items-center justify-center gap-4 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white p-8 text-center shadow-raft-sm theme-brutal:shadow-brutal">
+            <p className="font-bold text-foreground-strong theme-brutal:text-black">{asyncError ?? formatMessage({ id: "message.threadPanel.loadFailedTitle" })}</p>
+            <button type="button" onClick={closeWindow} className="btn-brutal-sm bg-layer-panel theme-brutal:bg-white px-3 py-1.5 font-bold">
               {formatMessage({ id: "message.threadPanel.closeThread" })}
             </button>
           </div>
@@ -204,7 +204,7 @@ export default function ThreadWindowRoute() {
             onViewInChannel={() => viewInChannel(legacyTask.channelId, legacyTask.messageId, true, legacyTask.channelType === "dm" ? "dm" : undefined)}
           />
         ) : openParentMessageId ? (
-          <div data-testid="thread-window-surface" className={`flex w-full max-w-none flex-col bg-white sm:max-w-3xl sm:border-2 sm:border-black sm:shadow-brutal ${
+          <div data-testid="thread-window-surface" className={`flex w-full max-w-none flex-col bg-layer-panel theme-brutal:bg-white sm:max-w-3xl sm:border theme-brutal:sm:border-2 sm:border-line-strong theme-brutal:sm:border-black sm:shadow-raft-sm theme-brutal:sm:shadow-brutal ${
             task
               ? "min-h-full overflow-hidden sm:min-h-0 sm:h-[calc(100dvh-1.5rem)] sm:max-h-full"
               : "min-h-full overflow-hidden sm:h-[calc(100dvh-1.5rem)] sm:max-h-full"
@@ -214,8 +214,8 @@ export default function ThreadWindowRoute() {
             </div>
           </div>
         ) : (
-          <div className="flex h-[calc(100dvh-1.5rem)] max-h-full w-full max-w-3xl items-center justify-center border-2 border-black bg-white shadow-brutal">
-            <span className="text-black/40">{formatMessage({ id: "common.loading" })}</span>
+          <div className="flex h-[calc(100dvh-1.5rem)] max-h-full w-full max-w-3xl items-center justify-center border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white shadow-raft-sm theme-brutal:shadow-brutal">
+            <span className="text-foreground-hint theme-brutal:text-black/40">{formatMessage({ id: "common.loading" })}</span>
           </div>
         )}
       </div>

@@ -107,7 +107,7 @@ export default function RegisterPage({ onSwitchToLogin, previewProviders }: Regi
                 setEmail(event.target.value);
                 if (fieldErrors.email) setFieldErrors((current) => ({ ...current, email: undefined }));
               }}
-              className="w-full border-2 border-black p-2 text-base shadow-brutal-sm focus:shadow-brutal focus:outline-none"
+              className="w-full border theme-brutal:border-2 border-line-strong theme-brutal:border-black p-2 text-base shadow-raft-xs theme-brutal:shadow-brutal-sm focus:shadow-raft-sm theme-brutal:focus:shadow-brutal focus:outline-none"
               autoComplete="email"
               required
             />
@@ -123,7 +123,7 @@ export default function RegisterPage({ onSwitchToLogin, previewProviders }: Regi
                 setPassword(event.target.value);
                 if (fieldErrors.password) setFieldErrors((current) => ({ ...current, password: undefined }));
               }}
-              className="w-full border-2 border-black p-2 text-base shadow-brutal-sm focus:shadow-brutal focus:outline-none"
+              className="w-full border theme-brutal:border-2 border-line-strong theme-brutal:border-black p-2 text-base shadow-raft-xs theme-brutal:shadow-brutal-sm focus:shadow-raft-sm theme-brutal:focus:shadow-brutal focus:outline-none"
               placeholder={formatMessage({ id: "pages.register.passwordPlaceholder" })}
               autoComplete="new-password"
               required
@@ -152,11 +152,11 @@ export default function RegisterPage({ onSwitchToLogin, previewProviders }: Regi
         {enabledProviders.length > 0 ? (
           <>
             <div className="my-4 flex items-center gap-3">
-              <div className="h-0.5 flex-1 bg-black" />
-              <span className="text-xs font-bold uppercase tracking-widest text-black/45">
+              <div className="h-0.5 flex-1 bg-foreground-strong theme-brutal:bg-black" />
+              <span className="text-xs font-bold uppercase tracking-widest text-foreground-hint theme-brutal:text-black/45">
                 {formatMessage({ id: "pages.register.or" })}
               </span>
-              <div className="h-0.5 flex-1 bg-black" />
+              <div className="h-0.5 flex-1 bg-foreground-strong theme-brutal:bg-black" />
             </div>
             <div className="space-y-2">
               {enabledProviders.map((provider) => (

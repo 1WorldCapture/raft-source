@@ -64,7 +64,7 @@ function SectionLabel({
       <button
         type="button"
         onClick={onToggle}
-        className="flex min-w-0 items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.08em] text-black transition-transform hover:-translate-y-px focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-black active:translate-x-px active:translate-y-px"
+        className="flex min-w-0 items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.08em] text-foreground-strong theme-brutal:text-black transition-transform hover:-translate-y-px focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-line-strong theme-brutal:focus-visible:outline-black active:translate-x-px active:translate-y-px"
         // Was aria-label={`${label} section`}. Blank the hole and the residue is
         // " section" — a single lowercase word that no prose heuristic can tell
         // from code, which is exactly why the shared scanner grew a positional
@@ -81,7 +81,7 @@ function SectionLabel({
           aria-hidden="true"
         />
         <span>{labelText}</span>
-        <span className="font-mono text-[11px] font-bold normal-case tracking-normal text-black/40">
+        <span className="font-mono text-[11px] font-bold normal-case tracking-normal text-foreground-hint theme-brutal:text-black/40">
           {count}
         </span>
       </button>
@@ -102,13 +102,13 @@ function SidebarRow({
 }) {
   return (
     <div
-      className={`flex min-h-8 items-center gap-1.5 border-2 px-2 py-1.5 text-xs ${
+      className={`flex min-h-8 items-center gap-1.5 border theme-brutal:border-2 px-2 py-1.5 text-xs ${
         active
-          ? "border-black bg-brutal-pink font-bold shadow-brutal-sm"
+          ? "border-line-strong theme-brutal:border-black bg-accent-soft theme-brutal:bg-brutal-pink font-bold shadow-raft-xs theme-brutal:shadow-brutal-sm"
           : "border-transparent font-medium"
       }`}
     >
-      {hash ? <span className="text-black/45">#</span> : null}
+      {hash ? <span className="text-foreground-hint theme-brutal:text-black/45">#</span> : null}
       {avatar}
       <span className="truncate">{children}</span>
     </div>
@@ -131,13 +131,13 @@ function MessageRow({
     <div className="flex items-start gap-2.5">
       {avatar}
       <div className="min-w-0">
-        <div className="text-xs font-bold text-black">
+        <div className="text-xs font-bold text-foreground-strong theme-brutal:text-black">
           {name}
-          <span className="ml-1.5 font-mono text-[9.5px] font-bold text-black/40">
+          <span className="ml-1.5 font-mono text-[9.5px] font-bold text-foreground-hint theme-brutal:text-black/40">
             {label}
           </span>
         </div>
-        <div className="mt-0.5 text-xs leading-5 text-black/80">{children}</div>
+        <div className="mt-0.5 text-xs leading-5 text-foreground-strong theme-brutal:text-black/80">{children}</div>
       </div>
     </div>
   );
@@ -160,22 +160,22 @@ export default function ServerCreatePreview({
 
   return (
     <div
-      className="flex min-h-[520px] flex-1 rotate-[-1deg] flex-col overflow-hidden border-2 border-black bg-white shadow-brutal-lg"
+      className="flex min-h-[520px] flex-1 rotate-[-1deg] flex-col overflow-hidden border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white shadow-raft-md theme-brutal:shadow-brutal-lg"
       data-testid="server-create-preview"
     >
-      <div className="flex shrink-0 flex-col gap-2 border-b-2 border-black bg-brutal-cream p-3">
+      <div className="flex shrink-0 flex-col gap-2 border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black bg-layer-canvas-muted theme-brutal:bg-brutal-cream p-3">
         <div className="flex gap-1.5 pl-px" aria-hidden="true">
-          <i className="size-3 border-2 border-black bg-brutal-pink" />
-          <i className="size-3 border-2 border-black bg-soft-signal" />
-          <i className="size-3 border-2 border-black bg-brutal-lime" />
+          <i className="size-3 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-accent-soft theme-brutal:bg-brutal-pink" />
+          <i className="size-3 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-primary-soft theme-brutal:bg-soft-signal" />
+          <i className="size-3 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-success-soft theme-brutal:bg-brutal-lime" />
         </div>
-        <div className="flex items-center justify-center border-2 border-black bg-white px-3 py-2 font-mono text-xs text-black/70 shadow-brutal-sm">
+        <div className="flex items-center justify-center border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white px-3 py-2 font-mono text-xs text-foreground-muted theme-brutal:text-black/70 shadow-raft-xs theme-brutal:shadow-brutal-sm">
           <span className="inline-flex min-w-0 items-center gap-1.5">
-            <LockKeyhole size={12} className="shrink-0 text-black/50" />
-            <span className="shrink-0 text-black/50">{RAFT_APP_SERVER_PATH_PREFIX}</span>
+            <LockKeyhole size={12} className="shrink-0 text-foreground-muted theme-brutal:text-black/50" />
+            <span className="shrink-0 text-foreground-muted theme-brutal:text-black/50">{RAFT_APP_SERVER_PATH_PREFIX}</span>
             <span
               key={previewSlug}
-              className={`min-w-0 truncate font-bold text-black ${hasCustomSlug ? "onboarding-preview-pop inline-block" : ""}`}
+              className={`min-w-0 truncate font-bold text-foreground-strong theme-brutal:text-black ${hasCustomSlug ? "onboarding-preview-pop inline-block" : ""}`}
               data-testid="server-preview-address-slug"
             >
               {previewSlug}
@@ -184,11 +184,11 @@ export default function ServerCreatePreview({
         </div>
       </div>
       <div className="flex min-h-0 flex-1">
-        <aside className="hidden w-[200px] shrink-0 flex-col border-r-2 border-black bg-brutal-cream sm:flex">
-          <div className="flex h-panel-header items-center gap-2 border-b-2 border-black bg-soft-signal px-3">
+        <aside className="hidden w-[200px] shrink-0 flex-col border-r theme-brutal:border-r-2 border-line-strong theme-brutal:border-black bg-layer-canvas-muted theme-brutal:bg-brutal-cream sm:flex">
+          <div className="flex h-panel-header items-center gap-2 border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black bg-primary-soft theme-brutal:bg-soft-signal px-3">
             <span
               key={previewName}
-              className="onboarding-preview-pop inline-flex max-w-full items-center gap-1.5 border-2 border-black bg-black px-2 py-1 text-xs font-bold text-soft-signal shadow-brutal-sm [--onboarding-pop-rotate:-2deg]"
+              className="onboarding-preview-pop inline-flex max-w-full items-center gap-1.5 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-foreground-strong theme-brutal:bg-black px-2 py-1 text-xs font-bold text-soft-signal shadow-raft-xs theme-brutal:shadow-brutal-sm [--onboarding-pop-rotate:-2deg]"
               data-testid="server-preview-sidebar-badge"
             >
               <span className="truncate">{previewName}</span>
@@ -238,12 +238,12 @@ export default function ServerCreatePreview({
             </div>
           ) : null}
         </aside>
-        <section className="flex min-w-0 flex-1 flex-col bg-white">
-          <div className="flex h-panel-header shrink-0 items-center gap-2.5 border-b-2 border-black bg-white px-4">
-            <div className="flex size-8 shrink-0 items-center justify-center border-2 border-black bg-soft-signal">
+        <section className="flex min-w-0 flex-1 flex-col bg-layer-panel theme-brutal:bg-white">
+          <div className="flex h-panel-header shrink-0 items-center gap-2.5 border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white px-4">
+            <div className="flex size-8 shrink-0 items-center justify-center border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-primary-soft theme-brutal:bg-soft-signal">
               <Hash size={16} />
             </div>
-            <h2 className="truncate text-sm font-bold text-black">{PREVIEW_CHANNEL}</h2>
+            <h2 className="truncate text-sm font-bold text-foreground-strong theme-brutal:text-black">{PREVIEW_CHANNEL}</h2>
           </div>
           <div className="flex min-h-0 flex-1 flex-col gap-3.5 p-4">
             <MessageRow
@@ -265,8 +265,8 @@ export default function ServerCreatePreview({
               </span>
             </MessageRow>
           </div>
-          <div className="border-t-2 border-black p-3">
-            <div className="border-2 border-black px-3 py-2 text-xs text-black/40 opacity-60 shadow-brutal-sm">
+          <div className="border-t theme-brutal:border-t-2 border-line-strong theme-brutal:border-black p-3">
+            <div className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black px-3 py-2 text-xs text-foreground-hint theme-brutal:text-black/40 opacity-60 shadow-raft-xs theme-brutal:shadow-brutal-sm">
               {formatMessage({ id: "onboarding.serverPreview.composerPlaceholder" }, { channel: PREVIEW_CHANNEL })}
             </div>
           </div>

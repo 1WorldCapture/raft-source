@@ -48,10 +48,10 @@ function IosInstructionSheet({
     >
       <div className="mb-3 flex items-start justify-between gap-3">
         <div>
-          <div className="text-lg font-black leading-tight text-black">
+          <div className="text-lg font-black leading-tight text-foreground-strong theme-brutal:text-black">
             {formatMessage({ id: "pwa.install.addToYourHomeScreen" })}
           </div>
-          <div className="mt-1 text-sm text-black/60">
+          <div className="mt-1 text-sm text-foreground-muted theme-brutal:text-black/60">
             {isSafari
               ? formatMessage({ id: "pwa.install.safariSubtitle" })
               : formatMessage({ id: "pwa.install.openInSafariSettingsHint" })}
@@ -60,7 +60,7 @@ function IosInstructionSheet({
         <button
           type="button"
           onClick={onClose}
-          className="btn-brutal-sm bg-white p-1"
+          className="btn-brutal-sm bg-layer-panel theme-brutal:bg-white p-1"
           aria-label={formatMessage({ id: "pwa.install.closeInstructionsAria" })}
         >
           <X size={16} />
@@ -68,7 +68,7 @@ function IosInstructionSheet({
       </div>
 
       {isSafari ? (
-        <div className="border-2 border-black bg-brutal-cream p-2">
+        <div className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-canvas-muted theme-brutal:bg-brutal-cream p-2">
           <img
             src="/pwa/ios-add-to-home-screen-3step.svg"
             alt={formatMessage({ id: "pwa.install.threeStepsAlt" })}
@@ -76,18 +76,18 @@ function IosInstructionSheet({
           />
         </div>
       ) : (
-        <div className="border-2 border-black bg-brutal-cream p-3 text-sm text-black">
+        <div className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-canvas-muted theme-brutal:bg-brutal-cream p-3 text-sm text-foreground-strong theme-brutal:text-black">
           {formatMessage({ id: "pwa.install.iosSafariOnly" })}
         </div>
       )}
 
       <div className="mt-4 flex gap-2">
         {!isSafari && (
-          <button type="button" onClick={onCopyLink} className="btn-brutal bg-brutal-pink px-3 py-2 text-xs">
+          <button type="button" onClick={onCopyLink} className="btn-brutal bg-accent-soft theme-brutal:bg-brutal-pink px-3 py-2 text-xs">
             {formatMessage({ id: "pwa.install.copyLink" })}
           </button>
         )}
-        <button type="button" onClick={onClose} className="btn-brutal bg-white px-3 py-2 text-xs">
+        <button type="button" onClick={onClose} className="btn-brutal bg-layer-panel theme-brutal:bg-white px-3 py-2 text-xs">
           {isSafari
             ? formatMessage({ id: "pwa.install.gotIt" })
             : formatMessage({ id: "common.close" })}
@@ -144,18 +144,18 @@ export function PwaInstallSettingsCard() {
 
   return (
     <div data-pwa-install-settings-card className="mb-6 md:hidden">
-      <div className="border-2 border-black bg-white p-4 shadow-brutal-sm">
+      <div className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white p-4 shadow-raft-xs theme-brutal:shadow-brutal-sm">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <div className="flex items-center gap-2 text-sm font-bold text-black">
+            <div className="flex items-center gap-2 text-sm font-bold text-foreground-strong theme-brutal:text-black">
               <Smartphone size={16} />
               {formatMessage({ id: "pwa.install.addToHomeScreen" })}
             </div>
-            <div className="mt-1 text-xs text-black/60">{helpText}</div>
+            <div className="mt-1 text-xs text-foreground-muted theme-brutal:text-black/60">{helpText}</div>
           </div>
           <button
             type="button"
-            className="btn-brutal bg-brutal-pink px-3 py-1.5 text-xs"
+            className="btn-brutal bg-accent-soft theme-brutal:bg-brutal-pink px-3 py-1.5 text-xs"
             onClick={() => {
               recordPwaInstallEvent({
                 event: "pwa_install_cta_clicked",

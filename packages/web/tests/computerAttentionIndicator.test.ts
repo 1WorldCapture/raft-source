@@ -11,6 +11,7 @@ import {
   getComputerRowDotTone,
   summarizeComputerAttention,
 } from "../src/utils/computerUpgradeIndicator";
+import { brutalView } from "./helpers/brutalView";
 
 test("Computer attention status prioritizes upgrade over offline", () => {
   assert.equal(
@@ -57,7 +58,7 @@ test("Computer attention summary returns aggregate counts and dot priority", () 
   assert.equal(summary.offlineCount, 1);
   assert.deepEqual(summary.problemComputers.map((machine) => machine.id), ["upgrade", "offline"]);
   assert.equal(formatComputerAttentionCounts(summary), "1 needs upgrade · 1 offline");
-  assert.equal(getComputerAttentionDotTone(summary.status), "bg-brutal-pink");
+  assert.equal(brutalView(getComputerAttentionDotTone(summary.status)), "bg-brutal-pink");
 });
 
 test("rail attention counts every affected machine once", () => {
@@ -115,9 +116,9 @@ test("Computer row dot is a single full-state signal for managed Computers and l
     "offline",
   );
 
-  assert.equal(getComputerRowDotTone("online"), "bg-brutal-lime");
-  assert.equal(getComputerRowDotTone("upgrade"), "bg-brutal-pink");
-  assert.equal(getComputerRowDotTone("offline"), "bg-gray-400");
+  assert.equal(brutalView(getComputerRowDotTone("online")), "bg-brutal-lime");
+  assert.equal(brutalView(getComputerRowDotTone("upgrade")), "bg-brutal-pink");
+  assert.equal(brutalView(getComputerRowDotTone("offline")), "bg-gray-400");
 });
 
 test("offline plus upgrade keeps upgrade primary while preserving offline in the dot title", () => {
