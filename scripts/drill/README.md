@@ -114,6 +114,18 @@ click, the app/service log tails, and the exact command output a verdict rests
 on. Sanity-check it before deleting: **is every claim I am about to make still
 backed by a file that exists?**
 
+### Deleting the disposable server does NOT delete its `computers` row
+
+Confirmed on 8443 (2026-10-12): after `DELETE /api/servers/<id>` returns
+`{"ok":true}` and `/api/servers` lists nothing, the machine's **attach row in
+`computers` survives**. One drill root was left behind on 8443 this way, and the
+machine had accumulated 26 historical rows from earlier drills.
+
+So `POST /api/servers` in the setup needs a matching **explicit row cleanup** in
+teardown — otherwise every drill permanently adds a machine row. Verify it, do
+not assume the cascade: re-query and confirm the row is gone, and say so in the
+report if it cannot be removed.
+
 ### Traces do not upload from an isolated root
 
 An isolated home has no trace-ingest credentials, so the Computer logs trace
