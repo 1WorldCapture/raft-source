@@ -4546,7 +4546,7 @@ test("computer surface revokes managed-runner credential and raw sk_agent stops 
   const mint = await fetch(`${app.baseUrl}/internal/computer/runners/${fixture.agentId}/credentials`, {
     method: "POST",
     headers: jsonHeaders(fixture.machineApiKey),
-    body: JSON.stringify({ scopes: ["server"], name: "managed-runner-test" }),
+    body: JSON.stringify({ scopes: ["server", "read"], name: "managed-runner-test" }),
   });
   assert.equal(mint.status, 201);
   const minted = await mint.json() as { apiKey?: string; credentialId?: string };
@@ -4814,7 +4814,9 @@ test("read-only agent credential is denied on mutating agent-api routes", async 
     body: JSON.stringify({ displayName: "Should Not Update" }),
   });
   assert.equal(profileUpdate.status, 403);
-  assert.equal((await profileUpdate.json() as { requiredCapability?: string }).requiredCapability, "server");
+  // Upstream 1.21.2 files own-profile writes under `send` (task #8); a
+  // read-only credential still cannot write.
+  assert.equal((await profileUpdate.json() as { requiredCapability?: string }).requiredCapability, "send");
 
   const mute = await fetch(`${app.baseUrl}/internal/agent-api/channels/${fixture.channelId}/mute`, {
     method: "POST",
