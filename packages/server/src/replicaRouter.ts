@@ -1613,6 +1613,13 @@ export interface MachineMeta {
   migrationTransportCapturedAt?: string | null;
   migrationTransportProtocol?: string | null;
   migrationTransportCapabilities?: string | null;
+  /** JSON-encoded sorted capability list used to authorize a provider probe. */
+  probeCapabilities?: string | null;
+  probeConnectionEpochId?: string | null;
+  probeReplicaGeneration?: string | null;
+  probeObservedAt?: string | null;
+  /** JSON-encoded Record<runtimeId, version> frozen for probe dispatch. */
+  probeRuntimeVersions?: string | null;
 }
 
 // 1h TTL: long enough that brief Redis hiccups don't drop live metadata,

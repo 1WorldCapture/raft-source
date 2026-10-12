@@ -21,8 +21,11 @@ import {
 import { getDb } from "../db/index.js";
 import {
   agentProviderConnections,
+  machines,
   providerConnectionCredentials,
   providerConnections,
+  providerProbeIntents,
+  providerProbeReceipts,
 } from "../db/schema.js";
 import { createSafeFetch, validateManagedMcpEndpoint } from "./managedMcpGateway.js";
 import { recordIntegrationAuditEvent } from "./integrationAuditService.js";
@@ -216,6 +219,7 @@ function projectSummary(row: {
     credentialVersion: row.credentialVersion ?? 0,
     hasCredential: row.credentialVersion !== null,
     assignedAgentCount: Number(row.assignedAgentCount),
+    latestVerified: null,
     lastCheckedAt: connection.lastCheckedAt?.toISOString() ?? null,
     lastErrorCategory: connection.lastErrorCategory,
     createdAt: connection.createdAt.toISOString(),
@@ -242,7 +246,44 @@ export async function listProviderConnections(serverId: string): Promise<Provide
     .where(eq(providerConnections.serverId, serverId))
     .groupBy(providerConnections.id, providerConnectionCredentials.credentialVersion)
     .orderBy(providerConnections.name);
-  return rows.map(projectSummary);
+  const summaries = rows.map(projectSummary);
+  // One batched read for the whole catalog: the latest durable success receipt
+  // per connection (plus its Computer name), so the settings page never fans
+  // out one request per row.
+  const verified = await getDb().select({
+    connectionId: providerProbeIntents.connectionId,
+    computerId: providerProbeIntents.computerId,
+    computerName: machines.name,
+    runtime: providerProbeIntents.runtime,
+    model: providerProbeIntents.model,
+    verifiedAt: providerProbeReceipts.verifiedAt,
+  }).from(providerProbeReceipts)
+    .innerJoin(providerProbeIntents, eq(providerProbeIntents.id, providerProbeReceipts.probeId))
+    .leftJoin(machines, eq(machines.id, providerProbeIntents.computerId))
+    .where(and(
+      eq(providerProbeIntents.serverId, serverId),
+      eq(providerProbeReceipts.outcome, "success"),
+    ))
+    .orderBy(sql`${providerProbeIntents.connectionId}`, sql`${providerProbeReceipts.verifiedAt} desc`);
+  const latestByConnection = new Map<string, (typeof verified)[number]>();
+  for (const row of verified) {
+    if (!latestByConnection.has(row.connectionId)) latestByConnection.set(row.connectionId, row);
+  }
+  return summaries.map((summary) => {
+    const row = latestByConnection.get(summary.id);
+    return {
+      ...summary,
+      latestVerified: row
+        ? {
+          computerId: row.computerId,
+          computerName: row.computerName,
+          runtime: row.runtime,
+          model: row.model,
+          verifiedAt: row.verifiedAt.toISOString(),
+        }
+        : null,
+    };
+  });
 }
 
 export async function createProviderConnection(input: {
@@ -865,4 +906,59 @@ export async function testProviderConnection(input: {
   const result = (await listProviderConnections(input.serverId)).find((connection) => connection.id === input.connectionId);
   if (!result) throw new ProviderConnectionError("Provider connection not found", "provider_connection_not_found");
   return result;
+}
+
+/**
+ * Probe-scoped materialization: credential env + projection for one connection
+ * without the enabled/ready/assignment gates. A Computer probe is what
+ * establishes verification before any of those can mean anything. Callers must
+ * already hold a one-time claim; the env carries the decrypted key and must
+ * never be logged, audited, or persisted.
+ */
+let probeMaterializationCalls = 0;
+
+/** Test seam: count credential-decrypting materializations. */
+export function __providerConnectionProbeMaterializationCallCount(): number {
+  return probeMaterializationCalls;
+}
+
+export function __resetProviderConnectionProbeMaterializationCallCount(): void {
+  probeMaterializationCalls = 0;
+}
+
+export async function resolveProviderConnectionProbeMaterialization(input: {
+  serverId: string;
+  connectionId: string;
+}): Promise<{
+  envVars: Record<string, string>;
+  providerConnection: ProviderConnectionLaunchProjection;
+  envKeyNames: string[];
+  configVersion: number;
+  credentialVersion: number;
+}> {
+  const [row] = await getDb().select({
+    connection: providerConnections,
+    credential: providerConnectionCredentials,
+  }).from(providerConnections).innerJoin(providerConnectionCredentials, and(
+    eq(providerConnectionCredentials.serverId, providerConnections.serverId),
+    eq(providerConnectionCredentials.connectionId, providerConnections.id),
+  )).where(and(
+    eq(providerConnections.serverId, input.serverId),
+    eq(providerConnections.id, input.connectionId),
+  )).limit(1);
+  if (!row) throw new ProviderConnectionError("Provider connection not found", "provider_connection_not_found");
+  probeMaterializationCalls += 1;
+  const apiKey = decryptApiKey(row.credential.encryptedApiKey, `${input.serverId}:${input.connectionId}`);
+  const envVars = connectionEnv(row.connection.providerId, row.connection.endpointUrl, apiKey);
+  return {
+    envVars,
+    providerConnection: {
+      providerId: row.connection.providerId,
+      endpointUrl: row.connection.endpointUrl,
+      supportsImageInput: row.connection.supportsImageInput,
+    },
+    envKeyNames: Object.keys(envVars).sort(),
+    configVersion: row.connection.configVersion,
+    credentialVersion: row.credential.credentialVersion,
+  };
 }

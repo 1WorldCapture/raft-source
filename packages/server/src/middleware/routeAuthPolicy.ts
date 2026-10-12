@@ -497,6 +497,12 @@ export const routeAuthPolicy: readonly RouteAuthPolicyEntry[] = [
     note: "Server-managed provider credential materialization for an attached Agent",
   },
   {
+    method: "POST",
+    path: "/internal/computer/probes/:probeId/materialize",
+    principal: "sk_computer",
+    note: "One-time provider probe credential materialization for the claiming Computer",
+  },
+  {
     method: "DELETE",
     path: "/internal/computer/runners/:agentId/credentials/:credentialId",
     principal: "sk_computer",

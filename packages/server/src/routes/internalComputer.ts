@@ -21,6 +21,7 @@ import {
   AGENT_MIGRATION_TERMINAL_FAILURE_CODES,
   agentMigrationTransferSummarySchema,
   currentDate,
+  isProviderProbeId,
   type AgentMigrationControlManifest,
   type AgentMigrationSourceQuiesceReceipt,
 } from "@botiverse/raft-shared";
@@ -38,7 +39,11 @@ import {
   ProviderConnectionError,
   resolveProviderConnectionLaunch,
 } from "../services/providerConnectionService.js";
-import { isProviderConnectionsEnabled } from "../services/providerConnectionFeature.js";
+import { isProviderConnectionsEnabled, isProviderProbesEnabled } from "../services/providerConnectionFeature.js";
+import {
+  materializeProviderProbe,
+  ProviderProbeError,
+} from "../services/providerProbeService.js";
 import {
   validateAgentO11yBatch,
   type AgentO11yAcceptedEvent,
@@ -1190,6 +1195,62 @@ internalComputerRouter.post("/runners/:agentId/provider-connection", async (req,
     }
     console.error("internal.computer.runners.provider-connection error:", error);
     res.status(500).json({ error: "Failed to materialize provider connection" });
+  }
+});
+
+/**
+ * POST /internal/computer/probes/:probeId/materialize
+ *
+ * One-time, machine-authenticated materialization for a probe claim. The
+ * machine command never carries credentials; this endpoint is the only place
+ * a probe sees them, and the intent's claim column group makes it exactly
+ * once per carrier (same claimant may retry inside the lease).
+ */
+internalComputerRouter.post("/probes/:probeId/materialize", async (req, res) => {
+  try {
+    const context = await computerMigrationContext(req);
+    if (!context) {
+      res.status(500).json({ error: "Computer authentication state missing" });
+      return;
+    }
+    if (!await isProviderProbesEnabled(context.serverId)) {
+      res.status(404).json({ error: "Provider probes are not enabled for this server", code: "probe_disabled" });
+      return;
+    }
+    const probeId = req.params.probeId;
+    if (!isProviderProbeId(probeId)) {
+      res.status(400).json({ error: "Provider probe id is invalid", code: "probe_invalid" });
+      return;
+    }
+    const body = jsonBody(req);
+    if (Object.keys(body).length !== 1 || typeof body.claimRequestId !== "string" || !body.claimRequestId) {
+      res.status(400).json({ error: "claimRequestId is required", code: "probe_invalid" });
+      return;
+    }
+    const orchestrator = req.app.get("agentOrchestrator") as AgentOrchestrator | undefined;
+    const fact = await orchestrator?.readProbeCarrierFact(context.machineId) ?? null;
+    const payload = await materializeProviderProbe({
+      serverId: context.serverId,
+      probeId,
+      machineId: context.machineId,
+      claimRequestId: body.claimRequestId,
+      fact,
+    });
+    res.status(200).json(payload);
+  } catch (error) {
+    if (error instanceof ProviderProbeError) {
+      const status = error.code === "probe_not_found" || error.code === "probe_disabled"
+        ? 404
+        : error.code === "probe_invalid"
+          ? 400
+          : error.code === "probe_expired"
+            ? 410
+            : 409;
+      res.status(status).json({ error: error.message, code: error.code });
+      return;
+    }
+    console.error("internal.computer.probes.materialize error:", error);
+    res.status(500).json({ error: "Failed to materialize probe" });
   }
 });
 

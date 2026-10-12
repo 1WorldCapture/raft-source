@@ -20,6 +20,7 @@ import {
   formatTraceparent,
   getStaticRuntimeModelSourceSet,
   getRuntimeModelDetectionTimeoutMs,
+  PROVIDER_PROBE_RELAY_BUDGET_MS,
   getToolActivityLabel,
   hydrateRuntimeConfig,
   isAgentActivityDetailKind,
@@ -238,6 +239,7 @@ import {
   assertBuiltInPresetSupportedByCatalog,
   type BuiltInModelCatalogValidation,
 } from "./builtinModelCatalogCompatibility.js";
+import { isProbeCarrierFactLive, parseProbeCarrierMeta } from "./probeCarrierFact.js";
 
 export type MachineConnectionPrincipalKind = "computer" | "legacy_machine" | "unknown";
 
@@ -6434,6 +6436,7 @@ export class AgentOrchestrator extends EventEmitter {
               daemonVersion: conn.daemonVersion ?? null,
               runtimeVersions: JSON.stringify(conn.runtimeVersions ?? {}),
               ...machineMetaFromMigrationTransport(conn.migrationTransport),
+              ...this.probeCarrierMetaFields(conn),
             })
             .catch(() => {});
         }
@@ -6609,6 +6612,8 @@ export class AgentOrchestrator extends EventEmitter {
             conn.daemonVersion = msg.daemonVersion ?? null;
             conn.capabilities = new Set((msg.capabilities ?? []).filter((capability) => typeof capability === "string" && capability.trim()));
             conn.computerVersion = msg.computerVersion ?? null;
+            conn.runtimes = [...msg.runtimes];
+            conn.runtimeVersions = runtimeVersions;
             conn.computerHostKind = normalizeComputerHostKind(msg.hostKind);
             conn.migrationTransport = migrationTransport;
             void this.dispatchPendingComputerLifecycleOperations().catch(() => {});
@@ -6635,6 +6640,7 @@ export class AgentOrchestrator extends EventEmitter {
                 hostname: msg.hostname ?? null,
                 os: msg.os ?? null,
                 ...machineMetaFromMigrationTransport(migrationTransport),
+                ...(conn ? this.probeCarrierMetaFields(conn, runtimeVersions) : {}),
               })
               .catch(() => {});
           }
@@ -8344,13 +8350,18 @@ export class AgentOrchestrator extends EventEmitter {
       case "machine:workspace:delete_result":
       case "machine:migration:source_workspace_archive_result":
       case "machine:runtime_models:result":
+      case "machine:provider_probe:result":
       case "machine:cursor_sdk:login_result":
       case "machine:cursor_sdk:status_result":
       case "agent:diagnostic:session_transcript_result":
       case "agent:diagnostic:feedback_transcript_result":
         // These are responses to workspace/machine/diagnostic requests — emit events for pending promises
         this.emit(`machine:response:${machineId}`, msg);
-        if (msg.type === "machine:runtime_models:result" || msg.type === "machine:migration:source_workspace_archive_result") {
+        if (
+          msg.type === "machine:runtime_models:result"
+          || msg.type === "machine:migration:source_workspace_archive_result"
+          || msg.type === "machine:provider_probe:result"
+        ) {
           void this.getMachineResponseRelay().forward(machineId, msg,
             (event, attrs) => this.recordMachineResponseRelay(event, attrs));
         }
@@ -11184,6 +11195,94 @@ export class AgentOrchestrator extends EventEmitter {
     }), (event, attrs) => this.recordMachineResponseRelay(event, attrs));
     if (response.type !== "machine:cursor_sdk:status_result") throw new Error("Unexpected cursor-sdk status response");
     return { status: response.status, source: response.source };
+  }
+
+  /**
+   * Computer-scoped provider probe carrier. Mirrors the runtime-models seam:
+   * requestId correlation, cross-replica relay, typed daemon_offline /
+   * daemon_timeout failures and the probe budget. The command carries no
+   * credential; the daemon materializes with its own machine auth.
+   */
+  async requestProviderProbe(
+    machineId: string,
+    input: { requestId: string; probeId: string; runtime: string; model: string },
+  ): Promise<Extract<MachineToServerMessage, { type: "machine:provider_probe:result" }>> {
+    const response = await this.getMachineResponseRelay().request({
+      requestId: input.requestId, machineId, type: "machine:provider_probe:result",
+    }, PROVIDER_PROBE_RELAY_BUDGET_MS, () => this.sendRequiredToMachine(machineId, {
+      type: "machine:provider_probe:request",
+      requestId: input.requestId,
+      probeId: input.probeId as Extract<ServerToMachineMessage, { type: "machine:provider_probe:request" }>["probeId"],
+      runtime: input.runtime,
+      model: input.model,
+    }), (event, attrs) => this.recordMachineResponseRelay(event, attrs));
+    if (response.type !== "machine:provider_probe:result") throw new Error("Unexpected probe response");
+    return response;
+  }
+
+  /**
+   * Probe carrier fact fields mirrored through the replica state store so a
+   * non-owner replica can verify dispatch authority. Rewritten on ready and
+   * every heartbeat while the connection is live.
+   */
+  private probeCarrierMetaFields(
+    conn: MachineConnection,
+    normalizedRuntimeVersions?: Record<string, string>,
+  ): {
+    probeCapabilities: string;
+    probeConnectionEpochId: string | null;
+    probeReplicaGeneration: string | null;
+    probeObservedAt: string;
+    probeRuntimeVersions: string;
+  } {
+    return {
+      probeCapabilities: JSON.stringify([...conn.capabilities].sort()),
+      probeConnectionEpochId: conn.connectionEpochId ?? null,
+      probeReplicaGeneration: conn.replicaGeneration ?? null,
+      probeObservedAt: new Date(currentTimeMs()).toISOString(),
+      probeRuntimeVersions: JSON.stringify(normalizedRuntimeVersions ?? conn.runtimeVersions ?? {}),
+    };
+  }
+
+  /**
+   * Cross-replica probe carrier fact: the owner replica's live connection when
+   * local, otherwise the Redis machine-meta mirror. Freshness is bounded so a
+   * forgotten connection can never keep authorizing probes.
+   */
+  async readProbeCarrierFact(machineId: string): Promise<{
+    capabilities: string[];
+    connectionEpochId: string;
+    replicaGeneration: string;
+    daemonVersion: string | null;
+    computerVersion: string | null;
+    runtimes: string[];
+    runtimeVersions: Record<string, string>;
+  } | null> {
+    const local = this.machineConnections.get(machineId);
+    if (local?.connectionEpochId && local.replicaGeneration) {
+      if (local.ws.readyState !== 1 || this.isMachineHeartbeatStale(local)) return null;
+      return {
+        capabilities: [...local.capabilities],
+        connectionEpochId: local.connectionEpochId,
+        replicaGeneration: local.replicaGeneration,
+        daemonVersion: local.daemonVersion ?? null,
+        computerVersion: local.computerVersion ?? null,
+        runtimes: [...(local.runtimes ?? [])],
+        runtimeVersions: { ...(local.runtimeVersions ?? {}) },
+      };
+    }
+    const meta = await this.replicaStateStore.getMachineMeta(machineId);
+    const snapshot = parseProbeCarrierMeta(meta ?? {});
+    if (!snapshot || !isProbeCarrierFactLive(snapshot, currentTimeMs())) return null;
+    return {
+      capabilities: snapshot.capabilities,
+      connectionEpochId: snapshot.connectionEpochId,
+      replicaGeneration: snapshot.replicaGeneration,
+      daemonVersion: snapshot.daemonVersion,
+      computerVersion: snapshot.computerVersion,
+      runtimes: Object.keys(snapshot.runtimeVersions),
+      runtimeVersions: snapshot.runtimeVersions,
+    };
   }
 
   async detectMachineRuntimeModels(machineId: string, runtime: string, opts: { refresh?: boolean } = {}): Promise<RuntimeModelSourceOutcome> {
