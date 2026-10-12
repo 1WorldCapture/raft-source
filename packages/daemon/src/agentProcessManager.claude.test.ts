@@ -4691,3 +4691,59 @@ test("runtime rate-limit telemetry remains diagnostic without publishing account
     assert.deepEqual(sent.filter((message) => message.type === "machine:runtime_account_usage:snapshot"), []);
   }, { tracer });
 });
+
+// ---------------------------------------------------------------------------
+// task #27: a busy-queued mention must never end up acked-but-never-received.
+//
+// Reproduces the agy sequence observed on 8443 (daemon 1.0.35): the mention is
+// queued while the agent is busy, a session_ready retry/flush writes it to stdin
+// (which marks it "contributed"), the model consumes it through the pull path
+// (which removes it from the pending inbox), and only then does turn_end fire.
+//
+// Invariant under test: a tracked mention that leaves the inbox ends either
+// drained+ACKED (the runtime was handed it) or still PENDING (redeliverable).
+// The forbidden outcome is an ACK with no drained state and no pending state —
+// i.e. the server is told "delivered" while the runtime never had it.
+// ---------------------------------------------------------------------------
+test("task #27: a mention flushed to stdin then consumed is settled, never acked-and-lost", async () => {
+  const { tracer } = makeDeterministicTracer();
+  await withManager(async ({ driver, manager }) => {
+    await manager.startAgent("agent-1", makeConfig({ sessionId: "s1" }), undefined, undefined, undefined, "launch-1");
+    const q = await queueBusyTrackedMention(manager);
+    assert.equal(q.accepted, true);
+    assert.equal(q.trackedState(), "pending", "a busy-queued mention parks pending");
+
+    // The session_ready flush writes the queued notice to stdin. This is what
+    // marks the identity "contributed" — the daemon's evidence that the runtime
+    // was handed the input.
+    q.ap.notifications.recordNoticeWritten(
+      computeInboxNoticeFingerprint([q.mention]),
+      q.ap.sessionId,
+      [q.mention],
+    );
+
+    // The model then reads it through the visible-consume path, which removes it
+    // from the pending inbox and settles any tracked mention it still holds.
+    (manager as any).consumeVisibleMessages("agent-1", {
+      messages: [q.mention],
+      source: "agent_api_events_local",
+    });
+    assert.equal(q.ap.inbox.length, 0, "the consumed mention left the pending inbox");
+
+    // Only now does the turn boundary arrive.
+    emitTurnEnd(driver);
+    await waitFor(() => q.trackedState() !== "pending" || q.trackedSize() === 0, "turn_end settle");
+
+    const state = q.trackedState();
+    // The forbidden outcome, asserted explicitly so a regression names itself:
+    // an ACK while the occurrence is still pending (or gone) — the server would
+    // be told "delivered" while the runtime never had it.
+    if (q.ackCount() > 0) {
+      assert.equal(state, "drained", "an ACK must accompany a drained occurrence, never a pending one");
+    }
+    assert.ok(
+      state === "drained" || state === "pending" || q.trackedSize() === 0,
+      `a consumed mention must end drained or still pending (got state=${String(state)}, acks=${q.ackCount()})`,
+    );
+  }, { tracer });
+});
