@@ -55,13 +55,13 @@ function seed({ atCapacity }: { atCapacity: boolean }) {
     loadBilling: async () => undefined,
   } as never);
   useMachineStore.setState({
-    machines: [{ id: "machine-1", name: "Mac", description: null, status: "online", statusVersion: 1, apiKeyPrefix: null, runtimes: ["cursor"], hostname: "mac.local", os: "darwin", daemonVersion: "0.72.6", lastHeartbeat: "2026-07-14T00:00:00.000Z", createdAt: "2026-07-14T00:00:00.000Z" }],
+    machines: [{ id: "machine-1", name: "Mac", description: null, status: "online", statusVersion: 1, apiKeyPrefix: null, runtimes: ["cursor-sdk"], hostname: "mac.local", os: "darwin", daemonVersion: "0.72.6", lastHeartbeat: "2026-07-14T00:00:00.000Z", createdAt: "2026-07-14T00:00:00.000Z" }],
   } as never);
   useChannelStore.setState({ channels: [] } as never);
   useAgentStore.setState({ agents: [], loading: false } as never);
   // A reported Cursor model keeps the runtime ready so this tests the banner gate.
   api.get = (async (url: string) => url.endsWith("/runtime-options")
-    ? { data: { context: "new_agent", machineId: "machine-1", options: getCreatableRuntimeOptions().filter((r) => r.id !== "grok").map((r) => ({ runtimeId: r.id, capabilityStatus: r.id === "cursor" ? "available" : "not_installed", admissionStatus: "available_for_new", admissionReason: null, current: false, availableForNew: true, manageableForCurrentAgent: false, canSelectInThisContext: r.id === "cursor" })) } }
+    ? { data: { context: "new_agent", machineId: "machine-1", options: getCreatableRuntimeOptions().filter((r) => r.id !== "grok").map((r) => ({ runtimeId: r.id, capabilityStatus: r.id === "cursor-sdk" ? "available" : "not_installed", admissionStatus: "available_for_new", admissionReason: null, current: false, availableForNew: true, manageableForCurrentAgent: false, canSelectInThisContext: r.id === "cursor-sdk" })) } }
     : { data: { models: [{ id: "auto", label: "Auto" }] } }) as never;
 }
 

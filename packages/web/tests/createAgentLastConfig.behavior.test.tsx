@@ -620,12 +620,12 @@ test("Cursor probe error cannot promote remembered bundled Auto into create opti
   useMachineStore.setState((state) => ({
     machines: state.machines.map((machine) => ({
       ...machine,
-      runtimes: ["cursor"],
+      runtimes: ["cursor-sdk"],
     })),
   }));
   writeCreateAgentLastConfig("server-1", {
     machineId: "machine-1",
-    runtime: "cursor",
+    runtime: "cursor-sdk",
     model: "auto",
     customModelMode: false,
   });
@@ -642,7 +642,7 @@ test("Cursor probe error cannot promote remembered bundled Auto into create opti
     </MemoryRouter>,
   );
 
-  await waitFor(() => assert.equal(hasSelectedValue("Cursor CLI"), true));
+  await waitFor(() => assert.equal(hasSelectedValue("Cursor SDK"), true));
   assert.equal(hasSelectedValue("Auto"), false);
   assert.ok(await screen.findByText("Could not load models from this Computer."));
 
@@ -664,11 +664,11 @@ test("Cursor probe error cannot promote remembered bundled Auto into create opti
 test("Cursor non-live model validation error is localized in zh-cn", async () => {
   seedStores();
   useMachineStore.setState((state) => ({
-    machines: state.machines.map((machine) => ({ ...machine, runtimes: ["cursor"] })),
+    machines: state.machines.map((machine) => ({ ...machine, runtimes: ["cursor-sdk"] })),
   }));
   writeCreateAgentLastConfig("server-1", {
     machineId: "machine-1",
-    runtime: "cursor",
+    runtime: "cursor-sdk",
     model: "auto",
     customModelMode: false,
   });
@@ -681,7 +681,7 @@ test("Cursor non-live model validation error is localized in zh-cn", async () =>
     { locale: "zh-cn" },
   );
 
-  await waitFor(() => assert.equal(hasSelectedValue("Cursor CLI"), true));
+  await waitFor(() => assert.equal(hasSelectedValue("Cursor SDK"), true));
   assert.ok(await screen.findByText("无法从此 Computer 加载模型。"));
   fireEvent.change(screen.getByPlaceholderText("例如 Alice"), { target: { value: "Alice" } });
   const createButton = screen.getByRole("button", { name: "创建 Agent" });

@@ -675,7 +675,7 @@ test("Built-in edit can change model while omitting the redacted provider secret
           value: {
             models: [
               { id: "deepseek/deepseek-v4-pro", label: "DeepSeek V4 Pro" },
-              { id: "deepseek/deepseek-v4-flash", label: "DeepSeek V4 Flash" },
+              { id: "deepseek/deepseek-flash", label: "DeepSeek V4.1 Flash" },
             ],
             default: "deepseek/deepseek-v4-pro",
             catalog: {
@@ -713,7 +713,7 @@ test("Built-in edit can change model while omitting the redacted provider secret
     return select;
   });
   fireEvent.click(modelSelect);
-  const nextModel = await screen.findByRole("option", { name: "DeepSeek V4 Flash" });
+  const nextModel = await screen.findByRole("option", { name: "DeepSeek V4.1 Flash" });
   fireEvent.pointerDown(nextModel);
   fireEvent.click(nextModel);
 
@@ -726,7 +726,7 @@ test("Built-in edit can change model while omitting the redacted provider secret
     runtimeConfig: { provider: Record<string, unknown>; model: unknown };
   };
   assert.deepEqual(patchBody.runtimeConfig.provider, { kind: "preset", providerId: "deepseek" });
-  assert.deepEqual(patchBody.runtimeConfig.model, { kind: "preset", id: "deepseek/deepseek-v4-flash" });
+  assert.deepEqual(patchBody.runtimeConfig.model, { kind: "preset", id: "deepseek/deepseek-flash" });
 });
 
 test("Built-in gateway edit retains an omitted secret only while the canonical Base URL is unchanged", async () => {
