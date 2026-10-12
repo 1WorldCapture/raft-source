@@ -595,11 +595,19 @@ function VerifiedOnChip({ latestVerified }: { latestVerified: ProviderConnection
     <div data-testid="provider-connection-verified-on">
       <span
         className="border theme-brutal:border-2 border-line-muted theme-brutal:border-black/30 bg-green-50 px-2 py-0.5 text-xs font-bold text-foreground-muted theme-brutal:text-black/70"
-        title={`${latestVerified.runtime} · ${latestVerified.model} · ${latestVerified.verifiedAt}`}
+        title={formatMessage(
+          { id: "settings.providers.verifiedOnDetail" },
+          {
+            runtime: latestVerified.runtime,
+            model: latestVerified.model,
+            verifiedAt: latestVerified.verifiedAt,
+          },
+        )}
       >
-        {formatMessage({ id: "settings.providers.verifiedOn" })}
-        {" "}
-        {latestVerified.computerName ?? latestVerified.computerId}
+        {formatMessage(
+          { id: "settings.providers.verifySuccess" },
+          { computer: latestVerified.computerName ?? latestVerified.computerId },
+        )}
       </span>
     </div>
   );

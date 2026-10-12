@@ -2541,7 +2541,7 @@ export const en = {
   "settings.providers.verifyAgain": "Verify again (one provider call)",
   "settings.providers.verifyError": "Verification could not be started.",
   "settings.providers.verifyNoComputers": "No online Computer with the Built-in runtime is connected.",
-  "settings.providers.verifiedOn": "Verified on",
+  "settings.providers.verifiedOnDetail": "{runtime} · {model} · {verifiedAt}",
   "settings.providers.probeCategory.auth": "credential rejected",
   "settings.providers.probeCategory.model": "model unavailable",
   "settings.providers.probeCategory.network": "network unreachable",
