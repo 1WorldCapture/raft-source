@@ -143,6 +143,9 @@ test("raw Modal usage is pinned so new hand-rolled confirmations cannot slip in"
     // loading state intentionally use panel chrome rather than raw Modal.
     // Connected Apps adds one installed-app detail Modal. It contains read-only
     // state and ordinary commands; destructive uninstall remains ConfirmDialog-owned.
+    // Desktop ⌘K search overlay: the real /search floated over the current channel
+    // in a Modal (backdrop primitive). Not a confirmation, a search surface.
+    "src/components/search/SearchOverlay.tsx": 1,
     "src/components/settings/SettingsPanel.tsx": 4,
     // Ordinary Create Agent and Add/Edit MCP forms share this product dialog shell.
     "src/components/ui/DialogCard.tsx": 1,

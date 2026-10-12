@@ -2427,6 +2427,15 @@ export const zhCn: Record<MessageId, string> = {
   "search.grpThreadDiscussion": "消息列讨论",
   "search.grpUnknownTime": "未知时间",
   "search.unknownSource": "#未知",
+  "search.overlay.searchFor": "搜索「{query}」",
+  "search.overlay.viewAllResults": "查看全部结果",
+  "search.overlay.viewAllResultsHint": "打开完整结果页，可筛选并预览上下文",
+  "search.overlay.placeholder": "频道、成员、消息…",
+  "search.overlay.recentConversations": "最近的会话",
+  "search.overlay.footerSelect": "选择",
+  "search.overlay.footerOpen": "打开",
+  "search.beyondHistory": "升级后可查看",
+  "search.queryTooBroadSortRecent": "按最新排序",
 
   // --- settings: display language ---
   "settings.language.displayLanguageTitle": "显示语言",
