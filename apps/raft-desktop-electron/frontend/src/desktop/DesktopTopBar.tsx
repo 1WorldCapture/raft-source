@@ -9,7 +9,7 @@
 // reserves the left inset for the traffic lights and opts interactive children
 // back out of dragging. Every control maps to a real action — no dead buttons.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useIntl } from "react-intl";
 import { useServerStore } from "@web/store/serverStore";
 import { useServerUnreadSummaryStore } from "@web/store/serverUnreadSummaryStore";
@@ -170,6 +170,9 @@ export function DesktopTopBar() {
   // the web sidebar's switcher (#unread-badges task #5/#7).
   const serverUnreadCounts = useServerUnreadSummaryStore((s) => s.byServer);
   const nav = useAppNavigate();
+  // The search field is the anchor of the ⌘K overlay (see searchAnchor.ts).
+  const searchFieldRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => (searchFieldRef.current ? trackSearchAnchor(searchFieldRef.current) : undefined), []);
   const [serverMenuOpen, setServerMenuOpen] = useState(false);
   // Deployment server-address settings (phase 3-1). Rendered only when the
   // native bridge exposes the serverOrigin API — old preloads hide it.
@@ -213,6 +216,7 @@ export function DesktopTopBar() {
           cluster underlap and clip it on narrower windows. */}
       <button
         type="button"
+        ref={searchFieldRef}
         onClick={() => nav.toSearch(undefined, { flushSync: true })}
         className="flex h-8 w-[min(520px,42vw)] shrink-0 items-center gap-2 border-2 border-black bg-white px-3 text-neutral-500 shadow-brutal-sm transition-all hover:shadow-brutal focus-visible:shadow-brutal"
       >

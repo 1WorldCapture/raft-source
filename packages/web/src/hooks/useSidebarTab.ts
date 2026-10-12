@@ -4,6 +4,7 @@ import { writeMembersSurface } from "../office/membersSurface";
 import { useAuthStore } from "../store/authStore";
 import { useServerStore } from "../store/serverStore";
 import { readTabMemory } from "./useTabRouteMemory";
+import { searchEntryState } from "../components/search/searchOverlayLocation";
 
 // The left navigation rail surfaces a fixed set of modes; the entire left
 // column (rail button highlight + sidebar content + sidebar header text)
@@ -69,7 +70,8 @@ export function useRailMode() {
     // where the user was.
     if (mode === "search") {
       navigate(`${base}/search`, {
-        state: { searchEntry: "rail", searchFrom: `${location.pathname}${location.search}` },
+        // Desktop: the rail entry is the ⌘K overlay too; web keeps full page.
+        state: searchEntryState({ pathname: location.pathname, search: location.search }, { searchEntry: "rail" }),
       });
       return;
     }

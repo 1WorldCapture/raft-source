@@ -2463,6 +2463,15 @@ export const en = {
   "search.grpThreadDiscussion": "Thread discussion",
   "search.grpUnknownTime": "unknown time",
   "search.unknownSource": "#unknown",
+  "search.overlay.searchFor": "Search for “{query}”",
+  "search.overlay.viewAllResults": "View all results",
+  "search.overlay.viewAllResultsHint": "Open the full results page with filters and context preview",
+  "search.overlay.placeholder": "Channels, people, messages…",
+  "search.overlay.recentConversations": "Recent conversations",
+  "search.overlay.footerSelect": "Select",
+  "search.overlay.footerOpen": "Open",
+  "search.beyondHistory": "Upgrade to view",
+  "search.queryTooBroadSortRecent": "Sort by newest",
 
   // --- settings: display language (drives the persistence-loop vertical slice) ---
   "settings.language.displayLanguageTitle": "Display language",

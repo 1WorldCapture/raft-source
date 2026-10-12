@@ -6,6 +6,8 @@ import { createPortal } from "react-dom";
  * Reusable modal backdrop with centered content.
  * Backdrop clicks do not close by default to avoid losing in-progress form input.
  * Pass `closeOnBackdrop` to opt specific lightweight modals back in.
+ * `backdrop="transparent"` keeps the click-outside/focus behaviour but draws no
+ * dim (a floating palette over live content, e.g. the desktop ⌘K search).
  * Use `layer` prop for stacking: layer=0 (default) → z-50, layer=1 → z-[60].
  *
  * Renders via portal to document.body so modals aren't clipped or repositioned
@@ -17,6 +19,7 @@ export default function Modal({
   layer = 0,
   closeOnBackdrop = false,
   closeOnEscape = true,
+  backdrop = "dim",
 }: {
   onClose: () => void;
   children: ReactNode;
@@ -26,6 +29,7 @@ export default function Modal({
   // up in an app that is not set up. Passing a no-op onClose worked by accident; saying so
   // out loud is the point (stdrc, 2026-07-13).
   closeOnEscape?: boolean;
+  backdrop?: "dim" | "transparent";
 }) {
   const rootRef = useRef<HTMLDivElement | null>(null);
 
@@ -80,7 +84,7 @@ export default function Modal({
     <div
       ref={rootRef}
       tabIndex={-1}
-      className={`fixed inset-0 ${zClass} overflow-y-auto bg-black/60 outline-none`}
+      className={`fixed inset-0 ${zClass} overflow-y-auto ${backdrop === "transparent" ? "bg-transparent" : "bg-black/60"} outline-none`}
     >
       <div className="flex min-h-full w-full p-4" onClick={handleBackdropClick}>
         <div className="m-auto flex w-full justify-center" onClick={handleBackdropClick}>
