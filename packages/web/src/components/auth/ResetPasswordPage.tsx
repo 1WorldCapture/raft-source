@@ -94,7 +94,7 @@ export default function ResetPasswordPage({ token, onBack }: ResetPasswordPagePr
                 setPassword(e.target.value);
                 if (fieldErrors.password) setFieldErrors((current) => ({ ...current, password: undefined }));
               }}
-              className="w-full border-2 border-black p-2 text-base shadow-brutal-sm focus:shadow-brutal focus:outline-none"
+              className="w-full border theme-brutal:border-2 border-line-strong theme-brutal:border-black p-2 text-base shadow-raft-xs theme-brutal:shadow-brutal-sm focus:shadow-raft-sm theme-brutal:focus:shadow-brutal focus:outline-none"
               placeholder={formatMessage({ id: "pages.resetPassword.passwordPlaceholder" })}
               required
             />
@@ -107,7 +107,7 @@ export default function ResetPasswordPage({ token, onBack }: ResetPasswordPagePr
                 setConfirmPassword(e.target.value);
                 if (fieldErrors.confirmPassword) setFieldErrors((current) => ({ ...current, confirmPassword: undefined }));
               }}
-              className="w-full border-2 border-black p-2 text-base shadow-brutal-sm focus:shadow-brutal focus:outline-none"
+              className="w-full border theme-brutal:border-2 border-line-strong theme-brutal:border-black p-2 text-base shadow-raft-xs theme-brutal:shadow-brutal-sm focus:shadow-raft-sm theme-brutal:focus:shadow-brutal focus:outline-none"
               required
             />
           </FormField>

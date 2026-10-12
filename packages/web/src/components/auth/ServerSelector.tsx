@@ -107,13 +107,13 @@ export default function ServerSelector({ onSelect }: ServerSelectorProps) {
         >
           <>
             <div>
-              <div className="font-mono text-[10px] font-bold uppercase tracking-[0.14em] text-black/50">
+              <div className="font-mono text-[10px] font-bold uppercase tracking-[0.14em] text-foreground-muted theme-brutal:text-black/50">
                 {title}
               </div>
-              <h1 className="mt-2 text-2xl font-bold leading-tight text-black">
+              <h1 className="mt-2 text-2xl font-bold leading-tight text-foreground-strong theme-brutal:text-black">
                 {formatMessage({ id: "pages.serverSelector.nameTheServer" })}
               </h1>
-              <p className="mt-2 text-sm leading-5 text-black/65">
+              <p className="mt-2 text-sm leading-5 text-foreground-muted theme-brutal:text-black/65">
                 {formatMessage({ id: "pages.serverSelector.serverIsWorkspace" })}
               </p>
             </div>
@@ -231,7 +231,7 @@ export default function ServerSelector({ onSelect }: ServerSelectorProps) {
                     setSlugTouched(false);
                     setError("");
                   }}
-                  className="btn-brutal flex-1 bg-white px-4 py-2 text-sm font-bold"
+                  className="btn-brutal flex-1 bg-layer-panel theme-brutal:bg-white px-4 py-2 text-sm font-bold"
                 >
                   {formatMessage({ id: "pages.serverSelector.cancel" })}
                 </button>
@@ -271,10 +271,10 @@ export default function ServerSelector({ onSelect }: ServerSelectorProps) {
                 key={server.id}
                 onClick={() => handleSelect(server)}
                 disabled={switchPending}
-                className="w-full border-2 border-black bg-white p-3 text-left font-bold shadow-brutal-sm transition-all duration-100 hover:-translate-y-[1px] hover:shadow-brutal active:translate-x-[2px] active:translate-y-[2px] active:shadow-brutal-active"
+                className="w-full border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white p-3 text-left font-bold shadow-raft-xs theme-brutal:shadow-brutal-sm transition-all duration-100 hover:-translate-y-[1px] hover:shadow-raft-sm theme-brutal:hover:shadow-brutal active:translate-x-[2px] active:translate-y-[2px] active:shadow-none theme-brutal:active:shadow-brutal-active"
               >
                 <div>{server.name}</div>
-                <div className="text-sm font-normal text-black/40">/{server.slug}</div>
+                <div className="text-sm font-normal text-foreground-hint theme-brutal:text-black/40">/{server.slug}</div>
               </button>
             ))}
           </div>
@@ -297,7 +297,7 @@ export default function ServerSelector({ onSelect }: ServerSelectorProps) {
         <div className="mt-3 text-center">
           <button
             onClick={() => logout()}
-            className="text-sm font-bold text-black/50 underline hover:text-black"
+            className="text-sm font-bold text-foreground-muted theme-brutal:text-black/50 underline hover:text-foreground-strong theme-brutal:hover:text-black"
           >
             {formatMessage({ id: "pages.serverSelector.logOut" })}
           </button>

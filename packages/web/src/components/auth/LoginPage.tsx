@@ -91,7 +91,7 @@ export default function LoginPage({ onSwitchToRegister, onForgotPassword }: Logi
                 setEmail(e.target.value);
                 if (fieldErrors.email) setFieldErrors((current) => ({ ...current, email: undefined }));
               }}
-              className="w-full border-2 border-black p-2 text-base shadow-brutal-sm focus:shadow-brutal focus:outline-none"
+              className="w-full border theme-brutal:border-2 border-line-strong theme-brutal:border-black p-2 text-base shadow-raft-xs theme-brutal:shadow-brutal-sm focus:shadow-raft-sm theme-brutal:focus:shadow-brutal focus:outline-none"
               required
             />
           </FormField>
@@ -106,7 +106,7 @@ export default function LoginPage({ onSwitchToRegister, onForgotPassword }: Logi
                 setPassword(e.target.value);
                 if (fieldErrors.password) setFieldErrors((current) => ({ ...current, password: undefined }));
               }}
-              className="w-full border-2 border-black p-2 text-base shadow-brutal-sm focus:shadow-brutal focus:outline-none"
+              className="w-full border theme-brutal:border-2 border-line-strong theme-brutal:border-black p-2 text-base shadow-raft-xs theme-brutal:shadow-brutal-sm focus:shadow-raft-sm theme-brutal:focus:shadow-brutal focus:outline-none"
               required
             />
           </FormField>
@@ -126,11 +126,11 @@ export default function LoginPage({ onSwitchToRegister, onForgotPassword }: Logi
         {enabledProviders.length > 0 && (
           <>
             <div className="my-4 flex items-center gap-3">
-              <div className="h-0.5 flex-1 bg-black" />
-              <span className="text-xs font-bold uppercase tracking-widest text-black/45">
+              <div className="h-0.5 flex-1 bg-foreground-strong theme-brutal:bg-black" />
+              <span className="text-xs font-bold uppercase tracking-widest text-foreground-hint theme-brutal:text-black/45">
                 {formatMessage({ id: "pages.login.or" })}
               </span>
-              <div className="h-0.5 flex-1 bg-black" />
+              <div className="h-0.5 flex-1 bg-foreground-strong theme-brutal:bg-black" />
             </div>
             <div className="space-y-2">
               {enabledProviders.map((provider) => (
@@ -145,7 +145,7 @@ export default function LoginPage({ onSwitchToRegister, onForgotPassword }: Logi
           </>
         )}
 
-        <p className="mt-4 text-center text-xs leading-5 text-black/60">
+        <p className="mt-4 text-center text-xs leading-5 text-foreground-muted theme-brutal:text-black/60">
           {formatMessage(
             { id: "pages.login.legalAgreement" },
             {
@@ -155,7 +155,7 @@ export default function LoginPage({ onSwitchToRegister, onForgotPassword }: Logi
                   href={legalUrls.termsUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="underline hover:text-black"
+                  className="underline hover:text-foreground-strong theme-brutal:hover:text-black"
                 >
                   {c}
                 </a>
@@ -166,7 +166,7 @@ export default function LoginPage({ onSwitchToRegister, onForgotPassword }: Logi
                   href={legalUrls.privacyUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="underline hover:text-black"
+                  className="underline hover:text-foreground-strong theme-brutal:hover:text-black"
                 >
                   {c}
                 </a>

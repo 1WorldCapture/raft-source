@@ -242,10 +242,10 @@ function sanitizeClone(clone: HTMLElement): void {
   clone.classList.remove(
     "group",
     "relative",
-    "hover:border-black",
-    "hover:bg-white",
-    "active:bg-white",
-    "active:border-black",
+    "hover:border-line-strong theme-brutal:hover:border-black",
+    "hover:bg-layer-panel theme-brutal:hover:bg-white",
+    "active:bg-layer-panel theme-brutal:active:bg-white",
+    "active:border-line-strong theme-brutal:active:border-black",
   );
   // Border rings vary by selection / hover state; force a clean
   // transparent border so clones stack without double lines.

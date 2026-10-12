@@ -26,7 +26,7 @@ export default function LegalAcceptanceCheckbox({
         onChange={(event) => onChange(event.target.checked)}
         className="mt-0.5"
       />
-      <span className="leading-5 text-black/70">
+      <span className="leading-5 text-foreground-muted theme-brutal:text-black/70">
         {formatMessage(
           { id: "auth.legalAcceptance.agreement" },
           {
@@ -36,7 +36,7 @@ export default function LegalAcceptanceCheckbox({
                 href={legalUrls.termsUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="font-bold text-black underline hover:text-brutal-pink"
+                className="font-bold text-foreground-strong theme-brutal:text-black underline hover:text-brutal-pink"
               >
                 {c}
               </a>
@@ -47,7 +47,7 @@ export default function LegalAcceptanceCheckbox({
                 href={legalUrls.privacyUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="font-bold text-black underline hover:text-brutal-pink"
+                className="font-bold text-foreground-strong theme-brutal:text-black underline hover:text-brutal-pink"
               >
                 {c}
               </a>

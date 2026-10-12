@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import "global-jsdom/register";
 import { buildTaskChannelUrl, closeThreadWindow } from "../src/components/window/closeThreadWindow.js";
+import { brutalView } from "./helpers/brutalView";
 
 const {
   buildLegacyTaskWindowUrl,
@@ -10,10 +11,8 @@ const {
   openPanelInNewTab,
 } = await import("../src/utils/openPanelInNewTab.js");
 
-const threadWindowRouteSource = readFileSync(
-  new URL("../src/components/window/ThreadWindowRoute.tsx", import.meta.url),
-  "utf8",
-);
+const threadWindowRouteSource = brutalView(readFileSync(
+  new URL("../src/components/window/ThreadWindowRoute.tsx", import.meta.url), "utf8"));
 
 test("thread window URL preserves live view/filter state and replaces stale panel state", () => {
   const url = new URL(buildThreadWindowUrl(

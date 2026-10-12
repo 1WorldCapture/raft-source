@@ -40,6 +40,12 @@ const SWEPT = [
   "src/components/workspace",
   "src/components/channel",
   "src/components/task",
+  "src/components/auth",
+  "src/components/oauth",
+  "src/components/pwa",
+  "src/components/window",
+  "src/components/icons",
+  "src/utils",
 ];
 // Top-level files directly under src/components (area 1) are listed by name so
 // sub-folders swept later are not pulled in early.

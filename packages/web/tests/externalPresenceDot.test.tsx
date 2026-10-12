@@ -7,6 +7,7 @@ import AgentActivityDot from "../src/components/agent/AgentActivityDot";
 import StatusDot from "../src/components/ui/StatusDot";
 import { TestIntlProvider } from "./helpers/intl";
 import { useAgentStore } from "../src/store/agentStore";
+import { brutalView } from "./helpers/brutalView";
 
 afterEach(() => {
   cleanup();
@@ -16,12 +17,12 @@ afterEach(() => {
 test("StatusDot external prop forces bg-brutal-cyan regardless of activity", () => {
   const external = render(<StatusDot activity="online" external />);
   assert.match(
-    external.container.firstElementChild?.className ?? "",
-    /(^|\s)theme-brutal:bg-brutal-cyan(\s|$)/,
+    brutalView(external.container.firstElementChild?.className ?? ""),
+    /(^|\s)bg-brutal-cyan(\s|$)/,
     "external=true must produce bg-brutal-cyan, ignoring activity",
   );
   assert.doesNotMatch(
-    external.container.firstElementChild?.className ?? "",
+    brutalView(external.container.firstElementChild?.className ?? ""),
     /(^|\s)bg-brutal-lime(\s|$)/,
     "external tone must not keep the managed online lime",
   );
@@ -29,7 +30,7 @@ test("StatusDot external prop forces bg-brutal-cyan regardless of activity", () 
 
   const managed = render(<StatusDot activity="online" />);
   assert.match(
-    managed.container.firstElementChild?.className ?? "",
+    brutalView(managed.container.firstElementChild?.className ?? ""),
     /(^|\s)bg-brutal-lime(\s|$)/,
     "managed online remains lime so the external override is not vacuous",
   );
@@ -66,8 +67,8 @@ test("AgentActivityDot passes external agent identity through to StatusDot", () 
     </TestIntlProvider>,
   );
   assert.match(
-    external.container.firstElementChild?.className ?? "",
-    /(^|\s)theme-brutal:bg-brutal-cyan(\s|$)/,
+    brutalView(external.container.firstElementChild?.className ?? ""),
+    /(^|\s)bg-brutal-cyan(\s|$)/,
     "external agents must render the neutral cyan status dot",
   );
   cleanup();
@@ -78,7 +79,7 @@ test("AgentActivityDot passes external agent identity through to StatusDot", () 
     </TestIntlProvider>,
   );
   assert.match(
-    managed.container.firstElementChild?.className ?? "",
+    brutalView(managed.container.firstElementChild?.className ?? ""),
     /(^|\s)bg-brutal-lime(\s|$)/,
     "managed online agents still use the lime liveness dot",
   );
