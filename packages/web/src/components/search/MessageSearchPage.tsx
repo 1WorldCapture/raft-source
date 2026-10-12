@@ -1922,7 +1922,7 @@ export default function MessageSearchPage({ onOpenPanelRef, onDragPanelRef, acti
         onDragStart={(event) => handleMessageResultDrag(event, result)}
         onClick={(event) => handleMessageResultClick(event, result)}
         selected={isSelected}
-        className={nested ? "border-t-2" : undefined}
+        className={nested ? "border-t theme-brutal:border-t-2" : undefined}
       >
         <SearchMessageResultHeader>
           <SearchMessageResultMeta>{sourceLabel}</SearchMessageResultMeta>

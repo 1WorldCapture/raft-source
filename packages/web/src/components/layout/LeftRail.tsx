@@ -439,15 +439,15 @@ export function LeftRail({ hidden, workspaceModeAvailable = false, side = "left"
   return (
     <>
       <div
-        className={`relative hidden md:flex h-full shrink-0 flex-col items-center bg-soft-signal select-none pb-2 ${workspaceEnabled ? "w-12" : "w-[64px] [@media(max-height:600px)]:w-[50px]"} ${workspaceEnabled ? (side === "left" ? "border-r border-black/25" : "border-l border-black/25") : "border-r-2 border-black"} ${workspaceRailDrag?.targetSide === side ? "outline outline-1 outline-black/35 -outline-offset-1" : ""}`}
+        className={`relative hidden md:flex h-full shrink-0 flex-col items-center bg-primary-soft theme-brutal:bg-soft-signal select-none pb-2 ${workspaceEnabled ? "w-12" : "w-[64px] [@media(max-height:600px)]:w-[50px]"} ${workspaceEnabled ? (side === "left" ? "border-r border-line-muted theme-brutal:border-black/25" : "border-l border-line-muted theme-brutal:border-black/25") : "border-r theme-brutal:border-r-2 border-line-strong theme-brutal:border-black"} ${workspaceRailDrag?.targetSide === side ? "outline outline-1 outline-line-strong theme-brutal:outline-black/35 -outline-offset-1" : ""}`}
         data-workspace-rail-side={side}
         data-testid={`workspace-${side}-rail`}
       >
       {/* Server switcher (top) */}
-      {side === "left" ? <div className={`relative flex w-full items-center justify-center ${workspaceEnabled ? "h-12 border-b border-black/25" : "h-panel-header border-b-2 border-black"}`}>
+      {side === "left" ? <div className={`relative flex w-full items-center justify-center ${workspaceEnabled ? "h-12 border-b border-line-muted theme-brutal:border-black/25" : "h-panel-header border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black"}`}>
         <Tooltip
           content={server?.name || formatMessage({ id: "layout.leftRail.serverFallbackName" })}
-          contentProps={{ side: "right", className: "bg-white" }}
+          contentProps={{ side: "right", className: "bg-layer-panel theme-brutal:bg-white" }}
         >
           <button
             type="button"
@@ -466,7 +466,7 @@ export function LeftRail({ hidden, workspaceModeAvailable = false, side = "left"
             // #proj-uiux:8e7df837 task #98 followup 54fbf722: "server name
             // 按钮怎么没修？" — keep server-initial in step with the rail
             // tabs, not pinned at size-icon-header (36 across all viewports).
-            className={`relative inline-flex items-center justify-center border-2 border-black bg-black font-display font-bold text-soft-signal transition-all duration-100 ${workspaceEnabled ? "size-9 text-sm shadow-brutal-active hover:shadow-brutal-sm" : "size-10 text-base shadow-brutal-sm hover:shadow-brutal [@media(max-height:600px)]:h-9 [@media(max-height:600px)]:w-9"}`}
+            className={`relative inline-flex items-center justify-center border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-foreground-strong theme-brutal:bg-black font-display font-bold text-soft-signal transition-all duration-100 ${workspaceEnabled ? "size-9 text-sm shadow-none theme-brutal:shadow-brutal-active hover:shadow-raft-xs theme-brutal:hover:shadow-brutal-sm" : "size-10 text-base shadow-raft-xs theme-brutal:shadow-brutal-sm hover:shadow-raft-sm theme-brutal:hover:shadow-brutal [@media(max-height:600px)]:h-9 [@media(max-height:600px)]:w-9"}`}
           >
             {hasOtherServerUnread && (
               <AttentionDot
@@ -511,7 +511,7 @@ export function LeftRail({ hidden, workspaceModeAvailable = false, side = "left"
           >
             {workspaceRailDrag?.item === item ? (
               <div
-                className="size-8 border border-dashed border-black/55 bg-black/[0.06] transition-[opacity,transform] duration-100 ease-out"
+                className="size-8 border border-dashed border-line-strong theme-brutal:border-black/55 bg-black/[0.06] transition-[opacity,transform] duration-100 ease-out"
                 data-testid="workspace-rail-drop-placeholder"
               />
             ) : renderWorkspaceRailButton(item)}
@@ -628,7 +628,7 @@ export function LeftRail({ hidden, workspaceModeAvailable = false, side = "left"
       </div>
       {workspaceRailDrag?.sourceSide === side ? createPortal(
         <div
-          className="pointer-events-none fixed z-[200] flex size-8 -translate-x-1/2 -translate-y-1/2 items-center justify-center border border-black/40 bg-white opacity-90"
+          className="pointer-events-none fixed z-[200] flex size-8 -translate-x-1/2 -translate-y-1/2 items-center justify-center border border-line-strong theme-brutal:border-black/40 bg-layer-panel theme-brutal:bg-white opacity-90"
           style={{ left: "var(--workspace-rail-drag-x)", top: "var(--workspace-rail-drag-y)" }}
           data-testid="workspace-rail-drag-overlay"
         >
@@ -777,7 +777,7 @@ function HelpMenu({
         data-testid="left-rail-help-menu"
         className="w-80 overflow-hidden p-0"
       >
-          <div className="flex items-center border-b-2 border-black bg-brutal-cream px-3 py-2">
+          <div className="flex items-center border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black bg-layer-canvas-muted theme-brutal:bg-brutal-cream px-3 py-2">
             <SectionEyebrow>
               {formatMessage({ id: "layout.leftRail.helpMenuTitle" })}
             </SectionEyebrow>
@@ -919,12 +919,12 @@ const RailTabButton = forwardRef<HTMLButtonElement, RailTabButtonProps>(function
       // header icons. stdrc 2026-05-02 #proj-uiux:8e7df837 task #98:
       // "正常桌面上还是原来的大小比较合适，只在缩窄 rail 和 header 的时候
       // 应该缩按钮".
-      className={`relative inline-flex ${compact ? "size-8" : "size-10 [@media(max-height:600px)]:h-9 [@media(max-height:600px)]:w-9"} items-center justify-center border-2 transition-colors ${
+      className={`relative inline-flex ${compact ? "size-8" : "size-10 [@media(max-height:600px)]:h-9 [@media(max-height:600px)]:w-9"} items-center justify-center border theme-brutal:border-2 transition-colors ${
         active
           ? activeVariant === "depressed"
-            ? "border-black bg-workspace-mode-active shadow-workspace-mode-active"
-            : "border-black bg-white shadow-brutal-sm"
-          : "border-transparent hover:border-black hover:bg-white"
+            ? "border-line-strong theme-brutal:border-black bg-workspace-mode-active shadow-workspace-mode-active"
+            : "border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white shadow-raft-xs theme-brutal:shadow-brutal-sm"
+          : "border-transparent hover:border-line-strong theme-brutal:hover:border-black hover:bg-layer-panel theme-brutal:hover:bg-white"
       } ${className}`}
     >
       <span className="relative inline-flex items-center justify-center">
@@ -944,7 +944,7 @@ const RailTabButton = forwardRef<HTMLButtonElement, RailTabButtonProps>(function
   return showTooltip ? (
     <Tooltip
       content={dotVisible && dotTooltip ? dotTooltip : label}
-      contentProps={{ side: tooltipSide, className: "bg-white" }}
+      contentProps={{ side: tooltipSide, className: "bg-layer-panel theme-brutal:bg-white" }}
     >
       {button}
     </Tooltip>

@@ -12,6 +12,7 @@ import type { Agent } from "../src/store/agentStore";
 import type { User } from "../src/store/authStore";
 import type { Channel } from "../src/store/channelStore";
 import type { Server, ServerMember } from "../src/store/serverStore";
+import { brutalView } from "./helpers/brutalView";
 
 class MemoryStorage {
   private readonly map = new Map<string, string>();
@@ -210,8 +211,8 @@ test("thread search result groups render only one divider between the pink heade
     const secondHit = buttons.find((button) => button.textContent?.includes("visual testing second hit"));
     assert.ok(firstHit instanceof HTMLElement);
     assert.ok(secondHit instanceof HTMLElement);
-    assert.equal(firstHit.classList.contains("border-t-2"), true);
-    assert.equal(secondHit.classList.contains("border-t-2"), true);
+    assert.equal(brutalView(firstHit.className).split(/\s+/).includes("border-t-2"), true);
+    assert.equal(brutalView(secondHit.className).split(/\s+/).includes("border-t-2"), true);
   } finally {
     api.get = originalGet;
   }

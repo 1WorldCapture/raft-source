@@ -102,8 +102,8 @@ export default function ThreadAgentFollowers({
             onClick={(event) => event.stopPropagation()}
             onPointerDown={(event) => event.stopPropagation()}
             className={variant === "header"
-              ? "btn-brutal-sm flex h-7 items-center gap-1 bg-white px-1.5 text-xs font-bold"
-              : "inline-flex h-5 items-center gap-1 rounded border border-black/25 bg-white px-1.5 text-[10px] font-bold text-black/60 hover:border-black"}
+              ? "btn-brutal-sm flex h-7 items-center gap-1 bg-layer-panel theme-brutal:bg-white px-1.5 text-xs font-bold"
+              : "inline-flex h-5 items-center gap-1 rounded border border-line-muted theme-brutal:border-black/25 bg-layer-panel theme-brutal:bg-white px-1.5 text-[10px] font-bold text-foreground-muted theme-brutal:text-black/60 hover:border-line-strong theme-brutal:hover:border-black"}
             aria-label={label}
             title={label}
             data-testid={`thread-followers-${variant}-trigger`}
@@ -131,24 +131,24 @@ export default function ThreadAgentFollowers({
         className="w-72 p-0"
         data-testid="thread-followers-popover"
       >
-        <div className="border-b-2 border-black bg-brutal-cream px-3 py-2 text-sm font-bold">
+        <div className="border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black bg-layer-canvas-muted theme-brutal:bg-brutal-cream px-3 py-2 text-sm font-bold">
           {formatMessage({ id: "thread.followers.title" })}
         </div>
         <div className="max-h-72 overflow-y-auto p-2">
           {roster?.loading && !roster.loaded ? (
-            <div className="px-2 py-4 text-center text-xs font-bold text-black/45" data-testid="thread-followers-loading">
+            <div className="px-2 py-4 text-center text-xs font-bold text-foreground-hint theme-brutal:text-black/45" data-testid="thread-followers-loading">
               {formatMessage({ id: "thread.followers.loading" })}
             </div>
           ) : roster?.error ? (
-            <div className="flex flex-col items-center gap-2 px-2 py-4 text-center text-xs font-bold text-black/60" data-testid="thread-followers-error">
+            <div className="flex flex-col items-center gap-2 px-2 py-4 text-center text-xs font-bold text-foreground-muted theme-brutal:text-black/60" data-testid="thread-followers-error">
               <AlertCircle size={18} />
               {formatMessage({ id: "thread.followers.loadFailed" })}
-              <button type="button" className="btn-brutal-sm bg-white px-2 py-1" onClick={() => void load([threadChannelId], true)}>
+              <button type="button" className="btn-brutal-sm bg-layer-panel theme-brutal:bg-white px-2 py-1" onClick={() => void load([threadChannelId], true)}>
                 {formatMessage({ id: "thread.followers.retry" })}
               </button>
             </div>
           ) : agents.length === 0 ? (
-            <div className="px-2 py-4 text-center text-xs font-bold text-black/45" data-testid="thread-followers-empty">
+            <div className="px-2 py-4 text-center text-xs font-bold text-foreground-hint theme-brutal:text-black/45" data-testid="thread-followers-empty">
               {formatMessage({ id: "thread.followers.empty" })}
             </div>
           ) : agents.map((agent) => {
@@ -192,7 +192,7 @@ export default function ThreadAgentFollowers({
               <div key={agent.id} className="flex items-center gap-2 px-1 py-1.5" data-testid="thread-follower-row">
                 <button
                   type="button"
-                  className="flex min-w-0 flex-1 items-center gap-2 rounded px-1 py-1 text-left hover:bg-black/5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-black"
+                  className="flex min-w-0 flex-1 items-center gap-2 rounded px-1 py-1 text-left hover:bg-fill-muted theme-brutal:hover:bg-black/5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-line-strong theme-brutal:focus-visible:outline-black"
                   onClick={openAgentProfile}
                   aria-label={agentLabel}
                   title={agentLabel}
@@ -213,7 +213,7 @@ export default function ThreadAgentFollowers({
                 {roster?.canManage ? (
                   <button
                     type="button"
-                    className={`btn-brutal-sm flex size-7 items-center justify-center bg-white ${canRemoveAgent ? "" : "cursor-not-allowed opacity-45"}`}
+                    className={`btn-brutal-sm flex size-7 items-center justify-center bg-layer-panel theme-brutal:bg-white ${canRemoveAgent ? "" : "cursor-not-allowed opacity-45"}`}
                     disabled={!canRemoveAgent || removingId === agent.id}
                     onClick={() => {
                       if (!canRemoveAgent) return;

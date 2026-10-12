@@ -20,6 +20,7 @@ import {
   setServerFeatureFlagForTests,
 } from "../src/store/serverFeatureFlags";
 import { useThreadAgentFollowerStore } from "../src/store/threadAgentFollowerStore";
+import { brutalView } from "./helpers/brutalView";
 
 type TestFn = (t: unknown) => void | Promise<void>;
 const test = (name: string, fn: TestFn) =>
@@ -201,21 +202,21 @@ test("Activity Done checks stay hidden until their row is hovered or focused, wh
 
   const rows = Array.from(document.querySelectorAll<HTMLElement>('[data-testid="inbox-row"]'));
   assert.equal(rows.length, 2);
-  assert.match(rows[0].className, /(?:^|\s)group(?:\s|$)/);
-  assert.match(rows[1].className, /(?:^|\s)group(?:\s|$)/);
+  assert.match(brutalView(rows[0].className), /(?:^|\s)group(?:\s|$)/);
+  assert.match(brutalView(rows[1].className), /(?:^|\s)group(?:\s|$)/);
 
   const inactiveDone = within(rows[0]).getByTestId("inbox-row-done");
   assert.equal(inactiveDone.getAttribute("aria-label"), "Mark as Done");
-  assert.match(inactiveDone.className, /(?:^|\s)opacity-0(?:\s|$)/);
-  assert.match(inactiveDone.className, /(?:^|\s)group-hover:opacity-100(?:\s|$)/);
-  assert.match(inactiveDone.className, /(?:^|\s)group-focus-visible:opacity-100(?:\s|$)/);
-  assert.match(inactiveDone.className, /(?:^|\s)\[@media\(hover:none\)\]:opacity-100(?:\s|$)/);
+  assert.match(brutalView(inactiveDone.className), /(?:^|\s)opacity-0(?:\s|$)/);
+  assert.match(brutalView(inactiveDone.className), /(?:^|\s)group-hover:opacity-100(?:\s|$)/);
+  assert.match(brutalView(inactiveDone.className), /(?:^|\s)group-focus-visible:opacity-100(?:\s|$)/);
+  assert.match(brutalView(inactiveDone.className), /(?:^|\s)\[@media\(hover:none\)\]:opacity-100(?:\s|$)/);
 
   const activeDone = within(rows[1]).getByTestId("inbox-row-done");
   assert.equal(rows[1].getAttribute("data-active"), "true");
-  assert.match(activeDone.className, /(?:^|\s)pointer-events-auto(?:\s|$)/);
-  assert.match(activeDone.className, /(?:^|\s)opacity-100(?:\s|$)/);
-  assert.doesNotMatch(activeDone.className, /(?:^|\s)opacity-0(?:\s|$)/);
+  assert.match(brutalView(activeDone.className), /(?:^|\s)pointer-events-auto(?:\s|$)/);
+  assert.match(brutalView(activeDone.className), /(?:^|\s)opacity-100(?:\s|$)/);
+  assert.doesNotMatch(brutalView(activeDone.className), /(?:^|\s)opacity-0(?:\s|$)/);
 });
 
 test("Activity opens its real context menu at a viewport-clamped position", () => {
@@ -318,15 +319,15 @@ test("Activity title color distinguishes unread emphasis from the muted read sta
   );
   assert.equal(primaryTitles.length, 3);
 
-  assert.match(primaryTitles[0].className, /(?:^|\s)font-semibold(?:\s|$)/);
-  assert.match(primaryTitles[0].className, /(?:^|\s)text-black\/55(?:\s|$)/);
-  assert.doesNotMatch(primaryTitles[0].className, /(?:^|\s)text-black(?:\s|$)/);
+  assert.match(brutalView(primaryTitles[0].className), /(?:^|\s)font-semibold(?:\s|$)/);
+  assert.match(brutalView(primaryTitles[0].className), /(?:^|\s)text-black\/55(?:\s|$)/);
+  assert.doesNotMatch(brutalView(primaryTitles[0].className), /(?:^|\s)text-black(?:\s|$)/);
 
-  assert.match(primaryTitles[1].className, /(?:^|\s)font-bold(?:\s|$)/);
-  assert.match(primaryTitles[1].className, /(?:^|\s)text-black(?:\s|$)/);
-  assert.doesNotMatch(primaryTitles[1].className, /(?:^|\s)text-black\/55(?:\s|$)/);
+  assert.match(brutalView(primaryTitles[1].className), /(?:^|\s)font-bold(?:\s|$)/);
+  assert.match(brutalView(primaryTitles[1].className), /(?:^|\s)text-black(?:\s|$)/);
+  assert.doesNotMatch(brutalView(primaryTitles[1].className), /(?:^|\s)text-black\/55(?:\s|$)/);
 
-  assert.match(primaryTitles[2].className, /(?:^|\s)text-black\/55(?:\s|$)/);
+  assert.match(brutalView(primaryTitles[2].className), /(?:^|\s)text-black\/55(?:\s|$)/);
 });
 
 test("Activity row metadata uses square raft-ui Badge primitives for every information item", () => {
@@ -356,7 +357,7 @@ test("Activity row metadata uses square raft-ui Badge primitives for every infor
   );
   for (const badge of badges) {
     assert.equal(badge.getAttribute("data-slot"), "badge");
-    assert.doesNotMatch(badge.className, /(?:^|\s)rounded(?:-|\s|$)/);
+    assert.doesNotMatch(brutalView(badge.className), /(?:^|\s)rounded(?:-|\s|$)/);
   }
 });
 
@@ -427,8 +428,8 @@ test("Activity in-review task badge uses the canonical lavender status color", (
   assert.ok(taskBadge);
   assert.equal(taskBadge.getAttribute("data-slot"), "badge");
   assert.equal(taskBadge.getAttribute("data-status"), "in_review");
-  assert.match(taskBadge.className, /(?:^|\s)bg-brutal-lavender(?:\s|$)/);
-  assert.doesNotMatch(taskBadge.className, /(?:^|\s)bg-accent-400(?:\s|$)/);
+  assert.match(brutalView(taskBadge.className), /(?:^|\s)bg-brutal-lavender(?:\s|$)/);
+  assert.doesNotMatch(brutalView(taskBadge.className), /(?:^|\s)bg-accent-400(?:\s|$)/);
   assert.equal(taskBadge.style.backgroundColor, "var(--color-brutal-lavender)");
 });
 
@@ -446,6 +447,6 @@ test("Activity todo task badge pins the same canonical orange used by Chat", () 
   );
   assert.ok(taskBadge);
   assert.equal(taskBadge.getAttribute("data-status"), "todo");
-  assert.match(taskBadge.className, /(?:^|\s)bg-brutal-orange(?:\s|$)/);
+  assert.match(brutalView(taskBadge.className), /(?:^|\s)bg-brutal-orange(?:\s|$)/);
   assert.equal(taskBadge.style.backgroundColor, "var(--color-brutal-orange)");
 });
