@@ -1,4 +1,5 @@
-import { readFile, stat } from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
+import { lstat, open } from "node:fs/promises";
 import path from "node:path";
 import { APPROX_PROMPT_BYTES_PER_TOKEN, RECOMMENDED_MEMORY_MD_BYTES, STARTUP_MEMORY_BLOCK_BUDGET_TOKENS, type AxSurfaceText } from "@botiverse/raft-shared";
 import { axSurface, axSurfaceLiteral, composeAxSurfaces } from "./agentRuntimeInput.js";
@@ -60,8 +61,8 @@ export function resolveStartupMemoryBlockConfig(
   };
 }
 
-function approxTokens(text: string): number {
-  return Math.max(1, Math.floor((text.length + 3) / 4));
+function approxTokens(sizeBytes: number): number {
+  return Math.max(1, Math.floor((sizeBytes + 3) / APPROX_PROMPT_BYTES_PER_TOKEN));
 }
 
 function kb(bytes: number): string {
@@ -98,7 +99,7 @@ export const formatStartupMemoryBlock = axSurface(
     // heading cannot delimit it unambiguously. Facts only, as attributes —
     // growth guidance lives in the CLI guide and the Cleaner's idle-time hint.
     const attrs = truncated
-      ? `size="${kb(input.sizeBytes)}" tokens="~${approxTokens(input.content)}" shown="first ${kb(shownBytes)}" note="read the file for the rest"`
+      ? `size="${kb(input.sizeBytes)}" tokens="~${approxTokens(input.sizeBytes)}" shown="first ${kb(shownBytes)}" note="read the file for the rest"`
       : `size="${kb(input.sizeBytes)}" complete="true" note="no need to re-read MEMORY.md unless you change it"`;
     return [`<memory-index file="MEMORY.md" ${attrs}>`, head.trimEnd(), "</memory-index>"].join("\n");
   },
@@ -123,10 +124,22 @@ export async function buildStartupMemoryBlock(args: {
   let content: string;
   let sizeBytes: number;
   try {
-    const info = await stat(filePath);
+    // A symlinked MEMORY.md could point outside the workspace; the agent owns
+    // the file, so an unusual shape is skipped rather than followed.
+    const info = await lstat(filePath);
     if (!info.isFile()) return null;
     sizeBytes = info.size;
-    content = await readFile(filePath, "utf8");
+    // Only the head is needed (plus slack for a split code point), so a huge
+    // MEMORY.md is never read whole. O_NOFOLLOW closes the lstat/open race.
+    const wanted = Math.min(sizeBytes, budgetTokens * APPROX_PROMPT_BYTES_PER_TOKEN + 8);
+    const handle = await open(filePath, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+    try {
+      const buffer = Buffer.alloc(wanted);
+      const { bytesRead } = await handle.read(buffer, 0, wanted, 0);
+      content = buffer.subarray(0, bytesRead).toString("utf8");
+    } finally {
+      await handle.close();
+    }
   } catch {
     return null;
   }

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -96,4 +96,19 @@ test("applyStartupMemoryBlock prepends and marks the prompt source, and is a no-
   const applied = applyStartupMemoryBlock(asAxSurfaceText("## MEMORY.md ..."), wake, "cold_start");
   assert.equal(applied.prompt, "## MEMORY.md ...\n\nwake");
   assert.equal(applied.promptSource, "cold_start_with_memory");
+});
+
+test("a symlinked MEMORY.md is never followed, even to a readable file outside the workspace", async () => {
+  const outside = workspaceWithMemory("SECRET outside the workspace");
+  const dir = workspaceWithMemory(null);
+  symlinkSync(path.join(outside, "MEMORY.md"), path.join(dir, "MEMORY.md"));
+  assert.equal(await buildStartupMemoryBlock({ workspacePath: dir }), null);
+});
+
+test("only the head of a huge MEMORY.md is read, and the size facts still describe the whole file", async () => {
+  const dir = workspaceWithMemory(`${"line of memory\n".repeat(200_000)}TAIL_MARKER\n`);
+  const block = String(await buildStartupMemoryBlock({ workspacePath: dir, budgetTokens: 100 }));
+  assert.ok(block.includes('shown="first '), block.slice(0, 200));
+  assert.ok(!block.includes("TAIL_MARKER"));
+  assert.match(block, /size="2[0-9]{3}\.\d KB"/);
 });
