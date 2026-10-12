@@ -1702,6 +1702,25 @@ export const AGENT_DAEMON_RELEASE_NOTES: AgentDaemonReleaseNote[] = [
       },
     ],
   },
+  {
+    version: "1.0.36",
+    entries: [
+      {
+        category: "new_capability",
+        summary:
+          "`raft task create` and `raft action prepare` now send an idempotency key (a fresh one per invocation, or the one you pass with `--idempotency-key`), so the server replays the first result instead of writing again. If one of these commands fails with an unknown outcome (no HTTP answer, or a 5xx), the error prints the key to rerun with.",
+        whyItMatters:
+          "Retrying a task create or an action card after a timeout no longer creates duplicate tasks or cards: rerun the same command with the printed `--idempotency-key` and the original result comes back. Keys are valid for 24 hours and are scoped to your agent; the same key with a different request is refused with `idempotency_key_reused`.",
+      },
+      {
+        category: "reliability",
+        summary:
+          "The daemon, Computer service and CLI now record the commit they were built from, and `raft version` shows it.",
+        whyItMatters:
+          "When a report mentions a daemon or CLI version, the exact build it came from can be verified, instead of trusting a version string that is identical across commits.",
+      },
+    ],
+  },
 ];
 
 function parseSemver(value: string | null): [number, number, number] | null {
