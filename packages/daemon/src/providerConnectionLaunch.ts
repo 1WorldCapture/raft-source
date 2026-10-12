@@ -109,3 +109,44 @@ export async function materializeProviderConnectionForSpawn(
     envVars: { ...(config.envVars ?? {}), ...launch.envVars },
   };
 }
+
+/**
+ * Strict parser for the one-time probe materialization payload. Same shape
+ * contract as the launch path: exact key sets, validated provider id,
+ * null-or-string endpoint, boolean capability and non-empty string env values.
+ * The returned env object is the only in-memory copy the canary may read.
+ */
+export function parseProviderConnectionLaunchPayload(body: unknown): {
+  envVars: Record<string, string>;
+  providerConnection: NonNullable<AgentConfig["providerConnection"]>;
+} {
+  const record = body as Record<string, unknown> | null;
+  const envVars = record?.envVars;
+  const projection = record?.providerConnection;
+  if (
+    !record
+    || Object.keys(record).sort().join(",") !== "envVars,providerConnection"
+    || !envVars
+    || typeof envVars !== "object"
+    || Array.isArray(envVars)
+    || !projection
+    || typeof projection !== "object"
+    || Array.isArray(projection)
+    || Object.keys(projection).sort().join(",") !== "endpointUrl,providerId,supportsImageInput"
+    || !isProviderConnectionProviderId((projection as Record<string, unknown>).providerId)
+    || !(
+      (projection as Record<string, unknown>).endpointUrl === null
+      || typeof (projection as Record<string, unknown>).endpointUrl === "string"
+    )
+    || typeof (projection as Record<string, unknown>).supportsImageInput !== "boolean"
+    || !Object.entries(envVars as Record<string, unknown>).every(
+      ([key, value]) => key.length > 0 && typeof value === "string" && value.length > 0,
+    )
+  ) {
+    throw new Error("probe materialization returned an invalid payload");
+  }
+  return {
+    envVars: envVars as Record<string, string>,
+    providerConnection: projection as NonNullable<AgentConfig["providerConnection"]>,
+  };
+}
