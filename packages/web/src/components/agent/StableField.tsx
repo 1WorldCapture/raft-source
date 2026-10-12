@@ -113,7 +113,7 @@ export function FieldSelectTrigger({ children, ...props }: React.ComponentProps<
   );
 }
 
-const LABEL_CLS = "text-sm font-bold text-black uppercase tracking-wide";
+const LABEL_CLS = "text-sm font-bold text-foreground-strong theme-brutal:text-black uppercase tracking-wide";
 
 export default function StableField({
   label, required, optional, hint, error, counter, labelAccessory, belowControl, adopt = true, layout = "stacked", htmlFor, className, children,
@@ -297,7 +297,7 @@ export default function StableField({
             lines of empty space on every field to keep the height pinned. */}
         <span className="flex min-h-4 items-start gap-2">
           <span
-            className={`flex-1 ${message ? "" : "invisible"} ${error ? "font-bold text-brutal-red" : "text-black/50"}`}
+            className={`flex-1 ${message ? "" : "invisible"} ${error ? "font-bold text-brutal-red" : "text-foreground-muted theme-brutal:text-black/50"}`}
             role={error ? "alert" : undefined}
           >
             {/* Holds the line box open when empty, so the row keeps its height
@@ -305,7 +305,7 @@ export default function StableField({
             {message ?? " "}
           </span>
           {counter ? (
-            <span className="shrink-0 font-mono tabular-nums text-black/50">{counter}</span>
+            <span className="shrink-0 font-mono tabular-nums text-foreground-muted theme-brutal:text-black/50">{counter}</span>
           ) : null}
         </span>
       </div>

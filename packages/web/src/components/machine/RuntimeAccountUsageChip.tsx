@@ -72,7 +72,7 @@ function RuntimeUsageContents({
 }) {
   const { formatMessage, locale } = useIntl();
   if (loading && !result) {
-    return <div className="px-4 py-5 text-sm text-black/50">{formatMessage({ id: "machine.runtimeUsage.reading" })}</div>;
+    return <div className="px-4 py-5 text-sm text-foreground-muted theme-brutal:text-black/50">{formatMessage({ id: "machine.runtimeUsage.reading" })}</div>;
   }
   if (loadError && !result) {
     return (
@@ -86,7 +86,7 @@ function RuntimeUsageContents({
     return (
       <div className="px-4 py-5">
         <div className="text-sm font-bold">{formatMessage({ id: "machine.runtimeUsage.noSnapshot" })}</div>
-        <p className="mt-1 text-xs leading-5 text-black/55">
+        <p className="mt-1 text-xs leading-5 text-foreground-muted theme-brutal:text-black/55">
           {formatMessage({ id: "machine.runtimeUsage.noSnapshotDescription" })}
         </p>
       </div>
@@ -95,13 +95,13 @@ function RuntimeUsageContents({
 
   const stale = result.state === "stale";
   return (
-    <div className={stale ? "bg-gray-50" : "bg-white"}>
+    <div className={stale ? "bg-gray-50" : "bg-layer-panel theme-brutal:bg-white"}>
       {stale && (
-        <div className="border-b-2 border-black bg-brutal-orange/20 px-4 py-2 text-xs font-bold">
+        <div className="border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black bg-warning-soft/20 theme-brutal:bg-brutal-orange/20 px-4 py-2 text-xs font-bold">
           {formatMessage({ id: "machine.runtimeUsage.stale" })}
         </div>
       )}
-      <div className="divide-y-2 divide-black/15">
+      <div className="divide-y-2 divide-line-muted theme-brutal:divide-black/15">
         {result.snapshot.accounts.map((account) => {
           const reauth = account.health === "reauth_required";
           return (
@@ -112,25 +112,25 @@ function RuntimeUsageContents({
                     {account.planLabel ?? formatMessage({ id: "machine.runtimeUsage.accountFallback" })}
                   </div>
                   {account.maskedLabel && (
-                    <div className="mt-0.5 truncate text-xs text-black/50" data-testid="runtime-account-masked-label">
+                    <div className="mt-0.5 truncate text-xs text-foreground-muted theme-brutal:text-black/50" data-testid="runtime-account-masked-label">
                       {account.maskedLabel}
                     </div>
                   )}
                 </div>
-                <span className={`shrink-0 border border-black px-1.5 py-0.5 text-[10px] font-bold uppercase ${
-                  account.health === "ok" ? "bg-brutal-lime" : "bg-brutal-orange"
+                <span className={`shrink-0 border border-line-strong theme-brutal:border-black px-1.5 py-0.5 text-[10px] font-bold uppercase ${
+                  account.health === "ok" ? "bg-success-soft theme-brutal:bg-brutal-lime" : "bg-warning-soft theme-brutal:bg-brutal-orange"
                 }`}>
                   {formatMessage({ id: `machine.runtimeUsage.health.${account.health}` })}
                 </span>
               </div>
               {account.health === "unsupported" || account.health === "error" ? (
-                <p className="mt-3 text-xs leading-5 text-black/60">
+                <p className="mt-3 text-xs leading-5 text-foreground-muted theme-brutal:text-black/60">
                   {formatMessage({ id: account.health === "unsupported"
                     ? "machine.runtimeUsage.unsupportedDescription"
                     : "machine.runtimeUsage.readFailed" })}
                 </p>
               ) : reauth ? (
-                <p className="mt-3 text-xs leading-5 text-black/60">
+                <p className="mt-3 text-xs leading-5 text-foreground-muted theme-brutal:text-black/60">
                   {formatMessage({ id: "machine.runtimeUsage.reauthDescription" })}
                 </p>
               ) : (
@@ -142,7 +142,7 @@ function RuntimeUsageContents({
                         {window.status === "parse_unavailable" ? (
                           <span className="text-brutal-orange">{formatMessage({ id: "machine.runtimeUsage.parseUnavailable" })}</span>
                         ) : (
-                          <span className="text-black/55 sm:text-right">
+                          <span className="text-foreground-muted theme-brutal:text-black/55 sm:text-right">
                             {window.resetsAt
                               ? formatMessage(
                                   { id: "machine.runtimeUsage.windowSummary" },
@@ -159,9 +159,9 @@ function RuntimeUsageContents({
                         )}
                       </div>
                       {window.status !== "parse_unavailable" && (
-                        <div className="mt-1.5 h-2 overflow-hidden border border-black bg-white">
+                        <div className="mt-1.5 h-2 overflow-hidden border border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white">
                           <div
-                            className={window.status === "limit_reached" ? "h-full bg-brutal-orange" : "h-full bg-brutal-cyan"}
+                            className={window.status === "limit_reached" ? "h-full bg-warning-soft theme-brutal:bg-brutal-orange" : "h-full bg-info-soft theme-brutal:bg-brutal-cyan"}
                             style={{ width: `${Math.round((window.usedRatio ?? 0) * 100)}%` }}
                           />
                         </div>
@@ -174,7 +174,7 @@ function RuntimeUsageContents({
           );
         })}
       </div>
-      <div className="border-t-2 border-black/15 px-4 py-2 text-[11px] text-black/50">
+      <div className="border-t theme-brutal:border-t-2 border-line-muted theme-brutal:border-black/15 px-4 py-2 text-[11px] text-foreground-muted theme-brutal:text-black/50">
         {formatMessage(
           { id: "machine.runtimeUsage.metadata" },
           {
@@ -208,23 +208,23 @@ function Surface({
   const { formatMessage } = useIntl();
   return (
     <div data-testid={`runtime-usage-surface-${provider}`}>
-      <div className="flex items-center justify-between gap-3 border-b-2 border-black px-4 py-3">
+      <div className="flex items-center justify-between gap-3 border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black px-4 py-3">
         <div>
           <div className="text-sm font-black">{formatMessage({ id: "machine.runtimeUsage.title" }, { provider: providerName(provider) })}</div>
-          <div data-testid={`runtime-version-${provider}`} className="text-[10px] font-bold uppercase tracking-wide text-black/55">
+          <div data-testid={`runtime-version-${provider}`} className="text-[10px] font-bold uppercase tracking-wide text-foreground-muted theme-brutal:text-black/55">
             {runtimeVersion?.trim()
               ? formatMessage({ id: "machine.runtimeUsage.version" }, { version: runtimeVersion.trim() })
               : formatMessage({ id: "machine.runtimeUsage.versionUnavailable" })}
           </div>
-          <div className="text-[10px] font-bold uppercase tracking-wide text-black/45">{formatMessage({ id: "machine.runtimeUsage.private" })}</div>
+          <div className="text-[10px] font-bold uppercase tracking-wide text-foreground-hint theme-brutal:text-black/45">{formatMessage({ id: "machine.runtimeUsage.private" })}</div>
         </div>
         <button type="button" className="p-1" onClick={onClose} aria-label={formatMessage({ id: "machine.runtimeUsage.close" })}>
           <X size={16} />
         </button>
       </div>
       <RuntimeUsageContents result={result} loading={loading} loadError={loadError} />
-      <div className="flex items-center justify-between gap-3 border-t-2 border-black px-4 py-2.5">
-        <span className="text-[11px] text-black/50">
+      <div className="flex items-center justify-between gap-3 border-t theme-brutal:border-t-2 border-line-strong theme-brutal:border-black px-4 py-2.5">
+        <span className="text-[11px] text-foreground-muted theme-brutal:text-black/50">
           {refreshState === "requested"
             ? formatMessage({ id: "machine.runtimeUsage.refreshRequested" })
             : refreshState === "unconfirmed"
@@ -239,7 +239,7 @@ function Surface({
           type="button"
           onClick={onRefresh}
           disabled={refreshState === "requesting"}
-          className="btn-brutal-sm flex items-center gap-1 bg-white px-2 py-1 text-xs disabled:opacity-50"
+          className="btn-brutal-sm flex items-center gap-1 bg-layer-panel theme-brutal:bg-white px-2 py-1 text-xs disabled:opacity-50"
         >
           <RefreshCw size={12} className={refreshState === "requesting" ? "animate-spin" : ""} />
           {formatMessage({ id: "machine.runtimeUsage.refresh" })}
@@ -479,7 +479,7 @@ export default function RuntimeAccountUsageChip({
         appearance="solid"
         variant="default"
         uppercase={false}
-        className={`${runtimeBadgeClassName(className)} relative cursor-help focus:outline-none focus:ring-2 focus:ring-black focus:ring-offset-1`}
+        className={`${runtimeBadgeClassName(className)} relative cursor-help focus:outline-none focus:ring-2 focus:ring-line-strong theme-brutal:focus:ring-black focus:ring-offset-1`}
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-label={typeof children === "string" ? children : providerName(provider)}
@@ -510,7 +510,7 @@ export default function RuntimeAccountUsageChip({
           ref={popoverRef}
           role="dialog"
           aria-label={formatMessage({ id: "machine.runtimeUsage.dialogLabel" }, { provider: providerName(provider) })}
-          className="z-[70] w-[min(390px,calc(100vw-16px))] overflow-y-auto border-2 border-black bg-white shadow-brutal-lg"
+          className="z-[70] w-[min(390px,calc(100vw-16px))] overflow-y-auto border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white shadow-raft-md theme-brutal:shadow-brutal-lg"
           style={popoverStyle}
           onMouseEnter={cancelClose}
           onMouseLeave={closeSoon}

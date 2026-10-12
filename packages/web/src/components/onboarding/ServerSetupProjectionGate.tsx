@@ -299,7 +299,7 @@ export default function ServerSetupProjectionGate({
     if (!dedicatedSurface) return null;
     return (
       <div className="flex min-h-full w-full items-center justify-center p-6" data-testid="native-onboarding-loading">
-        <p className="text-sm font-bold text-black/60">{formatMessage({ id: "onboarding.native.loading" })}</p>
+        <p className="text-sm font-bold text-foreground-muted theme-brutal:text-black/60">{formatMessage({ id: "onboarding.native.loading" })}</p>
       </div>
     );
   }
@@ -316,11 +316,11 @@ export default function ServerSetupProjectionGate({
       : "onboarding.native.unavailable";
     return (
       <div className="flex min-h-full w-full items-center justify-center p-6" data-testid="native-onboarding-unavailable">
-        <div className="w-full max-w-md border-2 border-black bg-white p-5 text-center shadow-brutal">
-          <p className="text-sm font-bold text-black">{formatMessage({ id: messageId })}</p>
+        <div className="w-full max-w-md border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white p-5 text-center shadow-raft-sm theme-brutal:shadow-brutal">
+          <p className="text-sm font-bold text-foreground-strong theme-brutal:text-black">{formatMessage({ id: messageId })}</p>
           <button
             type="button"
-            className="mt-4 border-2 border-black bg-soft-signal px-4 py-2 text-sm font-bold shadow-brutal-sm active:translate-x-0.5 active:translate-y-0.5 active:shadow-none"
+            className="mt-4 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-primary-soft theme-brutal:bg-soft-signal px-4 py-2 text-sm font-bold shadow-raft-xs theme-brutal:shadow-brutal-sm active:translate-x-0.5 active:translate-y-0.5 active:shadow-none"
             onClick={retryProjection}
           >
             {formatMessage({ id: "onboarding.native.retry" })}
@@ -382,7 +382,7 @@ export default function ServerSetupProjectionGate({
         // app shell inside the onboarding page.
         return (
           <div className="flex min-h-full w-full items-center justify-center p-6" data-testid="native-onboarding-complete">
-            <p className="text-sm font-bold text-black/60">{formatMessage({ id: "onboarding.native.complete" })}</p>
+            <p className="text-sm font-bold text-foreground-muted theme-brutal:text-black/60">{formatMessage({ id: "onboarding.native.complete" })}</p>
           </div>
         );
       }
@@ -393,7 +393,7 @@ export default function ServerSetupProjectionGate({
         className="pointer-events-none fixed inset-x-0 bottom-0 z-40 flex justify-center px-4 pb-4"
         data-testid="server-setup-resume-bar"
       >
-        <div className="pointer-events-auto flex w-full max-w-[560px] flex-wrap items-center justify-between gap-3 border-2 border-black bg-soft-signal px-4 py-3 shadow-brutal">
+        <div className="pointer-events-auto flex w-full max-w-[560px] flex-wrap items-center justify-between gap-3 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-primary-soft theme-brutal:bg-soft-signal px-4 py-3 shadow-raft-sm theme-brutal:shadow-brutal">
           <p className="min-w-0 text-sm font-bold">
             {formatMessage({ id: "layout.onboarding.notSetUpYet" })}
           </p>
@@ -401,7 +401,7 @@ export default function ServerSetupProjectionGate({
             type="button"
             onClick={() => void handleResume()}
             disabled={loading}
-            className="btn-brutal shrink-0 bg-white px-4 py-2 text-sm disabled:opacity-50"
+            className="btn-brutal shrink-0 bg-layer-panel theme-brutal:bg-white px-4 py-2 text-sm disabled:opacity-50"
             data-testid="server-setup-resume"
           >
             {loading

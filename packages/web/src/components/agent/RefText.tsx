@@ -74,8 +74,8 @@ function RefToken({ resolved }: { resolved: ResolvedRef }) {
   // row rhythm. text-black + border + tint give it enough contrast against
   // the row's black/50 text by construction.
   const tint = isThread
-    ? "bg-brutal-cyan/30 hover:bg-brutal-cyan/60"
-    : "bg-brutal-pink/30 hover:bg-brutal-pink/60";
+    ? "bg-info-soft/30 theme-brutal:bg-brutal-cyan/30 hover:bg-info-soft/60 theme-brutal:hover:bg-brutal-cyan/60"
+    : "bg-accent-soft/30 theme-brutal:bg-brutal-pink/30 hover:bg-accent-soft/60 theme-brutal:hover:bg-brutal-pink/60";
 
   const onClick = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -96,7 +96,7 @@ function RefToken({ resolved }: { resolved: ResolvedRef }) {
       // In-message refs are the explicit arrow-cursor exception to the app's
       // link-hand control contract. Busy state = dim + non-interactive, no
       // spinner in the mono row (locked with @Bugen).
-      className={`${MSG_REF_CHIP} cursor-default text-black ${tint} ${
+      className={`${MSG_REF_CHIP} cursor-default text-foreground-strong theme-brutal:text-black ${tint} ${
         busy ? "pointer-events-none opacity-60" : ""
       }`}
     >

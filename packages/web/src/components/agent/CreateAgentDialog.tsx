@@ -958,7 +958,7 @@ export default function CreateAgentDialog({
   // "Create Agent 那个也可以编辑了").
   const nameLocked = onboarding;
   const descriptionLocked = onboarding;
-  const lockedFieldClass = "bg-gray-100 text-black/50 cursor-not-allowed";
+  const lockedFieldClass = "bg-gray-100 text-foreground-muted theme-brutal:text-black/50 cursor-not-allowed";
   /**
    * One validator, two questions: "is this name usable?" and "should we say so
    * yet?" — previously conflated, which is why the empty case was unreachable.
@@ -1261,14 +1261,14 @@ export default function CreateAgentDialog({
   if (onboarding) {
     const formId = "create-cindy-onboarding-form";
     const content = (
-      <section ref={cindyRuntimeSelectPortalRef} className="flex w-full max-w-[960px] flex-col border-2 border-black bg-white shadow-brutal md:h-[min(720px,calc(100dvh-2rem))] md:min-h-0 md:overflow-hidden" data-testid="create-cindy-screen-c">
-        <header className="flex shrink-0 items-start justify-between gap-3 border-b-2 border-black px-6 pb-4 pt-6 sm:px-9">
+      <section ref={cindyRuntimeSelectPortalRef} className="flex w-full max-w-[960px] flex-col border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white shadow-raft-sm theme-brutal:shadow-brutal md:h-[min(720px,calc(100dvh-2rem))] md:min-h-0 md:overflow-hidden" data-testid="create-cindy-screen-c">
+        <header className="flex shrink-0 items-start justify-between gap-3 border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black px-6 pb-4 pt-6 sm:px-9">
           <div className="min-w-0">
-            <div className="font-mono text-[10px] font-bold uppercase tracking-wide text-black/55">
+            <div className="font-mono text-[10px] font-bold uppercase tracking-wide text-foreground-muted theme-brutal:text-black/55">
               {formatMessage({ id: "agent.create.setupServer" })}
             </div>
             <h1 className="mt-2 text-xl font-bold">{formatMessage({ id: "agent.create.meetCindy" })}</h1>
-            <p className="mt-1 text-xs leading-5 text-black/60">
+            <p className="mt-1 text-xs leading-5 text-foreground-muted theme-brutal:text-black/60">
               {formatMessage({ id: "agent.create.cindyDescription" })}
             </p>
           </div>
@@ -1300,21 +1300,21 @@ export default function CreateAgentDialog({
 
         <form id={formId} noValidate onSubmit={handleSubmit} className="flex flex-col md:min-h-0 md:flex-1 md:overflow-hidden">
           <div className="flex flex-col gap-0 md:grid md:grid-cols-[0.95fr_1.05fr] md:min-h-0 md:flex-1 md:overflow-hidden">
-            <div className="flex flex-col border-b-2 border-black bg-soft-pink px-8 py-5 md:min-h-0 md:justify-center md:border-b-0 md:border-r-2 md:py-8">
+            <div className="flex flex-col border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black bg-soft-pink px-8 py-5 md:min-h-0 md:justify-center md:border-b-0 theme-brutal:md:border-b-0 md:border-r theme-brutal:md:border-r-2 md:py-8">
               <div className="mx-auto flex max-w-[360px] flex-col items-center text-center">
                 <div className="relative mb-3 md:mb-5" data-testid="cindy-avatar-entrance">
-                  <span className="onboarding-cindy-pop-mark absolute -right-5 top-1 size-3 rotate-12 border-2 border-black bg-brutal-lime" aria-hidden="true" />
-                  <span className="onboarding-cindy-pop-mark absolute -left-5 top-8 size-2.5 -rotate-12 border-2 border-black bg-soft-signal [animation-delay:70ms]" aria-hidden="true" />
+                  <span className="onboarding-cindy-pop-mark absolute -right-5 top-1 size-3 rotate-12 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-success-soft theme-brutal:bg-brutal-lime" aria-hidden="true" />
+                  <span className="onboarding-cindy-pop-mark absolute -left-5 top-8 size-2.5 -rotate-12 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-primary-soft theme-brutal:bg-soft-signal [animation-delay:70ms]" aria-hidden="true" />
                   {/* Every avatar frame in the app carries the black border (see
                       AvatarSlot); this hero was the one that did not. */}
-                  <PixelAvatar avatarKey="mug" size={132} className="onboarding-cindy-entrance relative z-10 !size-[88px] border-2 border-black shadow-brutal-lg md:!size-[132px]" />
+                  <PixelAvatar avatarKey="mug" size={132} className="onboarding-cindy-entrance relative z-10 !size-[88px] border theme-brutal:border-2 border-line-strong theme-brutal:border-black shadow-raft-md theme-brutal:shadow-brutal-lg md:!size-[132px]" />
                 </div>
                 <h2 className="text-2xl font-black tracking-normal md:text-4xl">
                   {formatMessage({ id: "agent.create.cindyName" })}
                 </h2>
                 {/* The old "Onboarding assistant" badge spent a line restating
                     what the name and blurb already say. Say what she does for you. */}
-                <p className="mt-2 text-sm font-medium leading-relaxed text-black/70 md:mt-3 md:text-base">
+                <p className="mt-2 text-sm font-medium leading-relaxed text-foreground-muted theme-brutal:text-black/70 md:mt-3 md:text-base">
                   {formatMessage({ id: "agent.create.cindyHeroDescription" })}
                 </p>
               </div>
@@ -1519,7 +1519,7 @@ export default function CreateAgentDialog({
               ) : null}
             </div>
           </div>
-          <footer className="flex shrink-0 flex-col-reverse gap-3 border-t-2 border-black px-5 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-9">
+          <footer className="flex shrink-0 flex-col-reverse gap-3 border-t theme-brutal:border-t-2 border-line-strong theme-brutal:border-black px-5 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-9">
             {onboarding ? (
               <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
                 <SetupSessionFooter disabled={submitting} />
@@ -1624,7 +1624,7 @@ export default function CreateAgentDialog({
               not a warning, and it stays until submit. */}
           {autoJoinChannelName && (
             <p
-              className="border-2 border-black bg-brutal-cyan/60 px-3 py-2 text-xs font-bold text-black"
+              className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-info-soft/60 theme-brutal:bg-brutal-cyan/60 px-3 py-2 text-xs font-bold text-foreground-strong theme-brutal:text-black"
               data-testid="create-agent-channel-context"
             >
               {formatMessage(
@@ -1746,7 +1746,7 @@ export default function CreateAgentDialog({
                 </Select>
               )}
               {minimumDaemonVersion && (
-                <p className="mt-1 text-xs font-medium text-black/60">
+                <p className="mt-1 text-xs font-medium text-foreground-muted theme-brutal:text-black/60">
                   {formatMessage(
                     { id: "agent.create.requiresDaemon" },
                     { version: minimumDaemonVersion },
@@ -1754,7 +1754,7 @@ export default function CreateAgentDialog({
                 </p>
               )}
               {prefilledMachineMode === "required" ? (
-                <p className="mt-1 text-xs text-black/50">
+                <p className="mt-1 text-xs text-foreground-muted theme-brutal:text-black/50">
                   {prefilledMachine?.name
                     ? formatMessage(
                         { id: "agent.create.requiredByActionCardNamed" },
@@ -1763,7 +1763,7 @@ export default function CreateAgentDialog({
                     : formatMessage({ id: "agent.create.requiredByActionCard" })}
                 </p>
               ) : prefilledMachineId ? (
-                <p className="mt-1 text-xs text-black/50">
+                <p className="mt-1 text-xs text-foreground-muted theme-brutal:text-black/50">
                   {prefilledMachineOnline
                     ? formatMessage({ id: "agent.create.suggestedByActionCard" })
                     : formatMessage({ id: "agent.create.suggestedComputerUnavailable" })}
@@ -1804,7 +1804,7 @@ export default function CreateAgentDialog({
               say so. The caller composes the note because only it saw the
               original search text. */}
           {prefilledNameNote && (
-            <p className="text-xs text-black/60" data-testid="create-agent-prefill-note">
+            <p className="text-xs text-foreground-muted theme-brutal:text-black/60" data-testid="create-agent-prefill-note">
               {prefilledNameNote}
             </p>
           )}
@@ -1828,7 +1828,7 @@ export default function CreateAgentDialog({
               readOnly={descriptionLocked}
             />
             {descriptionLocked ? (
-              <div className="mt-1 text-xs text-black/60">
+              <div className="mt-1 text-xs text-foreground-muted theme-brutal:text-black/60">
                 {onboarding
                   ? formatMessage({ id: "agent.create.fixedForOnboarding" })
                   : formatMessage({ id: "agent.create.prefilledByActionCard" })}

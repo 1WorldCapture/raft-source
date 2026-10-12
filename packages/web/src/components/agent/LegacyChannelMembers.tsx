@@ -51,7 +51,7 @@ function AgentActivityInfo({ agentId, fallbackStatus }: { agentId: string; fallb
     displayState.activityDetailKind,
   );
   return (
-    <div className="text-xs text-black/50 font-mono truncate">
+    <div className="text-xs text-foreground-muted theme-brutal:text-black/50 font-mono truncate">
       {activityText}
     </div>
   );
@@ -59,7 +59,7 @@ function AgentActivityInfo({ agentId, fallbackStatus }: { agentId: string; fallb
 
 function JointPeerBadge({ label }: { label: string }) {
   return (
-    <span className="inline-block max-w-full truncate border border-black bg-brutal-cyan/25 px-1 font-mono text-[10px] font-bold uppercase leading-4 text-black">
+    <span className="inline-block max-w-full truncate border border-line-strong theme-brutal:border-black bg-info-soft/25 theme-brutal:bg-brutal-cyan/25 px-1 font-mono text-[10px] font-bold uppercase leading-4 text-foreground-strong theme-brutal:text-black">
       {label}
     </span>
   );
@@ -93,11 +93,11 @@ function AddMemberCandidateBody({
   return (
     <span className="min-w-0 flex-1 text-left">
       <span className="flex min-w-0 items-center">
-        <span className="truncate text-sm font-medium text-black">{name}</span>
+        <span className="truncate text-sm font-medium text-foreground-strong theme-brutal:text-black">{name}</span>
       </span>
       {normalizedDescription ? (
         <span
-          className="block truncate text-xs font-normal text-black/60"
+          className="block truncate text-xs font-normal text-foreground-muted theme-brutal:text-black/60"
           title={normalizedDescription}
         >
           {normalizedDescription}
@@ -270,7 +270,7 @@ export default function LegacyChannelMembers({ channelId }: { channelId: string 
               </h2>
               <button
                 onClick={() => { setShowPanel(false); setShowAddSection(false); setMemberSearch(""); setRoleError(null); }}
-                className="btn-brutal-sm bg-white p-1"
+                className="btn-brutal-sm bg-layer-panel theme-brutal:bg-white p-1"
               >
                 <X size={20} />
               </button>
@@ -279,7 +279,7 @@ export default function LegacyChannelMembers({ channelId }: { channelId: string 
             {/* Member list */}
             <ChannelMemberListShell>
               {(roleError || roleChangeFailed) && (
-                <div className="m-3 border-2 border-black bg-brutal-red/20 px-3 py-2 text-sm font-bold" role="alert" data-testid="channel-member-role-error">
+                <div className="m-3 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-danger-soft/20 theme-brutal:bg-brutal-red/20 px-3 py-2 text-sm font-bold" role="alert" data-testid="channel-member-role-error">
                   {roleError || formatMessage({ id: "agent.channelMembers.updateRoleFailed" })}
                 </div>
               )}
@@ -377,7 +377,7 @@ export default function LegacyChannelMembers({ channelId }: { channelId: string 
               )}
 
               {totalParticipants === 0 && (
-                <div className="px-3 py-4 text-sm text-black/50 font-mono text-center">
+                <div className="px-3 py-4 text-sm text-foreground-muted theme-brutal:text-black/50 font-mono text-center">
                   {formatMessage({ id: "agent.channelMembers.noMembers" })}
                 </div>
               )}
@@ -389,7 +389,7 @@ export default function LegacyChannelMembers({ channelId }: { channelId: string 
                 <button
                   onClick={() => setShowAddSection(true)}
                   disabled={!hasAvailable}
-                  className="btn-brutal flex w-full items-center justify-center gap-1.5 bg-brutal-pink px-3 py-1.5 text-sm font-bold disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="btn-brutal flex w-full items-center justify-center gap-1.5 bg-accent-soft theme-brutal:bg-brutal-pink px-3 py-1.5 text-sm font-bold disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <Plus size={14} />
                   {formatMessage({ id: "agent.channelMembers.addMember" })}
@@ -408,7 +408,7 @@ export default function LegacyChannelMembers({ channelId }: { channelId: string 
               <h2 className="text-lg font-bold uppercase">{formatMessage({ id: "agent.channelMembers.addMember" })}</h2>
               <button
                 onClick={() => { setShowAddSection(false); setMemberSearch(""); }}
-                className="btn-brutal-sm bg-white p-1"
+                className="btn-brutal-sm bg-layer-panel theme-brutal:bg-white p-1"
               >
                 <X size={20} />
               </button>
@@ -417,7 +417,7 @@ export default function LegacyChannelMembers({ channelId }: { channelId: string 
             {hasAvailable && (
               <FormField label={formatMessage({ id: "agent.channelMembers.search" })} className="mb-3">
                 <div className="relative">
-                  <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-black/40" />
+                  <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-foreground-hint theme-brutal:text-black/40" />
                   <input
                     type="text"
                     value={memberSearch}
@@ -430,11 +430,11 @@ export default function LegacyChannelMembers({ channelId }: { channelId: string 
               </FormField>
             )}
 
-            <div className="border-2 border-black bg-white shadow-brutal-sm max-h-72 overflow-y-auto">
+            <div className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white shadow-raft-xs theme-brutal:shadow-brutal-sm max-h-72 overflow-y-auto">
               {/* Available agents */}
               {filteredAgents.length > 0 && (
                 <>
-                  <SectionEyebrow as="div" className="px-3 py-1.5 bg-white/50">
+                  <SectionEyebrow as="div" className="px-3 py-1.5 bg-layer-panel/50 theme-brutal:bg-white/50">
                     {formatMessage({ id: "agent.channelMembers.agents" })}
                   </SectionEyebrow>
                   {filteredAgents.map((agent) => {
@@ -442,7 +442,7 @@ export default function LegacyChannelMembers({ channelId }: { channelId: string 
                       <button
                         key={agent.id}
                         onClick={() => addAgent(agent.id)}
-                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-black transition-colors hover:bg-soft-signal [@media(max-height:600px)]:py-1"
+                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-foreground-strong theme-brutal:text-black transition-colors hover:bg-primary-soft theme-brutal:hover:bg-soft-signal [@media(max-height:600px)]:py-1"
                       >
                         <AvatarSlot
                           context="compact-list"
@@ -464,14 +464,14 @@ export default function LegacyChannelMembers({ channelId }: { channelId: string 
               {/* Available humans */}
               {filteredHumans.length > 0 && (
                 <>
-                  <SectionEyebrow as="div" className="px-3 py-1.5 bg-white/50">
+                  <SectionEyebrow as="div" className="px-3 py-1.5 bg-layer-panel/50 theme-brutal:bg-white/50">
                     {formatMessage({ id: "agent.channelMembers.humans" })}
                   </SectionEyebrow>
                   {filteredHumans.map((human) => (
                     <button
                       key={human.userId}
                       onClick={() => addHuman(human.userId)}
-                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-black transition-colors hover:bg-soft-signal [@media(max-height:600px)]:py-1"
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-foreground-strong theme-brutal:text-black transition-colors hover:bg-primary-soft theme-brutal:hover:bg-soft-signal [@media(max-height:600px)]:py-1"
                     >
                       <AvatarSlot
                         context="compact-list"
@@ -490,13 +490,13 @@ export default function LegacyChannelMembers({ channelId }: { channelId: string 
               )}
 
               {!hasAvailable && (
-                <div className="px-3 py-4 text-sm text-black/50 font-mono text-center">
+                <div className="px-3 py-4 text-sm text-foreground-muted theme-brutal:text-black/50 font-mono text-center">
                   {formatMessage({ id: "agent.channelMembers.allMembersAdded" })}
                 </div>
               )}
 
               {hasAvailable && !hasFilteredResults && (
-                <div className="px-3 py-4 text-sm text-black/50 font-mono text-center">
+                <div className="px-3 py-4 text-sm text-foreground-muted theme-brutal:text-black/50 font-mono text-center">
                   {formatMessage({ id: "agent.channelMembers.noMatches" }, { query: memberSearch.trim() })}
                 </div>
               )}

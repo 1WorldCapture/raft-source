@@ -17,6 +17,7 @@ import ServerSetupSurveyStep from "../src/components/onboarding/ServerSetupSurve
 import { useAuthStore } from "../src/store/authStore";
 import type { User } from "../src/store/authStore";
 import { requiresAccountProfileSetup } from "../src/utils/accountProfileSetup";
+import { brutalView } from "./helpers/brutalView";
 import { TestIntlProvider } from "./helpers/intl";
 
 const originalGet = api.get.bind(api);
@@ -102,7 +103,7 @@ test("the survey is asked after Cindy is created and before the handoff", async 
     referralSource: "other",
     referralSourceOther: "Local meetup",
   }]);
-  assert.ok(screen.getByTestId("server-setup-survey").classList.contains("shadow-brutal"));
+  assert.ok(brutalView(screen.getByTestId("server-setup-survey").className).split(/\s+/).includes("shadow-brutal"));
 });
 
 test("the handoff screen is answered by the server alone, with no session-local memory", async () => {

@@ -11,7 +11,7 @@ export default function AgentUnavailablePanel({ onClose }: { onClose?: () => voi
   const onMobileBack = useMobileBack(onClose ?? (slug ? `/s/${slug}/members` : "/"));
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-white">
+    <div className="flex min-h-0 flex-1 flex-col bg-layer-panel theme-brutal:bg-white">
       <PanelHeader
         title={formatMessage({ id: "agent.detail.unavailableTitle" })}
         onMobileBack={onMobileBack}
@@ -25,7 +25,7 @@ export default function AgentUnavailablePanel({ onClose }: { onClose?: () => voi
           <button
             type="button"
             onClick={onClose}
-            className="btn-brutal-sm hidden size-7 items-center justify-center bg-white md:flex"
+            className="btn-brutal-sm hidden size-7 items-center justify-center bg-layer-panel theme-brutal:bg-white md:flex"
             title={formatMessage({ id: "common.close" })}
           >
             <X size={14} />

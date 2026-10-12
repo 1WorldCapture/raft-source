@@ -594,7 +594,7 @@ function VerifiedOnChip({ latestVerified }: { latestVerified: ProviderConnection
   return (
     <div data-testid="provider-connection-verified-on">
       <span
-        className="border-2 border-black/30 bg-green-50 px-2 py-0.5 text-xs font-bold text-black/70"
+        className="border theme-brutal:border-2 border-line-muted theme-brutal:border-black/30 bg-green-50 px-2 py-0.5 text-xs font-bold text-foreground-muted theme-brutal:text-black/70"
         title={`${latestVerified.runtime} · ${latestVerified.model} · ${latestVerified.verifiedAt}`}
       >
         {formatMessage({ id: "settings.providers.verifiedOn" })}
@@ -701,7 +701,7 @@ function VerifyProviderConnectionModal({
           </Select>
         </FormField>
         {candidates.length === 0 && (
-          <p className="text-sm text-black/55">{formatMessage({ id: "settings.providers.verifyNoComputers" })}</p>
+          <p className="text-sm text-foreground-muted theme-brutal:text-black/55">{formatMessage({ id: "settings.providers.verifyNoComputers" })}</p>
         )}
         <FormField
           label={formatMessage({ id: "settings.providers.verifyModel" })}
@@ -760,7 +760,7 @@ function VerifyProviderConnectionModal({
           )}
         </FormField>
         {phase === "running" && (
-          <p className="text-sm text-black/55" data-testid="provider-connection-verify-running">
+          <p className="text-sm text-foreground-muted theme-brutal:text-black/55" data-testid="provider-connection-verify-running">
             {formatMessage({ id: "settings.providers.verifyRunning" }, { computer: computerName })}
           </p>
         )}
@@ -774,7 +774,7 @@ function VerifyProviderConnectionModal({
               {result.probe.verifiedAt ?? ""}
             </p>
             <div>
-              <div className="text-xs font-black uppercase tracking-wide text-black/55">
+              <div className="text-xs font-black uppercase tracking-wide text-foreground-muted theme-brutal:text-black/55">
                 {formatMessage({ id: "settings.providers.verifyReply" })}
               </div>
               {result.reply ? (
@@ -782,7 +782,7 @@ function VerifyProviderConnectionModal({
                   {result.reply}
                 </pre>
               ) : (
-                <p className="mt-1 text-xs text-black/55">{formatMessage({ id: "settings.providers.verifyReplyMissing" })}</p>
+                <p className="mt-1 text-xs text-foreground-muted theme-brutal:text-black/55">{formatMessage({ id: "settings.providers.verifyReplyMissing" })}</p>
               )}
             </div>
           </div>
@@ -794,7 +794,7 @@ function VerifyProviderConnectionModal({
                 category: category ? formatMessage({ id: probeCategoryMessageId(category) }) : "",
               })}
             </p>
-            <p className="text-xs text-black/55">{formatMessage({ id: "settings.providers.verifyFailureHint" })}</p>
+            <p className="text-xs text-foreground-muted theme-brutal:text-black/55">{formatMessage({ id: "settings.providers.verifyFailureHint" })}</p>
           </div>
         )}
         <div className="flex justify-end gap-2">

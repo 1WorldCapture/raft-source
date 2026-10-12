@@ -401,44 +401,44 @@ export default function ReportIssueDialog({
     return (
       <DialogCard title={formatMessage({ id: "agent.reportIssue.submittedTitle" })} onClose={onClose} maxWidthClass="max-w-sm">
           <div className="flex flex-col items-center gap-4 py-4">
-            <div className="flex size-12 items-center justify-center border-2 border-black bg-brutal-lime">
+            <div className="flex size-12 items-center justify-center border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-success-soft theme-brutal:bg-brutal-lime">
               <CheckCircle size={24} />
             </div>
             <div className="text-center">
-              <p className="font-bold text-black">{formatMessage({ id: "agent.reportIssue.uploaded" })}</p>
-              <p className="mt-1 text-sm text-black/60">
+              <p className="font-bold text-foreground-strong theme-brutal:text-black">{formatMessage({ id: "agent.reportIssue.uploaded" })}</p>
+              <p className="mt-1 text-sm text-foreground-muted theme-brutal:text-black/60">
                 {formatMessage({ id: "agent.reportIssue.uploadedDescription" })}
               </p>
             </div>
             {submittedReport && (
-              <div className="w-full border-2 border-black bg-white p-3 text-left">
+              <div className="w-full border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white p-3 text-left">
                 <SectionEyebrow as="div" className="mb-1">{formatMessage({ id: "agent.reportIssue.reportReference" })}</SectionEyebrow>
                 <dl className="space-y-1 text-xs">
                   <div>
-                    <dt className="font-bold uppercase text-black/60">{formatMessage({ id: "agent.reportIssue.reportId" })}</dt>
-                    <dd className="break-all font-mono text-black">{submittedReport.reportId}</dd>
+                    <dt className="font-bold uppercase text-foreground-muted theme-brutal:text-black/60">{formatMessage({ id: "agent.reportIssue.reportId" })}</dt>
+                    <dd className="break-all font-mono text-foreground-strong theme-brutal:text-black">{submittedReport.reportId}</dd>
                   </div>
                   {submittedReport.artifactId && (
                     <div>
-                      <dt className="font-bold uppercase text-black/60">{formatMessage({ id: "agent.reportIssue.artifactId" })}</dt>
-                      <dd className="break-all font-mono text-black">{submittedReport.artifactId}</dd>
+                      <dt className="font-bold uppercase text-foreground-muted theme-brutal:text-black/60">{formatMessage({ id: "agent.reportIssue.artifactId" })}</dt>
+                      <dd className="break-all font-mono text-foreground-strong theme-brutal:text-black">{submittedReport.artifactId}</dd>
                     </div>
                   )}
                   <div>
-                    <dt className="font-bold uppercase text-black/60">{formatMessage({ id: "agent.reportIssue.serverId" })}</dt>
-                    <dd className="break-all font-mono text-black">{submittedReport.serverId}</dd>
+                    <dt className="font-bold uppercase text-foreground-muted theme-brutal:text-black/60">{formatMessage({ id: "agent.reportIssue.serverId" })}</dt>
+                    <dd className="break-all font-mono text-foreground-strong theme-brutal:text-black">{submittedReport.serverId}</dd>
                   </div>
                   {submittedReport.transcriptAttachmentRequested && (
                     <div>
-                      <dt className="font-bold uppercase text-black/60">{formatMessage({ id: "agent.reportIssue.runtimeTranscript" })}</dt>
-                      <dd className="text-black">{formatMessage({ id: "agent.reportIssue.runtimeTranscriptQueued" })}</dd>
+                      <dt className="font-bold uppercase text-foreground-muted theme-brutal:text-black/60">{formatMessage({ id: "agent.reportIssue.runtimeTranscript" })}</dt>
+                      <dd className="text-foreground-strong theme-brutal:text-black">{formatMessage({ id: "agent.reportIssue.runtimeTranscriptQueued" })}</dd>
                     </div>
                   )}
                 </dl>
                 <button
                   type="button"
                   onClick={handleCopyReportReference}
-                  className="btn-brutal-sm mt-3 bg-white px-3 py-1 text-xs"
+                  className="btn-brutal-sm mt-3 bg-layer-panel theme-brutal:bg-white px-3 py-1 text-xs"
                 >
                   {formatMessage({ id: reportRefCopied ? "agent.reportIssue.copied" : "agent.reportIssue.copyReference" })}
                 </button>
@@ -446,7 +446,7 @@ export default function ReportIssueDialog({
             )}
           </div>
           <div className="flex justify-end">
-            <button type="button" onClick={onClose} className="btn-brutal bg-brutal-lime px-4 py-2 text-sm">
+            <button type="button" onClick={onClose} className="btn-brutal bg-success-soft theme-brutal:bg-brutal-lime px-4 py-2 text-sm">
               {formatMessage({ id: "agent.reportIssue.done" })}
             </button>
           </div>
@@ -466,9 +466,9 @@ export default function ReportIssueDialog({
       maxWidthClass="max-w-sm"
     >
 
-        <div className="mb-4 border-2 border-black bg-white px-3 py-2">
+        <div className="mb-4 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white px-3 py-2">
           <SectionEyebrow>{formatMessage({ id: "agent.reportIssue.agentLabel" })}</SectionEyebrow>
-          <p className="mt-0.5 font-bold text-black">{agent.displayName || agent.name}</p>
+          <p className="mt-0.5 font-bold text-foreground-strong theme-brutal:text-black">{agent.displayName || agent.name}</p>
         </div>
 
         <FormField label={formatMessage({ id: "agent.reportIssue.describeLabel" })} optional className="mb-4">
@@ -484,7 +484,7 @@ export default function ReportIssueDialog({
 
         <div className="mb-4">
           <SectionEyebrow as="div" className="mb-1">{formatMessage({ id: "agent.reportIssue.includeLabel" })}</SectionEyebrow>
-          <p className="mb-2 text-xs text-black/60">
+          <p className="mb-2 text-xs text-foreground-muted theme-brutal:text-black/60">
             {formatMessage({ id: "agent.reportIssue.defaultIncludedDisclosure" })}
           </p>
           <div className="flex flex-col gap-1.5">
@@ -522,14 +522,14 @@ export default function ReportIssueDialog({
             </label>
           </div>
           {!agent.machineId && (
-            <p className="mt-1 text-xs text-black/60">
+            <p className="mt-1 text-xs text-foreground-muted theme-brutal:text-black/60">
               {formatMessage({ id: "agent.reportIssue.runtimeTranscriptUnavailable" })}
             </p>
           )}
         </div>
 
         <Banner intent="warning" withIcon density="sm" className="mb-5">
-          <p className="mb-2 text-black/80">
+          <p className="mb-2 text-foreground-strong theme-brutal:text-black/80">
             {formatMessage(
               { id: "agent.reportIssue.sensitiveDataWarning" },
               { strong: (chunks) => <strong key="strong">{chunks}</strong> },
@@ -556,7 +556,7 @@ export default function ReportIssueDialog({
             type="button"
             onClick={onClose}
             disabled={loading}
-            className="btn-brutal bg-white px-4 py-2 text-sm disabled:opacity-50"
+            className="btn-brutal bg-layer-panel theme-brutal:bg-white px-4 py-2 text-sm disabled:opacity-50"
           >
             {formatMessage({ id: "common.confirm.cancel" })}
           </button>
@@ -564,7 +564,7 @@ export default function ReportIssueDialog({
             type="button"
             onClick={handleSubmit}
             disabled={loading || !consented}
-            className="btn-brutal bg-brutal-pink px-4 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+            className="btn-brutal bg-accent-soft theme-brutal:bg-brutal-pink px-4 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
           >
             {formatMessage({ id: loading ? "agent.reportIssue.submitting" : "agent.reportIssue.title" })}
           </button>
