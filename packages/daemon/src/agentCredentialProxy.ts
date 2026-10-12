@@ -22,6 +22,7 @@ import {
   thirdPartyEventIdsFromEvents,
 } from "./thirdPartyEventDeliveryReporter.js";
 import type { ApmHeldFreshnessEnvelopeBody } from "./apmStateMachine.js";
+import { formatCommitShort, readDaemonProvenance } from "./buildProvenance.js";
 import {
   maxInboxMessageSeq,
   normalizeInboxVisibleMessages,
@@ -609,6 +610,7 @@ async function handleProxyRequest(req: http.IncomingMessage, res: http.ServerRes
     const sideEffectAction = agentApiSideEffectAction(target.pathname);
 
     if (method === "GET" && target.pathname === "/internal/agent-api/runtime-version") {
+      const daemonProvenance = readDaemonProvenance();
       if (!registration.daemonVersion) {
         proxySpanEndAttrs = {
           outcome: "local_response_unavailable",
@@ -632,6 +634,10 @@ async function handleProxyRequest(req: http.IncomingMessage, res: http.ServerRes
       res.end(JSON.stringify({
         daemonVersion: registration.daemonVersion,
         computerVersion: registration.computerVersion,
+        // Build provenance so `raft version` can name the commit, not just the
+        // package version (which is identical across commits). task #32.
+        daemonCommit: daemonProvenance.sha,
+        daemonCommitShort: formatCommitShort(daemonProvenance),
         observation: "live_daemon_process",
       }));
       return;

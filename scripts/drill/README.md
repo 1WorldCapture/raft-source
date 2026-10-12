@@ -1,0 +1,66 @@
+# `scripts/drill/` — isolated drill / observation guards
+
+Guards for running an isolated daemon + Computer against a live server without
+touching anything that belongs to the machine's owner.
+
+They exist because of two mistakes that produced *confident numbers from an
+unverified environment*:
+
+1. **A `dist/` can be stale while its `package.json` version still matches the
+   release.** Version and provenance are different questions. During the 0.2.4
+   duplicate-delivery observation, `packages/computer/dist` was a build from
+   before several shipped changes; the version number looked correct, so the
+   run would have quietly mixed versions. Builds now bake their commit
+   (`scripts/build-provenance.mjs`), so a dist can be *asked* which commit it
+   came from.
+2. **A drill can leave residue in the owner's account.** `raft-computer start`
+   registers a `build.raft.computer.login.*` LaunchAgent in the *real*
+   `~/Library/LaunchAgents` regardless of `RAFT_HOME`. It is removed on
+   teardown, but it exists for the whole run. A login item survived long enough
+   to be noticed by someone else.
+
+## Rules these enforce
+
+| Guard | Rule |
+| --- | --- |
+| `drill::require_clean_tree` | Refuse to switch refs on a dirty tree. Never lose work. |
+| `drill::rebuild_at_ref` | Rebuild shared **+** daemon **+** computer at an exact commit; restore the original ref on every path. |
+| `drill::assert_dist_provenance` | A dist must carry the expected baked commit. **A version number is not accepted as identity.** |
+| `drill::fingerprint` | Content hash, independent of any version string. |
+| `drill::snapshot_launchagents` / `drill::diff_launchagents` | Snapshot the owner's LaunchAgents before, and **prove they are restored** after. |
+| `drill::remove_tmp_loginitems` | Remove **only** `/tmp`-rooted login items; warn loudly about anything else and leave it alone. |
+| `drill::kill_pid_tree` | Kill by pid tree. Relative-path cmdlines (`node packages/computer/dist/…`) are the case an absolute-only `pkill` silently misses. |
+
+Every guard **fails loudly**. A drill whose identity or isolation cannot be
+proven is worse than no drill.
+
+## Usage
+
+```bash
+REPO=/path/to/raft-source
+WORK=/tmp/my-drill
+
+# prove the environment
+scripts/drill/preflight.sh "$REPO" <commit-or-HEAD> "$WORK"
+
+# ... run the drill, then always:
+RAFT_DRILL_HOMES=/tmp/my-drill/home-1 scripts/drill/postflight.sh "$REPO" "$WORK" \
+  'packages/computer/dist/raft-computer.js __service'
+```
+
+`postflight.sh` should run from an `EXIT` trap so it runs even when the drill
+fails — a failed drill still leaves residue.
+
+Verify the guards themselves:
+
+```bash
+scripts/drill/selftest.sh     # 11 checks, including the failure paths
+```
+
+## Credentials
+
+**Nothing here reads, writes, or stores a credential.** Callers pass secrets
+through the environment (`RAFT_TEST_EMAIL`, `RAFT_TEST_PASSWORD`, …), take them
+from a DM at the moment of use, and hand them back for rotation when done.
+Never commit a credential, and never accept a version string as a substitute
+for verifying what is actually installed.

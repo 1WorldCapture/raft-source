@@ -2,6 +2,8 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { buildCommitDefines } from "../../../scripts/build-provenance.mjs";
+
 // Build-time version identity for bundles that INLINE @botiverse/raft-computer
 // (the Electron desktop app and the menu-bar app). `src/version.ts` prefers
 // these baked identifiers; without them it falls back to the nearest
@@ -35,5 +37,9 @@ export function embeddedComputerVersionDefines() {
     __RAFT_COMPUTER_VERSION__: JSON.stringify(versions.computer),
     __RAFT_DAEMON_VERSION__: JSON.stringify(versions.daemon),
     __RAFT_CLI_VERSION__: JSON.stringify(versions.cli),
+    // Build provenance (task #32). These bundles inline the daemon too, so both
+    // identifiers are stamped. Never throws: a build without git gets `unknown`.
+    ...buildCommitDefines("RAFT_COMPUTER"),
+    ...buildCommitDefines("RAFT_DAEMON"),
   };
 }
