@@ -57,7 +57,9 @@ drill::rebuild_at_ref() {
   if ! git -C "$repo" checkout --quiet --detach "$ref"; then
     drill::fail "cannot check out $ref"
   fi
-  if ! ( cd "$repo" && env -u PI_PACKAGE_DIR pnpm --filter @botiverse/raft-shared --filter @botiverse/raft-daemon --filter @botiverse/raft-computer run build ); then
+  # Build chatter goes to stderr so this function's stdout carries ONLY the
+  # restore ref — otherwise the caller's `$(...)` capture swallows pnpm output.
+  if ! ( cd "$repo" && env -u PI_PACKAGE_DIR pnpm --filter @botiverse/raft-shared --filter @botiverse/raft-daemon --filter @botiverse/raft-computer run build ) >&2; then
     git -C "$repo" checkout --quiet "$before" || true
     drill::fail "build failed at $ref; restored ${before:0:12}"
   fi
