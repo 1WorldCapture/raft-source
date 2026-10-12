@@ -5,12 +5,17 @@ import { useIntl } from "react-intl";
 import {
   PI_BUILTIN_PROVIDER_DEFAULT_MODELS,
   PI_BUILTIN_PROVIDER_MODELS,
+  providerProbeRequestDigest,
 } from "@botiverse/raft-shared";
 import type {
+  ProviderConnectionLatestVerified,
   ProviderConnectionProviderId,
   ProviderConnectionProviderOption,
   ProviderConnectionSummary,
+  ProviderProbeCategory,
+  ProviderProbeCreatedView,
 } from "@botiverse/raft-shared";
+import type { MessageId } from "../../i18n/messages";
 import {
   Select,
   SelectContent,
@@ -24,6 +29,7 @@ import {
 } from "raft-ui";
 import api from "../../api/client";
 import { useProviderConnections } from "../../hooks/useProviderConnections";
+import { useMachineStore } from "../../store/machineStore";
 import { useServerPermissions } from "../../hooks/useServerPermissions";
 import Button from "../ui/Button";
 import Checkbox from "../ui/Checkbox";
@@ -31,6 +37,26 @@ import DialogCard from "../ui/DialogCard";
 import FormField from "../ui/FormField";
 import SectionHeader from "../ui/SectionHeader";
 import Spinner from "../ui/Spinner";
+
+const CUSTOM_MODEL_SELECT_VALUE = "__custom__";
+
+function probeCategoryMessageId(category: ProviderProbeCategory): MessageId {
+  switch (category) {
+    case "auth": return "settings.providers.probeCategory.auth";
+    case "model": return "settings.providers.probeCategory.model";
+    case "network": return "settings.providers.probeCategory.network";
+    case "dns_tls": return "settings.providers.probeCategory.dns_tls";
+    case "rate_quota": return "settings.providers.probeCategory.rate_quota";
+    case "invalid_response": return "settings.providers.probeCategory.invalid_response";
+    case "carrier_offline": return "settings.providers.probeCategory.carrier_offline";
+    case "carrier_timeout": return "settings.providers.probeCategory.carrier_timeout";
+    case "unsupported_carrier": return "settings.providers.probeCategory.unsupported_carrier";
+    case "provider_timeout": return "settings.providers.probeCategory.provider_timeout";
+    case "stale_authority": return "settings.providers.probeCategory.stale_authority";
+    case "intent_expired": return "settings.providers.probeCategory.intent_expired";
+    case "invalid_carrier_result": return "settings.providers.probeCategory.invalid_carrier_result";
+  }
+}
 
 function labelForProviderId(
   providerId: ProviderConnectionProviderId,
@@ -66,6 +92,7 @@ export default function ProviderConnectionsSettings() {
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<{ connection: ProviderConnectionSummary; action: "rename" | "rotate" } | null>(null);
   const [testing, setTesting] = useState<ProviderConnectionSummary | null>(null);
+  const [verifying, setVerifying] = useState<ProviderConnectionSummary | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [actionError, setActionError] = useState("");
 
@@ -120,6 +147,7 @@ export default function ProviderConnectionsSettings() {
               canManage={capabilities.manageExternalAuth}
               busy={busyId === connection.id}
               onTest={() => setTesting(connection)}
+              onVerify={() => setVerifying(connection)}
               onRename={() => setEditing({ connection, action: "rename" })}
               onRotate={() => setEditing({ connection, action: "rotate" })}
               onToggle={() => void run(connection.id, () => api.patch(`/provider-connections/${connection.id}`, { enabled: !connection.enabled }))}
@@ -167,6 +195,16 @@ export default function ProviderConnectionsSettings() {
           }}
         />
       )}
+      {verifying && (
+        <VerifyProviderConnectionModal
+          key={verifying.id}
+          connection={verifying}
+          onClose={() => {
+            setVerifying(null);
+            void refresh();
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -177,6 +215,7 @@ function ConnectionRow({
   canManage,
   busy,
   onTest,
+  onVerify,
   onRename,
   onRotate,
   onToggle,
@@ -187,6 +226,7 @@ function ConnectionRow({
   canManage: boolean;
   busy: boolean;
   onTest: () => void;
+  onVerify: () => void;
   onRename: () => void;
   onRotate: () => void;
   onToggle: () => void;
@@ -201,7 +241,8 @@ function ConnectionRow({
     )
     : "";
   return (
-    <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center" data-testid={`provider-connection-${connection.id}`}>
+    <div className="flex flex-col gap-3 p-4" data-testid={`provider-connection-${connection.id}`}>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
       <div className="flex min-w-0 flex-1 items-start gap-3">
         <span className={`mt-0.5 flex size-8 shrink-0 items-center justify-center border theme-brutal:border-2 border-line-strong theme-brutal:border-black ${ready ? "bg-green-100" : "bg-fill-muted theme-brutal:bg-black/5"}`}>
           {ready ? <CheckCircle2 size={17} /> : <XCircle size={17} />}
@@ -222,6 +263,7 @@ function ConnectionRow({
       {canManage && (
         <div className="flex shrink-0 items-center gap-1">
           <Button type="button" size="sm" shape="icon" title={formatMessage({ id: "settings.providers.test" })} disabled={busy} onClick={onTest}><Send size={15} /></Button>
+          <Button type="button" size="sm" shape="icon" title={formatMessage({ id: "settings.providers.verify" })} aria-label={formatMessage({ id: "settings.providers.verify" })} disabled={busy} onClick={onVerify}><Send size={15} /></Button>
           <Button type="button" size="sm" shape="icon" title={formatMessage({ id: "settings.providers.rename" })} disabled={busy} onClick={onRename}><Pencil size={15} /></Button>
           <Button type="button" size="sm" shape="icon" title={formatMessage({ id: "settings.providers.rotate" })} disabled={busy} onClick={onRotate}><KeyRound size={15} /></Button>
           <Button type="button" size="sm" shape="icon" title={connection.enabled ? formatMessage({ id: "settings.providers.disable" }) : formatMessage({ id: "settings.providers.enable" })} disabled={busy} onClick={onToggle}><Power size={15} /></Button>
@@ -241,6 +283,8 @@ function ConnectionRow({
           </Button>
         </div>
       )}
+      </div>
+      {connection.latestVerified && <VerifiedOnChip latestVerified={connection.latestVerified} />}
     </div>
   );
 }
@@ -545,4 +589,235 @@ function CreateProviderConnectionModal({
   );
 }
 
-export const __testInternals = { ConnectionRow, CreateProviderConnectionModal, ProviderConnectionTestModal };
+function VerifiedOnChip({ latestVerified }: { latestVerified: ProviderConnectionLatestVerified }) {
+  const { formatMessage } = useIntl();
+  return (
+    <div data-testid="provider-connection-verified-on">
+      <span
+        className="border-2 border-black/30 bg-green-50 px-2 py-0.5 text-xs font-bold text-black/70"
+        title={`${latestVerified.runtime} · ${latestVerified.model} · ${latestVerified.verifiedAt}`}
+      >
+        {formatMessage({ id: "settings.providers.verifiedOn" })}
+        {" "}
+        {latestVerified.computerName ?? latestVerified.computerId}
+      </span>
+    </div>
+  );
+}
+
+function VerifyProviderConnectionModal({
+  connection,
+  onClose,
+}: {
+  connection: ProviderConnectionSummary;
+  onClose: () => void;
+}) {
+  const { formatMessage } = useIntl();
+  const machines = useMachineStore((state) => state.machines);
+  const candidates = machines.filter((machine) => machine.status === "online" && machine.runtimes.includes("builtin"));
+  const [computerId, setComputerId] = useState(candidates[0]?.id ?? "");
+  const [model, setModel] = useState(() => defaultTestModel(connection.providerId));
+  const [phase, setPhase] = useState<"idle" | "running" | "done">("idle");
+  const [result, setResult] = useState<ProviderProbeCreatedView | null>(null);
+  const [failure, setFailure] = useState("");
+  const computerName = machines.find((machine) => machine.id === computerId)?.name ?? computerId;
+  const presetModels = presetTestModels(connection.providerId);
+  const [customModelMode, setCustomModelMode] = useState(() => {
+    const initial = defaultTestModel(connection.providerId);
+    return presetModels.length === 0 || (initial.trim().length > 0 && !presetModels.includes(initial));
+  });
+  const isCustom = customModelMode || (model.trim().length > 0 && !presetModels.includes(model));
+  const verifyModelInputId = `provider-connection-${connection.id}-verify-model`;
+  const verifyModelSelectId = `provider-connection-${connection.id}-verify-model-select`;
+  const verifyModelOptions = [
+    ...presetModels.map((candidate) => ({ value: candidate, label: candidate })),
+    { value: CUSTOM_MODEL_SELECT_VALUE, label: formatMessage({ id: "agent.runtimeConfig.custom" }) },
+  ];
+
+  const start = async () => {
+    setPhase("running");
+    setFailure("");
+    setResult(null);
+    try {
+      const payload = {
+        computerId,
+        runtime: "builtin" as const,
+        model: model.trim() || defaultTestModel(connection.providerId),
+        probeKind: "canary" as const,
+      };
+      const requestDigest = await providerProbeRequestDigest({ connectionId: connection.id, ...payload });
+      const { data } = await api.post<ProviderProbeCreatedView>(`/provider-connections/${connection.id}/probes`, {
+        probeRequestId: globalThis.crypto.randomUUID(),
+        requestDigest,
+        ...payload,
+      });
+      setResult(data);
+      setPhase("done");
+    } catch {
+      setFailure(formatMessage({ id: "settings.providers.verifyError" }));
+      setPhase("done");
+    }
+  };
+
+  const outcome = result?.probe.outcome ?? null;
+  const category = result?.probe.category ?? null;
+  return (
+    <DialogCard
+      onClose={onClose}
+      title={formatMessage({ id: "settings.providers.verifyTitle" }, { name: connection.name })}
+      testId="provider-connection-verify-dialog"
+    >
+      <div className="space-y-4" data-testid="provider-connection-verify-body">
+        <FormField label={formatMessage({ id: "settings.providers.verifyComputer" })}>
+          <Select
+            value={computerId}
+            disabled={phase === "running" || candidates.length === 0}
+            onValueChange={(value) => {
+              if (value != null) setComputerId(value);
+            }}
+            items={candidates.map((machine) => ({
+              value: machine.id,
+              label: machine.name,
+            }))}
+          >
+            <SelectTrigger
+              className="w-full"
+              aria-label={formatMessage({ id: "settings.providers.verifyComputer" })}
+              disabled={phase === "running" || candidates.length === 0}
+            >
+              <SelectValue placeholder={formatMessage({ id: "settings.providers.verifyComputer" })} />
+              <SelectIcon />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectList>
+                {candidates.map((machine) => (
+                  <SelectItem key={machine.id} value={machine.id}>
+                    <SelectItemText>{machine.name}</SelectItemText>
+                    <SelectItemIndicator />
+                  </SelectItem>
+                ))}
+              </SelectList>
+            </SelectContent>
+          </Select>
+        </FormField>
+        {candidates.length === 0 && (
+          <p className="text-sm text-black/55">{formatMessage({ id: "settings.providers.verifyNoComputers" })}</p>
+        )}
+        <FormField
+          label={formatMessage({ id: "settings.providers.verifyModel" })}
+          htmlFor={isCustom || presetModels.length === 0 ? verifyModelInputId : verifyModelSelectId}
+        >
+          {presetModels.length > 0 ? (
+            <Select
+              value={isCustom ? CUSTOM_MODEL_SELECT_VALUE : model}
+              disabled={phase === "running"}
+              onValueChange={(nextValue) => {
+                if (nextValue === CUSTOM_MODEL_SELECT_VALUE) {
+                  setCustomModelMode(true);
+                  if (presetModels.includes(model)) setModel("");
+                  return;
+                }
+                if (nextValue != null) {
+                  setCustomModelMode(false);
+                  setModel(nextValue);
+                }
+              }}
+              items={verifyModelOptions}
+            >
+              <SelectTrigger
+                id={verifyModelSelectId}
+                className="w-full"
+                aria-label={formatMessage({ id: "settings.providers.verifyModel" })}
+                disabled={phase === "running"}
+              >
+                <SelectValue placeholder={formatMessage({ id: "settings.providers.verifyModel" })} />
+                <SelectIcon />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectList>
+                  {verifyModelOptions.map((candidate) => (
+                    <SelectItem key={candidate.value} value={candidate.value}>
+                      <SelectItemText>{candidate.label}</SelectItemText>
+                      <SelectItemIndicator />
+                    </SelectItem>
+                  ))}
+                </SelectList>
+              </SelectContent>
+            </Select>
+          ) : null}
+          {(isCustom || presetModels.length === 0) && (
+            <input
+              id={verifyModelInputId}
+              className={`input-brutal w-full ${presetModels.length > 0 ? "mt-2" : ""}`}
+              value={model}
+              disabled={phase === "running"}
+              onChange={(event) => setModel(event.target.value)}
+              placeholder={formatMessage({ id: "agent.runtimeConfig.customModelId" })}
+              maxLength={200}
+              required
+              autoFocus={isCustom}
+            />
+          )}
+        </FormField>
+        {phase === "running" && (
+          <p className="text-sm text-black/55" data-testid="provider-connection-verify-running">
+            {formatMessage({ id: "settings.providers.verifyRunning" }, { computer: computerName })}
+          </p>
+        )}
+        {phase === "done" && result && outcome === "success" && (
+          <div className="space-y-2" data-testid="provider-connection-verify-success">
+            <p className="text-sm font-bold text-green-800">
+              {formatMessage({ id: "settings.providers.verifySuccess" }, { computer: computerName })}
+              {" · "}
+              {formatMessage({ id: "settings.providers.verifyLatency" }, { ms: result.probe.latencyMs ?? 0 })}
+              {" · "}
+              {result.probe.verifiedAt ?? ""}
+            </p>
+            <div>
+              <div className="text-xs font-black uppercase tracking-wide text-black/55">
+                {formatMessage({ id: "settings.providers.verifyReply" })}
+              </div>
+              {result.reply ? (
+                <pre className="input-brutal mt-1 w-full whitespace-pre-wrap" data-testid="provider-connection-verify-reply">
+                  {result.reply}
+                </pre>
+              ) : (
+                <p className="mt-1 text-xs text-black/55">{formatMessage({ id: "settings.providers.verifyReplyMissing" })}</p>
+              )}
+            </div>
+          </div>
+        )}
+        {phase === "done" && (outcome === "failure" || failure) && (
+          <div className="space-y-1" data-testid="provider-connection-verify-failure">
+            <p className="text-sm font-bold text-red-700">
+              {failure || formatMessage({ id: "settings.providers.verifyFailure" }, {
+                category: category ? formatMessage({ id: probeCategoryMessageId(category) }) : "",
+              })}
+            </p>
+            <p className="text-xs text-black/55">{formatMessage({ id: "settings.providers.verifyFailureHint" })}</p>
+          </div>
+        )}
+        <div className="flex justify-end gap-2">
+          <Button type="button" onClick={onClose}>{formatMessage({ id: "settings.common.close" })}</Button>
+          <Button
+            type="button"
+            disabled={phase === "running" || candidates.length === 0}
+            onClick={() => void start()}
+          >
+            {phase === "done"
+              ? formatMessage({ id: "settings.providers.verifyAgain" })
+              : formatMessage({ id: "settings.providers.verifyStart" })}
+          </Button>
+        </div>
+      </div>
+    </DialogCard>
+  );
+}
+
+export const __testInternals = {
+  ConnectionRow,
+  CreateProviderConnectionModal,
+  ProviderConnectionTestModal,
+  VerifyProviderConnectionModal,
+  VerifiedOnChip,
+};
