@@ -5,6 +5,7 @@ import { createRequire } from "node:module";
 import { accessSync, createReadStream, createWriteStream, readFileSync } from "node:fs";
 
 import { formatCommitShort, readDaemonProvenance, type BuildProvenance } from "./buildProvenance.js";
+import { ProbeGate } from "./probeGate.js";
 import { mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { Readable } from "node:stream";
@@ -1576,7 +1577,8 @@ export class DaemonCore {
   private readonly acceptedStartDispatches = new Map<string, AgentStartAckMessage>();
   private readonly acceptingStartDispatches = new Map<string, Promise<AgentStartAckMessage>>();
   private readonly runtimeModelDetectCache = new Map<string, { atMs: number; outcome: RuntimeModelSourceOutcome }>();
-  private readonly runtimeModelDetectInFlight = new Map<string, Promise<RuntimeModelSourceOutcome>>();
+  // Same-runtime detections join one in-flight run (ProbeGate); different runtimes run in parallel.
+  private readonly runtimeModelProbeGate = new ProbeGate();
   private readonly lastReadyRuntimeVersions = new Map<string, string | null>();
   private readonly handledComputerControlOperationIds = new Set<string>();
   private readonly runtimeAccountUsageCollector: RuntimeAccountUsageCollector;
@@ -3770,22 +3772,13 @@ export class DaemonCore {
     if (cached && currentTimeMs() - cached.atMs < RUNTIME_MODEL_DETECT_CACHE_TTL_MS) {
       return Promise.resolve(cached.outcome);
     }
-    const existing = this.runtimeModelDetectInFlight.get(runtime);
-    if (existing) return existing;
-    const settled = startDetection()
-      .then((outcome) => {
-        if (outcome.kind !== "error") {
-          this.runtimeModelDetectCache.set(runtime, { atMs: currentTimeMs(), outcome });
-        }
-        return outcome;
-      })
-      .finally(() => {
-        if (this.runtimeModelDetectInFlight.get(runtime) === settled) {
-          this.runtimeModelDetectInFlight.delete(runtime);
-        }
-      });
-    this.runtimeModelDetectInFlight.set(runtime, settled);
-    return settled;
+    return this.runtimeModelProbeGate.run(runtime, async () => {
+      const outcome = await startDetection();
+      if (outcome.kind !== "error") {
+        this.runtimeModelDetectCache.set(runtime, { atMs: currentTimeMs(), outcome });
+      }
+      return outcome;
+    });
   }
 
   private handleMessage(msg: ServerToMachineMessage) {
