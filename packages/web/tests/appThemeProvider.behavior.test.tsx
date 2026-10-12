@@ -11,6 +11,7 @@ import {
 } from "../src/theme/AppThemeProvider";
 import {
   ELEGANT_DARK_ENABLED,
+  THEME_PICKER_ENABLED,
   APP_THEME_PREFERENCES_STORAGE_KEY,
   APP_THEME_STORAGE_KEY,
 } from "../src/theme/appTheme";
@@ -130,7 +131,8 @@ test("legacy brutal stays light even when the system is dark and storage cannot 
   assert.equal(window.localStorage.getItem(APP_THEME_PREFERENCES_STORAGE_KEY), null);
 });
 
-const darkTest = (name: string, fn: () => void | Promise<void>) => test(name, { skip: !ELEGANT_DARK_ENABLED }, fn);
+const darkTest = (name: string, fn: () => void | Promise<void>) => test(name, { skip: !(ELEGANT_DARK_ENABLED && THEME_PICKER_ENABLED) }, fn);
+const pickerTest = (name: string, fn: () => void | Promise<void>) => test(name, { skip: !THEME_PICKER_ENABLED }, fn);
 
 darkTest("the device preference restores and persists without an account", async () => {
   window.localStorage.setItem(APP_THEME_STORAGE_KEY, "elegant-dark");
@@ -188,7 +190,7 @@ darkTest("switching accounts keeps the same device theme", () => {
   assert.equal(screen.getByTestId("preset").textContent, "elegant-dark");
 });
 
-test("a storage event refreshes the device preference", () => {
+pickerTest("a storage event refreshes the device preference", () => {
   window.localStorage.clear();
   render(
     <AppThemeProvider>
@@ -204,7 +206,7 @@ test("a storage event refreshes the device preference", () => {
   assert.equal(screen.getByTestId("preset").textContent, "elegant-light");
 });
 
-test("while Elegant dark is hidden a saved dark preference renders as Elegant light and keeps the saved value", async () => {
+pickerTest("while Elegant dark is hidden a saved dark preference renders as Elegant light and keeps the saved value", async () => {
   window.localStorage.setItem(APP_THEME_STORAGE_KEY, "elegant-dark");
 
   render(
@@ -226,4 +228,28 @@ test("while Elegant dark is hidden a saved dark preference renders as Elegant li
   });
   // Nothing was rewritten: the user's own choice comes back when dark is enabled.
   assert.equal(window.localStorage.getItem(APP_THEME_STORAGE_KEY), "elegant-dark");
+});
+
+test("with the theme picker off a saved Elegant preference renders Brutal and is not cleared", async () => {
+  assert.equal(THEME_PICKER_ENABLED, false);
+  const saved = JSON.stringify({ mode: "light", lightThemeId: "elegant", darkThemeId: "elegant" });
+  window.localStorage.setItem(APP_THEME_PREFERENCES_STORAGE_KEY, saved);
+
+  render(
+    <AppThemeProvider>
+      <ThemeProbe />
+    </AppThemeProvider>,
+  );
+
+  assert.equal(screen.getByTestId("preset").textContent, "brutal");
+  await waitFor(() => {
+    assert.equal(document.documentElement.dataset.theme, "brutal");
+    assert.equal(document.documentElement.classList.contains("light"), false);
+    assert.equal(document.documentElement.classList.contains("dark"), false);
+    assert.equal(
+      document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')?.content,
+      "#FFD440",
+    );
+  });
+  assert.equal(window.localStorage.getItem(APP_THEME_PREFERENCES_STORAGE_KEY), saved, "the saved preference is left alone");
 });

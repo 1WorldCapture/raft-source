@@ -9,6 +9,7 @@ import { useAppTheme } from "../src/hooks/useAppTheme";
 import { useAuthStore } from "../src/store/authStore";
 import {
   ELEGANT_DARK_ENABLED,
+  THEME_PICKER_ENABLED,
   APP_THEME_PREFERENCES_STORAGE_KEY,
   APP_THEME_STORAGE_KEY,
 } from "../src/theme/appTheme";
@@ -54,7 +55,8 @@ function ProductAppearance() {
   );
 }
 
-const darkTest = (name: string, fn: () => void | Promise<void>) => test(name, { skip: !ELEGANT_DARK_ENABLED }, fn);
+const darkTest = (name: string, fn: () => void | Promise<void>) => test(name, { skip: !(ELEGANT_DARK_ENABLED && THEME_PICKER_ENABLED) }, fn);
+const pickerTest = (name: string, fn: () => void | Promise<void>) => test(name, { skip: !THEME_PICKER_ENABLED }, fn);
 
 darkTest("the real Settings Appearance path saves the device preference", () => {
   window.localStorage.setItem(APP_THEME_STORAGE_KEY, "brutal");
@@ -95,7 +97,7 @@ darkTest("Light, Dark, and System mode preserve independent theme choices across
   assert.equal(screen.getByTestId("appearance-dark-theme-elegant").getAttribute("aria-checked"), "true");
 });
 
-test("selected theme cards use their own visual personality", () => {
+pickerTest("selected theme cards use their own visual personality", () => {
   render(<ProductAppearance />);
   const brutalRadio = screen.getByTestId("appearance-light-theme-brutal");
   const elegantRadio = screen.getByTestId("appearance-light-theme-elegant");
@@ -129,7 +131,7 @@ test("selected theme cards use their own visual personality", () => {
   assert.match(brutalCard.className, /border-line-muted/);
 });
 
-test("while Elegant dark is hidden Settings offers only the Brutal and Elegant light themes and saves the choice", () => {
+pickerTest("while Elegant dark is hidden Settings offers only the Brutal and Elegant light themes and saves the choice", () => {
   window.localStorage.setItem(APP_THEME_STORAGE_KEY, "brutal");
   observedPreset = "";
   render(<ProductAppearance />);
@@ -148,4 +150,12 @@ test("while Elegant dark is hidden Settings offers only the Brutal and Elegant l
   );
   assert.equal(document.documentElement.dataset.theme, "elegant");
   assert.equal(document.documentElement.classList.contains("dark"), false);
+});
+
+test("with the theme picker off Settings shows no theme controls", () => {
+  assert.equal(THEME_PICKER_ENABLED, false);
+  render(<ProductAppearance />);
+  assert.equal(screen.queryByTestId("appearance-theme-picker"), null);
+  assert.equal(screen.queryByTestId("appearance-theme-group-light"), null);
+  assert.equal(screen.queryByText("Theme"), null);
 });

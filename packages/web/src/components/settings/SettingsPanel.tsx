@@ -206,6 +206,7 @@ import {
   useAppearanceStore,
 } from "../../store/appearanceStore";
 import { useOptionalAppTheme } from "../../hooks/useAppTheme";
+import { THEME_PICKER_ENABLED } from "../../theme/appTheme";
 import { AppearanceThemePicker } from "./AppearanceThemePicker";
 import { useWorkspaceGridAvailability } from "../workspace/workspaceGridAvailability";
 import { useWorkspaceGridNavigationStore } from "../workspace/workspaceGridNavigationStore";
@@ -7480,7 +7481,7 @@ export const ADMINISTRATION_VISUAL_SECTIONS = {
 
 export function AppearanceThemeSettingsControl() {
   const theme = useOptionalAppTheme();
-  if (!theme) return null;
+  if (!THEME_PICKER_ENABLED || !theme) return null;
   const { preset, preferences, resolvedMode, setPreset, setMode, setThemeForMode } = theme;
   return (
     <AppearanceThemePicker
@@ -7526,7 +7527,7 @@ function AppearanceSection() {
       </div>
 
       <div className="border-2 border-black bg-white shadow-brutal-sm p-4 space-y-4">
-        {appTheme ? (
+        {appTheme && THEME_PICKER_ENABLED ? (
           <div className="space-y-3 border-b border-black/10 pb-4">
             <div>
               <div className="text-sm font-bold text-black">{formatMessage({ id: "settings.appearance.themeTitle" })}</div>

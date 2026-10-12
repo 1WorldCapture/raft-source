@@ -13,6 +13,15 @@ export type AppThemePreset = (typeof APP_THEME_PRESETS)[number];
 export const DEFAULT_APP_THEME_PRESET: AppThemePreset = "brutal";
 
 /**
+ * The Settings theme picker is hidden, and a saved Elegant preference has no
+ * effect (the app renders Brutal; the saved value is left untouched), until the
+ * component sweep makes Elegant look genuinely different on the main screens.
+ * The picker-on PR flips this constant and the bootstrap script's
+ * `themePickerEnabled`; ELEGANT_DARK_ENABLED comes after that.
+ */
+export const THEME_PICKER_ENABLED = false;
+
+/**
  * Elegant dark is ported but hidden until the component sweep to semantic
  * colour tokens has landed (hard-coded black text is unreadable on it). While
  * false, stored or legacy dark/system preferences resolve to light and the
@@ -157,9 +166,11 @@ export function resolveAppThemePreferences(
     : preferences.lightThemeId;
   // Invalid combinations can only arrive from stale/corrupt storage or future
   // registry drift. Fail to the first real recipe for that mode.
-  const themeId = supportsAppThemeMode(requestedThemeId, resolvedMode)
+  const validThemeId = supportsAppThemeMode(requestedThemeId, resolvedMode)
     ? requestedThemeId
     : APP_THEME_IDS.find((id) => supportsAppThemeMode(id, resolvedMode)) ?? "brutal";
+  // Picker off: whatever was saved, the product is Brutal (the saved value is not cleared).
+  const themeId: AppThemeId = THEME_PICKER_ENABLED ? validThemeId : "brutal";
   const definition = APP_THEME_REGISTRY[themeId];
   const preset = effectiveMode === "system" && themeId === "elegant"
     ? "elegant-system"

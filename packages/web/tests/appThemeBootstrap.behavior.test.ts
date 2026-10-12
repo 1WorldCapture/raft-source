@@ -8,7 +8,10 @@ import {
   APP_THEME_PRESET_STORAGE_KEY_PREFIX,
   APP_THEME_STORAGE_KEY,
   DEFAULT_APP_THEME_PREFERENCES,
+  THEME_PICKER_ENABLED,
 } from "../src/theme/appTheme";
+
+const pickerTest = (name: string, fn: () => void) => test(name, { skip: !THEME_PICKER_ENABLED }, fn);
 
 function executeBootstrap({
   storageEntries,
@@ -87,7 +90,7 @@ test("a browser with no saved choice stays light while Elegant dark is hidden", 
   assert.equal(dark.themeColor.content, "#FFD440");
 });
 
-test("an explicit device preference overrides the system appearance", () => {
+pickerTest("an explicit device preference overrides the system appearance", () => {
   const { root, classes, themeColor } = executeBootstrap({
     storageEntries: {
       [APP_THEME_PREFERENCES_STORAGE_KEY]: JSON.stringify({
@@ -121,7 +124,7 @@ test("legacy brutal stays light when the system is dark and storage cannot be wr
   assert.equal(entries[APP_THEME_PREFERENCES_STORAGE_KEY], undefined);
 });
 
-test("a legacy device preset is promoted once when the current key is empty", () => {
+pickerTest("a legacy device preset is promoted once when the current key is empty", () => {
   const { root, classes, themeColor, storageEntries } = executeBootstrap({
     storageEntries: { [APP_THEME_STORAGE_KEY]: "elegant-dark" },
     systemDark: false,
@@ -144,7 +147,7 @@ test("a legacy device preset is promoted once when the current key is empty", ()
   assert.equal(second.classes.has("dark"), false);
 });
 
-test("one old account preference migrates, but several accounts do not", () => {
+pickerTest("one old account preference migrates, but several accounts do not", () => {
   const one = executeBootstrap({
     storageEntries: {
       [`${APP_THEME_PRESET_STORAGE_KEY_PREFIX}account-a`]: "elegant-light",
@@ -173,4 +176,22 @@ test("corrupt device storage falls back to the default", () => {
 
   assert.equal(root.dataset.theme, "brutal");
   assert.equal(classes.has("dark"), false);
+});
+
+test("with the theme picker off a saved Elegant preference renders Brutal and is not cleared", () => {
+  assert.equal(THEME_PICKER_ENABLED, false);
+  const saved = JSON.stringify({ mode: "light", lightThemeId: "elegant", darkThemeId: "elegant" });
+  const { root, classes, themeColor, storageEntries } = executeBootstrap({
+    storageEntries: { [APP_THEME_PREFERENCES_STORAGE_KEY]: saved },
+    systemDark: true,
+  });
+  assert.equal(root.dataset.theme, "brutal");
+  assert.equal(classes.has("light"), false);
+  assert.equal(classes.has("dark"), false);
+  assert.equal(root.style.colorScheme, "light");
+  assert.equal(themeColor.content, "#FFD440");
+  assert.equal(storageEntries[APP_THEME_PREFERENCES_STORAGE_KEY], saved, "the saved preference is left alone");
+
+  const legacy = executeBootstrap({ storageEntries: { [APP_THEME_STORAGE_KEY]: "elegant-dark" }, systemDark: false });
+  assert.equal(legacy.root.dataset.theme, "brutal");
 });
