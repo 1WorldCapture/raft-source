@@ -23,8 +23,9 @@ unverified environment*:
 
 | Guard | Rule |
 | --- | --- |
-| `drill::require_clean_tree` | Refuse to switch refs on a dirty tree. Never lose work. |
-| `drill::rebuild_at_ref` | Rebuild shared **+** daemon **+** computer at an exact commit; restore the original ref on every path. |
+| `drill::require_clean_tree` | Refuse to switch refs on a dirty tree. Never lose work. **No environment bypass** — a bypass here means overwriting in-progress work. |
+| `drill::restore_ref_trap` | Put the worker's ref back on EXIT/INT/TERM, so a killed drill can't leave the tree detached. |
+| `drill::rebuild_at_ref` | Rebuild shared **+** daemon **+** computer at an exact commit. |
 | `drill::assert_dist_provenance` | A dist must carry the expected baked commit. **A version number is not accepted as identity.** |
 | `drill::fingerprint` | Content hash, independent of any version string. |
 | `drill::snapshot_launchagents` / `drill::diff_launchagents` | Snapshot the owner's LaunchAgents before, and **prove they are restored** after. |
@@ -33,6 +34,23 @@ unverified environment*:
 
 Every guard **fails loudly**. A drill whose identity or isolation cannot be
 proven is worse than no drill.
+
+## Why it builds in your worktree instead of a separate `git worktree`
+
+This is a real trade-off, not an oversight.
+
+A separate worktree avoids touching your checkout entirely, which is
+attractive. But it needs its **own `pnpm install`**: pnpm resolves workspace
+packages through symlinks, so symlinking the existing `node_modules` into the
+worktree makes the build compile **the original tree's sources** — the "isolated"
+build would silently be the operator's checkout, defeating the point. A genuine
+worktree install costs minutes and needs the registry/cache.
+
+So isolation here comes from **refusing a dirty tree and guaranteeing the ref is
+restored**, not from a second checkout. `restore_ref_trap` covers the interrupt
+paths, and if restoration ever fails it prints the exact `git checkout` command
+to recover. If a worktree-based mode is wanted later, it belongs behind an
+explicit flag that also runs `pnpm install` in the worktree.
 
 ## Usage
 
@@ -54,7 +72,7 @@ fails — a failed drill still leaves residue.
 Verify the guards themselves:
 
 ```bash
-scripts/drill/selftest.sh     # 11 checks, including the failure paths
+scripts/drill/selftest.sh     # 16 checks, including the failure paths
 ```
 
 ## Credentials
