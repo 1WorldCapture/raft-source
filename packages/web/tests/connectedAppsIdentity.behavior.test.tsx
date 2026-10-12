@@ -36,6 +36,12 @@ import { useAuthStore } from "../src/store/authStore";
 import { useServerStore } from "../src/store/serverStore";
 import type { Server } from "../src/store/serverStore";
 
+// A hard-coded Brutal class may now be written `<semantic class> theme-brutal:<brutal class>`
+// (Elegant sweep); either spelling counts as the Brutal class being applied.
+function hasBrutalClass(element: Element | null | undefined, name: string): boolean {
+  return !!element && (element.classList.contains(name) || element.classList.contains(`theme-brutal:${name}`));
+}
+
 const originalApiGet = api.get;
 const originalApiPost = api.post;
 const originalApiPut = api.put;
@@ -154,7 +160,7 @@ test("AvatarSlot renders app logos full-frame and deterministic app/server fallb
   assert.equal(fallbackLayer?.classList.contains("z-0"), true);
   assert.equal(logo?.classList.contains("relative"), true);
   assert.equal(logo?.classList.contains("z-[1]"), true);
-  assert.equal(logo?.parentElement?.classList.contains("bg-soft-signal"), true);
+  assert.equal(hasBrutalClass(logo?.parentElement, "bg-soft-signal"), true);
   assert.equal(logo?.parentElement?.classList.contains("font-black"), true);
   assert.equal(logo?.parentElement?.className.endsWith(" "), false);
   assert.equal(document.body.textContent?.trim(), "ON");
@@ -183,7 +189,7 @@ test("AvatarSlot renders app logos full-frame and deterministic app/server fallb
 
   rerender(<AvatarSlot context="surface-list" type="server" serverInitial=" beacon " />);
   assert.equal(document.body.textContent?.trim(), "B");
-  assert.ok(document.querySelector(".bg-black.text-soft-signal.font-bold"));
+  assert.ok(document.querySelector(".theme-brutal\\:bg-black.text-soft-signal.font-bold"));
 
   rerender(
     <AvatarSlot
@@ -199,7 +205,7 @@ test("AvatarSlot renders app logos full-frame and deterministic app/server fallb
   assert.equal(document.body.textContent?.trim(), "B");
 
   rerender(<AvatarSlot context="surface-list" type="human" humanPlaceholder />);
-  assert.ok(document.querySelector(".bg-brutal-lavender.text-black"));
+  assert.ok(document.querySelector(".theme-brutal\\:bg-brutal-lavender.theme-brutal\\:text-black"));
   assert.equal(document.body.textContent?.trim(), "");
 });
 
@@ -319,7 +325,7 @@ test("RequestedScopeConsent renders default spacing and identity-only grant copy
   assert.equal(identityRows.length, 2);
   for (const row of identityRows) {
     assert.equal(row.classList.contains("border"), false);
-    assert.equal(row.classList.contains("bg-white"), false);
+    assert.equal(hasBrutalClass(row, "bg-white"), false);
   }
   assert.equal(within(requested).queryByText("Agent messaging"), null);
   assert.equal(within(requested).queryByText(enMessages["oauth.consent.agentLoginRequiredNotice"]), null);
@@ -379,7 +385,7 @@ test("RequestedScopeConsent expands only agent messaging for mixed scopes", () =
   const agentMessagingRows = details[1]?.querySelectorAll("[data-oauth-scope-row]") ?? [];
   assert.equal(agentMessagingRows.length, 1);
   assert.equal(agentMessagingRows[0]?.classList.contains("border"), false);
-  assert.equal(agentMessagingRows[0]?.classList.contains("bg-white"), false);
+  assert.equal(hasBrutalClass(agentMessagingRows[0], "bg-white"), false);
 });
 
 test("Connected Apps renders app logos, descriptions, homepage links, and built-in open state", async () => {
@@ -759,18 +765,18 @@ test("Connected Apps renders app logos, descriptions, homepage links, and built-
   };
   fireEvent.scroll(editorContent);
   assert.equal(notificationsRailButton.getAttribute("aria-current"), "true");
-  assert.ok(notificationsRailButton.classList.contains("bg-soft-signal"));
+  assert.ok(hasBrutalClass(notificationsRailButton, "bg-soft-signal"));
   assert.ok((railScrollLeft ?? 0) > 0);
   const dangerRailButton = within(editorRail).getByRole("button", { name: /^Danger zone/ });
   fireEvent.click(dangerRailButton);
   assert.equal(dangerRailButton.getAttribute("aria-current"), "true");
   const deleteCard = within(editor).getByTestId("connected-app-delete-card");
-  assert.ok(deleteCard.classList.contains("border-black"));
-  assert.ok(deleteCard.classList.contains("shadow-brutal-sm"));
+  assert.ok(hasBrutalClass(deleteCard, "border-black"));
+  assert.ok(hasBrutalClass(deleteCard, "shadow-brutal-sm"));
   assert.ok(within(deleteCard).getByText("Delete app"));
   assert.ok(within(deleteCard).getByText("Permanently deletes this app registration and its current credentials."));
   const deleteButton = within(deleteCard).getByRole("button", { name: "Delete" });
-  assert.ok(deleteButton.classList.contains("bg-brutal-red"));
+  assert.ok(hasBrutalClass(deleteButton, "bg-brutal-red"));
   assert.ok(deleteButton.classList.contains("h-7"));
   assert.ok(deleteButton.classList.contains("text-xs"));
   assert.equal(deleteButton.classList.contains("border-brutal-red"), false);
@@ -800,7 +806,7 @@ test("Connected Apps renders app logos, descriptions, homepage links, and built-
     notificationChip.getAttribute("title"),
     "Sends notification messages to the one agent you authorize.",
   );
-  assert.ok(notificationChip.classList.contains("bg-soft-signal/20"));
+  assert.ok(hasBrutalClass(notificationChip, "bg-soft-signal/20"));
   assert.ok(within(privateModal as HTMLElement).getByRole("button", { name: "Uninstall from this server" }));
   fireEvent.click(within(privateModal as HTMLElement).getByRole("button", { name: "Close app detail" }));
 
@@ -821,7 +827,7 @@ test("Connected Apps renders app logos, descriptions, homepage links, and built-
   assert.ok(detailLink.classList.contains("inline-flex"));
   assert.ok(detailLink.classList.contains("font-mono"));
   const openButton = within(modal as HTMLElement).getByRole("button", { name: "Open" });
-  assert.equal(openButton.classList.contains("bg-brutal-pink"), true);
+  assert.equal(hasBrutalClass(openButton, "bg-brutal-pink"), true);
   fireEvent.click(openButton);
   assert.deepEqual(opened, [{ url: "https://survey.slock.ai", target: "_blank", features: "noopener,noreferrer" }]);
 
@@ -1622,14 +1628,14 @@ test("Login with Raft setup page renders fetched app identity details", async ()
 
   assert.ok((await screen.findAllByText("Orbital Notes")).length >= 2);
   const description = screen.getByText("Review launch notes from Raft.");
-  assert.equal(description.getAttribute("class"), "text-xs text-black/60");
+  assert.equal(description.getAttribute("class"), "text-xs text-foreground-muted theme-brutal:text-black/60");
   assert.equal(screen.queryByText("https://orbital.example.com/docs"), null);
   const detailLink = screen.getByRole("link", { name: "Open Orbital Notes" });
   assert.equal(detailLink.getAttribute("href"), "https://orbital.example.com/docs");
   assert.equal(detailLink.getAttribute("target"), "_blank");
   assert.equal(detailLink.getAttribute("rel"), "noreferrer");
   assert.equal(detailLink.getAttribute("title"), null);
-  assert.equal(detailLink.classList.contains("hover:shadow-brutal"), true);
+  assert.equal(hasBrutalClass(detailLink, "hover:shadow-brutal"), true);
 
   const logo = document.querySelector('img[src="https://cdn.example.com/orbital-notes.png"]');
   assert.equal(logo?.getAttribute("class"), "relative z-[1] h-full w-full object-cover");
@@ -1637,8 +1643,8 @@ test("Login with Raft setup page renders fetched app identity details", async ()
   const loginButton = screen.getByRole("button", { name: "Login with Raft" }) as HTMLButtonElement;
   await waitFor(() => assert.equal(loginButton.disabled, false));
   assert.equal(loginButton.classList.contains("btn-brutal-sm"), true);
-  assert.equal(loginButton.classList.contains("bg-brutal-pink"), true);
-  assert.equal(loginButton.classList.contains("bg-soft-signal"), false);
+  assert.equal(hasBrutalClass(loginButton, "bg-brutal-pink"), true);
+  assert.equal(hasBrutalClass(loginButton, "bg-soft-signal"), false);
   assert.equal(document.querySelector('button img[src="/brand/raft-logo.svg"]'), null);
   assert.equal(document.querySelector('button source[srcset="/brand/raft-logo-mono-light.svg"]'), null);
   assert.equal(loginButton.parentElement?.classList.contains("justify-end"), true);
@@ -1859,15 +1865,15 @@ test("public Marketplace setup always lists installed and uninstalled Servers to
   assert.equal(installed.getAttribute("title"), "Installed and ready to use.");
   assert.equal(within(installed).queryByText("Installed"), null);
   assert.equal(installed.getAttribute("aria-label"), "Use this Server: Launch Server");
-  assert.equal(installed.parentElement?.parentElement?.classList.contains("bg-brutal-cyan/15"), true);
+  assert.equal(hasBrutalClass(installed.parentElement?.parentElement, "bg-brutal-cyan/15"), true);
   assert.match(screen.getByTestId("marketplace-login-commit-zone").textContent ?? "", /Selected Launch Server\./);
   assert.ok(screen.getByRole("button", { name: "Continue login" }));
   const installable = screen.getByTestId("login-server-status-server-2");
   assert.equal(installable.getAttribute("title"), "Not installed on this Server. You can install it here.");
   assert.ok(within(installable).getByText("Not installed"));
   fireEvent.click(installable);
-  assert.equal(installed.parentElement?.parentElement?.classList.contains("bg-brutal-cyan/15"), false);
-  assert.equal(installable.parentElement?.parentElement?.classList.contains("bg-brutal-cyan/15"), true);
+  assert.equal(hasBrutalClass(installed.parentElement?.parentElement, "bg-brutal-cyan/15"), false);
+  assert.equal(hasBrutalClass(installable.parentElement?.parentElement, "bg-brutal-cyan/15"), true);
   assert.match(screen.getByTestId("marketplace-login-commit-zone").textContent ?? "", /Build Server has not installed Orbital Notes/);
   assert.ok(screen.getByText("Access granted: openid · profile"));
   fireEvent.click(screen.getByRole("button", { name: "Install and continue" }));
@@ -1883,8 +1889,8 @@ test("public Marketplace setup always lists installed and uninstalled Servers to
   assert.equal((installed as HTMLButtonElement).disabled, true);
   fireEvent.click(installed);
   fireEvent.click(pendingButton);
-  assert.equal(installed.parentElement?.parentElement?.classList.contains("bg-brutal-cyan/15"), false);
-  assert.equal(installable.parentElement?.parentElement?.classList.contains("bg-brutal-cyan/15"), true);
+  assert.equal(hasBrutalClass(installed.parentElement?.parentElement, "bg-brutal-cyan/15"), false);
+  assert.equal(hasBrutalClass(installable.parentElement?.parentElement, "bg-brutal-cyan/15"), true);
   assert.deepEqual(postUrls, ["/integrations/marketplace/app-1/install"]);
   await act(async () => {
     resolveInstall();
@@ -1906,8 +1912,8 @@ test("public Marketplace setup always lists installed and uninstalled Servers to
   const findAdmin = screen.getByRole("link", { name: "Find a Server admin" });
   assert.equal(findAdmin.getAttribute("href"), "/s/member/members");
   assert.ok(findAdmin.classList.contains("btn-brutal-sm"));
-  assert.ok(findAdmin.classList.contains("bg-white"));
-  assert.ok(findAdmin.classList.contains("shadow-brutal-sm"));
+  assert.ok(hasBrutalClass(findAdmin, "bg-white"));
+  assert.ok(hasBrutalClass(findAdmin, "shadow-brutal-sm"));
   const unavailable = screen.getByTestId("login-server-status-server-4");
   assert.equal(unavailable.getAttribute("title"), "Installation status could not be loaded. Reload this page to try again.");
   assert.ok(within(unavailable).getByText("Unavailable"));
@@ -2137,5 +2143,5 @@ test("Login with Raft setup page shows failed authorization status only after su
 
   const status = await screen.findByText("Failed to continue with Raft.");
   assert.equal(status.tagName, "PRE");
-  assert.equal(status.getAttribute("class"), "mt-4 min-h-16 overflow-auto bg-black p-3 text-xs text-white");
+  assert.equal(status.getAttribute("class"), "mt-4 min-h-16 overflow-auto bg-foreground-strong theme-brutal:bg-black p-3 text-xs text-white");
 });

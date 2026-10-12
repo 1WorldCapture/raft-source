@@ -83,22 +83,22 @@ const ConversationPreviewCard = forwardRef<HTMLButtonElement, ConversationPrevie
   onDragStart,
 }, ref) {
   const interactive = Boolean(onClick || onContextMenu);
-  const className = `relative flex w-full items-start gap-3 border-2 p-3 text-left transition-colors hover:border-black hover:shadow-brutal-sm ${
-    interactive ? `active:border-black active:shadow-brutal-sm` : "cursor-default"
+  const className = `relative flex w-full items-start gap-3 border theme-brutal:border-2 p-3 text-left transition-colors hover:border-line-strong theme-brutal:hover:border-black hover:shadow-raft-xs theme-brutal:hover:shadow-brutal-sm ${
+    interactive ? `active:border-line-strong theme-brutal:active:border-black active:shadow-raft-xs theme-brutal:active:shadow-brutal-sm` : "cursor-default"
   } ${
     focused
-      ? "border-black bg-brutal-cyan/25 shadow-brutal"
+      ? "border-line-strong theme-brutal:border-black bg-info-soft/25 theme-brutal:bg-brutal-cyan/25 shadow-raft-sm theme-brutal:shadow-brutal"
       : active
-      ? "border-black bg-white shadow-brutal-sm"
-      : "border-black/30 bg-white"
+      ? "border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white shadow-raft-xs theme-brutal:shadow-brutal-sm"
+      : "border-line-muted theme-brutal:border-black/30 bg-layer-panel theme-brutal:bg-white"
   }`;
   const content = (
     <>
       <div className="min-w-0 flex-1">
         <div className="mb-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs leading-4">
-          <span className="font-bold text-black/50">{channelLabel}</span>
+          <span className="font-bold text-foreground-muted theme-brutal:text-black/50">{channelLabel}</span>
           {author && !previewAuthor ? (
-            <span className="inline-flex min-w-0 items-center gap-1 font-bold text-black">
+            <span className="inline-flex min-w-0 items-center gap-1 font-bold text-foreground-strong theme-brutal:text-black">
               {author.kind === "agent" ? (
                 <AvatarSlot context="preview-mini" type="agent" agentAvatarUrl={author.avatarUrl ?? null} />
               ) : (
@@ -106,20 +106,20 @@ const ConversationPreviewCard = forwardRef<HTMLButtonElement, ConversationPrevie
               )}
               <span className="truncate">{author.name}</span>
               {author.subtitle ? (
-                <span className="font-mono text-[10px] text-black/40">{author.subtitle}</span>
+                <span className="font-mono text-[10px] text-foreground-hint theme-brutal:text-black/40">{author.subtitle}</span>
               ) : null}
             </span>
           ) : null}
           {marker}
-          {timestamp ? <span className="font-mono text-xs leading-4 text-black/40">{timestamp}</span> : null}
+          {timestamp ? <span className="font-mono text-xs leading-4 text-foreground-hint theme-brutal:text-black/40">{timestamp}</span> : null}
         </div>
         <p className={`${previewLineClampClassName} text-sm ${emphasized ? "font-bold" : ""} ${previewClassName ?? ""}`}>
           {previewLeading ? <span className="mr-1 inline-flex align-[-1px]">{previewLeading}</span> : null}
-          {previewAuthor ? <span className="font-bold text-black/70">{previewAuthor}: </span> : null}
+          {previewAuthor ? <span className="font-bold text-foreground-muted theme-brutal:text-black/70">{previewAuthor}: </span> : null}
           <InlineMarkdownPreview markdown={preview} />
         </p>
         {secondaryPreview ? (
-          <p className={`mt-1 line-clamp-1 text-xs ${secondaryPreviewClassName ?? "text-black/45"}`}>
+          <p className={`mt-1 line-clamp-1 text-xs ${secondaryPreviewClassName ?? "text-foreground-hint theme-brutal:text-black/45"}`}>
             {secondaryPreview}
           </p>
         ) : null}

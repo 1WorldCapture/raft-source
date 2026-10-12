@@ -16,7 +16,7 @@ export type TextLinkVariant = "primary" | "muted";
 
 const VARIANT_CLASS: Record<TextLinkVariant, string> = {
   primary: "font-bold text-brutal-pink underline",
-  muted: "text-black/50 underline hover:text-black",
+  muted: "text-foreground-muted theme-brutal:text-black/50 underline hover:text-foreground-strong theme-brutal:hover:text-black",
 };
 
 export default function TextLink({

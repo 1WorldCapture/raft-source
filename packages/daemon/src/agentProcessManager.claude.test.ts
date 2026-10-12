@@ -22,7 +22,7 @@
 
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "vitest";
@@ -2648,7 +2648,7 @@ test("APM-managed start stores minted runner credential for process cleanup", as
   }
 });
 
-// ===========================================================================
+// ====================================================================
 // Behavior-lock baseline — deliverMessage gating state machine (methodology run 1).
 // The decision tree at deliverMessage(...) emits a `daemon.agent.delivery.routed`
 // span whose `outcome` attr IS the linear oracle for each non-linear branch.
@@ -2663,7 +2663,7 @@ test("APM-managed start stores minted runner credential for process cleanup", as
 // boundary gate), so it is red/green'd in the "Seam ①②" suite further down rather
 // than as a current-behavior baseline row. That keeps the outcome enumeration
 // complete (20 outcomes total) without pinning a bug as baseline.
-// ===========================================================================
+// ====================================================================
 
 function deliveryOutcomes(sink: MemoryTraceSink): string[] {
   return sink.getAllSpans()
@@ -3024,7 +3024,7 @@ test("delivery-gating baseline: ap + busy + session + non-stdin driver → queue
   }, { tracer });
 });
 
-// ===========================================================================
+// ====================================================================
 // Seam ①② red-green — delivery-side visible-boundary gate (methodology run 1, step 3).
 // Verified gap (Noel, #proj-o11y:9bf7d748 msg=81805402): deliverMessage has NO
 // boundary gate — re-delivering a seq the model has ALREADY consumed (server
@@ -3035,7 +3035,7 @@ test("delivery-gating baseline: ap + busy + session + non-stdin driver → queue
 // push / notifications.add() (Kai cut-point); seq<=boundary → drop + outcome
 // "dropped_already_consumed". Double-assert per Kai (msg 7e945075): inbox queue AND
 // pendingCount. RED on current code; GREEN after the step-5 boundary-drop fix.
-// ===========================================================================
+// ====================================================================
 
 test("delivery-gating seam ①: re-delivering an already-consumed seq to a busy agent must not re-queue or re-notify (boundary-drop)", async () => {
   const { sink, tracer } = makeDeterministicTracer();
@@ -3139,7 +3139,7 @@ test("delivery-gating seam ①b: an already-consumed seq re-delivered DURING age
   }, { tracer });
 });
 
-// ===========================================================================
+// ====================================================================
 // Seam C2 (lead-run, methodology run 1 follow-up). The entry boundary-gate
 // `isVisibleMessageModelSeen` matches on seq<=boundary OR message_id ∈ seen-set.
 // Seams ①②①b only exercised the SEQ branch. This locks the ID branch: a re-push
@@ -3147,7 +3147,7 @@ test("delivery-gating seam ①b: an already-consumed seq re-delivered DURING age
 // but carries an already-consumed message_id must still be dropped. Without the
 // id-branch (gate seq-only) this re-push slips the gate → re-inject + re-notify.
 // Teeth: revert agentProcessManager.ts:1732 (the id-branch) → this flips RED.
-// ===========================================================================
+// ====================================================================
 test("delivery-gating seam C2: a seq-MISSING re-push of an already-consumed message_id drops via the gate id-branch (not the seq branch)", async () => {
   const { sink, tracer } = makeDeterministicTracer();
   await withManager(async ({ manager }) => {
@@ -3193,7 +3193,7 @@ test("delivery-gating seam C2: a seq-MISSING re-push of an already-consumed mess
   }, { tracer });
 });
 
-// ===========================================================================
+// ====================================================================
 // Seam ①c — the boundary drop must also DRAIN a tracked mention delivery.
 // The four teeth above prove the gate does not re-queue / re-notify. None of them
 // carries a tracked mention occurrence, so none of them can see what happens to the
@@ -3202,7 +3202,7 @@ test("delivery-gating seam C2: a seq-MISSING re-push of an already-consumed mess
 // message the model has ALREADY consumed — the drop would trade a re-notify for an
 // endless redrive. Contract per @Huaihuai (msg fae9fb4a): daemon_received →
 // daemon_drained, ACK exactly once, zero terminal errors, and still zero inbox/re-notify.
-// ===========================================================================
+// ====================================================================
 
 test("delivery-gating seam ①c: a boundary-dropped already-consumed seq must still drain and ACK its tracked mention occurrence exactly once", async () => {
   const { sink, tracer } = makeDeterministicTracer();
@@ -3269,7 +3269,7 @@ test("delivery-gating seam ①c: a boundary-dropped already-consumed seq must st
   }, { tracer });
 });
 
-// ===========================================================================
+// ====================================================================
 // Seam ①d — the CLI pull path must settle a BUSY-QUEUED tracked mention.
 // A mention delivered while the agent is busy queues in the pending inbox and
 // waits for the observed turn boundary. But the model routinely consumes that
@@ -3280,7 +3280,7 @@ test("delivery-gating seam ①c: a boundary-dropped already-consumed seq must st
 // while every redelivery was swallowed as duplicate_pending (task #16, seq 490).
 // Contract: consumed-and-removed-from-pending-inbox IS drained — transition
 // daemon_drained, ACK fired, redeliveries are idempotent no-ops.
-// ===========================================================================
+// ====================================================================
 
 test("task #16: a busy-queued mention consumed via the CLI pull path drains and ACKs its tracked occurrence", async () => {
   const { sink, tracer } = makeDeterministicTracer();
@@ -3447,7 +3447,7 @@ test("task #16: CLI consumption of an unrelated message must not settle an unrel
   }, { tracer });
 });
 
-// ===========================================================================
+// ====================================================================
 // Seam ①e — turn-end settlement net (upstream task #285 + #9). A busy-queued
 // tracked mention that the turn boundary does NOT flush must still END at that
 // boundary: previously it stayed pending forever — the agent went idle with
@@ -3455,7 +3455,7 @@ test("task #16: CLI consumption of an unrelated message must not settle an unrel
 // was answered with silence. Three-way settle contract (with the ①d consume-time
 // path): every pending occurrence ends EXACTLY ONCE — drained (told/contributed)
 // or terminal DELIVERY_REJECTED (released) — no duplicate ack, no missed ack.
-// ===========================================================================
+// ====================================================================
 
 async function queueBusyTrackedMention(
   manager: AgentProcessManager,
@@ -3738,14 +3738,14 @@ test("task #1113: an untracked delivery with no process and no cached snapshot h
   }, { tracer });
 });
 
-// ===========================================================================
+// ====================================================================
 // A direct @mention must wake an agent that has no running process. The mention
 // occurrence used to be rejected (IDENTITY_UNKNOWN) whenever `ap` was absent, so a
 // one-process-per-turn runtime (cursor, gemini, copilot, opencode) between turns, or
 // any runtime whose process had exited, never woke on a direct @mention — only on
 // messages that did not @ it. The occurrence is bound to the launch/session the
 // restart snapshot still carries, so the wake proceeds and drains the occurrence.
-// ===========================================================================
+// ====================================================================
 // Park the agent the way the daemon does when a process is gone but the agent stays
 // wakeable (a per-turn runtime after its turn, or an idle-evicted/exited process):
 // no `ap`, and an idle restart snapshot carrying the launch and session.
@@ -3849,7 +3849,7 @@ test("mention wake: an agent with no identity at all (never started) is rejected
   }, { tracer });
 });
 
-// ===========================================================================
+// ====================================================================
 // Agent-start slot accounting (lead-run, methodology run 2 — start/spawn state
 // machine). `activeAgentStartCount` is incremented once at dequeue (pumpAgentStartQueue,
 // :2148) and must be released exactly once when startAgentNow settles — on BOTH
@@ -3859,7 +3859,7 @@ test("mention wake: an agent with no identity at all (never started) is rejected
 // (:2107) and EVERY future start stalls in the queue forever. This locks the
 // balance invariant on the settle path. Teeth: drop the success-branch
 // releaseAgentStartSlot call → count stuck at 1 → these go RED.
-// ===========================================================================
+// ====================================================================
 test("agent-start slot accounting: activeAgentStartCount returns to 0 after a start settles, and subsequent starts are not stalled", async () => {
   await withManager(async ({ manager }) => {
     assert.equal(agentStartSnapshot(manager).activeStarts, 0, "no slots held initially");
@@ -3875,7 +3875,7 @@ test("agent-start slot accounting: activeAgentStartCount returns to 0 after a st
   });
 });
 
-// ===========================================================================
+// ====================================================================
 // Agent-start transient-tracking cleanup (start/spawn run). `agentsStarting` is
 // added at startAgentNow entry (:2246) and must be deleted on every terminal path
 // (normal spawn :2465, deferred spawn :2386, and the error path). A leak (add
@@ -3885,7 +3885,7 @@ test("agent-start slot accounting: activeAgentStartCount returns to 0 after a st
 // queuedAgentStarts must drain. This locks the clean terminal state after a
 // settled successful start. Teeth: drop the :2465 agentsStarting.delete →
 // agentsStarting stays set → RED.
-// ===========================================================================
+// ====================================================================
 test("agent-start tracking cleanup: a settled successful start clears agentsStarting / queuedAgentStarts / startingInboxes (no stuck-starting wedge)", async () => {
   await withManager(async ({ manager }) => {
     await manager.startAgent("agent-1", makeConfig({ sessionId: "s1" }));
@@ -3900,13 +3900,13 @@ test("agent-start tracking cleanup: a settled successful start clears agentsStar
   });
 });
 
-// ===========================================================================
+// ====================================================================
 // Agent-start entry dedup (start/spawn run, baseline rows). startAgent's three
 // entry guards each emit a unique daemon.agent.start.ignored{reason} (the linear
 // oracle) and early-return WITHOUT enqueuing — so a redundant start request never
 // double-spawns / double-queues. Locks each guard's outcome. Teeth: drop a guard →
 // that request would enqueue (length 1) / get a different outcome → RED.
-// ===========================================================================
+// ====================================================================
 function startIgnoredReasons(sink: MemoryTraceSink): Array<string | undefined> {
   return sink.getAllSpans()
     .filter((s) => s.name === "daemon.agent.start.ignored")
@@ -3949,7 +3949,7 @@ test("agent-start entry dedup: already-queued agent → start.ignored{already_qu
   }, { tracer });
 });
 
-// ===========================================================================
+// ====================================================================
 // Agent-start concurrency-cap branch (start/spawn run — Adspectum completeness
 // review). The cap guard in pumpAgentStartQueue (`if (activeAgentStartCount >=
 // maxConcurrentAgentStarts) return`, ~2104) is SILENT — it emits no trace outcome,
@@ -3961,7 +3961,7 @@ test("agent-start entry dedup: already-queued agent → start.ignored{already_qu
 // the 2nd start in the queue, and freeing the slot drains it.
 // Teeth: drop the pumpAgentStartQueue() call in releaseAgentStartSlot → parked
 // start never resumes → second assertion RED.
-// ===========================================================================
+// ====================================================================
 test("agent-start concurrency cap: a start parked behind a full cap resumes when a slot frees (silent-stall guard)", async () => {
   await withManager(async ({ manager }) => {
     (manager as any).agentStarts.setMaxConcurrentStartsForTesting(1);
@@ -3985,7 +3985,7 @@ test("agent-start concurrency cap: a start parked behind a full cap resumes when
   });
 });
 
-// ===========================================================================
+// ====================================================================
 // Agent-start cancel-path promise settle (start/spawn run). startAgent() returns
 // a Promise that resolves when the queued start settles (resolve at :2160/:2183,
 // reject at :2186). When a queued start is CANCELLED instead of run, the caller's
@@ -3995,7 +3995,7 @@ test("agent-start concurrency cap: a start parked behind a full cap resumes when
 // promise — e.g. a stopAgent() during a queued start would hang). These lock that
 // both cancel paths settle the promise + drain tracking. Teeth: drop item.resolve()
 // in cancelQueuedAgentStart → the await below never returns (caller hang).
-// ===========================================================================
+// ====================================================================
 test("agent-start cancel (single): cancelling a queued start settles the caller promise and clears tracking", async () => {
   await withManager(async ({ manager }) => {
     setAgentStartCapacityFull(manager); // occupy the only slot → next start parks
@@ -4029,7 +4029,7 @@ test("agent-start cancel (all): cancelAllQueuedAgentStarts settles every queued 
   });
 });
 
-// ===========================================================================
+// ====================================================================
 // C1 — consume-side suppress() orphaned-retain (methodology run, #proj-o11y:9bf7d748).
 // FM2's consume↔delivery counterpart: consumeVisibleMessages buckets pending by
 // formatVisibleMessageTarget (returned NULL when channel_name is falsy → no bucket
@@ -4043,7 +4043,7 @@ test("agent-start cancel (all): cancelAllQueuedAgentStarts settles every queued 
 // formatMessageTarget on the falsy fallback so the bucket IS built under the key
 // suppress looks up → residue actually suppress-removed (not symmetric-stuck).
 // GREEN asserts ACTUAL removal from inbox, not key equality. RED today; GREEN w/ fix.
-// ===========================================================================
+// ====================================================================
 test("C1 consume suppress(): a pending with falsy channel_name is left as orphaned residue while siblings drain (null-skip asymmetry)", async () => {
   const { sink, tracer } = makeDeterministicTracer();
   await withManager(async ({ manager }) => {
@@ -4077,7 +4077,7 @@ test("C1 consume suppress(): a pending with falsy channel_name is left as orphan
   }, { tracer });
 });
 
-// ===========================================================================
+// ====================================================================
 // C3 — consume suppress() residue for THREAD-falsy and DM-falsy (#proj-o11y:9bf7d748).
 // C1 only made the channel branch symmetric. formatMessageTarget's thread/dm branches
 // have NO channel_name guard (falsy → `#{parent}:` / `dm:@`), but
@@ -4087,7 +4087,7 @@ test("C1 consume suppress(): a pending with falsy channel_name is left as orphan
 // project-from-single-source: a shared computeTarget() both formatters delegate to →
 // all branches non-divergent by construction. RED = thread-falsy + dm-falsy residue;
 // GREEN asserts ACTUAL removal.
-// ===========================================================================
+// ====================================================================
 
 test("C3 consume suppress(): a consumed THREAD pending with falsy channel_name must be suppressed, not left as residue (thread-branch divergence)", async () => {
   const { sink, tracer } = makeDeterministicTracer();
@@ -4142,7 +4142,7 @@ test("C3 consume suppress(): a consumed DM pending with falsy channel_name must 
   }, { tracer });
 });
 
-// ===========================================================================
+// ====================================================================
 // CC2 — boundary overshoot × FM2 gate = message loss (#proj-o11y:9bf7d748).
 // The FM2 entry gate ("seq<=boundary → dropped_already_consumed") IMPLICITLY assumes
 // every seq<=boundary was delivered+consumed CONTIGUOUSLY from below (Kai's clause).
@@ -4154,7 +4154,7 @@ test("C3 consume suppress(): a consumed DM pending with falsy channel_name must 
 // message loss; FM2 is the weapon. RED today; GREEN once boundary is clamped to the
 // daemon authoritative contiguous delivered-high-water (Kai clamp clause — boundarySeq
 // from server-preflight must not raise boundary past it). Test-only; fix pending clause.
-// ===========================================================================
+// ====================================================================
 test("CC2 boundary overshoot: a never-shown gap message delivered late must NOT be dropped by the FM2 gate (preflight seenUpToSeq overshoot)", async () => {
   const { sink, tracer } = makeDeterministicTracer();
   await withManager(async ({ manager }) => {
@@ -4746,4 +4746,238 @@ test("task #27: a mention flushed to stdin then consumed is settled, never acked
       `a consumed mention must end drained or still pending (got state=${String(state)}, acks=${q.ackCount()})`,
     );
   }, { tracer });
+});
+
+// RFC 070 startup memory block: a FRESH session's first input carries the head
+// of the agent's MEMORY.md only when the server's `constructed_wake_context`
+// flag is on for the agent; resumed sessions and flag-off starts are untouched.
+test("fresh start injects the MEMORY.md block only when the server flag is on", async () => {
+  await withManager(async ({ driver, manager, dataDir }) => {
+    for (const id of ["agent-mem-on", "agent-mem-off", "agent-mem-resumed"]) {
+      await mkdir(path.join(dataDir, id), { recursive: true });
+      await writeFile(path.join(dataDir, id, "MEMORY.md"), `# Memory marker ${id}\n- durable fact\n`);
+    }
+    await manager.startAgent("agent-mem-on", makeConfig({ sessionId: null, constructedWakeContext: true }));
+    await manager.startAgent("agent-mem-off", makeConfig({ sessionId: null }));
+    await manager.startAgent("agent-mem-resumed", makeConfig({ sessionId: "session-resumed", constructedWakeContext: true }));
+
+    assert.equal(driver.spawnCalls.length, 3);
+    const [on, off, resumed] = driver.spawnCalls;
+    assert.match(on!.prompt, /<memory-index file="MEMORY\.md"/);
+    assert.match(on!.prompt, /Memory marker agent-mem-on/);
+    assert.doesNotMatch(off!.prompt, /<memory-index/, "flag off: no block");
+    assert.doesNotMatch(resumed!.prompt, /<memory-index/, "a resumed session never gets the block");
+  });
+});
+
+test("the startup memory block respects the local kill switch", async () => {
+  await withManager(async ({ driver, manager, dataDir }) => {
+    await mkdir(path.join(dataDir, "agent-mem-killed"), { recursive: true });
+    await writeFile(path.join(dataDir, "agent-mem-killed", "MEMORY.md"), "# Memory marker killed\n");
+    await manager.startAgent(
+      "agent-mem-killed",
+      makeConfig({ sessionId: null, constructedWakeContext: true, envVars: { RAFT_STARTUP_MEMORY_BLOCK: "0" } }),
+    );
+
+    assert.equal(driver.spawnCalls.length, 1);
+    assert.doesNotMatch(driver.spawnCalls[0]!.prompt, /<memory-index/, "RAFT_STARTUP_MEMORY_BLOCK=0 turns the block off");
+  });
+});
+
+// RFC 070 phase 1: at-wake session recycling. A cold wake (>1h since the last transcript
+// activity) whose prior Claude session context exceeds the threshold starts WITHOUT --resume
+// (spawn config sessionId null) while warm, small, flag-off or kill-switched wakes resume the
+// prior session unchanged. RED proof: drop the planWakeSessionRecycle hook in startAgentNow and
+// the first test fails with spawn config sessionId "session-recycle-1" !== null.
+async function writeClaudeSessionTranscript(
+  homeDir: string,
+  sessionId: string,
+  args: { lastActivityAtMs: number; contextTokens: number },
+): Promise<void> {
+  const projectDir = path.join(homeDir, ".claude", "projects", "-workspace-agent");
+  await mkdir(projectDir, { recursive: true });
+  const record = {
+    type: "assistant",
+    timestamp: new Date(args.lastActivityAtMs).toISOString(),
+    message: {
+      usage: {
+        input_tokens: 12,
+        cache_read_input_tokens: args.contextTokens - 12,
+        cache_creation_input_tokens: 0,
+      },
+    },
+  };
+  await writeFile(path.join(homeDir, ".claude", "projects", "-workspace-agent", `${sessionId}.jsonl`), JSON.stringify(record) + "\n");
+}
+
+const RECYCLE_HOUR_MS = 3_600_000;
+
+test("cold wake with large prior context spawns fresh with a context-only first input", async () => {
+  await withManager(async ({ driver, manager, dataDir }) => {
+    const sessionId = "session-recycle-1";
+    await writeClaudeSessionTranscript(dataDir, sessionId, { lastActivityAtMs: Date.now() - 3 * RECYCLE_HOUR_MS, contextTokens: 500_000 });
+    await mkdir(path.join(dataDir, "agent-recycle"), { recursive: true });
+    await writeFile(path.join(dataDir, "agent-recycle", "MEMORY.md"), "# Memory marker recycle\n- durable fact\n");
+    await manager.startAgent(
+      "agent-recycle",
+      makeConfig({ sessionId, constructedWakeContext: true, envVars: { RAFT_WAKE_RECYCLE: "1" } }),
+      undefined,
+      { "#general": 3 },
+    );
+
+    assert.equal(driver.spawnCalls.length, 1);
+    const spawn = driver.spawnCalls[0]!;
+    assert.equal(spawn.config.sessionId, null, "recycled start must not resume the prior session");
+    assert.match(spawn.prompt, /<memory-index file="MEMORY\.md"/, "the briefing carries the MEMORY.md head");
+    assert.match(spawn.prompt, /Memory marker recycle/);
+    assert.doesNotMatch(spawn.prompt, /retired|fresh session|~\d+k tokens/, "v2: no announcement and no stats");
+    // The resume-shaped ladder still delivers the unread summary after the briefing.
+    assert.match(spawn.prompt, /#general: 3 unread/);
+  });
+});
+
+test("warm wake and kill-switched wake resume the prior session unchanged", async () => {
+  await withManager(async ({ driver, manager, dataDir }) => {
+    await writeClaudeSessionTranscript(dataDir, "session-warm-1", { lastActivityAtMs: Date.now() - 10 * 60_000, contextTokens: 500_000 });
+    await manager.startAgent("agent-warm", makeConfig({ sessionId: "session-warm-1", constructedWakeContext: true, envVars: { RAFT_WAKE_RECYCLE: "1" } }));
+    await writeClaudeSessionTranscript(dataDir, "session-killed-1", { lastActivityAtMs: Date.now() - 3 * RECYCLE_HOUR_MS, contextTokens: 500_000 });
+    await manager.startAgent("agent-killed", makeConfig({ sessionId: "session-killed-1", constructedWakeContext: true, envVars: { RAFT_WAKE_RECYCLE: "0" } }));
+
+    assert.equal(driver.spawnCalls.length, 2);
+    assert.equal(driver.spawnCalls[0]!.config.sessionId, "session-warm-1", "warm cache: resume");
+    assert.equal(driver.spawnCalls[1]!.config.sessionId, "session-killed-1", "kill switch: resume");
+  });
+});
+
+test("without the server flag a cold wake with a large context resumes, even with the env set to 1", async () => {
+  await withManager(async ({ driver, manager, dataDir }) => {
+    await writeClaudeSessionTranscript(dataDir, "session-no-flag", { lastActivityAtMs: Date.now() - 3 * RECYCLE_HOUR_MS, contextTokens: 500_000 });
+    await manager.startAgent(
+      "agent-no-flag",
+      makeConfig({ sessionId: "session-no-flag", envVars: { RAFT_WAKE_RECYCLE: "1", RAFT_STARTUP_MEMORY_BLOCK: "1" } }),
+    );
+    assert.equal(driver.spawnCalls.length, 1);
+    assert.equal(driver.spawnCalls[0]!.config.sessionId, "session-no-flag");
+    assert.doesNotMatch(driver.spawnCalls[0]!.prompt, /<memory-index/);
+  });
+});
+
+test("a cold wake with nothing to answer does not recycle (it would pay a fresh session just to say stop)", async () => {
+  await withManager(async ({ driver, manager, dataDir }) => {
+    const sessionId = "session-empty-wake";
+    await writeClaudeSessionTranscript(dataDir, sessionId, { lastActivityAtMs: Date.now() - 3 * RECYCLE_HOUR_MS, contextTokens: 500_000 });
+    await manager.startAgent("agent-empty-wake", makeConfig({ sessionId, constructedWakeContext: true, envVars: { RAFT_WAKE_RECYCLE: "1" } }));
+    assert.equal(driver.spawnCalls.length, 1);
+    assert.equal(driver.spawnCalls[0]!.config.sessionId, sessionId, "no wake message, no unread summary: plain resume");
+  });
+});
+
+// RFC 070 cold-idle sweep: an idle claude process whose prompt cache has certainly expired and whose
+// context is large is stopped on purpose, so the NEXT wake goes through the process-start path where the
+// at-wake recycle applies (resident processes woken over stdin would otherwise never recycle).
+function coldIdleFixture(seq: number): AgentMessage {
+  return {
+    seq,
+    message_id: `msg-${seq}`,
+    channel_name: "general",
+    channel_type: "channel",
+    sender_name: "someone",
+    sender_type: "human",
+    content: `unread ${seq}`,
+    timestamp: new Date().toISOString(),
+  } as unknown as AgentMessage;
+}
+
+async function startIdleColdAgent(
+  ctx: { driver: FakeClaudeDriver; manager: AgentProcessManager; dataDir: string },
+  agentId: string,
+  sessionId: string,
+) {
+  // Start warm (resume), then age the transcript and the progress clock so the live process looks cold and idle.
+  await writeClaudeSessionTranscript(ctx.dataDir, sessionId, { lastActivityAtMs: Date.now() - 60_000, contextTokens: 500_000 });
+  await ctx.manager.startAgent(agentId, makeConfig({ sessionId, constructedWakeContext: true, envVars: { RAFT_WAKE_RECYCLE: "1" } }));
+  await writeClaudeSessionTranscript(ctx.dataDir, sessionId, { lastActivityAtMs: Date.now() - 3 * RECYCLE_HOUR_MS, contextTokens: 500_000 });
+  const ap = (ctx.manager as any).agents.get(agentId);
+  ap.sessionId = sessionId;
+  ap.gatedSteering = { ...ap.gatedSteering, isIdle: true };
+  ap.runtimeProgress.noteInternalProgress(Date.now() - 3 * RECYCLE_HOUR_MS);
+  return ap;
+}
+
+test("cold-idle sweep stops an idle process whose only queued messages were already notified, without restarting it", async () => {
+  await withManager(async (ctx) => {
+    const ap = await startIdleColdAgent(ctx, "agent-sweep-notified", "session-sweep-notified");
+    assert.equal(ctx.driver.spawnCalls.length, 1);
+    const unread = [coldIdleFixture(101), coldIdleFixture(102)];
+    ap.inbox.push(...unread);
+    ap.notifications.recordNoticeWritten("fp-unread", ap.sessionId, unread);
+    const restarts: unknown[] = [];
+    const realStartAgent = (ctx.manager as any).startAgent.bind(ctx.manager);
+    (ctx.manager as any).startAgent = (...args: unknown[]) => {
+      restarts.push(args[2]);
+      return realStartAgent(...args);
+    };
+
+    await (ctx.manager as any).sweepColdIdleRuntimes();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal((ctx.manager as any).agents.has("agent-sweep-notified"), false, "the cold idle process was stopped");
+    assert.equal(ap.gatedSteering.expectedTerminationReason, "cold_idle_recycle", "sweep stop is an expected termination");
+    assert.deepEqual(restarts, [], "notified-but-unread messages must not wake an immediate restart");
+    // The stop leaves a restartable idle record (not a crash): a later wake brings the agent back, and the
+    // notified messages stay unread on the server and ride that wake's catch-up.
+    const lifecycle = (ctx.manager as any).lifecycleRecords;
+    assert.ok(lifecycle.getRestartSnapshot("agent-sweep-notified"), "a restart snapshot is kept");
+    assert.equal(lifecycle.getTerminalFailure?.("agent-sweep-notified"), undefined, "the sweep stop is not terminal");
+  });
+});
+
+test("cold-idle sweep leaves a process alone while a queued message has not been notified yet", async () => {
+  await withManager(async (ctx) => {
+    const ap = await startIdleColdAgent(ctx, "agent-sweep-untold", "session-sweep-untold");
+    const told = coldIdleFixture(201);
+    const untold = coldIdleFixture(202);
+    ap.inbox.push(told, untold);
+    ap.notifications.recordNoticeWritten("fp-told", ap.sessionId, [told]);
+
+    await (ctx.manager as any).sweepColdIdleRuntimes();
+
+    assert.equal((ctx.manager as any).agents.has("agent-sweep-untold"), true, "an untold message is pending work");
+    assert.equal(ap.gatedSteering.expectedTerminationReason, null);
+  });
+});
+
+test("cold-idle sweep never touches a process on a server without the constructed_wake_context flag", async () => {
+  await withManager(async (ctx) => {
+    await writeClaudeSessionTranscript(ctx.dataDir, "session-sweep-noflag", { lastActivityAtMs: Date.now() - 3 * RECYCLE_HOUR_MS, contextTokens: 500_000 });
+    await ctx.manager.startAgent("agent-sweep-noflag", makeConfig({ sessionId: "session-sweep-noflag", envVars: { RAFT_WAKE_RECYCLE: "1" } }));
+    const ap = (ctx.manager as any).agents.get("agent-sweep-noflag");
+    ap.gatedSteering = { ...ap.gatedSteering, isIdle: true };
+    ap.runtimeProgress.noteInternalProgress(Date.now() - 3 * RECYCLE_HOUR_MS);
+
+    await (ctx.manager as any).sweepColdIdleRuntimes();
+
+    assert.equal((ctx.manager as any).agents.has("agent-sweep-noflag"), true, "flag off: nothing is swept");
+    assert.equal(ap.gatedSteering.expectedTerminationReason, null);
+  });
+});
+
+test("a sweep stop is a clean exit even when a recovered runtime error is still latched", async () => {
+  await withManager(async (ctx) => {
+    const ap = await startIdleColdAgent(ctx, "agent-sweep-stale-error", "session-sweep-stale-error");
+    // A rate limit hours ago; the agent has worked fine since. `lastRuntimeError` is only cleared by an ordinary delivery.
+    ap.lastRuntimeError = "You've hit your weekly limit · resets Sep 23 at 9am (Asia/Shanghai)";
+
+    await (ctx.manager as any).sweepColdIdleRuntimes();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal((ctx.manager as any).agents.has("agent-sweep-stale-error"), false);
+    const activities = ctx.sent.filter((m) => m.type === "agent:activity") as Array<{ activity: string; detail?: string }>;
+    assert.equal(activities.some((a) => a.detail === "Process idle"), true, "the sweep stop closes as a normal idle exit");
+    assert.equal(
+      activities.some((a) => a.activity === "error" || /crash/i.test(a.detail ?? "")),
+      false,
+      "a stale runtime error must not make the sweep stop look like a crash",
+    );
+  });
 });

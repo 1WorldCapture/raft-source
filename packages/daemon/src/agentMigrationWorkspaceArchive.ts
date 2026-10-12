@@ -51,21 +51,55 @@ async function prepareBackupDirectory(input: {
   await assertRealDirectory(input.agentBackupRoot, "MIGRATION_WORKSPACE_ARCHIVE_AGENT_ROOT_INVALID");
 }
 
-async function pruneAgentMigrationWorkspaceBackups(input: {
+export async function pruneAgentMigrationWorkspaceBackups(input: {
   agentBackupRoot: string;
   now: Date;
+  /** Called with each backup directory about to be removed (the disk janitor reports it). */
+  beforeRemove?: (entry: { name: string; modifiedAtMs: number }) => Promise<void>;
+  /**
+   * Newest backups that are kept whatever their age. Archived source
+   * workspaces hold the only copy of an agent's notes after a migration, so
+   * the janitor never lets age alone remove the last few.
+   */
+  keepNewestRegardlessOfAge?: number;
+  /** Checked before each removal; true stops pruning (bounded janitor passes). */
+  shouldStop?: () => boolean;
+  /** Upper bound on directory entries considered; the rest wait for a later pass. */
+  maxEntries?: number;
 }): Promise<void> {
-  const entries = await readdir(input.agentBackupRoot, { withFileTypes: true });
-  const directories = await Promise.all(entries.filter((entry) => entry.isDirectory()).map(async (entry) => ({
-    name: entry.name,
-    modifiedAtMs: (await stat(path.join(input.agentBackupRoot, entry.name))).mtimeMs,
-  })));
+  const entries = (await readdir(input.agentBackupRoot, { withFileTypes: true }))
+    .filter((entry) => entry.isDirectory())
+    .slice(0, input.maxEntries ?? Number.POSITIVE_INFINITY);
+  const stated = await Promise.all(entries.map(async (entry) => {
+    try {
+      return { name: entry.name, modifiedAtMs: (await stat(path.join(input.agentBackupRoot, entry.name))).mtimeMs };
+    } catch (error) {
+      // Removed or renamed between readdir and stat: not this entry's problem.
+      if ((error as NodeJS.ErrnoException)?.code === "ENOENT") return null;
+      throw error;
+    }
+  }));
+  const directories = stated.filter((entry): entry is { name: string; modifiedAtMs: number } => entry !== null);
   directories.sort((left, right) => right.modifiedAtMs - left.modifiedAtMs || right.name.localeCompare(left.name));
   const cutoffMs = input.now.getTime() - AGENT_MIGRATION_WORKSPACE_BACKUP_MAX_AGE_MS;
-  await Promise.all(directories.map(async (entry, index) => {
-    if (index < AGENT_MIGRATION_WORKSPACE_BACKUP_MAX_PER_AGENT && entry.modifiedAtMs >= cutoffMs) return;
+  const floor = input.keepNewestRegardlessOfAge ?? 0;
+  const doomed = directories.filter((entry, index) => {
+    if (index < floor) return false;
+    return !(index < AGENT_MIGRATION_WORKSPACE_BACKUP_MAX_PER_AGENT && entry.modifiedAtMs >= cutoffMs);
+  });
+  if (input.shouldStop === undefined) {
+    // Existing behaviour for the migration path: remove in parallel.
+    await Promise.all(doomed.map(async (entry) => {
+      await input.beforeRemove?.(entry);
+      await rm(path.join(input.agentBackupRoot, entry.name), { recursive: true, force: true });
+    }));
+    return;
+  }
+  for (const entry of doomed) {
+    if (input.shouldStop()) return;
+    await input.beforeRemove?.(entry);
     await rm(path.join(input.agentBackupRoot, entry.name), { recursive: true, force: true });
-  }));
+  }
 }
 
 export async function archiveCompletedAgentMigrationSourceWorkspace(input: {

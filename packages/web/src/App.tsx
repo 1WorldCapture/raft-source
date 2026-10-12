@@ -138,8 +138,8 @@ function EnvironmentDevOverlay() {
   );
   const badgeLabel = `${environmentLabel}${previewEnvironmentDetails ? ` · ${previewEnvironmentDetails}` : ""}`;
   const className = isSlockdev
-    ? "bg-soft-signal"
-    : "bg-brutal-orange";
+    ? "bg-primary-soft theme-brutal:bg-soft-signal"
+    : "bg-warning-soft theme-brutal:bg-brutal-orange";
   const triggerTitle = formatMessage(
     { id: isSlockdev ? "devTools.overlay.triggerTitle" : "env.badge.dragTitle" },
     { label: badgeLabel },
@@ -168,7 +168,7 @@ function EnvironmentDevOverlay() {
         <span
           aria-hidden="true"
           data-dev-overlay-handle
-          className="flex size-6 touch-none select-none items-center justify-center border border-black bg-soft-signal text-sm leading-none shadow-brutal-sm cursor-grab active:cursor-grabbing"
+          className="flex size-6 touch-none select-none items-center justify-center border border-line-strong theme-brutal:border-black bg-primary-soft theme-brutal:bg-soft-signal text-sm leading-none shadow-raft-xs theme-brutal:shadow-brutal-sm cursor-grab active:cursor-grabbing"
         >
           <Settings2 size={12} strokeWidth={2.5} />
         </span>
@@ -182,7 +182,7 @@ function EnvironmentDevOverlay() {
           type="button"
           data-dev-overlay-handle
           onClick={() => setOpen((value) => !value)}
-          className={`max-w-full touch-none select-none truncate border-2 border-black px-2 py-1 text-[10px] font-bold tracking-widest shadow-brutal-sm cursor-grab active:cursor-grabbing ${className}`}
+          className={`max-w-full touch-none select-none truncate border theme-brutal:border-2 border-line-strong theme-brutal:border-black px-2 py-1 text-[10px] font-bold tracking-widest shadow-raft-xs theme-brutal:shadow-brutal-sm cursor-grab active:cursor-grabbing ${className}`}
           data-testid="raftdev-debug-trigger"
         >
           <span data-testid="environment-badge">{badgeLabel}</span>
@@ -190,7 +190,7 @@ function EnvironmentDevOverlay() {
       ) : (
         <div
           data-dev-overlay-handle
-          className={`max-w-full touch-none select-none truncate border-2 border-black px-2 py-0.5 text-[10px] font-bold uppercase shadow-brutal-sm opacity-80 cursor-grab active:cursor-grabbing ${className}`}
+          className={`max-w-full touch-none select-none truncate border theme-brutal:border-2 border-line-strong theme-brutal:border-black px-2 py-0.5 text-[10px] font-bold uppercase shadow-raft-xs theme-brutal:shadow-brutal-sm opacity-80 cursor-grab active:cursor-grabbing ${className}`}
           data-testid="environment-badge"
         >
           {badgeLabel}
@@ -242,13 +242,13 @@ function SlockdevDebugPanel(props: SlockdevDebugPanelProps) {
   };
 
   return (
-        <div className="w-72 max-w-[calc(100vw-1rem)] overflow-y-auto border-2 border-black bg-white p-3 text-xs shadow-brutal">
+        <div className="w-72 max-w-[calc(100vw-1rem)] overflow-y-auto border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white p-3 text-xs shadow-raft-sm theme-brutal:shadow-brutal">
           <div className="mb-2 flex items-start justify-between gap-2">
             <div className="min-w-0">
-              <div className="font-bold uppercase tracking-widest text-black">
+              <div className="font-bold uppercase tracking-widest text-foreground-strong theme-brutal:text-black">
                 {formatMessage({ id: "devTools.overlay.panelTitle" })}
               </div>
-              <div className="mt-0.5 text-black/50">
+              <div className="mt-0.5 text-foreground-muted theme-brutal:text-black/50">
                 <div className="truncate">{envName || "slockdev"}</div>
                 <div className="truncate">
                   {user ? <SignedInAs user={user} nameClassName="font-normal" /> : "Not signed in"}
@@ -269,11 +269,11 @@ function SlockdevDebugPanel(props: SlockdevDebugPanelProps) {
           </div>
 
           {previewDescription ? (
-            <details className="mb-2 border border-black/20 bg-soft-signal/20 p-2" title={previewDescription}>
-              <summary className="cursor-pointer select-none text-[10px] font-bold uppercase tracking-widest text-black/60">
+            <details className="mb-2 border border-line-muted theme-brutal:border-black/20 bg-primary-soft/20 theme-brutal:bg-soft-signal/20 p-2" title={previewDescription}>
+              <summary className="cursor-pointer select-none text-[10px] font-bold uppercase tracking-widest text-foreground-muted theme-brutal:text-black/60">
                 Preview description
               </summary>
-              <p className="mt-1 max-h-24 overflow-y-auto whitespace-pre-wrap break-words text-black/70">
+              <p className="mt-1 max-h-24 overflow-y-auto whitespace-pre-wrap break-words text-foreground-muted theme-brutal:text-black/70">
                 {previewDescription}
               </p>
             </details>
@@ -286,14 +286,14 @@ function SlockdevDebugPanel(props: SlockdevDebugPanelProps) {
               onClick={() => login(SLOCKDEV_EMAIL, SLOCKDEV_PASSWORD).catch((err) => {
                 console.error("Dev login failed", err);
               })}
-              className="border-2 border-black bg-brutal-pink px-2 py-1 font-bold disabled:opacity-50"
+              className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-accent-soft theme-brutal:bg-brutal-pink px-2 py-1 font-bold disabled:opacity-50"
             >
               Dev login
             </button>
             <button
               type="button"
               onClick={() => window.location.reload()}
-              className="border-2 border-black bg-white px-2 py-1 font-bold"
+              className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white px-2 py-1 font-bold"
             >
               Reload
             </button>
@@ -304,35 +304,35 @@ function SlockdevDebugPanel(props: SlockdevDebugPanelProps) {
                 serverPersistence.clearLastServerSlug();
                 window.location.assign("/");
               }}
-              className="border-2 border-black bg-white px-2 py-1 font-bold"
+              className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white px-2 py-1 font-bold"
             >
               Server Picker
             </button>
             <button
               type="button"
               onClick={() => logout()}
-              className="border-2 border-black bg-white px-2 py-1 font-bold"
+              className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white px-2 py-1 font-bold"
             >
               Log out
             </button>
             <button
               type="button"
               onClick={clearLocalState}
-              className="col-span-2 border-2 border-black bg-brutal-orange/30 px-2 py-1 font-bold"
+              className="col-span-2 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-warning-soft/30 theme-brutal:bg-brutal-orange/30 px-2 py-1 font-bold"
             >
               Clear Local Session
             </button>
             <button
               type="button"
               onClick={copySeedCommand}
-              className="col-span-2 border-2 border-black bg-soft-signal px-2 py-1 text-left font-mono text-[11px] font-bold"
+              className="col-span-2 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-primary-soft theme-brutal:bg-soft-signal px-2 py-1 text-left font-mono text-[11px] font-bold"
             >
               {copied ? "Copied" : seedCommand}
             </button>
             <button
               type="button"
               onClick={onHideAll}
-              className="col-span-2 border border-black bg-white px-2 py-1 text-left text-[10px] font-bold tracking-widest text-black/60 hover:bg-black hover:text-white"
+              className="col-span-2 border border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white px-2 py-1 text-left text-[10px] font-bold tracking-widest text-foreground-muted theme-brutal:text-black/60 hover:bg-foreground-strong theme-brutal:hover:bg-black hover:text-white"
             >
               {formatMessage({ id: "devTools.overlay.hideUntilReload" })}
             </button>
@@ -343,8 +343,8 @@ function SlockdevDebugPanel(props: SlockdevDebugPanelProps) {
               picking a variant forces it locally (render-only, doesn't change
               real experiment exposure). Reload applies it to all flag readers. */}
           {FEATURE_FLAG_REGISTRY.length > 0 && (
-            <div className="mt-3 border-t-2 border-black/10 pt-2">
-              <div className="mb-1 text-[10px] font-bold uppercase tracking-widest text-black/60">
+            <div className="mt-3 border-t theme-brutal:border-t-2 border-line-muted theme-brutal:border-black/10 pt-2">
+              <div className="mb-1 text-[10px] font-bold uppercase tracking-widest text-foreground-muted theme-brutal:text-black/60">
                 Feature flags
               </div>
               {FEATURE_FLAG_REGISTRY.map((flag) => {
@@ -355,14 +355,14 @@ function SlockdevDebugPanel(props: SlockdevDebugPanelProps) {
                 };
                 return (
                   <div key={flag.key} className="mb-1.5">
-                    <div className="mb-0.5 text-[11px] font-bold text-black/80" title={flag.key}>
+                    <div className="mb-0.5 text-[11px] font-bold text-foreground-strong theme-brutal:text-black/80" title={flag.key}>
                       {flag.label}
                     </div>
                     <div className="flex flex-wrap gap-1">
                       <button
                         type="button"
                         onClick={() => apply(null)}
-                        className={`border border-black px-1.5 py-0.5 text-[10px] font-bold ${current === null ? "bg-black text-white" : "bg-white"}`}
+                        className={`border border-line-strong theme-brutal:border-black px-1.5 py-0.5 text-[10px] font-bold ${current === null ? "bg-foreground-strong theme-brutal:bg-black text-white" : "bg-layer-panel theme-brutal:bg-white"}`}
                       >
                         Auto
                       </button>
@@ -371,7 +371,7 @@ function SlockdevDebugPanel(props: SlockdevDebugPanelProps) {
                           key={v}
                           type="button"
                           onClick={() => apply(v)}
-                          className={`border border-black px-1.5 py-0.5 text-[10px] font-bold ${current === v ? "bg-brutal-pink text-white" : "bg-white"}`}
+                          className={`border border-line-strong theme-brutal:border-black px-1.5 py-0.5 text-[10px] font-bold ${current === v ? "bg-accent-soft theme-brutal:bg-brutal-pink text-white" : "bg-layer-panel theme-brutal:bg-white"}`}
                         >
                           {v}
                         </button>
@@ -410,10 +410,10 @@ export function ServerAccessDeniedPage() {
   }, [fallbackPath, navigate]);
 
   return (
-    <div className="flex min-h-0 flex-1 items-center justify-center bg-brutal-cream px-4 font-display safe-top safe-bottom">
-      <div className="w-full max-w-md border-2 border-black bg-white p-6 shadow-brutal">
-        <h1 className="text-2xl font-black text-black">{formatMessage({ id: "pages.serverNotFound.title" })}</h1>
-        <p className="mt-3 text-sm leading-6 text-black/70">
+    <div className="flex min-h-0 flex-1 items-center justify-center bg-layer-canvas-muted theme-brutal:bg-brutal-cream px-4 font-display safe-top safe-bottom">
+      <div className="w-full max-w-md border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white p-6 shadow-raft-sm theme-brutal:shadow-brutal">
+        <h1 className="text-2xl font-black text-foreground-strong theme-brutal:text-black">{formatMessage({ id: "pages.serverNotFound.title" })}</h1>
+        <p className="mt-3 text-sm leading-6 text-foreground-muted theme-brutal:text-black/70">
           {fallbackServer
             ? formatMessage(
                 { id: "pages.serverNotFound.redirectingToServer" },
@@ -425,7 +425,7 @@ export function ServerAccessDeniedPage() {
           <button
             type="button"
             onClick={() => navigate(fallbackPath, { replace: true })}
-            className="text-sm font-bold text-black/50 underline hover:text-black"
+            className="text-sm font-bold text-foreground-muted theme-brutal:text-black/50 underline hover:text-foreground-strong theme-brutal:hover:text-black"
           >
             {fallbackServer
               ? formatMessage({ id: "pages.serverNotFound.goToMyServer" })
@@ -590,7 +590,7 @@ export function ServerResolver() {
 
   if (loading) {
     return (
-      <div className="flex min-h-0 flex-1 items-center justify-center bg-brutal-cream font-display safe-top">
+      <div className="flex min-h-0 flex-1 items-center justify-center bg-layer-canvas-muted theme-brutal:bg-brutal-cream font-display safe-top">
         <div className="text-xl font-bold">{formatMessage({ id: "pages.app.loadingServers" })}</div>
       </div>
     );
@@ -599,7 +599,7 @@ export function ServerResolver() {
   if (!server) {
     if (missingCommunitySlug && communityJoinFlow.joiningCommunitySlug === missingCommunitySlug) {
       return (
-        <div className="flex min-h-0 flex-1 items-center justify-center bg-brutal-cream font-display safe-top">
+        <div className="flex min-h-0 flex-1 items-center justify-center bg-layer-canvas-muted theme-brutal:bg-brutal-cream font-display safe-top">
           <div className="text-xl font-bold">{formatMessage({ id: "pages.app.joiningCommunity" })}</div>
         </div>
       );
@@ -631,7 +631,7 @@ export function ServerResolver() {
 
   if (!current || current.id !== server.id) {
     return (
-      <div className="flex min-h-0 flex-1 items-center justify-center bg-brutal-cream font-display safe-top">
+      <div className="flex min-h-0 flex-1 items-center justify-center bg-layer-canvas-muted theme-brutal:bg-brutal-cream font-display safe-top">
         <div className="text-xl font-bold">{formatMessage({ id: "common.loading" })}</div>
       </div>
     );
@@ -658,7 +658,7 @@ export function ServerResolver() {
     if (!generation) return <Navigate to={`/s/${server.slug}`} replace />;
     return (
       <main
-        className="relative flex min-h-0 flex-1 bg-brutal-cream font-display safe-top safe-bottom"
+        className="relative flex min-h-0 flex-1 bg-layer-canvas-muted theme-brutal:bg-brutal-cream font-display safe-top safe-bottom"
         data-testid="native-onboarding-web-surface"
       >
         <ServerSetupProjectionGate
@@ -689,7 +689,7 @@ export function ServerSelectionPage() {
 
   if (loading) {
     return (
-      <div className="flex min-h-0 flex-1 items-center justify-center bg-brutal-cream font-display safe-top">
+      <div className="flex min-h-0 flex-1 items-center justify-center bg-layer-canvas-muted theme-brutal:bg-brutal-cream font-display safe-top">
         <div className="text-xl font-bold">{formatMessage({ id: "pages.app.loadingServers" })}</div>
       </div>
     );
@@ -717,7 +717,7 @@ export function ServerRedirect() {
 
   if (loading) {
     return (
-      <div className="flex min-h-0 flex-1 items-center justify-center bg-brutal-cream font-display safe-top">
+      <div className="flex min-h-0 flex-1 items-center justify-center bg-layer-canvas-muted theme-brutal:bg-brutal-cream font-display safe-top">
         <div className="text-xl font-bold">{formatMessage({ id: "pages.app.loadingServers" })}</div>
       </div>
     );
@@ -789,7 +789,7 @@ export function ServerRedirect() {
 export function AuthBootstrapStatus({ view }: { view: "loading" | "restoring" }) {
   const { formatMessage } = useIntl();
   return (
-    <div className="flex min-h-0 flex-1 items-center justify-center bg-brutal-cream font-display safe-top">
+    <div className="flex min-h-0 flex-1 items-center justify-center bg-layer-canvas-muted theme-brutal:bg-brutal-cream font-display safe-top">
       <div className="text-xl font-bold">
         {view === "restoring"
           ? formatMessage({ id: "auth.bootstrap.restoringSession" })
@@ -822,8 +822,8 @@ export function DegradedRestoreStatus({
       ? formatMessage({ id: "auth.bootstrap.errorNetwork" })
       : formatMessage({ id: "auth.bootstrap.errorUnknown" });
   return (
-    <div className="flex min-h-0 flex-1 items-center justify-center bg-brutal-cream p-6 font-display safe-top">
-      <div className="w-full max-w-md border-2 border-black bg-white p-6 shadow-brutal">
+    <div className="flex min-h-0 flex-1 items-center justify-center bg-layer-canvas-muted theme-brutal:bg-brutal-cream p-6 font-display safe-top">
+      <div className="w-full max-w-md border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white p-6 shadow-raft-sm theme-brutal:shadow-brutal">
         <h1 className="text-xl font-bold">{formatMessage({ id: "auth.bootstrap.degradedTitle" })}</h1>
         <div className="mt-4 space-y-1 text-sm">
           <div>
@@ -839,14 +839,14 @@ export function DegradedRestoreStatus({
         <div className="mt-6 flex gap-3">
           <button
             type="button"
-            className="border-2 border-black bg-brutal-lime px-4 py-2 text-sm font-bold shadow-brutal-sm active:translate-x-[1px] active:translate-y-[1px] active:shadow-brutal-active"
+            className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-success-soft theme-brutal:bg-brutal-lime px-4 py-2 text-sm font-bold shadow-raft-xs theme-brutal:shadow-brutal-sm active:translate-x-[1px] active:translate-y-[1px] active:shadow-none theme-brutal:active:shadow-brutal-active"
             onClick={onRetry}
           >
             {formatMessage({ id: "auth.bootstrap.retryNow" })}
           </button>
           <button
             type="button"
-            className="border-2 border-black bg-white px-4 py-2 text-sm font-bold shadow-brutal-sm active:translate-x-[1px] active:translate-y-[1px] active:shadow-brutal-active"
+            className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white px-4 py-2 text-sm font-bold shadow-raft-xs theme-brutal:shadow-brutal-sm active:translate-x-[1px] active:translate-y-[1px] active:shadow-none theme-brutal:active:shadow-brutal-active"
             onClick={onLogout}
           >
             {formatMessage({ id: "auth.bootstrap.signOut" })}
@@ -1185,7 +1185,7 @@ export function AppShell() {
     content = <AccountIdentitySetupPage />;
   } else if (serverLoading) {
     content = (
-      <div className="flex min-h-0 flex-1 items-center justify-center bg-brutal-cream font-display safe-top">
+      <div className="flex min-h-0 flex-1 items-center justify-center bg-layer-canvas-muted theme-brutal:bg-brutal-cream font-display safe-top">
         <div className="text-xl font-bold">{formatMessage({ id: "pages.app.loadingServers" })}</div>
       </div>
     );

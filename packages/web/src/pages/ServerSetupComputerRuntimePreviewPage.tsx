@@ -73,11 +73,11 @@ export default function ServerSetupComputerRuntimePreviewPage() {
   });
 
   return (
-    <div className="relative min-h-0 flex-1 overflow-hidden bg-brutal-cream font-display">
+    <div className="relative min-h-0 flex-1 overflow-hidden bg-layer-canvas-muted theme-brutal:bg-brutal-cream font-display">
       <div className="absolute inset-0">
         <ServerCreatePreview serverName="Cindy's pricing team" serverSlug="cindys-pricing-team" />
       </div>
-      <div className="absolute inset-0 bg-black/55" aria-hidden="true" />
+      <div className="absolute inset-0 bg-foreground/55 theme-brutal:bg-black/55" aria-hidden="true" />
       <div className="absolute inset-0 flex items-center justify-center p-4 sm:px-8 sm:py-7 lg:px-[120px] lg:py-14">
         {showCreateAgent ? (
           <CreateAgentDialog

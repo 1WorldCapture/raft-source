@@ -25,17 +25,17 @@ import type { ReactNode } from "react";
 
 /** Static border recipe only — exported for any future surface that wants
  *  the border tokens without the full bg + hover-bg skin. */
-export const PREVIEW_SHELL_BORDER = "border border-black/15 hover:border-black/30";
+export const PREVIEW_SHELL_BORDER = "border border-line-muted theme-brutal:border-black/15 hover:border-line-muted theme-brutal:hover:border-black/30";
 
 /** Full default skin: border + white bg + faint hover bg. No active token —
  *  press inherits hover. */
-export const PREVIEW_SHELL_SKIN = `${PREVIEW_SHELL_BORDER} bg-white hover:bg-black/5`;
+export const PREVIEW_SHELL_SKIN = `${PREVIEW_SHELL_BORDER} bg-layer-panel theme-brutal:bg-white hover:bg-fill-muted theme-brutal:hover:bg-black/5`;
 
 /** Muted / unavailable variant — visually unchanged from the prior
  *  QuotedMessageCard `unavailable` skin (kept distinct per stdrc: error
  *  semantic is separate from the route-B default). */
 export const PREVIEW_SHELL_SKIN_MUTED =
-  "border-2 border-black/30 bg-black/5 italic text-black/40 hover:shadow-brutal-sm";
+  "border theme-brutal:border-2 border-line-muted theme-brutal:border-black/30 bg-fill-muted theme-brutal:bg-black/5 italic text-foreground-hint theme-brutal:text-black/40 hover:shadow-raft-xs theme-brutal:hover:shadow-brutal-sm";
 
 export type PreviewShellVariant = "default" | "muted";
 

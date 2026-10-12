@@ -18,7 +18,7 @@ const surfaceClasses: Record<CopyIconButtonSurface, { copied: string; idle: stri
   },
   light: {
     copied: "text-brutal-lime",
-    idle: "text-black/40 hover:text-black/75",
+    idle: "text-foreground-hint theme-brutal:text-black/40 hover:text-foreground-strong theme-brutal:hover:text-black/75",
   },
 };
 

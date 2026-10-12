@@ -33,7 +33,7 @@ export default function DialogCard({
           <button
             type="button"
             onClick={onClose}
-            className="btn-brutal-sm bg-white p-1"
+            className="btn-brutal-sm bg-layer-panel theme-brutal:bg-white p-1"
             aria-label={formatMessage({ id: "common.close" })}
           >
             <X size={20} />

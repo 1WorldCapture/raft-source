@@ -177,14 +177,14 @@ function AnnouncementModalContent({ current }: { current: Announcement }) {
   return (
     <Modal onClose={() => close(current.id)} layer={1} closeOnBackdrop>
       <div className="card-brutal w-full max-w-xl flex flex-col" data-testid="announcement-modal" role="dialog" aria-modal="true" aria-label={current.title}>
-        <div className="flex items-center justify-between border-b-2 border-black px-5 py-3 bg-soft-signal">
+        <div className="flex items-center justify-between border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black px-5 py-3 bg-primary-soft theme-brutal:bg-soft-signal">
           <h2 className="text-lg font-bold uppercase truncate" data-testid="announcement-title">
             {current.title}
           </h2>
           <button
             type="button"
             onClick={() => close(current.id)}
-            className="btn-brutal-sm bg-white p-1"
+            className="btn-brutal-sm bg-layer-panel theme-brutal:bg-white p-1"
             aria-label={formatMessage({ id: "common.announcement.dismiss" })}
           >
             <X size={20} />
@@ -209,7 +209,7 @@ function AnnouncementModalContent({ current }: { current: Announcement }) {
                 </a>
               ),
               code: ({ children }) => (
-                <InlineCode className="rounded-sm bg-white px-1 text-[0.85em]">
+                <InlineCode className="rounded-sm bg-layer-panel theme-brutal:bg-white px-1 text-[0.85em]">
                   {children}
                 </InlineCode>
               ),
@@ -222,10 +222,10 @@ function AnnouncementModalContent({ current }: { current: Announcement }) {
           </ReactMarkdown>
         </div>
 
-        <div className="flex items-center justify-between gap-3 border-t-2 border-black px-5 py-3 bg-white">
+        <div className="flex items-center justify-between gap-3 border-t theme-brutal:border-t-2 border-line-strong theme-brutal:border-black px-5 py-3 bg-layer-panel theme-brutal:bg-white">
           <div>
             {totalPages > 1 && (
-              <span className="font-mono text-xs text-black/60" data-testid="announcement-page-indicator">
+              <span className="font-mono text-xs text-foreground-muted theme-brutal:text-black/60" data-testid="announcement-page-indicator">
                 {pageIndex + 1} / {totalPages}
               </span>
             )}
@@ -235,7 +235,7 @@ function AnnouncementModalContent({ current }: { current: Announcement }) {
               <button
                 type="button"
                 onClick={handleBack}
-                className="btn-brutal bg-white px-4 py-2 text-sm inline-flex items-center gap-1"
+                className="btn-brutal bg-layer-panel theme-brutal:bg-white px-4 py-2 text-sm inline-flex items-center gap-1"
                 data-testid="announcement-back"
               >
                 <ChevronLeft size={14} />
@@ -246,7 +246,7 @@ function AnnouncementModalContent({ current }: { current: Announcement }) {
               ref={okButtonRef}
               type="button"
               onClick={handleNext}
-              className="btn-brutal bg-brutal-pink px-4 py-2 text-sm font-bold inline-flex items-center gap-1"
+              className="btn-brutal bg-accent-soft theme-brutal:bg-brutal-pink px-4 py-2 text-sm font-bold inline-flex items-center gap-1"
               data-testid={isLast ? "announcement-ok" : "announcement-next"}
             >
               {isLast

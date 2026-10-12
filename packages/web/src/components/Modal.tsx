@@ -84,7 +84,7 @@ export default function Modal({
     <div
       ref={rootRef}
       tabIndex={-1}
-      className={`fixed inset-0 ${zClass} overflow-y-auto ${backdrop === "transparent" ? "bg-transparent" : "bg-black/60"} outline-none`}
+      className={`fixed inset-0 ${zClass} overflow-y-auto ${backdrop === "transparent" ? "bg-transparent" : "bg-foreground/60 theme-brutal:bg-black/60"} outline-none`}
     >
       <div className="flex min-h-full w-full p-4" onClick={handleBackdropClick}>
         <div className="m-auto flex w-full justify-center" onClick={handleBackdropClick}>

@@ -56,11 +56,11 @@ export default function EmptyState({
         className,
       ].filter(Boolean).join(" ")}
     >
-      <div className="mb-4 inline-flex items-center justify-center text-black/40">
+      <div className="mb-4 inline-flex items-center justify-center text-foreground-hint theme-brutal:text-black/40">
         {icon}
       </div>
-      <div className="mb-2 text-lg font-display font-semibold text-black/60">{title}</div>
-      {description ? <div className="mx-auto max-w-[32ch] text-sm leading-relaxed text-black/60">{description}</div> : null}
+      <div className="mb-2 text-lg font-display font-semibold text-foreground-muted theme-brutal:text-black/60">{title}</div>
+      {description ? <div className="mx-auto max-w-[32ch] text-sm leading-relaxed text-foreground-muted theme-brutal:text-black/60">{description}</div> : null}
       {action ? <div className="mt-5">{action}</div> : null}
     </div>
   );

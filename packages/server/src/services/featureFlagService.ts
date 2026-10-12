@@ -57,6 +57,14 @@ export const PUBLIC_SERVER_FEATURE_FLAG_KEY = SHARED_PUBLIC_SERVER_FEATURE_FLAG_
 export const SERVER_LABS_UI_FEATURE_FLAG_KEY = SHARED_SERVER_LABS_UI_FEATURE_FLAG_KEY;
 export const RUNTIME_ACCOUNT_USAGE_FEATURE_FLAG_KEY = SHARED_RUNTIME_ACCOUNT_USAGE_FEATURE_FLAG_KEY;
 export const SERVER_GUEST_FEATURE_FLAG_KEY = SHARED_SERVER_GUEST_FEATURE_FLAG_KEY;
+/**
+ * RFC 070 constructed wake context (at-wake session recycling with a
+ * constructed briefing, the cold-idle sweep, and the startup MEMORY.md block).
+ * Server-scoped, default OFF: evaluated at each agent start and sent to the
+ * daemon as `AgentConfig.constructedWakeContext`; a missing flag or any
+ * evaluation failure leaves the behavior off.
+ */
+export const CONSTRUCTED_WAKE_CONTEXT_FEATURE_FLAG_KEY = "constructed_wake_context";
 
 const FEATURE_FLAG_LOCK_NAMESPACE = 0x46464c47; // "FFLG"
 const FEATURE_FLAG_CONFIG_VERSION_LOCK_NAMESPACE = 0x46464356; // "FFCV"

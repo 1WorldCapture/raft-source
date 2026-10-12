@@ -5,6 +5,8 @@ import { createRequire } from "node:module";
 import { accessSync, createReadStream, createWriteStream, readFileSync } from "node:fs";
 
 import { formatCommitShort, readDaemonProvenance, type BuildProvenance } from "./buildProvenance.js";
+import { ProbeGate } from "./probeGate.js";
+import { runRaftDiskJanitor, scheduleRaftDiskJanitor } from "./raftDiskJanitor.js";
 import { mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { Readable } from "node:stream";
@@ -196,7 +198,7 @@ const MIGRATION_OBJECT_STORE_DOWNLOAD_RETRY_MAX_MS = 250;
 // connection must not re-run it on every reconnect-driven re-request: a
 // completed detection (live or unsupported — not a transient error) is served
 // from cache for this long, concurrent requests for the same runtime join one
-// detection, and a request carrying `refresh` bypasses both.
+// detection, and a request carrying `refresh` bypasses the cache only (it still joins an in-flight detection).
 const RUNTIME_MODEL_DETECT_CACHE_TTL_MS = 5 * 60_000;
 
 function migrationStatePathSegment(value: string): string {
@@ -1571,12 +1573,14 @@ export class DaemonCore {
   private machineContextConflict = false;
   private localTraceSink: LocalRotatingTraceSink | null = null;
   private traceBundleUploader: DaemonTraceBundleUploader | null = null;
+  private diskJanitor: { stop(): void } | null = null;
   private readonly coreStartingAgentIds = new Set<string>();
   private readonly coreStartPendingDeliveries = new Map<string, AgentDeliverMessage[]>();
   private readonly acceptedStartDispatches = new Map<string, AgentStartAckMessage>();
   private readonly acceptingStartDispatches = new Map<string, Promise<AgentStartAckMessage>>();
   private readonly runtimeModelDetectCache = new Map<string, { atMs: number; outcome: RuntimeModelSourceOutcome }>();
-  private readonly runtimeModelDetectInFlight = new Map<string, Promise<RuntimeModelSourceOutcome>>();
+  // Same-runtime detections join one in-flight run (ProbeGate); different runtimes run in parallel.
+  private readonly runtimeModelProbeGate = new ProbeGate();
   private readonly lastReadyRuntimeVersions = new Map<string, string | null>();
   private readonly handledComputerControlOperationIds = new Set<string>();
   private readonly runtimeAccountUsageCollector: RuntimeAccountUsageCollector;
@@ -1747,6 +1751,58 @@ export class DaemonCore {
     this.agentManager.setCliTransportTraceDir(path.join(machineDir, "traces"));
   }
 
+  /**
+   * Bounded daily cleanup of Raft Computer's own migration data under
+   * SLOCK_HOME (never agent workspaces). Several daemons may share one
+   * SLOCK_HOME; every removal is idempotent. `SLOCK_DAEMON_DISK_JANITOR_DISABLED=1`
+   * turns it off.
+   */
+  private installDiskJanitor(): void {
+    if (this.diskJanitor || process.env.SLOCK_DAEMON_DISK_JANITOR_DISABLED === "1") return;
+    this.diskJanitor = scheduleRaftDiskJanitor({ pass: () => this.runDiskJanitorPass() });
+  }
+
+  private async runDiskJanitorPass(): Promise<void> {
+    const startedAtMs = currentTimeMs();
+    try {
+      const lease = this.migrationTransferLease;
+      const result = await runRaftDiskJanitor({
+        slockHome: this.slockHome,
+        dataDir: this.agentsDataDir,
+        // A lease held in memory marks its migration as in use even after the
+        // lease's own expiry: the janitor skips rather than trusting a clock.
+        activeMigrationSegments: new Set(lease
+          ? [migrationStatePathSegment(lease.migrationId), migrationStatePathSegment(lease.sessionId)]
+          : []),
+      });
+      for (const removedPath of result.removedPaths) logger.info(`[Slock Daemon] Disk janitor removed ${removedPath}`);
+      for (const kept of result.keptPaths) logger.warn(`[Slock Daemon] Disk janitor kept ${kept.path} (${kept.reason})`);
+      for (const removal of result.backupsRemoved) {
+        this.recordDaemonTrace("daemon.disk_janitor.backup_removed", {
+          owner_agent_id: removal.ownerAgentId,
+          backup_kind: removal.backupKind,
+          age_days: removal.ageDays,
+          freed_bytes: removal.freedBytes,
+        });
+      }
+      this.recordDaemonTrace("daemon.disk_janitor.run", {
+        outcome: "ok",
+        migration_generations_cleaned: result.migrationGenerationsCleaned,
+        migration_freed_bytes: result.migrationFreedBytes,
+        backups_removed: result.backupsRemoved.length,
+        backups_freed_bytes: result.backupsFreedBytes,
+        sweep_outcome: result.sweepOutcome,
+        duration_ms: currentTimeMs() - startedAtMs,
+      });
+    } catch (error) {
+      this.recordDaemonTrace("daemon.disk_janitor.run", {
+        outcome: "failed",
+        error_class: error instanceof Error ? error.name : "unknown",
+        duration_ms: currentTimeMs() - startedAtMs,
+      }, "error");
+    }
+  }
+
   private installTraceBundleUploader(machineDir: string): void {
     if (!this.shouldEnableLocalTrace()) return;
     if (this.traceBundleUploader) return;
@@ -1797,6 +1853,7 @@ export class DaemonCore {
       logger.info(`[Slock Daemon] Acquired machine lock: ${this.machineLock.lockDir}`);
       this.installLocalTraceSink(this.machineLock.machineDir);
       this.installTraceBundleUploader(this.machineLock.machineDir);
+      this.installDiskJanitor();
       const span = this.tracer.startSpan("daemon.lifecycle.start", {
         surface: "daemon",
         kind: "internal",
@@ -1820,6 +1877,8 @@ export class DaemonCore {
       void this.stopMigrationTransport();
       this.traceBundleUploader?.stop();
       this.traceBundleUploader = null;
+      this.diskJanitor?.stop();
+      this.diskJanitor = null;
       this.machineLock.release();
       this.machineLock = null;
       throw err;
@@ -1845,6 +1904,8 @@ export class DaemonCore {
     this.scopedAppStorageObserver = null;
     this.traceBundleUploader?.stop();
     this.traceBundleUploader = null;
+    this.diskJanitor?.stop();
+    this.diskJanitor = null;
     try {
       await this.agentManager.stopAll();
       span.addEvent("daemon.agents.stopped");
@@ -3757,8 +3818,8 @@ export class DaemonCore {
    * CLI (some take seconds), so concurrent `machine:runtime_models:detect`
    * requests for the same runtime join one detection, and a completed
    * non-error outcome is served from a 5-minute cache so a flapping connection
-   * cannot re-spawn every runtime CLI on each reconnect. `refresh` bypasses
-   * both. The error outcome is never cached (usually transient), so a failed
+   * cannot re-spawn every runtime CLI on each reconnect. `refresh` bypasses the cache
+   * only and still joins an in-flight detection. The error outcome is never cached (usually transient), so a failed
    * detection is retried on the next request.
    */
   private detectRuntimeModelJoined(
@@ -3770,22 +3831,13 @@ export class DaemonCore {
     if (cached && currentTimeMs() - cached.atMs < RUNTIME_MODEL_DETECT_CACHE_TTL_MS) {
       return Promise.resolve(cached.outcome);
     }
-    const existing = this.runtimeModelDetectInFlight.get(runtime);
-    if (existing) return existing;
-    const settled = startDetection()
-      .then((outcome) => {
-        if (outcome.kind !== "error") {
-          this.runtimeModelDetectCache.set(runtime, { atMs: currentTimeMs(), outcome });
-        }
-        return outcome;
-      })
-      .finally(() => {
-        if (this.runtimeModelDetectInFlight.get(runtime) === settled) {
-          this.runtimeModelDetectInFlight.delete(runtime);
-        }
-      });
-    this.runtimeModelDetectInFlight.set(runtime, settled);
-    return settled;
+    return this.runtimeModelProbeGate.run(runtime, async () => {
+      const outcome = await startDetection();
+      if (outcome.kind !== "error") {
+        this.runtimeModelDetectCache.set(runtime, { atMs: currentTimeMs(), outcome });
+      }
+      return outcome;
+    });
   }
 
   private handleMessage(msg: ServerToMachineMessage) {

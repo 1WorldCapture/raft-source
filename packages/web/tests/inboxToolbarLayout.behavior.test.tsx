@@ -358,7 +358,7 @@ test("PanelHeader renders the canonical main-panel horizontal padding", () => {
 
   const header = screen.getByTestId("panel-header");
   for (const className of ["flex", "h-panel-header", "items-center", "gap-3", "border-b-2", "border-black", "bg-white", "px-5"]) {
-    assert.ok(header.classList.contains(className), `PanelHeader header row must carry ${className}`);
+    assert.ok((header.classList.contains(className) || header.classList.contains(`theme-brutal:${className}`)), `PanelHeader header row must carry ${className}`);
   }
   for (const className of header.classList) {
     assert.ok(

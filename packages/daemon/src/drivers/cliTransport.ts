@@ -9,6 +9,7 @@ import { SLOCK_HOME_ENV, resolveRaftHome } from "../raftHome.js";
 import { registerAgentCredentialProxy } from "../agentCredentialProxy.js";
 import { LOOPBACK_NO_PROXY, applyLoopbackNoProxyEnv } from "../loopbackNoProxy.js";
 import { detectNodeHostKind, resolveNodeHostLaunch, type NodeHostKind } from "./nodeHostLaunch.js";
+import { writeNodeModeEntryLauncher } from "./nodeModeEntryLauncher.js";
 
 /**
  * `dev:ino` of a file, or null when the platform cannot report one. Lives
@@ -538,6 +539,9 @@ export function writeOpencliWrapper(
     ? resolveNodeHostLaunch({ env: process.env, execIsElectron, seaProbe })
     : { command: liveHostExecutablePath(), env: process.env };
   const electronNodeMode = execIsElectron && nodeHost.env.ELECTRON_RUN_AS_NODE === "1";
+  // Electron node mode can exit 0 silently when the entry fails to load; the
+  // launcher turns that into stderr + exit 1 (see nodeModeEntryLauncher.ts).
+  const launcherPath = electronNodeMode ? writeNodeModeEntryLauncher(slockDir) : null;
   const fallbacks = deriveOpencliFallbackCandidates(opencliBinPath);
   // If the resolved path is already gone, bake the best existing fallback as
   // the primary so the wrapper works even before the exec-time block runs.
@@ -557,7 +561,7 @@ export function writeOpencliWrapper(
   const posixHostRef = hostPromotedPath ? '"$RAFT_HOST"' : shellSingleQuote(nodeHost.command);
   writeFileSync(
     path.join(slockDir, "opencli"),
-    `#!/usr/bin/env bash\nOPENCLI_BIN=${shellSingleQuote(binPath)}\n${posixFallbackBlock}${electronNodeMode ? "export ELECTRON_RUN_AS_NODE=1\n" : ""}${posixHostPrelude}exec ${posixHostRef} "$OPENCLI_BIN" "$@"\n`,
+    `#!/usr/bin/env bash\nOPENCLI_BIN=${shellSingleQuote(binPath)}\n${posixFallbackBlock}${electronNodeMode ? "export ELECTRON_RUN_AS_NODE=1\n" : ""}${posixHostPrelude}exec ${posixHostRef} ${launcherPath ? `${shellSingleQuote(launcherPath)} ` : ""}"$OPENCLI_BIN" "$@"\n`,
     { mode: 0o755 },
   );
   if (platform === "win32") {
@@ -575,9 +579,9 @@ export function writeOpencliWrapper(
         ? [
           `set "RAFT_HOST=${nodeHost.command}"`,
           `if not exist "%RAFT_HOST%" set "RAFT_HOST=${hostPromotedPath}"`,
-          `"%RAFT_HOST%" "%OPENCLI_BIN%" %*`,
+          `"%RAFT_HOST%" ${launcherPath ? `"${launcherPath}" ` : ""}"%OPENCLI_BIN%" %*`,
         ]
-        : [`"${nodeHost.command}" "%OPENCLI_BIN%" %*`]),
+        : [`"${nodeHost.command}" ${launcherPath ? `"${launcherPath}" ` : ""}"%OPENCLI_BIN%" %*`]),
       "",
     ].join("\r\n") + "\r\n";
     writeFileSync(path.join(slockDir, "opencli.cmd"), opencliCmdBody);
@@ -771,6 +775,9 @@ export async function prepareCliTransport(
   cleanupWorkspaceCliTransportFiles(ctx.workingDirectory);
   const slockDir = buildCliTransportDir(slockHome, ctx.agentId, ctx.launchId);
   mkdirSync(slockDir, { recursive: true });
+  // Electron node mode can exit 0 silently when an entry fails to load; the
+  // launcher turns that into stderr + exit 1 (see nodeModeEntryLauncher.ts).
+  const launcherPath = electronNodeMode ? writeNodeModeEntryLauncher(slockDir) : null;
 
   const tokenFile = path.join(slockDir, "agent-token");
 
@@ -873,7 +880,7 @@ export async function prepareCliTransport(
     : "";
   const posixHostRef = hostPromotedPath ? '"$RAFT_HOST"' : shellSingleQuote(nodeHost.command);
   const posixBody =
-    `#!/usr/bin/env bash\n${buildPosixLaunchForwardingGuard(slockDir)}\nunset RAFT_PROFILE SLOCK_PROFILE RAFT_PROFILE_DIR SLOCK_PROFILE_DIR\n${posixLoopbackNoProxyPrelude()}\nSLOCK_CLI=${shellSingleQuote(cliPath)}\n${posixCliFallbackBlock}${electronNodeMode ? "export ELECTRON_RUN_AS_NODE=1\n" : ""}${posixHostPrelude}${posixCredentialPrefix}exec ${posixHostRef} "$SLOCK_CLI" "$@"\n`;
+    `#!/usr/bin/env bash\n${buildPosixLaunchForwardingGuard(slockDir)}\nunset RAFT_PROFILE SLOCK_PROFILE RAFT_PROFILE_DIR SLOCK_PROFILE_DIR\n${posixLoopbackNoProxyPrelude()}\nSLOCK_CLI=${shellSingleQuote(cliPath)}\n${posixCliFallbackBlock}${electronNodeMode ? "export ELECTRON_RUN_AS_NODE=1\n" : ""}${posixHostPrelude}${posixCredentialPrefix}exec ${posixHostRef} ${launcherPath ? `${shellSingleQuote(launcherPath)} ` : ""}"$SLOCK_CLI" "$@"\n`;
   writeFileSync(posixWrapper, posixBody, { mode: 0o755 });
   writeFileSync(posixRaftWrapper, posixBody, { mode: 0o755 });
 
@@ -933,9 +940,9 @@ export async function prepareCliTransport(
         ? [
           `set "RAFT_HOST=${nodeHost.command}"`,
           `if not exist "%RAFT_HOST%" set "RAFT_HOST=${hostPromotedPath}"`,
-          `"%RAFT_HOST%" "%SLOCK_CLI%" %*`,
+          `"%RAFT_HOST%" ${launcherPath ? `"${launcherPath}" ` : ""}"%SLOCK_CLI%" %*`,
         ]
-        : [`"${nodeHost.command}" "%SLOCK_CLI%" %*`]),
+        : [`"${nodeHost.command}" ${launcherPath ? `"${launcherPath}" ` : ""}"%SLOCK_CLI%" %*`]),
       "",
     ].filter((line) => line.length > 0).join("\r\n") + "\r\n";
     writeFileSync(cmdWrapper, cmdBody);
@@ -996,9 +1003,9 @@ export async function prepareCliTransport(
         "}",
       ]),
       "if ($MyInvocation.ExpectingInput) {",
-      "  $input | & $node $cli @args",
+      `  $input | & $node ${launcherPath ? `${powershellSingleQuote(launcherPath)} ` : ""}$cli @args`,
       "} else {",
-      "  & $node $cli @args",
+      `  & $node ${launcherPath ? `${powershellSingleQuote(launcherPath)} ` : ""}$cli @args`,
       "}",
       "exit $LASTEXITCODE",
       "",

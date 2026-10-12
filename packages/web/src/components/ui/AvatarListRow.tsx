@@ -119,18 +119,18 @@ export default function AvatarListRow({
     <div className="min-w-0 flex-1">
       {align === "start" ? (
         <div className="flex min-w-0 flex-col gap-1">
-          <span className="truncate text-sm font-bold text-black">{name}</span>
+          <span className="truncate text-sm font-bold text-foreground-strong theme-brutal:text-black">{name}</span>
           {subtitle != null && subtitle !== false && (
-            <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs font-mono text-black/50">
+            <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs font-mono text-foreground-muted theme-brutal:text-black/50">
               {subtitle}
             </span>
           )}
         </div>
       ) : (
         <div className="flex min-w-0 flex-wrap items-baseline gap-x-2">
-          <span className="truncate text-sm font-bold text-black">{name}</span>
+          <span className="truncate text-sm font-bold text-foreground-strong theme-brutal:text-black">{name}</span>
           {subtitle != null && subtitle !== false && (
-            <span className="text-xs font-mono text-black/50">{subtitle}</span>
+            <span className="text-xs font-mono text-foreground-muted theme-brutal:text-black/50">{subtitle}</span>
           )}
         </div>
       )}

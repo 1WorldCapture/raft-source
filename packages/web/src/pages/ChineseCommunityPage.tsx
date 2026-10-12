@@ -63,7 +63,7 @@ export default function ChineseCommunityPage() {
   const unavailableMessageId = qrUnavailableMessageId(state.status, expired, imageLoadFailed);
 
   return (
-    <main className="h-dvh overflow-hidden bg-brutal-cream px-4 font-display text-black safe-top safe-bottom">
+    <main className="h-dvh overflow-hidden bg-layer-canvas-muted theme-brutal:bg-brutal-cream px-4 font-display text-foreground-strong theme-brutal:text-black safe-top safe-bottom">
       <div className="mx-auto flex h-full w-full max-w-sm flex-col items-center justify-center gap-5 text-center">
         <h1 className="text-2xl font-black leading-tight sm:text-3xl">
           {formatMessage({ id: "pages.chineseCommunity.title" })}
@@ -71,13 +71,13 @@ export default function ChineseCommunityPage() {
 
         <section
           aria-label={formatMessage({ id: "pages.chineseCommunity.qrLabel" })}
-          className="w-full max-w-[20rem] border-2 border-black bg-white p-3 shadow-brutal sm:p-4"
+          className="w-full max-w-[20rem] border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white p-3 shadow-raft-sm theme-brutal:shadow-brutal sm:p-4"
         >
-          <div className="mx-auto grid aspect-square w-full place-items-center border-2 border-black bg-brutal-cream">
+          <div className="mx-auto grid aspect-square w-full place-items-center border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-canvas-muted theme-brutal:bg-brutal-cream">
             {state.status === "loading" ? (
               <div
                 data-testid="chinese-community-qr-loading"
-                className="size-40 animate-pulse border-2 border-black bg-white"
+                className="size-40 animate-pulse border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white"
               />
             ) : showQrImage && config ? (
               <img
@@ -94,7 +94,7 @@ export default function ChineseCommunityPage() {
               <div
                 role="status"
                 data-testid="chinese-community-qr-missing"
-                className="px-5 text-sm font-bold leading-6 text-black/65"
+                className="px-5 text-sm font-bold leading-6 text-foreground-muted theme-brutal:text-black/65"
               >
                 {formatMessage({ id: unavailableMessageId })}
               </div>

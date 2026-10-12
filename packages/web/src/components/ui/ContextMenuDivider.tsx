@@ -8,5 +8,5 @@
  * border-black" />` literal. stdrc 2026-05-24 audit follow-up.
  */
 export default function ContextMenuDivider() {
-  return <div className="border-t-2 border-black" />;
+  return <div className="border-t theme-brutal:border-t-2 border-line-strong theme-brutal:border-black" />;
 }
