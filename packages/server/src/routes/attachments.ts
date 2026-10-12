@@ -1421,6 +1421,11 @@ attachmentPublicRouter.get("/:id/html-preview", async (req, res) => {
     // the API-origin preview document. CSP frame-ancestors above is the
     // allowlist source of truth for this sandbox-only endpoint.
     res.removeHeader("X-Frame-Options");
+    // Helmet's default CORP is same-origin, which Chromium enforces for the
+    // Desktop app's cross-origin app://raft iframe (blank page). The preview
+    // is token-scoped, has no cookie semantics and runs in an opaque origin
+    // (CSP sandbox), so it may be embedded cross-origin.
+    res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Content-Disposition", buildContentDisposition("inline", attachment.filename));
     // Measurement bridge (task #16): normally appended, but inserted before
