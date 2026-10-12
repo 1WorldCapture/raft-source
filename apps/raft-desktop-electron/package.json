@@ -59,7 +59,7 @@
     "electron-builder": "^25.1.8",
     "jsdom": "^29.1.1",
     "lucide-react": "^0.575.0",
-    "raft-ui": "0.5.11",
+    "raft-ui": "0.5.27",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "react-intl": "^7.1.11",

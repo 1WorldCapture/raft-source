@@ -13,7 +13,7 @@
   "dependencies": {
     "@botiverse/raft-web": "workspace:*",
     "lucide-react": "^0.575.0",
-    "raft-ui": "0.5.8",
+    "raft-ui": "0.5.27",
     "react": "^19.2.4",
     "react-dom": "^19.2.4"
   },
