@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createServer as createHttpServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { test } from "vitest";
+import { test, vi } from "vitest";
 import { completeSimple, registerFauxProvider } from "@earendil-works/pi-ai/compat";
 import {
   PROVIDER_PROBE_REPLY_MAX_BYTES,
@@ -13,6 +13,7 @@ import {
 import {
   buildProviderProbeResultMessage,
   claimProbeMaterialization,
+  providerProbeAdapter,
   buildUnclaimedProviderProbeResult,
   classifyProbeFailure,
   runProviderProbeCanary,
@@ -299,5 +300,35 @@ test("the claim budget cuts a slow materialize endpoint", async () => {
     assert.ok(Date.now() - started < 6_000, "the claim must abort before the slow endpoint answers");
   } finally {
     slow.close();
+  }
+});
+
+test("the canary times out even when the adapter ignores the abort signal", async () => {
+  const materialization: ProbeMaterialization = {
+    envVars: { OPENAI_API_KEY: "probe-key" },
+    providerConnection: {
+      providerId: "openai-compatible",
+      endpointUrl: "http://127.0.0.1:9",
+      supportsImageInput: false,
+    },
+    authority: { connectionEpochId: "e", replicaGeneration: "g" },
+  };
+  // An adapter that never settles and never observes the signal: only the
+  // outer budget race can end the probe.
+  const hanging = vi
+    .spyOn(providerProbeAdapter, "complete")
+    .mockImplementation(() => new Promise(() => {}));
+  try {
+    const startedAt = Date.now();
+    const result = await runProviderProbeCanary({ materialization, model: "faux-model", budgetMs: 120 });
+    const elapsed = Date.now() - startedAt;
+    assert.equal(result.outcome, "failure");
+    assert.equal(result.category, "provider_timeout");
+    assert.ok(elapsed >= 100, `expected the race to bound the call, ended after ${elapsed}ms`);
+    assert.ok(elapsed < 5_000, `expected a prompt timeout, ended after ${elapsed}ms`);
+    assert.equal(result.reply, null);
+    assert.equal(result.responseSha256, null);
+  } finally {
+    hanging.mockRestore();
   }
 });

@@ -8,7 +8,7 @@
 // wiped before that call returns. This module does not log the key, the
 // prompt, or the reply.
 import { completeSimple, registerBuiltInApiProviders } from "@earendil-works/pi-ai/compat";
-import type { Api, Model } from "@earendil-works/pi-ai";
+import type { Api, AssistantMessage, Model } from "@earendil-works/pi-ai";
 import {
   BUILTIN_RUNTIME_GATEWAY_PROVIDER_ENV_KEYS,
   BUILTIN_RUNTIME_PROVIDER_ENV_KEYS,
@@ -28,6 +28,17 @@ import {
 } from "@botiverse/raft-shared";
 import { daemonFetch } from "./daemonFetch.js";
 import { parseProviderConnectionLaunchPayload } from "./providerConnectionLaunch.js";
+
+/** Adapter invocation seam. Tests replace `complete` to simulate adapters
+ * that ignore the abort signal — the canary's outer race must still bound the
+ * call. Production always goes through the real pi-ai adapter. */
+export const providerProbeAdapter = {
+  complete: (
+    model: Model<Api>,
+    context: Parameters<typeof completeSimple>[1],
+    options: Parameters<typeof completeSimple>[2],
+  ): Promise<AssistantMessage> => completeSimple(model, context, options),
+};
 
 /** The canary prompt. Fixed so receipts are comparable across probes. */
 export const PROVIDER_PROBE_MESSAGE = "Reply with OK.";
@@ -148,7 +159,7 @@ function buildProbeModel(
       input: ["text"],
       cost: { ...ZERO_COST },
       contextWindow: 200_000,
-      maxTokens: 1,
+      maxTokens: 16,
     };
   }
   const probe = PI_BUILTIN_PROVIDER_CONNECTION_PROBES[projection.providerId];
@@ -163,7 +174,7 @@ function buildProbeModel(
     input: ["text"],
     cost: { ...ZERO_COST },
     contextWindow: 200_000,
-    maxTokens: 1,
+    maxTokens: 16,
   };
 }
 
@@ -231,13 +242,33 @@ export async function runProviderProbeCanary(input: {
     let abortedByBudget = false;
     const onAbort = () => { abortedByBudget = true; };
     controller.signal.addEventListener("abort", onAbort, { once: true });
+    // Outer belt over the signal braces: an adapter that ignores the abort
+    // signal must not hang the probe, so the call is raced against the same
+    // budget and the loser resolves to the timeout outcome.
+    const budgetExceeded = Symbol("providerProbeBudgetExceeded");
+    let budgetRaceTimer: ReturnType<typeof setTimeout> | undefined;
     try {
-      const assistant = await completeSimple(
-        model,
-        { messages: [{ role: "user", content: PROVIDER_PROBE_MESSAGE, timestamp: Date.now() }] },
-        { apiKey, maxTokens: 1, signal: controller.signal },
-      );
+      const assistant = await Promise.race([
+        providerProbeAdapter.complete(
+          model,
+          { messages: [{ role: "user", content: PROVIDER_PROBE_MESSAGE, timestamp: Date.now() }] },
+          { apiKey, maxTokens: 16, signal: controller.signal },
+        ),
+        new Promise<typeof budgetExceeded>((resolve) => {
+          budgetRaceTimer = setTimeout(() => resolve(budgetExceeded), budget);
+        }),
+      ]);
       const latencyMs = Date.now() - started;
+      if (assistant === budgetExceeded) {
+        return {
+          outcome: "failure",
+          category: "provider_timeout",
+          latencyMs,
+          responseSha256: null,
+          responseBytes: null,
+          reply: null,
+        };
+      }
       const stopReason = assistant?.stopReason;
       if (stopReason === "aborted") {
         return {
@@ -300,6 +331,7 @@ export async function runProviderProbeCanary(input: {
       };
     } finally {
       clearTimeout(timer);
+      if (budgetRaceTimer !== undefined) clearTimeout(budgetRaceTimer);
       controller.signal.removeEventListener("abort", onAbort);
     }
   } finally {
