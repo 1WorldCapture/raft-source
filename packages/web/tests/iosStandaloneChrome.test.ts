@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
+import { brutalView } from "./helpers/brutalView";
 
 const repoRoot = resolve(import.meta.dirname, "..");
 
@@ -9,10 +10,8 @@ test("iOS standalone chrome uses theme yellow by default and white detail routes
   const html = readFileSync(resolve(repoRoot, "index.html"), "utf8");
   const css = readFileSync(resolve(repoRoot, "src/index.css"), "utf8");
   const manifest = readFileSync(resolve(repoRoot, "public/site.webmanifest"), "utf8");
-  const layout = readFileSync(
-    resolve(repoRoot, "src/components/layout/MainLayout.tsx"),
-    "utf8",
-  );
+  const layout = brutalView(readFileSync(
+    resolve(repoRoot, "src/components/layout/MainLayout.tsx"), "utf8"));
 
   assert.match(html, /<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" \/>/);
   assert.match(html, /<meta name="theme-color" content="#FFD440" \/>/);

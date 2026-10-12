@@ -230,7 +230,7 @@ function highlightActivitySearchText(value: string, query: string): ReactNode {
     if (index > cursor) parts.push(value.slice(cursor, index));
     const match = value.slice(index, index + needle.length);
     parts.push(
-      <mark key={`${index}-${match}`} className="bg-soft-signal px-0.5 text-black">
+      <mark key={`${index}-${match}`} className="bg-primary-soft theme-brutal:bg-soft-signal px-0.5 text-foreground-strong theme-brutal:text-black">
         {match}
       </mark>,
     );
@@ -272,7 +272,7 @@ function ActivityGroupIcon({ group, dmChannel }: { group: InboxGroupCount; dmCha
   const isDm = group.channelType === "dm";
   return (
     <span
-      className={`flex size-5 shrink-0 items-center justify-center border-2 border-black/20 ${isDm ? "bg-soft-signal" : "bg-black/[0.04]"}`}
+      className={`flex size-5 shrink-0 items-center justify-center border theme-brutal:border-2 border-line-muted theme-brutal:border-black/20 ${isDm ? "bg-primary-soft theme-brutal:bg-soft-signal" : "bg-black/[0.04]"}`}
       data-testid={isDm ? `activity-group-dm-fallback-${group.channelId}` : `activity-group-channel-icon-${group.channelId}`}
     >
       {isDm ? <AtSign size={12} /> : <Hash size={12} />}
@@ -377,7 +377,7 @@ function InboxRow({ item, filter, searchQuery, onOpen, onDone, onContextMenu, on
       ? "dm"
       : "channel";
   const titleIcon = (() => {
-    const className = "mr-1.5 inline-block align-[-2px] text-black/45";
+    const className = "mr-1.5 inline-block align-[-2px] text-foreground-hint theme-brutal:text-black/45";
     if (titleIconKind === "thread") return <MessageSquare size={13} className={className} />;
     if (titleIconKind === "dm") return <AtSign size={13} className={className} />;
     return <Hash size={13} className={className} />;
@@ -385,21 +385,21 @@ function InboxRow({ item, filter, searchQuery, onOpen, onDone, onContextMenu, on
   const subtitleContent = item.kind === "thread" ? channelLabel : null;
   const bodyContent = (
     <>
-      {activitySenderLabel ? <span className="font-bold text-black/70">{activitySenderLabel}: </span> : null}
+      {activitySenderLabel ? <span className="font-bold text-foreground-muted theme-brutal:text-black/70">{activitySenderLabel}: </span> : null}
       {renderActivityPreview(activityPreview, searchQuery)}
     </>
   );
-  const rowClassName = `group relative flex w-full items-start gap-3 border-2 p-3 text-left transition-colors hover:border-black hover:shadow-brutal-sm active:border-black active:shadow-brutal-sm ${
+  const rowClassName = `group relative flex w-full items-start gap-3 border theme-brutal:border-2 p-3 text-left transition-colors hover:border-line-strong theme-brutal:hover:border-black hover:shadow-raft-xs theme-brutal:hover:shadow-brutal-sm active:border-line-strong theme-brutal:active:border-black active:shadow-raft-xs theme-brutal:active:shadow-brutal-sm ${
     focused
-      ? "border-black bg-brutal-cyan/25 shadow-brutal"
+      ? "border-line-strong theme-brutal:border-black bg-info-soft/25 theme-brutal:bg-brutal-cyan/25 shadow-raft-sm theme-brutal:shadow-brutal"
       : active
-      ? "border-black bg-white shadow-brutal-sm"
-      : "border-black/30 bg-white"
+      ? "border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white shadow-raft-xs theme-brutal:shadow-brutal-sm"
+      : "border-line-muted theme-brutal:border-black/30 bg-layer-panel theme-brutal:bg-white"
   }`;
   const rowActionVisibilityClassName = active
     ? "pointer-events-auto opacity-100"
     : "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-visible:pointer-events-auto group-focus-visible:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 [@media(hover:none)]:pointer-events-auto [@media(hover:none)]:opacity-100";
-  const doneActionClassName = `btn-brutal-sm relative z-10 shrink-0 bg-white p-1.5 transition-opacity ${
+  const doneActionClassName = `btn-brutal-sm relative z-10 shrink-0 bg-layer-panel theme-brutal:bg-white p-1.5 transition-opacity ${
     rowActionVisibilityClassName
   }`;
   const hasRowAction = doneAction !== "none";
@@ -409,8 +409,8 @@ function InboxRow({ item, filter, searchQuery, onOpen, onDone, onContextMenu, on
       ? "opacity-0"
       : "transition-opacity group-hover:opacity-0 group-focus-within:opacity-0 [@media(hover:none)]:opacity-0";
   const rowActionBackgroundClassName = active
-    ? "bg-white"
-    : "bg-transparent group-hover:bg-white group-focus-visible:bg-white group-focus-within:bg-white [@media(hover:none)]:bg-white";
+    ? "bg-layer-panel theme-brutal:bg-white"
+    : "bg-transparent group-hover:bg-layer-panel theme-brutal:group-hover:bg-white group-focus-visible:bg-layer-panel theme-brutal:group-focus-visible:bg-white group-focus-within:bg-layer-panel theme-brutal:group-focus-within:bg-white [@media(hover:none)]:bg-layer-panel theme-brutal:hover:none)]:bg-white";
 
   return (
     <div
@@ -435,7 +435,7 @@ function InboxRow({ item, filter, searchQuery, onOpen, onDone, onContextMenu, on
       <div className="min-w-0 w-full" data-testid="conversation-card-content">
         {subtitleContent ? (
           <div
-            className="mb-0.5 min-w-0 text-[11px] font-bold leading-3 text-black/45"
+            className="mb-0.5 min-w-0 text-[11px] font-bold leading-3 text-foreground-hint theme-brutal:text-black/45"
             data-testid="conversation-card-subtitle"
           >
             {subtitleContent}
@@ -443,7 +443,7 @@ function InboxRow({ item, filter, searchQuery, onOpen, onDone, onContextMenu, on
         ) : null}
         <div className="mb-0.5 flex min-w-0 items-start gap-2">
           <div
-            className={`line-clamp-2 min-w-0 flex-1 text-sm leading-5 ${unreadCount > 0 ? "font-bold text-black" : "font-semibold text-black/55"}`}
+            className={`line-clamp-2 min-w-0 flex-1 text-sm leading-5 ${unreadCount > 0 ? "font-bold text-foreground-strong theme-brutal:text-black" : "font-semibold text-foreground-muted theme-brutal:text-black/55"}`}
             data-testid="conversation-card-primary"
           >
             <span aria-hidden="true" data-testid="conversation-card-title-icon" data-kind={titleIconKind}>
@@ -453,7 +453,7 @@ function InboxRow({ item, filter, searchQuery, onOpen, onDone, onContextMenu, on
           </div>
           {timestamp ? (
             <span
-              className={`shrink-0 font-mono text-xs leading-5 text-black/40 ${timestampVisibilityClassName}`}
+              className={`shrink-0 font-mono text-xs leading-5 text-foreground-hint theme-brutal:text-black/40 ${timestampVisibilityClassName}`}
               data-testid="conversation-card-timestamp"
             >
               {timestamp}
@@ -461,7 +461,7 @@ function InboxRow({ item, filter, searchQuery, onOpen, onDone, onContextMenu, on
           ) : null}
         </div>
         <p
-          className={`line-clamp-2 text-xs leading-4 ${unreadCount > 0 ? "text-black" : "text-black/55"}`}
+          className={`line-clamp-2 text-xs leading-4 ${unreadCount > 0 ? "text-foreground-strong theme-brutal:text-black" : "text-foreground-muted theme-brutal:text-black/55"}`}
           data-testid="conversation-card-body"
         >
           {bodyContent}
@@ -1164,8 +1164,8 @@ export default function ThreadsInbox({ onOpenItem, onDragItem, compactActivitySi
 
   const sidebarResponsiveSuffix = " lg:justify-start lg:gap-2 lg:px-2.5";
   const sidebarLabelClassName = "sr-only lg:not-sr-only lg:min-w-0 lg:flex-1 lg:truncate";
-  const sidebarCountClassName = "hidden font-mono text-[11px] tabular-nums text-black/40 lg:inline";
-  const sidebarSectionLabelClassName = "hidden flex-1 text-[10px] font-black uppercase text-black/40 lg:block";
+  const sidebarCountClassName = "hidden font-mono text-[11px] tabular-nums text-foreground-hint theme-brutal:text-black/40 lg:inline";
+  const sidebarSectionLabelClassName = "hidden flex-1 text-[10px] font-black uppercase text-foreground-hint theme-brutal:text-black/40 lg:block";
   const activityViewOptions = [
     { value: "all" as const, label: formatMessage({ id: "thread.filter.all" }), icon: <Inbox size={14} />, count: activityGroupTotal || totalCount },
     { value: "unread" as const, label: formatMessage({ id: "thread.filter.unread" }), icon: <Mail size={14} />, count: totalUnreadCount },
@@ -1189,14 +1189,14 @@ export default function ThreadsInbox({ onOpenItem, onDragItem, compactActivitySi
     const testIdPrefix = isDialog ? "activity-switcher" : "activity";
     const navButtonClass = (active: boolean) => isDialog
       ? `flex w-full items-center gap-3 px-3 py-3 text-left text-sm font-bold transition-colors ${active ? "bg-black/[0.06]" : "hover:bg-black/[0.04]"}`
-      : `flex w-full items-center justify-center gap-0 border-2 px-2 py-2 text-left text-xs font-bold transition-colors${sidebarResponsiveSuffix} ${active ? "border-black bg-soft-signal shadow-brutal-sm" : "border-transparent hover:border-black/30 hover:bg-black/5"}`;
+      : `flex w-full items-center justify-center gap-0 border theme-brutal:border-2 px-2 py-2 text-left text-xs font-bold transition-colors${sidebarResponsiveSuffix} ${active ? "border-line-strong theme-brutal:border-black bg-primary-soft theme-brutal:bg-soft-signal shadow-raft-xs theme-brutal:shadow-brutal-sm" : "border-transparent hover:border-line-muted theme-brutal:hover:border-black/30 hover:bg-fill-muted theme-brutal:hover:bg-black/5"}`;
     const labelClass = isDialog ? "min-w-0 flex-1 truncate" : sidebarLabelClassName;
-    const countClass = isDialog ? "font-mono text-black/50" : sidebarCountClassName;
-    const sectionClass = isDialog ? "flex-1 text-xs font-black uppercase text-black/45" : sidebarSectionLabelClassName;
+    const countClass = isDialog ? "font-mono text-foreground-muted theme-brutal:text-black/50" : sidebarCountClassName;
+    const sectionClass = isDialog ? "flex-1 text-xs font-black uppercase text-foreground-hint theme-brutal:text-black/45" : sidebarSectionLabelClassName;
     const formatSidebarCount = (count: number) => count > 99 ? "99+" : formatNumber(count);
     const groupRowClass = (active: boolean) => isDialog
-      ? `flex w-full border-2 transition-colors ${active ? "border-black bg-black/[0.08]" : "border-transparent hover:border-black/30 hover:bg-black/[0.04]"}`
-      : `flex w-full border-2 transition-colors ${active ? "border-black bg-black/[0.08]" : "border-transparent hover:border-black/30 hover:bg-black/5"}`;
+      ? `flex w-full border theme-brutal:border-2 transition-colors ${active ? "border-line-strong theme-brutal:border-black bg-black/[0.08]" : "border-transparent hover:border-line-muted theme-brutal:hover:border-black/30 hover:bg-black/[0.04]"}`
+      : `flex w-full border theme-brutal:border-2 transition-colors ${active ? "border-line-strong theme-brutal:border-black bg-black/[0.08]" : "border-transparent hover:border-line-muted theme-brutal:hover:border-black/30 hover:bg-fill-muted theme-brutal:hover:bg-black/5"}`;
     const groupButtonClass = isDialog
       ? "flex min-w-0 flex-1 items-center gap-3 px-3 py-2.5 text-left text-sm font-bold"
       : `flex min-w-0 flex-1 items-center justify-center gap-0 px-2 py-2 text-left text-xs font-bold${sidebarResponsiveSuffix}`;
@@ -1375,7 +1375,7 @@ export default function ThreadsInbox({ onOpenItem, onDragItem, compactActivitySi
         title={formatMessage({ id: "thread.header.title" })}
         subtitle={formatMessage({ id: "thread.header.subtitle" }, { activeCount: totalCount, unreadCount: totalUnreadCount })}
         icon={<Activity size={18} />}
-        iconBg="bg-soft-signal"
+        iconBg="bg-primary-soft theme-brutal:bg-soft-signal"
         onMobileBack={onMobileBack}
         containerProps={{
           "data-testid": "inbox-header",
@@ -1391,7 +1391,7 @@ export default function ThreadsInbox({ onOpenItem, onDragItem, compactActivitySi
       <div className="flex min-h-0 flex-1">
         {activitySidebarInboxEnabled && !compactActivitySidebar ? (
           <aside
-            className="scrollbar-quiet hidden w-16 shrink-0 flex-col overflow-y-auto border-r-2 border-black bg-white px-2 py-3 md:flex lg:w-56 lg:p-3"
+            className="scrollbar-quiet hidden w-16 shrink-0 flex-col overflow-y-auto border-r theme-brutal:border-r-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white px-2 py-3 md:flex lg:w-56 lg:p-3"
             data-testid="activity-current-sidebar"
             aria-label={formatMessage({ id: "thread.filter.ariaLabel" })}
           >
@@ -1402,7 +1402,7 @@ export default function ThreadsInbox({ onOpenItem, onDragItem, compactActivitySi
         <section className="flex min-w-0 flex-1 flex-col">
           <div
             data-testid="inbox-toolbar"
-            className={`shrink-0 border-b-2 border-black bg-white px-4 ${activitySidebarInboxEnabled && compactActivitySidebar
+            className={`shrink-0 border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white px-4 ${activitySidebarInboxEnabled && compactActivitySidebar
               ? "flex min-h-[88px] flex-col items-stretch justify-center gap-2 py-2"
               : "flex h-[54px] items-center justify-between gap-3"}`}
           >
@@ -1411,7 +1411,7 @@ export default function ThreadsInbox({ onOpenItem, onDragItem, compactActivitySi
                 <div className="flex min-w-0 items-center" data-testid="activity-master-primary-controls">
                   <button
                     type="button"
-                    className="flex h-8 w-full min-w-0 items-center gap-2 border-2 border-black bg-white px-2 text-xs font-bold shadow-brutal-sm"
+                    className="flex h-8 w-full min-w-0 items-center gap-2 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white px-2 text-xs font-bold shadow-raft-xs theme-brutal:shadow-brutal-sm"
                     aria-expanded={activitySwitcherOpen}
                     onClick={() => setActivitySwitcherOpen(true)}
                     data-testid="activity-scope-switcher"
@@ -1421,17 +1421,17 @@ export default function ThreadsInbox({ onOpenItem, onDragItem, compactActivitySi
                     <span className="shrink-0 text-left">{activeActivityViewOption.label}</span>
                     {selectedActivityGroup ? (
                       <>
-                        <span className="h-4 w-px shrink-0 bg-black/25" aria-hidden="true" />
+                        <span className="h-4 w-px shrink-0 bg-foreground/25 theme-brutal:bg-black/25" aria-hidden="true" />
                         <span className="min-w-0 flex-1 truncate text-left">{compactScopeLabel}</span>
                       </>
                     ) : null}
-                    <ChevronDown size={14} className="shrink-0 text-black/55" />
+                    <ChevronDown size={14} className="shrink-0 text-foreground-muted theme-brutal:text-black/55" />
                   </button>
                 </div>
                 <div className="flex min-w-0 items-center justify-end gap-2" data-testid="activity-master-scope-controls">
                   {(activitySearchVisible || inboxSearchQuery.trim()) ? (
-                    <label className="hidden h-8 min-w-[150px] flex-[1.2] items-center gap-2 border-2 border-black bg-white px-2 shadow-brutal-sm md:flex">
-                      <Search size={14} className="shrink-0 text-black/55" />
+                    <label className="hidden h-8 min-w-[150px] flex-[1.2] items-center gap-2 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white px-2 shadow-raft-xs theme-brutal:shadow-brutal-sm md:flex">
+                      <Search size={14} className="shrink-0 text-foreground-muted theme-brutal:text-black/55" />
                       <input
                         ref={activitySearchInputRef}
                         value={inboxSearchQuery}
@@ -1440,7 +1440,7 @@ export default function ThreadsInbox({ onOpenItem, onDragItem, compactActivitySi
                           if (event.key !== "Escape" || inboxSearchQuery) return;
                           setActivitySearchVisible(false);
                         }}
-                        className="min-w-0 flex-1 bg-transparent text-xs font-bold outline-none placeholder:text-black/35"
+                        className="min-w-0 flex-1 bg-transparent text-xs font-bold outline-none placeholder:text-foreground-placeholder theme-brutal:placeholder:text-black/35"
                         placeholder={formatMessage({ id: "activity.current.searchPlaceholder" })}
                         aria-label={formatMessage({ id: "activity.current.searchAria" })}
                         data-testid="activity-search-input"
@@ -1454,11 +1454,11 @@ export default function ThreadsInbox({ onOpenItem, onDragItem, compactActivitySi
                       items={activitySortOptions}
                     >
                       <SelectTrigger
-                        className="h-8 w-full border-2 border-black bg-white px-2 text-xs font-bold shadow-brutal-sm"
+                        className="h-8 w-full border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white px-2 text-xs font-bold shadow-raft-xs theme-brutal:shadow-brutal-sm"
                         aria-label={formatMessage({ id: "activity.current.sortAria" })}
                         data-testid="activity-sort-select"
                       >
-                        <ArrowDownUp size={14} className="mr-1.5 shrink-0 text-black/55" />
+                        <ArrowDownUp size={14} className="mr-1.5 shrink-0 text-foreground-muted theme-brutal:text-black/55" />
                         <SelectValue />
                         <SelectIcon />
                       </SelectTrigger>
@@ -1477,7 +1477,7 @@ export default function ThreadsInbox({ onOpenItem, onDragItem, compactActivitySi
                   {showMarkAllRead && (
                     <button
                       onClick={() => void markAllRead()}
-                      className="btn-brutal-sm inline-flex h-8 shrink-0 items-center whitespace-nowrap bg-white px-2 text-xs font-bold"
+                      className="btn-brutal-sm inline-flex h-8 shrink-0 items-center whitespace-nowrap bg-layer-panel theme-brutal:bg-white px-2 text-xs font-bold"
                       title={formatMessage({ id: "thread.markAllRead.title" })}
                       data-testid="inbox-mark-all-read"
                     >
@@ -1501,7 +1501,7 @@ export default function ThreadsInbox({ onOpenItem, onDragItem, compactActivitySi
                     <button
                       key={entry.value}
                       type="button"
-                      className={`h-8 shrink-0 border-2 px-2 text-xs font-bold ${activityView === entry.value ? "border-black bg-soft-signal shadow-brutal-sm" : "border-black/20 bg-white"}`}
+                      className={`h-8 shrink-0 border theme-brutal:border-2 px-2 text-xs font-bold ${activityView === entry.value ? "border-line-strong theme-brutal:border-black bg-primary-soft theme-brutal:bg-soft-signal shadow-raft-xs theme-brutal:shadow-brutal-sm" : "border-line-muted theme-brutal:border-black/20 bg-layer-panel theme-brutal:bg-white"}`}
                       onClick={() => setSidebarView(entry.value)}
                       data-testid={`inbox-filter-${entry.value}`}
                     >
@@ -1531,7 +1531,7 @@ export default function ThreadsInbox({ onOpenItem, onDragItem, compactActivitySi
               {activitySidebarInboxEnabled && selectedActivityGroup ? (
                 <button
                   type="button"
-                  className="hidden min-w-0 items-center gap-1.5 text-xs font-bold text-black/60 hover:text-black md:flex"
+                  className="hidden min-w-0 items-center gap-1.5 text-xs font-bold text-foreground-muted theme-brutal:text-black/60 hover:text-foreground-strong theme-brutal:hover:text-black md:flex"
                   title={formatMessage({ id: "activity.channelFilter.clearTitle" }, { channel: stripActivityTitlePrefix(selectedActivityGroup.channelName) })}
                   onClick={() => setChannelFilterId(null)}
                   data-testid="activity-selected-channel-filter"
@@ -1545,8 +1545,8 @@ export default function ThreadsInbox({ onOpenItem, onDragItem, compactActivitySi
               {activitySidebarInboxEnabled ? (
                 <>
                   {(activitySearchVisible || inboxSearchQuery.trim()) ? (
-                    <label className="hidden h-8 w-[min(260px,24vw)] min-w-[180px] items-center gap-2 border-2 border-black bg-white px-2 shadow-brutal-sm md:flex">
-                      <Search size={14} className="shrink-0 text-black/55" />
+                    <label className="hidden h-8 w-[min(260px,24vw)] min-w-[180px] items-center gap-2 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white px-2 shadow-raft-xs theme-brutal:shadow-brutal-sm md:flex">
+                      <Search size={14} className="shrink-0 text-foreground-muted theme-brutal:text-black/55" />
                       <input
                         ref={activitySearchInputRef}
                         value={inboxSearchQuery}
@@ -1555,7 +1555,7 @@ export default function ThreadsInbox({ onOpenItem, onDragItem, compactActivitySi
                           if (event.key !== "Escape" || inboxSearchQuery) return;
                           setActivitySearchVisible(false);
                         }}
-                        className="min-w-0 flex-1 bg-transparent text-xs font-bold outline-none placeholder:text-black/35"
+                        className="min-w-0 flex-1 bg-transparent text-xs font-bold outline-none placeholder:text-foreground-placeholder theme-brutal:placeholder:text-black/35"
                         placeholder={formatMessage({ id: "activity.current.searchPlaceholder" })}
                         aria-label={formatMessage({ id: "activity.current.searchAria" })}
                         data-testid="activity-search-input"
@@ -1569,11 +1569,11 @@ export default function ThreadsInbox({ onOpenItem, onDragItem, compactActivitySi
                       items={activitySortOptions}
                     >
                       <SelectTrigger
-                        className="h-8 min-w-[116px] border-2 border-black bg-white px-2 text-xs font-bold shadow-brutal-sm"
+                        className="h-8 min-w-[116px] border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white px-2 text-xs font-bold shadow-raft-xs theme-brutal:shadow-brutal-sm"
                         aria-label={formatMessage({ id: "activity.current.sortAria" })}
                         data-testid="activity-sort-select"
                       >
-                        <ArrowDownUp size={14} className="mr-1.5 shrink-0 text-black/55" />
+                        <ArrowDownUp size={14} className="mr-1.5 shrink-0 text-foreground-muted theme-brutal:text-black/55" />
                         <SelectValue />
                         <SelectIcon />
                       </SelectTrigger>
@@ -1594,7 +1594,7 @@ export default function ThreadsInbox({ onOpenItem, onDragItem, compactActivitySi
               {showMarkAllRead && (
                 <button
                   onClick={() => void markAllRead()}
-                  className="btn-brutal-sm inline-flex h-8 shrink-0 items-center whitespace-nowrap bg-white px-2 text-xs font-bold"
+                  className="btn-brutal-sm inline-flex h-8 shrink-0 items-center whitespace-nowrap bg-layer-panel theme-brutal:bg-white px-2 text-xs font-bold"
                   title={formatMessage({ id: "thread.markAllRead.title" })}
                   data-testid="inbox-mark-all-read"
                 >
@@ -1609,7 +1609,7 @@ export default function ThreadsInbox({ onOpenItem, onDragItem, compactActivitySi
           <div
             ref={scrollRef}
             data-testid="inbox-scroll"
-            className="scrollbar-quiet relative flex-1 overflow-y-overlay bg-white p-4 safe-bottom"
+            className="scrollbar-quiet relative flex-1 overflow-y-overlay bg-layer-panel theme-brutal:bg-white p-4 safe-bottom"
             onScroll={(e) => handleScroll(e.currentTarget)}
           >
             {newUpdateCount > 0 && (
@@ -1618,7 +1618,7 @@ export default function ThreadsInbox({ onOpenItem, onDragItem, compactActivitySi
                   scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
                   setNewUpdateCount(0);
                 }}
-                className="btn-brutal-sm sticky top-0 left-1/2 -translate-x-1/2 z-10 mb-2 flex items-center gap-1.5 bg-white px-3 py-1.5 text-xs font-bold"
+                className="btn-brutal-sm sticky top-0 left-1/2 -translate-x-1/2 z-10 mb-2 flex items-center gap-1.5 bg-layer-panel theme-brutal:bg-white px-3 py-1.5 text-xs font-bold"
               >
                 <ArrowUp size={14} />
                 {formatMessage({ id: "thread.newUpdates" }, { count: newUpdateCount })}
@@ -1690,7 +1690,7 @@ export default function ThreadsInbox({ onOpenItem, onDragItem, compactActivitySi
                   );
                 })}
                 {visibleLoadingMore && (
-                  <div className="py-3 text-center text-xs font-bold text-black/40">{formatMessage({ id: "thread.loadingMore" })}</div>
+                  <div className="py-3 text-center text-xs font-bold text-foreground-hint theme-brutal:text-black/40">{formatMessage({ id: "thread.loadingMore" })}</div>
                 )}
               </div>
             )}

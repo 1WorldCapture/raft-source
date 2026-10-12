@@ -21,6 +21,9 @@ const SWEPT = [
   "src/App.tsx",
   "src/pages",
   "src/office",
+  "src/components/layout",
+  "src/components/search",
+  "src/components/thread",
 ];
 // Top-level files directly under src/components (area 1) are listed by name so
 // sub-folders swept later are not pulled in early.

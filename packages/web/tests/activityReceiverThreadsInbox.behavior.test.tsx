@@ -31,6 +31,7 @@ import { triggerServerReset } from "../src/store/serverResetRegistry";
 import { useMessageStore } from "../src/store/messageStore";
 import { useTaskStore } from "../src/store/taskStore";
 import { useThreadStore } from "../src/store/threadStore";
+import { brutalView } from "./helpers/brutalView";
 
 type TestFn = () => void | Promise<void>;
 const test = (name: string, fn: TestFn) =>
@@ -720,20 +721,20 @@ test("Activity done actions stay quiet until their row is active, focused, or ho
   const inactiveContent = within(rows[0]).getByTestId("conversation-card-content");
   const inactiveActions = within(rows[0]).getByTestId("conversation-card-actions");
   const inactiveTimestamp = within(rows[0]).getByTestId("conversation-card-timestamp");
-  assert.match(inactiveContent.className, /(?:^|\s)w-full(?:\s|$)/);
-  assert.match(inactiveActions.className, /(?:^|\s)absolute(?:\s|$)/);
-  assert.match(inactiveActions.className, /(?:^|\s)right-3(?:\s|$)/);
-  assert.match(inactiveActions.className, /(?:^|\s)top-3(?:\s|$)/);
-  assert.doesNotMatch(inactiveActions.className, /(?:^|\s)shrink-0(?:\s|$)/);
-  assert.match(inactiveActions.className, /(?:^|\s)bg-transparent(?:\s|$)/);
-  assert.match(inactiveActions.className, /(?:^|\s)group-hover:bg-white(?:\s|$)/);
-  assert.match(inactiveTimestamp.className, /(?:^|\s)group-hover:opacity-0(?:\s|$)/);
-  assert.match(inactiveTimestamp.className, /(?:^|\s)group-focus-within:opacity-0(?:\s|$)/);
+  assert.match(brutalView(inactiveContent.className), /(?:^|\s)w-full(?:\s|$)/);
+  assert.match(brutalView(inactiveActions.className), /(?:^|\s)absolute(?:\s|$)/);
+  assert.match(brutalView(inactiveActions.className), /(?:^|\s)right-3(?:\s|$)/);
+  assert.match(brutalView(inactiveActions.className), /(?:^|\s)top-3(?:\s|$)/);
+  assert.doesNotMatch(brutalView(inactiveActions.className), /(?:^|\s)shrink-0(?:\s|$)/);
+  assert.match(brutalView(inactiveActions.className), /(?:^|\s)bg-transparent(?:\s|$)/);
+  assert.match(brutalView(inactiveActions.className), /(?:^|\s)group-hover:bg-white(?:\s|$)/);
+  assert.match(brutalView(inactiveTimestamp.className), /(?:^|\s)group-hover:opacity-0(?:\s|$)/);
+  assert.match(brutalView(inactiveTimestamp.className), /(?:^|\s)group-focus-within:opacity-0(?:\s|$)/);
   assert.equal(within(rows[0]).queryByTestId("inbox-row-save"), null);
 
   const inactiveDone = within(rows[0]).getByTestId("inbox-row-done");
-  assert.match(inactiveDone.className, /(?:^|\s)pointer-events-none(?:\s|$)/);
-  assert.match(inactiveDone.className, /(?:^|\s)group-hover:pointer-events-auto(?:\s|$)/);
+  assert.match(brutalView(inactiveDone.className), /(?:^|\s)pointer-events-none(?:\s|$)/);
+  assert.match(brutalView(inactiveDone.className), /(?:^|\s)group-hover:pointer-events-auto(?:\s|$)/);
   fireEvent.keyDown(inactiveDone, { key: "Enter" });
   fireEvent.keyDown(inactiveDone, { key: " " });
   assert.deepEqual(keyboardDoneCalls, [inactiveItem.lastMessageId, inactiveItem.lastMessageId]);
@@ -742,10 +743,10 @@ test("Activity done actions stay quiet until their row is active, focused, or ho
   const activeDone = within(rows[1]).getByTestId("inbox-row-done");
   const activeTimestamp = within(rows[1]).getByTestId("conversation-card-timestamp");
   assert.equal(rows[1].getAttribute("data-active"), "true");
-  assert.match(activeDone.className, /(?:^|\s)pointer-events-auto(?:\s|$)/);
-  assert.match(activeDone.className, /(?:^|\s)opacity-100(?:\s|$)/);
-  assert.match(activeTimestamp.className, /(?:^|\s)opacity-0(?:\s|$)/);
-  assert.match(within(rows[1]).getByTestId("conversation-card-actions").className, /(?:^|\s)bg-white(?:\s|$)/);
+  assert.match(brutalView(activeDone.className), /(?:^|\s)pointer-events-auto(?:\s|$)/);
+  assert.match(brutalView(activeDone.className), /(?:^|\s)opacity-100(?:\s|$)/);
+  assert.match(brutalView(activeTimestamp.className), /(?:^|\s)opacity-0(?:\s|$)/);
+  assert.match(brutalView(within(rows[1]).getByTestId("conversation-card-actions").className), /(?:^|\s)bg-white(?:\s|$)/);
   assert.equal(within(rows[1]).queryByTestId("inbox-row-save"), null);
 });
 

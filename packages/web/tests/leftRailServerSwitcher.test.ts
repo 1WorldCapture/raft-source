@@ -7,14 +7,13 @@ import {
   getServerSwitcherTarget,
   openServerSwitcherAuxClickTarget,
 } from "../src/utils/serverSwitcherNavigation";
+import { brutalView } from "./helpers/brutalView";
 
 const repoRoot = resolve(import.meta.dirname, "..");
 
 test("server switcher rows expose remembered targets for new-tab actions", () => {
-  const primitive = readFileSync(
-    resolve(repoRoot, "src/components/ui/ServerSwitcherMenu.tsx"),
-    "utf8",
-  );
+  const primitive = brutalView(readFileSync(
+    resolve(repoRoot, "src/components/ui/ServerSwitcherMenu.tsx"), "utf8"));
 
   assert.match(
     primitive,
@@ -107,14 +106,10 @@ test("desktop server switcher keeps long server lists inside the viewport", () =
   // Post-extraction (task #234 ServerSwitcherMenu primitive): the desktop
   // LeftRail callsite owns the testId + max-h sizing (passed in via props);
   // the inner scrollable container + card chrome now live in the primitive.
-  const leftRail = readFileSync(
-    resolve(repoRoot, "src/components/layout/LeftRail.tsx"),
-    "utf8",
-  );
-  const primitive = readFileSync(
-    resolve(repoRoot, "src/components/ui/ServerSwitcherMenu.tsx"),
-    "utf8",
-  );
+  const leftRail = brutalView(readFileSync(
+    resolve(repoRoot, "src/components/layout/LeftRail.tsx"), "utf8"));
+  const primitive = brutalView(readFileSync(
+    resolve(repoRoot, "src/components/ui/ServerSwitcherMenu.tsx"), "utf8"));
 
   // Callsite owns: testId + viewport-bounded max-h (sized for the desktop rail).
   assert.match(leftRail, /testId="desktop-server-switcher-menu"/);
@@ -131,10 +126,8 @@ test("server switcher navigation preserves desktop restore while mobile replaces
   // Post-extraction: server switch routing lives in the primitive. Desktop
   // keeps remembered-surface behavior while the mobile callsite selects Home
   // + REPLACE through navigationMode. Assert the split at the source of truth.
-  const primitive = readFileSync(
-    resolve(repoRoot, "src/components/ui/ServerSwitcherMenu.tsx"),
-    "utf8",
-  );
+  const primitive = brutalView(readFileSync(
+    resolve(repoRoot, "src/components/ui/ServerSwitcherMenu.tsx"), "utf8"));
 
   assert.match(
     primitive,
@@ -155,24 +148,18 @@ test("server switcher navigation preserves desktop restore while mobile replaces
 });
 
 test("rail tabs hover to opaque white, not translucent gray", () => {
-  const source = readFileSync(
-    resolve(repoRoot, "src/components/layout/LeftRail.tsx"),
-    "utf8",
-  );
+  const source = brutalView(readFileSync(
+    resolve(repoRoot, "src/components/layout/LeftRail.tsx"), "utf8"));
 
   assert.match(source, /border-transparent hover:border-black hover:bg-white"/);
   assert.doesNotMatch(source, /hover:bg-white\/70/);
 });
 
 test("chat rail tab shows an icon-anchored unread dot only while inactive", () => {
-  const source = readFileSync(
-    resolve(repoRoot, "src/components/layout/LeftRail.tsx"),
-    "utf8",
-  );
-  const sidebar = readFileSync(
-    resolve(repoRoot, "src/components/layout/Sidebar.tsx"),
-    "utf8",
-  );
+  const source = brutalView(readFileSync(
+    resolve(repoRoot, "src/components/layout/LeftRail.tsx"), "utf8"));
+  const sidebar = brutalView(readFileSync(
+    resolve(repoRoot, "src/components/layout/Sidebar.tsx"), "utf8"));
 
   // Keep this source contract compatible with Stryker's callback
   // instrumentation; the runtime render tooth below owns subscription behavior.

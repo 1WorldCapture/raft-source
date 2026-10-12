@@ -26,10 +26,10 @@ export default function SidebarSectionDialog({
 
   return (
     <Modal onClose={onClose} closeOnBackdrop>
-      <div className="card-brutal w-full max-w-sm bg-white p-5">
+      <div className="card-brutal w-full max-w-sm bg-layer-panel theme-brutal:bg-white p-5">
         <div className="mb-4 flex items-center justify-between gap-3">
           <h2 className="text-base font-bold uppercase">{title}</h2>
-          <button type="button" onClick={onClose} className="btn-brutal-sm bg-white p-1" aria-label={formatMessage({ id: "common.close" })}>
+          <button type="button" onClick={onClose} className="btn-brutal-sm bg-layer-panel theme-brutal:bg-white p-1" aria-label={formatMessage({ id: "common.close" })}>
             <X size={18} />
           </button>
         </div>
@@ -45,7 +45,7 @@ export default function SidebarSectionDialog({
             <div className="mb-1 text-xs font-bold uppercase">
               {formatMessage({ id: "layout.sidebar.sectionName" })}
             </div>
-            <div className="flex items-stretch border-2 border-black bg-white shadow-brutal-sm focus-within:shadow-brutal">
+            <div className="flex items-stretch border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white shadow-raft-xs theme-brutal:shadow-brutal-sm focus-within:shadow-raft-sm theme-brutal:focus-within:shadow-brutal">
               <SidebarSectionEmojiPicker value={emoji} onChange={setEmoji} />
               <input
                 autoFocus
@@ -53,16 +53,16 @@ export default function SidebarSectionDialog({
                 maxLength={80}
                 value={name}
                 onChange={(event) => setName(event.target.value)}
-                className="min-w-0 flex-1 bg-white px-3 py-2 font-display normal-case focus:outline-none"
+                className="min-w-0 flex-1 bg-layer-panel theme-brutal:bg-white px-3 py-2 font-display normal-case focus:outline-none"
                 placeholder={formatMessage({ id: "layout.sidebar.sectionNamePlaceholder" })}
               />
             </div>
           </div>
           <div className="flex justify-end gap-2">
-            <button type="button" onClick={onClose} className="btn-brutal bg-white px-3 py-2 text-sm">
+            <button type="button" onClick={onClose} className="btn-brutal bg-layer-panel theme-brutal:bg-white px-3 py-2 text-sm">
               {formatMessage({ id: "layout.sidebar.cancelSection" })}
             </button>
-            <button type="submit" disabled={!trimmedName} className="btn-brutal bg-brutal-pink px-3 py-2 text-sm disabled:opacity-50">
+            <button type="submit" disabled={!trimmedName} className="btn-brutal bg-accent-soft theme-brutal:bg-brutal-pink px-3 py-2 text-sm disabled:opacity-50">
               {submitLabel}
             </button>
           </div>

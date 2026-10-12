@@ -64,8 +64,8 @@ export default function SidebarSectionEmojiPicker({
         aria-expanded={open}
         title={formatMessage({ id: value ? "layout.sidebar.changeEmoji" : "layout.sidebar.chooseEmoji" })}
         onClick={() => setOpen((current) => !current)}
-        className={`flex h-full min-h-10 w-11 items-center justify-center border-r-2 border-black bg-white p-0 text-xl focus:outline-none ${
-          value ? "text-black" : "text-black/40"
+        className={`flex h-full min-h-10 w-11 items-center justify-center border-r theme-brutal:border-r-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white p-0 text-xl focus:outline-none ${
+          value ? "text-foreground-strong theme-brutal:text-black" : "text-foreground-hint theme-brutal:text-black/40"
         }`}
       >
         {value || <SmilePlus size={18} aria-hidden />}
@@ -74,7 +74,7 @@ export default function SidebarSectionEmojiPicker({
         <div
           role="dialog"
           aria-label={formatMessage({ id: "layout.sidebar.chooseSectionEmoji" })}
-          className="absolute left-0 top-[calc(100%+8px)] z-[70] border-2 border-black bg-white shadow-brutal"
+          className="absolute left-0 top-[calc(100%+8px)] z-[70] border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white shadow-raft-sm theme-brutal:shadow-brutal"
         >
           {value && (
             <button
@@ -83,7 +83,7 @@ export default function SidebarSectionEmojiPicker({
                 onChange("");
                 setOpen(false);
               }}
-              className="flex h-9 w-full items-center justify-center gap-2 border-b-2 border-black bg-white px-3 text-xs font-bold hover:bg-soft-signal/30"
+              className="flex h-9 w-full items-center justify-center gap-2 border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white px-3 text-xs font-bold hover:bg-primary-soft/30 theme-brutal:hover:bg-soft-signal/30"
             >
               <X size={14} aria-hidden />
               {formatMessage({ id: "layout.sidebar.noEmoji" })}
@@ -101,7 +101,7 @@ export default function SidebarSectionEmojiPicker({
               }}
             />
           ) : (
-            <div role="status" className="flex h-24 w-[min(340px,calc(100vw-48px))] items-center justify-center text-sm text-black/60">
+            <div role="status" className="flex h-24 w-[min(340px,calc(100vw-48px))] items-center justify-center text-sm text-foreground-muted theme-brutal:text-black/60">
               {formatMessage({ id: "layout.sidebar.loadingEmoji" })}
             </div>
           )}

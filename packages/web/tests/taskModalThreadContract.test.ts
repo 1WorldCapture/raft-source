@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
+import { brutalView } from "./helpers/brutalView";
 
 const repoRoot = resolve(import.meta.dirname, "..");
 const strykerBackupRoot = () => {
@@ -13,7 +14,7 @@ const strykerBackupRoot = () => {
 
 function readSource(path: string): string {
   const backupPath = resolve(strykerBackupRoot() ?? repoRoot, path);
-  return readFileSync(backupPath, "utf8");
+  return brutalView(readFileSync(backupPath, "utf8"));
 }
 
 test("tasks route opens task threads in a centered modal instead of the side panel", () => {

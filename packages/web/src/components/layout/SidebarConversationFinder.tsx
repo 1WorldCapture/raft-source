@@ -143,8 +143,8 @@ export function SidebarConversationFinder({
 
   return (
     <div ref={rootRef} className="relative shrink-0 px-2 pt-2.5 pb-2">
-      <div className="flex min-w-0 items-center gap-2 border-2 border-black bg-white px-2.5 py-1.5 shadow-brutal-sm focus-within:shadow-brutal">
-        <Search size={15} className="shrink-0 text-black/50" />
+      <div className="flex min-w-0 items-center gap-2 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white px-2.5 py-1.5 shadow-raft-xs theme-brutal:shadow-brutal-sm focus-within:shadow-raft-sm theme-brutal:focus-within:shadow-brutal">
+        <Search size={15} className="shrink-0 text-foreground-muted theme-brutal:text-black/50" />
         <input
           ref={inputRef}
           value={query}
@@ -159,7 +159,7 @@ export function SidebarConversationFinder({
           placeholder={formatMessage({ id: "sidebar.findConversationPlaceholder" })}
           aria-label={formatMessage({ id: "sidebar.findConversationPlaceholder" })}
           data-testid="sidebar-conversation-finder-input"
-          className="min-w-0 flex-1 bg-transparent text-sm font-display font-medium outline-none placeholder:text-black/40"
+          className="min-w-0 flex-1 bg-transparent text-sm font-display font-medium outline-none placeholder:text-foreground-hint theme-brutal:placeholder:text-black/40"
         />
       </div>
 
@@ -169,7 +169,7 @@ export function SidebarConversationFinder({
           data-testid="sidebar-conversation-finder-results"
         >
           {ranked.length === 0 ? (
-            <div className="px-3 py-2 text-xs text-black/50">
+            <div className="px-3 py-2 text-xs text-foreground-muted theme-brutal:text-black/50">
               {formatMessage({ id: "sidebar.findConversationEmpty" })}
             </div>
           ) : (
@@ -185,15 +185,15 @@ export function SidebarConversationFinder({
                 }}
                 onMouseEnter={() => setActiveIndex(index)}
                 className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium transition-colors ${
-                  index === activeRow ? "bg-soft-signal font-bold" : "hover:bg-soft-signal/50"
+                  index === activeRow ? "bg-primary-soft theme-brutal:bg-soft-signal font-bold" : "hover:bg-primary-soft/50 theme-brutal:hover:bg-soft-signal/50"
                 }`}
               >
                 <FinderResultIcon result={result} />
-                <span className="min-w-0 flex-1 truncate font-medium text-black">
+                <span className="min-w-0 flex-1 truncate font-medium text-foreground-strong theme-brutal:text-black">
                   {result.label}
                 </span>
                 {result.sublabel && (
-                  <span className="max-w-[45%] shrink-0 truncate text-[11px] text-black/40">
+                  <span className="max-w-[45%] shrink-0 truncate text-[11px] text-foreground-hint theme-brutal:text-black/40">
                     {result.sublabel}
                   </span>
                 )}
@@ -209,9 +209,9 @@ export function SidebarConversationFinder({
 function FinderResultIcon({ result }: { result: FinderResult }) {
   if (result.kind === "channel") {
     return result.private ? (
-      <Lock size={14} className="shrink-0 text-black/50" />
+      <Lock size={14} className="shrink-0 text-foreground-muted theme-brutal:text-black/50" />
     ) : (
-      <Hash size={14} className="shrink-0 text-black/50" />
+      <Hash size={14} className="shrink-0 text-foreground-muted theme-brutal:text-black/50" />
     );
   }
   // DMs / agents / people reuse the app's avatar primitive at the same size

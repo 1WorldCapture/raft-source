@@ -52,8 +52,8 @@ export function LiveAgentActivityBarPresentation({
     : latest.text;
 
   const containerClassName = variant === "mobile"
-    ? "border-t-2 border-black bg-white px-3 py-2"
-    : "border-t-2 border-black bg-brutal-cream px-3 py-2";
+    ? "border-t theme-brutal:border-t-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white px-3 py-2"
+    : "border-t theme-brutal:border-t-2 border-line-strong theme-brutal:border-black bg-layer-canvas-muted theme-brutal:bg-brutal-cream px-3 py-2";
 
   return (
     <div
@@ -69,7 +69,7 @@ export function LiveAgentActivityBarPresentation({
         />
         <div className="flex min-w-0 flex-1 items-center gap-1.5">
           <StatusDot activity={latest.activity ?? "offline"} className="shrink-0" />
-          <span className="min-w-0 truncate text-sm text-black/60 font-mono" title={text}>
+          <span className="min-w-0 truncate text-sm text-foreground-muted theme-brutal:text-black/60 font-mono" title={text}>
             {text}
           </span>
         </div>
