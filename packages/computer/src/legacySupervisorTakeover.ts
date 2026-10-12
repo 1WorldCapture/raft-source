@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 import { open, readFile, rm, writeFile } from "node:fs/promises";
 import type { FileHandle } from "node:fs/promises";
 import { currentDate, currentTimeMs, setClockTimeout } from "@botiverse/raft-shared";
+import { liveProcessExecutablePath } from "./liveExecutable.js";
 import { isProcessAlive, readPidfileAt } from "./internal/process-primitives.js";
 import { rotateLogIfNeeded } from "./logRotation.js";
 import { resolveRaftHome, serviceLogPath, servicePidPath, serviceVersionPath } from "./paths.js";
@@ -36,9 +37,12 @@ function isSea(): boolean {
 }
 
 function selfCommand(args: string[]): { command: string; args: string[] } {
+  // Takeover legs re-execute this binary and can run after a K promotion
+  // renamed the startup execPath away — resolve the live path.
+  const command = liveProcessExecutablePath();
   return isSea()
-    ? { command: process.execPath, args: [...process.execArgv, ...args] }
-    : { command: process.execPath, args: [...process.execArgv, process.argv[1] ?? "", ...args] };
+    ? { command, args: [...process.execArgv, ...args] }
+    : { command, args: [...process.execArgv, process.argv[1] ?? "", ...args] };
 }
 
 function spawnLeg(

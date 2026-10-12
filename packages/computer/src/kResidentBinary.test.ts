@@ -156,3 +156,67 @@ test("Windows path casing cannot make a running stable SEA dispatch to itself fo
   );
   assert.equal(chosen, current);
 });
+
+test("a re-staged experiment slot is not mistaken for the running binary (identity guard)", async () => {
+  // K promoted the running experiment to stable, then staged the NEXT
+  // candidate into the experiment path again: the startup path exists but its
+  // bytes are the new candidate. The startup identity must route later spawns
+  // to stable (upstream liveExecutable semantics; the spelling-based path
+  // returned the experiment path — i.e. re-exec of an UNTESTED candidate).
+  const home = "/var/folders/fixture/home/.slock";
+  const experiment = kSlotBinaryPath(home, "experiment");
+  const stable = kSlotBinaryPath(home, "stable");
+  const chosen = await resolveKResidentBinary(
+    home,
+    experiment,
+    true,
+    accessible(experiment, stable),
+    "darwin",
+    () => { throw new Error("EACCES"); },
+    {
+      startupIdentity: () => "1:100",
+      identityOf: (p) => (p === stable ? "1:100" : p === experiment ? "1:200" : null),
+    },
+  );
+  assert.equal(chosen, stable, "the running bytes live at stable — spawns must follow the rename, not the re-staged path");
+});
+
+test("the identity guard does not override a genuine running experiment", async () => {
+  // Before any promotion the running binary IS the experiment file: identity
+  // matches the startup path and the resolver keeps using its own path.
+  const home = "/var/folders/fixture/home/.slock";
+  const experiment = kSlotBinaryPath(home, "experiment");
+  const stable = kSlotBinaryPath(home, "stable");
+  const chosen = await resolveKResidentBinary(
+    home,
+    experiment,
+    true,
+    accessible(experiment, stable),
+    "darwin",
+    () => { throw new Error("EACCES"); },
+    {
+      startupIdentity: () => "1:200",
+      identityOf: (p) => (p === stable ? "1:100" : p === experiment ? "1:200" : null),
+    },
+  );
+  assert.equal(chosen, experiment);
+});
+
+test("no usable startup identity keeps the spelling-based behavior", async () => {
+  const home = "/var/folders/fixture/home/.slock";
+  const experiment = kSlotBinaryPath(home, "experiment");
+  const stable = kSlotBinaryPath(home, "stable");
+  const chosen = await resolveKResidentBinary(
+    home,
+    experiment,
+    true,
+    accessible(experiment, stable),
+    "darwin",
+    () => { throw new Error("EACCES"); },
+    {
+      startupIdentity: () => null,
+      identityOf: () => null,
+    },
+  );
+  assert.equal(chosen, experiment, "without identity the experiment spelling still wins (pre-guard semantics)");
+});

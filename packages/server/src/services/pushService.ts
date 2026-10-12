@@ -8,6 +8,7 @@ import { and, asc, eq, exists, gt, inArray, isNull, lt, or, sql } from "drizzle-
 import jwt from "jsonwebtoken";
 import webpush from "web-push";
 import { getDb, registerDatabaseCloseHookForTests, type DatabaseExecutor } from "../db/index.js";
+import { chunkForBindParameters, insertParametersPerRow } from "../db/bindParameterBudget.js";
 import {
   agents,
   attachments,
@@ -1087,30 +1088,36 @@ export async function enqueueMobilePushForInboxFacts(
     .filter((fact) => fact.receiverType === "user" && fact.unreadEligible !== false)
     .map((fact) => ({ ...fact, receiverType: "user" as const }));
   if (queuedFacts.length === 0) return 0;
-  const insertedRows = await executor
-    .insert(mobilePushOutbox)
-    .values(queuedFacts.map((fact) => ({
-      receiverType: fact.receiverType,
-      receiverId: fact.receiverId,
-      serverId: fact.serverId,
-      kind: fact.kind,
-      sourceChannelId: fact.sourceChannelId,
-      messageId: fact.messageId,
-      messageSeq: fact.messageSeq,
-      activityAt: fact.activityAt,
-      personalMention: fact.personalMention === true,
-      unreadEligible: fact.unreadEligible !== false,
-      updatedAt: sql`now()`,
-    })))
-    .onConflictDoNothing({
-      target: [
-        mobilePushOutbox.receiverType,
-        mobilePushOutbox.receiverId,
-        mobilePushOutbox.sourceChannelId,
-        mobilePushOutbox.messageId,
-      ],
-    })
-    .returning({ id: mobilePushOutbox.id });
+  // PostgreSQL binds at most 65,535 parameters per statement; shard the
+  // outbox insert the same way as the inbox facts (upstream 1.21.2
+  // bindParameterBudget port). onConflictDoNothing makes chunks independent.
+  const insertedRows: Array<{ id: string }> = [];
+  for (const chunk of chunkForBindParameters(queuedFacts, insertParametersPerRow(mobilePushOutbox))) {
+    insertedRows.push(...await executor
+      .insert(mobilePushOutbox)
+      .values(chunk.map((fact) => ({
+        receiverType: fact.receiverType,
+        receiverId: fact.receiverId,
+        serverId: fact.serverId,
+        kind: fact.kind,
+        sourceChannelId: fact.sourceChannelId,
+        messageId: fact.messageId,
+        messageSeq: fact.messageSeq,
+        activityAt: fact.activityAt,
+        personalMention: fact.personalMention === true,
+        unreadEligible: fact.unreadEligible !== false,
+        updatedAt: sql`now()`,
+      })))
+      .onConflictDoNothing({
+        target: [
+          mobilePushOutbox.receiverType,
+          mobilePushOutbox.receiverId,
+          mobilePushOutbox.sourceChannelId,
+          mobilePushOutbox.messageId,
+        ],
+      })
+      .returning({ id: mobilePushOutbox.id }));
+  }
 
   addTraceEvent("push.mobile.delivery.enqueued", {
     fact_count: queuedFacts.length,

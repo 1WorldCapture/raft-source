@@ -1156,6 +1156,9 @@ interface DeliveryTraceContext {
   onMentionTransition?: (stage: MentionDeliveryTransitionStage, outcome: "accepted" | "coalesced") => void;
   onMentionTerminalError?: (code: MentionDeliveryTerminalErrorCode) => void;
   onMentionAck?: () => void;
+  /** No process and no cached idle/restart config: the Server must be told so it
+   *  can wake the agent WITH config (upstream task #1113). */
+  onRejectedNoProcess?: () => void;
 }
 
 interface TrackedMentionDelivery {
@@ -1163,6 +1166,12 @@ interface TrackedMentionDelivery {
   messageId: string;
   state: "received" | "pending" | "drained";
   context: DeliveryTraceContext;
+  /** The delivered row, kept so turn-end settlement can ask whether the
+   *  runtime consumed it (upstream task #285). */
+  message: AgentMessage;
+  /** The process whose first input named this message (a restart for it,
+   *  upstream task #9) — the turn-end settlement treats it as told. */
+  toldProcessInstanceId?: string;
 }
 
 /**
@@ -3281,6 +3290,9 @@ export class AgentProcessManager {
     };
     this.startingInboxes.drainOnSpawn(agentId);
     this.agents.set(agentId, agentProcess);
+    // Upstream task #9: any pending tracked mention this process's first input
+    // names was told to it — the turn-end settlement treats those as delivered.
+    this.markTrackedMentionsToldAtStart(agentId, processInstanceId, startupInputMessages);
     if (this.lifecycleRecords.stopEpochChanged(agentId, startStopEpoch)) {
       await this.cleanupStoppedRuntimeStart(agentId, agentProcess);
       return;
@@ -3467,6 +3479,7 @@ export class AgentProcessManager {
         this.interruptCompactionIfActive(agentId);
         cleanupLaunchProxies(agentId);
         this.revokeManagedRunnerCredential(agentId, ap.config, ap.launchId);
+        this.releaseTrackedMentionDeliveriesForProcessExit(agentId, ap);
         this.agents.delete(agentId);
 
         if (shouldColdStartResumeSession) {
@@ -4319,6 +4332,20 @@ export class AgentProcessManager {
         return reject("INSTRUMENT_FAILED");
       }
       if (existing.state === "drained") return "duplicate_drained";
+      // Upstream task #9 follow-up: pending, but no process, start or start
+      // buffer holds it any more (a continuation restart failed and dropped
+      // its input). The redelivery is routed again instead of coalescing into
+      // a dead entry no turn end will ever settle.
+      if (
+        existing.state === "pending"
+        && !ap
+        && !this.agentStarts.hasStarting(agentId)
+        && !this.agentStarts.hasQueued(agentId)
+        && !this.startingInboxes.has(agentId)
+      ) {
+        existing.message = message;
+        return "accepted";
+      }
       context.onMentionTransition?.("daemon_pending", "coalesced");
       return "duplicate_pending";
     }
@@ -4327,6 +4354,7 @@ export class AgentProcessManager {
       messageId: tracked.messageId,
       state: "received",
       context,
+      message,
     });
     context.onMentionTransition?.("daemon_received", "accepted");
     return "accepted";
@@ -4365,6 +4393,105 @@ export class AgentProcessManager {
     for (const tracked of this.trackedMentionDeliveries.values()) {
       if (tracked.agentId !== agentId || tracked.state !== "pending") continue;
       this.completeTrackedMentionDelivery(tracked.context);
+    }
+  }
+
+  /** Upstream task #9: pending tracked mentions this process's first input
+   *  names were told to it — the turn-end settlement treats those as
+   *  delivered even when the inbox row is gone. */
+  private markTrackedMentionsToldAtStart(agentId: string, processInstanceId: string, messages: readonly AgentMessage[]): void {
+    if (messages.length === 0) return;
+    const ids = new Set(messages.map((message) => message.message_id));
+    for (const tracked of this.trackedMentionDeliveries.values()) {
+      if (tracked.agentId === agentId && tracked.state === "pending" && ids.has(tracked.messageId)) {
+        tracked.toldProcessInstanceId = processInstanceId;
+      }
+    }
+  }
+
+  /** A tracked mention the delivery could not hand to any process: terminal,
+   *  and released from the map so later turn ends do not re-report it. */
+  private failTrackedMention(context: DeliveryTraceContext, code: MentionDeliveryTerminalErrorCode): void {
+    const occurrenceId = context.mentionDelivery?.occurrenceId;
+    if (!occurrenceId || !this.trackedMentionDeliveries.has(occurrenceId)) return;
+    this.trackedMentionDeliveries.delete(occurrenceId);
+    context.onMentionTerminalError?.(code);
+  }
+
+  /**
+   * Upstream task #285: a busy tracked mention waits for the turn boundary.
+   * When that boundary writes no fresh notice, the occurrence must still end
+   * here — otherwise it stays pending, the agent goes idle with nothing to
+   * wake it, and every server re-send of the occurrence lands on
+   * `duplicate_pending` and is answered with silence, forever.
+   *
+   * Complements the consume-time settlement (fd3b8924): a mention consumed via
+   * the CLI pull path is already drained out of the map by then; this net only
+   * sees what is STILL pending at the boundary, and every settle funnels into
+   * the same idempotent completeTrackedMentionDelivery / terminal-error paths,
+   * so neither ack can double-fire nor be missed.
+   */
+  private settleUndeliveredTrackedMentionsAtTurnEnd(agentId: string, ap: AgentProcess): void {
+    // Review fix 1: a turn that ended in a sticky terminal failure, or without
+    // a usable session, makes the inbox UNRELIABLE as evidence — the message
+    // sitting in it may still be delivered by a later turn or a restart. A
+    // still-queued mention must NOT be settled to DELIVERY_REJECTED here
+    // (that error is terminal on the server), or the mention is lost for good
+    // once this process's inbox dies with a daemon restart. Leave it pending;
+    // a later turn end, the consume-time settle, or the process-exit release
+    // owns it.
+    const inboxUnreliable = classifyStickyTerminalFailure(ap) !== null
+      || !this.canDeliverToRuntimeSession(ap);
+    for (const [occurrenceId, tracked] of [...this.trackedMentionDeliveries.entries()]) {
+      if (tracked.agentId !== agentId || tracked.state !== "pending") continue;
+      const queued = ap.inbox.find((message) => message.message_id === tracked.messageId);
+      // Upstream task #9: named in this process's first input → told. Still
+      // queued on a per_turn runtime but not yet told → the restart after this
+      // turn carries it, and that process's turn end settles it.
+      if (tracked.toldProcessInstanceId === ap.processInstanceId) {
+        this.completeTrackedMentionDelivery(tracked.context);
+        continue;
+      }
+      if (queued && ap.driver.lifecycle.kind === "per_turn") continue;
+      // Still queued: told only if its notice reached this session. Gone from
+      // the inbox: told only if the runtime consumed it (check/read record it
+      // model-seen). A server purge (e.g. membership removed) also removes the
+      // row, and that must not read as delivered.
+      const toldRuntime = queued
+        ? ap.notifications.hasContributedMessage(queued, ap.sessionId)
+        : this.isVisibleMessageModelSeen(agentId, formatAgentMessageVisibleTarget(tracked.message), tracked.message);
+      if (toldRuntime) {
+        this.completeTrackedMentionDelivery(tracked.context);
+        continue;
+      }
+      if (queued && inboxUnreliable) continue;
+      tracked.context.onMentionTerminalError?.("DELIVERY_REJECTED");
+      // Terminal: release the entry so later turn ends do not report it again.
+      this.trackedMentionDeliveries.delete(occurrenceId);
+    }
+  }
+
+  /**
+   * Review fix 3 (+ note b): release this agent's tracked mention deliveries
+   * when its process ends. A pending entry pointing at a dead process can
+   * never be settled by a turn end — every server redelivery would hit
+   * duplicate_pending forever (per_turn runtimes crash this way; the same
+   * stuck entry forms for any runtime whose process dies mid-queue). The
+   * server redelivers what it still considers undelivered, and that redelivery
+   * re-tracks against the replacement process. Drained entries of the ended
+   * process are released too: the server holds their acks, and keeping them
+   * (each now carries a full AgentMessage) only grows the map.
+   */
+  private releaseTrackedMentionDeliveriesForProcessExit(agentId: string, ap: AgentProcess): void {
+    for (const [occurrenceId, tracked] of [...this.trackedMentionDeliveries.entries()]) {
+      if (tracked.agentId !== agentId) continue;
+      if (tracked.state === "pending" && tracked.toldProcessInstanceId === ap.processInstanceId) {
+        // Named in this process's first input: the process WAS told before it
+        // ended — ack it instead of releasing.
+        this.completeTrackedMentionDelivery(tracked.context);
+        continue;
+      }
+      this.trackedMentionDeliveries.delete(occurrenceId);
     }
   }
 
@@ -4613,9 +4740,12 @@ export class AgentProcessManager {
         });
         if (trackedBegin !== "accepted") return restarted;
         // The wake message rides the spawn, so a started process is the drain.
+        // A failed restart is terminal AND released (upstream task #285): a
+        // raw terminal error without releasing the map entry leaves the
+        // occurrence pending forever — every later turn end would re-report it.
         return restarted.then((started) => {
           if (started) this.completeTrackedMentionDelivery(traceContext);
-          else traceContext.onMentionTerminalError?.("DELIVERY_REJECTED");
+          else this.failTrackedMention(traceContext, "DELIVERY_REJECTED");
           return started;
         });
       }
@@ -4650,6 +4780,10 @@ export class AgentProcessManager {
         process_present: false,
         cached_idle_config_present: false,
       }), "error");
+      // Upstream task #1113: hand the wake back to the Server with the delivery
+      // key — the Server owns the config and converts this into a start that
+      // carries the message, instead of blind redelivery against no process.
+      traceContext.onRejectedNoProcess?.();
       this.sendAgentStatus(agentId, "inactive", null);
       this.broadcastActivity(agentId, "offline", "Process unavailable; restart required", [], undefined, "runtime_unavailable");
       return false;
@@ -4663,6 +4797,25 @@ export class AgentProcessManager {
     const isIdle = this.isApmIdle(ap) || ap.driver.isRunInProgress?.() === false;
 
     if (trackedBegin === "accepted" && !isIdle) {
+      if (!ap.driver.supportsStdinNotification && ap.driver.lifecycle.kind === "per_turn") {
+        // Upstream task #9: a per_turn runtime takes no input mid-turn. The
+        // mention waits in the inbox; the restart after this turn's exit
+        // carries it, and that process's turn end settles it.
+        const queued = queueAgentInboxMessage(ap, message);
+        this.markTrackedMentionPending(traceContext, queued.duplicate ? "coalesced" : "accepted");
+        this.recordDaemonTrace("daemon.agent.delivery.routed", this.deliveryTraceAttrs(agentId, message, {
+          outcome: queued.duplicate ? "coalesced_busy_mention" : "queued_busy_mention",
+          accepted: true,
+          process_present: true,
+          runtime: ap.config.runtime,
+          session_id_present: Boolean(ap.sessionId),
+          launchId: ap.launchId || undefined,
+          inbox_count: queued.inboxCount,
+          duplicate_pending_delivery: queued.duplicate,
+          pending_notification_count: ap.notifications.pendingCount,
+        }));
+        return true;
+      }
       if (!ap.driver.supportsStdinNotification || !ap.sessionId || !this.canDeliverToRuntimeSession(ap)) {
         traceContext.onMentionTerminalError?.("UNSUPPORTED_DELIVERY_PATH");
         return false;
@@ -7795,6 +7948,10 @@ export class AgentProcessManager {
             if (deliveredAtTurnEnd) {
               this.completePendingTrackedMentions(agentId);
             } else {
+              // Upstream task #285: the boundary wrote no fresh notice — the
+              // still-pending occurrences must end HERE (settle or terminal),
+              // or they hang forever as duplicate_pending silence.
+              this.settleUndeliveredTrackedMentionsAtTurnEnd(agentId, ap);
               this.commitApmIdleState(agentId, ap, true);
               if (stickyTerminalFailure) {
                 this.broadcastActivity(agentId, "error", stickyTerminalFailure.detail, [], undefined, "runtime_error");
@@ -7805,6 +7962,9 @@ export class AgentProcessManager {
               }
             }
           } else {
+            // Upstream task #285: no fresh notice was written — settle whatever
+            // tracked mentions are still pending before going idle.
+            this.settleUndeliveredTrackedMentionsAtTurnEnd(agentId, ap);
             // No pending messages — mark idle, process stays alive waiting for stdin
             if (stickyTerminalFailure) {
               this.broadcastActivity(agentId, "error", stickyTerminalFailure.detail, [], undefined, "runtime_error");

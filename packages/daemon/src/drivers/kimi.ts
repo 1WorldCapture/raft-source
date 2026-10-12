@@ -6,7 +6,7 @@ import path from "node:path";
 import { hydrateRuntimeConfig, runtimeConfigToLaunchFields, runtimeModelSourceOutcomeFromSet, type AgentConfig, type RuntimeModelInfo, type RuntimeModelSet, type RuntimeModelSourceOutcome , type AxSurfaceText } from "@botiverse/raft-shared";
 import type { RuntimeDriver, SpawnContext, SpawnResult, ParsedEvent } from "./types.js";
 import { buildCliTransportSystemPrompt, prepareCliTransport } from "./cliTransport.js";
-import { resolveCommandOnPath, type ProbeDeps } from "./probe.js";
+import { resolveCommandOnPath, type ProbeDeps, guardChildStdin } from "./probe.js";
 import {
   prepareManagedMcpRuntimeProxy,
   writeManagedMcpRuntimeConfigFile,
@@ -193,6 +193,7 @@ export class KimiDriver implements RuntimeDriver {
       // keep prompts on stdin / files instead of routing through cmd.exe.
       shell: launch.shell,
     });
+    guardChildStdin(proc);
 
     proc.stdin?.write(JSON.stringify({
       jsonrpc: "2.0",

@@ -5,7 +5,7 @@ import path from "node:path";
 import { formatRuntimeProviderModelLabel, hydrateRuntimeConfig, runtimeConfigToLaunchFields, runtimeModelSourceOutcomeFromSet, type AgentConfig, type AgentMessage, type RuntimeModelInfo, type RuntimeModelSet, type RuntimeModelSourceOutcome , type AxSurfaceText } from "@botiverse/raft-shared";
 import { buildCliTransportSystemPrompt, prepareCliTransport } from "./cliTransport.js";
 import { resolveNodeHostLaunch } from "./nodeHostLaunch.js";
-import { resolveCommandOnPath, readCommandVersion, type ProbeDeps } from "./probe.js";
+import { resolveCommandOnPath, readCommandVersion, type ProbeDeps, guardChildStdin } from "./probe.js";
 import type { ParsedEvent, RuntimeDriver, RuntimeProbeResult, SpawnContext, SpawnResult } from "./types.js";
 import { prepareManagedMcpRuntimeProxy } from "../managedMcpRuntimeProxy.js";
 
@@ -543,6 +543,7 @@ export class OpenCodeDriver implements RuntimeDriver {
       env: spawnSpec.env ?? launch.env,
       shell: spawnSpec.shell,
     });
+    guardChildStdin(proc);
     // `opencode run` is a per-turn CLI. Leaving stdin open causes some
     // versions to wait before bootstrapping even when the prompt is supplied
     // as argv, so close it immediately.

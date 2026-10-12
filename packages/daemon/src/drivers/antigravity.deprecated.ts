@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import { hydrateRuntimeConfig, runtimeConfigToLaunchFields, type AgentConfig, type RuntimeModelSourceOutcome , type AxSurfaceText } from "@botiverse/raft-shared";
 import { buildCliTransportSystemPrompt, prepareCliTransport } from "./cliTransport.js";
-import { resolveAgyCommand, readCommandVersion, requiresWindowsShell, type ProbeDeps } from "./probe.js";
+import { resolveAgyCommand, readCommandVersion, requiresWindowsShell, type ProbeDeps, guardChildStdin } from "./probe.js";
 import type { ParsedEvent, RuntimeDriver, RuntimeProbeResult, SpawnContext, SpawnResult } from "./types.js";
 import {
   installManagedMcpRuntimeJsonOverlay,
@@ -161,6 +161,7 @@ export class AntigravityDriver implements RuntimeDriver {
       env: spawnEnv,
       shell,
     });
+    guardChildStdin(proc);
 
     proc.stdin?.end(ctx.prompt);
 

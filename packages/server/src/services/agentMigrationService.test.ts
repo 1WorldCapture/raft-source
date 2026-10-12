@@ -181,6 +181,8 @@ function makeAvailableReplicaStateStore(): ReplicaStateStore {
     setMachineMeta: async () => {},
     getMachineMeta: async () => null,
     clearMachineMeta: async () => {},
+    getWakeCrashLoopState: async () => null,
+    compareAndSetWakeCrashLoopState: async () => true,
   };
 }
 

@@ -9,7 +9,7 @@
 // It keeps the genuinely reusable native pieces: window-state persistence, the
 // application menu, single-instance, the auto-updater, and clean teardown.
 
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { hostname as osHostname } from "node:os";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
@@ -52,6 +52,7 @@ import { MigrationSupervisor } from "./standalone/migrationSupervisor.js";
 import { createMigrationController, finishSwitch, refuseWhileMigrating, registerMigrationIpc, restoreAndVerify } from "./standalone/migrationIpc.js";
 import { relaunchPreservingUserData } from "./relaunch.js";
 import { resolveEmbeddedHome } from "./embeddedHome.js";
+import { headlessUserDataDir } from "./headlessUserData.js";
 import { readLocalMachineIds } from "./standalone/localIdentity.js";
 import { registerEmbeddedStubs, registerHostModeIpc, registerStandaloneIpc } from "./standalone/ipc.js";
 import { resolveBundledCursorSdkAssets } from "./cursorSdkAssets.js";
@@ -89,12 +90,27 @@ const TRAFFIC_LIGHT_INSET_Y = 16;
 const userDataOverride = !app.isPackaged ? process.env.RAFT_DESKTOP_USER_DATA?.trim() : undefined;
 if (userDataOverride) app.setPath("userData", userDataOverride);
 
+// Detached `__service`/`__run` Computer children get a private userData under the Computer home: without it their
+// Chromium GPU/network helpers write caches into the owner's real Desktop userData (task #29). Must happen before
+// anything reads the userData path and before `ready`. The interactive app's own path is captured first because the
+// server-origin config below is read from it, not from the child's private directory.
+const interactiveUserData = app.getPath("userData");
+const headlessUserData = headlessUserDataDir(resolveRaftHome(), findHeadlessMode(process.argv));
+if (headlessUserData) {
+  try {
+    mkdirSync(headlessUserData, { recursive: true, mode: 0o700 });
+    app.setPath("userData", headlessUserData);
+  } catch (error) {
+    process.stderr.write(`[raft-desktop] could not use a private userData for the Computer child: ${String(error)}\n`);
+  }
+}
+
 // Runtime server origin (phase 3-1): userData/server-origin.json >
 // RAFT_DESKTOP_API_ORIGIN env > the baked CONFIGURED_API_ORIGIN. Resolved
 // ONCE per boot — a change is persisted and applied at relaunch. This is
 // the "current deployment" concept; isOfficialApiBuild() stays the
 // build-identity concept.
-const serverOriginConfig = new ServerOriginConfig({ userDataDir: app.getPath("userData"), env: process.env });
+const serverOriginConfig = new ServerOriginConfig({ userDataDir: interactiveUserData, env: process.env });
 
 const APP_VERSION = app.getVersion();
 // Official-app updates only when THIS boot talks to an official backend —

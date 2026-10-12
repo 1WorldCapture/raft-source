@@ -11,7 +11,7 @@ import {
 } from "@botiverse/raft-shared";
 import { buildCliTransportSystemPrompt, prepareCliTransport } from "./cliTransport.js";
 import { AntigravityStreamEventNormalizer } from "./antigravityStreamEventNormalizer.js";
-import { readCommandVersion, resolveAgyCommand, type ProbeDeps } from "./probe.js";
+import { readCommandVersion, resolveAgyCommand, type ProbeDeps, guardChildStdin } from "./probe.js";
 import { ChildProcessRuntimeSession } from "./runtimeSession.js";
 import type { ParsedEvent, RuntimeDriver, RuntimeProbeResult, RuntimeSession, SpawnContext, SpawnResult } from "./types.js";
 
@@ -266,6 +266,7 @@ export class AntigravityStreamDriver implements RuntimeDriver {
       // parent-death watchdog.
       detached: process.platform !== "win32",
     });
+    guardChildStdin(proc);
     this.child = proc;
     proc.stderr?.on("data", (chunk: Buffer) => {
       this.noteStderr(chunk.toString("utf8"), proc.pid);

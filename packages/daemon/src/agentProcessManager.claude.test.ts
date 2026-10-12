@@ -3448,6 +3448,297 @@ test("task #16: CLI consumption of an unrelated message must not settle an unrel
 });
 
 // ===========================================================================
+// Seam ①e — turn-end settlement net (upstream task #285 + #9). A busy-queued
+// tracked mention that the turn boundary does NOT flush must still END at that
+// boundary: previously it stayed pending forever — the agent went idle with
+// nothing to wake it and every server re-send landed on duplicate_pending and
+// was answered with silence. Three-way settle contract (with the ①d consume-time
+// path): every pending occurrence ends EXACTLY ONCE — drained (told/contributed)
+// or terminal DELIVERY_REJECTED (released) — no duplicate ack, no missed ack.
+// ===========================================================================
+
+async function queueBusyTrackedMention(
+  manager: AgentProcessManager,
+  options: { sessionId?: string } = {},
+) {
+  const ap = getProcess(manager, "agent-1");
+  (manager as any).commitApmIdleState("agent-1", ap, false); // busy → queues
+  ap.sessionId = options.sessionId ?? "s1";
+
+  const transitions: { state: string; outcome: string }[] = [];
+  const terminalErrors: string[] = [];
+  let ackCount = 0;
+  let rejectedNoProcessCount = 0;
+  const accepted = await manager.deliverMessage(
+    "agent-1",
+    makeMessage("hello", { seq: 491, message_id: "m-491", channel_name: "general", channel_type: "channel" }),
+    {
+      deliveryId: "occ-491",
+      mentionDelivery: {
+        occurrenceId: "occ-491",
+        messageId: "m-491",
+        launchId: ap.launchId ?? "launch-1",
+        sessionId: ap.sessionId,
+      },
+      onMentionTransition: (state: string, outcome: string) => { transitions.push({ state, outcome }); },
+      onMentionAck: () => { ackCount += 1; },
+      onMentionTerminalError: (code: string) => { terminalErrors.push(code); },
+      onRejectedNoProcess: () => { rejectedNoProcessCount += 1; },
+    } as any,
+  );
+  const mention = makeMessage("hello", { seq: 491, message_id: "m-491", channel_name: "general", channel_type: "channel" });
+  return {
+    ap,
+    accepted,
+    mention,
+    transitions,
+    terminalErrors,
+    ackCount: () => ackCount,
+    rejectedNoProcessCount: () => rejectedNoProcessCount,
+    trackedSize: () => (manager as any).trackedMentionDeliveries.size,
+    trackedState: () => (manager as any).trackedMentionDeliveries.get("occ-491")?.state,
+  };
+}
+
+function emitTurnEnd(driver: FakeClaudeDriver, sessionId = "s1"): void {
+  driver.parsedLines.set("turn-end", [{ kind: "turn_end", sessionId }]);
+  driver.processes[0].stdout.emit("data", Buffer.from("turn-end\n"));
+}
+
+test("task #285 review fix 1: a sticky-failed turn keeps a still-queued mention PENDING, not terminally rejected", async () => {
+  const { sink, tracer } = makeDeterministicTracer();
+  await withManager(async ({ driver, manager, sent }) => {
+    await manager.startAgent("agent-1", makeConfig({ sessionId: "s1" }), undefined, undefined, undefined, "launch-1");
+    const q = await queueBusyTrackedMention(manager);
+    assert.equal(q.accepted, true);
+    assert.equal(lastDeliveryOutcome(sink), "queued_busy_mention");
+
+    // The turn ends in a sticky terminal failure: the reduction sees
+    // inboxLength 0, so NO deliver_stdin effect fires and the settlement net
+    // is the only thing that runs. The message is STILL QUEUED in the inbox,
+    // so rejecting it here would record a terminal, non-recoverable error for
+    // a mention a later turn or restart could still deliver — it is lost for
+    // good once the process dies. The settle must SKIP it.
+    q.ap.lastRuntimeError = "the selected model is not supported by this account";
+    const inactiveStatuses = () => sent.filter((m: any) => m.type === "agent:status" && m.status === "inactive").length;
+
+    emitTurnEnd(driver);
+    await waitFor(() => inactiveStatuses() >= 1, "sticky turn_end status");
+
+    assert.deepEqual(q.terminalErrors, [], "a still-queued mention is NOT terminally rejected on an unreliable inbox");
+    assert.equal(q.ackCount(), 0, "no ACK for a mention the runtime never saw");
+    assert.equal(q.trackedSize(), 1, "the occurrence stays pending for a later turn / restart / redelivery");
+    assert.equal(q.trackedState(), "pending");
+
+    // A later sticky turn end must not change that either.
+    emitTurnEnd(driver);
+    await waitFor(() => inactiveStatuses() >= 2, "second sticky turn_end status");
+    assert.deepEqual(q.terminalErrors, []);
+    assert.equal(q.ackCount(), 0);
+    assert.equal(q.trackedSize(), 1);
+  }, { tracer });
+});
+
+test("task #285: a healthy turn boundary still ends a queued-untold mention TERMINAL when the boundary cannot write the notice", async () => {
+  const { sink, tracer } = makeDeterministicTracer();
+  await withManager(async ({ driver, manager, sent }) => {
+    await manager.startAgent("agent-1", makeConfig({ sessionId: "s1" }), undefined, undefined, undefined, "launch-1");
+    // Queued while stdin delivery was available; the boundary then cannot
+    // write a notice (stdin lane gone). The inbox is otherwise RELIABLE — no
+    // sticky failure, session deliverable — so an untold mention ends
+    // terminally here and the server converts the rejection into a wake.
+    const q = await queueBusyTrackedMention(manager);
+    assert.equal(q.accepted, true);
+    assert.equal(lastDeliveryOutcome(sink), "queued_busy_mention");
+    (driver as any).supportsStdinNotification = false;
+
+    emitTurnEnd(driver);
+    await waitFor(() => q.terminalErrors.length >= 1 || q.trackedSize() === 0, "turn_end settle of the untold mention");
+
+    assert.deepEqual(q.terminalErrors, ["DELIVERY_REJECTED"], "an INBOX-RELIABLE boundary still settles the untold mention terminally");
+    assert.equal(q.trackedSize(), 0, "the terminal occurrence is released");
+    assert.equal(q.ackCount(), 0);
+  }, { tracer });
+});
+
+test("task #285: a still-queued mention whose notice DID reach the session drains at the turn boundary", async () => {
+  const { sink, tracer } = makeDeterministicTracer();
+  await withManager(async ({ driver, manager, sent }) => {
+    await manager.startAgent("agent-1", makeConfig({ sessionId: "s1" }), undefined, undefined, undefined, "launch-1");
+    const q = await queueBusyTrackedMention(manager);
+    assert.equal(lastDeliveryOutcome(sink), "queued_busy_mention");
+    const inactiveStatuses = () => sent.filter((m: any) => m.type === "agent:status" && m.status === "inactive").length;
+
+    // Earlier in the turn, the busy notification write named this message —
+    // the session has already contributed it.
+    q.ap.notifications.recordNoticeWritten(
+      computeInboxNoticeFingerprint([q.mention]),
+      "s1",
+      [q.mention],
+    );
+
+    q.ap.lastRuntimeError = "the selected model is not supported by this account";
+    emitTurnEnd(driver);
+    await waitFor(() => inactiveStatuses() >= 1, "sticky turn_end status");
+
+    assert.deepEqual(q.terminalErrors, [], "a told runtime is not a rejected delivery");
+    assert.deepEqual(q.transitions.at(-1), { state: "daemon_drained", outcome: "accepted" }, "the boundary settles it as drained");
+    assert.equal(q.ackCount(), 1, "exactly one ACK — no missed ack for a told mention");
+    assert.equal(q.trackedState(), "drained", "a drained occurrence parks as drained (released only on terminal)");
+  }, { tracer });
+});
+
+test("task #9: a mention named in this process's first input settles drained at the turn end even after leaving the inbox", async () => {
+  const { tracer } = makeDeterministicTracer();
+  await withManager(async ({ driver, manager, sent }) => {
+    await manager.startAgent("agent-1", makeConfig({ sessionId: "s1" }), undefined, undefined, undefined, "launch-1");
+    const q = await queueBusyTrackedMention(manager);
+    const inactiveStatuses = () => sent.filter((m: any) => m.type === "agent:status" && m.status === "inactive").length;
+
+    // The restart carried the queued mention in its first input (what
+    // markTrackedMentionsToldAtStart records at spawn time) and it left the
+    // pending inbox with the spawn.
+    (manager as any).markTrackedMentionsToldAtStart("agent-1", q.ap.processInstanceId, [q.mention]);
+    q.ap.inbox.splice(0, q.ap.inbox.length);
+
+    q.ap.lastRuntimeError = "the selected model is not supported by this account";
+    emitTurnEnd(driver);
+    await waitFor(() => inactiveStatuses() >= 1, "sticky turn_end status");
+
+    assert.deepEqual(q.terminalErrors, []);
+    assert.deepEqual(q.transitions.at(-1), { state: "daemon_drained", outcome: "accepted" }, "told-at-start settles drained");
+    assert.equal(q.ackCount(), 1);
+    assert.equal(q.trackedState(), "drained", "a drained occurrence parks as drained (released only on terminal)");
+  }, { tracer });
+});
+
+test("task #9: a per_turn runtime's queued-but-untold mention waits for the restart's own turn end", async () => {
+  const { tracer } = makeDeterministicTracer();
+  await withManager(async ({ driver, manager, sent }) => {
+    await manager.startAgent("agent-1", makeConfig({ sessionId: "s1" }), undefined, undefined, undefined, "launch-1");
+    const inactiveStatuses = () => sent.filter((m: any) => m.type === "agent:status" && m.status === "inactive").length;
+    // A per_turn runtime that takes no input mid-turn.
+    (driver as any).lifecycle = { kind: "per_turn", stdin: "none", inFlightWake: "restart" };
+    (driver as any).supportsStdinNotification = false;
+    const q = await queueBusyTrackedMention(manager);
+    assert.equal(q.accepted, true, "the busy per_turn runtime QUEUES the mention (task #9), not UNSUPPORTED_DELIVERY_PATH");
+    assert.deepEqual(q.transitions, [
+      { state: "daemon_received", outcome: "accepted" },
+      { state: "daemon_pending", outcome: "accepted" },
+    ]);
+
+    // Told to a DIFFERENT (future restart) process, still queued here: the
+    // settlement must skip it — that restart's turn end settles it.
+    (manager as any).markTrackedMentionsToldAtStart("agent-1", "other-process-instance", [q.mention]);
+    q.ap.lastRuntimeError = "the selected model is not supported by this account";
+    emitTurnEnd(driver);
+    await waitFor(() => inactiveStatuses() >= 1, "sticky turn_end status");
+
+    assert.deepEqual(q.terminalErrors, [], "not this process's mention to settle");
+    assert.equal(q.ackCount(), 0);
+    assert.equal(q.trackedSize(), 1, "the occurrence stays pending for the restart that carries it");
+  }, { tracer });
+});
+
+test("task #285 review fix 3: a per_turn crash releases the queued pending mention, so redelivery retracks instead of duplicate_pending", async () => {
+  const { tracer } = makeDeterministicTracer();
+  await withManager(async ({ driver, manager, sent }) => {
+    await manager.startAgent("agent-1", makeConfig({ sessionId: "s1" }), undefined, undefined, undefined, "launch-1");
+    (driver as any).lifecycle = { kind: "per_turn", stdin: "none", inFlightWake: "restart" };
+    (driver as any).supportsStdinNotification = false;
+    const q = await queueBusyTrackedMention(manager);
+    assert.equal(q.accepted, true);
+    assert.equal(q.trackedSize(), 1);
+    assert.equal(q.trackedState(), "pending");
+
+    // The runtime crashes mid-turn (exit code 1, not a clean per-turn exit).
+    driver.processes[0].emit("exit", 1, null);
+    driver.processes[0].emit("close", 1, null);
+    await flush();
+
+    assert.equal(q.trackedSize(), 0, "the dead process's pending occurrence is released, not carried forever");
+    assert.deepEqual(q.terminalErrors, [], "release is not a terminal rejection");
+    assert.equal(q.ackCount(), 0);
+
+    // The server's redelivery of the still-undelivered mention must NOT hit
+    // duplicate_pending silence (the old forever-stuck bug): with the entry
+    // released it is retracked — accepted into a fresh restart lane or handed
+    // back to the server — never swallowed as a duplicate.
+    let reduplicateAck = false;
+    const reaccepted = await manager.deliverMessage(
+      "agent-1",
+      q.mention,
+      {
+        deliveryId: "occ-491",
+        mentionDelivery: {
+          occurrenceId: "occ-491",
+          messageId: "m-491",
+          launchId: q.ap.launchId ?? "launch-1",
+          sessionId: q.ap.sessionId,
+        },
+        onMentionAck: () => { reduplicateAck = true; },
+      } as any,
+    );
+    assert.notEqual(reaccepted, true, "the redelivery is not silently swallowed as duplicate_pending");
+    assert.equal(reduplicateAck, false, "no ack either — the mention was never told to any process");
+    await flush();
+    void sent;
+  }, { tracer });
+});
+
+test("task #285: a failed idle auto-restart fails the tracked mention terminally AND releases it", async () => {
+  const { sink, tracer } = makeDeterministicTracer();
+  await withManager(async ({ driver, manager }) => {
+    await manager.startAgent("agent-1", makeConfig({ sessionId: "session-1" }), undefined, undefined, undefined, "launch-1");
+    await parkAgentIdle(manager, driver);
+
+    // The next spawn fails: the restart promise resolves false and the wake
+    // message never reached any process.
+    (driver as any).spawn = () => { throw new Error("spawn boom"); };
+
+    const out = await deliverTrackedMentionToStoppedAgent(manager, driver, { launchId: "launch-1", sessionId: "session-1" });
+    // deliverMessage returns the restart promise for tracked mentions.
+    await out.result;
+    await flush();
+
+    assert.equal(lastDeliveryOutcome(sink), "auto_restart_from_idle");
+    assert.ok(out.terminalErrors.includes("DELIVERY_REJECTED"), "the failed wake is terminal");
+    assert.equal((manager as any).trackedMentionDeliveries.size, 0, "failTrackedMention RELEASES the occurrence (the leak the raw terminal error left)");
+    assert.equal(out.ackCount(), 0);
+  }, { tracer });
+});
+
+test("task #1113: an untracked delivery with no process and no cached snapshot hands the wake back to the Server", async () => {
+  const { sink, tracer } = makeDeterministicTracer();
+  await withManager(async ({ driver, manager }) => {
+    await manager.startAgent("agent-1", makeConfig({ sessionId: "session-1" }), undefined, undefined, undefined, "launch-1");
+    // Kill WITHOUT parking an idle snapshot: no process, no cached config.
+    driver.processes[0].kill();
+    await flush();
+    assert.equal(getProcess(manager, "agent-1"), undefined);
+    assert.equal((manager as any).agentLifecycleRecord("agent-1")?.kind, undefined, "no lifecycle record at all");
+
+    let rejectedNoProcessCount = 0;
+    const accepted = await manager.deliverMessage(
+      "agent-1",
+      makeMessage("plain wake", { seq: 88, message_id: "m-88" }),
+      {
+        deliveryId: "delivery-88",
+        onRejectedNoProcess: () => { rejectedNoProcessCount += 1; },
+      } as any,
+    );
+    await flush();
+
+    assert.equal(accepted, false, "the daemon still does not accept it locally");
+    assert.equal(lastDeliveryOutcome(sink), "rejected_no_process");
+    // core.ts wires this callback to agent:delivery:rejected so the Server
+    // converts the rejection into a config-carrying wake start instead of
+    // blind redelivery against no process.
+    assert.equal(rejectedNoProcessCount, 1, "the no-process rejection fires the Server-wake seam exactly once");
+  }, { tracer });
+});
+
+// ===========================================================================
 // A direct @mention must wake an agent that has no running process. The mention
 // occurrence used to be rejected (IDENTITY_UNKNOWN) whenever `ap` was absent, so a
 // one-process-per-turn runtime (cursor, gemini, copilot, opencode) between turns, or

@@ -2,6 +2,8 @@ import { realpathSync } from "node:fs";
 import { access } from "node:fs/promises";
 import { resolve } from "node:path";
 
+import { executableFileIdentity } from "./liveExecutable.js";
+
 import { kSlotBinaryPath } from "./kPaths.js";
 import {
   compareRealFiles,
@@ -10,6 +12,20 @@ import {
 } from "./realFileIdentity.js";
 
 export type KBinaryAccess = (filePath: string) => Promise<void>;
+
+// Captured at module load, i.e. before any later K promotion or staging can
+// rename or replace the file behind process.execPath (upstream liveExecutable
+// semantics): identity, not path spelling, decides which file IS the running
+// binary once K renames slots underneath it.
+const STARTUP_BINARY_IDENTITY = executableFileIdentity(process.execPath);
+
+/** Identity seams; tests inject fakes, production uses dev:ino statistics. */
+export interface KResidentBinaryIdentity {
+  /** Identity of the file this process was started from (null = platform has none). */
+  startupIdentity(): string | null;
+  /** Identity of a path's CURRENT file, or null when it does not exist. */
+  identityOf(path: string): string | null;
+}
 
 async function exists(filePath: string, accessFn: KBinaryAccess): Promise<boolean> {
   try {
@@ -45,6 +61,10 @@ export async function resolveKResidentBinary(
   accessFn: KBinaryAccess = access,
   platform: NodeJS.Platform = process.platform,
   resolveRealPath: ResolveRealPath = realpathSync.native,
+  identity: KResidentBinaryIdentity = {
+    startupIdentity: () => STARTUP_BINARY_IDENTITY,
+    identityOf: executableFileIdentity,
+  },
 ): Promise<string> {
   if (!isSea) return currentBinary;
   const current = resolve(currentBinary);
@@ -53,6 +73,19 @@ export async function resolveKResidentBinary(
   const equalSpelling = (left: string, right: string): boolean => platform === "win32"
     ? left.toLocaleLowerCase("en-US") === right.toLocaleLowerCase("en-US")
     : left === right;
+
+  // Identity guard (upstream liveExecutable semantics): a K promotion renames
+  // the running experiment slot to stable, and K may later re-stage the NEXT
+  // candidate into the experiment path. Spelling alone then mistakes the new
+  // candidate for the running binary. When the startup identity is available,
+  // the file whose CURRENT identity equals it is the running binary — if that
+  // is stable, later spawns must use stable even though the startup path
+  // exists again with different bytes. Platforms without a usable identity
+  // (and tests that inject none) keep the spelling-based behavior below.
+  const startupIdentity = identity.startupIdentity();
+  if (startupIdentity !== null && identity.identityOf(current) !== startupIdentity) {
+    if (identity.identityOf(stable) === startupIdentity) return stable;
+  }
 
   // Windows paths are case-insensitive. Returning currentBinary here is
   // deliberate: a differently-cased spelling of the same running slot must

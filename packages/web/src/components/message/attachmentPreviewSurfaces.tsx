@@ -779,6 +779,9 @@ export function AudioPreviewBody({
 export const INLINE_AUDIO_PREVIEW_CARD_CLASS = "w-full max-w-[min(28rem,calc(100vw-7rem))] overflow-hidden border-2 border-black bg-white p-2 text-left";
 
 
+/** How long the HTML preview waits for the bridge handshake before it degrades to a plain, interactive frame. */
+export const PREVIEW_HANDSHAKE_TIMEOUT_MS = 5_000;
+
 function HtmlPreviewBody({
   url,
   filename,
@@ -811,6 +814,18 @@ function HtmlPreviewBody({
     buildSrc,
     activateDocument,
   } = useAttachmentPreviewBridge();
+  // The "preparing" overlay used to stay until the bridge handshake finished, with the frame inert underneath. When
+  // the handshake never completes (document blocked or not loaded, a script error, a stuck epoch) the user was left
+  // with a permanent spinner and no content (task #28). After a bounded wait, degrade: drop the overlay and make the
+  // frame interactive; only the bridge-powered extras (external-link hotspots, region capture) are missing.
+  const [handshakeTimedOut, setHandshakeTimedOut] = useState(false);
+  useEffect(() => {
+    setHandshakeTimedOut(false);
+    if (externalLinksReady) return undefined;
+    const timer = window.setTimeout(() => setHandshakeTimedOut(true), PREVIEW_HANDSHAKE_TIMEOUT_MS);
+    return () => window.clearTimeout(timer);
+  }, [externalLinksReady, url]);
+  const awaitingHandshake = !externalLinksReady && !handshakeTimedOut;
   const handlePreviewDocumentLoad = useCallback(() => {
     // The iframe node is stable across hostile top-level self-navigation, but
     // its parent-owned link actions are document-scoped. Retire both bridge
@@ -931,11 +946,11 @@ function HtmlPreviewBody({
         src={buildSrc(url)}
         sandbox="allow-scripts"
         referrerPolicy="no-referrer"
-        className={`h-full w-full border-0 bg-white${externalLinksReady ? "" : " pointer-events-none"}`}
+        className={`h-full w-full border-0 bg-white${awaitingHandshake ? " pointer-events-none" : ""}`}
         frameRef={iframeRef}
         onLoad={handlePreviewDocumentLoad}
       />
-      {!externalLinksReady ? (
+      {awaitingHandshake ? (
         <div
           role="status"
           data-message-affordance="attachment-preview-external-links-loading"

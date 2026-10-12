@@ -12,6 +12,7 @@ import pg from "pg";
 import { noopTracer, type TraceContext, type Tracer } from "@botiverse/raft-shared";
 import * as schema from "./schema.js";
 import { closeRisingWavePool } from "./risingwave.js";
+import { attachPoolClientErrorHandler } from "./pgPoolErrorHandler.js";
 import { dbPoolConnections, dbPoolWaitingRequests, pgPoolReadOnlyClientRecycledTotal } from "../metrics.js";
 import { getCurrentTraceContext } from "../tracing/semanticTrace.js";
 
@@ -733,6 +734,11 @@ function createPool(connectionString: string) {
   pool.on("error", (err) => {
     console.error("Unexpected pg pool error (likely a disconnected idle client):", err.message);
   });
+  // Client-level guard for errors that fire while a client is checked out
+  // between queries (pg-pool removes its own idle listener on checkout, so a
+  // dropped connection inside a transaction would otherwise be an unhandled
+  // 'error' event and crash the process).
+  attachPoolClientErrorHandler(pool, "pg");
   return pool;
 }
 

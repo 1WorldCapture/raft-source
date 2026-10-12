@@ -8,7 +8,7 @@ import type { RuntimeDriver, SpawnContext, SpawnResult, ParsedEvent, RuntimeProb
 import { buildCliTransportSystemPrompt, prepareCliTransport } from "./cliTransport.js";
 import { codexStateRootCandidates, resolveCodexHomeRootFromEnv } from "./codexHome.js";
 import { detectNodeHostKind, NodeHostUnavailableError, resolveNodeHostLaunch } from "./nodeHostLaunch.js";
-import { firstExistingPath, requiresWindowsShell, resolveCommandOnPath, withWindowsUserEnvironment, type ProbeDeps } from "./probe.js";
+import { firstExistingPath, requiresWindowsShell, resolveCommandOnPath, withWindowsUserEnvironment, type ProbeDeps, guardChildStdin } from "./probe.js";
 import {
   CodexEventNormalizer,
   parseCodexJsonRpcLine,
@@ -966,6 +966,7 @@ export class CodexDriver implements RuntimeDriver {
         env: env ?? spawnEnv,
         shell,
       });
+      guardChildStdin(proc);
       launchSpan?.end("ok");
     } catch (error) {
       launchSpan?.end("error", {
@@ -1517,6 +1518,7 @@ export async function detectCodexModelsFromAppServer(
       env: launch.env ?? env,
       shell: launch.shell,
     });
+    guardChildStdin(proc);
     let settled = false;
     let buffer = "";
     let requestId = 0;

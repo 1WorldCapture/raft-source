@@ -6,7 +6,7 @@ import type { RuntimeDriver, SpawnContext, SpawnResult, ParsedEvent } from "./ty
 import { buildGeminiTokenUsageEvent } from "./geminiEventNormalizer.js";
 import { buildCliTransportSystemPrompt, prepareCliTransport } from "./cliTransport.js";
 import { resolveNodeHostLaunch } from "./nodeHostLaunch.js";
-import { resolveCommandOnPath, type ProbeDeps } from "./probe.js";
+import { resolveCommandOnPath, type ProbeDeps, guardChildStdin } from "./probe.js";
 import {
   prepareManagedMcpRuntimeProxy,
   writeManagedMcpRuntimeConfigFile,
@@ -204,6 +204,7 @@ export class GeminiDriver implements RuntimeDriver {
       env,
       shell: false,
     });
+    guardChildStdin(proc);
 
     proc.stdin?.end(ctx.prompt);
 

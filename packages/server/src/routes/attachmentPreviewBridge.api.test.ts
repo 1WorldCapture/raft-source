@@ -89,6 +89,13 @@ test("html-preview appends the inert measurement bridge; download stays byte-ide
     for (const directive of ["connect-src 'none'", "form-action 'none'", "object-src 'none'"]) {
       assert.ok(csp.includes(directive), `preview CSP must keep ${directive}`);
     }
+    // Task #28: the preview is framed by the web app. A second policy (helmet's global one, or one a proxy adds) would
+    // be enforced as an intersection and its `frame-ancestors 'none'` would block the iframe. The app must send exactly
+    // ONE CSP on this route (fetch joins duplicate headers with ", ") and no X-Frame-Options.
+    assert.ok(csp.includes("frame-ancestors 'self'"), "the preview CSP allows the web app to frame it");
+    assert.ok(!csp.includes("frame-ancestors 'none'"), `no policy on the preview may forbid framing: ${csp}`);
+    assert.equal(csp.split("default-src").length - 1, 1, `exactly one CSP header on the preview response: ${csp}`);
+    assert.equal(previewRes.headers.get("x-frame-options"), null, "X-Frame-Options would block the preview iframe");
     const body = await previewRes.text();
     assert.equal(body, html + ATTACHMENT_PREVIEW_BRIDGE_SCRIPT, "original bytes streamed unmodified, script appended");
 

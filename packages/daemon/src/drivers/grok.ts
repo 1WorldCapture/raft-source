@@ -26,6 +26,7 @@ import {
   resolveCommandOnPath,
   withWindowsUserEnvironment,
   type ProbeDeps,
+  guardChildStdin,
 } from "./probe.js";
 import type {
   ParsedEvent,
@@ -449,6 +450,7 @@ export class GrokDriver implements RuntimeDriver {
       env: spawnEnv,
       shell: launch.shell,
     });
+    guardChildStdin(proc);
     this.process = proc;
 
     queueMicrotask(() => {
@@ -764,6 +766,7 @@ export async function detectGrokModelsFromAcp(
       env,
       shell: launch.shell,
     });
+    guardChildStdin(proc);
     let settled = false;
     let buffer = "";
     const initializeRequestId = 1;

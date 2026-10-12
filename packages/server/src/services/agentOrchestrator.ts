@@ -217,6 +217,11 @@ import {
 } from "../replicaRouter.js";
 import { redisReplicaStateStore, type MachineMeta, type ReplicaStateStore } from "./replicaStateStore.js";
 import {
+  WakeCrashLoopBreaker,
+  resolveWakeCrashLoopRules,
+  type WakeCrashLoopActivityDiagnostic,
+} from "./wakeCrashLoopBreaker.js";
+import {
   buildRuntimeTraceContext,
   projectMachineConnectTraceAttrs,
   projectOwnerTraceAttrs,
@@ -713,11 +718,18 @@ interface StartAgentOptions {
   wakeMessage?: AgentMessage;
   wakeMessageTransient?: boolean;
   requireQueueReceipt?: boolean;
+  /**
+   * The start was requested by a human act (e.g. the channel resume route).
+   * Human starts always lift a wake crash-loop block and open a fresh
+   * episode, even when they carry a resume prompt (which would otherwise
+   * classify the start as automatic).
+   */
+  human?: boolean;
 }
 
 export type AgentStartDispatchResult =
   | { outcome: "dispatched" }
-  | { outcome: "skipped"; reason: "manual_stop" | "wake_lock_held" };
+  | { outcome: "skipped"; reason: "manual_stop" | "wake_lock_held" | "wake_crash_loop_blocked" };
 
 class CrossReplicaQueueReceiptUnavailableError extends Error {
   constructor() {
@@ -2257,6 +2269,10 @@ export class AgentOrchestrator extends EventEmitter {
   private readonly daemonIngressRateLimitMaxEvents: number;
   private readonly daemonIngressRateLimitMaxEventsPerMachine: number;
   private readonly daemonIngressRateLimitDisabled: boolean;
+  /** Upstream 1.21.2 port: automatic-wake crash-loop breaker (task #3 item 2). */
+  private readonly wakeCrashLoopBreaker: WakeCrashLoopBreaker;
+  /** One pending catch-up wake per agent: fires when the block cooldown ends. */
+  private readonly wakeCrashLoopCatchupTimers = new Map<string, unknown>();
 
   constructor(
     private readonly replicaStateStore: ReplicaStateStore = redisReplicaStateStore,
@@ -2264,6 +2280,7 @@ export class AgentOrchestrator extends EventEmitter {
     private readonly tracer: Tracer = noopTracer,
   ) {
     super();
+    this.wakeCrashLoopBreaker = new WakeCrashLoopBreaker(this.replicaStateStore, resolveWakeCrashLoopRules());
     this.daemonIngressRateLimitWindowMs = readPositiveIntegerEnv(
       "SLOCK_DAEMON_INGRESS_RATE_LIMIT_WINDOW_MS",
       AgentOrchestrator.DAEMON_INGRESS_RATE_LIMIT_DEFAULT_WINDOW_MS,
@@ -5031,6 +5048,11 @@ export class AgentOrchestrator extends EventEmitter {
         serverTime: this.clock.now(),
       });
       this.emit("machine:online", { machineId, serverId });
+      // Task #30: agents created while no computer was online are waiting
+      // for a machine. When one comes online, bind them — but only when this
+      // is the server's only machine, so multi-machine servers never grab
+      // agents unpredictably.
+      void this.bindUnassignedAgentsToLoneOnlineMachine(machineId, serverId).catch(() => undefined);
       span.addEvent("machine.status.emitted", {
         outcome: "emitted",
         status: "online",
@@ -6869,6 +6891,36 @@ export class AgentOrchestrator extends EventEmitter {
             next_status: nextStatus,
             ...liveActivityAttrs,
           });
+          if (action === "persist-active" && msg.launchId) {
+            // The runtime that carried an owed catch-up is live: the queued
+            // messages reached it, so the debt is paid.
+            await this.wakeCrashLoopBreaker.confirmCatchupDelivered(msg.agentId, msg.launchId).catch(() => {});
+          }
+          // Breaker exit observation (upstream 1.21.2 port): an inactive
+          // frame whose launchId matches the current start and arrives within
+          // the window is an early exit. Our agent:status protocol carries no
+          // exit code/signal (upstream's does), so the evidence is synthetic
+          // {code: null, signal: null} — documented in wakeCrashLoopBreaker.ts;
+          // conservative defaults absorb the weaker signal.
+          if (normalizedStatus === "inactive") {
+            try {
+              const observation = await this.wakeCrashLoopBreaker.recordExit(
+                msg.agentId,
+                { kind: "agent_process_exited", evidence: { code: null, signal: null }, launchId: msg.launchId ?? null },
+                this.clock.now(),
+              );
+              if (observation.blockedNow) {
+                console.warn(
+                  `[Agent ${msg.agentId}] Wake crash-loop breaker TRIPPED after ${observation.snapshot.earlyExitCount} ` +
+                  `early exits within ${observation.snapshot.windowMs}ms — automatic wakes are blocked until a release path clears it.`,
+                );
+                await this.wakeCrashLoopBreaker.markCatchupOwed(msg.agentId).catch(() => {});
+                this.scheduleWakeCrashLoopCatchup(msg.agentId, observation.snapshot.blockedAtMs ?? this.clock.now());
+              }
+            } catch (err) {
+              console.warn(`[Agent ${msg.agentId}] wake crash-loop recordExit failed:`, err);
+            }
+          }
         } catch (err) {
           span.end("error", {
             attrs: {
@@ -7904,6 +7956,94 @@ export class AgentOrchestrator extends EventEmitter {
             ack_result: ackResult.removedCount > 0 ? "acknowledged_seq" : "seq_not_pending",
           },
         });
+        break;
+      }
+
+      case "agent:delivery:rejected": {
+        // Upstream task #1113: the daemon answered a delivery with "no process
+        // and no cached restart snapshot". The Server owns the config: settle
+        // the pending delivery as converted and dispatch one ordinary start
+        // that carries the message as its wake message. Idempotent per
+        // delivery key — a duplicate rejection finds no pending delivery and
+        // is ignored.
+        const span = this.tracer.startSpan("server.agent.delivery.rejected", {
+          parent: parseTraceparent(msg.traceparent),
+          surface: "server",
+          kind: "server",
+          attrs: {
+            agent_id: msg.agentId,
+            machine_id: machineId,
+            server_id: conn?.serverId,
+            seq: msg.seq,
+            deliveryId: msg.deliveryId,
+            reason: msg.reason,
+          },
+        });
+        const endWith = (outcome: string, extra: Record<string, unknown> = {}): void => {
+          span.end("ok", { attrs: { outcome, ...extra } });
+        };
+        // Review fix 2: remove the pending entry BEFORE the first await. A
+        // retry timer that fires while validateMachineAgentMessage yields
+        // would otherwise still pass its map check and redeliver the same
+        // message on top of the wake start below (double routing). If the
+        // message turns out invalid, restore the tracker — a forged
+        // rejection must not eat a live delivery.
+        const key = this.findAgentDeliveryAckKey(msg.agentId, msg.seq, msg.deliveryId);
+        const pending = key ? this.pendingAgentDeliveryAcks.get(key) : undefined;
+        if (!key || !pending) {
+          endWith("ignored_no_pending");
+          break;
+        }
+        if (pending.machineId !== machineId) {
+          endWith("ignored_other_machine", { pending_machine_id: pending.machineId });
+          break;
+        }
+        if (pending.timer) this.clock.clearTimeout(pending.timer);
+        this.pendingAgentDeliveryAcks.delete(key);
+        const agent = await this.validateMachineAgentMessage(machineId, conn?.serverId ?? null, msg.agentId, msg.type);
+        if (!agent) {
+          // Restore with the NORMAL retry timer: parking it here would let a
+          // forged rejection silently remove a live delivery's retry (review
+          // follow-up on #344).
+          this.trackPendingAgentDeliveryAck(machineId, pending.msg);
+          endWith("invalid_agent_restored");
+          break;
+        }
+        // Settle the delivery here: the start below is its continuation, and
+        // the ordinary retry-until-gave-up path must not redeliver the same
+        // message on top of it.
+        let result: AgentStartDispatchResult;
+        try {
+          result = await this.startAgent(msg.agentId, {
+            wakeMessage: pending.msg.message,
+            ...(pending.msg.transient ? { wakeMessageTransient: true } : {}),
+          });
+        } catch (error) {
+          console.error(`[Agent ${msg.agentId}] Wake start after rejected delivery ${key} failed:`, error);
+          // Keep the delivery observable through the ordinary ack-retry path.
+          this.trackPendingAgentDeliveryAck(machineId, pending.msg, { scheduleTimeout: false });
+          endWith("start_failed_retracked");
+          break;
+        }
+        if (result.outcome === "dispatched") {
+          console.log(`[Agent ${msg.agentId}] Rejected delivery ${key} converted into a wake start`);
+          endWith("converted_to_wake_start");
+          break;
+        }
+        if (result.outcome === "skipped" && result.reason === "wake_lock_held") {
+          // Another start is already in flight; that process takes the
+          // ordinary redelivery.
+          this.trackPendingAgentDeliveryAck(machineId, pending.msg, { scheduleTimeout: false });
+          endWith("start_skipped_wake_lock_held_retracked");
+          break;
+        }
+        // manual_stop: the agent is offline by user intent; the delivery ends
+        // here with a typed outcome instead of retrying until gave_up. The
+        // residual cast keeps this compiling as the dispatch-result union
+        // grows; at this point only non-dispatched, non-retracked outcomes
+        // reach here.
+        const residual = result as { outcome: string; reason?: string };
+        endWith(`start_skipped_${residual.outcome === "skipped" ? (residual.reason ?? "unknown") : residual.outcome}`);
         break;
       }
 
@@ -9516,6 +9656,14 @@ export class AgentOrchestrator extends EventEmitter {
       pending.parkedReason = undefined;
       pending.attempts += 1;
       pending.lastAttemptAt = this.clock.now();
+      // Review fix 2 (companion check): the rejection handler removes the
+      // pending entry SYNCHRONOUSLY when a "no process" rejection arrives; a
+      // retry that captured this entry before one of the awaits above must
+      // not re-send on top of the wake start that rejection converted into.
+      if (!this.pendingAgentDeliveryAcks.has(key)) {
+        span.end("ok", { attrs: { outcome: "dropped", reason: "superseded_by_rejection" } });
+        return;
+      }
       let routeTraceAttrs: Record<string, unknown> = {};
       const sent = await this.sendToMachine(pending.machineId, pending.msg, {
         onRouteResult: (routeResult) => {
@@ -10019,8 +10167,9 @@ export class AgentOrchestrator extends EventEmitter {
 
   async startAgent(agentId: string, options: StartAgentOptions = {}): Promise<AgentStartDispatchResult> {
     const { resumePrompt, wakeMessage, wakeMessageTransient } = options;
+    const humanStart = options.human === true;
     // Load from DB (and populate cache) for start — need full state
-    const agent = await this.loadAgentForStart(agentId);
+    let agent = await this.loadAgentForStart(agentId);
     const startCause = wakeMessage ? "message" : resumePrompt ? "resume" : "manual";
     if (!agent) {
       this.recordLifecycleEvent({
@@ -10051,6 +10200,35 @@ export class AgentOrchestrator extends EventEmitter {
       });
       return { outcome: "skipped", reason: "manual_stop" };
     }
+
+    // Upstream 1.21.2 port (task #3 item 2): automatic wakes consult the
+    // crash-loop breaker. A tripped block refuses message/resume wakes until a
+    // release path clears it (human start, manual stop, config change, or the
+    // time cooldown). Messages are not lost: they stay in the inbox and the
+    // start path re-queries unread at dispatch time.
+    if (!humanStart && startCause !== "manual" && await this.wakeCrashLoopBreaker.isBlocked(agentId, this.clock.now())) {
+      const snapshot = await this.wakeCrashLoopBreaker.snapshot(agentId);
+      this.recordLifecycleEvent({
+        agentId,
+        machineId: agent.machineId,
+        action: "wake",
+        outcome: "suppressed",
+        cause: startCause,
+        previousStatus,
+        detail: "wake_crash_loop_blocked",
+      });
+      console.warn(
+        `[Agent ${agentId}] Automatic wake refused: crash-loop breaker tripped ` +
+        `(episode=${snapshot.episode} early_exits=${snapshot.earlyExitCount}/${snapshot.threshold} ` +
+        `within ${snapshot.windowMs}ms, blocked_at=${snapshot.blockedAtMs}). ` +
+        `Start the agent manually or change its runtime config to release.`,
+      );
+      // The refused messages stay in the inbox: owe a catch-up start and
+      // schedule it for when the cooldown lifts, so nothing strands.
+      await this.wakeCrashLoopBreaker.markCatchupOwed(agentId).catch(() => {});
+      this.scheduleWakeCrashLoopCatchup(agentId, snapshot.blockedAtMs ?? this.clock.now());
+      return { outcome: "skipped", reason: "wake_crash_loop_blocked" };
+    }
     const rollbackStatus = previousStatus ?? "inactive";
 
     if (isExternalAgentRuntime(agent.runtime)) {
@@ -10066,23 +10244,35 @@ export class AgentOrchestrator extends EventEmitter {
       throw new Error("External agents are operator-run; Slock never starts or manages their runtime (SHA-V0-006C).");
     }
 
-    if (!agent.machineId) {
-      this.recordLifecycleEvent({
-        agentId,
-        machineId: null,
-        action: "start",
-        outcome: "failed",
-        cause: startCause,
-        previousStatus,
-        detail: "machine_unassigned",
-      });
-      throw new Error("No machine assigned. Please assign a machine to this agent first.");
+    let startMachineId = agent.machineId;
+    if (!startMachineId) {
+      // Task #30: an agent created while no computer was online keeps an
+      // empty affinity (creation never binds to an offline machine). A start
+      // is the user's explicit act — bind to an online machine now.
+      const picked = await agentService.pickOnlineMachineForServer(agent.serverId);
+      if (picked) {
+        await agentService.assignMachine(agent.id, picked.id);
+        agent = { ...agent, machineId: picked.id };
+        startMachineId = picked.id;
+        console.log(`[Agent ${agentId}] Bound to online machine ${picked.id} at start (was unassigned)`);
+      } else {
+        this.recordLifecycleEvent({
+          agentId,
+          machineId: null,
+          action: "start",
+          outcome: "failed",
+          cause: startCause,
+          previousStatus,
+          detail: "machine_unassigned",
+        });
+        throw new Error("No computer is online for this server. Connect a computer, then start the agent (or assign one explicitly).");
+      }
     }
 
     const normalizedRuntimeConfig = hydrateRuntimeConfig(agent);
     const launchRuntimeFields = runtimeConfigToLaunchFields(normalizedRuntimeConfig);
     if (launchRuntimeFields.runtime === "kimi-sdk" && launchRuntimeFields.reasoningEffort !== null) {
-      const detected = await this.detectMachineRuntimeModels(agent.machineId, "kimi-sdk");
+      const detected = await this.detectMachineRuntimeModels(startMachineId, "kimi-sdk");
       const selectedModel = detected.kind === "live"
         ? detected.value.models.find((candidate) => candidate.id === launchRuntimeFields.model)
         : undefined;
@@ -10109,12 +10299,12 @@ export class AgentOrchestrator extends EventEmitter {
     // Catalog preflight and generation lease are both before wake locks,
     // cache/status mutation, credentials/session work, and spawn dispatch.
     const catalogValidation = await this.validateBuiltInPresetForMachine(
-      agent.machineId,
+      startMachineId,
       normalizedRuntimeConfig,
     );
     const releaseCatalogAuthority = catalogValidation
       ? this.acquireBuiltInCatalogAuthority(
-          agent.machineId,
+          startMachineId,
           catalogValidation.authority,
         )
       : () => undefined;
@@ -10308,14 +10498,14 @@ export class AgentOrchestrator extends EventEmitter {
         // queue acknowledgement. Fail before publishing so a retry cannot wake
         // a remote daemon twice after the source reports `dropped`.
         if (!this.sendLocalAgentStartWithAckRetry(
-          agent.machineId,
+          startMachineId,
           startMessage as AgentStartMessage & { startDispatchId: string },
         )) {
           throw new CrossReplicaQueueReceiptUnavailableError();
         }
       } else {
         if (!await this.sendAgentStartWithAckRetry(
-          agent.machineId,
+          startMachineId,
           startMessage as AgentStartMessage & { startDispatchId: string },
         )) {
           throw new RouteFailureError(
@@ -10327,9 +10517,19 @@ export class AgentOrchestrator extends EventEmitter {
       startDispatchSpan.end("ok", {
         attrs: {
           outcome: "sent",
-          queue_depth: this.pendingStartQueueDepth(agent.machineId),
+          queue_depth: this.pendingStartQueueDepth(startMachineId),
         },
       });
+      // Breaker bookkeeping (upstream 1.21.2 port): a successfully dispatched
+      // start opens/resets the episode. Human starts always lift a block and
+      // open a fresh episode; automatic starts keep it.
+      await this.wakeCrashLoopBreaker.recordStart(agentId, launchId ?? null, this.clock.now(), { human: startCause === "manual" || humanStart })
+        .catch((err) => console.warn(`[Agent ${agentId}] wake crash-loop recordStart failed:`, err));
+      // If this start carries an owed catch-up, claim it under this launchId;
+      // the active report below clears it once the runtime is really up.
+      if (launchId && await this.wakeCrashLoopBreaker.isCatchupOwed(agentId).catch(() => false)) {
+        await this.wakeCrashLoopBreaker.markCatchupCarried(agentId, launchId).catch(() => {});
+      }
     } catch (err) {
       startDispatchSpan.end("error", {
         attrs: {
@@ -10366,7 +10566,7 @@ export class AgentOrchestrator extends EventEmitter {
     const { event } = adaptStartLifecycleEvent({
       serverId: agent.serverId,
       agentId,
-      machineId: agent.machineId,
+      machineId: startMachineId,
       launchId,
       previousStatus,
       startCause,
@@ -10443,7 +10643,83 @@ export class AgentOrchestrator extends EventEmitter {
       nextStatus,
     };
 
+    // Breaker bookkeeping (upstream 1.21.2 port): a manual stop forgets the
+    // early-exit streak — the agent is offline by intent, not crashing.
+    if (reason === "manual") {
+      await this.wakeCrashLoopBreaker.recordManualStop(agentId).catch(() => {});
+    }
+
     await this.applyStopAction(context);
+  }
+
+  /**
+   * Release-path wiring (upstream 1.21.2 port): the agent's runtime config
+   * changed, so a block that retrying could not lift may no longer apply.
+   * Called by the agent update route after a runtime-affecting change lands.
+   */
+  async liftWakeCrashLoopBlockForConfigChange(agentId: string): Promise<boolean> {
+    return this.wakeCrashLoopBreaker.liftForConfigChange(agentId);
+  }
+
+  /** Breaker diagnostic for agent-status visibility: an agent that refuses to
+   * wake shows "circuit breaker tripped" instead of looking like a silent bug. */
+  async getWakeCrashLoopDiagnostic(agentId: string): Promise<WakeCrashLoopActivityDiagnostic | null> {
+    const snapshot = await this.wakeCrashLoopBreaker.snapshot(agentId);
+    return snapshot.blocked || snapshot.earlyExitCount > 0 ? snapshot : null;
+  }
+
+  /**
+   * Catch-up wake (B1 follow-up): messages that arrived while the breaker
+   * block was active stayed in the inbox; schedule one automatic wake at
+   * block end so they are not stranded until an unrelated message arrives.
+   */
+  private scheduleWakeCrashLoopCatchup(agentId: string, blockedAtMs: number): void {
+    const rules = this.wakeCrashLoopBreaker.getRules();
+    if (rules.blockCooldownMs <= 0) return;
+    const existing = this.wakeCrashLoopCatchupTimers.get(agentId);
+    if (existing !== undefined) this.clock.clearTimeout(existing);
+    const fireAt = blockedAtMs + rules.blockCooldownMs + 1_000;
+    const delay = Math.max(1, fireAt - this.clock.now());
+    const timer = this.clock.setTimeout(() => {
+      this.wakeCrashLoopCatchupTimers.delete(agentId);
+      void this.triggerWakeCrashLoopCatchup(agentId);
+    }, delay);
+    this.wakeCrashLoopCatchupTimers.set(agentId, timer);
+  }
+
+  /**
+   * Task #30: bind agents whose affinity was left empty at creation (no
+   * computer online) to a machine that just came online — only when it is
+   * the server's only machine, so multi-machine servers keep explicit
+   * assignment as the rule.
+   */
+  private async bindUnassignedAgentsToLoneOnlineMachine(machineId: string, serverId: string): Promise<void> {
+    const machine = await machineService.getMachine(asMachineId(machineId)).catch(() => null);
+    if (!machine || machine.serverId !== serverId) return;
+    const serverMachines = await machineService.listMachines(serverId).catch(() => null);
+    if (!serverMachines || serverMachines.length !== 1) return;
+    const unassigned = await agentService.listUnassignedManagedAgents(serverId).catch(() => []);
+    for (const row of unassigned) {
+      if (isExternalAgentRuntime(row.runtime)) continue;
+      await agentService.assignMachine(row.id, machineId).catch(() => undefined);
+    }
+  }
+
+  private async triggerWakeCrashLoopCatchup(agentId: string): Promise<void> {
+    try {
+      if (!(await this.wakeCrashLoopBreaker.isCatchupOwed(agentId))) return;
+      const agent = await this.getCachedAgent(agentId);
+      if (!agent || agent.status === "stopped") return;
+      // An automatic resume wake: isBlocked lifts the expired block, and the
+      // ordinary start path re-queries the unread inbox, so the queued
+      // messages reach the agent. If the agent re-trips immediately, the
+      // refusal path marks the catch-up owed again and reschedules.
+      await this.startAgent(agentId, {
+        resumePrompt: "<system>Wake crash-loop cooldown elapsed; catching up on queued messages.</system>",
+      });
+    } catch (err) {
+      console.warn(`[Agent ${agentId}] wake crash-loop catch-up wake failed:`, err);
+    }
   }
 
   protected async applyStopAction(context: StopApplyContext) {
@@ -10892,7 +11168,7 @@ export class AgentOrchestrator extends EventEmitter {
     return { status: response.status, source: response.source };
   }
 
-  async detectMachineRuntimeModels(machineId: string, runtime: string): Promise<RuntimeModelSourceOutcome> {
+  async detectMachineRuntimeModels(machineId: string, runtime: string, opts: { refresh?: boolean } = {}): Promise<RuntimeModelSourceOutcome> {
     // Plain model discovery does not consume connection-generation authority.
     // Built-in admission continues to use the local, fenced WithAuthority path.
     if (!this.machineConnections.has(machineId)) {
@@ -10900,7 +11176,7 @@ export class AgentOrchestrator extends EventEmitter {
       const response = await this.getMachineResponseRelay().request({
         requestId, machineId, type: "machine:runtime_models:result",
       }, getRuntimeModelDetectionTimeoutMs(runtime), () => this.sendRequiredToMachine(machineId, {
-        type: "machine:runtime_models:detect", requestId, runtime,
+        type: "machine:runtime_models:detect", requestId, runtime, ...(opts.refresh ? { refresh: true } : {}),
       }), (event, attrs) => this.recordMachineResponseRelay(event, attrs));
       if (response.type !== "machine:runtime_models:result") throw new Error("Unexpected model response");
       return projectRuntimeModelSourceResult(response, runtime);

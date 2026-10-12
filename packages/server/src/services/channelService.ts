@@ -6483,12 +6483,12 @@ type CanonicalThreadRow = {
 
 async function listCanonicalThreadsForParentMessages(
   parentMessageIds: string[],
+  executor: DatabaseExecutor = getDb(),
 ): Promise<CanonicalThreadRow[]> {
   const dedupedParentMessageIds = [...new Set(parentMessageIds.filter(Boolean))];
   if (dedupedParentMessageIds.length === 0) return [];
 
-  const db = getDb();
-  const rows = await db.execute(sql`
+  const rows = await executor.execute(sql`
     SELECT DISTINCT ON (c.parent_message_id)
       c.id::text AS "threadChannelId",
       c.id::text AS "storageThreadChannelId",
@@ -6647,8 +6647,11 @@ export async function listRecentThreadParentMessageIdsForChannelView(channelId: 
   return listRecentCanonicalThreadParentMessageIds(resolved.canonicalChannelId, limit);
 }
 
-async function getCanonicalThreadForParentMessage(parentMessageId: string): Promise<CanonicalThreadRow | null> {
-  const [row] = await listCanonicalThreadsForParentMessages([parentMessageId]);
+async function getCanonicalThreadForParentMessage(
+  parentMessageId: string,
+  executor: DatabaseExecutor = getDb(),
+): Promise<CanonicalThreadRow | null> {
+  const [row] = await listCanonicalThreadsForParentMessages([parentMessageId], executor);
   return row ?? null;
 }
 
@@ -6698,11 +6701,33 @@ async function listThreadRowsForChannelView(
 // `thread_id` reference once its thread channel is resolved. Reply messages
 // *inside* a thread keep `thread_id = null` and live in the thread channel
 // itself (see `schema.ts` `messages.threadId` comment for the contract).
-async function syncParentMessageThreadId(parentMessageId: string, threadChannelId: string) {
-  const db = getDb();
-  await db.update(messages)
+// The IS DISTINCT FROM guard skips dead writes — when nothing changes, and
+// when that version is not HOT it re-inserts the row into every messages
+// index, including the full-text GIN pending list (upstream 1.21.2 port).
+async function syncParentMessageThreadId(
+  parentMessageId: string,
+  threadChannelId: string,
+  executor: DatabaseExecutor = getDb(),
+) {
+  await executor.update(messages)
     .set({ threadId: threadChannelId })
-    .where(eq(messages.id, parentMessageId));
+    .where(and(
+      eq(messages.id, parentMessageId),
+      sql`${messages.threadId} IS DISTINCT FROM ${threadChannelId}`,
+    ));
+}
+
+/**
+ * Every creator of a root's canonical thread queues on the root message row
+ * before inserting the thread (upstream 1.21.2 port). FOR NO KEY UPDATE takes
+ * a row lock strong enough to serialize concurrent thread creators behind each
+ * other while not blocking readers' FOR KEY SHARE.
+ */
+async function lockThreadRootMessageForCreate(executor: DatabaseExecutor, parentMessageId: string) {
+  await executor.select({ id: messages.id })
+    .from(messages)
+    .where(eq(messages.id, parentMessageId))
+    .for("no key update");
 }
 
 /**
@@ -6726,13 +6751,20 @@ export async function getOrCreateThread(
 
   const existing = await getCanonicalThreadForParentMessage(parentMessageId);
   if (existing) {
-    await syncParentMessageThreadId(parentMessageId, existing.threadChannelId);
     const [parentThread] = await db
-      .select({ serverId: channels.serverId })
+      .select({
+        serverId: channels.serverId,
+        parentThreadId: sql<string | null>`(SELECT ${messages.threadId} FROM ${messages} WHERE ${messages.id} = ${parentMessageId})`,
+      })
       .from(channels)
       .where(eq(channels.id, existing.threadChannelId))
       .limit(1);
     if (!parentThread) throw new Error("Canonical thread channel not found");
+    // Usually already stamped. Still re-stamp when it is missing or when the
+    // canonical thread among duplicates has changed (upstream 1.21.2 port).
+    if (parentThread.parentThreadId !== existing.threadChannelId) {
+      await syncParentMessageThreadId(parentMessageId, existing.threadChannelId);
+    }
     return {
       id: existing.threadChannelId,
       serverId: parentThread.serverId,
@@ -6758,18 +6790,40 @@ export async function getOrCreateThread(
   // that creates a thread goes through here.
   if (isAnnouncementChannel(parentChannel)) throw new AnnouncementNoThreadsError();
 
-  // Create thread channel
+  // Create the thread channel and stamp the parent's thread_id in one
+  // transaction (upstream 1.21.2 port). As two autocommit statements, a
+  // failed or timed-out stamp left a committed thread whose parent carried no
+  // thread_id; search relies on "a thread's parent always carries its
+  // thread_id".
   const threadName = `thread-${parentMessageId.slice(0, 8)}`;
-  const [threadChannel] = await db.insert(channels).values({
-    serverId: parentChannel.serverId,
-    name: threadName,
-    type: "thread",
-    parentMessageId,
-  }).onConflictDoNothing().returning();
+  const threadResult = await db.transaction(async (tx) => {
+    await lockThreadRootMessageForCreate(tx, parentMessageId);
+    // Re-query UNDER the lock: there is no unique index on parent_message_id,
+    // so a concurrent creator that committed between our outer check and this
+    // lock is only visible here. Without this, both creators insert a thread
+    // and the later one re-stamps the parent's thread_id.
+    const raced = await getCanonicalThreadForParentMessage(parentMessageId, tx);
+    if (raced) {
+      await syncParentMessageThreadId(parentMessageId, raced.threadChannelId, tx);
+      return { id: raced.threadChannelId, created: false as const };
+    }
+    const [inserted] = await tx.insert(channels).values({
+      serverId: parentChannel.serverId,
+      name: threadName,
+      type: "thread",
+      parentMessageId,
+    }).onConflictDoNothing().returning();
+    if (inserted) {
+      await syncParentMessageThreadId(parentMessageId, inserted.id, tx);
+      return { id: inserted.id, created: true as const };
+    }
+    // The insert conflicted (a unique violation elsewhere) but the re-query
+    // found nothing visible; fall back to a post-commit canonical lookup.
+    return { id: null, created: false as const };
+  });
 
-  if (threadChannel) {
-    await syncParentMessageThreadId(parentMessageId, threadChannel.id);
-    return { id: threadChannel.id, serverId: parentChannel.serverId, parentMessageId, created: true };
+  if (threadResult.id) {
+    return { id: threadResult.id, serverId: parentChannel.serverId, parentMessageId, created: threadResult.created };
   }
 
   const canonical = await getCanonicalThreadForParentMessage(parentMessageId);

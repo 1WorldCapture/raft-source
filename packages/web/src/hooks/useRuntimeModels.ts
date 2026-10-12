@@ -238,6 +238,20 @@ export function projectRuntimeModelSourcePresentation(runtime: string, source: R
   };
 }
 
+/**
+ * The models request path for one (server, machine, runtime) identity. A
+ * rescan-driven request carries `?refresh=1` so the daemon's detection cache
+ * is bypassed (see runtimeModelsRescanContract.test.ts).
+ */
+export function runtimeModelsRequestPath(input: {
+  serverId: string;
+  machineId: string;
+  runtime: string;
+  rescan: boolean;
+}): string {
+  return `/servers/${input.serverId}/machines/${input.machineId}/runtime-models/${input.runtime}${input.rescan ? "?refresh=1" : ""}`;
+}
+
 export function useRuntimeModels(machineId: string | null | undefined, runtime: string): RuntimeModelsResult {
   const serverId = useServerStore((s) => s.current?.id);
   const [refreshNonce, setRefreshNonce] = useState(0);
@@ -289,8 +303,13 @@ export function useRuntimeModels(machineId: string | null | undefined, runtime: 
         previous: getStaticRuntimeModelSourceSet(runtime),
       },
     });
+    // A rescan click (refreshNonce > 0) must bypass BOTH layers of caching:
+    // this hook's request identity and the daemon's 5-minute detection cache
+    // (?refresh=1) — the hook's contract says a rescan recovers without a
+    // hidden TTL. Identity-driven loads (first mount, machine/runtime switch)
+    // stay on the cached path so a flapping connection cannot storm the CLIs.
     void api
-      .get(`/servers/${serverId}/machines/${machineId}/runtime-models/${runtime}`)
+      .get(runtimeModelsRequestPath({ serverId, machineId, runtime, rescan: refreshNonce > 0 }))
       .then((res) => {
         if (cancelled) return;
         setSourceSnapshot({ requestKey, source: parseRuntimeModelSourcePayload(res.data) });
@@ -302,7 +321,7 @@ export function useRuntimeModels(machineId: string | null | undefined, runtime: 
     return () => {
       cancelled = true;
     };
-  }, [machineId, requestKey, runtime, serverId]);
+  }, [machineId, refreshNonce, requestKey, runtime, serverId]);
 
   const presentation = useMemo(
     () => projectRuntimeModelSourcePresentation(runtime, source),

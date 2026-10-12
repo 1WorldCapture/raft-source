@@ -327,3 +327,28 @@ export function resolveHomePath(relativePath: string, deps: ProbeDeps = {}): str
   const homeDir = deps.homeDir ?? deps.env?.HOME ?? process.env.HOME ?? "";
   return path.join(homeDir, relativePath);
 }
+
+/**
+ * Swallow the asynchronous EPIPE a child's stdin emits when we write after
+ * the process has exited (task #22 generalised): the write does not throw
+ * synchronously, and without an 'error' listener the event is unhandled and
+ * takes down the whole daemon. Attach once right after spawn for every child
+ * the daemon writes to; the exit/crash paths own the lifecycle outcome, this
+ * listener only keeps the process alive. Idempotent per stream.
+ */
+const guardedStdins = new WeakSet<object>();
+
+export function guardChildStdin(proc: import("node:child_process").ChildProcess): void {
+  const stdin = proc.stdin as ({ on?: unknown } & object) | null;
+  // Test doubles may hand us a bare writable without the EventEmitter API.
+  if (!stdin || typeof stdin.on !== "function" || guardedStdins.has(stdin)) return;
+  guardedStdins.add(stdin);
+  (stdin as { on: (event: string, listener: (err: Error) => void) => void }).on("error", (err) => {
+    // A write to an exited child is expected (EPIPE / destroyed stream):
+    // lifecycle paths own the outcome. Anything else on stdin is unusual
+    // enough to keep visible.
+    const code = (err as { code?: unknown }).code;
+    if (code === "EPIPE" || code === "ERR_STREAM_DESTROYED") return;
+    logger.warn(`[guardChildStdin] unexpected child stdin error: ${err?.message ?? String(err)}`);
+  });
+}

@@ -198,6 +198,8 @@ export * from "./unreadSummaryEvent.js";
 export * from "./channelPermissions.js";
 export * from "./raftPermalinks.js";
 export * from "./raftRefs.js";
+export * from "./liveExecutablePath.js";
+export * from "./thirdPartyEventId.js";
 export * from "./thirdPartyInertRenderer.js";
 export * from "./producerFactLineage.js";
 export * from "./apmHeldFreshness.js";
@@ -603,7 +605,7 @@ export type ServerToMachineMessage =
   | { type: "agent:activity_probe"; agentId: string; probeId: string; purpose: "sweep" | "manual" }
   | { type: "machine:workspace:scan" }
   | { type: "machine:workspace:delete"; directoryName: string }
-  | { type: "machine:runtime_models:detect"; requestId: string; runtime: string }
+  | { type: "machine:runtime_models:detect"; requestId: string; runtime: string; refresh?: boolean }
   /**
    * Ask the owning Computer to start a Cursor SDK owner sign-in for the web
    * login button. The daemon answers with `machine:cursor_sdk:login_result`
@@ -780,6 +782,26 @@ export interface RuntimeErrorActivityDiagnostic {
 }
 
 export type FeedbackTranscriptReportTimeSource = "web_report_bundle" | "server_request_received";
+
+/**
+ * Server-side wake crash-loop breaker diagnostic (upstream 1.21.2 port, their
+ * task #1119): the tripped/unsettled state of an automatic-wake episode,
+ * surfaced on the agent status so an agent that refuses to wake is visible as
+ * "circuit breaker tripped", not silent. Counts, classes, ids and times only.
+ */
+export interface WakeCrashLoopActivityDiagnostic {
+  episode: number;
+  earlyExitCount: number;
+  threshold: number;
+  windowMs: number;
+  blocked: boolean;
+  blockedAtMs: number | null;
+  firstExitAtMs: number | null;
+  lastExitAtMs: number | null;
+  lastExitKind: "machine_disconnected" | "agent_process_exited" | null;
+  lastSignal: string | null;
+  lastLaunchId: string | null;
+}
 export type FeedbackTranscriptWindowCoverage =
   | "covered"
   | "outside_report_window"
@@ -860,6 +882,7 @@ export type MachineToServerMessage =
   | { type: "agent:deliver:ack"; agentId: string; seq: number; traceparent?: string; deliveryId?: string; mentionDelivery?: MentionDeliveryIdentitySnapshot }
   | { type: "agent:delivery:transition"; agentId: string; stage: MentionDeliveryTransitionStage; outcome: "accepted" | "coalesced"; mentionDelivery: MentionDeliveryIdentitySnapshot; traceparent?: string }
   | { type: "agent:delivery:terminal_error"; agentId: string; code: MentionDeliveryTerminalErrorCode; mentionDelivery: MentionDeliveryIdentitySnapshot; traceparent?: string }
+  | { type: "agent:delivery:rejected"; agentId: string; seq: number; traceparent?: string; deliveryId?: string; reason: "no_process"; mentionDelivery?: MentionDeliveryIdentitySnapshot }
   | { type: "agent:workspace:file_tree"; agentId: string; files: FileNode[]; dirPath?: string; includeHidden?: boolean }
   | { type: "agent:workspace:file_content"; agentId: string; requestId: string; content: string | null; binary: boolean; size?: number; mimeType?: string; encoding?: "utf-8" | "base64" }
   | { type: "agent:workspace:wiki_ensured"; agentId: string; requestId: string; success: boolean; packId: string; files: WikiWorkspaceFileReceipt[]; error?: string }

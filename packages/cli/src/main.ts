@@ -36,6 +36,7 @@ import { Command, CommanderError } from "commander";
 import { CliError, CliExit } from "./core/errors.js";
 import { defaultCliIo } from "./core/io.js";
 import { renderError } from "./core/renderer.js";
+import { installStdoutEpipeGuard } from "./core/stdoutEpipe.js";
 import { forwardManagedTransportIfNeeded, ManagedTransportError } from "./auth/managedTransport.js";
 import { readCliVersion } from "./version.js";
 import { registerWhoamiCommand } from "./commands/auth/whoami.js";
@@ -396,6 +397,10 @@ function handleCliError(err: unknown): void {
     process.exitCode = 1;
   }
 }
+
+// `raft … | head` closes the pipe early; the guard below makes that the
+// reader's choice instead of an unhandled stream error (see core/stdoutEpipe).
+installStdoutEpipeGuard(process.stdout);
 
 try {
   // A login/interactive shell may rewrite PATH after the daemon prepended its
