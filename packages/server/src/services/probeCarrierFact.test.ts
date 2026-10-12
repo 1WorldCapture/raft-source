@@ -5,6 +5,7 @@ import {
   parseProbeCarrierMeta,
   probeCarrierFactHasProbeCapability,
   PROBE_CARRIER_FACT_MAX_AGE_MS,
+  selectProbeCarrierMeta,
 } from "./probeCarrierFact.js";
 
 const NOW = Date.parse("2026-09-15T00:00:00.000Z");
@@ -38,6 +39,23 @@ test("parseProbeCarrierMeta projects capabilities and runtime versions", () => {
   const noCap = parseProbeCarrierMeta(meta({ probeCapabilities: "[]" }));
   assert.ok(noCap);
   assert.equal(probeCarrierFactHasProbeCapability(noCap), false);
+});
+
+test("probe meta is omitted when provider connections are off and never carries runtime reassignment", () => {
+  const input = {
+    capabilities: ["provider-probe:v1", "other"],
+    connectionEpochId: "epoch-1",
+    replicaGeneration: "gen-1",
+    runtimeVersions: { builtin: "pi-1" },
+    observedAt: new Date(NOW).toISOString(),
+  };
+  assert.equal(selectProbeCarrierMeta({ ...input, probesEnabled: false }), null);
+  const enabled = selectProbeCarrierMeta({ ...input, probesEnabled: true });
+  assert.ok(enabled);
+  assert.deepEqual(JSON.parse(enabled.probeCapabilities), ["other", "provider-probe:v1"]);
+  assert.equal(enabled.probeConnectionEpochId, "epoch-1");
+  assert.deepEqual(JSON.parse(enabled.probeRuntimeVersions), { builtin: "pi-1" });
+  assert.equal("runtimes" in enabled, false);
 });
 
 test("fact freshness rejects future and stale observations", () => {

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, gt, isNull, sql } from "drizzle-orm";
+import { and, eq, gt, isNull, or, sql } from "drizzle-orm";
 import {
   currentDate,
   currentTimeMs,
@@ -34,6 +34,8 @@ import {
 } from "@botiverse/raft-shared";
 import { getDb, type DatabaseTransaction } from "../db/index.js";
 import {
+  agentProviderConnections,
+  agents,
   machines,
   providerConnections,
   providerConnectionCredentials,
@@ -42,7 +44,10 @@ import {
 } from "../db/schema.js";
 import { isProviderConnectionsEnabled, isProviderProbesEnabled } from "./providerConnectionFeature.js";
 import { recordIntegrationAuditEvent } from "./integrationAuditService.js";
-import { resolveProviderConnectionProbeMaterialization } from "./providerConnectionService.js";
+import {
+  previewProviderConnectionProbeMaterialization,
+  resolveProviderConnectionProbeMaterialization,
+} from "./providerConnectionService.js";
 
 export type ProviderProbeErrorCode =
   | "probe_disabled"
@@ -304,13 +309,35 @@ export async function createProviderProbe(input: {
     )).limit(1);
     if (!connection) throw new ProviderProbeError("Provider connection not found", "probe_not_found");
 
-    const [computer] = await tx.select({ id: machines.id, runtimes: machines.runtimes }).from(machines).where(and(
+    const [computer] = await tx.select({
+      id: machines.id,
+      userId: machines.userId,
+      runtimes: machines.runtimes,
+    }).from(machines).where(and(
       eq(machines.serverId, input.serverId),
       eq(machines.id, input.computerId),
     )).limit(1);
     if (!computer) throw new ProviderProbeError("Computer not found", "probe_not_found");
     if (!Array.isArray(computer.runtimes) || !computer.runtimes.includes(input.runtime)) {
       throw new ProviderProbeError("Computer does not declare the probe runtime", "probe_invalid");
+    }
+    if (computer.userId !== input.userId) {
+      const [assigned] = await tx.select({ id: agents.id }).from(agentProviderConnections).innerJoin(agents, and(
+        eq(agents.id, agentProviderConnections.agentId),
+        eq(agents.serverId, input.serverId),
+      )).where(and(
+        eq(agentProviderConnections.serverId, input.serverId),
+        eq(agentProviderConnections.connectionId, input.connectionId),
+        eq(agents.machineId, computer.id),
+        isNull(agents.deletedAt),
+        eq(agents.status, "active"),
+      )).limit(1);
+      if (!assigned) {
+        throw new ProviderProbeError(
+          "Probe Computer must be owned by the requester or already run an agent that uses this connection",
+          "probe_invalid",
+        );
+      }
     }
 
     // Pair-level reservation: serializes concurrent creates for one
@@ -346,16 +373,28 @@ export async function createProviderProbe(input: {
       throw new ProviderProbeError("A probe is already pending for this connection and Computer", "probe_rate_limited", retryAfter);
     }
     const windowStart = new Date(now.getTime() - PROVIDER_PROBE_RATE_WINDOW_MS);
-    const [recent] = await tx.select({ dispatchedAt: providerProbeIntents.dispatchedAt })
-      .from(providerProbeIntents).where(and(
-        eq(providerProbeIntents.serverId, input.serverId),
-        eq(providerProbeIntents.connectionId, input.connectionId),
-        eq(providerProbeIntents.computerId, input.computerId),
+    const [recent] = await tx.select({
+      dispatchedAt: providerProbeIntents.dispatchedAt,
+      closedAt: providerProbeIntents.closedAt,
+      closeReason: providerProbeIntents.closeReason,
+    }).from(providerProbeIntents).where(and(
+      eq(providerProbeIntents.serverId, input.serverId),
+      eq(providerProbeIntents.connectionId, input.connectionId),
+      eq(providerProbeIntents.computerId, input.computerId),
+      or(
         gt(providerProbeIntents.dispatchedAt, windowStart),
-      )).orderBy(sql`${providerProbeIntents.dispatchedAt} desc`).limit(1);
-    if (recent?.dispatchedAt) {
+        and(
+          eq(providerProbeIntents.closeReason, "unsupported_carrier"),
+          gt(providerProbeIntents.closedAt, windowStart),
+        ),
+      ),
+    )).orderBy(sql`greatest(${providerProbeIntents.dispatchedAt}, ${providerProbeIntents.closedAt}) desc`).limit(1);
+    const recentAt = recent?.dispatchedAt && recent.dispatchedAt.getTime() > windowStart.getTime()
+      ? recent.dispatchedAt
+      : recent?.closeReason === "unsupported_carrier" ? recent.closedAt : null;
+    if (recentAt) {
       const retryAfter = Math.max(1, Math.ceil(
-        (recent.dispatchedAt.getTime() + PROVIDER_PROBE_RATE_WINDOW_MS - now.getTime()) / 1000,
+        (recentAt.getTime() + PROVIDER_PROBE_RATE_WINDOW_MS - now.getTime()) / 1000,
       ));
       throw new ProviderProbeError("Probe rate limit reached for this connection and Computer", "probe_rate_limited", retryAfter);
     }
@@ -746,11 +785,28 @@ export async function materializeProviderProbe(input: {
     await closeProbeTerminalOutside(asProviderProbeId(intentPre.id), "stale_authority");
     throw new ProviderProbeError("Provider connection changed before the probe claim", "probe_stale_authority");
   }
+  // An existing claim is decided before any decrypt. A losing or expired
+  // claimant stops here; a fresh claim is taken in the transaction below.
+  if (intentPre.claimMachineId !== null && !probeClaimIsReusable(intentPre, input, currentTimeMs())) {
+    throw new ProviderProbeError("Probe materialization already claimed by another carrier", "probe_claim_conflict");
+  }
   const connectionId = await intentConnectionId(input.serverId, input.probeId);
-  const preRead = await resolveProviderConnectionProbeMaterialization({
+  const preview = await previewProviderConnectionProbeMaterialization({
     serverId: input.serverId,
     connectionId,
   });
+  const digest = await providerProbeMaterializationDigest({
+    probeId: intentPre.id,
+    machineId: input.machineId,
+    claimRequestId: input.claimRequestId,
+    connectionEpochId: intentPre.dispatchEpochId ?? "",
+    replicaGeneration: intentPre.dispatchGeneration ?? "",
+    projection: preview.providerConnection,
+    keyEnvNames: preview.envKeyNames,
+  });
+  if (intentPre.claimMachineId !== null && intentPre.materializationDigest !== digest) {
+    throw new ProviderProbeError("Probe materialization already claimed by another carrier", "probe_claim_conflict");
+  }
   try {
     await getDb().transaction(async (tx) => {
       const [intent] = await tx.select().from(providerProbeIntents)
@@ -790,15 +846,6 @@ export async function materializeProviderProbe(input: {
       if (intent.dispatchRequestId !== input.claimRequestId) {
         throw new ProviderProbeError("Claim does not match the frozen dispatch request", "probe_claim_conflict");
       }
-      const digest = await providerProbeMaterializationDigest({
-        probeId: intent.id,
-        machineId: input.machineId,
-        claimRequestId: input.claimRequestId,
-        connectionEpochId: intent.dispatchEpochId ?? "",
-        replicaGeneration: intent.dispatchGeneration ?? "",
-        projection: preRead.providerConnection,
-        keyEnvNames: preRead.envKeyNames,
-      });
       const now = currentDate();
       if (intent.claimMachineId === null) {
         const [claimedRow] = await tx.update(providerProbeIntents).set({
@@ -815,14 +862,7 @@ export async function materializeProviderProbe(input: {
         if (!claimedRow) throw new ProviderProbeError("Probe claim raced", "probe_claim_conflict");
         return;
       }
-      const sameClaim = intent.claimMachineId === input.machineId
-        && intent.claimRequestId === input.claimRequestId
-        && intent.claimRequestId === intent.dispatchRequestId
-        && intent.claimEpochId === intent.dispatchEpochId
-        && intent.claimGeneration === intent.dispatchGeneration;
-      const withinLease = intent.claimLeasedAt !== null
-        && now.getTime() - intent.claimLeasedAt.getTime() <= PROVIDER_PROBE_MATERIALIZE_LEASE_MS;
-      if (!sameClaim || !withinLease || intent.materializationDigest !== digest) {
+      if (!probeClaimIsReusable(intent, input, now.getTime()) || intent.materializationDigest !== digest) {
         throw new ProviderProbeError("Probe materialization already claimed by another carrier", "probe_claim_conflict");
       }
     });
@@ -835,14 +875,33 @@ export async function materializeProviderProbe(input: {
     }
     throw error;
   }
+  const materialized = await resolveProviderConnectionProbeMaterialization({
+    serverId: input.serverId,
+    connectionId,
+  });
   return {
-    envVars: preRead.envVars,
-    providerConnection: preRead.providerConnection,
+    envVars: materialized.envVars,
+    providerConnection: materialized.providerConnection,
     authority: {
       connectionEpochId: intentPre.dispatchEpochId ?? "",
       replicaGeneration: intentPre.dispatchGeneration ?? "",
     },
   };
+}
+
+function probeClaimIsReusable(
+  intent: { claimMachineId: string | null; claimRequestId: string | null; claimEpochId: string | null; claimGeneration: string | null; claimLeasedAt: Date | null; dispatchRequestId: string | null; dispatchEpochId: string | null; dispatchGeneration: string | null },
+  input: { machineId: string; claimRequestId: string },
+  nowMs: number,
+): boolean {
+  const sameClaim = intent.claimMachineId === input.machineId
+    && intent.claimRequestId === input.claimRequestId
+    && intent.claimRequestId === intent.dispatchRequestId
+    && intent.claimEpochId === intent.dispatchEpochId
+    && intent.claimGeneration === intent.dispatchGeneration;
+  const withinLease = intent.claimLeasedAt !== null
+    && nowMs - intent.claimLeasedAt.getTime() <= PROVIDER_PROBE_MATERIALIZE_LEASE_MS;
+  return sameClaim && withinLease;
 }
 
 async function intentConnectionId(serverId: string, probeId: ProviderProbeId): Promise<string> {

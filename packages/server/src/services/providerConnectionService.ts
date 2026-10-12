@@ -569,6 +569,11 @@ function connectionEnv(providerId: ProviderConnectionProviderId, endpointUrl: st
   return { [apiKeyEnv]: apiKey, [baseUrlEnv]: endpointUrl };
 }
 
+/** Env names only. The placeholder value never leaves this function. */
+function connectionEnvKeyNames(providerId: ProviderConnectionProviderId, endpointUrl: string | null): string[] {
+  return Object.keys(connectionEnv(providerId, endpointUrl, "probe-name-only")).sort();
+}
+
 function connectionTestRequest(
   providerId: ProviderConnectionProviderId,
   endpointUrl: string | null,
@@ -926,16 +931,7 @@ export function __resetProviderConnectionProbeMaterializationCallCount(): void {
   probeMaterializationCalls = 0;
 }
 
-export async function resolveProviderConnectionProbeMaterialization(input: {
-  serverId: string;
-  connectionId: string;
-}): Promise<{
-  envVars: Record<string, string>;
-  providerConnection: ProviderConnectionLaunchProjection;
-  envKeyNames: string[];
-  configVersion: number;
-  credentialVersion: number;
-}> {
+async function loadProbeConnectionRow(input: { serverId: string; connectionId: string }) {
   const [row] = await getDb().select({
     connection: providerConnections,
     credential: providerConnectionCredentials,
@@ -947,18 +943,53 @@ export async function resolveProviderConnectionProbeMaterialization(input: {
     eq(providerConnections.id, input.connectionId),
   )).limit(1);
   if (!row) throw new ProviderConnectionError("Provider connection not found", "provider_connection_not_found");
-  probeMaterializationCalls += 1;
-  const apiKey = decryptApiKey(row.credential.encryptedApiKey, `${input.serverId}:${input.connectionId}`);
-  const envVars = connectionEnv(row.connection.providerId, row.connection.endpointUrl, apiKey);
+  return row;
+}
+
+function probeProjection(row: Awaited<ReturnType<typeof loadProbeConnectionRow>>) {
   return {
-    envVars,
     providerConnection: {
       providerId: row.connection.providerId,
       endpointUrl: row.connection.endpointUrl,
       supportsImageInput: row.connection.supportsImageInput,
     },
-    envKeyNames: Object.keys(envVars).sort(),
+    envKeyNames: connectionEnvKeyNames(row.connection.providerId, row.connection.endpointUrl),
     configVersion: row.connection.configVersion,
     credentialVersion: row.credential.credentialVersion,
+  };
+}
+
+/** Names and projection only. Does not decrypt and does not count as a materialization. */
+export async function previewProviderConnectionProbeMaterialization(input: {
+  serverId: string;
+  connectionId: string;
+}): Promise<{
+  providerConnection: ProviderConnectionLaunchProjection;
+  envKeyNames: string[];
+  configVersion: number;
+  credentialVersion: number;
+}> {
+  return probeProjection(await loadProbeConnectionRow(input));
+}
+
+export async function resolveProviderConnectionProbeMaterialization(input: {
+  serverId: string;
+  connectionId: string;
+}): Promise<{
+  envVars: Record<string, string>;
+  providerConnection: ProviderConnectionLaunchProjection;
+  envKeyNames: string[];
+  configVersion: number;
+  credentialVersion: number;
+}> {
+  const row = await loadProbeConnectionRow(input);
+  probeMaterializationCalls += 1;
+  const apiKey = decryptApiKey(row.credential.encryptedApiKey, `${input.serverId}:${input.connectionId}`);
+  const preview = probeProjection(row);
+  const envVars = connectionEnv(row.connection.providerId, row.connection.endpointUrl, apiKey);
+  return {
+    envVars,
+    ...preview,
+    envKeyNames: Object.keys(envVars).sort(),
   };
 }

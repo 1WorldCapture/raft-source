@@ -79,3 +79,33 @@ export function isProbeCarrierFactLive(
 export function probeCarrierFactHasProbeCapability(snapshot: ProbeCarrierMetaSnapshot): boolean {
   return snapshot.capabilities.includes(PROVIDER_PROBE_CAPABILITY);
 }
+
+/**
+ * Probe fields for the cross-replica machine-meta hash. Null when probes are
+ * off, so a ready/heartbeat write adds nothing and does not touch the
+ * connection's runtime list. `conn.runtimes` stays owned by the capabilities
+ * persist writer.
+ */
+export function selectProbeCarrierMeta(input: {
+  probesEnabled: boolean;
+  capabilities: Iterable<string>;
+  connectionEpochId: string | null;
+  replicaGeneration: string | null;
+  runtimeVersions: Record<string, string>;
+  observedAt: string;
+}): {
+  probeCapabilities: string;
+  probeConnectionEpochId: string | null;
+  probeReplicaGeneration: string | null;
+  probeObservedAt: string;
+  probeRuntimeVersions: string;
+} | null {
+  if (!input.probesEnabled) return null;
+  return {
+    probeCapabilities: JSON.stringify([...input.capabilities].sort()),
+    probeConnectionEpochId: input.connectionEpochId,
+    probeReplicaGeneration: input.replicaGeneration,
+    probeObservedAt: input.observedAt,
+    probeRuntimeVersions: JSON.stringify(input.runtimeVersions),
+  };
+}

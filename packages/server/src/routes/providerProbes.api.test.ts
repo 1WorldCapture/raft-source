@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import {
   PROVIDER_PROBE_BUDGET_MS,
+  PROVIDER_PROBE_MATERIALIZE_LEASE_MS,
   PROVIDER_CONNECTIONS_FEATURE_FLAG_KEY,
   asProviderProbeId,
   mintProviderProbeId,
@@ -18,6 +19,8 @@ import { fixturePasswordHash } from "../test/integration/credentials.js";
 import { createApiTest } from "../test/integration/apiTest.js";
 import { getDb } from "../db/index.js";
 import {
+  agentProviderConnections,
+  agents,
   featureFlagRules,
   integrationAuditEvents,
   machines,
@@ -267,8 +270,10 @@ test("provider probe foundation: idempotent create, closed receipts, capability 
       { serverId: server.id, userId: owner.id, name: "probe-machine-6", apiKeyHash: "h7", runtimes: ["builtin"] },
       { serverId: server.id, userId: owner.id, name: "probe-machine-7", apiKeyHash: "h8", runtimes: ["builtin"] },
       { serverId: server.id, userId: owner.id, name: "probe-machine-claude", apiKeyHash: "h6", runtimes: ["claude"] },
+      { serverId: server.id, userId: owner.id, name: "probe-machine-blank", apiKeyHash: "h9", runtimes: ["builtin"] },
+      { serverId: server.id, userId: member.id, name: "probe-machine-member", apiKeyHash: "h10", runtimes: ["builtin"] },
     ]).returning();
-    const [machine, machine2, machine3, machine4, machine5, machine6, machine7, claudeMachine] = machineRows;
+    const [machine, machine2, machine3, machine4, machine5, machine6, machine7, claudeMachine, blankMachine, memberMachine] = machineRows;
 
     // ---- closed runtime set: non-builtin runtime and non-string kind are 400
     const claudeRuntime = await fetch(`${app.baseUrl}/api/provider-connections/${connection.id}/probes`, {
@@ -448,6 +453,13 @@ test("provider probe foundation: idempotent create, closed receipts, capability 
     assert.equal(noCapView.probe.outcome, "failure");
     assert.equal(noCapView.probe.category, "unsupported_carrier");
     assert.equal(noCapState.dispatches.length, 0, "no capability must mean zero commands and zero provider calls");
+    const limitedAfterUnsupported = await fetch(`${app.baseUrl}/api/provider-connections/${connection.id}/probes`, {
+      method: "POST",
+      headers: headers(ownerToken, server.id),
+      body: JSON.stringify(await createBody(connection.id, machine2!.id)),
+    });
+    assert.equal(limitedAfterUnsupported.status, 429, "unsupported_carrier still consumes the rate window");
+    assert.equal((await limitedAfterUnsupported.json() as { code?: string }).code, "probe_rate_limited");
 
     // ---- send failure and timeout close with distinct carrier categories
     const offlineState: FakeCarrierState = { fact: FACT, dispatches: [], outcome: { kind: "send_failed" } };
@@ -527,7 +539,7 @@ test("provider probe foundation: idempotent create, closed receipts, capability 
     const blankReply = await fetch(`${app.baseUrl}/api/provider-connections/${connection.id}/probes`, {
       method: "POST",
       headers: headers(ownerToken, server.id),
-      body: JSON.stringify(await createBody(connection.id, machine2!.id)),
+      body: JSON.stringify(await createBody(connection.id, blankMachine!.id)),
     });
     const blankReplyView = (await blankReply.json()) as { probe: { outcome: string; category: string } };
     assert.equal(blankReplyView.probe.outcome, "failure");
@@ -580,6 +592,37 @@ test("provider probe foundation: idempotent create, closed receipts, capability 
       serverId: server.id, probeId: openProbeId, machineId: machine2!.id, claimRequestId: "claim-dispatch-request", fact: FACT,
     });
     assert.deepEqual(retryClaim.authority, firstClaim.authority);
+    await getDb().update(providerProbeIntents).set({
+      claimLeasedAt: new Date(Date.now() - PROVIDER_PROBE_MATERIALIZE_LEASE_MS - 1_000),
+    }).where(eq(providerProbeIntents.id, openProbeId));
+    __resetProviderConnectionProbeMaterializationCallCount();
+    await assert.rejects(
+      materializeProviderProbe({
+        serverId: server.id, probeId: openProbeId, machineId: machine2!.id, claimRequestId: "claim-dispatch-request", fact: FACT,
+      }),
+      /already claimed/,
+    );
+    assert.equal(
+      __providerConnectionProbeMaterializationCallCount(),
+      0,
+      "an expired claim retry must not decrypt",
+    );
+    await getDb().update(providerProbeIntents).set({
+      claimLeasedAt: new Date(),
+      claimMachineId: machine3!.id,
+    }).where(eq(providerProbeIntents.id, openProbeId));
+    __resetProviderConnectionProbeMaterializationCallCount();
+    await assert.rejects(
+      materializeProviderProbe({
+        serverId: server.id, probeId: openProbeId, machineId: machine2!.id, claimRequestId: "claim-dispatch-request", fact: FACT,
+      }),
+      /already claimed/,
+    );
+    assert.equal(
+      __providerConnectionProbeMaterializationCallCount(),
+      0,
+      "a claim held by another computer must not decrypt",
+    );
     // A claimant that cannot name the frozen dispatch request gets nothing,
     // and must never even reach the credential decrypt boundary. Use a fresh
     // open intent so earlier closures in this case cannot mask the tooth.
@@ -648,6 +691,35 @@ test("provider probe foundation: idempotent create, closed receipts, capability 
       }),
       /authority changed before the probe claim/,
     );
+
+    const foreignComputer = await fetch(`${app.baseUrl}/api/provider-connections/${connection.id}/probes`, {
+      method: "POST",
+      headers: headers(ownerToken, server.id),
+      body: JSON.stringify(await createBody(connection.id, memberMachine!.id)),
+    });
+    assert.equal(foreignComputer.status, 400);
+    assert.equal((await foreignComputer.json() as { code?: string }).code, "probe_invalid");
+    const [runningAgent] = await getDb().insert(agents).values({
+      serverId: server.id,
+      name: "probe-running-agent",
+      machineId: memberMachine!.id,
+      status: "active",
+      runtime: "builtin",
+    }).returning();
+    await getDb().insert(agentProviderConnections).values({
+      serverId: server.id,
+      agentId: runningAgent!.id,
+      connectionId: connection.id,
+      expectedConfigVersion: 1,
+      expectedCredentialVersion: 1,
+      updatedByUserId: owner.id,
+    });
+    const assignedComputer = await fetch(`${app.baseUrl}/api/provider-connections/${connection.id}/probes`, {
+      method: "POST",
+      headers: headers(ownerToken, server.id),
+      body: JSON.stringify(await createBody(connection.id, memberMachine!.id)),
+    });
+    assert.equal(assignedComputer.status, 201, "a computer already running an agent on this connection can be probed");
 
     // ---- member cannot create or read probes
     const forbidden = await fetch(`${app.baseUrl}/api/provider-connections/${connection.id}/probes`, {

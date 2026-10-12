@@ -239,7 +239,8 @@ import {
   assertBuiltInPresetSupportedByCatalog,
   type BuiltInModelCatalogValidation,
 } from "./builtinModelCatalogCompatibility.js";
-import { isProbeCarrierFactLive, parseProbeCarrierMeta } from "./probeCarrierFact.js";
+import { isProbeCarrierFactLive, parseProbeCarrierMeta, selectProbeCarrierMeta } from "./probeCarrierFact.js";
+import { isProviderProbesEnabled } from "./providerConnectionFeature.js";
 
 export type MachineConnectionPrincipalKind = "computer" | "legacy_machine" | "unknown";
 
@@ -256,6 +257,9 @@ interface MachineConnection {
   lastIngressAt: number;
   daemonVersion: string | null;
   capabilities: Set<string>;
+  // Cached provider_connections_v0 evaluation for probe meta writes. Undefined
+  // until the first ready/heartbeat on this connection. Never written when off.
+  providerProbesEnabled?: boolean;
   // Runtimes reported in the daemon `ready` message, held in-memory so
   // server-authoritative readiness (ServerSetupProjectionGate) derives runtime
   // from the SAME live "Ready" event as the client card — no DB-persist lag,
@@ -6428,6 +6432,7 @@ export class AgentOrchestrator extends EventEmitter {
         // a Redis miss here is silent. Only the owner replica enters this
         // branch (conn is the local-replica connection state).
         if (conn) {
+          const probeMeta = await this.probeCarrierMetaIfEnabled(conn);
           this.replicaStateStore
             .setMachineMeta(machineId, {
               computerVersion: conn.computerVersion ?? null,
@@ -6436,7 +6441,7 @@ export class AgentOrchestrator extends EventEmitter {
               daemonVersion: conn.daemonVersion ?? null,
               runtimeVersions: JSON.stringify(conn.runtimeVersions ?? {}),
               ...machineMetaFromMigrationTransport(conn.migrationTransport),
-              ...this.probeCarrierMetaFields(conn),
+              ...probeMeta,
             })
             .catch(() => {});
         }
@@ -6612,8 +6617,6 @@ export class AgentOrchestrator extends EventEmitter {
             conn.daemonVersion = msg.daemonVersion ?? null;
             conn.capabilities = new Set((msg.capabilities ?? []).filter((capability) => typeof capability === "string" && capability.trim()));
             conn.computerVersion = msg.computerVersion ?? null;
-            conn.runtimes = [...msg.runtimes];
-            conn.runtimeVersions = runtimeVersions;
             conn.computerHostKind = normalizeComputerHostKind(msg.hostKind);
             conn.migrationTransport = migrationTransport;
             void this.dispatchPendingComputerLifecycleOperations().catch(() => {});
@@ -6630,6 +6633,7 @@ export class AgentOrchestrator extends EventEmitter {
           // coherence contract picks them up). Best-effort: a Redis miss
           // logs nothing and the read path falls back to in-memory.
           if (this.replicaStateStore.isAvailable()) {
+            const probeMeta = conn ? await this.probeCarrierMetaIfEnabled(conn, runtimeVersions) : {};
             this.replicaStateStore
               .setMachineMeta(machineId, {
                 computerVersion: msg.computerVersion ?? null,
@@ -6640,7 +6644,7 @@ export class AgentOrchestrator extends EventEmitter {
                 hostname: msg.hostname ?? null,
                 os: msg.os ?? null,
                 ...machineMetaFromMigrationTransport(migrationTransport),
-                ...(conn ? this.probeCarrierMetaFields(conn, runtimeVersions) : {}),
+                ...probeMeta,
               })
               .catch(() => {});
           }
@@ -11225,23 +11229,21 @@ export class AgentOrchestrator extends EventEmitter {
    * non-owner replica can verify dispatch authority. Rewritten on ready and
    * every heartbeat while the connection is live.
    */
-  private probeCarrierMetaFields(
+  private async probeCarrierMetaIfEnabled(
     conn: MachineConnection,
     normalizedRuntimeVersions?: Record<string, string>,
-  ): {
-    probeCapabilities: string;
-    probeConnectionEpochId: string | null;
-    probeReplicaGeneration: string | null;
-    probeObservedAt: string;
-    probeRuntimeVersions: string;
-  } {
-    return {
-      probeCapabilities: JSON.stringify([...conn.capabilities].sort()),
-      probeConnectionEpochId: conn.connectionEpochId ?? null,
-      probeReplicaGeneration: conn.replicaGeneration ?? null,
-      probeObservedAt: new Date(currentTimeMs()).toISOString(),
-      probeRuntimeVersions: JSON.stringify(normalizedRuntimeVersions ?? conn.runtimeVersions ?? {}),
-    };
+  ): Promise<NonNullable<ReturnType<typeof selectProbeCarrierMeta>> | Record<string, never>> {
+    if (conn.providerProbesEnabled === undefined) {
+      conn.providerProbesEnabled = await isProviderProbesEnabled(conn.serverId);
+    }
+    return selectProbeCarrierMeta({
+      probesEnabled: conn.providerProbesEnabled,
+      capabilities: conn.capabilities,
+      connectionEpochId: conn.connectionEpochId ?? null,
+      replicaGeneration: conn.replicaGeneration ?? null,
+      runtimeVersions: normalizedRuntimeVersions ?? conn.runtimeVersions ?? {},
+      observedAt: new Date(currentTimeMs()).toISOString(),
+    }) ?? {};
   }
 
   /**
