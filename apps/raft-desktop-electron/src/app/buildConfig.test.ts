@@ -4,6 +4,7 @@
 // the exact-origin CSP widening for self-hosted builds.
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
 
 import {
   DEFAULT_API_ORIGIN,
@@ -14,7 +15,7 @@ import {
   resolveBuildApiConfig,
 } from "../../buildConfig.mjs";
 
-const STOCK_CSP = "default-src 'self' app:; script-src 'self' app:; style-src 'self' app: 'unsafe-inline'; img-src 'self' app: data: blob: https:; font-src 'self' app: data:; connect-src 'self' app: https: wss:; media-src 'self' app: blob: https:;";
+const STOCK_CSP = "default-src 'self' app:; script-src 'self' app:; style-src 'self' app: 'unsafe-inline'; img-src 'self' app: data: blob: https:; font-src 'self' app: data:; connect-src 'self' app: https: wss:; media-src 'self' app: blob: https:; frame-src 'self' app: https:;";
 
 test("parseApiOrigin normalizes to the origin and rejects anything not a bare http(s) source", () => {
   assert.equal(parseApiOrigin("https://api.example.com"), "https://api.example.com");
@@ -86,6 +87,7 @@ test("applyCspToHtml widens exactly the configured origins for self-hosted build
   assert.match(csp, /connect-src 'self' app: https: wss: http:\/\/raft\.internal\.example:3001 ws:\/\/raft\.internal\.example:3001(;|$)/);
   assert.match(csp, /img-src 'self' app: data: blob: https: http:\/\/raft\.internal\.example:3001(;|$)/);
   assert.match(csp, /media-src 'self' app: blob: https: http:\/\/raft\.internal\.example:3001(;|$)/);
+  assert.match(csp, /frame-src 'self' app: https: http:\/\/raft\.internal\.example:3001(;|$)/);
   // No directive gains a BARE http:/ws: scheme token — only the exact
   // configured origin URLs (http://…, ws://…) are appended.
   assert.doesNotMatch(csp, /connect-src[^;]*\shttp:(?!\/\/)/);
@@ -96,6 +98,13 @@ test("applyCspToHtml widens exactly the configured origins for self-hosted build
   // Idempotent: widening the already-widened policy adds nothing.
   const again = applyCspToHtml(out, selfHosted);
   assert.equal(again.match(/content="([^"]*)"/)![1], csp);
+});
+
+test("the shipped index.html CSP lets the embedded app frame https previews (frame-src), not just default-src", () => {
+  const html = readFileSync(new URL("../../frontend/index.html", import.meta.url), "utf8");
+  const csp = html.match(/http-equiv="Content-Security-Policy"\s+content="([^"]*)"/)![1];
+  assert.match(csp, /frame-src 'self' app: https:(;|$)/);
+  assert.doesNotMatch(csp, /frame-src[^;]*\*/);
 });
 
 test("applyCspToHtml fails loudly when the CSP meta tag or a directive is missing", () => {

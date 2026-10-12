@@ -68,7 +68,7 @@ export function desktopApiDefines(config) {
 // self-hosted backend would be blocked by the renderer's own CSP before the
 // main-process CORS bridge is ever reached. Widen by exactly the configured
 // origins — never bare `http:`/`ws:` — so look-alike hosts stay blocked.
-const CSP_DIRECTIVES_TO_WIDEN = Object.freeze(["connect-src", "img-src", "media-src"]);
+const CSP_DIRECTIVES_TO_WIDEN = Object.freeze(["connect-src", "img-src", "media-src", "frame-src"]);
 
 function widenCspDirectives(content, additions) {
   const directives = content.split(";").map((part) => part.trim()).filter((part) => part.length > 0);
@@ -103,6 +103,9 @@ export function applyCspToHtml(html, config) {
     "connect-src": [config.apiOrigin, config.wsOrigin],
     "img-src": [config.apiOrigin],
     "media-src": [config.apiOrigin],
+    // HTML attachment previews are framed from the API origin (token-scoped,
+    // sandboxed); without a frame-src the default-src fallback blocks them.
+    "frame-src": [config.apiOrigin],
   };
   const metaPattern = /<meta\s+http-equiv="Content-Security-Policy"[^>]*>/;
   const meta = html.match(metaPattern);
