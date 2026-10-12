@@ -242,7 +242,7 @@ test("③ HTML preview body uses the shared primitive — behavior preserved", (
   assert.match(m, /sandbox="allow-scripts"/); // exactly — not tightened/loosened
   assert.doesNotMatch(m, /allow-popups(?:-to-escape-sandbox)?/);
   assert.match(m, /referrerPolicy="no-referrer"/);
-  assert.match(m, /className=\{`h-full w-full border-0 bg-white\$\{externalLinksReady \? "" : " pointer-events-none"\}`\}/);
+  assert.match(m, /className=\{`h-full w-full border-0 bg-white\$\{awaitingHandshake \? " pointer-events-none" : ""\}`\}/);
   assert.match(m, /title=\{formatMessage\(\{ id: "message\.messageItem\.htmlPreviewTitle" \}, \{ filename \}\)\}/);
   // Threat-model comment retained.
   assert.match(m, /Threat model: any human or agent can upload hostile HTML/);
