@@ -71,7 +71,7 @@ function ChannelSettingsSheet({
     >
       <DrawerContent
         data-testid="channel-settings-sheet"
-        className="inset-y-0 right-0 h-dvh w-full max-w-[min(100vw,34rem)] [--drawer-content-height:100dvh] [--drawer-inset:0px] flex-col rounded-none border-y-0 border-r-0 border-l-2 bg-brutal-cream"
+        className="inset-y-0 right-0 h-dvh w-full max-w-[min(100vw,34rem)] [--drawer-content-height:100dvh] [--drawer-inset:0px] flex-col rounded-none border-y-0 border-r-0 border-l theme-brutal:border-l-2 bg-layer-canvas-muted theme-brutal:bg-brutal-cream"
       >
         {children}
       </DrawerContent>
@@ -419,15 +419,15 @@ export default function LegacyEditChannelDialog({
   return (
     <>
       <ChannelSettingsSheet isDirty={isDirty} onClose={onClose}>
-        <div className="flex shrink-0 items-center justify-between gap-4 border-b-2 border-black bg-soft-signal px-4 py-3">
+        <div className="flex shrink-0 items-center justify-between gap-4 border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black bg-primary-soft theme-brutal:bg-soft-signal px-4 py-3">
           <div className="min-w-0">
-            <p className="text-[10px] font-bold uppercase tracking-wide text-black/55">
+            <p className="text-[10px] font-bold uppercase tracking-wide text-foreground-muted theme-brutal:text-black/55">
               {formatMessage({ id: "message.channelSettings.eyebrow" })}
             </p>
             <DrawerTitle id="channel-settings-title" className="truncate font-display text-xl font-bold uppercase">
               {formatMessage({ id: "message.channelSettings.title" })}
             </DrawerTitle>
-            <DrawerDescription className="truncate font-mono text-xs text-black/60">
+            <DrawerDescription className="truncate font-mono text-xs text-foreground-muted theme-brutal:text-black/60">
               #{initialName}
             </DrawerDescription>
           </div>
@@ -435,7 +435,7 @@ export default function LegacyEditChannelDialog({
             render={(
               <button
                 type="button"
-                className="btn-brutal-sm bg-white p-1"
+                className="btn-brutal-sm bg-layer-panel theme-brutal:bg-white p-1"
                 aria-label={formatMessage({ id: "message.channelSettings.close" })}
               />
             )}
@@ -452,12 +452,12 @@ export default function LegacyEditChannelDialog({
               </Banner>
             )}
             {canEditChannel && (
-              <section className="space-y-3 border-b-2 border-black pb-5">
+              <section className="space-y-3 border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black pb-5">
                 <div>
-                  <h3 className="text-xs font-bold uppercase tracking-wide text-black/65">
+                  <h3 className="text-xs font-bold uppercase tracking-wide text-foreground-muted theme-brutal:text-black/65">
                     {formatMessage({ id: "message.channelSettings.infoTitle" })}
                   </h3>
-                  <p className="mt-1 text-xs text-black/60">
+                  <p className="mt-1 text-xs text-foreground-muted theme-brutal:text-black/60">
                     {formatMessage({ id: "message.channelSettings.infoDescription" })}
                   </p>
                 </div>
@@ -500,22 +500,22 @@ export default function LegacyEditChannelDialog({
               </section>
             )}
             {canManageGuestAccess && (
-              <section className="space-y-3 border-b-2 border-black pb-5" data-testid="channel-settings-guest-access">
+              <section className="space-y-3 border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black pb-5" data-testid="channel-settings-guest-access">
                 <div>
-                  <h3 className="text-xs font-bold uppercase tracking-wide text-black/65">
+                  <h3 className="text-xs font-bold uppercase tracking-wide text-foreground-muted theme-brutal:text-black/65">
                     {formatMessage({ id: "channel.edit.guestAccessTitle" })}
                   </h3>
-                  <p className="mt-1 text-xs text-black/60">
+                  <p className="mt-1 text-xs text-foreground-muted theme-brutal:text-black/60">
                     {formatMessage({ id: "channel.edit.guestAccessDescription" })}
                   </p>
                 </div>
-                <div className="divide-y divide-black/10">
+                <div className="divide-y divide-line-muted theme-brutal:divide-black/10">
                   <div className="flex items-center justify-between gap-3 py-3">
                     <div className="min-w-0">
-                      <h4 id="legacy-channel-settings-guest-visible-label" className="text-sm font-medium text-black">
+                      <h4 id="legacy-channel-settings-guest-visible-label" className="text-sm font-medium text-foreground-strong theme-brutal:text-black">
                         {formatMessage({ id: "channel.edit.guestVisibleTitle" })}
                       </h4>
-                      <p className="mt-1 text-xs text-black/55">
+                      <p className="mt-1 text-xs text-foreground-muted theme-brutal:text-black/55">
                         {formatMessage({ id: "channel.edit.guestVisibleDescription" })}
                       </p>
                     </div>
@@ -532,10 +532,10 @@ export default function LegacyEditChannelDialog({
                   </div>
                   {channel?.name !== "all" && <div className="flex items-center justify-between gap-3 py-3">
                     <div className="min-w-0">
-                      <h4 id="legacy-channel-settings-guest-joinable-label" className="text-sm font-medium text-black">
+                      <h4 id="legacy-channel-settings-guest-joinable-label" className="text-sm font-medium text-foreground-strong theme-brutal:text-black">
                         {formatMessage({ id: "channel.edit.guestJoinableTitle" })}
                       </h4>
-                      <p className="mt-1 text-xs text-black/55">
+                      <p className="mt-1 text-xs text-foreground-muted theme-brutal:text-black/55">
                         {formatMessage({ id: "channel.edit.guestJoinableDescription" })}
                       </p>
                     </div>
@@ -554,32 +554,32 @@ export default function LegacyEditChannelDialog({
               </section>
             )}
             {isJointChannel && (
-              <section className="space-y-3 border-b-2 border-black pb-5">
+              <section className="space-y-3 border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black pb-5">
                 <div>
-                  <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-black/65">
+                  <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-foreground-muted theme-brutal:text-black/65">
                     <GitBranch size={14} />
                     {formatMessage({ id: "message.channelSettings.jointTitle" })}
                   </div>
-                  <p className="mt-1 text-xs text-black/60">
+                  <p className="mt-1 text-xs text-foreground-muted theme-brutal:text-black/60">
                     {formatMessage({ id: "message.channelSettings.jointDescription" })}
                   </p>
                 </div>
                 <div>
-                  <div className="mb-2 text-xs font-bold uppercase text-black/60">{formatMessage({ id: "channel.edit.connectedServers" })}</div>
+                  <div className="mb-2 text-xs font-bold uppercase text-foreground-muted theme-brutal:text-black/60">{formatMessage({ id: "channel.edit.connectedServers" })}</div>
                   {jointServers.length > 0 ? (
                     <div className="space-y-2">
                       {jointServers.map((server) => (
-                        <div key={`${server.serverId}:${server.status}`} className="flex items-center justify-between gap-3 border-2 border-black bg-brutal-gray/20 px-3 py-2 text-sm">
+                        <div key={`${server.serverId}:${server.status}`} className="flex items-center justify-between gap-3 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-brutal-gray/20 px-3 py-2 text-sm">
                           <div className="min-w-0">
                             <div className="truncate font-bold">
                               {server.serverName || server.serverSlug}
                             </div>
-                            <div className="truncate text-xs text-black/60">
+                            <div className="truncate text-xs text-foreground-muted theme-brutal:text-black/60">
                               {server.serverSlug}
                               {server.isCurrentServer ? ` · ${formatMessage({ id: "channel.edit.thisServer" })}` : ""}
                             </div>
                           </div>
-                          <span className={`shrink-0 border-2 border-black px-2 py-0.5 text-xs font-bold uppercase ${server.status === "active" ? "bg-brutal-lime" : "bg-soft-signal"}`}>
+                          <span className={`shrink-0 border theme-brutal:border-2 border-line-strong theme-brutal:border-black px-2 py-0.5 text-xs font-bold uppercase ${server.status === "active" ? "bg-success-soft theme-brutal:bg-brutal-lime" : "bg-primary-soft theme-brutal:bg-soft-signal"}`}>
                             {formatMessage({
                               id: server.status === "active"
                                 ? "channel.edit.serverStatusActive"
@@ -590,7 +590,7 @@ export default function LegacyEditChannelDialog({
                       ))}
                     </div>
                   ) : (
-                    <p className="text-sm text-black/70">{formatMessage({ id: "channel.edit.connectedMetaUnavailable" })}</p>
+                    <p className="text-sm text-foreground-muted theme-brutal:text-black/70">{formatMessage({ id: "channel.edit.connectedMetaUnavailable" })}</p>
                   )}
                 </div>
                 {effectiveCapabilities.federateChannels && hasCurrentServerPendingJointInvites && !isArchived && (
@@ -607,15 +607,15 @@ export default function LegacyEditChannelDialog({
                       {resendBusy ? formatMessage({ id: "channel.edit.resending" }) : formatMessage({ id: "channel.edit.resendInvite" })}
                     </Button>
                     {resendStatus && (
-                      <p className="text-xs font-bold text-black/70">{resendStatus}</p>
+                      <p className="text-xs font-bold text-foreground-muted theme-brutal:text-black/70">{resendStatus}</p>
                     )}
                   </div>
                 )}
                 {effectiveCapabilities.federateChannels && !isArchived && (
-                  <div className="mt-4 space-y-3 border-t-2 border-black pt-3">
-                    <div className="text-xs font-bold uppercase text-black/60">{formatMessage({ id: "channel.edit.inviteServerSection" })}</div>
+                  <div className="mt-4 space-y-3 border-t theme-brutal:border-t-2 border-line-strong theme-brutal:border-black pt-3">
+                    <div className="text-xs font-bold uppercase text-foreground-muted theme-brutal:text-black/60">{formatMessage({ id: "channel.edit.inviteServerSection" })}</div>
                     {jointServerLimitReached ? (
-                      <p className="text-sm font-bold text-black/70">
+                      <p className="text-sm font-bold text-foreground-muted theme-brutal:text-black/70">
                         {formatMessage({ id: "channel.edit.maxServers" }, { max: MAX_JOINT_CHANNEL_SERVERS })}
                       </p>
                     ) : (
@@ -654,7 +654,7 @@ export default function LegacyEditChannelDialog({
                       </>
                     )}
                     {inviteStatus && (
-                      <p className="text-xs font-bold text-black/70">{inviteStatus}</p>
+                      <p className="text-xs font-bold text-foreground-muted theme-brutal:text-black/70">{inviteStatus}</p>
                     )}
                   </div>
                 )}
@@ -665,10 +665,10 @@ export default function LegacyEditChannelDialog({
           {(showLeaveAction || showManageActions || (isArchived && effectiveCapabilities.archiveChannels)) && (
             <section className="mt-5 space-y-3">
               <div>
-                <h3 className="text-xs font-bold uppercase tracking-wide text-black/65">
+                <h3 className="text-xs font-bold uppercase tracking-wide text-foreground-muted theme-brutal:text-black/65">
                   {formatMessage({ id: "message.channelSettings.actionsTitle" })}
                 </h3>
-                <p className="mt-1 text-xs text-black/60">
+                <p className="mt-1 text-xs text-foreground-muted theme-brutal:text-black/60">
                   {formatMessage({ id: "message.channelSettings.actionsDescription" })}
                 </p>
               </div>
@@ -677,7 +677,7 @@ export default function LegacyEditChannelDialog({
                   <button
                     type="button"
                     onClick={() => setShowLeaveConfirm(true)}
-                    className="btn-brutal flex w-full items-center justify-center gap-1.5 bg-brutal-orange px-4 py-2 text-sm"
+                    className="btn-brutal flex w-full items-center justify-center gap-1.5 bg-warning-soft theme-brutal:bg-brutal-orange px-4 py-2 text-sm"
                   >
                     <LogOut size={14} />
                     {formatMessage({ id: "channel.edit.leaveChannel" })}
@@ -688,7 +688,7 @@ export default function LegacyEditChannelDialog({
                     type="button"
                     onClick={() => setShowVisibilityConfirm(true)}
                     disabled={isArchived || visibilityBusy}
-                    className="btn-brutal flex w-full items-center justify-center gap-1.5 bg-brutal-orange px-4 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="btn-brutal flex w-full items-center justify-center gap-1.5 bg-warning-soft theme-brutal:bg-brutal-orange px-4 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {isAllChannel
                       ? currentVisibility === "private" ? <Eye size={14} /> : <EyeOff size={14} />
@@ -712,7 +712,7 @@ export default function LegacyEditChannelDialog({
                       setShowConvertConfirm(true);
                     }}
                     disabled={isArchived || convertBusy}
-                    className="btn-brutal flex w-full items-center justify-center gap-1.5 bg-brutal-lime px-4 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="btn-brutal flex w-full items-center justify-center gap-1.5 bg-success-soft theme-brutal:bg-brutal-lime px-4 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <GitBranch size={14} />
                     {convertBusy ? formatMessage({ id: "channel.edit.converting" }) : formatMessage({ id: "channel.edit.convertToJoint" })}
@@ -723,7 +723,7 @@ export default function LegacyEditChannelDialog({
                     {!isArchived && <button
                       type="button"
                       onClick={handlePinToggle}
-                      className="btn-brutal flex w-full items-center justify-center gap-1.5 bg-brutal-lime px-4 py-2 text-sm"
+                      className="btn-brutal flex w-full items-center justify-center gap-1.5 bg-success-soft theme-brutal:bg-brutal-lime px-4 py-2 text-sm"
                     >
                       {isPinned ? <PinOff size={14} /> : <Pin size={14} />}
                       {isPinned
@@ -735,7 +735,7 @@ export default function LegacyEditChannelDialog({
                         type="button"
                         onClick={handleUnarchive}
                         disabled={archiveBusy}
-                        className="btn-brutal flex w-full items-center justify-center gap-1.5 bg-brutal-lime px-4 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="btn-brutal flex w-full items-center justify-center gap-1.5 bg-success-soft theme-brutal:bg-brutal-lime px-4 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         <ArchiveRestore size={14} />
                         {archiveBusy ? formatMessage({ id: "channel.edit.unarchiving" }) : formatMessage({ id: "channel.edit.unarchiveChannel" })}
@@ -744,7 +744,7 @@ export default function LegacyEditChannelDialog({
                       <button
                         type="button"
                         onClick={() => setShowArchiveConfirm(true)}
-                        className="btn-brutal flex w-full items-center justify-center gap-1.5 bg-brutal-orange px-4 py-2 text-sm"
+                        className="btn-brutal flex w-full items-center justify-center gap-1.5 bg-warning-soft theme-brutal:bg-brutal-orange px-4 py-2 text-sm"
                       >
                         <Archive size={14} />
                         {formatMessage({ id: "channel.edit.archiveChannel" })}
@@ -754,7 +754,7 @@ export default function LegacyEditChannelDialog({
                       <button
                         type="button"
                         onClick={() => setShowDeleteConfirm(true)}
-                        className="btn-brutal flex w-full items-center justify-center gap-1.5 bg-brutal-red px-4 py-2 text-sm"
+                        className="btn-brutal flex w-full items-center justify-center gap-1.5 bg-danger-soft theme-brutal:bg-brutal-red px-4 py-2 text-sm"
                       >
                         <LogOut size={14} />
                         {formatMessage({ id: "channel.edit.disconnectChannel" })}
@@ -763,7 +763,7 @@ export default function LegacyEditChannelDialog({
                       <button
                         type="button"
                         onClick={() => setShowDeleteConfirm(true)}
-                        className="btn-brutal flex w-full items-center justify-center gap-1.5 bg-brutal-red px-4 py-2 text-sm"
+                        className="btn-brutal flex w-full items-center justify-center gap-1.5 bg-danger-soft theme-brutal:bg-brutal-red px-4 py-2 text-sm"
                       >
                         <Trash2 size={14} />
                         {formatMessage({ id: "channel.edit.deleteChannel" })}
@@ -776,12 +776,12 @@ export default function LegacyEditChannelDialog({
           )}
         </div>
 
-        <div className="flex shrink-0 justify-end gap-3 border-t-2 border-black bg-brutal-cream px-4 py-3">
+        <div className="flex shrink-0 justify-end gap-3 border-t theme-brutal:border-t-2 border-line-strong theme-brutal:border-black bg-layer-canvas-muted theme-brutal:bg-brutal-cream px-4 py-3">
           <DrawerClose
             render={(
               <button
                 type="button"
-                className="btn-brutal bg-white px-4 py-2 text-sm"
+                className="btn-brutal bg-layer-panel theme-brutal:bg-white px-4 py-2 text-sm"
               />
             )}
           >
@@ -792,7 +792,7 @@ export default function LegacyEditChannelDialog({
               type="submit"
               form={CHANNEL_SETTINGS_FORM_ID}
               disabled={saving || isArchived}
-              className="btn-brutal bg-brutal-pink px-4 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+              className="btn-brutal bg-accent-soft theme-brutal:bg-brutal-pink px-4 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {saving ? formatMessage({ id: "channel.edit.saving" }) : formatMessage({ id: "channel.edit.saveChanges" })}
             </button>

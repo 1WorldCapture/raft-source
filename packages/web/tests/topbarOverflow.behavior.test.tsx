@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 import "./helpers/domSetup";
+import { brutalView } from "./helpers/brutalView";
 import { createElement } from "react";
 import { act, cleanup, fireEvent, render as rtlRender, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
@@ -439,41 +440,41 @@ test("flag on collapses channel actions into the overflow drawer", async () => {
   const sheet = screen.getByTestId("channel-overflow-sheet");
   const header = screen.getByTestId("overflow-sheet-header");
   const headerTitle = screen.getByTestId("overflow-sheet-title");
-  assert.ok(header.className.includes("h-panel-header"));
-  assert.ok(header.className.includes("items-center"));
-  assert.ok(!header.className.includes("py-3"));
-  assert.ok(headerTitle.className.includes("text-base"));
-  assert.ok(headerTitle.className.includes("leading-tight"));
-  assert.ok(!headerTitle.className.includes("text-xl"));
+  assert.ok(brutalView(header.className).includes("h-panel-header"));
+  assert.ok(brutalView(header.className).includes("items-center"));
+  assert.ok(!brutalView(header.className).includes("py-3"));
+  assert.ok(brutalView(headerTitle.className).includes("text-base"));
+  assert.ok(brutalView(headerTitle.className).includes("leading-tight"));
+  assert.ok(!brutalView(headerTitle.className).includes("text-xl"));
   const channelTitleText = screen.getByTestId("channel-overflow-title-text");
   const visibilityBadge = screen.getByTestId("channel-overflow-visibility-badge");
-  assert.ok(channelTitleText.className.includes("truncate"));
+  assert.ok(brutalView(channelTitleText.className).includes("truncate"));
   assert.ok(channelTitleText.parentElement?.className.includes("flex"));
   assert.ok(channelTitleText.parentElement?.className.includes("min-w-0"));
-  assert.ok(visibilityBadge.className.includes("shrink-0"));
+  assert.ok(brutalView(visibilityBadge.className).includes("shrink-0"));
   const searchIcon = screen.getByTestId("channel-topbar-search");
   assert.ok(!sheet.contains(searchIcon));
   // Follow-up: Search is a sibling topbar action, not part of the Settings drawer.
   assert.equal(searchIcon.tagName, "BUTTON");
-  assert.ok(searchIcon.className.includes("btn-brutal-sm"));
-  assert.ok(searchIcon.className.includes("size-7"));
-  assert.ok(searchIcon.className.includes("bg-white"));
+  assert.ok(brutalView(searchIcon.className).includes("btn-brutal-sm"));
+  assert.ok(brutalView(searchIcon.className).includes("size-7"));
+  assert.ok(brutalView(searchIcon.className).includes("bg-white"));
   assert.ok(searchIcon.querySelector("svg"));
   assert.ok(!searchIcon.textContent?.includes("Search this channel"));
   // The visible description shares the same identity stack as the title. If it
   // sits in a separate grid row, the action button height opens a visible line
   // gap that no longer matches PanelHeader.
   const identityDescription = screen.getByTestId("channel-overflow-identity-desc");
-  assert.ok(identityDescription.className.includes("font-mono"));
-  assert.ok(identityDescription.className.includes("text-black/50"));
-  assert.ok(!identityDescription.className.includes("text-black/60"));
-  assert.ok(!identityDescription.className.includes("mt-1"));
+  assert.ok(brutalView(identityDescription.className).includes("font-mono"));
+  assert.ok(brutalView(identityDescription.className).includes("text-black/50"));
+  assert.ok(!brutalView(identityDescription.className).includes("text-black/60"));
+  assert.ok(!brutalView(identityDescription.className).includes("mt-1"));
   const title = screen.getByTestId("overflow-sheet-title");
   const subtitleRow = screen.getByTestId("overflow-sheet-subtitle-row");
   assert.ok(subtitleRow.contains(identityDescription));
   assert.equal(subtitleRow.parentElement, title.parentElement);
-  assert.ok(!subtitleRow.className.includes("col-start-2"));
-  assert.ok(!subtitleRow.className.includes("md:col-start-1"));
+  assert.ok(!brutalView(subtitleRow.className).includes("col-start-2"));
+  assert.ok(!brutalView(subtitleRow.className).includes("md:col-start-1"));
   // v2 identity: visibility pill rides the header title.
   assert.ok(visibilityBadge);
   // v2 members strip: two-tone tiles by member kind, dashed pink add
@@ -503,19 +504,19 @@ test("flag on collapses channel actions into the overflow drawer", async () => {
   // one medium-weight treatment. The required star stays intact.
   const membersHeading = screen.getByTestId("channel-overflow-members-heading");
   assert.equal(membersHeading.textContent, "Members");
-  assert.equal(membersHeading.className, "text-base font-bold text-black");
+  assert.equal(brutalView(membersHeading.className), "text-base font-bold text-black");
   const manageHeading = screen.getByTestId("channel-settings-manage-group");
   assert.equal(manageHeading.textContent?.trim(), "Info");
-  assert.ok(manageHeading.className.includes("text-base"));
-  assert.ok(manageHeading.className.includes("font-bold"));
-  assert.ok(manageHeading.className.includes("text-black"));
-  assert.ok(!manageHeading.className.includes("text-black/55"));
+  assert.ok(brutalView(manageHeading.className).includes("text-base"));
+  assert.ok(brutalView(manageHeading.className).includes("font-bold"));
+  assert.ok(brutalView(manageHeading.className).includes("text-black"));
+  assert.ok(!brutalView(manageHeading.className).includes("text-black/55"));
   const preferencesHeading = preferences.querySelector(":scope > h3")!;
   const lifecycleHeading = lifecycleGroup.querySelector(":scope > h3")!;
   assert.equal(preferencesHeading.textContent?.trim(), "Preferences");
   assert.equal(lifecycleHeading.textContent?.trim(), "Actions");
   for (const sectionHeading of [preferencesHeading, lifecycleHeading]) {
-    assert.equal(sectionHeading.className, "text-base font-bold text-black");
+    assert.equal(brutalView(sectionHeading.className), "text-base font-bold text-black");
   }
   assert.equal(screen.queryByTestId("channel-settings-info-title"), null);
   const infoDescription = screen.getByTestId("channel-settings-info-description");
@@ -526,8 +527,8 @@ test("flag on collapses channel actions into the overflow drawer", async () => {
   assert.equal(nameLabel.querySelector("span")?.textContent, "*");
   assert.ok(nameLabel.querySelector("span")?.className.includes("text-brutal-pink"));
   const optionalMarker = screen.getByText("(optional)");
-  assert.ok(optionalMarker.className.includes("font-normal"));
-  assert.ok(optionalMarker.className.includes("text-black/40"));
+  assert.ok(brutalView(optionalMarker.className).includes("font-normal"));
+  assert.ok(brutalView(optionalMarker.className).includes("text-black/40"));
   // The inline information-form actions share the same compact 28px
   // primitive as the rest of Channel Settings; raw `.btn-brutal` padding
   // made this pair visibly taller than adjacent controls.
@@ -544,10 +545,10 @@ test("flag on collapses channel actions into the overflow drawer", async () => {
     "channel-settings-collapse-label",
   ]) {
     const label = document.getElementById(labelId)!;
-    assert.ok(label.className.includes("text-sm"));
-    assert.ok(label.className.includes("font-medium"));
-    assert.ok(label.className.includes("text-black"));
-    assert.ok(!label.className.includes("font-bold"));
+    assert.ok(brutalView(label.className).includes("text-sm"));
+    assert.ok(brutalView(label.className).includes("font-medium"));
+    assert.ok(brutalView(label.className).includes("text-black"));
+    assert.ok(!brutalView(label.className).includes("font-bold"));
   }
   // Artea 2026-08-06: Channel info (management group) leads the panel,
   // preferences follow the form, lifecycle closes it.
@@ -592,21 +593,21 @@ test("flag on collapses channel actions into the overflow drawer", async () => {
   const visibilityRow = screen.getByTestId("channel-settings-visibility-action");
   const actionZone = screen.getByTestId("channel-settings-action-zone");
   const stopAgentsRow = screen.getByTestId("channel-overflow-stop-agents");
-  assert.ok(!actionZone.className.includes("border-2"));
-  assert.ok(!actionZone.className.includes("shadow-brutal-sm"));
-  assert.ok(actionZone.className.includes("!justify-center"));
-  assert.ok(visibilityRow.className.includes("border-2"));
-  assert.ok(visibilityRow.className.includes("shadow-raft-sm"));
-  assert.ok(visibilityRow.className.includes("hover:-translate-y-px"));
-  assert.ok(visibilityRow.className.includes("hover:shadow-raft-md"));
-  assert.ok(!visibilityRow.className.includes("hover:bg-soft-signal"));
+  assert.ok(!brutalView(actionZone.className).includes("border-2"));
+  assert.ok(!brutalView(actionZone.className).includes("shadow-brutal-sm"));
+  assert.ok(brutalView(actionZone.className).includes("!justify-center"));
+  assert.ok(brutalView(visibilityRow.className).includes("border-2"));
+  assert.ok(brutalView(visibilityRow.className).includes("shadow-raft-sm"));
+  assert.ok(brutalView(visibilityRow.className).includes("hover:-translate-y-px"));
+  assert.ok(brutalView(visibilityRow.className).includes("hover:shadow-raft-md"));
+  assert.ok(!brutalView(visibilityRow.className).includes("hover:bg-soft-signal"));
   assert.equal(stopAgentsRow.textContent, "Stop Agents");
   assert.equal(stopAgentsRow.getAttribute("aria-label"), "Stop all agents in this channel");
   // v2: Delete is the drawer's ONLY filled action (irreversible earns
   // the fill); it no longer renders as a red-text outline row.
   const deleteRow = screen.getByTestId("channel-settings-delete-action");
-  assert.ok(deleteRow.className.includes("bg-brutal-red"));
-  assert.ok(!deleteRow.className.includes("text-brutal-red"));
+  assert.ok(brutalView(deleteRow.className).includes("bg-brutal-red"));
+  assert.ok(!brutalView(deleteRow.className).includes("text-brutal-red"));
   assert.ok(!screen.queryByTestId("channel-settings-mute-switch"));
   assert.ok(!screen.queryByTestId("channel-overflow-unread-switch"));
   assert.ok(!screen.queryByTestId("channel-overflow-sheet-back"));
@@ -636,12 +637,12 @@ test("channel overflow header joins the panel height contract when no descriptio
   await screen.findByTestId("channel-overflow-sheet");
   const header = screen.getByTestId("overflow-sheet-header");
   const headerTitle = screen.getByTestId("overflow-sheet-title");
-  assert.ok(header.className.includes("h-panel-header"));
-  assert.ok(header.className.includes("items-center"));
-  assert.ok(!header.className.includes("py-3"));
-  assert.ok(headerTitle.className.includes("text-base"));
-  assert.ok(headerTitle.className.includes("leading-tight"));
-  assert.ok(!headerTitle.className.includes("text-xl"));
+  assert.ok(brutalView(header.className).includes("h-panel-header"));
+  assert.ok(brutalView(header.className).includes("items-center"));
+  assert.ok(!brutalView(header.className).includes("py-3"));
+  assert.ok(brutalView(headerTitle.className).includes("text-base"));
+  assert.ok(brutalView(headerTitle.className).includes("leading-tight"));
+  assert.ok(!brutalView(headerTitle.className).includes("text-xl"));
   assert.ok(header.firstElementChild?.className.includes("w-full"));
 });
 
@@ -664,10 +665,10 @@ test("long channel overflow titles truncate the name without clipping the visibi
   assert.equal(visibilityBadge.textContent, "Joint Channel");
   assert.ok(headerTitle.contains(channelTitleText));
   assert.equal(channelTitleText.nextElementSibling, visibilityBadge);
-  assert.ok(channelTitleText.className.includes("truncate"));
+  assert.ok(brutalView(channelTitleText.className).includes("truncate"));
   assert.ok(channelTitleText.parentElement?.className.includes("flex"));
   assert.ok(channelTitleText.parentElement?.className.includes("min-w-0"));
-  assert.ok(visibilityBadge.className.includes("shrink-0"));
+  assert.ok(brutalView(visibilityBadge.className).includes("shrink-0"));
 });
 
 test("ordinary members can enter the add-members flow from the avatar strip", async () => {
@@ -748,37 +749,37 @@ test("joint channel settings reuse the flat channel drawer hierarchy", async () 
   assert.equal(screen.getByTestId("channel-overflow-visibility-badge").textContent, "Joint Channel");
   const infoSection = screen.getByTestId("channel-settings-save-inline").closest("section");
   assert.ok(infoSection);
-  assert.match(infoSection.className, /border-b border-black\/10/);
-  assert.doesNotMatch(infoSection.className, /border-b-2/);
+  assert.match(brutalView(infoSection.className), /border-b border-black\/10/);
+  assert.doesNotMatch(brutalView(infoSection.className), /border-b-2/);
   const jointSection = screen.getByTestId("channel-settings-joint-section");
-  assert.match(jointSection.className, /border-b border-black\/10/);
-  assert.doesNotMatch(jointSection.className, /border-b-2/);
+  assert.match(brutalView(jointSection.className), /border-b border-black\/10/);
+  assert.doesNotMatch(brutalView(jointSection.className), /border-b-2/);
 
   const serverList = screen.getByTestId("channel-settings-joint-servers");
-  assert.match(serverList.className, /divide-y divide-black\/10/);
+  assert.match(brutalView(serverList.className), /divide-y divide-black\/10/);
   const serverRows = screen.getAllByTestId("channel-settings-joint-server-row");
   assert.equal(serverRows.length, 2);
   for (const row of serverRows) {
-    assert.match(row.className, /\bpy-3\b/);
-    assert.doesNotMatch(row.className, /border-2|bg-brutal-gray/);
+    assert.match(brutalView(row.className), /\bpy-3\b/);
+    assert.doesNotMatch(brutalView(row.className), /border-2|bg-brutal-gray/);
   }
   const resendRow = screen.getByTestId("channel-settings-joint-resend-row");
-  assert.match(resendRow.className, /\bflex\b/);
-  assert.match(resendRow.className, /\bjustify-end\b/);
+  assert.match(brutalView(resendRow.className), /\bflex\b/);
+  assert.match(brutalView(resendRow.className), /\bjustify-end\b/);
   assert.ok(within(resendRow).getByRole("button", { name: "Resend Invite" }));
 
   const invite = screen.getByTestId("channel-settings-joint-invite");
-  assert.match(invite.className, /border-t border-black\/10/);
-  assert.doesNotMatch(invite.className, /border-t-2/);
+  assert.match(brutalView(invite.className), /border-t border-black\/10/);
+  assert.doesNotMatch(brutalView(invite.className), /border-t-2/);
   const inviteForm = screen.getByTestId("channel-settings-joint-invite-form");
   assert.equal(inviteForm.tagName, "FORM");
   const sendInvite = screen.getByTestId("channel-settings-joint-send-invite");
   const sendInviteRow = screen.getByTestId("channel-settings-joint-send-invite-row");
-  assert.match(sendInviteRow.className, /\bflex\b/);
-  assert.match(sendInviteRow.className, /\bjustify-end\b/);
-  assert.match(sendInvite.className, /\bh-7\b/);
-  assert.match(sendInvite.className, /\bbg-brutal-pink\b/);
-  assert.doesNotMatch(sendInvite.className, /\bw-full\b/);
+  assert.match(brutalView(sendInviteRow.className), /\bflex\b/);
+  assert.match(brutalView(sendInviteRow.className), /\bjustify-end\b/);
+  assert.match(brutalView(sendInvite.className), /\bh-7\b/);
+  assert.match(brutalView(sendInvite.className), /\bbg-brutal-pink\b/);
+  assert.doesNotMatch(brutalView(sendInvite.className), /\bw-full\b/);
   assert.equal((sendInvite as HTMLButtonElement).disabled, true);
 
   const slugInput = screen.getByLabelText(/^Server slug/) as HTMLInputElement;
@@ -1219,10 +1220,10 @@ test("multi-select add flow stages candidates and commits on confirm — inside 
   const humanChip = within(selectedChips).getByTestId("add-member-selected-chip-human:human-candidate");
   assert.equal(agentChip.getAttribute("data-member-kind"), "agent");
   assert.equal(humanChip.getAttribute("data-member-kind"), "human");
-  assert.ok(agentChip.className.includes("bg-brutal-cyan"));
-  assert.ok(humanChip.className.includes("bg-brutal-lavender"));
-  assert.ok(!agentChip.className.includes("bg-soft-signal"));
-  assert.ok(!humanChip.className.includes("bg-soft-signal"));
+  assert.ok(brutalView(agentChip.className).includes("bg-brutal-cyan"));
+  assert.ok(brutalView(humanChip.className).includes("bg-brutal-lavender"));
+  assert.ok(!brutalView(agentChip.className).includes("bg-soft-signal"));
+  assert.ok(!brutalView(humanChip.className).includes("bg-soft-signal"));
   assert.ok(!(confirm as HTMLButtonElement).disabled);
 
   // ‹ back in the add view is the add flow's own back (add-member-back):
@@ -1284,16 +1285,16 @@ test("atomic add failure keeps every selected row available for retry", async ()
   await screen.findByTestId("add-member-error");
   const humanRow = await screen.findByTestId("add-candidate-human-human-candidate");
   assert.equal(humanRow.getAttribute("aria-pressed"), "true");
-  assert.match(humanRow.className, /bg-brutal-red\/15/);
+  assert.match(brutalView(humanRow.className), /bg-brutal-red\/15/);
   const humanChip = screen.getByTestId("add-member-selected-chip-human:human-candidate");
-  assert.ok(humanChip.className.includes("bg-brutal-red/25"));
-  assert.ok(!humanChip.className.includes("bg-brutal-lavender"));
+  assert.ok(brutalView(humanChip.className).includes("bg-brutal-red/25"));
+  assert.ok(!brutalView(humanChip.className).includes("bg-brutal-lavender"));
   const agentRow = screen.getByTestId("add-candidate-agent-agent-candidate");
   assert.equal(agentRow.getAttribute("aria-pressed"), "true");
-  assert.match(agentRow.className, /bg-brutal-red\/15/);
+  assert.match(brutalView(agentRow.className), /bg-brutal-red\/15/);
   const agentChip = screen.getByTestId("add-member-selected-chip-agent:agent-candidate");
-  assert.ok(agentChip.className.includes("bg-brutal-red/25"));
-  assert.ok(!agentChip.className.includes("bg-brutal-cyan"));
+  assert.ok(brutalView(agentChip.className).includes("bg-brutal-red/25"));
+  assert.ok(!brutalView(agentChip.className).includes("bg-brutal-cyan"));
 });
 
 test("channel settings pin switch drives sidebar pinned refs", async () => {
@@ -2120,20 +2121,20 @@ test("members strip fills at most three responsive rows and keeps +N plus Add vi
   // reserved for +N and Add when the roster overflows.
   assert.equal(grid.getAttribute("data-max-rows"), "3");
   assert.equal(grid.getAttribute("data-column-count"), "7");
-  assert.ok(grid.className.includes("flex-wrap"));
+  assert.ok(brutalView(grid.className).includes("flex-wrap"));
   // Capacity math already limits the rendered slots to three rows. Let those
   // rows define the natural block size so AvatarBadge can overflow without a
   // second, geometry-coupled CSS clipping contract.
-  assert.ok(!grid.className.includes("max-h-"));
-  assert.ok(!grid.className.includes("overflow-hidden"));
-  assert.ok(!grid.className.includes("4.75px"));
+  assert.ok(!brutalView(grid.className).includes("max-h-"));
+  assert.ok(!brutalView(grid.className).includes("overflow-hidden"));
+  assert.ok(!brutalView(grid.className).includes("4.75px"));
   const heading = screen.getByTestId("channel-overflow-members-heading");
   assert.equal(heading.textContent, "Members");
   assert.equal(heading.getAttribute("role"), "heading");
   assert.equal(heading.getAttribute("aria-level"), "3");
-  assert.ok(heading.className.includes("text-base"));
-  assert.ok(heading.className.includes("font-bold"));
-  assert.ok(heading.className.includes("text-black"));
+  assert.ok(brutalView(heading.className).includes("text-base"));
+  assert.ok(brutalView(heading.className).includes("font-bold"));
+  assert.ok(brutalView(heading.className).includes("text-black"));
   assert.equal(screen.getByTestId("channel-overflow-members-more").textContent, "+11");
   assert.ok(grid.contains(screen.getByTestId("channel-overflow-members-add-tile")));
 });
@@ -2159,13 +2160,13 @@ test("members entry swaps the drawer into the members page — same size, root s
   // Page navigation INSIDE the drawer: the sheet stays open at the same
   // size, and the members page renders inside it.
   assert.ok(sheet.contains(page));
-  assert.ok(sheet.className.includes("max-w-[min(100vw,34rem)]"));
+  assert.ok(brutalView(sheet.className).includes("max-w-[min(100vw,34rem)]"));
   for (const headerButton of [
     screen.getByTestId("member-page-back"),
   ]) {
-    assert.ok(headerButton.className.includes("btn-brutal-sm"));
-    assert.ok(headerButton.className.includes("size-7"));
-    assert.ok(headerButton.className.includes("bg-white"));
+    assert.ok(brutalView(headerButton.className).includes("btn-brutal-sm"));
+    assert.ok(brutalView(headerButton.className).includes("size-7"));
+    assert.ok(brutalView(headerButton.className).includes("bg-white"));
   }
   // Root content stays mounted but hidden (draft survival).
   const settingsPanel = screen.getByTestId("channel-settings-panel");
@@ -2240,7 +2241,7 @@ test("members page keeps its roster state under an in-drawer profile page; Back 
   assert.deepEqual(adminBadges.map((badge) => badge.textContent), ["Channel Admin", "Channel Admin"]);
   const adminTrailing = adminBadges[1]?.closest("[data-testid='member-page-trailing']");
   assert.ok(adminTrailing, "the agent role needs the shared trailing column");
-  assert.match(adminTrailing.className, /md:grid/);
+  assert.match(brutalView(adminTrailing.className), /md:grid/);
   assert.equal(adminTrailing.children.length, 2);
   for (const cell of adminTrailing.children) {
     assert.match((cell as HTMLElement).className, /md:col-start-1/);
@@ -2292,16 +2293,16 @@ test("members page keeps its roster state under an in-drawer profile page; Back 
   const nestedAgentLink = await within(profile).findByRole("button", { name: /^nested-agent/ });
   fireEvent.click(nestedAgentLink);
   const nestedBack = await screen.findByTestId("agent-mobile-back");
-  assert.ok(!nestedBack.className.includes("md:hidden"));
+  assert.ok(!brutalView(nestedBack.className).includes("md:hidden"));
   assert.equal(useProfileStore.getState().profileType, null);
   fireEvent.click(nestedBack);
 
   const profileBack = await screen.findByTestId("human-mobile-back");
-  assert.ok(!profileBack.className.includes("md:hidden"), "in-drawer Back stays visible on desktop");
+  assert.ok(!brutalView(profileBack.className).includes("md:hidden"), "in-drawer Back stays visible on desktop");
   fireEvent.click(profileBack);
   await waitFor(() => assert.ok(!screen.queryByTestId("profile-panel")));
   const restoredPage = screen.getByTestId("member-page");
-  assert.ok(!restoredPage.className.includes("hidden"));
+  assert.ok(!brutalView(restoredPage.className).includes("hidden"));
   assert.equal((screen.getByTestId("member-page-search") as HTMLInputElement).value, "own");
   assert.ok(within(restoredPage).getByRole("button", { name: /^owner/ }));
 
@@ -2310,7 +2311,7 @@ test("members page keeps its roster state under an in-drawer profile page; Back 
   fireEvent.click(within(restoredPage).getByRole("button", { name: /^owner/ }));
   const reopenedProfile = await screen.findByTestId("profile-panel");
   const profileClose = within(reopenedProfile).getByTitle("Close");
-  assert.ok(!profileClose.className.includes("md:flex"), "in-drawer Close remains available on mobile");
+  assert.ok(!brutalView(profileClose.className).includes("md:flex"), "in-drawer Close remains available on mobile");
   fireEvent.click(profileClose);
   await waitFor(() => assert.ok(!screen.queryByTestId("channel-overflow-sheet")));
 });

@@ -47,7 +47,7 @@ function MemberStripTooltip({
   return (
     <Tooltip
       content={label}
-      contentProps={{ className: "bg-white" }}
+      contentProps={{ className: "bg-layer-panel theme-brutal:bg-white" }}
     >
       {children}
     </Tooltip>
@@ -141,12 +141,12 @@ function MembersStrip({
         <span
           role="heading"
           aria-level={3}
-          className="text-base font-bold text-black"
+          className="text-base font-bold text-foreground-strong theme-brutal:text-black"
           data-testid="channel-overflow-members-heading"
         >
           {formatMessage({ id: "message.chatPanel.overflow.members" })}
         </span>
-        <span className="inline-flex min-w-0 items-center gap-1 text-xs font-bold text-black">
+        <span className="inline-flex min-w-0 items-center gap-1 text-xs font-bold text-foreground-strong theme-brutal:text-black">
           {loading
             ? formatMessage({ id: "message.chatPanel.overflow.membersLoading" })
             : formatMessage(
@@ -224,7 +224,7 @@ function MembersStrip({
             <button
               type="button"
               onClick={onOpen}
-              className="flex h-9 w-9 shrink-0 items-center justify-center border-2 border-black text-xs font-bold"
+              className="flex h-9 w-9 shrink-0 items-center justify-center border theme-brutal:border-2 border-line-strong theme-brutal:border-black text-xs font-bold"
               data-testid="channel-overflow-members-more"
             >
               +{overflow}
@@ -237,7 +237,7 @@ function MembersStrip({
               disabled={loading}
               title={formatMessage({ id: "agent.channelMembers.addMember" })}
               aria-label={formatMessage({ id: "agent.channelMembers.addMember" })}
-              className="flex h-9 w-9 shrink-0 items-center justify-center border-2 border-dashed border-black/40 text-lg font-bold text-black/45 transition-colors hover:border-black hover:text-black disabled:cursor-wait disabled:opacity-40"
+              className="flex h-9 w-9 shrink-0 items-center justify-center border theme-brutal:border-2 border-dashed border-line-strong theme-brutal:border-black/40 text-lg font-bold text-foreground-hint theme-brutal:text-black/45 transition-colors hover:border-line-strong theme-brutal:hover:border-black hover:text-foreground-strong theme-brutal:hover:text-black disabled:cursor-wait disabled:opacity-40"
               data-testid="channel-overflow-members-add-tile"
             >
               +
@@ -503,7 +503,7 @@ export default function ChannelOverflowMenu({
             </span>
             {channel && (
               <span
-                className="shrink-0 border-[1.5px] border-black bg-brutal-lime px-2 py-px text-[11px] font-bold"
+                className="shrink-0 border-[1.5px] border-line-strong theme-brutal:border-black bg-success-soft theme-brutal:bg-brutal-lime px-2 py-px text-[11px] font-bold"
                 data-testid="channel-overflow-visibility-badge"
               >
                 {channel.type === "private"
@@ -516,7 +516,7 @@ export default function ChannelOverflowMenu({
           </span>
         )}
         subtitle={settings?.initialDescription ? (
-          <p className="truncate font-mono text-xs text-black/50" data-testid="channel-overflow-identity-desc">
+          <p className="truncate font-mono text-xs text-foreground-muted theme-brutal:text-black/50" data-testid="channel-overflow-identity-desc">
             {settings.initialDescription}
           </p>
         ) : undefined}
@@ -628,7 +628,7 @@ export default function ChannelOverflowMenu({
             <h2 className="mb-4 text-lg font-bold">
               {formatMessage({ id: "message.chatPanel.overflow.unsavedTitle" })}
             </h2>
-            <p className="mb-5 text-sm text-black/70">
+            <p className="mb-5 text-sm text-foreground-muted theme-brutal:text-black/70">
               {formatMessage({
                 id: unsavedCanSave
                   ? "message.chatPanel.overflow.unsavedMessage"

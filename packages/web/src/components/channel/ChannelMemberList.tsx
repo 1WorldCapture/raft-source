@@ -23,7 +23,7 @@ export function ChannelMemberListShell({
     <div
       className={
         framed
-          ? `max-h-72 overflow-y-auto border-2 border-black bg-white shadow-brutal-sm ${className}`
+          ? `max-h-72 overflow-y-auto border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white shadow-raft-xs theme-brutal:shadow-brutal-sm ${className}`
           : className
       }
       data-testid={dataTestId}
@@ -35,7 +35,7 @@ export function ChannelMemberListShell({
 
 export function ChannelMemberSectionHeader({ children }: { children: ReactNode }) {
   return (
-    <SectionEyebrow as="div" uppercase={false} className="bg-white/50 px-3 py-1.5">
+    <SectionEyebrow as="div" uppercase={false} className="bg-layer-panel/50 theme-brutal:bg-white/50 px-3 py-1.5">
       {children}
     </SectionEyebrow>
   );
@@ -71,7 +71,7 @@ export function MemberRoleTag({ role }: { role: ServerRole }) {
   return (
     <span
       data-testid={isGuest ? "member-page-role-channel-guest" : "member-page-role-channel-admin"}
-      className={`shrink-0 border-[1.5px] border-black px-1.5 py-0.5 font-mono text-[10px] leading-3 ${isGuest ? "bg-brutal-cyan" : "bg-brutal-lavender"}`}
+      className={`shrink-0 border-[1.5px] border-line-strong theme-brutal:border-black px-1.5 py-0.5 font-mono text-[10px] leading-3 ${isGuest ? "bg-info-soft theme-brutal:bg-brutal-cyan" : "bg-secondary-200 theme-brutal:bg-brutal-lavender"}`}
     >
       {formatMessage({ id: isGuest
         ? "channel.membersPage.role.channelGuest"
@@ -151,11 +151,11 @@ export function ChannelMemberRow({
   const body = (
     <>
       <div className="min-w-0 flex-1">
-        <div className={`truncate text-sm text-black ${type === "human" ? "font-bold" : "font-medium"}`}>
+        <div className={`truncate text-sm text-foreground-strong theme-brutal:text-black ${type === "human" ? "font-bold" : "font-medium"}`}>
           {name}
         </div>
         {secondary ? (
-          <div className="truncate text-xs text-black/50">
+          <div className="truncate text-xs text-foreground-muted theme-brutal:text-black/50">
             {secondary}
           </div>
         ) : null}
@@ -169,7 +169,7 @@ export function ChannelMemberRow({
     // trailing slot (role tag, remove button) renders as a sibling so
     // interactive controls never nest inside a button.
     return (
-      <div className="group flex items-start gap-2 px-3 py-2 transition-colors [@media(max-height:600px)]:py-1 hover:bg-soft-signal/30">
+      <div className="group flex items-start gap-2 px-3 py-2 transition-colors [@media(max-height:600px)]:py-1 hover:bg-primary-soft/30 theme-brutal:hover:bg-soft-signal/30">
         <button
           type="button"
           onClick={onRowClick}
@@ -177,11 +177,11 @@ export function ChannelMemberRow({
         >
           <span className="relative mt-1 shrink-0">{avatar}</span>
           <div className="min-w-0 flex-1">
-            <div className={`truncate text-sm text-black ${type === "human" ? "font-bold" : "font-medium"}`}>
+            <div className={`truncate text-sm text-foreground-strong theme-brutal:text-black ${type === "human" ? "font-bold" : "font-medium"}`}>
               {name}
             </div>
             {secondary ? (
-              <div className="truncate text-xs text-black/50">
+              <div className="truncate text-xs text-foreground-muted theme-brutal:text-black/50">
                 {secondary}
               </div>
             ) : null}
@@ -193,7 +193,7 @@ export function ChannelMemberRow({
   }
 
   return (
-    <div className="group flex items-start gap-2 px-3 py-2 transition-colors [@media(max-height:600px)]:py-1 hover:bg-soft-signal/30">
+    <div className="group flex items-start gap-2 px-3 py-2 transition-colors [@media(max-height:600px)]:py-1 hover:bg-primary-soft/30 theme-brutal:hover:bg-soft-signal/30">
       {onAvatarClick ? (
         <button
           type="button"
@@ -231,7 +231,7 @@ export function ChannelMemberRemoveButton({
     <button
       type="button"
       onClick={onClick}
-      className={`${revealOnRowHover ? "flex md:invisible md:group-hover:visible md:group-focus-within:visible" : "flex"} ${visibleLabel ? "btn-brutal-sm h-7 whitespace-nowrap bg-brutal-red/20 px-2 text-xs hover:bg-brutal-red/60" : "mt-1 size-6 border border-black bg-brutal-red/20 hover:bg-brutal-red/60"} shrink-0 items-center justify-center text-black transition-colors`}
+      className={`${revealOnRowHover ? "flex md:invisible md:group-hover:visible md:group-focus-within:visible" : "flex"} ${visibleLabel ? "btn-brutal-sm h-7 whitespace-nowrap bg-danger-soft/20 theme-brutal:bg-brutal-red/20 px-2 text-xs hover:bg-danger-soft/60 theme-brutal:hover:bg-brutal-red/60" : "mt-1 size-6 border border-line-strong theme-brutal:border-black bg-danger-soft/20 theme-brutal:bg-brutal-red/20 hover:bg-danger-soft/60 theme-brutal:hover:bg-brutal-red/60"} shrink-0 items-center justify-center text-foreground-strong theme-brutal:text-black transition-colors`}
       title={label}
       aria-label={label}
     >
@@ -268,7 +268,7 @@ export function ChannelMemberHoverActions({
             roleAction.onClick();
           }}
           disabled={roleAction.disabled}
-          className="btn-brutal-sm h-7 whitespace-nowrap bg-white px-2 text-xs disabled:opacity-50"
+          className="btn-brutal-sm h-7 whitespace-nowrap bg-layer-panel theme-brutal:bg-white px-2 text-xs disabled:opacity-50"
           data-testid="channel-member-role-action"
           aria-label={roleAction.ariaLabel}
         >

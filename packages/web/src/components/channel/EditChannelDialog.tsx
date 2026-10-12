@@ -82,7 +82,7 @@ function ChannelSettingsSheet({
     >
       <DrawerContent
         data-testid="channel-settings-sheet"
-        className="inset-y-0 right-0 h-dvh w-full max-w-[min(100vw,34rem)] [--drawer-content-height:100dvh] [--drawer-inset:0px] flex-col rounded-none border-y-0 border-r-0 border-l-2 bg-brutal-cream"
+        className="inset-y-0 right-0 h-dvh w-full max-w-[min(100vw,34rem)] [--drawer-content-height:100dvh] [--drawer-inset:0px] flex-col rounded-none border-y-0 border-r-0 border-l theme-brutal:border-l-2 bg-layer-canvas-muted theme-brutal:bg-brutal-cream"
       >
         {children}
       </DrawerContent>
@@ -619,7 +619,7 @@ function GatedEditChannelDialog({
     <button
       type="button"
       onClick={() => setShowLeaveConfirm(true)}
-      className="btn-brutal flex w-full items-center justify-center gap-1.5 bg-brutal-orange px-4 py-2 text-sm"
+      className="btn-brutal flex w-full items-center justify-center gap-1.5 bg-warning-soft theme-brutal:bg-brutal-orange px-4 py-2 text-sm"
     >
       <LogOut size={14} />
       {formatMessage({ id: "channel.edit.leaveChannel" })}
@@ -630,7 +630,7 @@ function GatedEditChannelDialog({
       type="button"
       onClick={() => setShowVisibilityConfirm(true)}
       disabled={isArchived || visibilityBusy}
-      className="btn-brutal flex w-full items-center justify-center gap-1.5 bg-brutal-orange px-4 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+      className="btn-brutal flex w-full items-center justify-center gap-1.5 bg-warning-soft theme-brutal:bg-brutal-orange px-4 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
     >
       {isAllChannel
         ? currentVisibility === "private" ? <Eye size={14} /> : <EyeOff size={14} />
@@ -654,7 +654,7 @@ function GatedEditChannelDialog({
         setShowConvertConfirm(true);
       }}
       disabled={isArchived || convertBusy}
-      className="btn-brutal flex w-full items-center justify-center gap-1.5 bg-brutal-lime px-4 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+      className="btn-brutal flex w-full items-center justify-center gap-1.5 bg-success-soft theme-brutal:bg-brutal-lime px-4 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
     >
       <GitBranch size={14} />
       {convertBusy ? formatMessage({ id: "channel.edit.converting" }) : formatMessage({ id: "channel.edit.convertToJoint" })}
@@ -667,7 +667,7 @@ function GatedEditChannelDialog({
           type="button"
           onClick={handleUnarchive}
           disabled={archiveBusy}
-          className="btn-brutal flex w-full items-center justify-center gap-1.5 bg-brutal-lime px-4 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+          className="btn-brutal flex w-full items-center justify-center gap-1.5 bg-success-soft theme-brutal:bg-brutal-lime px-4 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <ArchiveRestore size={14} />
           {archiveBusy ? formatMessage({ id: "channel.edit.unarchiving" }) : formatMessage({ id: "channel.edit.unarchiveChannel" })}
@@ -676,7 +676,7 @@ function GatedEditChannelDialog({
         <button
           type="button"
           onClick={() => setShowArchiveConfirm(true)}
-          className="btn-brutal flex w-full items-center justify-center gap-1.5 bg-brutal-orange px-4 py-2 text-sm"
+          className="btn-brutal flex w-full items-center justify-center gap-1.5 bg-warning-soft theme-brutal:bg-brutal-orange px-4 py-2 text-sm"
         >
           <Archive size={14} />
           {formatMessage({ id: "channel.edit.archiveChannel" })}
@@ -686,7 +686,7 @@ function GatedEditChannelDialog({
         <button
           type="button"
           onClick={() => setShowDeleteConfirm(true)}
-          className="btn-brutal flex w-full items-center justify-center gap-1.5 bg-brutal-red px-4 py-2 text-sm"
+          className="btn-brutal flex w-full items-center justify-center gap-1.5 bg-danger-soft theme-brutal:bg-brutal-red px-4 py-2 text-sm"
         >
           <Unplug size={14} />
           {formatMessage({ id: "channel.edit.disconnectChannel" })}
@@ -695,7 +695,7 @@ function GatedEditChannelDialog({
         <button
           type="button"
           onClick={() => setShowDeleteConfirm(true)}
-          className="btn-brutal flex w-full items-center justify-center gap-1.5 bg-brutal-red px-4 py-2 text-sm"
+          className="btn-brutal flex w-full items-center justify-center gap-1.5 bg-danger-soft theme-brutal:bg-brutal-red px-4 py-2 text-sm"
         >
           <Trash2 size={14} />
           {formatMessage({ id: "channel.edit.deleteChannel" })}
@@ -796,16 +796,16 @@ function GatedEditChannelDialog({
   // visual weight is reserved for the action zone below.
   const preferencesSection = topbarOverflowEnabled && (
     <section className="mt-5" data-testid="channel-settings-preferences">
-      <h3 className="text-base font-bold text-black">
+      <h3 className="text-base font-bold text-foreground-strong theme-brutal:text-black">
         {formatMessage({ id: "message.chatPanel.overflow.preferencesGroup" })}
       </h3>
-      <div className="mt-2 divide-y divide-black/10">
+      <div className="mt-2 divide-y divide-line-muted theme-brutal:divide-black/10">
         <div className="flex items-center justify-between gap-3 py-3">
           <div className="min-w-0">
-            <h4 id="channel-settings-pin-label" className="text-sm font-medium text-black">
+            <h4 id="channel-settings-pin-label" className="text-sm font-medium text-foreground-strong theme-brutal:text-black">
               {formatMessage({ id: "message.channelSettings.pinTitle" })}
             </h4>
-            <p className="mt-1 text-xs font-normal text-black/55">
+            <p className="mt-1 text-xs font-normal text-foreground-muted theme-brutal:text-black/55">
               {formatMessage({ id: "message.channelSettings.pinDescription" })}
             </p>
           </div>
@@ -821,10 +821,10 @@ function GatedEditChannelDialog({
         {isPanel && activityMute && (
           <div className="flex items-center justify-between gap-3 py-3">
             <div className="min-w-0">
-              <h4 id="channel-settings-mute-label" className="text-sm font-medium text-black">
+              <h4 id="channel-settings-mute-label" className="text-sm font-medium text-foreground-strong theme-brutal:text-black">
                 {formatMessage({ id: "message.channelSettings.muteActivityTitle" })}
               </h4>
-              <p className="mt-1 text-xs font-normal text-black/55">
+              <p className="mt-1 text-xs font-normal text-foreground-muted theme-brutal:text-black/55">
                 {formatMessage({ id: "message.channelSettings.muteActivityDescription" })}
               </p>
             </div>
@@ -842,10 +842,10 @@ function GatedEditChannelDialog({
         {collapseLongMessages && (
           <div className="flex items-center justify-between gap-3 py-3">
             <div className="min-w-0">
-              <h4 id="channel-settings-collapse-label" className="text-sm font-medium text-black">
+              <h4 id="channel-settings-collapse-label" className="text-sm font-medium text-foreground-strong theme-brutal:text-black">
                 {formatMessage({ id: "message.channelSettings.collapseLongMessagesTitle" })}
               </h4>
-              <p className="mt-1 text-xs font-normal text-black/55">
+              <p className="mt-1 text-xs font-normal text-foreground-muted theme-brutal:text-black/55">
                 {formatMessage({ id: "message.channelSettings.collapseLongMessagesDescription" })}
               </p>
             </div>
@@ -866,19 +866,19 @@ function GatedEditChannelDialog({
 
   const guestAccessSection = canManageGuestAccess && (
     <section className="mt-5" data-testid="channel-settings-guest-access">
-      <h3 className="text-base font-bold text-black">
+      <h3 className="text-base font-bold text-foreground-strong theme-brutal:text-black">
         {formatMessage({ id: "channel.edit.guestAccessTitle" })}
       </h3>
-      <p className="mt-1 text-xs font-normal text-black/55">
+      <p className="mt-1 text-xs font-normal text-foreground-muted theme-brutal:text-black/55">
         {formatMessage({ id: "channel.edit.guestAccessDescription" })}
       </p>
-      <div className="mt-2 divide-y divide-black/10">
+      <div className="mt-2 divide-y divide-line-muted theme-brutal:divide-black/10">
         <div className="flex items-center justify-between gap-3 py-3">
           <div className="min-w-0">
-            <h4 id="channel-settings-guest-visible-label" className="text-sm font-medium text-black">
+            <h4 id="channel-settings-guest-visible-label" className="text-sm font-medium text-foreground-strong theme-brutal:text-black">
               {formatMessage({ id: "channel.edit.guestVisibleTitle" })}
             </h4>
-            <p className="mt-1 text-xs font-normal text-black/55">
+            <p className="mt-1 text-xs font-normal text-foreground-muted theme-brutal:text-black/55">
               {formatMessage({ id: "channel.edit.guestVisibleDescription" })}
             </p>
           </div>
@@ -895,10 +895,10 @@ function GatedEditChannelDialog({
         </div>
         {channel?.name !== "all" && <div className="flex items-center justify-between gap-3 py-3">
           <div className="min-w-0">
-            <h4 id="channel-settings-guest-joinable-label" className="text-sm font-medium text-black">
+            <h4 id="channel-settings-guest-joinable-label" className="text-sm font-medium text-foreground-strong theme-brutal:text-black">
               {formatMessage({ id: "channel.edit.guestJoinableTitle" })}
             </h4>
-            <p className="mt-1 text-xs font-normal text-black/55">
+            <p className="mt-1 text-xs font-normal text-foreground-muted theme-brutal:text-black/55">
               {formatMessage({ id: "channel.edit.guestJoinableDescription" })}
             </p>
           </div>
@@ -942,13 +942,13 @@ function GatedEditChannelDialog({
            (no manage capability) never see an empty header. */
         <div className="mt-5 mb-3">
           <h3
-            className="text-base font-bold text-black"
+            className="text-base font-bold text-foreground-strong theme-brutal:text-black"
             data-testid="channel-settings-manage-group"
           >
             {formatMessage({ id: "message.chatPanel.overflow.manageGroup" })}
           </h3>
           <p
-            className="mt-1 text-xs font-normal text-black/55"
+            className="mt-1 text-xs font-normal text-foreground-muted theme-brutal:text-black/55"
             data-testid="channel-settings-info-description"
           >
             {formatMessage({ id: "message.channelSettings.infoDescription" })}
@@ -967,7 +967,7 @@ function GatedEditChannelDialog({
           </Banner>
         )}
         {canEditChannel && (
-          <section className="space-y-3 border-b border-black/10 pb-5">
+          <section className="space-y-3 border-b border-line-muted theme-brutal:border-black/10 pb-5">
             <div className="space-y-3">
                   <FormField
                     label={formatMessage({ id: "channel.edit.nameLabel" })}
@@ -1081,24 +1081,24 @@ function GatedEditChannelDialog({
       )}
       {isJointChannel && (
         <section
-          className="space-y-4 border-b border-black/10 pb-5"
+          className="space-y-4 border-b border-line-muted theme-brutal:border-black/10 pb-5"
           data-testid="channel-settings-joint-section"
         >
                 <div>
-                  <h3 className="text-base font-bold text-black">
+                  <h3 className="text-base font-bold text-foreground-strong theme-brutal:text-black">
                     {formatMessage({ id: "message.channelSettings.jointTitle" })}
                   </h3>
-                  <p className="mt-1 text-xs font-normal text-black/55">
+                  <p className="mt-1 text-xs font-normal text-foreground-muted theme-brutal:text-black/55">
                     {formatMessage({ id: "message.channelSettings.jointDescription" })}
                   </p>
                 </div>
                 <div>
-                  <h4 className="text-sm font-medium text-black">
+                  <h4 className="text-sm font-medium text-foreground-strong theme-brutal:text-black">
                     {formatMessage({ id: "channel.edit.connectedServers" })}
                   </h4>
                   {jointServers.length > 0 ? (
                     <div
-                      className="mt-2 divide-y divide-black/10"
+                      className="mt-2 divide-y divide-line-muted theme-brutal:divide-black/10"
                       data-testid="channel-settings-joint-servers"
                     >
                       {jointServers.map((server) => (
@@ -1108,15 +1108,15 @@ function GatedEditChannelDialog({
                           data-testid="channel-settings-joint-server-row"
                         >
                           <div className="min-w-0">
-                            <div className="truncate text-sm font-medium text-black">
+                            <div className="truncate text-sm font-medium text-foreground-strong theme-brutal:text-black">
                               {server.serverName || server.serverSlug}
                             </div>
-                            <div className="mt-1 truncate text-xs font-normal text-black/55">
+                            <div className="mt-1 truncate text-xs font-normal text-foreground-muted theme-brutal:text-black/55">
                               {server.serverSlug}
                               {server.isCurrentServer ? ` · ${formatMessage({ id: "channel.edit.thisServer" })}` : ""}
                             </div>
                           </div>
-                          <span className={`shrink-0 border-[1.5px] border-black px-2 py-px text-[11px] font-bold ${server.status === "active" ? "bg-brutal-lime" : "bg-soft-signal"}`}>
+                          <span className={`shrink-0 border-[1.5px] border-line-strong theme-brutal:border-black px-2 py-px text-[11px] font-bold ${server.status === "active" ? "bg-success-soft theme-brutal:bg-brutal-lime" : "bg-primary-soft theme-brutal:bg-soft-signal"}`}>
                             {formatMessage({
                               id: server.status === "active"
                                 ? "channel.edit.serverStatusActive"
@@ -1127,7 +1127,7 @@ function GatedEditChannelDialog({
                       ))}
                     </div>
                   ) : (
-                    <p className="text-sm text-black/70">{formatMessage({ id: "channel.edit.connectedMetaUnavailable" })}</p>
+                    <p className="text-sm text-foreground-muted theme-brutal:text-black/70">{formatMessage({ id: "channel.edit.connectedMetaUnavailable" })}</p>
                   )}
                 </div>
                 {effectiveCapabilities.federateChannels && hasCurrentServerPendingJointInvites && !isArchived && (
@@ -1188,14 +1188,14 @@ function GatedEditChannelDialog({
                 )}
                 {effectiveCapabilities.federateChannels && !isArchived && (
                   <div
-                    className="space-y-3 border-t border-black/10 pt-4"
+                    className="space-y-3 border-t border-line-muted theme-brutal:border-black/10 pt-4"
                     data-testid="channel-settings-joint-invite"
                   >
-                    <h4 className="text-sm font-medium text-black">
+                    <h4 className="text-sm font-medium text-foreground-strong theme-brutal:text-black">
                       {formatMessage({ id: "channel.edit.inviteServerSection" })}
                     </h4>
                     {jointServerLimitReached ? (
-                      <p className="text-sm font-bold text-black/70">
+                      <p className="text-sm font-bold text-foreground-muted theme-brutal:text-black/70">
                         {formatMessage({ id: "channel.edit.maxServers" }, { max: MAX_JOINT_CHANNEL_SERVERS })}
                       </p>
                     ) : (
@@ -1280,7 +1280,7 @@ function GatedEditChannelDialog({
                           </Banner>
                         )}
                         {inviteStatus && (
-                          <p className="text-xs font-bold text-black/70" role="status">{inviteStatus}</p>
+                          <p className="text-xs font-bold text-foreground-muted theme-brutal:text-black/70" role="status">{inviteStatus}</p>
                         )}
                       </form>
                     )}
@@ -1309,7 +1309,7 @@ function GatedEditChannelDialog({
               )}
               {((showManageActions && (visibilityActionRow || archiveActionRow || deleteActionRow)) || (isArchived && archiveActionRow) || leaveActionRow || (!isArchived && stopAgentsRow)) && (
                 <section className="mt-5" data-testid="channel-settings-lifecycle-group">
-                  <h3 className="text-base font-bold text-black">
+                  <h3 className="text-base font-bold text-foreground-strong theme-brutal:text-black">
                     {formatMessage({ id: "message.chatPanel.overflow.lifecycleGroup" })}
                   </h3>
                   <div
@@ -1329,10 +1329,10 @@ function GatedEditChannelDialog({
             (showLeaveAction || showManageActions || (isArchived && effectiveCapabilities.archiveChannels)) && (
               <section className="mt-5 space-y-3">
                 <div>
-                  <h3 className="text-xs font-bold tracking-wide text-black/65">
+                  <h3 className="text-xs font-bold tracking-wide text-foreground-muted theme-brutal:text-black/65">
                     {formatMessage({ id: "message.channelSettings.actionsTitle" })}
                   </h3>
-                  <p className="mt-1 text-xs text-black/60">
+                  <p className="mt-1 text-xs text-foreground-muted theme-brutal:text-black/60">
                     {formatMessage({ id: "message.channelSettings.actionsDescription" })}
                   </p>
                 </div>
@@ -1353,7 +1353,7 @@ function GatedEditChannelDialog({
       type="submit"
       form={CHANNEL_SETTINGS_FORM_ID}
       disabled={saving || isArchived}
-      className="btn-brutal bg-brutal-pink px-4 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+      className="btn-brutal bg-accent-soft theme-brutal:bg-brutal-pink px-4 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
     >
       {saving ? formatMessage({ id: "channel.edit.saving" }) : formatMessage({ id: "channel.edit.saveChanges" })}
     </button>
@@ -1369,20 +1369,20 @@ function GatedEditChannelDialog({
            v2: identity lives in the yellow header, so the panel drops
            its own title and keeps only a hairline from the members
            strip above. */
-        <div className="safe-bottom border-t border-black/10 px-4 pt-3" data-testid="channel-settings-panel">
+        <div className="safe-bottom border-t border-line-muted theme-brutal:border-black/10 px-4 pt-3" data-testid="channel-settings-panel">
           {settingsBody}
         </div>
       ) : (
         <ChannelSettingsSheet isDirty={isDirty} onClose={onClose}>
-          <div className="flex shrink-0 items-center justify-between gap-4 border-b-2 border-black bg-soft-signal px-4 py-3">
+          <div className="flex shrink-0 items-center justify-between gap-4 border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black bg-primary-soft theme-brutal:bg-soft-signal px-4 py-3">
             <div className="min-w-0">
-              <p className="text-[10px] font-bold tracking-wide text-black/55">
+              <p className="text-[10px] font-bold tracking-wide text-foreground-muted theme-brutal:text-black/55">
                 {formatMessage({ id: "message.channelSettings.eyebrow" })}
               </p>
               <DrawerTitle id="channel-settings-title" className="truncate font-display text-xl font-bold">
                 {formatMessage({ id: "message.channelSettings.title" })}
               </DrawerTitle>
-              <DrawerDescription className="truncate font-mono text-xs text-black/60">
+              <DrawerDescription className="truncate font-mono text-xs text-foreground-muted theme-brutal:text-black/60">
                 #{initialName}
               </DrawerDescription>
             </div>
@@ -1390,7 +1390,7 @@ function GatedEditChannelDialog({
               render={(
                 <button
                   type="button"
-                  className="btn-brutal-sm bg-white p-1"
+                  className="btn-brutal-sm bg-layer-panel theme-brutal:bg-white p-1"
                   aria-label={formatMessage({ id: "message.channelSettings.close" })}
                 />
               )}
@@ -1403,12 +1403,12 @@ function GatedEditChannelDialog({
             {settingsBody}
           </div>
 
-          <div className="safe-bottom flex shrink-0 justify-end gap-3 border-t-2 border-black bg-brutal-cream px-4 py-3">
+          <div className="safe-bottom flex shrink-0 justify-end gap-3 border-t theme-brutal:border-t-2 border-line-strong theme-brutal:border-black bg-layer-canvas-muted theme-brutal:bg-brutal-cream px-4 py-3">
             <DrawerClose
               render={(
                 <button
                   type="button"
-                  className="btn-brutal bg-white px-4 py-2 text-sm"
+                  className="btn-brutal bg-layer-panel theme-brutal:bg-white px-4 py-2 text-sm"
                 />
               )}
             >

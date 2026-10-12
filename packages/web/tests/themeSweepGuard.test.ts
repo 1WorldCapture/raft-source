@@ -38,10 +38,16 @@ const SWEPT = [
   "src/components/machine",
   "src/components/onboarding",
   "src/components/workspace",
+  "src/components/channel",
+  "src/components/task",
 ];
 // Top-level files directly under src/components (area 1) are listed by name so
 // sub-folders swept later are not pulled in early.
 const SWEPT_TOP_LEVEL_COMPONENTS = true;
+// Single sources of truth whose Brutal class names are DATA (resolved to CSS variables, shared with
+// the mobile palette and pinned by taskStatusBadgeConfig): sweeping them changes what those
+// consumers read. Elegant status colours need a semantic field in the SSOT first (follow-up).
+const EXEMPT = ["src/components/task/taskStatusUi.ts"];
 
 function* walk(path: string): Generator<string> {
   const st = statSync(path);
@@ -61,7 +67,7 @@ function sweptFiles(): string[] {
       if (/\.tsx?$/.test(name) && !/\.(test|d)\.tsx?$/.test(name)) files.push(join(dir, name));
     }
   }
-  return files;
+  return files.filter((file) => !EXEMPT.some((exempt) => file.endsWith(exempt)));
 }
 
 test("swept folders keep every hard-coded Brutal colour behind a theme-brutal: guard", () => {

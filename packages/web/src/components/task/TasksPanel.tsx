@@ -139,13 +139,13 @@ function TaskSection({
         className={`flex w-full items-center justify-between gap-3 text-left ${onToggleCollapsed ? "" : "cursor-default"}`}
       >
         <div className="flex items-center gap-2">
-          <span className={`border border-black px-2 py-0.5 text-[10px] font-bold uppercase ${TASK_STATUS_UI[status].bg}`}>
+          <span className={`border border-line-strong theme-brutal:border-black px-2 py-0.5 text-[10px] font-bold uppercase ${TASK_STATUS_UI[status].bg}`}>
             {formatMessage({ id: TASK_STATUS_UI[status].labelId })}
           </span>
-          <span className="text-xs font-mono text-black/50">{tasks.length}</span>
+          <span className="text-xs font-mono text-foreground-muted theme-brutal:text-black/50">{tasks.length}</span>
         </div>
         {onToggleCollapsed ? (
-          <span className="inline-flex items-center text-black/50 hover:text-black">
+          <span className="inline-flex items-center text-foreground-muted theme-brutal:text-black/50 hover:text-foreground-strong theme-brutal:hover:text-black">
             <ChevronDown size={14} className={`transition-transform ${collapsed ? "-rotate-90" : ""}`} />
           </span>
         ) : (
@@ -153,7 +153,7 @@ function TaskSection({
         )}
       </button>
       {!collapsed && tasks.length === 0 ? (
-        <div className="border-2 border-dashed border-black/20 px-3 py-5 text-sm text-black/40">
+        <div className="border theme-brutal:border-2 border-dashed border-line-muted theme-brutal:border-black/20 px-3 py-5 text-sm text-foreground-hint theme-brutal:text-black/40">
           {formatMessage(
             { id: "task.status.emptyGroup" },
             { status: formatMessage({ id: TASK_STATUS_UI[status].labelId }) },
@@ -254,8 +254,8 @@ function DroppableColumn({
   return (
     <div
       ref={setNodeRef}
-      className={`flex w-[320px] shrink-0 self-start flex-col border-2 ${
-        isOver ? "border-black bg-soft-signal/20 shadow-brutal-sm" : "border-black/20 bg-white/30"
+      className={`flex w-[320px] shrink-0 self-start flex-col border theme-brutal:border-2 ${
+        isOver ? "border-line-strong theme-brutal:border-black bg-primary-soft/20 theme-brutal:bg-soft-signal/20 shadow-raft-xs theme-brutal:shadow-brutal-sm" : "border-line-muted theme-brutal:border-black/20 bg-layer-panel/30 theme-brutal:bg-white/30"
       } p-3 transition-colors`}
     >
       <button
@@ -268,20 +268,20 @@ function DroppableColumn({
         className={`flex w-full items-center justify-between gap-3 text-left ${collapsed ? "" : "mb-3"}`}
       >
         <div className="flex items-center gap-2">
-          <span className={`border border-black px-2 py-0.5 text-[10px] font-bold uppercase ${TASK_STATUS_UI[status].bg}`}>
+          <span className={`border border-line-strong theme-brutal:border-black px-2 py-0.5 text-[10px] font-bold uppercase ${TASK_STATUS_UI[status].bg}`}>
             {formatMessage({ id: TASK_STATUS_UI[status].labelId })}
           </span>
-          <span className="text-xs font-mono text-black/50">{statusTasks.length}</span>
+          <span className="text-xs font-mono text-foreground-muted theme-brutal:text-black/50">{statusTasks.length}</span>
         </div>
-        <span className="inline-flex items-center text-black/50 hover:text-black">
+        <span className="inline-flex items-center text-foreground-muted theme-brutal:text-black/50 hover:text-foreground-strong theme-brutal:hover:text-black">
           <ChevronDown size={14} className={`transition-transform ${collapsed ? "-rotate-90" : ""}`} />
         </span>
       </button>
       {!collapsed && (
         <div className="space-y-2.5">
           {statusTasks.length === 0 ? (
-            <div className={`border-2 border-dashed px-3 py-5 text-sm ${
-              isOver ? "border-black text-black/60" : "border-black/20 text-black/40"
+            <div className={`border theme-brutal:border-2 border-dashed px-3 py-5 text-sm ${
+              isOver ? "border-line-strong theme-brutal:border-black text-foreground-muted theme-brutal:text-black/60" : "border-line-muted theme-brutal:border-black/20 text-foreground-hint theme-brutal:text-black/40"
             }`}>
               {formatMessage(
                 { id: isOver ? "task.status.dropToSet" : "task.status.emptyGroup" },
@@ -469,16 +469,16 @@ function IdentityFilterChip({
       <button
         type="button"
         onClick={onToggleOpen}
-        className={`inline-flex items-center gap-2 border-2 px-3 py-1.5 text-xs font-bold transition-colors ${
+        className={`inline-flex items-center gap-2 border theme-brutal:border-2 px-3 py-1.5 text-xs font-bold transition-colors ${
           selected.length > 0
-            ? "border-black bg-soft-signal text-black shadow-brutal-sm"
-            : "border-black/30 bg-white text-black/70 hover:border-black"
+            ? "border-line-strong theme-brutal:border-black bg-primary-soft theme-brutal:bg-soft-signal text-foreground-strong theme-brutal:text-black shadow-raft-xs theme-brutal:shadow-brutal-sm"
+            : "border-line-muted theme-brutal:border-black/30 bg-layer-panel theme-brutal:bg-white text-foreground-muted theme-brutal:text-black/70 hover:border-line-strong theme-brutal:hover:border-black"
         }`}
       >
         {icon}
         {label}
         {selected.length > 0 && (
-          <span className="border border-black px-1 py-0.5 font-mono text-[10px] leading-none">
+          <span className="border border-line-strong theme-brutal:border-black px-1 py-0.5 font-mono text-[10px] leading-none">
             {selected.length}
           </span>
         )}
@@ -921,13 +921,13 @@ export default function TasksPanel({ channelId, onOpenTask, onOpenTaskInNewTab, 
           which already shows the channel header, so a second "Tasks" title
           would be redundant — drop straight into the toolbar. */}
       {!isChannelMode && (
-        <div className="flex h-panel-header items-center gap-3 border-b-2 border-black bg-soft-signal px-5 md:bg-white">
-          <div className="hidden md:flex size-icon-header items-center justify-center border-2 border-black bg-soft-signal">
+        <div className="flex h-panel-header items-center gap-3 border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black bg-primary-soft theme-brutal:bg-soft-signal px-5 md:bg-layer-panel theme-brutal:md:bg-white">
+          <div className="hidden md:flex size-icon-header items-center justify-center border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-primary-soft theme-brutal:bg-soft-signal">
             <CheckSquare size={18} />
           </div>
           <div className="min-w-0 flex-1">
             <h2 className="font-bold text-base leading-tight">{formatMessage({ id: "task.panel.heading" })}</h2>
-            <p className="text-xs text-black/50 font-mono">
+            <p className="text-xs text-foreground-muted theme-brutal:text-black/50 font-mono">
               {sortedTasks.length}
               {hasAnyFilter ? formatMessage({ id: "task.panel.ofTotal" }, { total: tasks.length }) : ""}
               {" "}{formatMessage({ id: "task.panel.channelTasks" })}
@@ -940,7 +940,7 @@ export default function TasksPanel({ channelId, onOpenTask, onOpenTaskInNewTab, 
         </div>
       )}
 
-      <div className="shrink-0 border-b-2 border-black bg-white px-4 py-3">
+      <div className="shrink-0 border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white px-4 py-3">
         <div className="flex flex-wrap items-center gap-2">
           {/* Channel filter only makes sense in server mode — channel mode
               is already scoped to one channel. */}
@@ -951,16 +951,16 @@ export default function TasksPanel({ channelId, onOpenTask, onOpenTaskInNewTab, 
                 onClick={() =>
                   setOpenFilter((prev) => (prev === "channel" ? null : "channel"))
                 }
-                className={`inline-flex items-center gap-2 border-2 px-3 py-1.5 text-xs font-bold transition-colors ${
+                className={`inline-flex items-center gap-2 border theme-brutal:border-2 px-3 py-1.5 text-xs font-bold transition-colors ${
                   selectedChannelIds.length > 0
-                    ? "border-black bg-soft-signal text-black shadow-brutal-sm"
-                    : "border-black/30 bg-white text-black/70 hover:border-black"
+                    ? "border-line-strong theme-brutal:border-black bg-primary-soft theme-brutal:bg-soft-signal text-foreground-strong theme-brutal:text-black shadow-raft-xs theme-brutal:shadow-brutal-sm"
+                    : "border-line-muted theme-brutal:border-black/30 bg-layer-panel theme-brutal:bg-white text-foreground-muted theme-brutal:text-black/70 hover:border-line-strong theme-brutal:hover:border-black"
                 }`}
               >
                 <Hash size={14} />
                 {formatMessage({ id: "task.panel.channelColumn" })}
                 {selectedChannelIds.length > 0 && (
-                  <span className="border border-black px-1 py-0.5 font-mono text-[10px] leading-none">
+                  <span className="border border-line-strong theme-brutal:border-black px-1 py-0.5 font-mono text-[10px] leading-none">
                     {selectedChannelIds.length}
                   </span>
                 )}
@@ -1024,7 +1024,7 @@ export default function TasksPanel({ channelId, onOpenTask, onOpenTaskInNewTab, 
             <button
               type="button"
               onClick={clearAllFilters}
-              className="inline-flex items-center gap-2 border border-black bg-white px-2.5 py-1 text-[11px] font-bold text-black/60 hover:text-black"
+              className="inline-flex items-center gap-2 border border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white px-2.5 py-1 text-[11px] font-bold text-foreground-muted theme-brutal:text-black/60 hover:text-foreground-strong theme-brutal:hover:text-black"
             >
               {formatMessage({ id: "task.panel.clearAll" })}
             </button>
@@ -1038,7 +1038,7 @@ export default function TasksPanel({ channelId, onOpenTask, onOpenTaskInNewTab, 
             <button
               type="button"
               onClick={() => setShowCreateDialog(true)}
-              className="btn-brutal-sm inline-flex items-center gap-1 bg-brutal-pink px-2 py-1 text-xs font-bold"
+              className="btn-brutal-sm inline-flex items-center gap-1 bg-accent-soft theme-brutal:bg-brutal-pink px-2 py-1 text-xs font-bold"
             >
               <Plus size={12} />
               {formatMessage({ id: "task.board.newTask" })}
@@ -1066,7 +1066,7 @@ export default function TasksPanel({ channelId, onOpenTask, onOpenTaskInNewTab, 
       <div
         ref={scrollContainerRef}
         data-task-virtual-scroll
-        className="flex-1 overflow-auto bg-white p-4 safe-bottom"
+        className="flex-1 overflow-auto bg-layer-panel theme-brutal:bg-white p-4 safe-bottom"
       >
         {/* Skeleton only while there is nothing to show: a cache seed (#10)
             may already paint rows while the network refresh is in flight. */}
@@ -1075,7 +1075,7 @@ export default function TasksPanel({ channelId, onOpenTask, onOpenTaskInNewTab, 
             {Array.from({ length: 5 }, (_, i) => (
               <SkeletonRow
                 key={i}
-                className="gap-2 rounded border-2 border-black/30 p-3"
+                className="gap-2 rounded border theme-brutal:border-2 border-line-muted theme-brutal:border-black/30 p-3"
                 lineWidths={["w-1/2", "w-3/4"]}
               />
             ))}

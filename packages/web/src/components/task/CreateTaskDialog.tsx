@@ -78,7 +78,7 @@ export default function CreateTaskDialog({
                   <button
                     type="button"
                     onClick={() => removeRow(i)}
-                    className="btn-brutal-sm p-1 bg-white"
+                    className="btn-brutal-sm p-1 bg-layer-panel theme-brutal:bg-white"
                   >
                     <Trash2 size={14} />
                   </button>
@@ -88,7 +88,7 @@ export default function CreateTaskDialog({
             <button
               type="button"
               onClick={addRow}
-              className="btn-brutal-sm px-2 py-1 text-xs font-bold flex items-center gap-1 bg-white mt-3"
+              className="btn-brutal-sm px-2 py-1 text-xs font-bold flex items-center gap-1 bg-layer-panel theme-brutal:bg-white mt-3"
             >
               <Plus size={12} />
               {formatMessage({ id: "task.create.addAnother" })}
@@ -99,14 +99,14 @@ export default function CreateTaskDialog({
             <button
               type="button"
               onClick={onClose}
-              className="btn-brutal bg-white px-4 py-2 text-sm"
+              className="btn-brutal bg-layer-panel theme-brutal:bg-white px-4 py-2 text-sm"
             >
               {formatMessage({ id: "common.confirm.cancel" })}
             </button>
             <button
               type="submit"
               disabled={submitting}
-              className="btn-brutal bg-brutal-pink px-4 py-2 text-sm"
+              className="btn-brutal bg-accent-soft theme-brutal:bg-brutal-pink px-4 py-2 text-sm"
             >
               {submitting
                 ? formatMessage({ id: "task.create.submitting" })
