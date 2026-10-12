@@ -4,6 +4,7 @@ import {
   type RequestHandlerMap,
 } from "./internal/ipc-server.js";
 import { createMachineAttestationHandler } from "./machineServiceAttestation.js";
+import { COMPUTER_PROVENANCE, COMPUTER_VERSION } from "./version.js";
 import { resetRunner, resetService } from "./reset.js";
 import { listRunners, readRunnerStatus, readServiceStatus } from "./lib/readers.js";
 import {
@@ -84,6 +85,12 @@ export async function listenServiceIpcSeam(ipc: IpcServer): Promise<IpcServer> {
   try {
     const transportPath = await ipc.listen();
     process.stderr.write(`Service: IPC seam listening at ${transportPath}\n`);
+    // Build provenance, not just version: the bundle version comes from
+    // package.json and is the same across commits (task #32).
+    process.stderr.write(
+      `Service: build=${COMPUTER_VERSION}+${COMPUTER_PROVENANCE.short}` +
+        `${COMPUTER_PROVENANCE.known ? "" : " (commit unknown: built without git)"}\n`,
+    );
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     process.stderr.write(`Service: IPC seam failed to bind (${msg}); ownership not acquired.\n`);

@@ -57,6 +57,7 @@ test("version asks the live daemon and ignores stale inherited process env", asy
           data: {
             daemonVersion: "1.0.15",
             computerVersion: "1.0.16",
+            daemonCommit: "d85eb3371234567890abcdef1234567890abcdef",
             observation: "live_daemon_process",
           },
         };
@@ -74,7 +75,12 @@ test("version asks the live daemon and ignores stale inherited process env", asy
   }
 
   assert.deepEqual(requests, [{ method: "GET", path: "/internal/agent-api/runtime-version" }]);
-  assert.equal(stdout.join(""), `Raft CLI: ${CLI_VERSION}\nRaft daemon (live): 1.0.15\nRaft Computer (live): 1.0.16\n`);
+  assert.equal(
+    stdout.join(""),
+    `Raft CLI: ${CLI_VERSION}\nRaft daemon (live): 1.0.15\n`
+      + "Raft daemon commit: d85eb3371234567890abcdef1234567890abcdef\n"
+      + "Raft Computer (live): 1.0.16\n",
+  );
   assert.equal(stdout.join("").includes("1.0.14-stale"), false);
   assert.equal(stdout.join("").includes("must-not-be-printed"), false);
   assert.deepEqual(stderr, []);
@@ -93,6 +99,7 @@ test("version JSON labels the observation as live daemon process", async () => {
         data: {
           daemonVersion: "1.0.15",
           computerVersion: null,
+          daemonCommit: "d85eb3371234567890abcdef1234567890abcdef",
           observation: "live_daemon_process",
         },
       }),
@@ -107,9 +114,35 @@ test("version JSON labels the observation as live daemon process", async () => {
       cli: CLI_VERSION,
       daemon: "1.0.15",
       computer: null,
+      daemonCommit: "d85eb3371234567890abcdef1234567890abcdef",
       observation: "live_daemon_process",
     },
   });
+});
+
+test("a daemon predating the commit field still reports, as unknown", async () => {
+  // A rolling upgrade pairs a new CLI with an older daemon; missing provenance
+  // must degrade to an explicit "unknown", never fail the command or hide it.
+  const { io, stdout } = memoryIo();
+  const ctx = createCommandContext({
+    io,
+    loadAgentContext: () => managedContext,
+    createApiClient: () => ({
+      request: async (): Promise<ApiResponse<unknown>> => ({
+        ok: true,
+        status: 200,
+        error: null,
+        data: {
+          daemonVersion: "1.0.15",
+          computerVersion: "1.0.16",
+          observation: "live_daemon_process",
+        },
+      }),
+    }) as any,
+  });
+
+  await versionCommand.handler(ctx, {});
+  assert.match(stdout.join(""), /Raft daemon commit: unknown\n/);
 });
 
 test("live observation marker is required by the production parser", () => {
@@ -121,11 +154,13 @@ test("live observation marker is required by the production parser", () => {
   assert.deepEqual(parseLiveVersionInfo(CLI_VERSION, {
     daemonVersion: "1.0.15",
     computerVersion: "1.0.16",
+    daemonCommit: "abc1234def5678",
     observation: "live_daemon_process",
   }), {
     cli: CLI_VERSION,
     daemon: "1.0.15",
     computer: "1.0.16",
+    daemonCommit: "abc1234def5678",
     observation: "live_daemon_process",
   });
 });
