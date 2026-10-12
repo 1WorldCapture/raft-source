@@ -39,7 +39,7 @@ export function BillingIntervalSegmentedControl({
       label: (
         <span className="inline-flex items-center gap-1.5">
           <span>{formatMessage({ id: "billing.yearly" })}</span>
-          <span className="whitespace-nowrap text-[10px] font-mono font-bold uppercase text-black/60">{formatMessage({ id: "billing.saveAnnualPercent" }, { percent: PRO_PACK_ANNUAL_DISCOUNT_PERCENT })}</span>
+          <span className="whitespace-nowrap text-[10px] font-mono font-bold uppercase text-foreground-muted theme-brutal:text-black/60">{formatMessage({ id: "billing.saveAnnualPercent" }, { percent: PRO_PACK_ANNUAL_DISCOUNT_PERCENT })}</span>
         </span>
       ),
       testId: "billing-interval-annual",

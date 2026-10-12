@@ -19,8 +19,8 @@ export function JointChannelInvitesSection() {
         label={formatMessage({ id: "settings.jointInvites.sectionLabel" })}
         count={invites.length}
       />
-      <p className="mb-2 text-xs text-black/60">{formatMessage({ id: "settings.jointInvites.description" })}</p>
-      <div className="border-2 border-black bg-white p-3 shadow-brutal-sm">
+      <p className="mb-2 text-xs text-foreground-muted theme-brutal:text-black/60">{formatMessage({ id: "settings.jointInvites.description" })}</p>
+      <div className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white p-3 shadow-raft-xs theme-brutal:shadow-brutal-sm">
         <JointChannelInviteList allowDismiss={false} onOpenChannel={(channelId) => nav.toChannel(channelId)} />
       </div>
     </div>

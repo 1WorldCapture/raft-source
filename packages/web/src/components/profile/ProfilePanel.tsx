@@ -205,8 +205,8 @@ export default function ProfilePanel({
   const skeletonMobileBack = useMobileBack(closePanel);
   const headerBack = onBack ?? skeletonMobileBack;
   const containerClassName = embedded
-    ? "flex min-h-0 min-w-0 flex-1 flex-col bg-white"
-    : "absolute inset-0 z-30 flex min-h-0 min-w-0 flex-col bg-white lg:relative lg:inset-auto lg:z-auto lg:border-l-2 lg:border-black";
+    ? "flex min-h-0 min-w-0 flex-1 flex-col bg-layer-panel theme-brutal:bg-white"
+    : "absolute inset-0 z-30 flex min-h-0 min-w-0 flex-col bg-layer-panel theme-brutal:bg-white lg:relative lg:inset-auto lg:z-auto lg:border-l theme-brutal:lg:border-l-2 lg:border-line-strong theme-brutal:lg:border-black";
   const containerStyle = !embedded && isDesktop ? { width } : undefined;
 
   // Render order:
@@ -253,7 +253,7 @@ export default function ProfilePanel({
     return (
       <div
         data-testid="profile-panel"
-        className="absolute inset-0 z-30 flex min-h-0 min-w-0 flex-col bg-white lg:relative lg:inset-auto lg:z-auto lg:border-l-2 lg:border-black"
+        className="absolute inset-0 z-30 flex min-h-0 min-w-0 flex-col bg-layer-panel theme-brutal:bg-white lg:relative lg:inset-auto lg:z-auto lg:border-l theme-brutal:lg:border-l-2 lg:border-line-strong theme-brutal:lg:border-black"
         style={isDesktop ? { width } : undefined}
       >
         <div
@@ -343,7 +343,7 @@ export default function ProfilePanel({
             </Button>
           ) : undefined}
         />
-        <div className="flex flex-1 items-center justify-center text-sm text-black/40 font-display">
+        <div className="flex flex-1 items-center justify-center text-sm text-foreground-hint theme-brutal:text-black/40 font-display">
           {formatMessage({ id: "common.loading" })}
         </div>
       </div>

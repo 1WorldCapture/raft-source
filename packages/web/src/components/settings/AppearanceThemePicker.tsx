@@ -190,7 +190,7 @@ export function AppearanceThemePicker({
                   // entirely. Border width never changes, so selecting cannot
                   // shift the layout.
                   const cardClass = isBrutal
-                    ? `border-2 bg-layer-panel ${
+                    ? `border theme-brutal:border-2 bg-layer-panel ${
                         selected ? "border-line-strong shadow-raft-md" : "border-line-muted shadow-none"
                       }`
                     : `rounded-lg border-[0.5px] bg-layer-panel shadow-none ${
@@ -225,7 +225,7 @@ export function AppearanceThemePicker({
                           <div
                             className={`relative h-16 overflow-hidden bg-layer-canvas p-2 ${
                               isBrutal
-                                ? "rounded-none border-2 border-line-strong"
+                                ? "rounded-none border theme-brutal:border-2 border-line-strong"
                                 : "rounded-md border border-line-muted"
                             }`}
                             aria-hidden="true"
@@ -233,7 +233,7 @@ export function AppearanceThemePicker({
                             <div
                               className={`h-full bg-layer-panel p-2 ${
                                 isBrutal
-                                  ? "rounded-none border-2 border-black shadow-brutal-xs"
+                                  ? "rounded-none border theme-brutal:border-2 border-line-strong theme-brutal:border-black shadow-raft-xs theme-brutal:shadow-brutal-xs"
                                   : "rounded border border-line-muted shadow-raft-xs"
                               }`}
                             >

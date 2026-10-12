@@ -27,6 +27,13 @@ const SWEPT = [
   "src/components/message",
   "src/components/markdown",
   "src/components/actions",
+  "src/components/settings",
+  "src/components/server",
+  "src/components/profile",
+  "src/components/member",
+  "src/components/saved",
+  "src/components/wiki",
+  "src/components/brand",
 ];
 // Top-level files directly under src/components (area 1) are listed by name so
 // sub-folders swept later are not pulled in early.

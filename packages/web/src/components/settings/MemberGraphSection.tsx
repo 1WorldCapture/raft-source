@@ -163,7 +163,7 @@ function GraphMemberNode({
               className="relative block cursor-default border-0 bg-transparent p-0 text-left"
             >
               <div
-                className="relative overflow-hidden rounded-full border-black"
+                className="relative overflow-hidden rounded-full border-line-strong theme-brutal:border-black"
                 style={{
                   width: GRAPH_NODE_SIZE,
                   height: GRAPH_NODE_SIZE,
@@ -197,7 +197,7 @@ function GraphMemberNode({
               </div>
               <div
                 className={[
-                  "pointer-events-none absolute whitespace-nowrap text-[12px] font-bold text-black",
+                  "pointer-events-none absolute whitespace-nowrap text-[12px] font-bold text-foreground-strong theme-brutal:text-black",
                   dense
                     ? member.type === "agent"
                       ? "right-full top-1/2 -translate-y-1/2 pr-2 text-right"
@@ -206,7 +206,7 @@ function GraphMemberNode({
                 ].join(" ")}
               >
                 <div>{shortLabel(label, dense ? 12 : 16)}</div>
-                {!dense && <div className="font-mono text-[10px] text-black/55">{formatMessage({ id: "settings.memberGraph.nodeLinks" }, { count: degree })}</div>}
+                {!dense && <div className="font-mono text-[10px] text-foreground-muted theme-brutal:text-black/55">{formatMessage({ id: "settings.memberGraph.nodeLinks" }, { count: degree })}</div>}
               </div>
             </button>
           }
@@ -573,7 +573,7 @@ function MemberGraphCanvas({ data }: { data: GraphResponse }) {
 
   if (members.length === 0 && channels.length === 0) {
     return (
-      <div className="flex min-h-[320px] items-center justify-center border-2 border-dashed border-black/30 bg-white text-sm font-bold text-black/40">
+      <div className="flex min-h-[320px] items-center justify-center border theme-brutal:border-2 border-dashed border-line-muted theme-brutal:border-black/30 bg-layer-panel theme-brutal:bg-white text-sm font-bold text-foreground-hint theme-brutal:text-black/40">
         {formatMessage({ id: "settings.memberGraph.emptyState" })}
       </div>
     );
@@ -612,7 +612,7 @@ function MemberGraphCanvas({ data }: { data: GraphResponse }) {
   return (
     <div
       ref={graphRef}
-      className="relative touch-none select-none overflow-hidden border-2 border-black bg-[#f8f8f0] shadow-brutal-sm cursor-grab active:cursor-grabbing"
+      className="relative touch-none select-none overflow-hidden border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-[#f8f8f0] shadow-raft-xs theme-brutal:shadow-brutal-sm cursor-grab active:cursor-grabbing"
     >
       {renderGraphSvg()}
       <div className="pointer-events-none absolute inset-0">
@@ -639,8 +639,8 @@ function MemberGraphCanvas({ data }: { data: GraphResponse }) {
 
 function RankedList({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <div className="border-2 border-black bg-white p-3 shadow-brutal-sm">
-      <div className="mb-2 text-xs font-black uppercase tracking-normal text-black">{title}</div>
+    <div className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white p-3 shadow-raft-xs theme-brutal:shadow-brutal-sm">
+      <div className="mb-2 text-xs font-black uppercase tracking-normal text-foreground-strong theme-brutal:text-black">{title}</div>
       {children}
     </div>
   );
@@ -714,7 +714,7 @@ export default function MemberGraphSection({
           type="button"
           onClick={loadGraph}
           disabled={loading}
-          className="btn-brutal-sm flex w-fit items-center gap-1.5 bg-white px-2.5 py-1.5 text-xs disabled:opacity-50"
+          className="btn-brutal-sm flex w-fit items-center gap-1.5 bg-layer-panel theme-brutal:bg-white px-2.5 py-1.5 text-xs disabled:opacity-50"
         >
           <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
           {formatMessage({ id: "settings.memberGraph.refresh" })}
@@ -728,17 +728,17 @@ export default function MemberGraphSection({
 
         <div className="space-y-3">
           <div className="grid grid-cols-3 gap-2">
-            <div className="border-2 border-black bg-white p-2 text-center shadow-brutal-sm">
+            <div className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white p-2 text-center shadow-raft-xs theme-brutal:shadow-brutal-sm">
               <div className="text-lg font-black">{data?.humans.length ?? 0}</div>
-              <div className="text-[10px] font-bold uppercase text-black/55">{formatMessage({ id: "settings.memberGraph.humans" })}</div>
+              <div className="text-[10px] font-bold uppercase text-foreground-muted theme-brutal:text-black/55">{formatMessage({ id: "settings.memberGraph.humans" })}</div>
             </div>
-            <div className="border-2 border-black bg-white p-2 text-center shadow-brutal-sm">
+            <div className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white p-2 text-center shadow-raft-xs theme-brutal:shadow-brutal-sm">
               <div className="text-lg font-black">{data?.agents.length ?? 0}</div>
-              <div className="text-[10px] font-bold uppercase text-black/55">{formatMessage({ id: "settings.memberGraph.agents" })}</div>
+              <div className="text-[10px] font-bold uppercase text-foreground-muted theme-brutal:text-black/55">{formatMessage({ id: "settings.memberGraph.agents" })}</div>
             </div>
-            <div className="border-2 border-black bg-white p-2 text-center shadow-brutal-sm">
+            <div className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white p-2 text-center shadow-raft-xs theme-brutal:shadow-brutal-sm">
               <div className="text-lg font-black">{memberLinks.length}</div>
-              <div className="text-[10px] font-bold uppercase text-black/55">{formatMessage({ id: "settings.memberGraph.links" })}</div>
+              <div className="text-[10px] font-bold uppercase text-foreground-muted theme-brutal:text-black/55">{formatMessage({ id: "settings.memberGraph.links" })}</div>
             </div>
           </div>
 
@@ -751,12 +751,12 @@ export default function MemberGraphSection({
                       <MemberAvatar member={member} compact />
                       <span className="truncate font-bold">{displayName(member)}</span>
                     </div>
-                    <span className="shrink-0 font-mono text-black/55">{memberLinkDegrees.get(memberKey(member)) ?? 0}</span>
+                    <span className="shrink-0 font-mono text-foreground-muted theme-brutal:text-black/55">{memberLinkDegrees.get(memberKey(member)) ?? 0}</span>
                   </div>
                 ))}
               </div>
             ) : (
-              <div className="text-xs italic text-black/40">{formatMessage({ id: "settings.memberGraph.noMemberships" })}</div>
+              <div className="text-xs italic text-foreground-hint theme-brutal:text-black/40">{formatMessage({ id: "settings.memberGraph.noMemberships" })}</div>
             )}
           </RankedList>
 
@@ -769,14 +769,14 @@ export default function MemberGraphSection({
                       <Hash size={13} />
                       <span className="truncate font-bold">{channel.name}</span>
                     </div>
-                    <span className="shrink-0 font-mono text-black/55">
+                    <span className="shrink-0 font-mono text-foreground-muted theme-brutal:text-black/55">
                       {channel.humanCount}H/{channel.agentCount}A
                     </span>
                   </div>
                 ))}
               </div>
             ) : (
-              <div className="text-xs italic text-black/40">{formatMessage({ id: "settings.memberGraph.noVisibleChannels" })}</div>
+              <div className="text-xs italic text-foreground-hint theme-brutal:text-black/40">{formatMessage({ id: "settings.memberGraph.noVisibleChannels" })}</div>
             )}
           </RankedList>
         </div>

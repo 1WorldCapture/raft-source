@@ -96,10 +96,10 @@ export default function ProviderConnectionsSettings() {
           </Button>
         )}
       </div>
-      <p className="text-sm text-black/60">{formatMessage({ id: "settings.providers.description" })}</p>
+      <p className="text-sm text-foreground-muted theme-brutal:text-black/60">{formatMessage({ id: "settings.providers.description" })}</p>
 
       {(error || actionError) && (
-        <div className="border-2 border-black bg-red-50 px-3 py-2 text-sm font-medium text-red-800">
+        <div className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-red-50 px-3 py-2 text-sm font-medium text-red-800">
           {actionError || formatMessage({ id: "settings.providers.loadError" })}
         </div>
       )}
@@ -107,11 +107,11 @@ export default function ProviderConnectionsSettings() {
       {loading ? (
         <div className="flex min-h-32 items-center justify-center"><Spinner size="md" /></div>
       ) : connections.length === 0 ? (
-        <div className="border-2 border-dashed border-black/25 px-5 py-10 text-center text-sm text-black/55">
+        <div className="border theme-brutal:border-2 border-dashed border-line-muted theme-brutal:border-black/25 px-5 py-10 text-center text-sm text-foreground-muted theme-brutal:text-black/55">
           {formatMessage({ id: "settings.providers.empty" })}
         </div>
       ) : (
-        <div className="divide-y-2 divide-black border-2 border-black bg-white shadow-brutal-sm">
+        <div className="divide-y-2 divide-line-muted theme-brutal:divide-black border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white shadow-raft-xs theme-brutal:shadow-brutal-sm">
           {connections.map((connection) => (
             <ConnectionRow
               key={connection.id}
@@ -203,12 +203,12 @@ function ConnectionRow({
   return (
     <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center" data-testid={`provider-connection-${connection.id}`}>
       <div className="flex min-w-0 flex-1 items-start gap-3">
-        <span className={`mt-0.5 flex size-8 shrink-0 items-center justify-center border-2 border-black ${ready ? "bg-green-100" : "bg-black/5"}`}>
+        <span className={`mt-0.5 flex size-8 shrink-0 items-center justify-center border theme-brutal:border-2 border-line-strong theme-brutal:border-black ${ready ? "bg-green-100" : "bg-fill-muted theme-brutal:bg-black/5"}`}>
           {ready ? <CheckCircle2 size={17} /> : <XCircle size={17} />}
         </span>
         <div className="min-w-0">
           <div className="truncate text-sm font-bold">{connection.name}</div>
-          <div className="mt-0.5 text-xs text-black/55">
+          <div className="mt-0.5 text-xs text-foreground-muted theme-brutal:text-black/55">
             {labelForProviderId(connection.providerId, providerOptions)}
             {" · "}
             {formatMessage({ id: `settings.providers.status.${connection.status}` })}
@@ -325,7 +325,7 @@ function ProviderConnectionTestModal({
           </datalist>
         </FormField>
         <div className="flex items-center justify-between gap-3">
-          <p className={`text-xs ${modelError ? "text-red-700" : "text-black/55"}`}>
+          <p className={`text-xs ${modelError ? "text-red-700" : "text-foreground-muted theme-brutal:text-black/55"}`}>
             {modelError || formatMessage({ id: "settings.providers.testModelHint" })}
           </p>
           <Button type="button" size="sm" disabled={loadingModels || submitting} onClick={() => void loadModels()}>
@@ -416,7 +416,7 @@ function ProviderConnectionActionModal({
           </FormField>
         ) : (
           <>
-            <p className="text-sm text-black/60">{formatMessage({ id: "settings.providers.rotateHint" })}</p>
+            <p className="text-sm text-foreground-muted theme-brutal:text-black/60">{formatMessage({ id: "settings.providers.rotateHint" })}</p>
             {gateway && (
               <FormField label={formatMessage({ id: "settings.providers.endpoint" })}>
                 <input className="input-brutal w-full" type="url" value={endpointUrl} onChange={(event) => setEndpointUrl(event.target.value)} required />

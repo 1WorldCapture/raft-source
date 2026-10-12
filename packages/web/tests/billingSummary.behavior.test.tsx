@@ -9,6 +9,7 @@ import { useAgentStore } from "../src/store/agentStore";
 import { useAuthStore } from "../src/store/authStore";
 import { useServerStore } from "../src/store/serverStore";
 import { TestIntlProvider } from "./helpers/intl";
+import { brutalView } from "./helpers/brutalView";
 
 // Mounted-DOM replacement for the SettingsPanel half of
 // tests/billingSummaryContract.test.ts. It checks the rendered plan card,
@@ -182,7 +183,7 @@ test("free plan renders the contract plan card with included/not-included featur
   assert.ok(screen.getByText("Start building with agents."));
 
   const included = screen.getByText("Included");
-  const card = included.closest("div.border-2");
+  const card = included.closest("div[class*=\"border-2\"]");
   assert.ok(card instanceof HTMLElement, "plan card container not found");
   for (const feature of [
     "Channels",
@@ -216,8 +217,8 @@ test("free plan renders the contract plan card with included/not-included featur
 
   const compare = screen.getByRole("link", { name: "See all features and compare plans" });
   assert.equal(compare.getAttribute("href"), "https://raft.build/#pricing");
-  assert.ok(compare.classList.contains("btn-brutal-sm"));
-  assert.ok(compare.classList.contains("bg-white"));
+  assert.ok(brutalView(compare.className).split(/\s+/).includes("btn-brutal-sm"));
+  assert.ok(brutalView(compare.className).split(/\s+/).includes("bg-white"));
 
   // Retired copy stays retired (was doesNotMatch source regexes).
   for (const stale of [
@@ -256,7 +257,7 @@ test("checkout-mode pricing defaults to annual with the strike-through original,
   assert.ok(annual.textContent?.includes("Yearly"));
   assert.ok(annual.textContent?.includes("Save 12%"), "annual option carries the discount badge");
   const annualBadge = within(annual).getByText("Save 12%");
-  assert.ok(annualBadge.classList.contains("uppercase"));
+  assert.ok(brutalView(annualBadge.className).split(/\s+/).includes("uppercase"));
 
   // Seat input is a numeric text field, not a spinner.
   const seatInput = screen.getByRole("textbox", { name: "Seats to buy" });
@@ -366,9 +367,9 @@ test("pro plan renders seat usage, manage-seats copy, and the subscription summa
   );
   assert.ok(usageValue);
   const humansSwatch = screen.getByTitle("1 human using 1 seat");
-  assert.ok(humansSwatch.classList.contains("bg-soft-signal"));
+  assert.ok(brutalView(humansSwatch.className).split(/\s+/).includes("bg-soft-signal"));
   const agentsSwatch = screen.getByTitle("5 agents using 0.5 seats");
-  assert.ok(agentsSwatch.classList.contains("bg-brutal-pink"));
+  assert.ok(brutalView(agentsSwatch.className).split(/\s+/).includes("bg-brutal-pink"));
   assert.ok(screen.getByText("Humans"));
   assert.ok(screen.getByText("Agents"));
   // The free-plan usage rows stay off the pro surface.

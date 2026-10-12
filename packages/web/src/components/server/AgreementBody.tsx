@@ -72,7 +72,7 @@ export default function AgreementBody({ source }: { source: string }) {
   const blocks = parseAgreementBody(source);
   if (blocks.length === 0) {
     return (
-      <p className="text-black/50">
+      <p className="text-foreground-muted theme-brutal:text-black/50">
         {formatMessage({ id: "server.communityAgreement.nothingToPreview" })}
       </p>
     );

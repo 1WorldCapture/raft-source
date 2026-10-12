@@ -25,7 +25,7 @@ export default function SettingsProfileCard({
   return (
     <div
       data-testid={testId}
-      className="space-y-4 border-2 border-black bg-white p-4 shadow-brutal-sm"
+      className="space-y-4 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white p-4 shadow-raft-xs theme-brutal:shadow-brutal-sm"
     >
       <div className="flex items-start gap-4">
         <div className="flex size-16 shrink-0 items-center justify-center">
@@ -34,18 +34,18 @@ export default function SettingsProfileCard({
 
         <div className="min-w-0 flex-1 pt-1">
           <div
-            className="min-w-0 truncate text-lg font-bold leading-tight text-black"
+            className="min-w-0 truncate text-lg font-bold leading-tight text-foreground-strong theme-brutal:text-black"
             title={title}
           >
             {title}
           </div>
-          <div className="truncate text-sm font-mono text-black/50" title={subtitle}>
+          <div className="truncate text-sm font-mono text-foreground-muted theme-brutal:text-black/50" title={subtitle}>
             {subtitle}
           </div>
         </div>
       </div>
 
-      <div className="space-y-3 border-t border-black/10 pt-4">
+      <div className="space-y-3 border-t border-line-muted theme-brutal:border-black/10 pt-4">
         {children}
       </div>
     </div>
