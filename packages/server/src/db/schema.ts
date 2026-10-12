@@ -6550,6 +6550,95 @@ export const providerConnectionCredentials = pgTable("provider_connection_creden
   index("idx_provider_connection_credentials_scope").on(t.serverId),
 ]);
 
+// Computer-scoped provider probe intents and closed receipts. The Server never
+// calls the provider: it stores the intent, materializes credentials once to
+// the claiming Computer, and records a credential-free receipt.
+export const providerProbeIntents = pgTable("provider_probe_intents", {
+  id: uuid("id").primaryKey().$defaultFn(() => randomUUID()),
+  serverId: uuid("server_id").notNull().references(() => servers.id, { onDelete: "cascade" }),
+  connectionId: uuid("connection_id").notNull().references(() => providerConnections.id, { onDelete: "cascade" }),
+  configVersion: integer("config_version").notNull(),
+  credentialVersion: integer("credential_version").notNull(),
+  computerId: uuid("computer_id").notNull().references(() => machines.id, { onDelete: "cascade" }),
+  runtime: text("runtime").notNull(),
+  model: text("model").notNull(),
+  probeKind: text("probe_kind").notNull(),
+  probeRequestId: text("probe_request_id").notNull(),
+  requestDigest: text("request_digest").notNull(),
+  intentDigest: text("intent_digest").notNull(),
+  createdByUserId: uuid("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  dispatchedAt: timestamp("dispatched_at", { withTimezone: true }),
+  closeReason: text("close_reason"),
+  closedAt: timestamp("closed_at", { withTimezone: true }),
+  dispatchRequestId: text("dispatch_request_id"),
+  dispatchEpochId: text("dispatch_epoch_id"),
+  dispatchGeneration: text("dispatch_generation"),
+  capabilityObserved: boolean("capability_observed"),
+  dispatchDaemonVersion: text("dispatch_daemon_version"),
+  dispatchComputerVersion: text("dispatch_computer_version"),
+  dispatchRuntimeVersion: text("dispatch_runtime_version"),
+  dispatchRuntimes: jsonb("dispatch_runtimes").$type<string[]>(),
+  claimMachineId: uuid("claim_machine_id").references(() => machines.id, { onDelete: "cascade" }),
+  claimRequestId: text("claim_request_id"),
+  claimEpochId: text("claim_epoch_id"),
+  claimGeneration: text("claim_generation"),
+  claimLeasedAt: timestamp("claim_leased_at", { withTimezone: true }),
+  materializationDigest: text("materialization_digest"),
+}, (t) => [
+  uniqueIndex("idx_provider_probe_intents_server_request").on(t.serverId, t.probeRequestId),
+  index("idx_provider_probe_intents_server_connection").on(t.serverId, t.connectionId),
+  index("idx_provider_probe_intents_authority_match").on(
+    t.serverId,
+    t.connectionId,
+    t.configVersion,
+    t.credentialVersion,
+    t.computerId,
+    t.runtime,
+    t.model,
+    t.probeKind,
+  ),
+  check("provider_probe_intents_kind_known", sql`${t.probeKind} in ('canary')`),
+  check(
+    "provider_probe_intents_close_reason_known",
+    sql`${t.closeReason} is null or ${t.closeReason} in ('receipt', 'carrier_offline', 'carrier_timeout', 'unsupported_carrier', 'provider_timeout', 'stale_authority', 'intent_expired', 'invalid_carrier_result')`,
+  ),
+]);
+
+export const providerProbeReceipts = pgTable("provider_probe_receipts", {
+  id: uuid("id").primaryKey().$defaultFn(() => randomUUID()),
+  probeId: uuid("probe_id").notNull().references(() => providerProbeIntents.id, { onDelete: "cascade" }),
+  serverId: uuid("server_id").notNull().references(() => servers.id, { onDelete: "cascade" }),
+  outcome: text("outcome").notNull(),
+  category: text("category"),
+  latencyMs: integer("latency_ms"),
+  responseSha256: text("response_sha256"),
+  responseBytes: integer("response_bytes"),
+  resultDigest: text("result_digest").notNull(),
+  intentDigest: text("intent_digest").notNull(),
+  materializationDigest: text("materialization_digest"),
+  authorityIdentity: text("authority_identity"),
+  daemonVersion: text("daemon_version"),
+  computerVersion: text("computer_version"),
+  runtimeVersion: text("runtime_version"),
+  dispatchEpochId: text("dispatch_epoch_id"),
+  dispatchGeneration: text("dispatch_generation"),
+  verifiedAt: timestamp("verified_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  unique("provider_probe_receipts_probe_id_unique").on(t.probeId),
+  check("provider_probe_receipts_outcome_known", sql`${t.outcome} in ('success', 'failure')`),
+  check(
+    "provider_probe_receipts_category_known",
+    sql`${t.category} is null or ${t.category} in ('auth', 'model', 'network', 'dns_tls', 'rate_quota', 'invalid_response', 'carrier_offline', 'carrier_timeout', 'unsupported_carrier', 'provider_timeout', 'stale_authority', 'intent_expired', 'invalid_carrier_result')`,
+  ),
+  check("provider_probe_receipts_bytes_nonneg", sql`${t.responseBytes} is null or ${t.responseBytes} >= 0`),
+  check(
+    "provider_probe_receipts_success_needs_response",
+    sql`${t.outcome} <> 'success' or (${t.responseSha256} is not null and ${t.responseBytes} is not null and ${t.authorityIdentity} is not null)`,
+  ),
+]);
+
 export const agentProviderConnections = pgTable("agent_provider_connections", {
   serverId: uuid("server_id").notNull().references(() => servers.id, { onDelete: "cascade" }),
   agentId: uuid("agent_id").primaryKey().references(() => agents.id, { onDelete: "cascade" }),

@@ -14,6 +14,10 @@ import { formatRuntimeProviderModelLabel } from "./runtimeProviderDisplay.js";
 import { hydrateLegacyRuntimeConfigWithTrace } from "./runtimeConfigLegacy.js";
 import type { AttentionHint } from "./attentionDependencyOracle.js";
 import type {
+  MachineProviderProbeRequest,
+  MachineProviderProbeResult,
+} from "./providerProbes.js";
+import type {
   ComputerBoundDueReceiptMessage,
   ServerBoundDueReceiptMessage,
 } from "./apps/reminder/protocol.js";
@@ -608,6 +612,7 @@ export type ServerToMachineMessage =
   | { type: "machine:workspace:scan" }
   | { type: "machine:workspace:delete"; directoryName: string }
   | { type: "machine:runtime_models:detect"; requestId: string; runtime: string; refresh?: boolean }
+  | MachineProviderProbeRequest
   /**
    * Ask the owning Computer to start a Cursor SDK owner sign-in for the web
    * login button. The daemon answers with `machine:cursor_sdk:login_result`
@@ -938,6 +943,7 @@ export type MachineToServerMessage =
       default?: string;
       error?: string;
     }
+  | MachineProviderProbeResult
   /**
    * Result of a web-triggered Cursor SDK sign-in start. Minimal by contract:
    * only the validated login URL / failure reason — never credential
@@ -3967,6 +3973,7 @@ export * from "./agentMigrationResumable.js";
 export * from "./discussionGraph.js";
 export * from "./managedMcp.js";
 export * from "./providerConnections.js";
+export * from "./providerProbes.js";
 
 
 // ── Identity setup: who still owes us a handle ──
