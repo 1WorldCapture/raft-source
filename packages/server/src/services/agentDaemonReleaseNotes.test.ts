@@ -285,9 +285,9 @@ test("Computer Alpha 1.0.28 closes the Computer, CLI, and daemon carrier tuple",
       daemon: readPackageVersion("daemon"),
     },
     {
-      computer: "1.0.47",
+      computer: "1.0.48",
       cli: "0.0.25-zcode.1",
-      daemon: "1.0.37",
+      daemon: "1.0.38",
     },
   );
 });
