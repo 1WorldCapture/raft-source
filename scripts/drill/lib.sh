@@ -38,17 +38,30 @@ $dirty"
 }
 
 # Restore the ref a drill moved the tree to, for paths the build itself cannot
-# cover: SIGINT (Ctrl-C), SIGTERM, or the process dying outright. Without this a
-# killed drill leaves the operator on a detached HEAD at someone else's commit.
+# cover: SIGINT (Ctrl-C), SIGTERM, or the process dying outright.
+#
+# Restoring the COMMIT alone is not enough. `git checkout <sha>` leaves the
+# worktree DETACHED, so a drill that restores by sha silently breaks the next
+# `git push` — the push then publishes the stale local BRANCH while reporting
+# success. When the tree started on a branch, the branch is what we restore.
 drill::restore_ref_trap() {
-  local repo="$1" original="$2"
+  local repo="$1" original="$2" original_branch="${3:-}"
   [[ -n "$original" ]] || return 0
-  local current
+  local current current_branch
   current="$(git -C "$repo" rev-parse HEAD 2>/dev/null || echo "")"
-  [[ -n "$current" && "$current" == "$original" ]] && return 0
-  drill::warn "restoring ref to ${original:0:12} (tree was left at ${current:0:12})"
+  current_branch="$(git -C "$repo" symbolic-ref --short -q HEAD 2>/dev/null || echo "")"
+  if [[ -n "$original_branch" ]]; then
+    if [[ "$current_branch" == "$original_branch" && "$current" == "$original" ]]; then
+      return 0
+    fi
+    drill::warn "restoring branch $original_branch (was ${current_branch:-detached}@${current:0:12})"
+    git -C "$repo" checkout --quiet "$original_branch" 2>/dev/null && return 0
+    drill::warn "branch checkout failed; falling back to the exact commit"
+  elif [[ -n "$current" && "$current" == "$original" ]]; then
+    return 0
+  fi
   git -C "$repo" checkout --quiet "$original" 2>/dev/null \
-    || drill::fail "could not restore ref ${original:0:12} — the worktree is left at ${current:0:12}; recover it with: git -C $repo checkout $original"
+    || drill::fail "could not restore ${original:0:12} — worktree left at ${current:0:12}; recover with: git -C $repo checkout $original"
 }
 
 # Rebuild shared + daemon + computer from an exact commit.
@@ -70,9 +83,11 @@ drill::rebuild_at_ref() {
   drill::require_cmd git pnpm node
   drill::require_clean_tree "$repo"
 
-  local before
+  local before before_branch
   before="$(git -C "$repo" rev-parse HEAD)"
-  drill::log "rebuilding shared+daemon+computer at $ref (was ${before:0:12})"
+  # Empty when the operator was already detached; then we restore the commit only.
+  before_branch="$(git -C "$repo" symbolic-ref --short -q HEAD 2>/dev/null || echo "")"
+  drill::log "rebuilding shared+daemon+computer at $ref (was ${before:0:12}${before_branch:+, branch $before_branch})"
 
   # A dirty tree is refused above; a failed build must not leave the operator on
   # the wrong ref, so restore in all paths.
@@ -85,7 +100,7 @@ drill::rebuild_at_ref() {
     git -C "$repo" checkout --quiet "$before" || true
     drill::fail "build failed at $ref; restored ${before:0:12}"
   fi
-  printf '%s\n' "$before"
+  printf '%s\n%s\n' "$before" "$before_branch"
 }
 
 # ---------------------------------------------------------------------------

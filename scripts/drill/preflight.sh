@@ -35,14 +35,15 @@ drill::log "LaunchAgents snapshot: $(wc -l < "$LA_BEFORE" | tr -d ' ') entr(ies)
 
 # --- 2. rebuild at the exact commit -----------------------------------------
 ORIGINAL_HEAD="$(git -C "$REPO" rev-parse HEAD)"
-# Guarantee the operator's ref comes back even if this script is interrupted:
-# a killed drill must not leave their worktree detached at the drill's commit.
-trap 'drill::restore_ref_trap "$REPO" "$ORIGINAL_HEAD"' EXIT INT TERM
+ORIGINAL_BRANCH="$(git -C "$REPO" symbolic-ref --short -q HEAD 2>/dev/null || echo "")"
+# Guarantee the operator comes back even if this script is interrupted: a killed
+# drill must not leave their worktree detached at the drill's commit.
+trap 'drill::restore_ref_trap "$REPO" "$ORIGINAL_HEAD" "$ORIGINAL_BRANCH"' EXIT INT TERM
 
-REBUILT_AT="$(drill::rebuild_at_ref "$REPO" "$REF")"
+read -r REBUILT_AT REBUILT_FROM_BRANCH < <(drill::rebuild_at_ref "$REPO" "$REF")
 TARGET_SHA="$(git -C "$REPO" rev-parse HEAD)"
-drill::log "rebuilt at ${TARGET_SHA:0:12} (original HEAD was ${REBUILT_AT:0:12})"
-[[ "$REBUILT_AT" == "$ORIGINAL_HEAD" ]] || drill::log "note: drill moved the worktree from ${ORIGINAL_HEAD:0:12}; postflight restores it"
+drill::log "rebuilt at ${TARGET_SHA:0:12} (was ${REBUILT_AT:0:12}${REBUILT_FROM_BRANCH:+, branch $REBUILT_FROM_BRANCH})"
+[[ "$REBUILT_AT" == "$ORIGINAL_HEAD" ]] || drill::log "note: drill moved the worktree from ${REBUILT_AT:0:12}; postflight restores it"
 
 # Rebuilding must not have introduced or removed an owner login item.
 drill::snapshot_launchagents "$LA_AFTER"
@@ -62,7 +63,7 @@ cat <<EOF
 [drill]   target commit : ${TARGET_SHA:0:12} ($TARGET_SHA)
 [drill]   daemon  dist  : $(drill::fingerprint "$REPO/packages/daemon/dist")
 [drill]   computer dist : $(drill::fingerprint "$REPO/packages/computer/dist")
-[drill]   restore ref   : ${REBUILT_AT:0:12}
+[drill]   restore to    : ${REBUILT_AT:0:12}$(printf '%s' "${REBUILT_FROM_BRANCH:+ (branch $REBUILT_FROM_BRANCH)}")
 [drill]   launchagents  : $LA_BEFORE
 EOF
-printf '%s\n' "$REBUILT_AT" > "$WORK/restore-ref.txt"
+printf '%s\n%s\n' "$REBUILT_AT" "$REBUILT_FROM_BRANCH" > "$WORK/restore-ref.txt"

@@ -114,17 +114,29 @@ fi
 
 echo "== ref restore after an interrupted drill =="
 BEFORE_REF="$(git -C "$FAKE_REPO" rev-parse HEAD)"
+BEFORE_BRANCH="$(git -C "$FAKE_REPO" symbolic-ref --short -q HEAD 2>/dev/null || echo "")"
+[[ -n "$BEFORE_BRANCH" ]] || git -C "$FAKE_REPO" checkout -q -b drill-branch 2>/dev/null || true
+BEFORE_BRANCH="$(git -C "$FAKE_REPO" symbolic-ref --short -q HEAD 2>/dev/null || echo "")"
 git -C "$FAKE_REPO" checkout -q --detach HEAD 2>/dev/null || true
-DRILL_REF="$(git -C "$FAKE_REPO" rev-parse HEAD)"
 touch "$FAKE_REPO/file.txt"
 git -C "$FAKE_REPO" add -A
 git -C "$FAKE_REPO" commit -qm second
 MOVED_REF="$(git -C "$FAKE_REPO" rev-parse HEAD)"
-drill::restore_ref_trap "$FAKE_REPO" "$BEFORE_REF" >/dev/null 2>&1
+
+# The bug this covers: restoring by COMMIT alone leaves the tree detached, and a
+# later `git push` then publishes the stale local branch while reporting success.
+drill::restore_ref_trap "$FAKE_REPO" "$BEFORE_REF" "$BEFORE_BRANCH" >/dev/null 2>&1
 NOW="$(git -C "$FAKE_REPO" rev-parse HEAD)"
-[[ "$NOW" == "$BEFORE_REF" ]] && ok "restore_ref_trap puts the tree back" || bad "restore_ref_trap left the tree at ${NOW:0:12}, wanted ${BEFORE_REF:0:12}"
+NOW_BRANCH="$(git -C "$FAKE_REPO" symbolic-ref --short -q HEAD 2>/dev/null || echo "")"
+[[ "$NOW" == "$BEFORE_REF" ]] && ok "restore_ref_trap puts the commit back" || bad "restore_ref_trap left the commit at ${NOW:0:12}, wanted ${BEFORE_REF:0:12}"
+if [[ -n "$BEFORE_BRANCH" ]]; then
+  [[ "$NOW_BRANCH" == "$BEFORE_BRANCH" ]] && ok "restore_ref_trap REATTACHES the branch (not just the commit)" || bad "tree left detached — the next git push would publish a stale branch"
+else
+  ok "no branch to reattach (started detached)"
+fi
+
 # And it is a no-op when the tree is already where it should be.
-drill::restore_ref_trap "$FAKE_REPO" "$NOW" >/dev/null 2>&1 \
+drill::restore_ref_trap "$FAKE_REPO" "$NOW" "$NOW_BRANCH" >/dev/null 2>&1 \
   && ok "restore_ref_trap is a no-op when already correct" || bad "restore_ref_trap failed on a no-op"
 
 echo

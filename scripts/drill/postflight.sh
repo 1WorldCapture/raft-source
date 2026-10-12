@@ -69,15 +69,22 @@ else
 fi
 
 # --- 5. operator ref restored ----------------------------------------------
+# Restoring the BRANCH matters, not just the commit: a tree left detached makes
+# the next `git push` publish a stale local branch while reporting success.
 RESTORE_FILE="$WORK/restore-ref.txt"
 if [[ -f "$RESTORE_FILE" ]]; then
-  want="$(cat "$RESTORE_FILE")"
+  want_commit="$(sed -n '1p' "$RESTORE_FILE")"
+  want_branch="$(sed -n '2p' "$RESTORE_FILE")"
   have="$(git -C "$REPO" rev-parse HEAD)"
-  if [[ "$want" != "$have" ]]; then
-    drill::fail "operator ref not restored: HEAD=$(git -C "$REPO" rev-parse --short HEAD) expected ${want:0:12}"
-    STATUS=1
+  have_branch="$(git -C "$REPO" symbolic-ref --short -q HEAD 2>/dev/null || echo "")"
+  ok=1
+  [[ "$have" == "$want_commit" ]] || ok=0
+  [[ -z "$want_branch" || "$have_branch" == "$want_branch" ]] || ok=0
+  if [[ "$ok" -eq 1 ]]; then
+    drill::log "operator ref restored: ${have:0:12}$(printf '%s' "${have_branch:+ (branch $have_branch)}")"
   else
-    drill::log "operator ref restored: ${have:0:12}"
+    drill::fail "operator ref not restored: have=${have:0:12}$(printf '%s' "${have_branch:+ ($have_branch)}") want=${want_commit:0:12}$(printf '%s' "${want_branch:+ ($want_branch)}")"
+    STATUS=1
   fi
 else
   drill::warn "no restore-ref recorded at $RESTORE_FILE — skipping ref-restore check"
