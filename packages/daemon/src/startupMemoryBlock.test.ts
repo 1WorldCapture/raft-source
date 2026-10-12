@@ -10,6 +10,7 @@ import {
   buildStartupMemoryBlock,
   resolveStartupMemoryBlockConfig,
 } from "./startupMemoryBlock.js";
+import { planWakeSessionRecycle } from "./wakeSessionRecycle.js";
 import { asAxSurfaceText, type AgentConfig } from "@botiverse/raft-shared";
 
 function workspaceWithMemory(content: string | null): string {
@@ -111,4 +112,59 @@ test("only the head of a huge MEMORY.md is read, and the size facts still descri
   assert.ok(block.includes('shown="first '), block.slice(0, 200));
   assert.ok(!block.includes("TAIL_MARKER"));
   assert.match(block, /size="2[0-9]{3}\.\d KB"/);
+});
+
+test("recycled briefing orders chrome, then memory block, then constructed panel", async () => {
+  const home = mkdtempSync(path.join(os.tmpdir(), "memory-recycle-"));
+  const projectDir = path.join(home, ".claude", "projects", "-workspace-agent");
+  mkdirSync(projectDir, { recursive: true });
+  const sessionId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+  const lastTurnAt = Date.now() - 3 * 3_600_000;
+  const records = [
+    JSON.stringify({
+      type: "assistant",
+      timestamp: new Date(lastTurnAt).toISOString(),
+      message: { usage: { input_tokens: 5, cache_read_input_tokens: 600_000, cache_creation_input_tokens: 1_500 } },
+    }),
+  ];
+  for (let i = 0; i < 6; i += 1) {
+    records.push(JSON.stringify({
+      type: "assistant",
+      timestamp: new Date(lastTurnAt).toISOString(),
+      message: { content: [{ type: "tool_use", id: `t${i}`, name: "Bash", input: { command: `echo ${i}` } }] },
+    }));
+    records.push(JSON.stringify({
+      type: "user",
+      timestamp: new Date(lastTurnAt).toISOString(),
+      message: { content: [{ type: "tool_result", tool_use_id: `t${i}`, content: `${i}` }] },
+    }));
+  }
+  writeFileSync(path.join(projectDir, `${sessionId}.jsonl`), records.join("\n") + "\n");
+  const workspacePath = workspaceWithMemory("# Memory index marker\n- durable fact\n");
+
+  const config = {
+    runtime: "claude",
+    sessionId,
+    constructedWakeContext: true,
+    envVars: { RAFT_WAKE_RECYCLE: "1", RAFT_STARTUP_MEMORY_BLOCK: "1" },
+    runtimeContext: { workspacePath },
+  } as unknown as AgentConfig;
+  const plan = await planWakeSessionRecycle({ config, hasResumePrompt: false, homeDir: home, processEnv: {} });
+  assert.equal(plan.action, "recycle");
+  if (plan.action !== "recycle") return;
+  const memoryFirst = plan.briefing.startsWith("<memory-index");
+  const memoryAt = plan.briefing.indexOf("## MEMORY.md (your memory index");
+  const panelAt = plan.briefing.indexOf("<recent-actions");
+  assert.ok(memoryFirst && panelAt > memoryAt, `order broken: first=${memoryFirst} ${memoryAt}/${panelAt}`);
+  assert.match(plan.briefing, /Memory index marker/);
+
+  // Kill switch => briefing unchanged apart from the panel.
+  const offPlan = await planWakeSessionRecycle({
+    config: { ...config, envVars: { RAFT_WAKE_RECYCLE: "1", RAFT_STARTUP_MEMORY_BLOCK: "0" } } as unknown as AgentConfig,
+    hasResumePrompt: false,
+    homeDir: home,
+    processEnv: {},
+  });
+  assert.equal(offPlan.action, "recycle");
+  if (offPlan.action === "recycle") assert.doesNotMatch(offPlan.briefing, /<memory-index/);
 });

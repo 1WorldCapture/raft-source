@@ -215,6 +215,7 @@ export * from "./attachmentPreview.js";
 export * from "./typeGuards.js";
 export * from "./brandedIds.js";
 export * from "./startupMemoryContract.js";
+export * from "./agentBodyContinuation.js";
 export * from "./actionCards.js";
 export * from "./featureFlags.js";
 export * from "./externalProjection.js";
