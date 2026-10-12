@@ -87,6 +87,46 @@ if kill -0 "$victim" 2>/dev/null; then bad "victim process survived cleanup"; el
 drill::kill_pid_tree "definitely-not-a-running-pattern-xyz" >/dev/null 2>&1 \
   && ok "no-match cleanup is a no-op" || bad "no-match cleanup failed"
 
+echo "== clean-tree guard =="
+# PM asked specifically whether a dirty worktree can be clobbered. Prove both
+# the refusal and that the refusal is not bypassable by environment.
+FAKE_REPO="$TMP/repo"
+mkdir -p "$FAKE_REPO"
+git -C "$FAKE_REPO" init -q
+git -C "$FAKE_REPO" config user.email t@example.invalid
+git -C "$FAKE_REPO" config user.name t
+echo one > "$FAKE_REPO/file.txt"
+git -C "$FAKE_REPO" add -A
+git -C "$FAKE_REPO" commit -qm init
+
+( drill::require_clean_tree "$FAKE_REPO" ) >/dev/null 2>&1 \
+  && ok "clean tree is accepted" || bad "clean tree was rejected"
+
+echo two >> "$FAKE_REPO/file.txt"
+expect_fail "a dirty tree is refused" drill::require_clean_tree "$FAKE_REPO"
+
+# A previous revision honoured an env bypass here. There must not be one.
+if grep -q "RAFT_DRILL_REQUIRE_CLEAN_TREE" "$SELF_DIR/lib.sh"; then
+  bad "clean-tree guard is still bypassable via environment"
+else
+  ok "clean-tree guard has no environment bypass"
+fi
+
+echo "== ref restore after an interrupted drill =="
+BEFORE_REF="$(git -C "$FAKE_REPO" rev-parse HEAD)"
+git -C "$FAKE_REPO" checkout -q --detach HEAD 2>/dev/null || true
+DRILL_REF="$(git -C "$FAKE_REPO" rev-parse HEAD)"
+touch "$FAKE_REPO/file.txt"
+git -C "$FAKE_REPO" add -A
+git -C "$FAKE_REPO" commit -qm second
+MOVED_REF="$(git -C "$FAKE_REPO" rev-parse HEAD)"
+drill::restore_ref_trap "$FAKE_REPO" "$BEFORE_REF" >/dev/null 2>&1
+NOW="$(git -C "$FAKE_REPO" rev-parse HEAD)"
+[[ "$NOW" == "$BEFORE_REF" ]] && ok "restore_ref_trap puts the tree back" || bad "restore_ref_trap left the tree at ${NOW:0:12}, wanted ${BEFORE_REF:0:12}"
+# And it is a no-op when the tree is already where it should be.
+drill::restore_ref_trap "$FAKE_REPO" "$NOW" >/dev/null 2>&1 \
+  && ok "restore_ref_trap is a no-op when already correct" || bad "restore_ref_trap failed on a no-op"
+
 echo
 printf 'selftest: %d passed, %d failed\n' "$PASS" "$FAIL"
 [[ "$FAIL" -eq 0 ]] || exit 1

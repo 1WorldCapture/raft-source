@@ -11,8 +11,6 @@
 
 set -euo pipefail
 
-: "${RAFT_DRILL_REQUIRE_CLEAN_TREE:=1}"
-
 # Logs go to STDERR so that stdout carries only function return values. Mixing
 # the two silently corrupts every caller that does ORIGINAL_HEAD="$(drill::...)".
 drill::log() { printf '[drill] %s\n' "$*" >&2; }
@@ -29,15 +27,39 @@ drill::require_cmd() {
 # Working tree / rebuild
 # ---------------------------------------------------------------------------
 
+# Refuse to touch a tree that has uncommitted work. Deliberately NOT
+# switchable: a bypass here means "overwrite someone's in-progress work", which
+# is the one outcome a drill must never produce.
 drill::require_clean_tree() {
-  [[ "$RAFT_DRILL_REQUIRE_CLEAN_TREE" == "1" ]] || return 0
   local dirty
   dirty="$(git -C "$1" status --porcelain)"
   [[ -z "$dirty" ]] || drill::fail "working tree is dirty; refusing to switch refs (would lose work):
 $dirty"
 }
 
+# Restore the ref a drill moved the tree to, for paths the build itself cannot
+# cover: SIGINT (Ctrl-C), SIGTERM, or the process dying outright. Without this a
+# killed drill leaves the operator on a detached HEAD at someone else's commit.
+drill::restore_ref_trap() {
+  local repo="$1" original="$2"
+  [[ -n "$original" ]] || return 0
+  local current
+  current="$(git -C "$repo" rev-parse HEAD 2>/dev/null || echo "")"
+  [[ -n "$current" && "$current" == "$original" ]] && return 0
+  drill::warn "restoring ref to ${original:0:12} (tree was left at ${current:0:12})"
+  git -C "$repo" checkout --quiet "$original" 2>/dev/null \
+    || drill::fail "could not restore ref ${original:0:12} — the worktree is left at ${current:0:12}; recover it with: git -C $repo checkout $original"
+}
+
 # Rebuild shared + daemon + computer from an exact commit.
+#
+# Operates in the operator's own worktree rather than a throwaway git worktree.
+# That is a deliberate trade-off, documented in scripts/drill/README.md: a
+# separate worktree needs its own `pnpm install`, and symlinking the existing
+# node_modules makes pnpm resolve workspace packages through the ORIGINAL
+# tree's symlinks — so the "isolated" build would silently compile the
+# operator's checkout instead. Isolation here comes from refusing a dirty tree
+# and guaranteeing the ref is restored, not from a second checkout.
 #
 # The commit matters: a `dist/` whose package.json version matches the release
 # can still have been built from a different commit, and that mismatch once made

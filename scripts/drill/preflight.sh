@@ -34,9 +34,15 @@ drill::snapshot_launchagents "$LA_BEFORE"
 drill::log "LaunchAgents snapshot: $(wc -l < "$LA_BEFORE" | tr -d ' ') entr(ies)"
 
 # --- 2. rebuild at the exact commit -----------------------------------------
-ORIGINAL_HEAD="$(drill::rebuild_at_ref "$REPO" "$REF")"
+ORIGINAL_HEAD="$(git -C "$REPO" rev-parse HEAD)"
+# Guarantee the operator's ref comes back even if this script is interrupted:
+# a killed drill must not leave their worktree detached at the drill's commit.
+trap 'drill::restore_ref_trap "$REPO" "$ORIGINAL_HEAD"' EXIT INT TERM
+
+REBUILT_AT="$(drill::rebuild_at_ref "$REPO" "$REF")"
 TARGET_SHA="$(git -C "$REPO" rev-parse HEAD)"
-drill::log "rebuilt at ${TARGET_SHA:0:12} (original HEAD was ${ORIGINAL_HEAD:0:12})"
+drill::log "rebuilt at ${TARGET_SHA:0:12} (original HEAD was ${REBUILT_AT:0:12})"
+[[ "$REBUILT_AT" == "$ORIGINAL_HEAD" ]] || drill::log "note: drill moved the worktree from ${ORIGINAL_HEAD:0:12}; postflight restores it"
 
 # Rebuilding must not have introduced or removed an owner login item.
 drill::snapshot_launchagents "$LA_AFTER"
@@ -56,7 +62,7 @@ cat <<EOF
 [drill]   target commit : ${TARGET_SHA:0:12} ($TARGET_SHA)
 [drill]   daemon  dist  : $(drill::fingerprint "$REPO/packages/daemon/dist")
 [drill]   computer dist : $(drill::fingerprint "$REPO/packages/computer/dist")
-[drill]   restore ref   : ${ORIGINAL_HEAD:0:12}
+[drill]   restore ref   : ${REBUILT_AT:0:12}
 [drill]   launchagents  : $LA_BEFORE
 EOF
-printf '%s\n' "$ORIGINAL_HEAD" > "$WORK/restore-ref.txt"
+printf '%s\n' "$REBUILT_AT" > "$WORK/restore-ref.txt"
