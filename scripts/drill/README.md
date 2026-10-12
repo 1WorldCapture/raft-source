@@ -114,17 +114,21 @@ click, the app/service log tails, and the exact command output a verdict rests
 on. Sanity-check it before deleting: **is every claim I am about to make still
 backed by a file that exists?**
 
-### Deleting the disposable server does NOT delete its `computers` row
+### Deleting the disposable server leaves its `computers` row behind
 
-Confirmed on 8443 (2026-10-12): after `DELETE /api/servers/<id>` returns
-`{"ok":true}` and `/api/servers` lists nothing, the machine's **attach row in
-`computers` survives**. One drill root was left behind on 8443 this way, and the
-machine had accumulated 26 historical rows from earlier drills.
+Observed on 8443 (2026-10-12): after `DELETE /api/servers/<id>` returns
+`{"ok":true}` and `/api/servers` lists nothing, the machine's attach row in
+`computers` survives. One drill root was left behind this way, and the machine
+had accumulated 26 historical rows from earlier drills.
 
-So `POST /api/servers` in the setup needs a matching **explicit row cleanup** in
-teardown — otherwise every drill permanently adds a machine row. Verify it, do
-not assume the cascade: re-query and confirm the row is gone, and say so in the
-report if it cannot be removed.
+**This may well be by design** — machines belong to the user, not to a server —
+so treat it as a fact to plan around rather than a defect to file. PM's read was
+exactly that.
+
+Either way the consequence for a drill is the same: `POST /api/servers` in the
+setup needs a matching **explicit row cleanup** in teardown, or every drill
+permanently adds a machine row. Verify it rather than assuming a cascade —
+re-query afterwards, and say so in the report if a row cannot be removed.
 
 ### Traces do not upload from an isolated root
 
