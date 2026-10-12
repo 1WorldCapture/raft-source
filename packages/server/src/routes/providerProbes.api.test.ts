@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import {
   PROVIDER_PROBE_BUDGET_MS,
+  PROVIDER_PROBE_CAPABILITY,
   PROVIDER_PROBE_MATERIALIZE_LEASE_MS,
   PROVIDER_CONNECTIONS_FEATURE_FLAG_KEY,
   asProviderProbeId,
@@ -49,7 +50,7 @@ const test = createApiTest({ humanActivityMuteFlagDefaultEnabled: true, onboardi
 
 const AUTHORITY = { connectionEpochId: "epoch-probe-1", replicaGeneration: "gen-probe-1" };
 const FACT: ProbeCarrierFact = {
-  capabilities: ["provider-probe:v1"],
+  capabilities: [PROVIDER_PROBE_CAPABILITY],
   connectionEpochId: AUTHORITY.connectionEpochId,
   replicaGeneration: AUTHORITY.replicaGeneration,
   daemonVersion: "daemon-1",
@@ -1059,6 +1060,51 @@ test("the shadow-UI receipt list exposes durable coordinates without reply bodie
       headers: headers(memberToken, server.id),
     });
     assert.equal(forbidden.status, 403);
+  } finally {
+    __setProviderProbeCarrierForTests(null);
+    await app.close();
+    if (originalKey === undefined) delete process.env.SLOCK_PROVIDER_CREDENTIAL_KEY;
+    else process.env.SLOCK_PROVIDER_CREDENTIAL_KEY = originalKey;
+  }
+});
+
+test("a carrier advertising PROVIDER_PROBE_CAPABILITY is not closed as unsupported_carrier", async () => {
+  const originalKey = process.env.SLOCK_PROVIDER_CREDENTIAL_KEY;
+  process.env.SLOCK_PROVIDER_CREDENTIAL_KEY = Buffer.alloc(32, 15).toString("base64");
+  const app = await openTestApp("pglite://", 0, { humanActivityMuteFlagDefaultEnabled: true, onboardingOpenerFlagDefaultEnabled: false });
+  try {
+    const owner = await seedUser("probe-cap-owner@raft.test", "probe-cap-owner");
+    const server = await createServer("Probe Capability", "probe-capability", owner.id);
+    const ownerToken = await login(app.baseUrl, owner.email);
+    await enableFlags(server.id);
+    const createdConnection = await fetch(`${app.baseUrl}/api/provider-connections`, {
+      method: "POST",
+      headers: headers(ownerToken, server.id),
+      body: JSON.stringify({ name: "Capable DeepSeek", providerId: "deepseek", apiKey: "capable-secret-value" }),
+    });
+    assert.equal(createdConnection.status, 201);
+    const connection = (await createdConnection.json()) as { id: string };
+    const [machine] = await getDb().insert(machines).values({
+      serverId: server.id, userId: owner.id, name: "capable-machine", apiKeyHash: "h-cap", runtimes: ["builtin"],
+    }).returning();
+    const state: FakeCarrierState = {
+      fact: { ...FACT, capabilities: [PROVIDER_PROBE_CAPABILITY] },
+      dispatches: [],
+      outcome: { kind: "claim_then_success" },
+    };
+    __setProviderProbeCarrierForTests(fakeCarrier(server.id, state));
+    const created = await fetch(`${app.baseUrl}/api/provider-connections/${connection.id}/probes`, {
+      method: "POST",
+      headers: headers(ownerToken, server.id),
+      body: JSON.stringify(await createBody(connection.id, machine!.id)),
+    });
+    assert.equal(created.status, 201);
+    const view = (await created.json()) as { probe: { outcome: string; category: string | null } };
+    assert.notEqual(view.probe.category, "unsupported_carrier");
+    assert.equal(view.probe.outcome, "success");
+    assert.equal(view.probe.category, null);
+    assert.equal(state.dispatches.length, 1);
+    assert.equal(JSON.stringify(view).includes("capable-secret-value"), false);
   } finally {
     __setProviderProbeCarrierForTests(null);
     await app.close();

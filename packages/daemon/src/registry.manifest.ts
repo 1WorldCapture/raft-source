@@ -2,10 +2,11 @@ import type {
   AgentAppInboxRegistry,
   AgentAppInboxStore,
 } from "./agentAppInbox.js";
-import type {
-  AgentInboxAppItem,
-  MachineToServerMessage,
-  ServerToMachineMessage,
+import {
+  PROVIDER_PROBE_CAPABILITY,
+  type AgentInboxAppItem,
+  type MachineToServerMessage,
+  type ServerToMachineMessage,
 } from "@botiverse/raft-shared";
 import { CLEANER_CONFIG_BOUNDS } from "@botiverse/raft-shared/src/apps/cleaner/configProtocol.js";
 import { REMINDER_FIRE_REQUEST_CAPABILITY } from "@botiverse/raft-shared/src/apps/reminder/protocol.js";
@@ -24,6 +25,7 @@ import type { ScopedAppStorageFactory } from "./scopedAppStorage.js";
 
 export const BUILT_IN_READY_CAPABILITIES = [
   REMINDER_FIRE_REQUEST_CAPABILITY,
+  PROVIDER_PROBE_CAPABILITY,
 ] as const;
 
 export interface BuiltInLocalAppRuntimeOptions {
