@@ -2,6 +2,11 @@
 @import "raft-ui/styles.css";
 @import "./components/markdown/mermaid/mermaid.css";
 
+/* Tailwind utilities scoped to the app's Brutal theme root: `theme-brutal:<class>`
+   keeps the original Brutal look while the unprefixed class paints every other
+   theme from raft-ui's semantic tokens (see scripts/theme-sweep-codemod.mjs). */
+@custom-variant theme-brutal (&:where([data-theme="brutal"], [data-theme="brutal"] *));
+
 /* Responsive high-frequency actions use the width of their owning surface,
    not a viewport breakpoint. This keeps split panes and narrow desktop
    drawers readable while preserving the same affordance on phones. */
