@@ -32,7 +32,7 @@ export function Tag({
   className: string;
 }) {
   return (
-    <span className={`inline-flex items-center gap-1 border-[1.5px] border-black px-1.5 py-0.5 text-[11px] font-bold leading-none ${className}`}>
+    <span className={`inline-flex items-center gap-1 border-[1.5px] border-line-strong theme-brutal:border-black px-1.5 py-0.5 text-[11px] font-bold leading-none ${className}`}>
       {children}
     </span>
   );
@@ -88,43 +88,43 @@ export default function QuotedMessageCard({
       <div className="px-2.5 py-2 sm:px-3 sm:py-2.5">
         <div className="mb-1 flex items-start gap-2 sm:mb-1.5">
           <div className="min-w-0 flex flex-1 flex-wrap items-center gap-x-1.5 gap-y-1 text-xs leading-none">
-            <span className="inline-flex items-center gap-1 font-bold text-black/70">
+            <span className="inline-flex items-center gap-1 font-bold text-foreground-muted theme-brutal:text-black/70">
               {channelKind === "dm" ? null : <Hash size={11} className="shrink-0" />}
               {channelKind === "dm" ? `@${channelName}` : channelName}
             </span>
-            <span className="text-black/30">·</span>
+            <span className="text-foreground-placeholder theme-brutal:text-black/30">·</span>
             <span className="inline-flex min-w-0 items-center gap-1.5">
               <CompactUserAvatar author={author} />
-              <span className="truncate font-bold text-black/70">{author.name}</span>
+              <span className="truncate font-bold text-foreground-muted theme-brutal:text-black/70">{author.name}</span>
               {author.subtitle ? (
-                <span className="truncate font-mono text-[10px] text-black/40">{author.subtitle}</span>
+                <span className="truncate font-mono text-[10px] text-foreground-hint theme-brutal:text-black/40">{author.subtitle}</span>
               ) : null}
             </span>
             {isThread ? (
               <>
-                <span className="text-black/30">·</span>
+                <span className="text-foreground-placeholder theme-brutal:text-black/30">·</span>
                 <ThreadMarker />
               </>
             ) : null}
             {isArchived ? (
               <>
-                <span className="text-black/30">·</span>
-                <Tag className="bg-brutal-orange/30 text-black">
+                <span className="text-foreground-placeholder theme-brutal:text-black/30">·</span>
+                <Tag className="bg-warning-soft/30 theme-brutal:bg-brutal-orange/30 text-foreground-strong theme-brutal:text-black">
                   {intl.formatMessage({ id: "ui.quotedMessage.archived" })}
                 </Tag>
               </>
             ) : null}
           </div>
-          <span className="shrink-0 font-mono text-[10px] text-black/40">{timestamp}</span>
+          <span className="shrink-0 font-mono text-[10px] text-foreground-hint theme-brutal:text-black/40">{timestamp}</span>
         </div>
         <div className="min-w-0">
-          <div className="line-clamp-2 text-xs leading-snug text-black sm:text-[13px]">
+          <div className="line-clamp-2 text-xs leading-snug text-foreground-strong theme-brutal:text-black sm:text-[13px]">
             <InlineMarkdownPreview markdown={content} />
           </div>
           {attachments?.length ? (
             <div className="mt-2 flex flex-wrap gap-1.5">
               {attachments.map((attachment) => (
-                <Tag key={attachment.label} className="bg-brutal-lavender font-mono text-[10px] font-bold text-black">
+                <Tag key={attachment.label} className="bg-secondary-200 theme-brutal:bg-brutal-lavender font-mono text-[10px] font-bold text-foreground-strong theme-brutal:text-black">
                   {attachment.label}
                 </Tag>
               ))}

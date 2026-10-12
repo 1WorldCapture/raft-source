@@ -204,13 +204,13 @@ test("mounted MachineDetail selection rows expose live yellow markers and clear/
   assert.match(marker.className, /bg-white text-transparent/);
 
   fireEvent.click(offline);
-  assert.match(marker.className, /bg-soft-signal text-black/);
+  assert.match(marker.className, /bg-primary-soft theme-brutal:bg-soft-signal text-foreground-strong theme-brutal:text-black/);
   assert.equal(screen.getByText("1 selected").textContent, "1 selected");
   assert.ok(screen.getByRole("button", { name: "Deselect Offline Agent" }));
 
   fireEvent.click(screen.getByRole("button", { name: en["machine.detail.selectAll"] }));
   assert.equal(screen.getByText("2 selected").textContent, "2 selected");
-  assert.equal(view.container.querySelectorAll(".check-marker-brutal.bg-soft-signal").length, 2);
+  assert.equal(view.container.querySelectorAll(".check-marker-brutal.theme-brutal\\:bg-soft-signal").length, 2);
 
   fireEvent.click(screen.getByRole("button", { name: en["machine.detail.clearAll"] }));
   assert.equal(screen.queryByText("2 selected"), null);

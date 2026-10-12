@@ -59,10 +59,10 @@ export type BannerIntent = "destructive" | "warning" | "info" | "success";
 export type BannerDensity = "sm" | "md" | "lg";
 
 const INTENT_SURFACE: Record<BannerIntent, string> = {
-  destructive: "bg-brutal-red/20",
-  warning: "bg-brutal-orange/20",
-  info: "bg-soft-signal/30",
-  success: "bg-brutal-lime/20",
+  destructive: "bg-danger-soft/20 theme-brutal:bg-brutal-red/20",
+  warning: "bg-warning-soft/20 theme-brutal:bg-brutal-orange/20",
+  info: "bg-primary-soft/30 theme-brutal:bg-soft-signal/30",
+  success: "bg-success-soft/20 theme-brutal:bg-brutal-lime/20",
 };
 
 // Default icon per intent. NOT auto-rendered — the dominant
@@ -72,16 +72,16 @@ const INTENT_SURFACE: Record<BannerIntent, string> = {
 // ReactNode via `icon`. The map exists so `withIcon` has a
 // predictable lookup.
 const INTENT_DEFAULT_ICON: Record<BannerIntent, ReactNode> = {
-  destructive: <AlertTriangle size={18} className="shrink-0 mt-0.5 text-black" />,
-  warning: <CircleAlert size={18} className="shrink-0 mt-0.5 text-black" />,
-  info: <Info size={18} className="shrink-0 mt-0.5 text-black" />,
-  success: <CheckCircle2 size={18} className="shrink-0 mt-0.5 text-black" />,
+  destructive: <AlertTriangle size={18} className="shrink-0 mt-0.5 text-foreground-strong theme-brutal:text-black" />,
+  warning: <CircleAlert size={18} className="shrink-0 mt-0.5 text-foreground-strong theme-brutal:text-black" />,
+  info: <Info size={18} className="shrink-0 mt-0.5 text-foreground-strong theme-brutal:text-black" />,
+  success: <CheckCircle2 size={18} className="shrink-0 mt-0.5 text-foreground-strong theme-brutal:text-black" />,
 };
 
 const DENSITY_PADDING: Record<BannerDensity, string> = {
   sm: "p-2",
   md: "p-3",
-  lg: "p-4 shadow-brutal-sm",
+  lg: "p-4 shadow-raft-xs theme-brutal:shadow-brutal-sm",
 };
 
 const DENSITY_TEXT: Record<BannerDensity, string> = {
@@ -136,10 +136,10 @@ export default function Banner({
   return (
     <div
       {...rest}
-      className={`flex items-start ${DENSITY_GAP[density]} border-2 border-black ${INTENT_SURFACE[intent]} ${DENSITY_PADDING[density]} ${className}`}
+      className={`flex items-start ${DENSITY_GAP[density]} border theme-brutal:border-2 border-line-strong theme-brutal:border-black ${INTENT_SURFACE[intent]} ${DENSITY_PADDING[density]} ${className}`}
     >
       {resolvedIcon}
-      <div className={`min-w-0 flex-1 ${DENSITY_TEXT[density]} text-black`}>
+      <div className={`min-w-0 flex-1 ${DENSITY_TEXT[density]} text-foreground-strong theme-brutal:text-black`}>
         {title && <div className="font-bold mb-0.5">{title}</div>}
         {children}
       </div>

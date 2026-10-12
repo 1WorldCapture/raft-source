@@ -1,6 +1,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
-import { renderToStaticMarkup } from "react-dom/server";
+import { renderToStaticMarkup as renderToStaticMarkupRaw } from "react-dom/server";
+import { brutalView } from "./helpers/brutalView";
+const renderToStaticMarkup = (element: Parameters<typeof renderToStaticMarkupRaw>[0]) => brutalView(renderToStaticMarkupRaw(element));
 import { createElement } from "react";
 import Skeleton, { SkeletonRow, ConversationCardSkeleton } from "../src/components/ui/Skeleton";
 

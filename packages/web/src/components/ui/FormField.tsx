@@ -44,8 +44,8 @@ import type { LabelHTMLAttributes, ReactNode } from "react";
 import { IntlContext } from "react-intl";
 import { en } from "../../i18n/messages/en";
 
-const LABEL_BASE_DEFAULT = "text-sm font-bold text-black";
-const LABEL_BASE_COMPACT = "text-xs font-bold text-black/60";
+const LABEL_BASE_DEFAULT = "text-sm font-bold text-foreground-strong theme-brutal:text-black";
+const LABEL_BASE_COMPACT = "text-xs font-bold text-foreground-muted theme-brutal:text-black/60";
 const LABEL_UPPERCASE = "uppercase tracking-wide";
 
 export type FormFieldProps = {
@@ -107,7 +107,7 @@ export default function FormField({
       {label}
       {required ? <span className="ml-1 text-brutal-pink">*</span> : null}
       {optional ? (
-        <span className="ml-1 font-normal text-black/40 normal-case">{optionalLabel}</span>
+        <span className="ml-1 font-normal text-foreground-hint theme-brutal:text-black/40 normal-case">{optionalLabel}</span>
       ) : null}
     </label>
   );
@@ -123,7 +123,7 @@ export default function FormField({
       {error ? (
         <p className="mt-1 text-xs font-bold text-brutal-red" role="alert">{error}</p>
       ) : hint ? (
-        <p className="mt-1 text-xs text-black/50">{hint}</p>
+        <p className="mt-1 text-xs text-foreground-muted theme-brutal:text-black/50">{hint}</p>
       ) : null}
     </div>
   );

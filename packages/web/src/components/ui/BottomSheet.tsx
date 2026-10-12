@@ -81,7 +81,7 @@ export default function BottomSheet({
       }
     >
       <div
-        className={`mx-auto border-2 border-black bg-white shadow-brutal-lg ${widthClass} ${sheetClassName}`}
+        className={`mx-auto border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white shadow-raft-md theme-brutal:shadow-brutal-lg ${widthClass} ${sheetClassName}`}
         onClick={(event) => event.stopPropagation()}
       >
         {children}

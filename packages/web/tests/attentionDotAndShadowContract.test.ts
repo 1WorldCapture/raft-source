@@ -25,10 +25,10 @@ test("AttentionDot primitive exposes lg/sm physical-fit axis + brutal-pink defau
   // it should land on the canonical 10×10, not the compact tier.
   assert.match(src, /size = "lg"/);
   // brutal-pink stays the canonical default tone — overrides are explicit.
-  assert.match(src, /tone = "bg-brutal-pink"/);
+  assert.match(src, /tone = "bg-accent-soft theme-brutal:bg-brutal-pink"/);
   // Border is what makes the dot read as an attention chip vs decorative
   // pixel. Required at every tier.
-  assert.match(src, /border border-black/);
+  assert.match(src, /border border-line-strong theme-brutal:border-black/);
   // rounded-full guarantees the dot shape across tiers.
   assert.match(src, /rounded-full/);
 });

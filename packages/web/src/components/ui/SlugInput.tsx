@@ -17,11 +17,11 @@ export function PrefixedInput({
 }: PrefixedInputProps) {
   return (
     <div
-      className={`input-brutal flex w-full items-stretch overflow-hidden px-0 py-0 focus-within:shadow-brutal ${className}`.trim()}
+      className={`input-brutal flex w-full items-stretch overflow-hidden px-0 py-0 focus-within:shadow-raft-sm theme-brutal:focus-within:shadow-brutal ${className}`.trim()}
     >
       <span
         aria-hidden="true"
-        className="flex shrink-0 items-center border-r-2 border-black bg-soft-signal/30 px-3 font-display font-bold text-black/70"
+        className="flex shrink-0 items-center border-r theme-brutal:border-r-2 border-line-strong theme-brutal:border-black bg-primary-soft/30 theme-brutal:bg-soft-signal/30 px-3 font-display font-bold text-foreground-muted theme-brutal:text-black/70"
       >
         {prefix}
       </span>

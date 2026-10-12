@@ -17,7 +17,7 @@ test("StatusDot external prop forces bg-brutal-cyan regardless of activity", () 
   const external = render(<StatusDot activity="online" external />);
   assert.match(
     external.container.firstElementChild?.className ?? "",
-    /(^|\s)bg-brutal-cyan(\s|$)/,
+    /(^|\s)theme-brutal:bg-brutal-cyan(\s|$)/,
     "external=true must produce bg-brutal-cyan, ignoring activity",
   );
   assert.doesNotMatch(
@@ -67,7 +67,7 @@ test("AgentActivityDot passes external agent identity through to StatusDot", () 
   );
   assert.match(
     external.container.firstElementChild?.className ?? "",
-    /(^|\s)bg-brutal-cyan(\s|$)/,
+    /(^|\s)theme-brutal:bg-brutal-cyan(\s|$)/,
     "external agents must render the neutral cyan status dot",
   );
   cleanup();

@@ -81,7 +81,7 @@ function Section({ title, eyebrow, children }: { title: string; eyebrow?: string
     <section className="mb-12">
       <header className="mb-4">
         {eyebrow && (
-          <div className="text-xs font-bold uppercase text-black/60 tracking-widest mb-1">{eyebrow}</div>
+          <div className="text-xs font-bold uppercase text-foreground-muted theme-brutal:text-black/60 tracking-widest mb-1">{eyebrow}</div>
         )}
         <h2 className="text-2xl font-bold font-display">{title}</h2>
       </header>
@@ -93,7 +93,7 @@ function Section({ title, eyebrow, children }: { title: string; eyebrow?: string
 function Sample({ source, children }: { source: string; children: ReactNode }) {
   return (
     <div className="flex items-start gap-3 py-1">
-      <InlineCode className="w-72 shrink-0 text-[11px] leading-snug text-black/45">{source}</InlineCode>
+      <InlineCode className="w-72 shrink-0 text-[11px] leading-snug text-foreground-hint theme-brutal:text-black/45">{source}</InlineCode>
       <div className="flex items-center gap-3 flex-wrap min-h-[2rem]">{children}</div>
     </div>
   );
@@ -102,12 +102,12 @@ function Sample({ source, children }: { source: string; children: ReactNode }) {
 function ColorRow({ color }: { color: typeof COLORS[number] }) {
   const { formatMessage } = useIntl();
   return (
-    <div className="border-2 border-black bg-white p-5 shadow-brutal">
+    <div className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white p-5 shadow-raft-sm theme-brutal:shadow-brutal">
       {/* Token header */}
       <div className="flex items-baseline gap-3 mb-4 flex-wrap">
         <h3 className="text-xl font-bold font-display">{color.name}</h3>
-        <InlineCode className="text-sm text-black/60">{color.hex}</InlineCode>
-        <span className="text-xs text-black/50 italic">{color.note}</span>
+        <InlineCode className="text-sm text-foreground-muted theme-brutal:text-black/60">{color.hex}</InlineCode>
+        <span className="text-xs text-foreground-muted theme-brutal:text-black/50 italic">{color.note}</span>
       </div>
 
       {/* Solid + tints scale.
@@ -116,10 +116,10 @@ function ColorRow({ color }: { color: typeof COLORS[number] }) {
           color-mix on the @theme variable instead, which gives us the
           identical opacity-blend behavior for any token + tint level. */}
       <div className="mb-5">
-        <div className="text-xs font-bold uppercase text-black/60 tracking-widest mb-2">{formatMessage({ id: "pages.paletteAudit.solidTints" })}</div>
+        <div className="text-xs font-bold uppercase text-foreground-muted theme-brutal:text-black/60 tracking-widest mb-2">{formatMessage({ id: "pages.paletteAudit.solidTints" })}</div>
         <div className="flex items-center gap-1">
           <div
-            className="w-16 h-16 border-2 border-black flex items-center justify-center text-[10px] font-mono text-black/60"
+            className="w-16 h-16 border theme-brutal:border-2 border-line-strong theme-brutal:border-black flex items-center justify-center text-[10px] font-mono text-foreground-muted theme-brutal:text-black/60"
             title="100%"
             style={{ backgroundColor: `var(--color-${color.name})` }}
           >
@@ -128,7 +128,7 @@ function ColorRow({ color }: { color: typeof COLORS[number] }) {
           {TINTS.map((t) => (
             <div
               key={t}
-              className="w-16 h-16 border-2 border-black flex items-center justify-center text-[10px] font-mono text-black/60"
+              className="w-16 h-16 border theme-brutal:border-2 border-line-strong theme-brutal:border-black flex items-center justify-center text-[10px] font-mono text-foreground-muted theme-brutal:text-black/60"
               title={`${t}%`}
               style={{ backgroundColor: `color-mix(in srgb, var(--color-${color.name}) ${t}%, transparent)` }}
             >
@@ -140,7 +140,7 @@ function ColorRow({ color }: { color: typeof COLORS[number] }) {
 
       {/* Real-component samples */}
       <div>
-        <div className="text-xs font-bold uppercase text-black/60 tracking-widest mb-2">{formatMessage({ id: "pages.paletteAudit.realComponentsPrefix" })} {color.name}</div>
+        <div className="text-xs font-bold uppercase text-foreground-muted theme-brutal:text-black/60 tracking-widest mb-2">{formatMessage({ id: "pages.paletteAudit.realComponentsPrefix" })} {color.name}</div>
         <div className="space-y-1">{realComponentsFor(color.name, formatMessage)}</div>
       </div>
     </div>
@@ -157,23 +157,23 @@ function realComponentsFor(
         <>
           {/* from LeftRail.tsx:88 — full rail strip wrapper */}
           <Sample source="LeftRail.tsx:88 — rail strip">
-            <div className="hidden md:flex h-32 w-[64px] shrink-0 flex-col items-center border-2 border-black bg-soft-signal gap-1.5 py-2">
+            <div className="hidden md:flex h-32 w-[64px] shrink-0 flex-col items-center border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-primary-soft theme-brutal:bg-soft-signal gap-1.5 py-2">
               <button
                 type="button"
-                className="relative inline-flex size-10 items-center justify-center border-2 border-black bg-black font-display text-base font-bold text-soft-signal shadow-brutal-sm"
+                className="relative inline-flex size-10 items-center justify-center border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-foreground-strong theme-brutal:bg-black font-display text-base font-bold text-soft-signal shadow-raft-xs theme-brutal:shadow-brutal-sm"
               >
                 S
               </button>
               <button
                 type="button"
                 aria-pressed="true"
-                className="inline-flex size-10 items-center justify-center border-2 border-black bg-white shadow-brutal-sm"
+                className="inline-flex size-10 items-center justify-center border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white shadow-raft-xs theme-brutal:shadow-brutal-sm"
               >
                 <MessageSquare size={18} />
               </button>
               <button
                 type="button"
-                className="inline-flex size-10 items-center justify-center border-2 border-transparent hover:border-black hover:bg-white"
+                className="inline-flex size-10 items-center justify-center border theme-brutal:border-2 border-transparent hover:border-line-strong theme-brutal:hover:border-black hover:bg-layer-panel theme-brutal:hover:bg-white"
               >
                 <CheckSquare size={18} />
               </button>
@@ -182,7 +182,7 @@ function realComponentsFor(
 
           {/* from ChatPanel.tsx:558-ish — channel hash icon container */}
           <Sample source="ChatPanel.tsx panel header channel icon">
-            <div className="flex size-9 shrink-0 items-center justify-center border-2 border-black bg-soft-signal text-black">
+            <div className="flex size-9 shrink-0 items-center justify-center border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-primary-soft theme-brutal:bg-soft-signal text-foreground-strong theme-brutal:text-black">
               <Hash size={18} />
             </div>
           </Sample>
@@ -191,7 +191,7 @@ function realComponentsFor(
           <Sample source="MessageItem.tsx:340 — task #N inline ref">
             <a
               href="#"
-              className="bg-soft-signal/40 px-1 text-sm font-bold text-black border border-black hover:bg-soft-signal"
+              className="bg-primary-soft/40 theme-brutal:bg-soft-signal/40 px-1 text-sm font-bold text-foreground-strong theme-brutal:text-black border border-line-strong theme-brutal:border-black hover:bg-primary-soft theme-brutal:hover:bg-soft-signal"
             >
               task #92
             </a>
@@ -199,7 +199,7 @@ function realComponentsFor(
 
           {/* from MessageItem.tsx:328 — invalid task ref placeholder */}
           <Sample source="MessageItem.tsx:328 — invalid task ref">
-            <span className="bg-soft-signal/30 px-1 text-sm font-bold text-black border border-black opacity-60">
+            <span className="bg-primary-soft/30 theme-brutal:bg-soft-signal/30 px-1 text-sm font-bold text-foreground-strong theme-brutal:text-black border border-line-strong theme-brutal:border-black opacity-60">
               task #abc
             </span>
           </Sample>
@@ -208,18 +208,18 @@ function realComponentsFor(
           <Sample source="MessageItem.tsx:374 — slock permalink (current server)">
             <a
               href="#"
-              className="inline-flex items-center gap-1 border border-black px-1.5 py-0.5 text-sm font-bold bg-soft-signal/40 text-black hover:bg-soft-signal"
+              className="inline-flex items-center gap-1 border border-line-strong theme-brutal:border-black px-1.5 py-0.5 text-sm font-bold bg-primary-soft/40 theme-brutal:bg-soft-signal/40 text-foreground-strong theme-brutal:text-black hover:bg-primary-soft theme-brutal:hover:bg-soft-signal"
             >
               <LinkIcon size={12} />
               <span>#general</span>
-              <span className="font-mono text-[10px] text-black/50">msg</span>
+              <span className="font-mono text-[10px] text-foreground-muted theme-brutal:text-black/50">msg</span>
             </a>
           </Sample>
 
           {/* from LeftRail.tsx:130 — server menu hover (normal) */}
           <Sample source="LeftRail.tsx:130 — menu hover (normal)">
             <div className="card-brutal overflow-hidden w-56">
-              <button className="flex w-full items-center gap-2 px-3 py-2 text-sm font-medium text-black hover:bg-soft-signal transition-colors">
+              <button className="flex w-full items-center gap-2 px-3 py-2 text-sm font-medium text-foreground-strong theme-brutal:text-black hover:bg-primary-soft theme-brutal:hover:bg-soft-signal transition-colors">
                 <Check size={14} className="opacity-100" />
                 <span>Hover Me</span>
               </button>
@@ -229,8 +229,8 @@ function realComponentsFor(
           {/* from getActivityDotClass — thinking/working dot is FIXED status
               yellow + animate-pulse (status lights never re-skin) */}
           <Sample source="utils/activity.ts:11 — thinking/working dot">
-            <span className="size-2.5 rounded-full border border-black bg-status-busy animate-pulse" />
-            <span className="text-sm text-black/60 font-mono">thinking…</span>
+            <span className="size-2.5 rounded-full border border-line-strong theme-brutal:border-black bg-status-busy animate-pulse" />
+            <span className="text-sm text-foreground-muted theme-brutal:text-black/60 font-mono">thinking…</span>
           </Sample>
         </>
       );
@@ -240,7 +240,7 @@ function realComponentsFor(
         <>
           {/* from Sidebar.tsx:561 — selected sidebar item */}
           <Sample source="Sidebar.tsx:561 — selected channel item">
-            <div className="inline-flex items-center gap-2 border-2 border-black bg-brutal-pink text-black shadow-brutal-sm font-bold px-2 py-1 text-sm">
+            <div className="inline-flex items-center gap-2 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-accent-soft theme-brutal:bg-brutal-pink text-foreground-strong theme-brutal:text-black shadow-raft-xs theme-brutal:shadow-brutal-sm font-bold px-2 py-1 text-sm">
               <Hash size={14} />
               <span>general</span>
             </div>
@@ -248,19 +248,19 @@ function realComponentsFor(
 
           {/* from Sidebar.tsx:703 — unread count badge (sidebar inline) */}
           <Sample source="Sidebar.tsx:703 / ThreadsInbox.tsx:136 — unread count badge">
-            <span className="rounded bg-brutal-pink px-1.5 py-0.5 text-[10px] font-bold leading-none text-white border border-black">
+            <span className="rounded bg-accent-soft theme-brutal:bg-brutal-pink px-1.5 py-0.5 text-[10px] font-bold leading-none text-white border border-line-strong theme-brutal:border-black">
               99+
             </span>
           </Sample>
 
           {/* from LeftRail.tsx:107 — small notification dot on server initial */}
           <Sample source="LeftRail.tsx:107 — server-switcher unread dot">
-            <span className="size-2.5 rounded-full border border-black bg-brutal-pink" />
+            <span className="size-2.5 rounded-full border border-line-strong theme-brutal:border-black bg-accent-soft theme-brutal:bg-brutal-pink" />
           </Sample>
 
           {/* from AnnouncementModal.tsx:181 — primary CTA */}
           <Sample source="AnnouncementModal.tsx:181 — primary CTA">
-            <button className="btn-brutal bg-brutal-pink px-4 py-2 text-sm font-bold inline-flex items-center gap-1">
+            <button className="btn-brutal bg-accent-soft theme-brutal:bg-brutal-pink px-4 py-2 text-sm font-bold inline-flex items-center gap-1">
               <Plus size={14} />
               Add Machine
             </button>
@@ -268,7 +268,7 @@ function realComponentsFor(
 
           {/* Small pink action button token sample */}
           <Sample source="small CTA token sample">
-            <button className="btn-brutal-sm flex h-7 shrink-0 items-center gap-1 whitespace-nowrap bg-brutal-pink px-2 text-xs font-bold">
+            <button className="btn-brutal-sm flex h-7 shrink-0 items-center gap-1 whitespace-nowrap bg-accent-soft theme-brutal:bg-brutal-pink px-2 text-xs font-bold">
               <Plus size={12} />
               New Task
             </button>
@@ -278,7 +278,7 @@ function realComponentsFor(
           <Sample source="MessageItem.tsx:316 — #channel inline ref">
             <a
               href="#"
-              className="bg-brutal-pink/30 px-1 text-sm font-bold text-black border border-black hover:bg-brutal-pink/60"
+              className="bg-accent-soft/30 theme-brutal:bg-brutal-pink/30 px-1 text-sm font-bold text-foreground-strong theme-brutal:text-black border border-line-strong theme-brutal:border-black hover:bg-accent-soft/60 theme-brutal:hover:bg-brutal-pink/60"
             >
               #engineering
             </a>
@@ -287,7 +287,7 @@ function realComponentsFor(
           {/* from ServerSwitcherMenu.tsx — destructive menu item is PINK, not red */}
           <Sample source="ServerSwitcherMenu.tsx — destructive menu item (pink)">
             <div className="card-brutal overflow-hidden w-56">
-              <button className="flex w-full items-center gap-2 px-3 py-2 text-sm font-bold text-black hover:bg-brutal-pink transition-colors">
+              <button className="flex w-full items-center gap-2 px-3 py-2 text-sm font-bold text-foreground-strong theme-brutal:text-black hover:bg-accent-soft theme-brutal:hover:bg-brutal-pink transition-colors">
                 <Plus size={14} />
                 Switch or Create Server
               </button>
@@ -313,14 +313,14 @@ function realComponentsFor(
 
           {/* from AgentDetailPanel.tsx:995 — runtime label badge */}
           <Sample source="AgentDetailPanel.tsx:995 — runtime label badge">
-            <span className="inline-block border-2 border-black bg-brutal-cyan px-2 py-0.5 text-xs font-bold text-black">
+            <span className="inline-block border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-info-soft theme-brutal:bg-brutal-cyan px-2 py-0.5 text-xs font-bold text-foreground-strong theme-brutal:text-black">
               {formatMessage({ id: "brand.claudeCode" })}
             </span>
           </Sample>
 
           {/* from MessageItem.tsx:981 — pinned/quoted message frame */}
           <Sample source="MessageItem.tsx:981 — pinned/quoted block">
-            <div className="border-2 border-black bg-brutal-cyan/25 shadow-brutal mb-1 px-3 py-2 text-sm">
+            <div className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-info-soft/25 theme-brutal:bg-brutal-cyan/25 shadow-raft-sm theme-brutal:shadow-brutal mb-1 px-3 py-2 text-sm">
               {formatMessage({ id: "pages.paletteAudit.sampleQuotedMessageContents" })}
             </div>
           </Sample>
@@ -329,7 +329,7 @@ function realComponentsFor(
           <Sample source="MessageItem.tsx:290 — thread ref inline">
             <a
               href="#"
-              className="bg-brutal-cyan/30 px-1 text-sm font-bold text-black border border-black hover:bg-brutal-cyan/60"
+              className="bg-info-soft/30 theme-brutal:bg-brutal-cyan/30 px-1 text-sm font-bold text-foreground-strong theme-brutal:text-black border border-line-strong theme-brutal:border-black hover:bg-info-soft/60 theme-brutal:hover:bg-brutal-cyan/60"
             >
               #proj-uiux:0e6befb8
             </a>
@@ -344,13 +344,13 @@ function realComponentsFor(
               NOTE: thinking/working dots are YELLOW (animate-pulse), not orange.
               See yellow row above for the live thinking dot. */}
           <Sample source="utils/activity.ts:14 — error dot (orange)">
-            <span className="size-2.5 rounded-full border border-black bg-brutal-orange" />
-            <span className="text-sm text-black/60 font-mono">error</span>
+            <span className="size-2.5 rounded-full border border-line-strong theme-brutal:border-black bg-warning-soft theme-brutal:bg-brutal-orange" />
+            <span className="text-sm text-foreground-muted theme-brutal:text-black/60 font-mono">error</span>
           </Sample>
 
           {/* from CreateTaskDialog.tsx:68 — error/warning notice card */}
           <Sample source="CreateTaskDialog.tsx:68 — error notice card">
-            <div className="border-2 border-black bg-brutal-orange/20 p-3 text-sm text-black font-bold">
+            <div className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-warning-soft/20 theme-brutal:bg-brutal-orange/20 p-3 text-sm text-foreground-strong theme-brutal:text-black font-bold">
               <AlertTriangle size={14} className="inline mr-1.5 -mt-0.5" />
               Title cannot be empty.
             </div>
@@ -358,14 +358,14 @@ function realComponentsFor(
 
           {/* from ConfirmDialog.tsx:75 — destructive notice inside confirm dialog */}
           <Sample source="ConfirmDialog.tsx:75 — confirm-dialog notice">
-            <div className="border-2 border-black bg-brutal-orange/20 p-3 text-sm text-black w-80">
+            <div className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-warning-soft/20 theme-brutal:bg-brutal-orange/20 p-3 text-sm text-foreground-strong theme-brutal:text-black w-80">
               This will remove all associated data and cannot be undone.
             </div>
           </Sample>
 
           {/* from SettingsPanel.tsx:1409 — full warning card with shadow */}
           <Sample source="SettingsPanel.tsx:1409 — settings warning panel">
-            <div className="border-2 border-black bg-brutal-orange/20 shadow-brutal-sm p-4 text-sm text-black w-80">
+            <div className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-warning-soft/20 theme-brutal:bg-brutal-orange/20 shadow-raft-xs theme-brutal:shadow-brutal-sm p-4 text-sm text-foreground-strong theme-brutal:text-black w-80">
               <AlertTriangle size={14} className="inline mr-1.5 -mt-0.5" />
               <span className="font-bold">No machine connected.</span>
             </div>
@@ -374,8 +374,8 @@ function realComponentsFor(
           {/* from NotificationCenter dot — info=yellow / warning|error=orange.
               Per NotificationCenter.tsx KIND_DOT_BG. */}
           <Sample source="NotificationCenter.tsx — kind dot (warning/error)">
-            <div className="flex size-6 shrink-0 items-center justify-center border-2 border-black bg-brutal-orange">
-              <AlertTriangle size={14} className="text-black" />
+            <div className="flex size-6 shrink-0 items-center justify-center border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-warning-soft theme-brutal:bg-brutal-orange">
+              <AlertTriangle size={14} className="text-foreground-strong theme-brutal:text-black" />
             </div>
           </Sample>
         </>
@@ -386,8 +386,8 @@ function realComponentsFor(
         <>
           {/* from getActivityDotClass — online */}
           <Sample source="utils/activity.ts:8 — online dot">
-            <span className="size-2.5 rounded-full border border-black bg-brutal-lime" />
-            <span className="text-sm text-black/60 font-mono">online</span>
+            <span className="size-2.5 rounded-full border border-line-strong theme-brutal:border-black bg-success-soft theme-brutal:bg-brutal-lime" />
+            <span className="text-sm text-foreground-muted theme-brutal:text-black/60 font-mono">online</span>
           </Sample>
 
         </>
@@ -409,11 +409,11 @@ function realComponentsFor(
             <span>
               <a
                 href="#"
-                className="bg-brutal-lavender/40 px-1 text-sm font-bold text-black border border-black hover:bg-brutal-lavender"
+                className="bg-secondary-200/40 theme-brutal:bg-brutal-lavender/40 px-1 text-sm font-bold text-foreground-strong theme-brutal:text-black border border-line-strong theme-brutal:border-black hover:bg-secondary-200 theme-brutal:hover:bg-brutal-lavender"
               >
                 @stdrc
               </a>{" "}
-              <span className="text-sm text-black/60">
+              <span className="text-sm text-foreground-muted theme-brutal:text-black/60">
                 {formatMessage({ id: "pages.paletteAudit.sampleRiskyMessage" })}
               </span>
             </span>
@@ -433,14 +433,14 @@ function realComponentsFor(
 
           {/* from AgentRemindersSection.tsx:60 — reminder timestamp pill */}
           <Sample source="AgentRemindersSection.tsx:60 — reminder pill">
-            <span className="inline-flex items-center gap-1 border border-black bg-brutal-lavender/30 px-1.5 py-0.5 font-mono text-[11px] text-black">
+            <span className="inline-flex items-center gap-1 border border-line-strong theme-brutal:border-black bg-secondary-200/30 theme-brutal:bg-brutal-lavender/30 px-1.5 py-0.5 font-mono text-[11px] text-foreground-strong theme-brutal:text-black">
               fires 14:35
             </span>
           </Sample>
 
           {/* from ThreadsInbox.tsx:117 — in-review task badge */}
           <Sample source="ThreadsInbox.tsx:117 — in-review task badge">
-            <span className="inline-flex items-center gap-1 border-2 border-black bg-brutal-lavender px-1.5 py-0.5 text-[10px] font-bold uppercase">
+            <span className="inline-flex items-center gap-1 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-secondary-200 theme-brutal:bg-brutal-lavender px-1.5 py-0.5 text-[10px] font-bold uppercase">
               In review
             </span>
           </Sample>
@@ -453,7 +453,7 @@ function realComponentsFor(
           {/* from AgentDetailPanel.tsx:1673 — Delete agent button.
               Note: NO text-white — actual button uses default black text. */}
           <Sample source="AgentDetailPanel.tsx:1673 — Delete Agent">
-            <button className="btn-brutal flex items-center justify-center gap-2 bg-brutal-red px-4 py-2 text-sm font-bold">
+            <button className="btn-brutal flex items-center justify-center gap-2 bg-danger-soft theme-brutal:bg-brutal-red px-4 py-2 text-sm font-bold">
               <Trash2 size={14} />
               Delete Agent
             </button>
@@ -461,14 +461,14 @@ function realComponentsFor(
 
           {/* from ConfirmDialog.tsx:94 — destructive confirm button */}
           <Sample source="ConfirmDialog.tsx:94 — destructive confirm">
-            <button className="btn-brutal bg-brutal-red px-4 py-2 text-sm">
+            <button className="btn-brutal bg-danger-soft theme-brutal:bg-brutal-red px-4 py-2 text-sm">
               Delete
             </button>
           </Sample>
 
           {/* from MachineDetailPanel.tsx:614 — machine delete button */}
           <Sample source="MachineDetailPanel.tsx:614 — Delete machine">
-            <button className="btn-brutal bg-brutal-red px-4 py-2 text-sm font-bold flex items-center gap-1.5 shrink-0">
+            <button className="btn-brutal bg-danger-soft theme-brutal:bg-brutal-red px-4 py-2 text-sm font-bold flex items-center gap-1.5 shrink-0">
               <Trash2 size={14} />
               Delete Computer
             </button>
@@ -484,14 +484,14 @@ function realComponentsFor(
 export default function PaletteAuditPage() {
   const { formatMessage } = useIntl();
   return (
-    <div className="min-h-screen w-full bg-brutal-cream font-display text-black overflow-y-auto">
+    <div className="min-h-screen w-full bg-layer-canvas-muted theme-brutal:bg-brutal-cream font-display text-foreground-strong theme-brutal:text-black overflow-y-auto">
       <div className="max-w-5xl mx-auto px-6 py-10">
-        <header className="mb-10 border-b-2 border-black pb-6">
-          <div className="text-xs font-bold uppercase text-black/60 tracking-widest mb-1">
+        <header className="mb-10 border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black pb-6">
+          <div className="text-xs font-bold uppercase text-foreground-muted theme-brutal:text-black/60 tracking-widest mb-1">
             {formatMessage({ id: "pages.paletteAudit.eyebrow" })}
           </div>
           <h1 className="text-4xl font-bold font-display mb-2">{formatMessage({ id: "pages.paletteAudit.title" })}</h1>
-          <p className="text-sm text-black/60 max-w-2xl">
+          <p className="text-sm text-foreground-muted theme-brutal:text-black/60 max-w-2xl">
             {formatMessage({ id: "pages.paletteAudit.introPrefix" })}{" "}
             <InlineCode>file:line</InlineCode>{formatMessage({ id: "pages.paletteAudit.introFileMid" })}
             <InlineCode> packages/web/src/index.css</InlineCode>{" "}
@@ -507,7 +507,7 @@ export default function PaletteAuditPage() {
         </Section>
 
         <Section title={formatMessage({ id: "pages.paletteAudit.sectionNotesTitle" })} eyebrow={formatMessage({ id: "pages.paletteAudit.sectionNotesEyebrow" })}>
-          <div className="border-2 border-black bg-white p-5 text-sm text-black/70 space-y-2">
+          <div className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white p-5 text-sm text-foreground-muted theme-brutal:text-black/70 space-y-2">
             <p>
               <SettingsIcon size={12} className="inline mr-1 -mt-0.5" /> The
               <InlineCode className="mx-1">getActivityDotClass()</InlineCode>

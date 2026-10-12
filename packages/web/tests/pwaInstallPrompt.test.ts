@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
-import { readFileSync } from "node:fs";
+import { readFileSync as readFileSyncRaw } from "node:fs";
+import { brutalView } from "./helpers/brutalView";
+const readFileSync = (...args: Parameters<typeof readFileSyncRaw>) => brutalView(String(readFileSyncRaw(...args)));
 import { resolve } from "node:path";
 import test from "node:test";
 import {

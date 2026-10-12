@@ -100,7 +100,7 @@ export function OverflowSheet({
   children: ReactNode;
 }) {
   const { formatMessage } = useIntl();
-  const headerClassName = "flex h-panel-header shrink-0 items-center border-b-2 border-black bg-soft-signal px-4";
+  const headerClassName = "flex h-panel-header shrink-0 items-center border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black bg-primary-soft theme-brutal:bg-soft-signal px-4";
   return (
     <Drawer
       open={open}
@@ -117,7 +117,7 @@ export function OverflowSheet({
     >
       <DrawerContent
         data-testid={testId}
-        className="inset-y-0 right-0 h-dvh w-full max-w-[min(100vw,34rem)] [--drawer-content-height:100dvh] [--drawer-inset:0px] flex-col rounded-none border-y-0 border-r-0 border-l-2 bg-brutal-cream"
+        className="inset-y-0 right-0 h-dvh w-full max-w-[min(100vw,34rem)] [--drawer-content-height:100dvh] [--drawer-inset:0px] flex-col rounded-none border-y-0 border-r-0 border-l theme-brutal:border-l-2 bg-layer-canvas-muted theme-brutal:bg-brutal-cream"
       >
         {/* Bare mode HIDES the header instead of unmounting it and keeps
             the body wrapper as the same element at the same position —
@@ -237,7 +237,7 @@ export function OverflowActionRow({
       <span data-icon="inline-start" className="shrink-0">{icon}</span>
       <span className="truncate">{label}</span>
       {trailing && (
-        <span className="ml-auto shrink-0 font-mono text-xs font-normal text-black/55">
+        <span className="ml-auto shrink-0 font-mono text-xs font-normal text-foreground-muted theme-brutal:text-black/55">
           {trailing}
         </span>
       )}
@@ -267,7 +267,7 @@ export function OverflowCommandRow({
       size="md"
       nativeButton
       type="button"
-      className="h-11 w-full justify-start gap-3 border-0 px-4 py-0 text-left font-medium shadow-none hover:translate-y-0 hover:border-0 hover:bg-black/5 hover:shadow-none active:translate-x-0 active:translate-y-0 active:shadow-none [&_[data-slot=button-content]]:w-full [&_[data-slot=button-content]]:justify-start"
+      className="h-11 w-full justify-start gap-3 border-0 px-4 py-0 text-left font-medium shadow-none hover:translate-y-0 hover:border-0 hover:bg-fill-muted theme-brutal:hover:bg-black/5 hover:shadow-none active:translate-x-0 active:translate-y-0 active:shadow-none [&_[data-slot=button-content]]:w-full [&_[data-slot=button-content]]:justify-start"
       onClick={onClick}
       disabled={disabled}
       data-testid={testId}
@@ -298,7 +298,7 @@ export function OverflowSwitchRow({
 }) {
   return (
     <div className="flex w-full items-center justify-between gap-3 px-4 py-3">
-      <span id={labelId} className="flex min-w-0 items-center gap-3 text-sm font-bold text-black">
+      <span id={labelId} className="flex min-w-0 items-center gap-3 text-sm font-bold text-foreground-strong theme-brutal:text-black">
         <span className="shrink-0">{icon}</span>
         <span className="truncate">{label}</span>
       </span>
@@ -325,9 +325,9 @@ export function OverflowDangerZone({
 }) {
   const { formatMessage } = useIntl();
   return (
-    <div className="mt-2 border-t-2 border-black pt-2">
+    <div className="mt-2 border-t theme-brutal:border-t-2 border-line-strong theme-brutal:border-black pt-2">
       {labelId && (
-        <div className="px-4 pb-1 text-xs font-bold tracking-wide text-black/65">
+        <div className="px-4 pb-1 text-xs font-bold tracking-wide text-foreground-muted theme-brutal:text-black/65">
           {formatMessage({ id: labelId })}
         </div>
       )}

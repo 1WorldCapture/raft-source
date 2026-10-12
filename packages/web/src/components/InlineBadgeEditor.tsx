@@ -198,7 +198,7 @@ export default function InlineBadgeEditor({
         onSearchChange={onSearchChange ?? (() => {})}
         searchPlaceholder={searchPlaceholder}
         emptyLabel={emptyLabel}
-        className="w-[240px] border-2 border-black bg-white shadow-brutal"
+        className="w-[240px] border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white shadow-raft-sm theme-brutal:shadow-brutal"
         options={options.map((opt) => ({
           key: opt.id,
           label: opt.label,
@@ -221,7 +221,7 @@ export default function InlineBadgeEditor({
       {/* Dropdown chrome aligned to the Select / SelectionPopover family per
           stdrc #proj-theme:ac79cf20 msg=832c2c02 + msg=b0b92c1c
           (2026-05-25): no yellow hover, no yellow selected; hover =
-          `bg-soft-signal/30` (shared with SegmentedControl unselected
+          `bg-primary-soft/30 theme-brutal:bg-soft-signal/30` (shared with SegmentedControl unselected
           and MenuItem); ✓ on the right (trailing slot is the canonical
           selected indicator). */}
       {options.map((opt) => {
@@ -234,7 +234,7 @@ export default function InlineBadgeEditor({
               await onSelect(opt.id);
             }}
             data-testid={optionTestIdPrefix ? `${optionTestIdPrefix}-${opt.id}` : undefined}
-            className="flex w-full items-center justify-between gap-2 px-3 py-2 text-sm text-left transition-colors bg-white hover:bg-soft-signal/30"
+            className="flex w-full items-center justify-between gap-2 px-3 py-2 text-sm text-left transition-colors bg-layer-panel theme-brutal:bg-white hover:bg-primary-soft/30 theme-brutal:hover:bg-soft-signal/30"
           >
             <span className="flex min-w-0 items-center gap-2">
               {opt.avatar}
@@ -257,7 +257,7 @@ export default function InlineBadgeEditor({
   // state below uses `disabled:opacity-60`. stdrc msg=3d60f9dd #proj-theme
   // — the older `hover:opacity-70 transition-colors` was a mismatch
   // (transition target didn't cover opacity, so the state snapped).
-  const defaultButtonClassName = `mt-0.5 inline-flex items-center gap-1 border-2 border-black ${badgeClassName} px-2 py-0.5 text-xs font-bold ${uppercase ? "uppercase tracking-wide " : ""}text-black transition-[filter,opacity] duration-100 hover:brightness-90 disabled:cursor-not-allowed disabled:opacity-60${capitalize ? " capitalize" : ""}`;
+  const defaultButtonClassName = `mt-0.5 inline-flex items-center gap-1 border theme-brutal:border-2 border-line-strong theme-brutal:border-black ${badgeClassName} px-2 py-0.5 text-xs font-bold ${uppercase ? "uppercase tracking-wide " : ""}text-black transition-[filter,opacity] duration-100 hover:brightness-90 disabled:cursor-not-allowed disabled:opacity-60${capitalize ? " capitalize" : ""}`;
 
   return (
     <>

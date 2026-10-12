@@ -41,19 +41,19 @@ export default function MobileDownloadChooserPage() {
   const likelyIPad = typeof navigator === "undefined" ? false : isTouchCapableMac(navigator);
 
   return (
-    <div className="flex min-h-dvh items-center justify-center bg-brutal-cream px-6 py-10 font-display">
+    <div className="flex min-h-dvh items-center justify-center bg-layer-canvas-muted theme-brutal:bg-brutal-cream px-6 py-10 font-display">
       <div className="card-brutal w-full max-w-sm space-y-4 p-6" data-testid="mobile-download-chooser">
-        <h1 className="text-lg font-bold text-black">
+        <h1 className="text-lg font-bold text-foreground-strong theme-brutal:text-black">
           {formatMessage({ id: "mobileDownload.chooser.title" })}
         </h1>
-        <p className="text-sm text-black/60">
+        <p className="text-sm text-foreground-muted theme-brutal:text-black/60">
           {formatMessage({ id: "mobileDownload.chooser.description" })}
         </p>
         {/* An iPad cannot be identified server-side, so when the browser tells us
             what the UA could not, say so — otherwise the reader has to know that
             "iPad counts as iOS here", which is our implementation detail. */}
         {likelyIPad ? (
-          <p className="text-xs text-black/50" data-testid="mobile-download-chooser-ipad-hint">
+          <p className="text-xs text-foreground-muted theme-brutal:text-black/50" data-testid="mobile-download-chooser-ipad-hint">
             {formatMessage({ id: "mobileDownload.chooser.ipadHint" })}
           </p>
         ) : null}
@@ -61,7 +61,7 @@ export default function MobileDownloadChooserPage() {
           {/* Leaves Raft (302 → testflight.apple.com), so new tab; Android is a
               download and stays put. Same asymmetry as the Settings section. */}
           <a
-            className="btn-brutal-sm bg-white px-3 py-2 text-center text-sm font-bold"
+            className="btn-brutal-sm bg-layer-panel theme-brutal:bg-white px-3 py-2 text-center text-sm font-bold"
             href={mobileDownloadUrl("ios")}
             target="_blank"
             rel="noopener noreferrer"
@@ -70,7 +70,7 @@ export default function MobileDownloadChooserPage() {
             {formatMessage({ id: "settings.mobileApp.ios" })}
           </a>
           <a
-            className="btn-brutal-sm bg-white px-3 py-2 text-center text-sm font-bold"
+            className="btn-brutal-sm bg-layer-panel theme-brutal:bg-white px-3 py-2 text-center text-sm font-bold"
             href={mobileDownloadUrl("android")}
             data-testid="mobile-download-chooser-android"
           >

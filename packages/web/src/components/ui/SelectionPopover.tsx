@@ -68,7 +68,7 @@ function SelectionPopoverOptionRow({
 }: SelectionPopoverOption) {
   const leadingContent = leading ?? avatar;
   const labelClassName = italic
-    ? "-mx-1 px-1 whitespace-nowrap leading-6 italic text-black/70"
+    ? "-mx-1 px-1 whitespace-nowrap leading-6 italic text-foreground-muted theme-brutal:text-black/70"
     : "truncate leading-6";
   // Selection family contract (stdrc #proj-theme:ac79cf20 msg=32e323aa
   // + msg=832c2c02 + msg=b0b92c1c 2026-05-25): hover = bg-soft-signal/30
@@ -79,15 +79,15 @@ function SelectionPopoverOptionRow({
   // sidebar action menus + right-click context menus all share one
   // hover token.
   const rowTone = disabled
-    ? "cursor-not-allowed bg-white text-black/30"
-    : "bg-white text-black hover:bg-soft-signal/30";
+    ? "cursor-not-allowed bg-layer-panel theme-brutal:bg-white text-foreground-placeholder theme-brutal:text-black/30"
+    : "bg-layer-panel theme-brutal:bg-white text-foreground-strong theme-brutal:text-black hover:bg-primary-soft/30 theme-brutal:hover:bg-soft-signal/30";
 
   return (
     <button
       type="button"
       disabled={disabled}
       onClick={onClick}
-      className={`flex h-9 w-full items-center justify-between gap-2 overflow-hidden border-b border-black/10 px-3 text-left text-xs font-bold last:border-b-0 ${rowTone}`}
+      className={`flex h-9 w-full items-center justify-between gap-2 overflow-hidden border-b border-line-muted theme-brutal:border-black/10 px-3 text-left text-xs font-bold last:border-b-0 ${rowTone}`}
     >
       <span className="flex min-w-0 items-center gap-2">
         {(reserveLeadingSlot || leadingContent) && (
@@ -114,22 +114,22 @@ export default function SelectionPopover(props: SelectionPopoverProps) {
     showHeader = true,
     emptyLabel,
     width = "content",
-    className = `absolute left-0 top-[calc(100%+8px)] z-20 ${width === "trigger" ? "w-full" : "min-w-[220px]"} border-2 border-black bg-white shadow-brutal`,
+    className = `absolute left-0 top-[calc(100%+8px)] z-20 ${width === "trigger" ? "w-full" : "min-w-[220px]"} border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white shadow-raft-sm theme-brutal:shadow-brutal`,
   } = props;
   const emptyLabelText = emptyLabel ?? formatMessage({ id: "ui.selectionPopover.emptyLabel" });
 
   return (
     <div className={className}>
       {showHeader && (
-        <div className="flex items-center justify-between border-b border-black px-3 py-2">
-          <span className="text-[10px] font-bold uppercase tracking-wide text-black/60">
+        <div className="flex items-center justify-between border-b border-line-strong theme-brutal:border-black px-3 py-2">
+          <span className="text-[10px] font-bold uppercase tracking-wide text-foreground-muted theme-brutal:text-black/60">
             {title}
           </span>
           {showClear && onClear && (
             <button
               type="button"
               onClick={onClear}
-              className="text-[10px] font-bold tracking-wide text-black/50 hover:text-black"
+              className="text-[10px] font-bold tracking-wide text-foreground-muted theme-brutal:text-black/50 hover:text-foreground-strong theme-brutal:hover:text-black"
             >
               {formatMessage({ id: "ui.selectionPopover.clear" })}
             </button>
@@ -137,7 +137,7 @@ export default function SelectionPopover(props: SelectionPopoverProps) {
         </div>
       )}
       {props.searchable && (
-        <div className="border-b border-black px-2 py-2">
+        <div className="border-b border-line-strong theme-brutal:border-black px-2 py-2">
           <input
             type="text"
             autoFocus
@@ -154,7 +154,7 @@ export default function SelectionPopover(props: SelectionPopoverProps) {
       )}
       <div className="max-h-64 overflow-y-auto">
         {options.length === 0 ? (
-          <div className="px-3 py-3 text-center text-[11px] font-mono text-black/40">
+          <div className="px-3 py-3 text-center text-[11px] font-mono text-foreground-hint theme-brutal:text-black/40">
             {emptyLabelText}
           </div>
         ) : (

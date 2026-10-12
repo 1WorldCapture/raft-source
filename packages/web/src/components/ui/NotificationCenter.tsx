@@ -67,10 +67,10 @@ const WIDTH_CLASS: Record<NotificationCenterViewport, string> = {
 };
 
 const KIND_DOT_BG: Record<NotificationCenterKind, string> = {
-  error: "bg-brutal-orange",
-  warning: "bg-brutal-orange",
-  info: "bg-soft-signal",
-  success: "bg-brutal-lime",
+  error: "bg-warning-soft theme-brutal:bg-brutal-orange",
+  warning: "bg-warning-soft theme-brutal:bg-brutal-orange",
+  info: "bg-primary-soft theme-brutal:bg-soft-signal",
+  success: "bg-success-soft theme-brutal:bg-brutal-lime",
 };
 
 // Per-entry kind labels are display copy (the dot's accessible name), so they
@@ -83,10 +83,10 @@ const KIND_LABEL_ID: Record<NotificationCenterKind, MessageId> = {
 };
 
 const DEFAULT_KIND_ICON: Record<NotificationCenterKind, ReactNode> = {
-  error: <AlertTriangle size={16} className="text-black" />,
-  warning: <AlertTriangle size={16} className="text-black" />,
-  info: <Info size={16} className="text-black" />,
-  success: <CheckCircle2 size={16} className="text-black" />,
+  error: <AlertTriangle size={16} className="text-foreground-strong theme-brutal:text-black" />,
+  warning: <AlertTriangle size={16} className="text-foreground-strong theme-brutal:text-black" />,
+  info: <Info size={16} className="text-foreground-strong theme-brutal:text-black" />,
+  success: <CheckCircle2 size={16} className="text-foreground-strong theme-brutal:text-black" />,
 };
 
 /**
@@ -160,15 +160,15 @@ const NotificationCenter = forwardRef<HTMLDivElement, NotificationCenterProps>(
         role={props.role ?? "dialog"}
         aria-label={props["aria-label"] ?? intl.formatMessage({ id: "ui.notificationCenter.ariaLabel" })}
         className={[
-          "card-brutal flex flex-col overflow-hidden bg-white outline-none",
+          "card-brutal flex flex-col overflow-hidden bg-layer-panel theme-brutal:bg-white outline-none",
           WIDTH_CLASS[viewport],
           SIZE_CLASS[viewport][size],
           className,
         ].join(" ")}
       >
-        <div className="flex items-center gap-2 border-b-2 border-black bg-brutal-cream px-3 py-2">
+        <div className="flex items-center gap-2 border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black bg-layer-canvas-muted theme-brutal:bg-brutal-cream px-3 py-2">
           <SectionEyebrow>{resolvedTitle}</SectionEyebrow>
-          <span className="ml-auto text-xs font-mono text-black/40">
+          <span className="ml-auto text-xs font-mono text-foreground-hint theme-brutal:text-black/40">
             {countLabel ?? defaultCountLabel(intl, entries.length)}
           </span>
         </div>
@@ -177,7 +177,7 @@ const NotificationCenter = forwardRef<HTMLDivElement, NotificationCenterProps>(
           {entries.length === 0 ? (
             emptyState ?? <NotificationCenterEmptyState />
           ) : (
-            <ul className="divide-y-2 divide-black" aria-label={intl.formatMessage({ id: "ui.notificationCenter.listAriaLabel" })}>
+            <ul className="divide-y-2 divide-line-muted theme-brutal:divide-black" aria-label={intl.formatMessage({ id: "ui.notificationCenter.listAriaLabel" })}>
               {entries.map((entry) => (
                 <NotificationCenterItem key={entry.id} entry={entry} />
               ))}
@@ -214,7 +214,7 @@ function NotificationCenterItem({ entry }: { entry: NotificationCenterEntry }) {
     <li className={`px-3 py-3 ${entry.read ? "opacity-70" : ""}`}>
       <div className="flex items-start gap-2">
         <div
-          className={`mt-0.5 flex size-6 shrink-0 items-center justify-center border-2 border-black ${
+          className={`mt-0.5 flex size-6 shrink-0 items-center justify-center border theme-brutal:border-2 border-line-strong theme-brutal:border-black ${
             KIND_DOT_BG[entry.kind]
           }`}
           aria-label={intl.formatMessage({ id: KIND_LABEL_ID[entry.kind] })}
@@ -222,7 +222,7 @@ function NotificationCenterItem({ entry }: { entry: NotificationCenterEntry }) {
           {entry.icon ?? DEFAULT_KIND_ICON[entry.kind]}
         </div>
         <div className="min-w-0 flex-1">
-          <div className="text-sm font-bold text-black break-words">{entry.title}</div>
+          <div className="text-sm font-bold text-foreground-strong theme-brutal:text-black break-words">{entry.title}</div>
           {entry.body && <div className="mt-0.5 text-sm break-words">{entry.body}</div>}
           {entry.actions && entry.actions.length > 0 && (
             <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -253,7 +253,7 @@ function NotificationCenterActionButton({
       disabled={action.disabled}
       aria-label={action.ariaLabel}
       className={`btn-brutal px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-50 ${
-        isPrimary ? "bg-brutal-pink" : "bg-white"
+        isPrimary ? "bg-accent-soft theme-brutal:bg-brutal-pink" : "bg-layer-panel theme-brutal:bg-white"
       }`}
     >
       {action.label}

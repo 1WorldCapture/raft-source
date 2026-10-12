@@ -319,7 +319,7 @@ test("server switcher renders muted Activity counts as quiet right-aligned numbe
 
   assert.equal(unreadCount.classList.contains("bg-brutal-pink"), false);
   assert.equal(unreadCount.classList.contains("font-mono"), true);
-  assert.equal(unreadCount.classList.contains("text-black/50"), true);
+  assert.equal(unreadCount.classList.contains("theme-brutal:text-black/50"), true);
   assert.equal(unreadCount.classList.contains("ml-auto"), true);
   assert.equal(unreadCount.getAttribute("title"), "Notifications muted");
 });

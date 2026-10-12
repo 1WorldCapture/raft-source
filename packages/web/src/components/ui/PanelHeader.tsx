@@ -115,7 +115,7 @@ export default function PanelHeader({
   subtitle,
   subtitleMultiline = false,
   icon,
-  iconBg = "bg-soft-signal",
+  iconBg = "bg-primary-soft theme-brutal:bg-soft-signal",
   iconSlot,
   iconAlwaysVisible = false,
   onMobileBack,
@@ -170,7 +170,7 @@ export default function PanelHeader({
       // the old hand-rolled MobileComputersPanel, so every Settings sub-page
       // (Account / Browser / Server / Computers) now reads the same width
       // at every breakpoint.
-      className={`flex h-panel-header items-center gap-3 border-b-2 border-black bg-white px-5 ${containerExtraClass ?? ""}`}
+      className={`flex h-panel-header items-center gap-3 border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white px-5 ${containerExtraClass ?? ""}`}
     >
       {onMobileBack && (
         <Button
@@ -184,7 +184,7 @@ export default function PanelHeader({
       )}
       {icon && (
         <div
-          className={`${iconVisibilityClass} size-icon-header shrink-0 items-center justify-center border-2 border-black ${iconBg}`}
+          className={`${iconVisibilityClass} size-icon-header shrink-0 items-center justify-center border theme-brutal:border-2 border-line-strong theme-brutal:border-black ${iconBg}`}
         >
           {icon}
         </div>
@@ -200,14 +200,14 @@ export default function PanelHeader({
           className={`min-w-0 flex-1 ${titleClickProps?.className ?? ""}`}
         >
           <div className="flex items-center gap-2 min-w-0">
-            <h2 className="truncate font-bold text-base leading-tight text-black">
+            <h2 className="truncate font-bold text-base leading-tight text-foreground-strong theme-brutal:text-black">
               {title}
             </h2>
             {titleSuffix && <div className="shrink-0">{titleSuffix}</div>}
           </div>
           {subtitle && (
             <p
-              className={`text-xs text-black/50 font-mono ${
+              className={`text-xs text-foreground-muted theme-brutal:text-black/50 font-mono ${
                 subtitleMultiline ? "" : "truncate"
               }`}
             >

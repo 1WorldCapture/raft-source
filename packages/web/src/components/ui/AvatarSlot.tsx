@@ -98,7 +98,7 @@ interface ContextSpec {
 const SPEC: Record<AvatarContext, ContextSpec> = {
   "profile-tile": {
     size: "size-16",
-    border: "border-2",
+    border: "border theme-brutal:border-2",
     agentPixel: 60,
     gravatarSize: 60,
     gravatarIcon: 32,
@@ -107,7 +107,7 @@ const SPEC: Record<AvatarContext, ContextSpec> = {
   },
   "account-tile": {
     size: "size-14",
-    border: "border-2",
+    border: "border theme-brutal:border-2",
     agentPixel: 52,
     gravatarSize: 52,
     gravatarIcon: 24,
@@ -116,7 +116,7 @@ const SPEC: Record<AvatarContext, ContextSpec> = {
   },
   "mention-card": {
     size: "size-12",
-    border: "border-2",
+    border: "border theme-brutal:border-2",
     agentPixel: 44,
     gravatarSize: 44,
     gravatarIcon: 24,
@@ -125,7 +125,7 @@ const SPEC: Record<AvatarContext, ContextSpec> = {
   },
   "panel-header": {
     size: "size-9",
-    border: "border-2",
+    border: "border theme-brutal:border-2",
     agentPixel: 32,
     gravatarSize: 32,
     gravatarIcon: 16,
@@ -134,7 +134,7 @@ const SPEC: Record<AvatarContext, ContextSpec> = {
   },
   "surface-list": {
     size: "size-8",
-    border: "border-2",
+    border: "border theme-brutal:border-2",
     agentPixel: 28,
     gravatarSize: 28,
     gravatarIcon: 16,
@@ -295,13 +295,13 @@ export default function AvatarSlot({
   // fallback icon (placeholder branches + gravatar pre-load). Real avatar
   // images cover this bg edge-to-edge via the fill invariant documented above.
   const fallbackBg = type === "agent"
-    ? "bg-brutal-cyan"
+    ? "bg-info-soft theme-brutal:bg-brutal-cyan"
     : type === "human"
-      ? "bg-brutal-lavender"
+      ? "bg-secondary-200 theme-brutal:bg-brutal-lavender"
       : type === "app"
-        ? "bg-soft-signal text-black font-display font-black"
-        : "bg-black text-soft-signal font-display font-bold";
-  const baseClass = `relative flex shrink-0 items-center justify-center overflow-hidden ${spec.size} ${spec.border} border-black ${fallbackBg}`;
+        ? "bg-primary-soft theme-brutal:bg-soft-signal text-foreground-strong theme-brutal:text-black font-display font-black"
+        : "bg-foreground-strong theme-brutal:bg-black text-soft-signal font-display font-bold";
+  const baseClass = `relative flex shrink-0 items-center justify-center overflow-hidden ${spec.size} ${spec.border} border-line-strong theme-brutal:border-black ${fallbackBg}`;
 
   if (type === "agent") {
     // Agent path: stretch to fill the full inner area instead of relying on a
@@ -346,7 +346,7 @@ export default function AvatarSlot({
 
   // Human path. Staging adds `text-black` on human containers (controls the
   // User-icon fallback color); preserve it.
-  const humanBase = `${baseClass} text-black`;
+  const humanBase = `${baseClass} text-foreground-strong theme-brutal:text-black`;
 
   if (humanPlaceholder) {
     return (
