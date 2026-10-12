@@ -19,6 +19,7 @@ import { AvatarImageWithFallback } from "@web/components/ui/AvatarSlot";
 import ServerSwitcherMenu from "@web/components/ui/ServerSwitcherMenu";
 import { useOptionalAppTheme } from "@web/hooks/useAppTheme";
 import { SKINS, currentSkinId, setSkin, skinById, subscribeSkin } from "./skins";
+import { trackSearchAnchor } from "./searchAnchor";
 import { DesktopUpdatePill } from "./appUpdate";
 import { PrivateUpdatePill } from "./privateUpdate";
 import { ServerOriginDialog, serverOriginSettingsAvailable } from "./ServerOriginDialog";
