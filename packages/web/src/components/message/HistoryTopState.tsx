@@ -40,7 +40,7 @@ export default function HistoryTopState({
     // never expose a second manual pagination path at the top of the list.
     if (loadingOlder) {
       return (
-        <div className="pb-2 text-center text-black/50 font-mono text-xs">
+        <div className="pb-2 text-center text-foreground-muted theme-brutal:text-black/50 font-mono text-xs">
           {formatMessage({ id: keys.loadingOlder })}
         </div>
       );
@@ -50,8 +50,8 @@ export default function HistoryTopState({
 
   if (state === "history_limited") {
     return (
-      <div className="pb-2 text-center text-black/50 font-mono text-xs">
-        <span className="inline-flex items-center gap-1.5 border border-black/20 bg-white/70 px-2 py-1">
+      <div className="pb-2 text-center text-foreground-muted theme-brutal:text-black/50 font-mono text-xs">
+        <span className="inline-flex items-center gap-1.5 border border-line-muted theme-brutal:border-black/20 bg-layer-panel/70 theme-brutal:bg-white/70 px-2 py-1">
           <Lock size={12} />
           {formatMessage({ id: keys.limited })}
         </span>
@@ -60,7 +60,7 @@ export default function HistoryTopState({
   }
 
   return (
-    <div className="pb-2 text-center text-black/40 font-mono text-xs">
+    <div className="pb-2 text-center text-foreground-hint theme-brutal:text-black/40 font-mono text-xs">
       {formatMessage({ id: keys.beginning })}
     </div>
   );

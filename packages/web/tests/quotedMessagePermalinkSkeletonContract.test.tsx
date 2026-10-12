@@ -7,6 +7,7 @@ import type { ParsedRaftPermalink } from "@botiverse/raft-shared";
 import api from "../src/api/client";
 import QuotedMessagePermalinkPreview from "../src/components/message/QuotedMessagePermalinkPreview";
 import { TestIntlProvider } from "./helpers/intl";
+import { brutalView } from "./helpers/brutalView";
 
 const originalGet = api.get;
 
@@ -33,22 +34,22 @@ test("quoted message permalink loading skeleton keeps placeholder bars as horizo
   );
 
   const bars = [...container.querySelectorAll("div")].filter((el) =>
-    /(^|\s)bg-black\/10(\s|$)/.test(el.className),
+    /(^|\s)bg-black\/10(\s|$)/.test(brutalView(el.className)),
   );
   assert.ok(bars.length >= 1, "loading preview must paint placeholder bars");
   const last = bars[bars.length - 1]!;
   assert.match(
-    last.className,
+    brutalView(last.className),
     /(^|\s)h-3(\s|$)/,
     "the final skeleton placeholder must stay a 3-tall line",
   );
   assert.match(
-    last.className,
+    brutalView(last.className),
     /(^|\s)w-3\/4(\s|$)/,
     "the final skeleton placeholder must be a 75%-width line, not a square",
   );
   assert.doesNotMatch(
-    last.className,
+    brutalView(last.className),
     /(^|\s)size-3\/4(\s|$)/,
     "`size-3/4` creates a tall square that overflows the preview border",
   );

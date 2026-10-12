@@ -12,6 +12,7 @@ import type { User } from "../src/store/authStore";
 import type { Channel } from "../src/store/channelStore";
 import type { Message } from "../src/store/messageStore";
 import type { Server, ServerMember } from "../src/store/serverStore";
+import { brutalView } from "./helpers/brutalView";
 
 const originalMatchMedia = window.matchMedia;
 
@@ -148,15 +149,15 @@ test("opening the reaction picker pins the message toolbar visible outside row h
   const reactionButton = container.querySelector<HTMLButtonElement>("[data-message-affordance='reaction']");
   assert.ok(toolbar);
   assert.ok(reactionButton);
-  assert.equal(toolbar.classList.contains("hidden"), false, "resting toolbar stays mounted for stable hover clicks");
-  assert.equal(toolbar.classList.contains("pointer-events-none"), false);
-  assert.equal(toolbar.classList.contains("opacity-0"), true);
+  assert.equal(brutalView(toolbar.className).split(/\s+/).includes("hidden"), false, "resting toolbar stays mounted for stable hover clicks");
+  assert.equal(brutalView(toolbar.className).split(/\s+/).includes("pointer-events-none"), false);
+  assert.equal(brutalView(toolbar.className).split(/\s+/).includes("opacity-0"), true);
 
   fireEvent.click(reactionButton);
 
   assert.equal(reactionButton.getAttribute("aria-expanded"), "true");
-  assert.equal(toolbar.classList.contains("opacity-100"), true);
-  assert.equal(toolbar.classList.contains("flex"), true);
+  assert.equal(brutalView(toolbar.className).split(/\s+/).includes("opacity-100"), true);
+  assert.equal(brutalView(toolbar.className).split(/\s+/).includes("flex"), true);
 });
 
 test("read-only messages omit the reaction action while keeping non-mutating toolbar actions", () => {
@@ -193,7 +194,7 @@ test("opening the reaction picker keeps the message row's outer frame active", a
   const { row } = await renderMessage();
   const reactionButton = row.querySelector<HTMLButtonElement>("[data-message-affordance='reaction']");
   assert.ok(reactionButton);
-  assert.equal(row.classList.contains("border-transparent"), true, "resting row keeps its transparent border");
+  assert.equal(brutalView(row.className).split(/\s+/).includes("border-transparent"), true, "resting row keeps its transparent border");
 
   const originalCustomEvent = globalThis.CustomEvent;
   globalThis.CustomEvent = window.CustomEvent;
@@ -205,10 +206,10 @@ test("opening the reaction picker keeps the message row's outer frame active", a
 
   assert.ok(document.querySelector("[data-message-affordance='reaction-picker']"));
   assert.equal(
-    row.classList.contains("border-black"),
+    brutalView(row.className).split(/\s+/).includes("border-black"),
     true,
     "the message frame must stay active while the pointer can move through the portaled picker",
   );
-  assert.equal(row.classList.contains("border-transparent"), false);
-  assert.equal(row.classList.contains("bg-white"), true);
+  assert.equal(brutalView(row.className).split(/\s+/).includes("border-transparent"), false);
+  assert.equal(brutalView(row.className).split(/\s+/).includes("bg-white"), true);
 });

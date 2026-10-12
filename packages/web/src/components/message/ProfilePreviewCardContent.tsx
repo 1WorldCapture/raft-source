@@ -110,8 +110,8 @@ export default function ProfilePreviewCardContent({ mentionType, mentionId, fall
           <div className="flex items-start gap-3 px-3 py-3">
             <AvatarSlot context="mention-card" type="agent" />
             <div className="min-w-0 flex-1">
-              <div className="truncate text-sm font-bold text-black">{unavailableHandle ?? formatMessage({ id: "message.profilePreview.fallbackAgent" })}</div>
-              <div className="truncate font-mono text-xs text-black/60">{formatMessage({ id: "message.profilePreview.unavailable" })}</div>
+              <div className="truncate text-sm font-bold text-foreground-strong theme-brutal:text-black">{unavailableHandle ?? formatMessage({ id: "message.profilePreview.fallbackAgent" })}</div>
+              <div className="truncate font-mono text-xs text-foreground-muted theme-brutal:text-black/60">{formatMessage({ id: "message.profilePreview.unavailable" })}</div>
             </div>
           </div>
         );
@@ -154,35 +154,35 @@ export default function ProfilePreviewCardContent({ mentionType, mentionId, fall
             <AvatarSlot context="mention-card" type="agent" agentAvatarUrl={profileAgent.avatarUrl} className="mt-0.5 self-start" />
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-1.5">
-                <span className="truncate text-sm font-bold text-black">{displayName}</span>
+                <span className="truncate text-sm font-bold text-foreground-strong theme-brutal:text-black">{displayName}</span>
                 <StatusDot activity={displayState?.activity ?? "offline"} external={displayState?.isExternal} size="sm" />
-                <span className="truncate font-mono text-xs text-black/60">
+                <span className="truncate font-mono text-xs text-foreground-muted theme-brutal:text-black/60">
                   {renderedActivityText}
                 </span>
               </div>
-              <div className="truncate font-mono text-xs text-black/60">@{profileAgent.name}</div>
-              {!isChannelSummaryAgent ? <dl className="mt-2 grid grid-cols-[auto_minmax(0,1fr)] gap-x-2 gap-y-1 border-t border-black/20 pt-2 text-[11px] leading-tight">
+              <div className="truncate font-mono text-xs text-foreground-muted theme-brutal:text-black/60">@{profileAgent.name}</div>
+              {!isChannelSummaryAgent ? <dl className="mt-2 grid grid-cols-[auto_minmax(0,1fr)] gap-x-2 gap-y-1 border-t border-line-muted theme-brutal:border-black/20 pt-2 text-[11px] leading-tight">
                 {computerLabel !== null ? (
                   <>
-                    <dt className="font-mono text-black/45">{formatMessage({ id: "message.profilePreview.labelComputer" })}</dt>
-                    <dd className="min-w-0 truncate font-mono text-black/70" title={computerLabel}>{computerLabel}</dd>
+                    <dt className="font-mono text-foreground-hint theme-brutal:text-black/45">{formatMessage({ id: "message.profilePreview.labelComputer" })}</dt>
+                    <dd className="min-w-0 truncate font-mono text-foreground-muted theme-brutal:text-black/70" title={computerLabel}>{computerLabel}</dd>
                   </>
                 ) : null}
-                <dt className="font-mono text-black/45">{formatMessage({ id: "message.profilePreview.labelRuntime" })}</dt>
-                <dd className="min-w-0 truncate font-mono text-black/70" title={runtimeLabel}>{runtimeLabel}</dd>
-                <dt className="font-mono text-black/45">{formatMessage({ id: "message.profilePreview.labelModel" })}</dt>
-                <dd className="min-w-0 truncate font-mono text-black/70" title={modelLabel}>{modelLabel}</dd>
+                <dt className="font-mono text-foreground-hint theme-brutal:text-black/45">{formatMessage({ id: "message.profilePreview.labelRuntime" })}</dt>
+                <dd className="min-w-0 truncate font-mono text-foreground-muted theme-brutal:text-black/70" title={runtimeLabel}>{runtimeLabel}</dd>
+                <dt className="font-mono text-foreground-hint theme-brutal:text-black/45">{formatMessage({ id: "message.profilePreview.labelModel" })}</dt>
+                <dd className="min-w-0 truncate font-mono text-foreground-muted theme-brutal:text-black/70" title={modelLabel}>{modelLabel}</dd>
                 {reasoningLabel ? (
                   <>
-                    <dt className="font-mono text-black/45">{formatMessage({ id: "message.profilePreview.labelReasoning" })}</dt>
-                    <dd className="min-w-0 truncate font-mono capitalize text-black/70" title={reasoningLabel}>{reasoningLabel}</dd>
+                    <dt className="font-mono text-foreground-hint theme-brutal:text-black/45">{formatMessage({ id: "message.profilePreview.labelReasoning" })}</dt>
+                    <dd className="min-w-0 truncate font-mono capitalize text-foreground-muted theme-brutal:text-black/70" title={reasoningLabel}>{reasoningLabel}</dd>
                   </>
                 ) : null}
               </dl> : null}
             </div>
           </div>
           {profileAgent.description ? (
-            <div className="truncate border-t-2 border-black px-3 py-2 text-xs text-black/70" title={profileAgent.description}>
+            <div className="truncate border-t theme-brutal:border-t-2 border-line-strong theme-brutal:border-black px-3 py-2 text-xs text-foreground-muted theme-brutal:text-black/70" title={profileAgent.description}>
               {profileAgent.description}
             </div>
           ) : null}
@@ -208,8 +208,8 @@ export default function ProfilePreviewCardContent({ mentionType, mentionId, fall
         <div className="flex items-start gap-3 px-3 py-3">
           <AvatarSlot context="mention-card" type="human" humanPlaceholder />
           <div className="min-w-0 flex-1">
-            <div className="truncate text-sm font-bold text-black">{unavailableHandle ?? formatMessage({ id: "message.profilePreview.fallbackMember" })}</div>
-            <div className="truncate font-mono text-xs text-black/60">{formatMessage({ id: "message.profilePreview.unavailable" })}</div>
+            <div className="truncate text-sm font-bold text-foreground-strong theme-brutal:text-black">{unavailableHandle ?? formatMessage({ id: "message.profilePreview.fallbackMember" })}</div>
+            <div className="truncate font-mono text-xs text-foreground-muted theme-brutal:text-black/60">{formatMessage({ id: "message.profilePreview.unavailable" })}</div>
           </div>
         </div>
       );
@@ -220,12 +220,12 @@ export default function ProfilePreviewCardContent({ mentionType, mentionId, fall
         <div className="flex items-start gap-3 px-3 py-3">
           <AvatarSlot context="mention-card" type="human" humanAvatarUrl={profileMember.avatarUrl} gravatarHash={profileMember.gravatarHash} className="mt-0.5 self-start" />
           <div className="min-w-0 flex-1">
-            <div className="truncate text-sm font-bold text-black">{displayName}</div>
-            <div className="truncate font-mono text-xs text-black/60">@{profileMember.name}</div>
+            <div className="truncate text-sm font-bold text-foreground-strong theme-brutal:text-black">{displayName}</div>
+            <div className="truncate font-mono text-xs text-foreground-muted theme-brutal:text-black/60">@{profileMember.name}</div>
           </div>
         </div>
         {profileMember.description ? (
-          <div className="truncate border-t-2 border-black px-3 py-2 text-xs text-black/70" title={profileMember.description}>
+          <div className="truncate border-t theme-brutal:border-t-2 border-line-strong theme-brutal:border-black px-3 py-2 text-xs text-foreground-muted theme-brutal:text-black/70" title={profileMember.description}>
             {profileMember.description}
           </div>
         ) : null}

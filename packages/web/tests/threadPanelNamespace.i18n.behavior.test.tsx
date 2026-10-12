@@ -16,6 +16,7 @@ import type { Message } from "../src/store/messageStore";
 import { useServerStore } from "../src/store/serverStore";
 import { useTaskStore } from "../src/store/taskStore";
 import { useThreadStore } from "../src/store/threadStore";
+import { brutalView } from "./helpers/brutalView";
 
 // Behavior gate for the message.threadPanel.* migration (ThreadPanel, B2b).
 // Rendered under zh-cn, the panel chrome + empty state must reach the DOM with no
@@ -170,17 +171,17 @@ test("ThreadPanel keeps chrome above its mobile scrolling history", () => {
   const closeButton = screen.getByTestId("thread-close");
   const panel = closeButton.closest(".isolate");
   assert.ok(panel, "the real panel root owns an isolated stacking context");
-  assert.match(panel.className, /\bflex-col\b/);
+  assert.match(brutalView(panel.className), /\bflex-col\b/);
 
   const chrome = closeButton.closest(".relative.z-20");
   assert.ok(chrome, "thread header is mounted in the high chrome layer");
-  assert.match(chrome.className, /\bshrink-0\b/);
+  assert.match(brutalView(chrome.className), /\bshrink-0\b/);
 
   const timeline = screen.getByTestId("thread-message-scroller");
   const contentLayer = timeline.closest(".relative.z-0");
   assert.ok(contentLayer, "the real message history is mounted in the low content layer");
-  assert.match(contentLayer.className, /\boverflow-hidden\b/);
-  assert.match(timeline.className, /\boverflow-y-auto\b/);
+  assert.match(brutalView(contentLayer.className), /\boverflow-hidden\b/);
+  assert.match(brutalView(timeline.className), /\boverflow-y-auto\b/);
   assert.equal(timeline.style.overscrollBehavior, "contain");
   assert.ok(
     (panel.compareDocumentPosition(contentLayer) & Node.DOCUMENT_POSITION_CONTAINED_BY) !== 0,
@@ -384,7 +385,7 @@ test("loaded, loading, and empty thread parents keep balanced brutal spacing", a
   const assertParentRecipe = (branch: string) => {
     const parent = screen.getByTestId("thread-panel-parent");
     for (const className of expectedClasses) {
-      assert.ok(parent.classList.contains(className), `${branch} parent keeps ${className}`);
+      assert.ok(brutalView(parent.className).split(/\s+/).includes(className), `${branch} parent keeps ${className}`);
     }
   };
 

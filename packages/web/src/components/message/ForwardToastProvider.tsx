@@ -42,7 +42,7 @@ function ForwardToastList() {
             <ToastActions className="col-span-1 col-start-2 row-start-1 w-auto shrink-0 justify-self-end">
               {showClose ? <ToastClose /> : null}
               {showAction ? (
-                <ToastAction className="border-0 bg-transparent px-0 py-1 text-xs font-medium text-black/55 shadow-none transition-colors hover:border-transparent hover:bg-transparent hover:text-black hover:no-underline hover:shadow-none hover:translate-x-0 hover:translate-y-0" />
+                <ToastAction className="border-0 bg-transparent px-0 py-1 text-xs font-medium text-foreground-muted theme-brutal:text-black/55 shadow-none transition-colors hover:border-transparent hover:bg-transparent hover:text-foreground-strong theme-brutal:hover:text-black hover:no-underline hover:shadow-none hover:translate-x-0 hover:translate-y-0" />
               ) : null}
             </ToastActions>
           ) : null}

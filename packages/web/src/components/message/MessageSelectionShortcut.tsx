@@ -264,24 +264,24 @@ export default function MessageSelectionShortcut() {
       role="menu"
       aria-label={formatMessage({ id: "message.selectionShortcut.actionsAria" })}
       data-message-selection-shortcut="true"
-      className="fixed z-[70] flex overflow-hidden border-2 border-black bg-white text-xs font-semibold shadow-brutal-sm select-none"
+      className="fixed z-[70] flex overflow-hidden border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white text-xs font-semibold shadow-raft-xs theme-brutal:shadow-brutal-sm select-none"
       style={{ left: position.x, top: position.y }}
     >
       <button
         type="button"
         role="menuitem"
         onClick={handleQuote}
-        className="flex h-7 items-center gap-1.5 px-2 text-black transition-colors hover:bg-soft-signal/30"
+        className="flex h-7 items-center gap-1.5 px-2 text-foreground-strong theme-brutal:text-black transition-colors hover:bg-primary-soft/30 theme-brutal:hover:bg-soft-signal/30"
       >
         <TextQuote size={13} />
         {formatMessage({ id: "message.selectionShortcut.quote" })}
       </button>
-      <div className="w-px bg-black/20" aria-hidden="true" />
+      <div className="w-px bg-foreground/20 theme-brutal:bg-black/20" aria-hidden="true" />
       <button
         type="button"
         role="menuitem"
         onClick={handleCopy}
-        className="flex h-7 items-center gap-1.5 px-2 text-black transition-colors hover:bg-soft-signal/30"
+        className="flex h-7 items-center gap-1.5 px-2 text-foreground-strong theme-brutal:text-black transition-colors hover:bg-primary-soft/30 theme-brutal:hover:bg-soft-signal/30"
       >
         <Copy size={13} />
         {formatMessage({ id: "message.selectionShortcut.copy" })}

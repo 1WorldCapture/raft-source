@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
+import { brutalView } from "./helpers/brutalView";
 
 const repoRoot = resolve(import.meta.dirname, "..");
-const read = (path: string) => readFileSync(resolve(repoRoot, path), "utf8");
+const read = (path: string) => brutalView(readFileSync(resolve(repoRoot, path), "utf8"));
 
 test("forward entrypoints remain fail-closed behind the server feature gate", () => {
   const toolbar = read("src/components/message/SelectModeToolbar.tsx");

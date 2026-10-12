@@ -134,7 +134,7 @@ function ChannelFileVisual({
   }, [canPreview, file.id, file.thumbnailUrl]);
 
   return (
-    <span className="flex size-14 shrink-0 items-center justify-center overflow-hidden border-2 border-black bg-white">
+    <span className="flex size-14 shrink-0 items-center justify-center overflow-hidden border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white">
       {canPreview && src ? (
         <img
           src={src}
@@ -363,10 +363,10 @@ export default function ChannelFilesPanel({ channel }: { channel: Channel }) {
   }, []);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-white">
+    <div className="flex min-h-0 flex-1 flex-col bg-layer-panel theme-brutal:bg-white">
       <div className="min-h-0 flex-1 overflow-y-auto" onScroll={(event) => handleScroll(event.currentTarget)}>
         {loading ? (
-          <div className="flex h-full items-center justify-center text-sm font-mono text-black/40">{formatMessage({ id: "message.channelFilesPanel.loading" })}</div>
+          <div className="flex h-full items-center justify-center text-sm font-mono text-foreground-hint theme-brutal:text-black/40">{formatMessage({ id: "message.channelFilesPanel.loading" })}</div>
         ) : error ? (
           <div className="flex h-full items-center justify-center text-sm font-bold text-brutal-red">{error}</div>
         ) : files.length === 0 ? (
@@ -462,12 +462,12 @@ export default function ChannelFilesPanel({ channel }: { channel: Channel }) {
             {(loadingMore || nextCursor) && (
               <div className="flex justify-center p-4">
                 {loadingMore ? (
-                  <div className="font-mono text-xs text-black/45">{formatMessage({ id: "message.channelFilesPanel.loadingMore" })}</div>
+                  <div className="font-mono text-xs text-foreground-hint theme-brutal:text-black/45">{formatMessage({ id: "message.channelFilesPanel.loadingMore" })}</div>
                 ) : (
                   <button
                     type="button"
                     onClick={() => void loadFilesPage(nextCursor, "append")}
-                    className="btn-brutal-sm bg-white px-4 py-1.5 text-xs"
+                    className="btn-brutal-sm bg-layer-panel theme-brutal:bg-white px-4 py-1.5 text-xs"
                   >
                     {formatMessage({ id: "message.channelFilesPanel.loadMore" })}
                   </button>

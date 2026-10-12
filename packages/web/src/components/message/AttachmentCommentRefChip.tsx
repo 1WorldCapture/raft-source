@@ -39,7 +39,7 @@ export function AttachmentCommentRefChip({
             }}
             data-message-affordance="attachment-comment-ref-chip"
             icon={MessageSquare}
-            colorClass="bg-brutal-stone/25 text-black transition-colors hover:bg-brutal-stone/40"
+            colorClass="bg-fill-muted/25 theme-brutal:bg-brutal-stone/25 text-foreground-strong theme-brutal:text-black transition-colors hover:bg-fill-muted/40 theme-brutal:hover:bg-brutal-stone/40"
             label={label}
             title={formatMessage({ id: "message.attachmentComment.jumpTitle" }, { detail })}
           />
@@ -48,14 +48,14 @@ export function AttachmentCommentRefChip({
             as="span"
             data-message-affordance="attachment-comment-ref-chip"
             icon={MessageSquare}
-            colorClass="bg-brutal-stone/25 text-black"
+            colorClass="bg-fill-muted/25 theme-brutal:bg-brutal-stone/25 text-foreground-strong theme-brutal:text-black"
             label={label}
             title={formatMessage({ id: "message.attachmentComment.commentTitle" }, { detail })}
           />
         )}
       </div>
       {commentRef.anchorQuote ? (
-        <div className="mb-1 whitespace-pre-wrap break-words border-l-2 border-black/20 pl-2 text-xs italic text-black/55">
+        <div className="mb-1 whitespace-pre-wrap break-words border-l theme-brutal:border-l-2 border-line-muted theme-brutal:border-black/20 pl-2 text-xs italic text-foreground-muted theme-brutal:text-black/55">
           {commentRef.anchorQuote}
         </div>
       ) : null}

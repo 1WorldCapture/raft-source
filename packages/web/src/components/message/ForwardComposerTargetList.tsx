@@ -84,8 +84,8 @@ export default function ForwardComposerTargetList({
           event.preventDefault();
           toggle();
         }}
-        className={`flex w-full min-w-0 items-center gap-2 border-2 border-black px-2 py-2 text-left text-sm font-bold transition-colors ${
-          unavailable ? "cursor-not-allowed bg-black/5 opacity-50" : selected ? "bg-soft-signal" : "bg-white hover:bg-brutal-cyan/15"
+        className={`flex w-full min-w-0 items-center gap-2 border theme-brutal:border-2 border-line-strong theme-brutal:border-black px-2 py-2 text-left text-sm font-bold transition-colors ${
+          unavailable ? "cursor-not-allowed bg-fill-muted theme-brutal:bg-black/5 opacity-50" : selected ? "bg-primary-soft theme-brutal:bg-soft-signal" : "bg-layer-panel theme-brutal:bg-white hover:bg-info-soft/15 theme-brutal:hover:bg-brutal-cyan/15"
         }`}
         data-testid={`forward-search-target-${target.type}-${target.id}`}
       >
@@ -108,13 +108,13 @@ export default function ForwardComposerTargetList({
         </span>
         <span className="min-w-0 flex-1 truncate">{target.title}</span>
         {target.requiredAction === "join_channel" && !resolvedChannelId && (
-          <span className="flex shrink-0 items-center gap-1 text-[10px] font-bold uppercase text-black/45">
+          <span className="flex shrink-0 items-center gap-1 text-[10px] font-bold uppercase text-foreground-hint theme-brutal:text-black/45">
             <LogIn size={10} />
             {formatMessage({ id: "message.forwardComposer.notJoined" })}
           </span>
         )}
         {target.requiredAction === "create_dm" && !resolvedChannelId && (
-          <span className="flex shrink-0 items-center gap-1 text-[10px] font-bold uppercase text-black/45">
+          <span className="flex shrink-0 items-center gap-1 text-[10px] font-bold uppercase text-foreground-hint theme-brutal:text-black/45">
             <UserPlus size={10} />
             {formatMessage({ id: "message.forwardComposer.newDm" })}
           </span>
@@ -142,7 +142,7 @@ export default function ForwardComposerTargetList({
           event.preventDefault();
           toggle();
         }}
-        className={`flex w-full min-w-0 items-center gap-2 border-2 border-black px-2 py-2 text-left text-sm font-bold transition-colors ${selected ? "bg-soft-signal" : "bg-white hover:bg-brutal-cyan/15"}`}
+        className={`flex w-full min-w-0 items-center gap-2 border theme-brutal:border-2 border-line-strong theme-brutal:border-black px-2 py-2 text-left text-sm font-bold transition-colors ${selected ? "bg-primary-soft theme-brutal:bg-soft-signal" : "bg-layer-panel theme-brutal:bg-white hover:bg-info-soft/15 theme-brutal:hover:bg-brutal-cyan/15"}`}
         data-testid={`forward-target-${target.id}`}
       >
         {showCheckbox && <Checkbox checked={selected} disabled={disabled} tabIndex={-1} aria-hidden className="pointer-events-none" />}
@@ -157,13 +157,13 @@ export default function ForwardComposerTargetList({
   if (searchFailed) {
     return (
       <div className="flex flex-col items-center gap-2 py-4 text-center">
-        <p className="text-xs font-bold text-black/55">{formatMessage({ id: "message.forwardComposer.searchFailed" })}</p>
+        <p className="text-xs font-bold text-foreground-muted theme-brutal:text-black/55">{formatMessage({ id: "message.forwardComposer.searchFailed" })}</p>
         <Button type="button" size="xs" tone="white" onClick={() => retrySearch(lowerQuery)}>{formatMessage({ id: "message.forwardComposer.tryAgain" })}</Button>
       </div>
     );
   }
   if (searchResults.length === 0) {
-    return <p className="py-4 text-center text-xs font-bold text-black/35">{formatMessage({ id: "message.forwardComposer.noMatchingDestinations" })}</p>;
+    return <p className="py-4 text-center text-xs font-bold text-foreground-placeholder theme-brutal:text-black/35">{formatMessage({ id: "message.forwardComposer.noMatchingDestinations" })}</p>;
   }
   return <>{searchResults.map(renderSearchTarget)}</>;
 }

@@ -86,6 +86,83 @@ const VARIANTS = String.raw`(?:[a-zA-Z0-9_\-\[\]=.()&>*~]+:)*`;
 const BASE = String.raw`(?:text-black|bg-white|border-black|border(?:-[tblrxy])?-2|bg-soft-signal|bg-brutal-[a-z]+|bg-black|shadow-brutal(?:-[a-z]+)?|divide-black|ring-black|outline-black)(?:\/\d+)?`;
 const TOKEN = new RegExp(String.raw`(?<=[\s"'\`{(])(${VARIANTS})(!?)(${BASE})(?=[\s"'\`)}$])`, "g");
 
+// ---------------------------------------------------------------------------
+// Responsive overrides.
+//
+// `theme-brutal:` is a registered variant, so a guarded base class such as
+// `theme-brutal:border-b-2` is emitted AFTER (and therefore beats) an unguarded
+// responsive override in the same string such as `md:border-b-0`. In the
+// original class text the override won at its breakpoint, so Brutal would now
+// show the border where it used to be removed. The fix keeps the Brutal view
+// exactly the original token set and only restores the precedence: every
+// unguarded responsive token whose property group clashes with a guarded class
+// in the same string gets a guarded twin (`theme-brutal:md:border-b-0`), which
+// stacks two variants and sorts after the single-variant guarded base.
+const RESPONSIVE = /^(?:(?:max-)?(?:sm|md|lg|xl|2xl):)+/;
+
+function groupsOf(utility) {
+  const u = utility.replace(/^!/, "");
+  let m;
+  if ((m = /^border(?:-([tblrxy]))?(?:-(?:\d+))?$/.exec(u))) return [`bw:${m[1] ?? ""}`];
+  if (/^border-(?:black|transparent|line-|brutal-|white)/.test(u)) return ["bc"];
+  if (/^bg-(?!gradient|\[url|none$|clip|cover|center|no-repeat|repeat)/.test(u)) return ["bg"];
+  if (/^shadow(?:-|$)/.test(u)) return ["sh"];
+  if (/^text-(?:black|white|foreground|brutal|primary|muted)/.test(u)) return ["tc"];
+  return [];
+}
+
+function sidesClash(a, b) {
+  if (a === "" || b === "") return true;
+  if (a === b) return true;
+  return (a === "x" && (b === "l" || b === "r")) || (b === "x" && (a === "l" || a === "r"))
+    || (a === "y" && (b === "t" || b === "b")) || (b === "y" && (a === "t" || a === "b"));
+}
+
+function clashes(g1, g2) {
+  if (g1.startsWith("bw:") && g2.startsWith("bw:")) return sidesClash(g1.slice(3), g2.slice(3));
+  return g1 === g2;
+}
+
+function guardResponsiveOverrides(line) {
+  return line.replace(/(["'`])((?:(?!\1).)*)\1/g, (whole, quote, body) => {
+    if (!body.includes("theme-brutal:")) return whole;
+    const tokens = body.split(/(\s+)/);
+    const guardedGroups = [];
+    const guardedSet = new Set();
+    for (const t of tokens) {
+      if (!t.includes("theme-brutal:")) continue;
+      guardedSet.add(t);
+      const utility = t.split(":").pop();
+      guardedGroups.push(...groupsOf(utility));
+    }
+    if (guardedGroups.length === 0) return whole;
+    let changed = false;
+    const next = [];
+    for (let i = 0; i < tokens.length; i += 1) {
+      const t = tokens[i];
+      next.push(t);
+      if (!t || /^\s+$/.test(t) || t.includes("theme-brutal:")) continue;
+      if (!RESPONSIVE.test(t)) continue;
+      const utility = t.split(":").pop();
+      const g = groupsOf(utility);
+      if (g.length === 0 || !g.some((x) => guardedGroups.some((y) => clashes(x, y)))) continue;
+      // The semantic half of a swept pair (`md:border-r theme-brutal:md:border-r-2`) is
+      // directly followed by its guarded class: it is not an override.
+      let j = i + 1;
+      while (j < tokens.length && /^\s*$/.test(tokens[j])) j += 1;
+      if (j < tokens.length && tokens[j].startsWith("theme-brutal:")
+        && groupsOf(tokens[j].split(":").pop()).some((x) => g.some((y) => clashes(x, y)))
+        && tokens[j].slice("theme-brutal:".length).startsWith(RESPONSIVE.exec(t)[0])) continue;
+      const twin = `theme-brutal:${t}`;
+      if (tokens.includes(twin)) continue;
+      next.push(" ", twin);
+      changed = true;
+      guardedSet.add(twin);
+    }
+    return changed ? `${quote}${next.join("")}${quote}` : whole;
+  });
+}
+
 export function transformSource(source) {
   let changes = 0;
   const lines = source.split("\n");
@@ -96,7 +173,7 @@ export function transformSource(source) {
     // Identity strings must keep their exact text: an object KEY (`"bg-x": value`) is
     // looked up by the caller's original class, and `theme-sweep-ignore` opts a line out.
     if (/^\s*["'`][^"'`]*["'`]\s*:/.test(line) || line.includes("theme-sweep-ignore") || /\bconfirmColor\b/.test(line)) return line;
-    return line.replace(TOKEN, (whole, variants, bang, cls, offset, str) => {
+    const swept = line.replace(TOKEN, (whole, variants, bang, cls, offset, str) => {
       // Already guarded: `theme-brutal:` is the LAST variant before an original class.
       if (variants.includes("theme-brutal:")) return whole;
       const elegant = elegantClass(cls);
@@ -105,6 +182,9 @@ export function transformSource(source) {
       changes += 1;
       return `${variants}${bang}${elegant} theme-brutal:${variants}${bang}${cls}`;
     });
+    const guarded = guardResponsiveOverrides(swept);
+    if (guarded !== swept) changes += 1;
+    return guarded;
   });
   return { text: out.join("\n"), changes };
 }

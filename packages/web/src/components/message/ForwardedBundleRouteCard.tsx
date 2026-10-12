@@ -60,11 +60,11 @@ export default function ForwardedBundleRouteCard({
       />
       {detailOpen && createPortal(
         <section
-          className="fixed bottom-0 left-0 right-0 top-0 z-[70] flex flex-col bg-white md:hidden"
+          className="fixed bottom-0 left-0 right-0 top-0 z-[70] flex flex-col bg-layer-panel theme-brutal:bg-white md:hidden"
           data-testid="forwarded-bundle-detail-page"
           aria-label={formatMessage({ id: "message.forwardedBundle.detailTitle" })}
         >
-          <header className="flex h-12 shrink-0 items-center gap-2 border-b-2 border-black px-3">
+          <header className="flex h-12 shrink-0 items-center gap-2 border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black px-3">
             <Button type="button" shape="icon" tone="white" onClick={onBack} aria-label={formatMessage({ id: "message.forwardedBundle.backToConversation" })}>
               <ArrowLeft size={16} />
             </Button>

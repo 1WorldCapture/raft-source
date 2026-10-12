@@ -78,14 +78,14 @@ export default function QuotedMessagePermalinkPreview({
 
   if (state.status === "loading") {
     return (
-      <div className="w-full animate-pulse border-2 border-black bg-white">
-        <div className="h-[34px] border-b-2 border-black bg-white/60" />
+      <div className="w-full animate-pulse border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white">
+        <div className="h-[34px] border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black bg-layer-panel/60 theme-brutal:bg-white/60" />
         <div className="flex gap-3 px-3 py-2.5">
-          <div className="size-7 shrink-0 border-2 border-black bg-black/5" />
+          <div className="size-7 shrink-0 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-fill-muted theme-brutal:bg-black/5" />
           <div className="flex-1 space-y-2">
-            <div className="h-3 w-32 bg-black/10" />
-            <div className="h-3 w-full bg-black/10" />
-            <div className="h-3 w-3/4 bg-black/10" />
+            <div className="h-3 w-32 bg-fill-muted theme-brutal:bg-black/10" />
+            <div className="h-3 w-full bg-fill-muted theme-brutal:bg-black/10" />
+            <div className="h-3 w-3/4 bg-fill-muted theme-brutal:bg-black/10" />
           </div>
         </div>
       </div>

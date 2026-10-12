@@ -35,7 +35,7 @@ export interface MessageHoverToolbarProps {
 }
 
 // Flush square buttons; hover tint matches SegmentedControl's hover.
-const BUTTON = "flex size-6 items-center justify-center hover:bg-soft-signal/30";
+const BUTTON = "flex size-6 items-center justify-center hover:bg-primary-soft/30 theme-brutal:hover:bg-soft-signal/30";
 
 export function MessageHoverToolbar({
   isSaved,
@@ -57,7 +57,7 @@ export function MessageHoverToolbar({
       // Keep the transparent toolbar hit-testable. Half of it sits above the
       // row; disabling its pointer events makes the row lose :hover while the
       // cursor crosses that edge, so the controls can disappear under a click.
-      className={`absolute -top-3.5 right-2 z-20 flex items-center overflow-hidden border-2 border-black bg-white shadow-brutal-sm transition-opacity ${
+      className={`absolute -top-3.5 right-2 z-20 flex items-center overflow-hidden border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white shadow-raft-xs theme-brutal:shadow-brutal-sm transition-opacity ${
         reactionActive
           ? "opacity-100"
           : "opacity-0 group-hover/message:opacity-100 group-focus-within/message:opacity-100"
@@ -70,7 +70,7 @@ export function MessageHoverToolbar({
           onClick={onReplyInThread}
           aria-label={formatMessage({ id: "message.messageItem.replyInThread" })}
           data-message-affordance="thread"
-          className={`${BUTTON} text-black/50 hover:text-black`}
+          className={`${BUTTON} text-foreground-muted theme-brutal:text-black/50 hover:text-foreground-strong theme-brutal:hover:text-black`}
         >
           <MessageSquare size={13} />
         </button>
@@ -82,7 +82,7 @@ export function MessageHoverToolbar({
           aria-label={formatMessage({ id: "message.messageItem.addReaction" })}
           aria-expanded={reactionActive}
           data-message-affordance="reaction"
-          className={`${BUTTON} ${reactionActive ? "text-black" : "text-black/50 hover:text-black"}`}
+          className={`${BUTTON} ${reactionActive ? "text-foreground-strong theme-brutal:text-black" : "text-foreground-muted theme-brutal:text-black/50 hover:text-foreground-strong theme-brutal:hover:text-black"}`}
         >
           <SmilePlus size={13} strokeWidth={2} />
         </button>
@@ -92,7 +92,7 @@ export function MessageHoverToolbar({
         onClick={onToggleSave}
         aria-label={isSaved ? formatMessage({ id: "message.messageItem.removeFromSaved" }) : formatMessage({ id: "message.messageItem.saveMessage" })}
         data-message-affordance="bookmark"
-        className={`${BUTTON} ${isSaved ? "text-brutal-orange" : "text-black/50 hover:text-black"}`}
+        className={`${BUTTON} ${isSaved ? "text-brutal-orange" : "text-foreground-muted theme-brutal:text-black/50 hover:text-foreground-strong theme-brutal:hover:text-black"}`}
       >
         <Bookmark size={13} fill={isSaved ? "currentColor" : "none"} />
       </button>
