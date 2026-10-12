@@ -51,9 +51,11 @@ async function prepareBackupDirectory(input: {
   await assertRealDirectory(input.agentBackupRoot, "MIGRATION_WORKSPACE_ARCHIVE_AGENT_ROOT_INVALID");
 }
 
-async function pruneAgentMigrationWorkspaceBackups(input: {
+export async function pruneAgentMigrationWorkspaceBackups(input: {
   agentBackupRoot: string;
   now: Date;
+  /** Called with each backup directory about to be removed (the disk janitor reports it). */
+  beforeRemove?: (entry: { name: string; modifiedAtMs: number }) => Promise<void>;
 }): Promise<void> {
   const entries = await readdir(input.agentBackupRoot, { withFileTypes: true });
   const directories = await Promise.all(entries.filter((entry) => entry.isDirectory()).map(async (entry) => ({
@@ -64,6 +66,7 @@ async function pruneAgentMigrationWorkspaceBackups(input: {
   const cutoffMs = input.now.getTime() - AGENT_MIGRATION_WORKSPACE_BACKUP_MAX_AGE_MS;
   await Promise.all(directories.map(async (entry, index) => {
     if (index < AGENT_MIGRATION_WORKSPACE_BACKUP_MAX_PER_AGENT && entry.modifiedAtMs >= cutoffMs) return;
+    await input.beforeRemove?.(entry);
     await rm(path.join(input.agentBackupRoot, entry.name), { recursive: true, force: true });
   }));
 }

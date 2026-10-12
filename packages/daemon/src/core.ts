@@ -6,6 +6,7 @@ import { accessSync, createReadStream, createWriteStream, readFileSync } from "n
 
 import { formatCommitShort, readDaemonProvenance, type BuildProvenance } from "./buildProvenance.js";
 import { ProbeGate } from "./probeGate.js";
+import { runRaftDiskJanitor, scheduleRaftDiskJanitor } from "./raftDiskJanitor.js";
 import { mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { Readable } from "node:stream";
@@ -1572,6 +1573,7 @@ export class DaemonCore {
   private machineContextConflict = false;
   private localTraceSink: LocalRotatingTraceSink | null = null;
   private traceBundleUploader: DaemonTraceBundleUploader | null = null;
+  private diskJanitor: { stop(): void } | null = null;
   private readonly coreStartingAgentIds = new Set<string>();
   private readonly coreStartPendingDeliveries = new Map<string, AgentDeliverMessage[]>();
   private readonly acceptedStartDispatches = new Map<string, AgentStartAckMessage>();
@@ -1749,6 +1751,47 @@ export class DaemonCore {
     this.agentManager.setCliTransportTraceDir(path.join(machineDir, "traces"));
   }
 
+  /**
+   * Bounded daily cleanup of Raft Computer's own migration data under
+   * SLOCK_HOME (never agent workspaces). Several daemons may share one
+   * SLOCK_HOME; every removal is idempotent. `SLOCK_DAEMON_DISK_JANITOR_DISABLED=1`
+   * turns it off.
+   */
+  private installDiskJanitor(): void {
+    if (this.diskJanitor || process.env.SLOCK_DAEMON_DISK_JANITOR_DISABLED === "1") return;
+    this.diskJanitor = scheduleRaftDiskJanitor({ pass: () => this.runDiskJanitorPass() });
+  }
+
+  private async runDiskJanitorPass(): Promise<void> {
+    const startedAtMs = currentTimeMs();
+    try {
+      const result = await runRaftDiskJanitor({ slockHome: this.slockHome });
+      for (const removal of result.backupsRemoved) {
+        this.recordDaemonTrace("daemon.disk_janitor.backup_removed", {
+          owner_agent_id: removal.ownerAgentId,
+          backup_kind: removal.backupKind,
+          age_days: removal.ageDays,
+          freed_bytes: removal.freedBytes,
+        });
+      }
+      this.recordDaemonTrace("daemon.disk_janitor.run", {
+        outcome: "ok",
+        migration_generations_cleaned: result.migrationGenerationsCleaned,
+        migration_freed_bytes: result.migrationFreedBytes,
+        backups_removed: result.backupsRemoved.length,
+        backups_freed_bytes: result.backupsFreedBytes,
+        sweep_outcome: result.sweepOutcome,
+        duration_ms: currentTimeMs() - startedAtMs,
+      });
+    } catch (error) {
+      this.recordDaemonTrace("daemon.disk_janitor.run", {
+        outcome: "failed",
+        error_class: error instanceof Error ? error.name : "unknown",
+        duration_ms: currentTimeMs() - startedAtMs,
+      }, "error");
+    }
+  }
+
   private installTraceBundleUploader(machineDir: string): void {
     if (!this.shouldEnableLocalTrace()) return;
     if (this.traceBundleUploader) return;
@@ -1799,6 +1842,7 @@ export class DaemonCore {
       logger.info(`[Slock Daemon] Acquired machine lock: ${this.machineLock.lockDir}`);
       this.installLocalTraceSink(this.machineLock.machineDir);
       this.installTraceBundleUploader(this.machineLock.machineDir);
+      this.installDiskJanitor();
       const span = this.tracer.startSpan("daemon.lifecycle.start", {
         surface: "daemon",
         kind: "internal",
@@ -1822,6 +1866,8 @@ export class DaemonCore {
       void this.stopMigrationTransport();
       this.traceBundleUploader?.stop();
       this.traceBundleUploader = null;
+      this.diskJanitor?.stop();
+      this.diskJanitor = null;
       this.machineLock.release();
       this.machineLock = null;
       throw err;
@@ -1847,6 +1893,8 @@ export class DaemonCore {
     this.scopedAppStorageObserver = null;
     this.traceBundleUploader?.stop();
     this.traceBundleUploader = null;
+    this.diskJanitor?.stop();
+    this.diskJanitor = null;
     try {
       await this.agentManager.stopAll();
       span.addEvent("daemon.agents.stopped");
