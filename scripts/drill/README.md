@@ -101,6 +101,19 @@ record was `cli` at the moment of the throw and got rewritten to `app`
 afterwards — which is exactly the ambiguity that left one 0.2.5 investigation
 open. Snapshot before you click, snapshot after, and diff.
 
+### Archive the evidence BEFORE you delete the root
+
+`--cleanup` removes the whole staging root, and the evidence lives inside it.
+Copy anything you intend to argue from to a durable location **first** — Anna's
+0.2.6 root B run archived its 7 screenshots under
+`notes/drill-logs/<root>/` *before* teardown; an earlier run of mine deleted the
+root with its evidence still inside, leaving only quoted text in the thread.
+
+Worth keeping, at minimum: the owner record snapshots from both sides of the
+click, the app/service log tails, and the exact command output a verdict rests
+on. Sanity-check it before deleting: **is every claim I am about to make still
+backed by a file that exists?**
+
 ## What is still unexplained
 
 A 0.2.5 drill saw the app's `Start` fail with
