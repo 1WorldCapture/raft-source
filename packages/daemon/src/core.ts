@@ -197,7 +197,7 @@ const MIGRATION_OBJECT_STORE_DOWNLOAD_RETRY_MAX_MS = 250;
 // connection must not re-run it on every reconnect-driven re-request: a
 // completed detection (live or unsupported — not a transient error) is served
 // from cache for this long, concurrent requests for the same runtime join one
-// detection, and a request carrying `refresh` bypasses both.
+// detection, and a request carrying `refresh` bypasses the cache only (it still joins an in-flight detection).
 const RUNTIME_MODEL_DETECT_CACHE_TTL_MS = 5 * 60_000;
 
 function migrationStatePathSegment(value: string): string {
@@ -3759,8 +3759,8 @@ export class DaemonCore {
    * CLI (some take seconds), so concurrent `machine:runtime_models:detect`
    * requests for the same runtime join one detection, and a completed
    * non-error outcome is served from a 5-minute cache so a flapping connection
-   * cannot re-spawn every runtime CLI on each reconnect. `refresh` bypasses
-   * both. The error outcome is never cached (usually transient), so a failed
+   * cannot re-spawn every runtime CLI on each reconnect. `refresh` bypasses the cache
+   * only and still joins an in-flight detection. The error outcome is never cached (usually transient), so a failed
    * detection is retried on the next request.
    */
   private detectRuntimeModelJoined(
