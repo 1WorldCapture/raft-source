@@ -428,9 +428,10 @@ test("Activity in-review task badge uses the canonical lavender status color", (
   assert.ok(taskBadge);
   assert.equal(taskBadge.getAttribute("data-slot"), "badge");
   assert.equal(taskBadge.getAttribute("data-status"), "in_review");
-  assert.match(brutalView(taskBadge.className), /(?:^|\s)bg-brutal-lavender(?:\s|$)/);
-  assert.doesNotMatch(brutalView(taskBadge.className), /(?:^|\s)bg-accent-400(?:\s|$)/);
-  assert.equal(taskBadge.style.backgroundColor, "var(--color-brutal-lavender)");
+  assert.match(taskBadge.className, /(?:^|\s)theme-brutal:bg-brutal-lavender(?:\s|$)/);
+  // The Badge variant (bg-accent-400) stays in the class list now; Brutal beats it with the important variable class.
+  assert.match(taskBadge.className, /(?:^|\s)theme-brutal:bg-\(--task-status-bg\)!(?:\s|$)/);
+  assert.equal(taskBadge.style.getPropertyValue("--task-status-bg"), "var(--color-brutal-lavender)");
 });
 
 test("Activity todo task badge pins the same canonical orange used by Chat", () => {
@@ -447,6 +448,6 @@ test("Activity todo task badge pins the same canonical orange used by Chat", () 
   );
   assert.ok(taskBadge);
   assert.equal(taskBadge.getAttribute("data-status"), "todo");
-  assert.match(brutalView(taskBadge.className), /(?:^|\s)bg-brutal-orange(?:\s|$)/);
-  assert.equal(taskBadge.style.backgroundColor, "var(--color-brutal-orange)");
+  assert.match(taskBadge.className, /(?:^|\s)theme-brutal:bg-brutal-orange(?:\s|$)/);
+  assert.equal(taskBadge.style.getPropertyValue("--task-status-bg"), "var(--color-brutal-orange)");
 });

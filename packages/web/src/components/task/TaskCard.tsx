@@ -8,7 +8,7 @@ import InlineBadgeEditor from "../InlineBadgeEditor";
 import { useIntl } from "react-intl";
 import { StatusBadge } from "./StatusBadge";
 
-import { STATUS_STYLES, canEditTaskStatus, getTaskStatusOptions } from "./taskStatusUi";
+import { STATUS_STYLES, canEditTaskStatus, getTaskStatusOptions, taskStatusBgClass } from "./taskStatusUi";
 
 // Memoized so a single task update (status change, drag-reorder, socket
 // task:* broadcast) re-renders only the changed card, not the whole board.
@@ -106,7 +106,7 @@ function TaskCard({ task, onOpen, onOpenInNewTab, onDragStart, showChannelName =
               open={editingStatus}
               onToggle={() => setEditingStatus((prev) => !prev)}
               onRequestClose={() => setEditingStatus(false)}
-              badgeClassName={style.bg}
+              badgeClassName={taskStatusBgClass(task.status)}
               uppercase={false}
               dropdownMinWidth="min-w-[140px]"
               dropdownAlign="right"
