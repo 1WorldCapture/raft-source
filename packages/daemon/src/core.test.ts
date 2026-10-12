@@ -15,6 +15,7 @@ import { asAxSurfaceText, type AxSurfaceText,
   AGENT_MIGRATION_RESUMABLE_PROTOCOL,
   AGENT_MIGRATION_SOURCE_WORKSPACE_ARCHIVE_CAPABILITY,
   COMPUTER_CAPABILITY_SUPERVISOR_MUTATIONS,
+  PROVIDER_PROBE_CAPABILITY,
   WIKI_WORKSPACE_PACK_CAPABILITY,
   canonicalizeWikiWorkspacePackFiles,
   createTraceScopeTracer,
@@ -281,6 +282,7 @@ test("DaemonCore ready stamps the Computer SEA baked daemon version", async () =
     assert.equal(ready?.daemonVersion, "0.72.4-sea");
     assert.equal(ready?.capabilities?.includes(COMPUTER_CAPABILITY_SUPERVISOR_MUTATIONS), false);
     assert.equal(ready?.capabilities?.includes(REMINDER_FIRE_REQUEST_CAPABILITY), true);
+    assert.equal(ready?.capabilities?.includes(PROVIDER_PROBE_CAPABILITY), true);
 
     await core.stop();
     core = null;
@@ -288,6 +290,41 @@ test("DaemonCore ready stamps the Computer SEA baked daemon version", async () =
     if (core) await core.stop();
     if (previous === undefined) delete process.env.RAFT_DAEMON_VERSION;
     else process.env.RAFT_DAEMON_VERSION = previous;
+    await rm(dataDir, { recursive: true, force: true });
+  }
+});
+
+test("DaemonCore ready advertises the provider probe capability", async () => {
+  const dataDir = await mkdtemp(path.join(os.tmpdir(), "slock-daemon-probe-ready-test-"));
+  const sockets: FakeWebSocket[] = [];
+  let core: DaemonCore | null = null;
+  try {
+    core = newCore({
+      serverUrl: "https://daemon.example.com",
+      apiKey: "sk_machine_test",
+      dataDir,
+      runtimeDetector: () => ({ ids: ["builtin"], versions: { builtin: "1.1.0" } }),
+      connectionOptions: {
+        wsFactory: () => {
+          const socket = new FakeWebSocket();
+          sockets.push(socket);
+          return socket;
+        },
+      },
+    });
+    core.start();
+    const socket = sockets[0];
+    assert.ok(socket, "wsFactory should create a websocket");
+    socket.emitOpen();
+    const ready = socket.sent.find((msg): msg is Extract<MachineToServerMessage, { type: "ready" }> =>
+      typeof msg === "object" && msg !== null && (msg as { type?: string }).type === "ready"
+    );
+    assert.equal(ready?.capabilities?.includes(PROVIDER_PROBE_CAPABILITY), true);
+    assert.equal(ready?.runtimeVersions?.builtin, "1.1.0");
+    await core.stop();
+    core = null;
+  } finally {
+    if (core) await core.stop();
     await rm(dataDir, { recursive: true, force: true });
   }
 });
