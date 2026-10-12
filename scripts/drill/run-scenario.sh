@@ -26,7 +26,7 @@ REF="${4:-HEAD}"
 
 : "${RAFT_TEST_EMAIL:?set RAFT_TEST_EMAIL}"
 : "${RAFT_TEST_PASSWORD:?set RAFT_TEST_PASSWORD}"
-BASE_URL="${RAFT_TEST_BASE_URL:-https://raft.tailf3efbe.ts.net:8443}"
+BASE_URL="${RAFT_TEST_BASE_URL:-https://xai.tailf3efbe.ts.net:8443}"
 # Owner policy: tailnet names only. Refuse to start a drill against the public
 # 1wc.io names, where a local proxy can cut TLS and look like a server fault.
 drill::assert_tailscale_endpoint "$BASE_URL"
