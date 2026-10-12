@@ -346,13 +346,13 @@ function SocialProviderIcon({ providerId }: { providerId: SocialAuthProviderId }
   }
   if (providerId === "apple") {
     return (
-      <span className="inline-flex size-[18px] shrink-0 items-center justify-center text-black">
+      <span className="inline-flex size-[18px] shrink-0 items-center justify-center text-foreground-strong theme-brutal:text-black">
         <AppleLogo className="size-4" />
       </span>
     );
   }
   return (
-    <span className="inline-flex size-[18px] shrink-0 items-center justify-center text-black">
+    <span className="inline-flex size-[18px] shrink-0 items-center justify-center text-foreground-strong theme-brutal:text-black">
       <GitHubLogo className="size-4" />
     </span>
   );
@@ -608,7 +608,7 @@ export function AccountSection({
               aria-label={avatarSaving ? formatMessage({ id: "settings.common.uploadingAvatar" }) : formatMessage({ id: "settings.common.uploadImage" })}
             >
               <AvatarSlot context="profile-tile" type="human" humanAvatarUrl={user?.avatarUrl} email={user?.email} />
-              <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity group-hover:opacity-100">
+              <div className="absolute inset-0 flex items-center justify-center bg-foreground/40 theme-brutal:bg-black/40 opacity-0 transition-opacity group-hover:opacity-100">
                 <Upload size={18} className="text-white" />
               </div>
               <input
@@ -639,7 +639,7 @@ export function AccountSection({
                 setDisplayName(e.target.value);
                 setSaved(false);
               }}
-              className="w-full border-2 border-black p-2 text-sm shadow-brutal-sm focus:shadow-brutal focus:outline-none"
+              className="w-full border theme-brutal:border-2 border-line-strong theme-brutal:border-black p-2 text-sm shadow-raft-xs theme-brutal:shadow-brutal-sm focus:shadow-raft-sm theme-brutal:focus:shadow-brutal focus:outline-none"
             />
           </FormField>
           <FormField label={formatMessage({ id: "settings.account.usernameLabel" })} labelStyle="plain" size="compact">
@@ -651,19 +651,19 @@ export function AccountSection({
               aria-readonly="true"
               tabIndex={-1}
               prefix="@"
-              className="border-black/30 bg-gray-50 shadow-none focus-within:shadow-none"
-              inputClassName="cursor-default text-sm text-black/60"
+              className="border-line-muted theme-brutal:border-black/30 bg-gray-50 shadow-none focus-within:shadow-none"
+              inputClassName="cursor-default text-sm text-foreground-muted theme-brutal:text-black/60"
             />
           </FormField>
           <FormField label={formatMessage({ id: "settings.account.emailLabel" })} labelStyle="plain" size="compact">
             <div className="flex items-center gap-2">
               <span className="font-mono text-sm">{user?.email}</span>
               {user?.emailVerified ? (
-                <span className="inline-flex items-center gap-1 border border-black bg-brutal-lime px-1.5 text-[10px] font-bold uppercase">
+                <span className="inline-flex items-center gap-1 border border-line-strong theme-brutal:border-black bg-success-soft theme-brutal:bg-brutal-lime px-1.5 text-[10px] font-bold uppercase">
                   <Shield size={10} /> {formatMessage({ id: "settings.account.verified" })}
                 </span>
               ) : (
-                <span className="inline-flex items-center gap-1 border border-black bg-brutal-orange/30 px-1.5 text-[10px] font-bold uppercase">
+                <span className="inline-flex items-center gap-1 border border-line-strong theme-brutal:border-black bg-warning-soft/30 theme-brutal:bg-brutal-orange/30 px-1.5 text-[10px] font-bold uppercase">
                   {formatMessage({ id: "settings.account.unverified" })}
                 </span>
               )}
@@ -677,7 +677,7 @@ export function AccountSection({
           <button
             type="submit"
             disabled={!profileDirty || saving}
-            className="btn-brutal bg-brutal-pink px-3 py-1.5 text-xs flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="btn-brutal bg-accent-soft theme-brutal:bg-brutal-pink px-3 py-1.5 text-xs flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {saving ? formatMessage({ id: "settings.common.saving" }) : saved ? (
               <><Check size={14} /> {formatMessage({ id: "settings.common.saved" })}</>
@@ -686,7 +686,7 @@ export function AccountSection({
           </form>
 
         {/* Divider */}
-        <div className="border-t-2 border-black" />
+        <div className="border-t theme-brutal:border-t-2 border-line-strong theme-brutal:border-black" />
 
         {visibleProviders.length > 0 && (
           <>
@@ -700,14 +700,14 @@ export function AccountSection({
                       key={provider.id}
                       role="group"
                       aria-label={formatMessage({ id: "settings.account.providerAccountAria" }, { label: provider.label })}
-                      className="relative flex items-start justify-between gap-3 border-2 border-black/30 bg-white p-3 text-left transition-colors hover:border-black hover:shadow-brutal-sm"
+                      className="relative flex items-start justify-between gap-3 border theme-brutal:border-2 border-line-muted theme-brutal:border-black/30 bg-layer-panel theme-brutal:bg-white p-3 text-left transition-colors hover:border-line-strong theme-brutal:hover:border-black hover:shadow-raft-xs theme-brutal:hover:shadow-brutal-sm"
                     >
                       <div className="min-w-0 flex-1">
                         <div className="mb-1 flex items-center gap-2 text-xs">
                           <SocialProviderIcon providerId={provider.id} />
-                          <span className="font-bold text-black">{provider.label}</span>
+                          <span className="font-bold text-foreground-strong theme-brutal:text-black">{provider.label}</span>
                         </div>
-                        <div className="truncate text-xs text-black/50">
+                        <div className="truncate text-xs text-foreground-muted theme-brutal:text-black/50">
                           {identity?.providerEmail
                             ? formatMessage({ id: "settings.account.connectedAs" }, { email: identity.providerEmail })
                             : formatMessage({ id: "settings.account.notConnected" })}
@@ -718,7 +718,7 @@ export function AccountSection({
                           type="button"
                           onClick={() => handleConnectProvider(provider)}
                           disabled={linkingProviderId === provider.id}
-                          className="btn-brutal-sm shrink-0 bg-white px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                          className="btn-brutal-sm shrink-0 bg-layer-panel theme-brutal:bg-white px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           {linkingProviderId === provider.id ? formatMessage({ id: "settings.account.connecting" }) : formatMessage({ id: "settings.account.connect" })}
                         </button>
@@ -732,7 +732,7 @@ export function AccountSection({
                             setPendingDisconnectProvider(provider);
                           }}
                           aria-label={formatMessage({ id: "settings.account.disconnectAria" }, { label: provider.label })}
-                          className="btn-brutal-sm shrink-0 bg-white px-3 py-1.5 text-xs"
+                          className="btn-brutal-sm shrink-0 bg-layer-panel theme-brutal:bg-white px-3 py-1.5 text-xs"
                         >
                           {formatMessage({ id: "settings.account.disconnect" })}
                         </button>
@@ -751,14 +751,14 @@ export function AccountSection({
               )}
             </div>
 
-            <div className="border-t-2 border-black" />
+            <div className="border-t theme-brutal:border-t-2 border-line-strong theme-brutal:border-black" />
           </>
         )}
 
         {/* Password credential */}
         <div>
           {passwordChangeIntent && passwordConfigured === null ? (
-            <p className="text-xs text-black/60" role="status">
+            <p className="text-xs text-foreground-muted theme-brutal:text-black/60" role="status">
               {formatMessage({ id: "settings.account.loadingSignInMethods" })}
             </p>
           ) : passwordChangeIntent && passwordConfigured === false ? (
@@ -766,7 +766,7 @@ export function AccountSection({
               <div className="text-sm font-bold">
                 {formatMessage({ id: "settings.account.passwordManagedTitle" })}
               </div>
-              <p className="text-xs text-black/60">
+              <p className="text-xs text-foreground-muted theme-brutal:text-black/60">
                 {formatMessage(
                   { id: "settings.account.passwordManagedDescription" },
                   {
@@ -780,7 +780,7 @@ export function AccountSection({
             <div className="space-y-3">
               <div>
                 <div className="text-sm font-bold">{formatMessage({ id: "settings.account.setPassword" })}</div>
-                <p className="mt-1 text-xs text-black/60">
+                <p className="mt-1 text-xs text-foreground-muted theme-brutal:text-black/60">
                   {formatMessage({ id: "settings.account.setPasswordDescription" })}
                 </p>
               </div>
@@ -796,7 +796,7 @@ export function AccountSection({
                 type="button"
                 onClick={() => void handleSendPasswordSetup()}
                 disabled={passwordSetupLoading}
-                className="btn-brutal bg-brutal-pink px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                className="btn-brutal bg-accent-soft theme-brutal:bg-brutal-pink px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {passwordSetupLoading
                   ? formatMessage({ id: "settings.account.sendingSetupEmail" })
@@ -827,7 +827,7 @@ export function AccountSection({
                   aria-label={formatMessage({ id: "settings.account.currentPassword" })}
                   value={currentPassword}
                   onChange={(e) => setCurrentPassword(e.target.value)}
-                  className="w-full border-2 border-black p-2 text-sm shadow-brutal-sm focus:shadow-brutal focus:outline-none"
+                  className="w-full border theme-brutal:border-2 border-line-strong theme-brutal:border-black p-2 text-sm shadow-raft-xs theme-brutal:shadow-brutal-sm focus:shadow-raft-sm theme-brutal:focus:shadow-brutal focus:outline-none"
                   required
                 />
               </FormField>
@@ -839,7 +839,7 @@ export function AccountSection({
                   aria-label={formatMessage({ id: "settings.account.newPassword" })}
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
-                  className="w-full border-2 border-black p-2 text-sm shadow-brutal-sm focus:shadow-brutal focus:outline-none"
+                  className="w-full border theme-brutal:border-2 border-line-strong theme-brutal:border-black p-2 text-sm shadow-raft-xs theme-brutal:shadow-brutal-sm focus:shadow-raft-sm theme-brutal:focus:shadow-brutal focus:outline-none"
                   placeholder={formatMessage({ id: "settings.account.minCharsPlaceholder" })}
                   required
                 />
@@ -852,7 +852,7 @@ export function AccountSection({
                   aria-label={formatMessage({ id: "settings.account.confirmPassword" })}
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
-                  className="w-full border-2 border-black p-2 text-sm shadow-brutal-sm focus:shadow-brutal focus:outline-none"
+                  className="w-full border theme-brutal:border-2 border-line-strong theme-brutal:border-black p-2 text-sm shadow-raft-xs theme-brutal:shadow-brutal-sm focus:shadow-raft-sm theme-brutal:focus:shadow-brutal focus:outline-none"
                   required
                 />
               </FormField>
@@ -862,13 +862,13 @@ export function AccountSection({
               )}
 
               {passwordSaved && (
-                <div className="border-2 border-black bg-brutal-lime/30 p-2 text-xs font-bold">{formatMessage({ id: "settings.account.passwordUpdated" })}</div>
+                <div className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-success-soft/30 theme-brutal:bg-brutal-lime/30 p-2 text-xs font-bold">{formatMessage({ id: "settings.account.passwordUpdated" })}</div>
               )}
 
               <button
                 type="submit"
                 disabled={saving}
-                className="btn-brutal bg-brutal-pink px-3 py-1.5 text-xs"
+                className="btn-brutal bg-accent-soft theme-brutal:bg-brutal-pink px-3 py-1.5 text-xs"
               >
                 {saving ? formatMessage({ id: "settings.account.updating" }) : formatMessage({ id: "settings.account.changePassword" })}
               </button>
@@ -907,7 +907,7 @@ export function AccountSection({
               : "settings.account.disconnecting",
           })}
           confirmColor={pendingDisconnectRequiresPassword
-            ? "bg-brutal-pink"
+            ? "bg-accent-soft theme-brutal:bg-brutal-pink"
             : undefined}
           chromeLocale="active"
           onConfirm={() => pendingDisconnectRequiresPassword
@@ -937,13 +937,13 @@ function AccountSignOutSection() {
         label={formatMessage({ id: "settings.session.sectionLabel" })}
       />
 
-      <div className="border-2 border-black bg-white shadow-brutal-sm p-4">
+      <div className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white shadow-raft-xs theme-brutal:shadow-brutal-sm p-4">
         <div className="flex items-center justify-between">
           <div>
-            <div className="text-sm font-bold text-black">
+            <div className="text-sm font-bold text-foreground-strong theme-brutal:text-black">
               {formatMessage({ id: "settings.session.logOutTitle" })}
             </div>
-            <p className="text-xs text-black/60 mt-0.5">
+            <p className="text-xs text-foreground-muted theme-brutal:text-black/60 mt-0.5">
               {formatMessage({ id: "settings.session.logOutDescription" })}
             </p>
           </div>
@@ -951,7 +951,7 @@ function AccountSignOutSection() {
             type="button"
             onClick={() => setShowConfirm(true)}
             data-testid="account-logout"
-            className="btn-brutal bg-brutal-orange px-4 py-2 [@media(max-height:600px)]:py-1 text-sm font-bold flex items-center gap-1.5 shrink-0 ml-4"
+            className="btn-brutal bg-warning-soft theme-brutal:bg-brutal-orange px-4 py-2 [@media(max-height:600px)]:py-1 text-sm font-bold flex items-center gap-1.5 shrink-0 ml-4"
           >
             {formatMessage({ id: "settings.session.logOutAction" })}
           </button>
@@ -1166,13 +1166,13 @@ function LanguageRegionSection() {
           label={formatMessage({ id: "settings.language.sectionLabel" })}
         />
 
-        <form onSubmit={handleSaveLanguageRegion} className="border-2 border-black bg-white shadow-brutal-sm p-4 space-y-4">
+        <form onSubmit={handleSaveLanguageRegion} className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white shadow-raft-xs theme-brutal:shadow-brutal-sm p-4 space-y-4">
           <div className="space-y-3">
             <div>
-              <div className="text-sm font-bold text-black">
+              <div className="text-sm font-bold text-foreground-strong theme-brutal:text-black">
                 {formatMessage({ id: "settings.language.displayLanguageTitle" })}
               </div>
-              <div className="text-xs text-black/60 mt-0.5">
+              <div className="text-xs text-foreground-muted theme-brutal:text-black/60 mt-0.5">
                 {formatMessage({ id: "settings.language.displayLanguageDescription" })}
               </div>
             </div>
@@ -1201,15 +1201,15 @@ function LanguageRegionSection() {
                 some pages may still be English while zh-cn is active. en never
                 shows this. Removed once all namespaces are migrated. */}
             {locale === "zh-cn" ? (
-              <div className="text-xs text-black/60 mt-0.5" data-testid="zh-coverage-notice">
+              <div className="text-xs text-foreground-muted theme-brutal:text-black/60 mt-0.5" data-testid="zh-coverage-notice">
                 {formatMessage({ id: "settings.language.zhCoverageNotice" })}
               </div>
             ) : null}
           </div>
           <div className="space-y-3">
             <div>
-              <div className="text-sm font-bold text-black">{formatMessage({ id: "settings.language.translationMode" })}</div>
-              <div className="text-xs text-black/60 mt-0.5">
+              <div className="text-sm font-bold text-foreground-strong theme-brutal:text-black">{formatMessage({ id: "settings.language.translationMode" })}</div>
+              <div className="text-xs text-foreground-muted theme-brutal:text-black/60 mt-0.5">
                 {formatMessage({ id: "settings.language.translationModeDesc" })}
               </div>
             </div>
@@ -1238,8 +1238,8 @@ function LanguageRegionSection() {
           {translationMode !== "off" ? (
             <div className="space-y-3">
               <div>
-                <div className="text-sm font-bold text-black">{formatMessage({ id: "settings.language.translationTarget" })}</div>
-                <div className="text-xs text-black/60 mt-0.5">
+                <div className="text-sm font-bold text-foreground-strong theme-brutal:text-black">{formatMessage({ id: "settings.language.translationTarget" })}</div>
+                <div className="text-xs text-foreground-muted theme-brutal:text-black/60 mt-0.5">
                   {formatMessage({ id: "settings.language.translationTargetDesc" }, { language: settings.effectiveLanguage?.toUpperCase() ?? "English" })}
                 </div>
               </div>
@@ -1270,8 +1270,8 @@ function LanguageRegionSection() {
           {translationMode !== "off" ? (
             <div className="space-y-3">
               <div>
-                <div className="text-sm font-bold text-black">{formatMessage({ id: "settings.language.defaultView" })}</div>
-                <div className="text-xs text-black/60 mt-0.5">
+                <div className="text-sm font-bold text-foreground-strong theme-brutal:text-black">{formatMessage({ id: "settings.language.defaultView" })}</div>
+                <div className="text-xs text-foreground-muted theme-brutal:text-black/60 mt-0.5">
                   {formatMessage({ id: "settings.language.defaultViewDesc" })}
                 </div>
               </div>
@@ -1306,7 +1306,7 @@ function LanguageRegionSection() {
           <button
             type="submit"
             disabled={!languageRegionDirty || savingLanguageRegion || settingsLoading}
-            className="btn-brutal bg-brutal-pink px-3 py-1.5 text-xs flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="btn-brutal bg-accent-soft theme-brutal:bg-brutal-pink px-3 py-1.5 text-xs flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {savingLanguageRegion ? formatMessage({ id: "settings.common.saving" }) : languageRegionSaved ? (
               <><Check size={14} /> {formatMessage({ id: "settings.common.saved" })}</>
@@ -1322,11 +1322,11 @@ function LanguageRegionSection() {
           label={formatMessage({ id: "settings.dateTime.sectionLabel" })}
         />
 
-        <form onSubmit={handleSaveDateTime} className="border-2 border-black bg-white shadow-brutal-sm p-4 space-y-4">
+        <form onSubmit={handleSaveDateTime} className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white shadow-raft-xs theme-brutal:shadow-brutal-sm p-4 space-y-4">
           <div className="space-y-3">
             <div>
-              <div className="text-sm font-bold text-black">{formatMessage({ id: "settings.dateTime.timezone" })}</div>
-              <div className="text-xs text-black/60 mt-0.5">
+              <div className="text-sm font-bold text-foreground-strong theme-brutal:text-black">{formatMessage({ id: "settings.dateTime.timezone" })}</div>
+              <div className="text-xs text-foreground-muted theme-brutal:text-black/60 mt-0.5">
                 {formatMessage({ id: "settings.dateTime.timezoneDesc" })}
               </div>
             </div>
@@ -1352,8 +1352,8 @@ function LanguageRegionSection() {
               </SelectContent>
             </Select>
             <div>
-              <div className="text-sm font-bold text-black">{formatMessage({ id: "settings.dateTime.timeFormat" })}</div>
-              <div className="text-xs text-black/60 mt-0.5">
+              <div className="text-sm font-bold text-foreground-strong theme-brutal:text-black">{formatMessage({ id: "settings.dateTime.timeFormat" })}</div>
+              <div className="text-xs text-foreground-muted theme-brutal:text-black/60 mt-0.5">
                 {formatMessage({ id: "settings.dateTime.timeFormatDesc" })}
               </div>
             </div>
@@ -1384,7 +1384,7 @@ function LanguageRegionSection() {
           <button
             type="submit"
             disabled={!dateTimeDirty || savingDateTime || settingsLoading}
-            className="btn-brutal bg-brutal-pink px-3 py-1.5 text-xs flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="btn-brutal bg-accent-soft theme-brutal:bg-brutal-pink px-3 py-1.5 text-xs flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {savingDateTime ? formatMessage({ id: "settings.common.saving" }) : dateTimeSaved ? (
               <><Check size={14} /> {formatMessage({ id: "settings.common.saved" })}</>
@@ -1579,33 +1579,33 @@ function NotificationsSection() {
         label={formatMessage({ id: "settings.notifications.sectionLabel" })}
       />
 
-      <div className="border-2 border-black bg-white shadow-brutal-sm p-4 space-y-3">
+      <div className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white shadow-raft-xs theme-brutal:shadow-brutal-sm p-4 space-y-3">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <div className="text-sm font-bold text-black">{formatMessage({ id: "settings.notifications.mainTitle" })}</div>
-            <div className="text-xs text-black/60 mt-0.5">
+            <div className="text-sm font-bold text-foreground-strong theme-brutal:text-black">{formatMessage({ id: "settings.notifications.mainTitle" })}</div>
+            <div className="text-xs text-foreground-muted theme-brutal:text-black/60 mt-0.5">
               {formatMessage({ id: "settings.notifications.mainDescription" })}
             </div>
           </div>
-          <span className="inline-flex shrink-0 border-2 border-black bg-soft-signal px-2 py-1 text-[10px] font-bold uppercase">
+          <span className="inline-flex shrink-0 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-primary-soft theme-brutal:bg-soft-signal px-2 py-1 text-[10px] font-bold uppercase">
             {statusLabel}
           </span>
         </div>
 
         {permission === "unsupported" && (
-          <div className="text-xs text-black/60">
+          <div className="text-xs text-foreground-muted theme-brutal:text-black/60">
             {formatMessage({ id: "settings.notifications.unsupportedHint" })}
           </div>
         )}
 
         {permission !== "unsupported" && !serverConfigured && !loading && (
-          <div className="text-xs text-black/60">
+          <div className="text-xs text-foreground-muted theme-brutal:text-black/60">
             {formatMessage({ id: "settings.notifications.notConfiguredHint" })}
           </div>
         )}
 
         {permission === "denied" && (
-          <div className="text-xs text-black/60">
+          <div className="text-xs text-foreground-muted theme-brutal:text-black/60">
             {formatMessage({ id: "settings.notifications.deniedHint" })}
           </div>
         )}
@@ -1615,7 +1615,7 @@ function NotificationsSection() {
         )}
 
         {message && (
-          <div className="border-2 border-black bg-brutal-lime/30 p-2 text-xs font-bold">{message}</div>
+          <div className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-success-soft/30 theme-brutal:bg-brutal-lime/30 p-2 text-xs font-bold">{message}</div>
         )}
 
         <div className="flex gap-2">
@@ -1624,14 +1624,14 @@ function NotificationsSection() {
               <button
                 onClick={handleDisable}
                 disabled={busy || testing}
-                className="btn-brutal bg-white px-3 py-1.5 text-xs"
+                className="btn-brutal bg-layer-panel theme-brutal:bg-white px-3 py-1.5 text-xs"
               >
                 {busy ? formatMessage({ id: "settings.notifications.disabling" }) : formatMessage({ id: "settings.notifications.disable" })}
               </button>
               <button
                 onClick={handleSendTest}
                 disabled={busy || testing || permission === "unsupported" || !serverConfigured}
-                className="btn-brutal bg-brutal-lime px-3 py-1.5 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
+                className="btn-brutal bg-success-soft theme-brutal:bg-brutal-lime px-3 py-1.5 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {testing ? formatMessage({ id: "settings.notifications.sending" }) : formatMessage({ id: "settings.notifications.sendTest" })}
               </button>
@@ -1640,7 +1640,7 @@ function NotificationsSection() {
             <button
               onClick={handleEnable}
               disabled={busy || testing || permission === "unsupported" || !serverConfigured}
-              className="btn-brutal bg-brutal-pink px-3 py-1.5 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
+              className="btn-brutal bg-accent-soft theme-brutal:bg-brutal-pink px-3 py-1.5 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {busy ? formatMessage({ id: "settings.notifications.enabling" }) : formatMessage({ id: "settings.notifications.enable" })}
             </button>
@@ -1648,7 +1648,7 @@ function NotificationsSection() {
         </div>
 
         {currentServer && (
-          <div className="border-t-2 border-black/20 pt-3">
+          <div className="border-t theme-brutal:border-t-2 border-line-muted theme-brutal:border-black/20 pt-3">
             <form onSubmit={handleSaveServerMute} className="space-y-3">
               <label className={`flex items-start gap-3 ${loading || busy || testing || muting ? "opacity-60" : ""}`}>
                 <Checkbox
@@ -1663,8 +1663,8 @@ function NotificationsSection() {
                   className="mt-0.5"
                 />
                 <span className="min-w-0">
-                  <span className="block text-sm font-bold text-black">{formatMessage({ id: "settings.notifications.muteServerTitle" })}</span>
-                  <span className="block text-xs text-black/60 mt-0.5">
+                  <span className="block text-sm font-bold text-foreground-strong theme-brutal:text-black">{formatMessage({ id: "settings.notifications.muteServerTitle" })}</span>
+                  <span className="block text-xs text-foreground-muted theme-brutal:text-black/60 mt-0.5">
                     {formatMessage({ id: "settings.notifications.muteServerDescription" }, { serverName: currentServer.name })}
                   </span>
                 </span>
@@ -1673,7 +1673,7 @@ function NotificationsSection() {
                 <button
                   type="submit"
                   disabled={serverPushMuted === savedServerPushMuted || loading || busy || testing || muting}
-                  className="btn-brutal bg-brutal-pink px-3 py-1.5 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="btn-brutal bg-accent-soft theme-brutal:bg-brutal-pink px-3 py-1.5 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {muting ? formatMessage({ id: "settings.common.saving" }) : formatMessage({ id: "settings.common.save" })}
                 </button>
@@ -1860,7 +1860,7 @@ function ProfileSection() {
               aria-label={avatarSaving ? formatMessage({ id: "settings.common.uploadingAvatar" }) : formatMessage({ id: "settings.common.uploadImage" })}
             >
               <AvatarSlot context="profile-tile" type="server" serverAvatarUrl={server.avatarUrl} serverInitial={serverInitial} />
-              <span className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity group-hover:opacity-100">
+              <span className="absolute inset-0 flex items-center justify-center bg-foreground/40 theme-brutal:bg-black/40 opacity-0 transition-opacity group-hover:opacity-100">
                 <Upload size={18} className="text-white" />
               </span>
               <input
@@ -1876,7 +1876,7 @@ function ProfileSection() {
               />
             </label>
           ) : (
-            <AvatarSlot context="profile-tile" type="server" serverAvatarUrl={server.avatarUrl} serverInitial={serverInitial} className="border-black/30" />
+            <AvatarSlot context="profile-tile" type="server" serverAvatarUrl={server.avatarUrl} serverInitial={serverInitial} className="border-line-muted theme-brutal:border-black/30" />
           )
         }
       >
@@ -1892,12 +1892,12 @@ function ProfileSection() {
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 maxLength={100}
-                className="w-full border-2 border-black p-2 text-sm shadow-brutal-sm focus:shadow-brutal focus:outline-none"
+                className="w-full border theme-brutal:border-2 border-line-strong theme-brutal:border-black p-2 text-sm shadow-raft-xs theme-brutal:shadow-brutal-sm focus:shadow-raft-sm theme-brutal:focus:shadow-brutal focus:outline-none"
               />
             ) : (
               <div
                 data-testid="server-profile-name-readonly"
-                className="w-full border-2 border-black/30 bg-gray-50 p-2 text-sm font-mono text-black/60"
+                className="w-full border theme-brutal:border-2 border-line-muted theme-brutal:border-black/30 bg-gray-50 p-2 text-sm font-mono text-foreground-muted theme-brutal:text-black/60"
               >
                 {server.name}
               </div>
@@ -1911,8 +1911,8 @@ function ProfileSection() {
               readOnly
               aria-readonly="true"
               tabIndex={-1}
-              className="border-black/30 bg-gray-50 shadow-none focus-within:shadow-none"
-              inputClassName="cursor-default text-sm text-black/60"
+              className="border-line-muted theme-brutal:border-black/30 bg-gray-50 shadow-none focus-within:shadow-none"
+              inputClassName="cursor-default text-sm text-foreground-muted theme-brutal:text-black/60"
             />
           </FormField>
 
@@ -1926,7 +1926,7 @@ function ProfileSection() {
               data-save-state={saving ? "saving" : saved ? "saved" : dirty ? "dirty" : "pristine"}
               type="submit"
               disabled={!dirty || saving}
-              className="btn-brutal bg-brutal-pink px-3 py-1.5 text-xs flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="btn-brutal bg-accent-soft theme-brutal:bg-brutal-pink px-3 py-1.5 text-xs flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {saving ? formatMessage({ id: "settings.common.saving" }) : saved ? (
                 <><Check size={14} /> {formatMessage({ id: "settings.common.saved" })}</>
@@ -1985,21 +1985,21 @@ function PublicChannelList({ channels }: { channels: PublicVisibilityReadback["e
   const scrollFrameClass = "max-h-[7.5rem] overflow-y-scroll";
   if (channels.length === 0) {
     return (
-      <div className={`border-2 border-dashed border-black/25 bg-gray-50 px-3 py-4 text-center text-xs text-black/55 ${scrollFrameClass}`}>
+      <div className={`border theme-brutal:border-2 border-dashed border-line-muted theme-brutal:border-black/25 bg-gray-50 px-3 py-4 text-center text-xs text-foreground-muted theme-brutal:text-black/55 ${scrollFrameClass}`}>
         {formatMessage({ id: "settings.publicVisibility.emptyChannels" })}
       </div>
     );
   }
   return (
-    <ul className={`divide-y divide-black/10 border-2 border-black bg-white ${scrollFrameClass}`} data-testid="public-visibility-channel-list">
+    <ul className={`divide-y divide-line-muted theme-brutal:divide-black/10 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white ${scrollFrameClass}`} data-testid="public-visibility-channel-list">
       {channels.map((channel) => (
         <li key={channel.id} className="flex h-[3.625rem] items-start gap-3 px-3 py-2.5">
-          <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center border border-black bg-brutal-cream" aria-hidden="true">
+          <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center border border-line-strong theme-brutal:border-black bg-layer-canvas-muted theme-brutal:bg-brutal-cream" aria-hidden="true">
             <Hash size={14} strokeWidth={2.5} />
           </span>
           <span className="min-w-0 flex-1">
-            <span className="block truncate text-sm font-bold text-black">{channel.name}</span>
-            {channel.description ? <span className="mt-0.5 block truncate text-xs text-black/55">{channel.description}</span> : null}
+            <span className="block truncate text-sm font-bold text-foreground-strong theme-brutal:text-black">{channel.name}</span>
+            {channel.description ? <span className="mt-0.5 block truncate text-xs text-foreground-muted theme-brutal:text-black/55">{channel.description}</span> : null}
           </span>
         </li>
       ))}
@@ -2068,13 +2068,13 @@ export function PublicVisibilitySection() {
         icon={<Globe2 size={16} />}
         label={formatMessage({ id: "settings.publicVisibility.sectionLabel" })}
       />
-      <div className="space-y-4 border-2 border-black bg-white p-4 shadow-brutal-sm">
+      <div className="space-y-4 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white p-4 shadow-raft-xs theme-brutal:shadow-brutal-sm">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
-            <h3 id="public-visibility-label" className="text-sm font-bold text-black">
+            <h3 id="public-visibility-label" className="text-sm font-bold text-foreground-strong theme-brutal:text-black">
               {formatMessage({ id: "settings.publicVisibility.title" })}
             </h3>
-            <p className="mt-1 text-xs leading-relaxed text-black/60">
+            <p className="mt-1 text-xs leading-relaxed text-foreground-muted theme-brutal:text-black/60">
               {formatMessage({ id: "settings.publicVisibility.description" })}
             </p>
           </div>
@@ -2095,7 +2095,7 @@ export function PublicVisibilitySection() {
           <div data-testid="public-visibility-url">
             <label
               htmlFor="public-visibility-url-input"
-              className="mb-1 block text-xs font-bold uppercase tracking-wide text-black/60"
+              className="mb-1 block text-xs font-bold uppercase tracking-wide text-foreground-muted theme-brutal:text-black/60"
             >
               {formatMessage({ id: "settings.publicVisibility.publicUrl" })}
             </label>
@@ -2140,11 +2140,11 @@ export function PublicVisibilitySection() {
         ) : null}
 
         <div>
-          <p className="mb-2 text-xs font-bold uppercase tracking-wide text-black/60">
+          <p className="mb-2 text-xs font-bold uppercase tracking-wide text-foreground-muted theme-brutal:text-black/60">
             {formatMessage({ id: "settings.publicVisibility.channelListLabel" })}
           </p>
           {loading ? (
-            <div className="h-16 animate-pulse border-2 border-black/15 bg-gray-100" data-testid="public-visibility-loading" />
+            <div className="h-16 animate-pulse border theme-brutal:border-2 border-line-muted theme-brutal:border-black/15 bg-gray-100" data-testid="public-visibility-loading" />
           ) : <PublicChannelList channels={channels} />}
         </div>
 
@@ -2156,11 +2156,11 @@ export function PublicVisibilitySection() {
           title={formatMessage({ id: "settings.publicVisibility.confirmTitle" })}
           message={(
             <div className="space-y-4">
-              <p className="text-sm leading-relaxed text-black/75">
+              <p className="text-sm leading-relaxed text-foreground-strong theme-brutal:text-black/75">
                 {formatMessage({ id: "settings.publicVisibility.confirmDescription" })}
               </p>
               <PublicChannelList channels={channels} />
-              <p className="text-xs leading-relaxed text-black/60">
+              <p className="text-xs leading-relaxed text-foreground-muted theme-brutal:text-black/60">
                 {formatMessage({ id: "settings.publicVisibility.confirmAudienceChange" })}
               </p>
             </div>
@@ -2286,7 +2286,7 @@ function LabsSection() {
         count={activeReadback?.labs.length}
       />
 
-      <div className="border-2 border-black bg-white p-4 shadow-brutal-sm">
+      <div className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white p-4 shadow-raft-xs theme-brutal:shadow-brutal-sm">
         {loading ? (
           <div className="space-y-3">
             <Skeleton className="h-10 w-full" />
@@ -2294,20 +2294,20 @@ function LabsSection() {
             <Skeleton className="h-16 w-full" />
           </div>
         ) : unavailable ? (
-          <div className="flex items-start gap-3 text-sm text-black/60">
-            <AlertTriangle size={16} className="mt-0.5 shrink-0 text-black/50" />
+          <div className="flex items-start gap-3 text-sm text-foreground-muted theme-brutal:text-black/60">
+            <AlertTriangle size={16} className="mt-0.5 shrink-0 text-foreground-muted theme-brutal:text-black/50" />
             <div>
-              <div className="font-bold text-black">{formatMessage({ id: "settings.labs.unavailableTitle" })}</div>
+              <div className="font-bold text-foreground-strong theme-brutal:text-black">{formatMessage({ id: "settings.labs.unavailableTitle" })}</div>
               <div className="mt-1 text-xs leading-5">{formatMessage({ id: "settings.labs.unavailableDescription" })}</div>
             </div>
           </div>
         ) : activeReadback ? (
           <div className="space-y-4">
-            <div className="flex items-start justify-between gap-4 border-b-2 border-black pb-4">
+            <div className="flex items-start justify-between gap-4 border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black pb-4">
               <div className="min-w-0">
-                <div className="text-sm font-bold text-black">{formatMessage({ id: "settings.labs.masterTitle" })}</div>
+                <div className="text-sm font-bold text-foreground-strong theme-brutal:text-black">{formatMessage({ id: "settings.labs.masterTitle" })}</div>
                 {!authority.canSetMasterAccess && (
-                  <div className="mt-1 text-xs font-mono text-black/45">
+                  <div className="mt-1 text-xs font-mono text-foreground-hint theme-brutal:text-black/45">
                     {formatMessage({ id: "settings.labs.masterOwnerOnly" })}
                   </div>
                 )}
@@ -2323,9 +2323,9 @@ function LabsSection() {
             </div>
 
             {activeReadback.labs.length === 0 ? (
-              <div className="text-xs text-black/40 italic">{formatMessage({ id: "settings.labs.emptyState" })}</div>
+              <div className="text-xs text-foreground-hint theme-brutal:text-black/40 italic">{formatMessage({ id: "settings.labs.emptyState" })}</div>
             ) : (
-              <div className="divide-y-2 divide-black/10" data-testid="server-labs-list">
+              <div className="divide-y-2 divide-line-muted theme-brutal:divide-black/10" data-testid="server-labs-list">
                 {activeReadback.labs.map((lab) => {
                   const editable = isServerLabEnrollmentEditable(lab, authority, activeReadback.masterEnabled);
                   const disabledReasonId = getServerLabEnrollmentDisabledReasonMessageId(lab, authority, activeReadback.masterEnabled);
@@ -2342,11 +2342,11 @@ function LabsSection() {
                     >
                       <div className="min-w-0">
                         <div className="flex min-w-0 flex-wrap items-center gap-2">
-                          <span className="min-w-0 truncate text-sm font-bold text-black">{lab.name}</span>
+                          <span className="min-w-0 truncate text-sm font-bold text-foreground-strong theme-brutal:text-black">{lab.name}</span>
                         </div>
-                        <div className="mt-1 text-xs leading-5 text-black/60">{description}</div>
+                        <div className="mt-1 text-xs leading-5 text-foreground-muted theme-brutal:text-black/60">{description}</div>
                         {disabledReason && (
-                          <div className="mt-1 text-xs font-mono text-black/45">{disabledReason}</div>
+                          <div className="mt-1 text-xs font-mono text-foreground-hint theme-brutal:text-black/45">{disabledReason}</div>
                         )}
                       </div>
                       <Switch
@@ -2580,9 +2580,9 @@ function AdminsSection() {
         count={admins.length}
       />
 
-      <div className="border-2 border-black bg-white shadow-brutal-sm p-4 space-y-4">
+      <div className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white shadow-raft-xs theme-brutal:shadow-brutal-sm p-4 space-y-4">
         <div>
-          <div className="mb-2 text-xs font-bold text-black/60">{formatMessage({ id: "settings.admins.addLabel" })}</div>
+          <div className="mb-2 text-xs font-bold text-foreground-muted theme-brutal:text-black/60">{formatMessage({ id: "settings.admins.addLabel" })}</div>
           <div className="flex flex-col gap-2 sm:flex-row">
             <div ref={pickerRef} className="relative min-w-0 sm:flex-[1_1_0%]">
               <button
@@ -2590,9 +2590,9 @@ function AdminsSection() {
                 data-testid="admin-principal-picker"
                 onClick={() => setPrincipalPickerOpen((open) => !open)}
                 disabled={candidates.length === 0 || savingPrincipalKey != null}
-                className="flex h-10 w-full min-w-0 items-center justify-between gap-2 border-2 border-black bg-white px-3 text-left text-xs font-bold shadow-brutal-sm transition-colors hover:bg-soft-signal/30 disabled:cursor-not-allowed disabled:opacity-50"
+                className="flex h-10 w-full min-w-0 items-center justify-between gap-2 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white px-3 text-left text-xs font-bold shadow-raft-xs theme-brutal:shadow-brutal-sm transition-colors hover:bg-primary-soft/30 theme-brutal:hover:bg-soft-signal/30 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                <span className={`truncate ${selectedCandidate ? "text-black" : "text-black/45"}`}>
+                <span className={`truncate ${selectedCandidate ? "text-foreground-strong theme-brutal:text-black" : "text-foreground-hint theme-brutal:text-black/45"}`}>
                   {selectedCandidate
                     ? selectedCandidate.kind === "human" && selectedCandidate.email
                       ? `${getAdminPrincipalLabel(selectedCandidate, formatMessage)} · ${selectedCandidate.email}`
@@ -2644,14 +2644,14 @@ function AdminsSection() {
               type="button"
               onClick={handlePromote}
               disabled={!selectedCandidate || selectedRoleOptions.length === 0 || savingPrincipalKey != null}
-              className="btn-brutal bg-brutal-pink px-3 py-2 [@media(max-height:600px)]:py-1 text-xs disabled:opacity-50 disabled:cursor-not-allowed sm:shrink-0"
+              className="btn-brutal bg-accent-soft theme-brutal:bg-brutal-pink px-3 py-2 [@media(max-height:600px)]:py-1 text-xs disabled:opacity-50 disabled:cursor-not-allowed sm:shrink-0"
             >
               {selectedCandidate && savingPrincipalKey === getAdminPrincipalKey(selectedCandidate) ? formatMessage({ id: "settings.common.saving" }) : formatMessage({ id: "settings.admins.updateRole" })}
             </button>
           </div>
         </div>
 
-        <div className="border-t-2 border-black pt-4">
+        <div className="border-t theme-brutal:border-t-2 border-line-strong theme-brutal:border-black pt-4">
           {admins.length > 0 ? (
             <div className="space-y-2">
               {admins.map((admin) => {
@@ -2678,12 +2678,12 @@ function AdminsSection() {
                           type="button"
                           onClick={() => handleDemote(admin)}
                           disabled={savingPrincipalKey != null}
-                          className="btn-brutal-sm shrink-0 bg-white px-2 py-1 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
+                          className="btn-brutal-sm shrink-0 bg-layer-panel theme-brutal:bg-white px-2 py-1 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                           {savingPrincipalKey === key ? formatMessage({ id: "settings.common.saving" }) : admin.role === "owner" ? formatMessage({ id: "settings.admins.removeOwner" }) : formatMessage({ id: "settings.admins.removeAdmin" })}
                         </button>
                       ) : (
-                        <span className="shrink-0 text-[10px] font-mono text-black/40">
+                        <span className="shrink-0 text-[10px] font-mono text-foreground-hint theme-brutal:text-black/40">
                           {admin.role === "owner" && ownerCount <= 1 ? formatMessage({ id: "settings.admins.lastOwner" }) : formatMessage({ id: "settings.admins.ownerOnly" })}
                         </span>
                       )
@@ -2693,7 +2693,7 @@ function AdminsSection() {
               })}
             </div>
           ) : (
-            <div className="text-xs text-black/40 italic">
+            <div className="text-xs text-foreground-hint theme-brutal:text-black/40 italic">
               {formatMessage({ id: "settings.admins.emptyState" })}
             </div>
           )}
@@ -2761,18 +2761,18 @@ function InvitesSection() {
         count={invites.length > 0 ? invites.length : null}
       />
 
-      <div className="border-2 border-black bg-white shadow-brutal-sm p-4">
+      <div className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white shadow-raft-xs theme-brutal:shadow-brutal-sm p-4">
         {invites.length > 0 ? (
           <div className="space-y-1.5">
             {invites.map((invite) => (
               <div
                 key={invite.id}
-                className="flex items-center gap-2 border-2 border-black/30 px-3 py-2"
+                className="flex items-center gap-2 border theme-brutal:border-2 border-line-muted theme-brutal:border-black/30 px-3 py-2"
               >
-                <span className="flex-1 font-mono text-xs text-black truncate">
+                <span className="flex-1 font-mono text-xs text-foreground-strong theme-brutal:text-black truncate">
                   {invite.invitedEmail}
                 </span>
-                <span className="text-[10px] text-black/40 font-mono shrink-0">
+                <span className="text-[10px] text-foreground-hint theme-brutal:text-black/40 font-mono shrink-0">
                   {formatDate(invite.createdAt, {
                     month: "short",
                     day: "numeric",
@@ -2780,7 +2780,7 @@ function InvitesSection() {
                 </span>
                 <button
                   onClick={() => setRevokeTarget(invite)}
-                  className="shrink-0 btn-brutal-sm bg-white p-1"
+                  className="shrink-0 btn-brutal-sm bg-layer-panel theme-brutal:bg-white p-1"
                   title={formatMessage({ id: "settings.invites.revokeInviteTitle" })}
                 >
                   <X size={12} />
@@ -2789,7 +2789,7 @@ function InvitesSection() {
             ))}
           </div>
         ) : !loading ? (
-          <div className="text-xs text-black/40 italic">
+          <div className="text-xs text-foreground-hint theme-brutal:text-black/40 italic">
             {formatMessage({ id: "settings.invites.emptyState" })}
           </div>
         ) : null}
@@ -2894,7 +2894,7 @@ function JoinLinksSection() {
         count={links.length > 0 ? links.length : null}
       />
 
-      <div className="border-2 border-black bg-white shadow-brutal-sm p-4">
+      <div className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white shadow-raft-xs theme-brutal:shadow-brutal-sm p-4">
         <form onSubmit={handleCreate} className="space-y-3">
           <div className="grid gap-3 md:grid-cols-2">
             <FormField label={formatMessage({ id: "settings.joinLinks.maxUses" })} labelStyle="plain" size="compact" htmlFor="join-link-max-uses">
@@ -2905,7 +2905,7 @@ function JoinLinksSection() {
                 value={maxUses}
                 onChange={(e) => setMaxUses(e.target.value)}
                 placeholder={formatMessage({ id: "settings.joinLinks.unlimited" })}
-                className="w-full border-2 border-black p-2 text-sm shadow-brutal-sm focus:shadow-brutal focus:outline-none"
+                className="w-full border theme-brutal:border-2 border-line-strong theme-brutal:border-black p-2 text-sm shadow-raft-xs theme-brutal:shadow-brutal-sm focus:shadow-raft-sm theme-brutal:focus:shadow-brutal focus:outline-none"
               />
             </FormField>
 
@@ -2915,7 +2915,7 @@ function JoinLinksSection() {
                 type="datetime-local"
                 value={expiresAt}
                 onChange={(e) => setExpiresAt(e.target.value)}
-                className="w-full border-2 border-black p-2 text-sm shadow-brutal-sm focus:shadow-brutal focus:outline-none"
+                className="w-full border theme-brutal:border-2 border-line-strong theme-brutal:border-black p-2 text-sm shadow-raft-xs theme-brutal:shadow-brutal-sm focus:shadow-raft-sm theme-brutal:focus:shadow-brutal focus:outline-none"
               />
             </FormField>
           </div>
@@ -2929,41 +2929,41 @@ function JoinLinksSection() {
           <button
             type="submit"
             disabled={creating}
-            className="btn-brutal bg-brutal-pink px-3 py-1.5 text-xs flex items-center gap-1.5"
+            className="btn-brutal bg-accent-soft theme-brutal:bg-brutal-pink px-3 py-1.5 text-xs flex items-center gap-1.5"
           >
             <Plus size={14} />
             {creating ? formatMessage({ id: "settings.joinLinks.creating" }) : formatMessage({ id: "settings.joinLinks.createLink" })}
           </button>
         </form>
 
-        <div className="mt-4 border-t-2 border-black pt-4">
+        <div className="mt-4 border-t theme-brutal:border-t-2 border-line-strong theme-brutal:border-black pt-4">
           {links.length > 0 ? (
             <div className="space-y-2">
               {links.map((link) => (
                 <div
                   key={link.id}
-                  className="border-2 border-black/30 px-3 py-2.5 space-y-1.5"
+                  className="border theme-brutal:border-2 border-line-muted theme-brutal:border-black/30 px-3 py-2.5 space-y-1.5"
                 >
                   <div className="flex items-center gap-2">
-                    <div className="min-w-0 flex-1 border-2 border-black bg-white px-2 py-1 font-mono text-[11px] truncate select-all">
+                    <div className="min-w-0 flex-1 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white px-2 py-1 font-mono text-[11px] truncate select-all">
                       {buildJoinLinkUrl(link.token)}
                     </div>
                     <button
                       onClick={() => handleCopy(link.id, link.token)}
-                      className="btn-brutal-sm shrink-0 bg-white p-1.5"
+                      className="btn-brutal-sm shrink-0 bg-layer-panel theme-brutal:bg-white p-1.5"
                       title={formatMessage({ id: "settings.joinLinks.copyLink" })}
                     >
                       {copiedLinkId === link.id ? <Check size={14} /> : <Copy size={14} />}
                     </button>
                     <button
                       onClick={() => setRevokeTarget(link)}
-                      className="btn-brutal-sm shrink-0 bg-white p-1.5"
+                      className="btn-brutal-sm shrink-0 bg-layer-panel theme-brutal:bg-white p-1.5"
                       title={formatMessage({ id: "settings.joinLinks.revokeLink" })}
                     >
                       <X size={14} />
                     </button>
                   </div>
-                  <div className="text-[11px] text-black/50 font-mono">
+                  <div className="text-[11px] text-foreground-muted theme-brutal:text-black/50 font-mono">
                     {link.maxUses != null
                       ? formatMessage({ id: "settings.joinLinks.usesWithMax" }, { used: link.useCount, max: link.maxUses })
                       : formatMessage({ id: "settings.joinLinks.uses" }, { used: link.useCount })}
@@ -2976,7 +2976,7 @@ function JoinLinksSection() {
               ))}
             </div>
           ) : !loading ? (
-            <div className="text-xs text-black/40 italic">
+            <div className="text-xs text-foreground-hint theme-brutal:text-black/40 italic">
               {formatMessage({ id: "settings.joinLinks.emptyState" })}
             </div>
           ) : null}
@@ -3124,14 +3124,14 @@ function OnboardingAgentSection() {
         label={formatMessage({ id: "settings.onboarding.sectionLabel" })}
       />
 
-      <div className="border-2 border-black bg-white shadow-brutal-sm p-4">
+      <div className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white shadow-raft-xs theme-brutal:shadow-brutal-sm p-4">
         <div className="space-y-4">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0 pr-0 sm:pr-4">
-              <div className="text-sm font-bold text-black">
+              <div className="text-sm font-bold text-foreground-strong theme-brutal:text-black">
                 {formatMessage({ id: "settings.onboarding.humanAgentTitle" })}
               </div>
-              <div className="mt-0.5 text-xs text-black/60">
+              <div className="mt-0.5 text-xs text-foreground-muted theme-brutal:text-black/60">
                 {formatMessage({ id: "settings.onboarding.humanAgentDescription" })}
               </div>
             </div>
@@ -3161,10 +3161,10 @@ function OnboardingAgentSection() {
 
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0 pr-0 sm:pr-4">
-              <div className="text-sm font-bold text-black">
+              <div className="text-sm font-bold text-foreground-strong theme-brutal:text-black">
                 {formatMessage({ id: "settings.onboarding.greetingTitle" })}
               </div>
-              <div className="mt-0.5 text-xs text-black/60">
+              <div className="mt-0.5 text-xs text-foreground-muted theme-brutal:text-black/60">
                 {formatMessage({ id: "settings.onboarding.greetingDescription" })}
               </div>
             </div>
@@ -3201,13 +3201,13 @@ function OnboardingAgentSection() {
 
         <div className="mt-2 flex items-center justify-between">
           {!canManageLinks && (
-            <div className="text-[11px] text-black/50">{formatMessage({ id: "settings.onboarding.adminOnly" })}</div>
+            <div className="text-[11px] text-foreground-muted theme-brutal:text-black/50">{formatMessage({ id: "settings.onboarding.adminOnly" })}</div>
           )}
           <button
             type="button"
             onClick={handleSave}
             disabled={!canManageLinks || !dirty || saving || loading}
-            className="btn-brutal bg-brutal-pink px-3 py-1.5 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
+            className="btn-brutal bg-accent-soft theme-brutal:bg-brutal-pink px-3 py-1.5 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {saving ? formatMessage({ id: "settings.common.saving" }) : saved ? formatMessage({ id: "settings.common.saved" }) : formatMessage({ id: "settings.common.save" })}
           </button>
@@ -3218,16 +3218,16 @@ function OnboardingAgentSection() {
             role would be a second opinion that can drift — hide it in one surface, leak it in
             another (@Jianwei's point). The projection alone decides. */}
         {setupProjection && setupProjection.phase !== "complete" && setupProjection.surface !== "none" ? (
-          <div className="mt-4 flex items-center justify-between border-t-2 border-black pt-3">
+          <div className="mt-4 flex items-center justify-between border-t theme-brutal:border-t-2 border-line-strong theme-brutal:border-black pt-3">
             <div>
               <div className="text-xs font-bold">{formatMessage({ id: "settings.onboarding.serverSetupTitle" })}</div>
-              <div className="text-[11px] text-black/50">{formatMessage({ id: "settings.onboarding.serverSetupDescription" })}</div>
+              <div className="text-[11px] text-foreground-muted theme-brutal:text-black/50">{formatMessage({ id: "settings.onboarding.serverSetupDescription" })}</div>
             </div>
             <button
               type="button"
               onClick={() => void handleFinishSetup()}
               disabled={reopeningSetup}
-              className="btn-brutal inline-flex items-center gap-1.5 bg-white px-3 py-1.5 text-xs disabled:opacity-50"
+              className="btn-brutal inline-flex items-center gap-1.5 bg-layer-panel theme-brutal:bg-white px-3 py-1.5 text-xs disabled:opacity-50"
               data-testid="finish-server-setup"
             >
               {formatMessage({ id: reopeningSetup ? "settings.onboarding.openingSetup" : "settings.onboarding.finishSetup" })}
@@ -3291,7 +3291,7 @@ function MemberPermissionsSection() {
         label={formatMessage({ id: "settings.memberPermissions.sectionLabel" })}
       />
 
-      <form onSubmit={handleSave} className="border-2 border-black bg-white shadow-brutal-sm p-4 space-y-3">
+      <form onSubmit={handleSave} className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white shadow-raft-xs theme-brutal:shadow-brutal-sm p-4 space-y-3">
         <label className={`flex items-start gap-3 ${canEdit ? "" : "opacity-60"}`}>
           <Checkbox
             size="md"
@@ -3301,8 +3301,8 @@ function MemberPermissionsSection() {
             className="mt-0.5"
           />
           <span className="min-w-0">
-            <span className="block text-sm font-bold text-black">{formatMessage({ id: "settings.memberPermissions.hideHumansTitle" })}</span>
-            <span className="block text-xs text-black/60 mt-0.5">
+            <span className="block text-sm font-bold text-foreground-strong theme-brutal:text-black">{formatMessage({ id: "settings.memberPermissions.hideHumansTitle" })}</span>
+            <span className="block text-xs text-foreground-muted theme-brutal:text-black/60 mt-0.5">
               {formatMessage({ id: "settings.memberPermissions.hideHumansDescription" })}
             </span>
           </span>
@@ -3316,7 +3316,7 @@ function MemberPermissionsSection() {
           <button
             type="submit"
             disabled={!dirty || saving}
-            className="btn-brutal bg-brutal-pink px-3 py-1.5 text-xs flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="btn-brutal bg-accent-soft theme-brutal:bg-brutal-pink px-3 py-1.5 text-xs flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {saving ? formatMessage({ id: "settings.common.saving" }) : saved ? (
               <><Check size={14} /> {formatMessage({ id: "settings.common.saved" })}</>
@@ -3389,7 +3389,7 @@ function SystemChannelsSection() {
         label={formatMessage({ id: "settings.systemChannels.sectionLabel" })}
       />
 
-      <form onSubmit={handleSave} className="border-2 border-black bg-white shadow-brutal-sm p-4 space-y-3">
+      <form onSubmit={handleSave} className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white shadow-raft-xs theme-brutal:shadow-brutal-sm p-4 space-y-3">
         <label className={`flex items-start gap-3 ${saving ? "opacity-60" : ""}`}>
           <Checkbox
             size="md"
@@ -3402,8 +3402,8 @@ function SystemChannelsSection() {
             className="mt-0.5"
           />
           <span className="min-w-0">
-            <span className="block text-sm font-bold text-black">{formatMessage({ id: "settings.systemChannels.hideAllTitle" })}</span>
-            <span className="block text-xs text-black/60 mt-0.5">
+            <span className="block text-sm font-bold text-foreground-strong theme-brutal:text-black">{formatMessage({ id: "settings.systemChannels.hideAllTitle" })}</span>
+            <span className="block text-xs text-foreground-muted theme-brutal:text-black/60 mt-0.5">
               {formatMessage({ id: "settings.systemChannels.hideAllDescription" })}
             </span>
           </span>
@@ -3416,7 +3416,7 @@ function SystemChannelsSection() {
         <button
           type="submit"
           disabled={!dirty || saving}
-          className="btn-brutal bg-brutal-pink px-3 py-1.5 text-xs flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="btn-brutal bg-accent-soft theme-brutal:bg-brutal-pink px-3 py-1.5 text-xs flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {saving ? formatMessage({ id: "settings.common.saving" }) : saved ? (
             <><Check size={14} /> {formatMessage({ id: "settings.common.saved" })}</>
@@ -3485,7 +3485,7 @@ function ServerTranslationSection() {
         label={formatMessage({ id: "settings.serverTranslation.sectionLabel" })}
       />
 
-      <form onSubmit={handleSave} className="border-2 border-black bg-white shadow-brutal-sm p-4 space-y-3">
+      <form onSubmit={handleSave} className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white shadow-raft-xs theme-brutal:shadow-brutal-sm p-4 space-y-3">
         <label className={`flex items-start gap-3 ${settingsLoading || !settings.canManageServerTranslation ? "opacity-60" : ""}`}>
           <Checkbox
             size="md"
@@ -3495,8 +3495,8 @@ function ServerTranslationSection() {
             className="mt-0.5"
           />
           <span className="min-w-0">
-            <span className="block text-sm font-bold text-black">{formatMessage({ id: "settings.serverTranslation.enableTitle" })}</span>
-            <span className="block text-xs text-black/60 mt-0.5">
+            <span className="block text-sm font-bold text-foreground-strong theme-brutal:text-black">{formatMessage({ id: "settings.serverTranslation.enableTitle" })}</span>
+            <span className="block text-xs text-foreground-muted theme-brutal:text-black/60 mt-0.5">
               {formatMessage({ id: "settings.serverTranslation.enableDescription" })}
             </span>
           </span>
@@ -3516,7 +3516,7 @@ function ServerTranslationSection() {
           <button
             type="submit"
             disabled={!dirty || saving || settingsLoading}
-            className="btn-brutal bg-brutal-pink px-3 py-1.5 text-xs flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="btn-brutal bg-accent-soft theme-brutal:bg-brutal-pink px-3 py-1.5 text-xs flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {saving ? formatMessage({ id: "settings.common.saving" }) : saved ? (
               <><Check size={14} /> {formatMessage({ id: "settings.common.saved" })}</>
@@ -3539,8 +3539,8 @@ function PlanBillingLoadingSection() {
         icon={<CreditCard size={16} />}
         label={formatMessage({ id: "billing.planBilling" })}
       />
-      <div className="mb-6 border-2 border-black bg-white shadow-brutal-sm">
-        <div className="border-b-2 border-black bg-brutal-cream px-4 py-4">
+      <div className="mb-6 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white shadow-raft-xs theme-brutal:shadow-brutal-sm">
+        <div className="border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black bg-layer-canvas-muted theme-brutal:bg-brutal-cream px-4 py-4">
           <Skeleton variant="line" className="mb-2 h-5 w-32" />
           <Skeleton variant="line" className="h-4 w-64 max-w-full" />
         </div>
@@ -3552,7 +3552,7 @@ function PlanBillingLoadingSection() {
               <div className="space-y-3">
                 {[0, 1, 2].map((row) => (
                   <div key={row} className="flex items-start gap-3">
-                    <Skeleton variant="block" className="mt-0.5 h-4 w-4 border-2 border-black/20" />
+                    <Skeleton variant="block" className="mt-0.5 h-4 w-4 border theme-brutal:border-2 border-line-muted theme-brutal:border-black/20" />
                     <Skeleton variant="line" className={row === 2 ? "w-3/5" : row === 1 ? "w-4/5" : "w-full"} />
                   </div>
                 ))}
@@ -3561,20 +3561,20 @@ function PlanBillingLoadingSection() {
           ))}
         </div>
 
-        <div className="border-t-2 border-black/10 px-4 py-4">
+        <div className="border-t theme-brutal:border-t-2 border-line-muted theme-brutal:border-black/10 px-4 py-4">
           <div className="grid gap-3 sm:grid-cols-2">
             {(["billing.seat", "billing.messageHistory", "billing.fileUploads"] as const).map((label) => (
               <div key={label} className="flex items-center justify-between gap-3">
-                <span className="text-xs font-bold text-black/45">{formatMessage({ id: label })}</span>
+                <span className="text-xs font-bold text-foreground-hint theme-brutal:text-black/45">{formatMessage({ id: label })}</span>
                 <Skeleton variant="line" className="w-20" />
               </div>
             ))}
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t-2 border-black/10 px-4 py-4">
-          <Skeleton variant="block" className="h-8 w-28 border-2 border-black/20" />
-          <Skeleton variant="block" className="h-8 w-44 border-2 border-black/20" />
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t theme-brutal:border-t-2 border-line-muted theme-brutal:border-black/10 px-4 py-4">
+          <Skeleton variant="block" className="h-8 w-28 border theme-brutal:border-2 border-line-muted theme-brutal:border-black/20" />
+          <Skeleton variant="block" className="h-8 w-44 border theme-brutal:border-2 border-line-muted theme-brutal:border-black/20" />
         </div>
       </div>
 
@@ -3583,17 +3583,17 @@ function PlanBillingLoadingSection() {
         icon={<Plus size={16} />}
         label={formatMessage({ id: "billing.managePlan" })}
       />
-      <div className="mb-6 grid gap-4 border-2 border-black bg-white p-4 shadow-brutal-sm lg:grid-cols-[minmax(0,1fr)_280px]">
+      <div className="mb-6 grid gap-4 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white p-4 shadow-raft-xs theme-brutal:shadow-brutal-sm lg:grid-cols-[minmax(0,1fr)_280px]">
         <div>
           <Skeleton variant="line" className="mb-3 h-4 w-56 max-w-full" />
           <div className="flex flex-wrap items-center gap-3">
-            <Skeleton variant="block" className="h-8 w-24 border-2 border-black/20" />
+            <Skeleton variant="block" className="h-8 w-24 border theme-brutal:border-2 border-line-muted theme-brutal:border-black/20" />
             <Skeleton variant="line" className="w-48 max-w-full" />
           </div>
-          <Skeleton variant="block" className="mt-4 h-8 w-32 border-2 border-black/20" />
+          <Skeleton variant="block" className="mt-4 h-8 w-32 border theme-brutal:border-2 border-line-muted theme-brutal:border-black/20" />
         </div>
 
-        <div className="border-2 border-black bg-brutal-cream p-4 shadow-brutal-sm">
+        <div className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-canvas-muted theme-brutal:bg-brutal-cream p-4 shadow-raft-xs theme-brutal:shadow-brutal-sm">
           <Skeleton variant="line" className="mb-4 h-3 w-32" />
           <div className="space-y-3">
             {[0, 1, 2].map((row) => (
@@ -3632,27 +3632,27 @@ function DowngradeWarningCard({ server, usage }: { server: { planDowngradedAt: s
   const excessChannels = getFinitePlanLimitExcess(channelCount, limits.maxChannels);
 
   return (
-    <div className="mb-4 border-2 border-black bg-brutal-orange/20 shadow-brutal-sm p-4">
+    <div className="mb-4 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-warning-soft/20 theme-brutal:bg-brutal-orange/20 shadow-raft-xs theme-brutal:shadow-brutal-sm p-4">
       <div className="flex items-center gap-2 mb-2">
-        <AlertTriangle size={16} className="text-black" />
+        <AlertTriangle size={16} className="text-foreground-strong theme-brutal:text-black" />
         <span className="text-sm font-bold">
           {graceExpired ? formatMessage({ id: "billing.gracePeriodExpired" }) : formatMessage({ id: "billing.planDowngraded" })}
         </span>
       </div>
       {graceExpired ? (
-        <p className="text-xs text-black/60 font-mono">
+        <p className="text-xs text-foreground-muted theme-brutal:text-black/60 font-mono">
           {formatMessage({ id: "billing.theGracePeriodHasEndedExcessAgentsHaveBeenSt" })}
         </p>
       ) : (
         <>
-                <p className="text-xs text-black/60 font-mono mb-2">
+                <p className="text-xs text-foreground-muted theme-brutal:text-black/60 font-mono mb-2">
                   {formatMessage(
                     {
                       id: excessAgents === 0 && excessMachines === 0 && excessChannels === 0
                         ? "billing.graceAllWithinLimits"
                         : "billing.graceExcessWillStop",
                     },
-                    { days: daysLeft, b: (chunks) => <span key="b" className="font-bold text-black">{chunks}</span> },
+                    { days: daysLeft, b: (chunks) => <span key="b" className="font-bold text-foreground-strong theme-brutal:text-black">{chunks}</span> },
                   )}
                 </p>
           {(excessAgents > 0 || excessMachines > 0 || excessChannels > 0) && (
@@ -4100,11 +4100,11 @@ export function PlanSection() {
 
       {/* Free trial notice */}
       {plan === "free" && finalTrialActive && (
-        <div className="mb-4 border-2 border-black bg-soft-signal/30 shadow-brutal-sm p-4">
+        <div className="mb-4 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-primary-soft/30 theme-brutal:bg-soft-signal/30 shadow-raft-xs theme-brutal:shadow-brutal-sm p-4">
           <div className="flex items-center gap-2 mb-1">
             <span className="text-sm font-bold">{formatMessage({ id: "billing.finalTrialPeriod" })}</span>
           </div>
-          <p className="text-xs text-black/60 font-mono">
+          <p className="text-xs text-foreground-muted theme-brutal:text-black/60 font-mono">
                   {formatMessage(
                     { id: "billing.trialActiveThrough" },
                     {
@@ -4115,12 +4115,12 @@ export function PlanSection() {
         </div>
       )}
 
-      <div className="mb-6 border-2 border-black bg-white shadow-brutal-sm">
-        <div className="border-b-2 border-black bg-brutal-cream px-4 py-4">
+      <div className="mb-6 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white shadow-raft-xs theme-brutal:shadow-brutal-sm">
+        <div className="border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black bg-layer-canvas-muted theme-brutal:bg-brutal-cream px-4 py-4">
           <div className="flex flex-wrap items-center gap-3">
             <div className="min-w-0">
-              <div className="text-lg font-bold text-black">{currentPlanDisplayName}</div>
-              <div className="text-sm text-black/60">
+              <div className="text-lg font-bold text-foreground-strong theme-brutal:text-black">{currentPlanDisplayName}</div>
+              <div className="text-sm text-foreground-muted theme-brutal:text-black/60">
                 {currentPlanDescription}
               </div>
             </div>
@@ -4129,10 +4129,10 @@ export function PlanSection() {
 
         <div className={`grid gap-4 p-4 ${hasNotIncludedFeatures ? "lg:grid-cols-2" : ""}`}>
           <div>
-            <div className="mb-3 text-sm font-bold text-black">{formatMessage({ id: "billing.included" })}</div>
+            <div className="mb-3 text-sm font-bold text-foreground-strong theme-brutal:text-black">{formatMessage({ id: "billing.included" })}</div>
             <div className="space-y-3">
               {currentIncludedFeatures.map((feature) => (
-                <div key={feature} className="flex items-start gap-3 text-sm text-black">
+                <div key={feature} className="flex items-start gap-3 text-sm text-foreground-strong theme-brutal:text-black">
                   <Check size={16} className="mt-0.5 shrink-0 text-green-700" />
                   <span>{feature}</span>
                 </div>
@@ -4142,10 +4142,10 @@ export function PlanSection() {
 
           {hasNotIncludedFeatures && (
             <div>
-              <div className="mb-3 text-sm font-bold text-black/60">{formatMessage({ id: "billing.notIncluded" })}</div>
+              <div className="mb-3 text-sm font-bold text-foreground-muted theme-brutal:text-black/60">{formatMessage({ id: "billing.notIncluded" })}</div>
               <div className="space-y-3">
                 {currentNotIncludedFeatures.map((feature) => (
-                  <div key={feature} className="flex items-start gap-3 text-sm text-black">
+                  <div key={feature} className="flex items-start gap-3 text-sm text-foreground-strong theme-brutal:text-black">
                     <X size={16} className="mt-0.5 shrink-0 text-brutal-red" />
                     <span>{feature}</span>
                   </div>
@@ -4155,19 +4155,19 @@ export function PlanSection() {
           )}
         </div>
 
-        <div className="border-t-2 border-black/10 px-4 py-4">
+        <div className="border-t theme-brutal:border-t-2 border-line-muted theme-brutal:border-black/10 px-4 py-4">
           {showSeatUsage && usesUniversalSeats && (
             <div className="space-y-3">
               <div className="flex items-center justify-between gap-3">
-                <span className="text-xs font-bold text-black">{formatMessage({ id: "billing.seat" })}</span>
-                <span className="text-xs font-mono text-black/60">
+                <span className="text-xs font-bold text-foreground-strong theme-brutal:text-black">{formatMessage({ id: "billing.seat" })}</span>
+                <span className="text-xs font-mono text-foreground-muted theme-brutal:text-black/60">
                   {formatSeatUsageNumber(usedUniversalSeats)} / {formatLimit(universalSeatLimit)} {formatMessage({ id: "billing.used" })}
                 </span>
               </div>
-              <div className="flex h-4 w-full overflow-hidden border-2 border-black bg-white">
+              <div className="flex h-4 w-full overflow-hidden border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white">
                 {humanSeatUsagePercent > 0 && (
                   <div
-                    className="h-full bg-soft-signal"
+                    className="h-full bg-primary-soft theme-brutal:bg-soft-signal"
                     style={{ width: `${humanSeatUsagePercent}%` }}
                     title={formatMessage(
                       { id: "billing.humansUsingSeats" },
@@ -4181,7 +4181,7 @@ export function PlanSection() {
                 )}
                 {agentSeatUsagePercent > 0 && (
                   <div
-                    className="h-full bg-brutal-pink"
+                    className="h-full bg-accent-soft theme-brutal:bg-brutal-pink"
                     style={{ width: `${agentSeatUsagePercent}%` }}
                     title={formatMessage(
                       { id: "billing.agentsUsingSeats" },
@@ -4196,14 +4196,14 @@ export function PlanSection() {
               </div>
               <div className="flex flex-wrap items-center gap-4 text-xs">
                 <div className="flex items-center gap-2">
-                  <span className="flex items-center gap-2 font-bold text-black">
-                    <span className="size-2 border border-black bg-soft-signal" />
+                  <span className="flex items-center gap-2 font-bold text-foreground-strong theme-brutal:text-black">
+                    <span className="size-2 border border-line-strong theme-brutal:border-black bg-primary-soft theme-brutal:bg-soft-signal" />
                     {formatMessage({ id: "billing.humans" })}
                   </span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="flex items-center gap-2 font-bold text-black">
-                    <span className="size-2 border border-black bg-brutal-pink" />
+                  <span className="flex items-center gap-2 font-bold text-foreground-strong theme-brutal:text-black">
+                    <span className="size-2 border border-line-strong theme-brutal:border-black bg-accent-soft theme-brutal:bg-brutal-pink" />
                     {formatMessage({ id: "billing.agents" })}
                   </span>
                 </div>
@@ -4214,15 +4214,15 @@ export function PlanSection() {
             <div className="grid gap-3 sm:grid-cols-2">
               {humanCount != null && (
                 <div className="flex items-center justify-between gap-3">
-                  <span className="text-xs font-bold text-black">{formatMessage({ id: "billing.humans" })}</span>
-                  <span className="text-xs font-mono text-black/60">
+                  <span className="text-xs font-bold text-foreground-strong theme-brutal:text-black">{formatMessage({ id: "billing.humans" })}</span>
+                  <span className="text-xs font-mono text-foreground-muted theme-brutal:text-black/60">
                     {humanCount} / {formatLimit(capacity?.maxHumans)}
                   </span>
                 </div>
               )}
               <div className="flex items-center justify-between gap-3">
-                <span className="text-xs font-bold text-black">{formatMessage({ id: "billing.agents" })}</span>
-                <span className="text-xs font-mono text-black/60">
+                <span className="text-xs font-bold text-foreground-strong theme-brutal:text-black">{formatMessage({ id: "billing.agents" })}</span>
+                <span className="text-xs font-mono text-foreground-muted theme-brutal:text-black/60">
                   {agentCount} / {formatLimit(capacity?.maxAgents ?? limits.maxAgents)}
                 </span>
               </div>
@@ -4231,16 +4231,16 @@ export function PlanSection() {
           <div className="grid gap-3 sm:grid-cols-2">
             {plan === "free" && (
               <div className="flex items-center justify-between gap-3">
-                <span className="text-xs font-bold text-black">{formatMessage({ id: "billing.messageHistory" })}</span>
-                <span className="text-xs font-mono text-black/60">
+                <span className="text-xs font-bold text-foreground-strong theme-brutal:text-black">{formatMessage({ id: "billing.messageHistory" })}</span>
+                <span className="text-xs font-mono text-foreground-muted theme-brutal:text-black/60">
                   {pricedLimits.messageHistoryDays === -1 ? formatMessage({ id: "billing.unlimited" }) : `${pricedLimits.messageHistoryDays} ${formatMessage({ id: "billing.days" })}`}
                 </span>
               </div>
             )}
             {plan === "free" && billing?.fileUploadQuota && (
               <div className="flex items-center justify-between gap-3">
-                <span className="text-xs font-bold text-black">{formatMessage({ id: "billing.fileUploads" })}</span>
-                <span className="text-xs font-mono text-black/60">
+                <span className="text-xs font-bold text-foreground-strong theme-brutal:text-black">{formatMessage({ id: "billing.fileUploads" })}</span>
+                <span className="text-xs font-mono text-foreground-muted theme-brutal:text-black/60">
                   {billing.fileUploadQuota.limited
                     ? `${formatBytes(billing.fileUploadQuota.usedBytes)} / ${formatBytes(billing.fileUploadQuota.limitBytes)} ${formatMessage({ id: "billing.thisMonth" })}`
                     : pricedFileUploadLimitLabel}
@@ -4249,13 +4249,13 @@ export function PlanSection() {
             )}
           </div>
         </div>
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t-2 border-black/10 px-4 py-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t theme-brutal:border-t-2 border-line-muted theme-brutal:border-black/10 px-4 py-4">
           {billingControlsState.canOpenPortal ? (
             <div className="flex min-w-0 flex-wrap gap-2">
               <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
-                  className="btn-brutal-sm bg-white px-3 py-1.5 text-xs disabled:opacity-50"
+                  className="btn-brutal-sm bg-layer-panel theme-brutal:bg-white px-3 py-1.5 text-xs disabled:opacity-50"
                   disabled={!!billingControlsDisabledReason || billingAction != null}
                   onClick={handlePortal}
                   title={billingControlsDisabledReason ?? formatMessage({ id: "billing.openStripeBillingPortal" })}
@@ -4265,7 +4265,7 @@ export function PlanSection() {
                 {!isCancelScheduled && (
                   <button
                     type="button"
-                    className="btn-brutal-sm bg-white px-3 py-1.5 text-xs disabled:opacity-50"
+                    className="btn-brutal-sm bg-layer-panel theme-brutal:bg-white px-3 py-1.5 text-xs disabled:opacity-50"
                     disabled={!!billingControlsDisabledReason || billingAction != null}
                     onClick={() => setShowCancelSubscriptionConfirm(true)}
                     title={billingControlsDisabledReason ?? formatMessage({ id: "billing.cancelTheWholeProSubscriptionAtPeriodEnd" })}
@@ -4280,7 +4280,7 @@ export function PlanSection() {
           )}
           <a
             href={comparePlansHref}
-            className="btn-brutal-sm cursor-default bg-white px-3 py-1.5 text-xs"
+            className="btn-brutal-sm cursor-default bg-layer-panel theme-brutal:bg-white px-3 py-1.5 text-xs"
           >
             {formatMessage({ id: "billing.seeAllFeaturesAndComparePlans" })}
           </a>
@@ -4295,11 +4295,11 @@ export function PlanSection() {
             label={managePlanTitle}
           />
 
-          <div className="mb-6 grid gap-4 border-2 border-black bg-white p-4 shadow-brutal-sm lg:grid-cols-[minmax(0,1fr)_280px]">
+          <div className="mb-6 grid gap-4 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white p-4 shadow-raft-xs theme-brutal:shadow-brutal-sm lg:grid-cols-[minmax(0,1fr)_280px]">
             <div>
               {isCheckoutMode && (
                 <div className="mb-4">
-                  <div className="mb-2 text-sm font-bold text-black">{formatMessage({ id: "billing.howOftenDoYouWantToBeBilled" })}</div>
+                  <div className="mb-2 text-sm font-bold text-foreground-strong theme-brutal:text-black">{formatMessage({ id: "billing.howOftenDoYouWantToBeBilled" })}</div>
                   <BillingIntervalSegmentedControl
                     value={billingInterval}
                     onValueChange={setBillingInterval}
@@ -4309,7 +4309,7 @@ export function PlanSection() {
               )}
 
               {billing?.subscription && (
-                <div className="mb-4 text-xs font-mono text-black/60">
+                <div className="mb-4 text-xs font-mono text-foreground-muted theme-brutal:text-black/60">
                   {formatMessage({ id: "billing.billingInterval" })}: {isCancelScheduled
                     ? formatMessage(
                         { id: "billing.intervalWithCancellationScheduled" },
@@ -4320,14 +4320,14 @@ export function PlanSection() {
               )}
 
               <div className="flex min-w-0 flex-col gap-3">
-                <span className="text-sm font-bold text-black">
+                <span className="text-sm font-bold text-foreground-strong theme-brutal:text-black">
                   {managePlanInputPrompt}
                 </span>
                 <div className="flex flex-wrap items-end gap-3">
                   <label className="flex flex-col gap-1">
-                    <span className="text-xs font-bold text-black/60">{localizedBillingSeatCopyLabels.seatQuantityLabel}</span>
+                    <span className="text-xs font-bold text-foreground-muted theme-brutal:text-black/60">{localizedBillingSeatCopyLabels.seatQuantityLabel}</span>
                     <input
-                      className="w-28 border-2 border-black bg-white px-2 py-1 text-sm font-mono"
+                      className="w-28 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white px-2 py-1 text-sm font-mono"
                       type="text"
                       inputMode="numeric"
                       pattern="[0-9]*"
@@ -4342,9 +4342,9 @@ export function PlanSection() {
                   </label>
                   {isManageSeatMode && seatDelta > 0 && (
                     <label className="flex w-64 max-w-full flex-col gap-1">
-                      <span className="text-xs font-bold text-black/60">{formatMessage({ id: "billing.promotionCodeOptional" })}</span>
+                      <span className="text-xs font-bold text-foreground-muted theme-brutal:text-black/60">{formatMessage({ id: "billing.promotionCodeOptional" })}</span>
                       <input
-                        className="w-full border-2 border-black bg-white px-2 py-1 text-sm font-mono uppercase"
+                        className="w-full border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white px-2 py-1 text-sm font-mono uppercase"
                         type="text"
                         autoComplete="off"
                         aria-label={formatMessage({ id: "billing.promotionCodeOptional" })}
@@ -4359,11 +4359,11 @@ export function PlanSection() {
                   )}
                 </div>
                 {isManageSeatMode && seatDelta > 0 && (
-                  <span className="text-[11px] font-mono text-black/50">
+                  <span className="text-[11px] font-mono text-foreground-muted theme-brutal:text-black/50">
                     {formatMessage({ id: "billing.enterACodeApprovedForExistingSeatUpdate" })}
                   </span>
                 )}
-                <span className="text-xs font-mono text-black/60">
+                <span className="text-xs font-mono text-foreground-muted theme-brutal:text-black/60">
                     {localizedBillingSeatCopyLabels.quantityHelpLabel} {formatMessage(
                       { id: "billing.seatCoverageHelp" },
                       { min: minimumUsageSeatQuantity, price: PRO_SEAT_MONTHLY_USD },
@@ -4380,7 +4380,7 @@ export function PlanSection() {
                 {isCheckoutMode && (
                   <button
                     type="button"
-                    className="btn-brutal-sm bg-brutal-pink px-3 py-1.5 text-xs disabled:opacity-50"
+                    className="btn-brutal-sm bg-accent-soft theme-brutal:bg-brutal-pink px-3 py-1.5 text-xs disabled:opacity-50"
                     disabled={!!billingControlsDisabledReason || !!billingSeatDraftError || billingAction != null}
                     onClick={openCheckoutConfirm}
                       title={billingControlsDisabledReason ?? billingSeatDraftError ?? formatMessage(
@@ -4399,7 +4399,7 @@ export function PlanSection() {
                 {billingControlsState.canUpdatePacks && (
                   <button
                     type="button"
-                    className="btn-brutal-sm bg-brutal-pink px-3 py-1.5 text-xs disabled:opacity-50"
+                    className="btn-brutal-sm bg-accent-soft theme-brutal:bg-brutal-pink px-3 py-1.5 text-xs disabled:opacity-50"
                     disabled={updateSeatButtonDisabled}
                     onClick={openSeatUpdateConfirm}
                     title={updateSeatButtonTitle}
@@ -4409,32 +4409,32 @@ export function PlanSection() {
                 )}
               </div>
               {billingControlsDisabledReason && (
-                <p className="mt-2 text-xs font-mono text-black/60">{billingControlsDisabledReason}</p>
+                <p className="mt-2 text-xs font-mono text-foreground-muted theme-brutal:text-black/60">{billingControlsDisabledReason}</p>
               )}
               {billingNotice && (
-                <p className="mt-2 text-xs font-mono text-black/60">{billingNotice}</p>
+                <p className="mt-2 text-xs font-mono text-foreground-muted theme-brutal:text-black/60">{billingNotice}</p>
               )}
               {billingError && (
                 <p className="mt-2 text-xs font-mono text-brutal-red">{billingError}</p>
               )}
             </div>
 
-            <div className="border-2 border-black bg-brutal-cream p-4 shadow-brutal-sm">
-              <div className="mb-3 text-xs font-bold uppercase tracking-widest text-black/50">
+            <div className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-canvas-muted theme-brutal:bg-brutal-cream p-4 shadow-raft-xs theme-brutal:shadow-brutal-sm">
+              <div className="mb-3 text-xs font-bold uppercase tracking-widest text-foreground-muted theme-brutal:text-black/50">
                 {isCheckoutMode ? formatMessage({ id: "billing.checkoutSummary" }) : isManageSeatMode ? (formatMessage({ id: "billing.manageSeatsSummary" })) : formatMessage({ id: "billing.subscriptionSummary" })}
               </div>
               <div className="space-y-3">
                 <div className="flex items-center justify-between gap-3">
-                  <span className="text-sm font-bold text-black">{localizedBillingSeatCopyLabels.seatSummaryLabel}</span>
-                  <span className="text-sm font-mono text-black/60">{seatSummaryValue}</span>
+                  <span className="text-sm font-bold text-foreground-strong theme-brutal:text-black">{localizedBillingSeatCopyLabels.seatSummaryLabel}</span>
+                  <span className="text-sm font-mono text-foreground-muted theme-brutal:text-black/60">{seatSummaryValue}</span>
                 </div>
                 <div className="flex items-center justify-between gap-3">
-                  <span className="text-sm font-bold text-black">{localizedBillingSeatCopyLabels.billableSeatsSummaryLabel}</span>
-                  <span className="text-sm font-mono text-black/60">{draftSeatQuantity}</span>
+                  <span className="text-sm font-bold text-foreground-strong theme-brutal:text-black">{localizedBillingSeatCopyLabels.billableSeatsSummaryLabel}</span>
+                  <span className="text-sm font-mono text-foreground-muted theme-brutal:text-black/60">{draftSeatQuantity}</span>
                 </div>
                 <div className="flex items-center justify-between gap-3">
-                  <span className="text-sm font-bold text-black">{localizedBillingSeatCopyLabels.capacitySummaryLabel}</span>
-                  <span className="inline-flex flex-col items-end text-sm font-mono leading-5 text-black/60">
+                  <span className="text-sm font-bold text-foreground-strong theme-brutal:text-black">{localizedBillingSeatCopyLabels.capacitySummaryLabel}</span>
+                  <span className="inline-flex flex-col items-end text-sm font-mono leading-5 text-foreground-muted theme-brutal:text-black/60">
                     <span>{formatHumanCapacityLabel(draftSeatQuantity)}</span>
                     <span>{formatAgentCapacityLabel(draftProvisionedAgentSeats)}</span>
                   </span>
@@ -4442,10 +4442,10 @@ export function PlanSection() {
                 {isCheckoutMode ? (
                   <>
                     <div className="flex items-center justify-between gap-3">
-                      <span className="text-sm font-bold text-black">{localizedBillingTotalSummaryLabels.totalLabel}</span>
-                      <span className="inline-flex flex-col items-end text-sm font-mono leading-5 text-black/60">
+                      <span className="text-sm font-bold text-foreground-strong theme-brutal:text-black">{localizedBillingTotalSummaryLabels.totalLabel}</span>
+                      <span className="inline-flex flex-col items-end text-sm font-mono leading-5 text-foreground-muted theme-brutal:text-black/60">
                         {localizedSelectedTotalLabels.originalLabel && (
-                          <span className="text-black/40 line-through">{localizedSelectedTotalLabels.originalLabel}</span>
+                          <span className="text-foreground-hint theme-brutal:text-black/40 line-through">{localizedSelectedTotalLabels.originalLabel}</span>
                         )}
                         <span>{localizedSelectedTotalLabels.totalLabel}</span>
                       </span>
@@ -4455,14 +4455,14 @@ export function PlanSection() {
                   <>
                     {isManageSeatMode && (
                       <div className="flex items-center justify-between gap-3">
-                        <span className="text-sm font-bold text-black">{formatMessage({ id: "billing.currentSeats" })}</span>
-                        <span className="text-sm font-mono text-black/60">{currentSeatQuantity}</span>
+                        <span className="text-sm font-bold text-foreground-strong theme-brutal:text-black">{formatMessage({ id: "billing.currentSeats" })}</span>
+                        <span className="text-sm font-mono text-foreground-muted theme-brutal:text-black/60">{currentSeatQuantity}</span>
                       </div>
                     )}
                     {isManageSeatMode && seatDelta !== 0 && (
                       <div className="flex items-center justify-between gap-3">
-                        <span className="text-sm font-bold text-black">{seatDelta > 0 ? formatMessage({ id: "billing.addedCapacity" }) : formatMessage({ id: "billing.removedCapacity" })}</span>
-                        <span className="inline-flex flex-col items-end text-sm font-mono leading-5 text-black/60">
+                        <span className="text-sm font-bold text-foreground-strong theme-brutal:text-black">{seatDelta > 0 ? formatMessage({ id: "billing.addedCapacity" }) : formatMessage({ id: "billing.removedCapacity" })}</span>
+                        <span className="inline-flex flex-col items-end text-sm font-mono leading-5 text-foreground-muted theme-brutal:text-black/60">
                           <span>{formatHumanCapacityLabel(Math.abs(seatDelta))}</span>
                           <span>{formatAgentCapacityLabel(Math.abs(seatDelta) * PRO_AGENT_SEAT_BLOCK_SIZE)}</span>
                         </span>
@@ -4470,22 +4470,22 @@ export function PlanSection() {
                     )}
                     {isManageSeatMode && localizedCurrentTotalLabel && localizedBillingTotalSummaryLabels.currentTotalLabel && (
                       <div className="flex items-center justify-between gap-3">
-                        <span className="text-sm font-bold text-black">{localizedBillingTotalSummaryLabels.currentTotalLabel}</span>
-                        <span className="text-sm font-mono text-black/60">{localizedCurrentTotalLabel}</span>
+                        <span className="text-sm font-bold text-foreground-strong theme-brutal:text-black">{localizedBillingTotalSummaryLabels.currentTotalLabel}</span>
+                        <span className="text-sm font-mono text-foreground-muted theme-brutal:text-black/60">{localizedCurrentTotalLabel}</span>
                       </div>
                     )}
                     {isManageSeatMode && (
                       <div className="flex items-center justify-between gap-3">
-                        <span className="text-sm font-bold text-black">{localizedBillingTotalSummaryLabels.totalLabel}</span>
-                        <span className="inline-flex flex-col items-end text-sm font-mono leading-5 text-black/60">
+                        <span className="text-sm font-bold text-foreground-strong theme-brutal:text-black">{localizedBillingTotalSummaryLabels.totalLabel}</span>
+                        <span className="inline-flex flex-col items-end text-sm font-mono leading-5 text-foreground-muted theme-brutal:text-black/60">
                           {localizedSelectedTotalLabels.originalLabel && (
-                            <span className="text-black/40 line-through">{localizedSelectedTotalLabels.originalLabel}</span>
+                            <span className="text-foreground-hint theme-brutal:text-black/40 line-through">{localizedSelectedTotalLabels.originalLabel}</span>
                           )}
                           <span>{localizedSelectedTotalLabels.totalLabel}</span>
                         </span>
                       </div>
                     )}
-                    <div className="border-t-2 border-black pt-3 text-xs font-mono text-black/60">
+                    <div className="border-t theme-brutal:border-t-2 border-line-strong theme-brutal:border-black pt-3 text-xs font-mono text-foreground-muted theme-brutal:text-black/60">
                       {formatMessage({ id: "billing.seatIncreasesMayBillImmediatelyAfterStripeConf" })}
                     </div>
                   </>
@@ -4623,11 +4623,11 @@ function DangerActionCard({
   actionTestId?: string;
 }) {
   return (
-    <div data-testid={testId} className="border-2 border-black bg-white p-4 shadow-brutal-sm">
+    <div data-testid={testId} className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white p-4 shadow-raft-xs theme-brutal:shadow-brutal-sm">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <div className="text-sm font-bold text-black">{title}</div>
-          <p className="mt-0.5 text-xs text-black/60">{description}</p>
+          <div className="text-sm font-bold text-foreground-strong theme-brutal:text-black">{title}</div>
+          <p className="mt-0.5 text-xs text-foreground-muted theme-brutal:text-black/60">{description}</p>
         </div>
         <Button
           type="button"
@@ -4680,18 +4680,18 @@ function DangerZoneSection() {
       />
 
       {canLeave && (
-        <div className="border-2 border-black bg-white shadow-brutal-sm p-4 mb-3">
+        <div className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white shadow-raft-xs theme-brutal:shadow-brutal-sm p-4 mb-3">
           <div className="flex items-center justify-between">
             <div>
-              <div className="text-sm font-bold text-black">{formatMessage({ id: "settings.dangerZone.leaveServerTitle" })}</div>
-              <p className="text-xs text-black/60 mt-0.5">
+              <div className="text-sm font-bold text-foreground-strong theme-brutal:text-black">{formatMessage({ id: "settings.dangerZone.leaveServerTitle" })}</div>
+              <p className="text-xs text-foreground-muted theme-brutal:text-black/60 mt-0.5">
                 {formatMessage({ id: "settings.dangerZone.leaveServerDescription" })}
               </p>
             </div>
             <button
               data-testid="server-danger-leave-button"
               onClick={() => setShowLeaveConfirm(true)}
-              className="btn-brutal bg-brutal-orange px-4 py-2 [@media(max-height:600px)]:py-1 text-sm font-bold flex items-center gap-1.5 shrink-0 ml-4"
+              className="btn-brutal bg-warning-soft theme-brutal:bg-brutal-orange px-4 py-2 [@media(max-height:600px)]:py-1 text-sm font-bold flex items-center gap-1.5 shrink-0 ml-4"
             >
               {formatMessage({ id: "settings.dangerZone.leaveServer" })}
             </button>
@@ -4738,8 +4738,8 @@ function DangerZoneSection() {
                 {formatMessage({ id: "settings.dangerZone.deleteWarningPrefix" })}<span className="font-bold">{server.name}</span>{formatMessage({ id: "settings.dangerZone.deleteWarningSuffix" })}
               </p>
               <div>
-                <p className="text-sm text-black/60 mb-2">
-                  {formatMessage({ id: "settings.dangerZone.typeToConfirmPrefix" })}<span className="font-mono font-bold text-black">{server.slug}</span>{formatMessage({ id: "settings.dangerZone.typeToConfirmSuffix" })}
+                <p className="text-sm text-foreground-muted theme-brutal:text-black/60 mb-2">
+                  {formatMessage({ id: "settings.dangerZone.typeToConfirmPrefix" })}<span className="font-mono font-bold text-foreground-strong theme-brutal:text-black">{server.slug}</span>{formatMessage({ id: "settings.dangerZone.typeToConfirmSuffix" })}
                 </p>
                 <SlugInput
                   data-testid="server-delete-slug-input"
@@ -4848,7 +4848,7 @@ function ConnectedAppsViewToggle({
   const listLabel = formatMessage({ id: "settings.connectedApps.listView" });
   return (
     <div
-      className="box-border flex h-10 min-h-10 shrink-0 items-stretch border-2 border-black bg-white shadow-brutal-sm"
+      className="box-border flex h-10 min-h-10 shrink-0 items-stretch border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white shadow-raft-xs theme-brutal:shadow-brutal-sm"
       role="group"
       aria-label={formatMessage({ id: "settings.connectedApps.viewMode" })}
       data-testid="connected-apps-view-toggle"
@@ -4859,7 +4859,7 @@ function ConnectedAppsViewToggle({
         aria-label={gridLabel}
         title={gridLabel}
         aria-pressed={value === "grid"}
-        className={`flex w-10 items-center justify-center border-r-2 border-black transition-colors ${value === "grid" ? "bg-soft-signal" : "bg-white hover:bg-brutal-cream"}`}
+        className={`flex w-10 items-center justify-center border-r theme-brutal:border-r-2 border-line-strong theme-brutal:border-black transition-colors ${value === "grid" ? "bg-primary-soft theme-brutal:bg-soft-signal" : "bg-layer-panel theme-brutal:bg-white hover:bg-layer-canvas-muted theme-brutal:hover:bg-brutal-cream"}`}
       >
         <LayoutGrid size={16} />
       </button>
@@ -4869,7 +4869,7 @@ function ConnectedAppsViewToggle({
         aria-label={listLabel}
         title={listLabel}
         aria-pressed={value === "list"}
-        className={`flex w-10 items-center justify-center transition-colors ${value === "list" ? "bg-soft-signal" : "bg-white hover:bg-brutal-cream"}`}
+        className={`flex w-10 items-center justify-center transition-colors ${value === "list" ? "bg-primary-soft theme-brutal:bg-soft-signal" : "bg-layer-panel theme-brutal:bg-white hover:bg-layer-canvas-muted theme-brutal:hover:bg-brutal-cream"}`}
       >
         <List size={17} />
       </button>
@@ -4915,18 +4915,18 @@ function ConnectedAppEditorSection({
     <section
       id={`connected-app-editor-${sectionId}`}
       data-testid={`connected-app-editor-section-${sectionId}`}
-      className={`scroll-mt-4 border-2 border-black ${tone === "warning" ? "bg-brutal-pink/15" : "bg-brutal-cream/35"}`}
+      className={`scroll-mt-4 border theme-brutal:border-2 border-line-strong theme-brutal:border-black ${tone === "warning" ? "bg-accent-soft/15 theme-brutal:bg-brutal-pink/15" : "bg-layer-canvas-muted/35 theme-brutal:bg-brutal-cream/35"}`}
     >
-      <div className="flex flex-col gap-2 border-b-2 border-black bg-brutal-cream px-4 py-3 sm:flex-row sm:items-start sm:justify-between">
+      <div className="flex flex-col gap-2 border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black bg-layer-canvas-muted theme-brutal:bg-brutal-cream px-4 py-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
-          <h3 className="flex flex-wrap items-center gap-2 text-base font-black text-black">{title}</h3>
-          <p className="mt-0.5 text-xs leading-relaxed text-black/60">{description}</p>
+          <h3 className="flex flex-wrap items-center gap-2 text-base font-black text-foreground-strong theme-brutal:text-black">{title}</h3>
+          <p className="mt-0.5 text-xs leading-relaxed text-foreground-muted theme-brutal:text-black/60">{description}</p>
         </div>
-        <span className="w-fit shrink-0 border-2 border-black bg-white px-2 py-1 font-mono text-[10px] font-black uppercase text-black">
+        <span className="w-fit shrink-0 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white px-2 py-1 font-mono text-[10px] font-black uppercase text-foreground-strong theme-brutal:text-black">
           {status}
         </span>
       </div>
-      <div className="space-y-4 bg-white p-4">{children}</div>
+      <div className="space-y-4 bg-layer-panel theme-brutal:bg-white p-4">{children}</div>
     </section>
   );
 }
@@ -5060,7 +5060,7 @@ function ConnectedAppSummary({ description }: { description?: string | null }) {
   const text = description?.trim();
   if (!text) return null;
   return (
-    <div className="mt-1 line-clamp-2 break-words text-sm leading-snug text-black/65" title={text}>
+    <div className="mt-1 line-clamp-2 break-words text-sm leading-snug text-foreground-muted theme-brutal:text-black/65" title={text}>
       {text}
     </div>
   );
@@ -5095,7 +5095,7 @@ function ConnectedAppLogo({ name, logoUrl, seed, size = "md" }: { name: string; 
       type="app"
       appAvatarUrl={logoUrl}
       appInitials={initialsForApp(name || seed)}
-      className="shadow-brutal-sm"
+      className="shadow-raft-xs theme-brutal:shadow-brutal-sm"
     />
   );
 }
@@ -5111,7 +5111,7 @@ function ConnectedAppUrlLink({ url, label, className = "" }: { url?: string | nu
       rel="noreferrer"
       onClick={(event) => event.stopPropagation()}
       title={href}
-      className={`inline-flex max-w-full min-w-0 items-center gap-1.5 text-xs font-mono font-bold text-black/55 underline decoration-2 underline-offset-2 hover:text-black ${className}`.trim()}
+      className={`inline-flex max-w-full min-w-0 items-center gap-1.5 text-xs font-mono font-bold text-foreground-muted theme-brutal:text-black/55 underline decoration-2 underline-offset-2 hover:text-foreground-strong theme-brutal:hover:text-black ${className}`.trim()}
     >
       <ExternalLink size={12} className="shrink-0" />
       <span className="min-w-0 truncate">{visibleLabel}</span>
@@ -5122,7 +5122,7 @@ function ConnectedAppUrlLink({ url, label, className = "" }: { url?: string | nu
 function OAuthScopeNegativeCapabilityBlock({ className = "" }: { className?: string }) {
   const { formatMessage } = useIntl();
   return (
-    <div className={`border-2 border-black bg-soft-signal/25 p-3 text-xs font-bold leading-relaxed text-black shadow-brutal-sm ${className}`.trim()}>
+    <div className={`border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-primary-soft/25 theme-brutal:bg-soft-signal/25 p-3 text-xs font-bold leading-relaxed text-foreground-strong theme-brutal:text-black shadow-raft-xs theme-brutal:shadow-brutal-sm ${className}`.trim()}>
       {formatMessage({ id: AGENT_INBOUND_NEGATIVE_CAPABILITY_ID })}
     </div>
   );
@@ -5149,7 +5149,7 @@ export function OAuthScopeList({
   return (
     <div className="space-y-3" data-testid="oauth-scope-list">
       {visibleScopes.length === 0 && (
-        <div className="border-2 border-black/15 bg-white p-2 text-xs font-bold text-black/55">
+        <div className="border theme-brutal:border-2 border-line-muted theme-brutal:border-black/15 bg-layer-panel theme-brutal:bg-white p-2 text-xs font-bold text-foreground-muted theme-brutal:text-black/55">
           {formatMessage({ id: "settings.connectedApps.noGrantScopes" })}
         </div>
       )}
@@ -5161,7 +5161,7 @@ export function OAuthScopeList({
               <span
                 key={scope}
                 title={formatMessage({ id: detail.copyId })}
-                className={`inline-flex items-center border border-black/20 bg-white px-2 py-1 text-[11px] font-bold text-black/70 ${detail.requiresResource ? "bg-soft-signal/20" : ""}`}
+                className={`inline-flex items-center border border-line-muted theme-brutal:border-black/20 bg-layer-panel theme-brutal:bg-white px-2 py-1 text-[11px] font-bold text-foreground-muted theme-brutal:text-black/70 ${detail.requiresResource ? "bg-primary-soft/20 theme-brutal:bg-soft-signal/20" : ""}`}
               >
                 {scope}
               </span>
@@ -5175,14 +5175,14 @@ export function OAuthScopeList({
             if (tierScopes.length === 0) return null;
             return (
               <div key={tier} className="space-y-2">
-                <div className="text-[10px] font-black uppercase tracking-widest text-black/50">{formatMessage({ id: scopeGroupLabelId(tier) })}</div>
+                <div className="text-[10px] font-black uppercase tracking-widest text-foreground-muted theme-brutal:text-black/50">{formatMessage({ id: scopeGroupLabelId(tier) })}</div>
                 <div className="space-y-2">
                   {tierScopes.map((scope) => {
                     const detail = OAUTH_SCOPE_PRESENTATION[scope];
                     return (
-                      <div key={scope} className="border-2 border-black/15 bg-white p-2">
+                      <div key={scope} className="border theme-brutal:border-2 border-line-muted theme-brutal:border-black/15 bg-layer-panel theme-brutal:bg-white p-2">
                         <div className="flex flex-wrap items-center gap-2">
-                          <code className="break-all text-[11px] font-bold text-black/70">{scope}</code>
+                          <code className="break-all text-[11px] font-bold text-foreground-muted theme-brutal:text-black/70">{scope}</code>
                           {detail.requiresResource && <Badge appearance="outline">{formatMessage({ id: "settings.connectedApps.scopeRequiresResource" })}</Badge>}
                         </div>
                       </div>
@@ -5218,9 +5218,9 @@ function OAuthScopeSummaryPanel({
   return (
     <div className="space-y-2">
       <SectionEyebrow as="div">{title}</SectionEyebrow>
-      {description && <div className="mt-2 text-xs leading-relaxed text-black/60">{description}</div>}
-      <details open={defaultOpen} className="border-2 border-black/15 bg-brutal-cream p-2">
-        <summary className="text-xs font-black text-black">{formatMessage({ id: "settings.connectedApps.detail.declaredAccess" })}</summary>
+      {description && <div className="mt-2 text-xs leading-relaxed text-foreground-muted theme-brutal:text-black/60">{description}</div>}
+      <details open={defaultOpen} className="border theme-brutal:border-2 border-line-muted theme-brutal:border-black/15 bg-layer-canvas-muted theme-brutal:bg-brutal-cream p-2">
+        <summary className="text-xs font-black text-foreground-strong theme-brutal:text-black">{formatMessage({ id: "settings.connectedApps.detail.declaredAccess" })}</summary>
         <div className="mt-2">
           <OAuthScopeList scopes={scopes} compact={compact} defaultToDeclared={defaultToDeclared} />
         </div>
@@ -5241,9 +5241,9 @@ function ConnectedAppDetailSection({
   tone?: "white" | "cream";
 }) {
   return (
-    <section className={`border-2 border-black p-3 shadow-brutal-sm ${tone === "cream" ? "bg-brutal-cream" : "bg-white"}`}>
+    <section className={`border theme-brutal:border-2 border-line-strong theme-brutal:border-black p-3 shadow-raft-xs theme-brutal:shadow-brutal-sm ${tone === "cream" ? "bg-layer-canvas-muted theme-brutal:bg-brutal-cream" : "bg-layer-panel theme-brutal:bg-white"}`}>
       <SectionEyebrow as="div">{title}</SectionEyebrow>
-      {description && <div className="mt-1 text-xs leading-relaxed text-black/60">{description}</div>}
+      {description && <div className="mt-1 text-xs leading-relaxed text-foreground-muted theme-brutal:text-black/60">{description}</div>}
       <div className="mt-3">{children}</div>
     </section>
   );
@@ -5258,8 +5258,8 @@ function ConnectedAppDetailRow({
 }) {
   return (
     <div className="flex flex-col gap-1 py-2 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
-      <span className="shrink-0 text-black/55">{label}</span>
-      <div className="min-w-0 text-left font-bold text-black sm:text-right">{children}</div>
+      <span className="shrink-0 text-foreground-muted theme-brutal:text-black/55">{label}</span>
+      <div className="min-w-0 text-left font-bold text-foreground-strong theme-brutal:text-black sm:text-right">{children}</div>
     </div>
   );
 }
@@ -5287,21 +5287,21 @@ export function DeclaredScopesPicker({
   };
 
   return (
-    <div className="border-2 border-black bg-white p-3 shadow-brutal-sm" data-testid="connected-app-declared-scopes">
+    <div className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white p-3 shadow-raft-xs theme-brutal:shadow-brutal-sm" data-testid="connected-app-declared-scopes">
       <SectionEyebrow as="div">{formatMessage({ id: "settings.connectedApps.declaredScopesTitle" })}</SectionEyebrow>
-      <div className="mt-1 text-xs leading-relaxed text-black/60">
+      <div className="mt-1 text-xs leading-relaxed text-foreground-muted theme-brutal:text-black/60">
         {formatMessage({ id: "settings.connectedApps.declaredScopesDescription" })}
       </div>
       <div className="mt-3 space-y-2">
-        <details className="border-2 border-black/15 bg-brutal-cream p-2">
-          <summary className="text-xs font-black text-black">
+        <details className="border theme-brutal:border-2 border-line-muted theme-brutal:border-black/15 bg-layer-canvas-muted theme-brutal:bg-brutal-cream p-2">
+          <summary className="text-xs font-black text-foreground-strong theme-brutal:text-black">
             {formatMessage({ id: "settings.connectedApps.identitySection" })}
           </summary>
           <div className="mt-2 flex flex-wrap gap-1.5">
             {IDENTITY_OAUTH_SCOPES.map((scope) => {
               const detail = OAUTH_SCOPE_PRESENTATION[scope];
               return (
-                <span key={scope} title={formatMessage({ id: detail.copyId })} className="inline-flex items-center border border-black/20 bg-white px-2 py-1 text-[11px] font-bold text-black/70">
+                <span key={scope} title={formatMessage({ id: detail.copyId })} className="inline-flex items-center border border-line-muted theme-brutal:border-black/20 bg-layer-panel theme-brutal:bg-white px-2 py-1 text-[11px] font-bold text-foreground-muted theme-brutal:text-black/70">
                   {scope}
                 </span>
               );
@@ -5309,7 +5309,7 @@ export function DeclaredScopesPicker({
             {OPTIONAL_IDENTITY_OAUTH_SCOPES.map((scope) => {
               const detail = OAUTH_SCOPE_PRESENTATION[scope];
               return (
-                <label key={scope} title={formatMessage({ id: detail.copyId })} className="inline-flex items-center gap-2 border border-black/20 bg-white px-2 py-1 text-[11px] font-bold text-black/70">
+                <label key={scope} title={formatMessage({ id: detail.copyId })} className="inline-flex items-center gap-2 border border-line-muted theme-brutal:border-black/20 bg-layer-panel theme-brutal:bg-white px-2 py-1 text-[11px] font-bold text-foreground-muted theme-brutal:text-black/70">
                   <Checkbox
                     size="sm"
                     checked={selected.has(scope)}
@@ -5321,15 +5321,15 @@ export function DeclaredScopesPicker({
             })}
           </div>
         </details>
-        <details open className="border-2 border-black/15 bg-brutal-cream p-2">
-          <summary className="text-xs font-black text-black">
+        <details open className="border theme-brutal:border-2 border-line-muted theme-brutal:border-black/15 bg-layer-canvas-muted theme-brutal:bg-brutal-cream p-2">
+          <summary className="text-xs font-black text-foreground-strong theme-brutal:text-black">
             {formatMessage({ id: "settings.connectedApps.agentMessagingSection" })}
           </summary>
           <div className="mt-2 flex flex-wrap gap-2">
             {AGENT_INBOUND_OAUTH_SCOPES.map((scope) => {
               const detail = OAUTH_SCOPE_PRESENTATION[scope];
               return (
-                <label key={scope} title={formatMessage({ id: detail.copyId })} className="inline-flex items-center gap-2 border border-black/20 bg-white px-2 py-1.5 text-xs font-bold text-black/70">
+                <label key={scope} title={formatMessage({ id: detail.copyId })} className="inline-flex items-center gap-2 border border-line-muted theme-brutal:border-black/20 bg-layer-panel theme-brutal:bg-white px-2 py-1.5 text-xs font-bold text-foreground-muted theme-brutal:text-black/70">
                   <Checkbox
                     size="sm"
                     checked={selected.has(scope)}
@@ -5341,7 +5341,7 @@ export function DeclaredScopesPicker({
             })}
           </div>
           {hasAgentInboundOAuthScope(value) && (
-            <div className="mt-2 text-xs font-bold text-black/55">
+            <div className="mt-2 text-xs font-bold text-foreground-muted theme-brutal:text-black/55">
               {formatMessage({ id: "settings.connectedApps.scopeRequiresResourceDetail" })}
             </div>
           )}
@@ -6003,15 +6003,15 @@ export function IntegrationsSection() {
   const renderClientSecretReveal = () => {
     if (!createdSecret) return null;
     return (
-      <div className="border-2 border-black bg-brutal-lime/20 p-3 space-y-2">
+      <div className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-success-soft/20 theme-brutal:bg-brutal-lime/20 p-3 space-y-2">
         <SectionEyebrow as="div">{formatMessage({ id: "settings.connectedApps.clientSecret" })}</SectionEyebrow>
-        <div className="text-sm text-black">{formatMessage({ id: "settings.connectedApps.secretOnce" })}</div>
+        <div className="text-sm text-foreground-strong theme-brutal:text-black">{formatMessage({ id: "settings.connectedApps.secretOnce" })}</div>
         <div className="flex items-center gap-2">
-          <div className="flex-1 border-2 border-black bg-white p-2 font-mono text-xs break-all">{createdSecret}</div>
+          <div className="flex-1 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white p-2 font-mono text-xs break-all">{createdSecret}</div>
           <button
             type="button"
             onClick={() => void handleCopyCreatedSecret()}
-            className="btn-brutal-sm shrink-0 bg-white p-2"
+            className="btn-brutal-sm shrink-0 bg-layer-panel theme-brutal:bg-white p-2"
             data-testid="connected-app-secret-copy-button"
             aria-live="polite"
             aria-label={secretCopied ? formatMessage({ id: "settings.connectedApps.copiedSecret" }) : formatMessage({ id: "settings.connectedApps.copySecret" })}
@@ -6092,18 +6092,18 @@ export function IntegrationsSection() {
         icon={<Link2 size={16} />}
         label={connectedAppsLabel}
         action={canManage ? (
-          <button type="button" onClick={openRegisterDrawer} className="btn-brutal inline-flex items-center gap-1.5 bg-brutal-pink px-3 py-1.5 text-xs">
+          <button type="button" onClick={openRegisterDrawer} className="btn-brutal inline-flex items-center gap-1.5 bg-accent-soft theme-brutal:bg-brutal-pink px-3 py-1.5 text-xs">
             <Plus size={14} />
             {formatMessage({ id: "settings.connectedApps.registerApp" })}
           </button>
         ) : undefined}
       />
 
-      <div className="border-2 border-black bg-white p-4 shadow-brutal-sm">
+      <div className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white p-4 shadow-raft-xs theme-brutal:shadow-brutal-sm">
         <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
           <div>
-            <div className="text-sm font-bold text-black">{formatMessage({ id: "settings.connectedApps.title" })}</div>
-            <div className="mt-1 max-w-2xl text-xs leading-relaxed text-black/60">
+            <div className="text-sm font-bold text-foreground-strong theme-brutal:text-black">{formatMessage({ id: "settings.connectedApps.title" })}</div>
+            <div className="mt-1 max-w-2xl text-xs leading-relaxed text-foreground-muted theme-brutal:text-black/60">
               {formatMessage({
                 id: canManage
                   ? "settings.connectedApps.sectionDescriptionManage"
@@ -6111,12 +6111,12 @@ export function IntegrationsSection() {
               })}
             </div>
             {!canManage && (
-              <div className="mt-1 text-xs leading-relaxed text-black/60">
+              <div className="mt-1 text-xs leading-relaxed text-foreground-muted theme-brutal:text-black/60">
                 {formatMessage({ id: "settings.connectedApps.adminOnlyNote" })}
               </div>
             )}
           </div>
-          {loading && <div className="text-xs font-bold text-black/50">{formatMessage({ id: "settings.common.loading" })}</div>}
+          {loading && <div className="text-xs font-bold text-foreground-muted theme-brutal:text-black/50">{formatMessage({ id: "settings.common.loading" })}</div>}
         </div>
         <ConnectedAppsTabSegmentedControl
           value={activeTab}
@@ -6174,11 +6174,11 @@ export function IntegrationsSection() {
       {activeTab === "marketplace" && (
         <div className="space-y-3" data-testid="connected-apps-marketplace-tab">
           {builtInApps.length > 0 && (
-            <div className="border-2 border-black bg-brutal-cream p-3 shadow-brutal-sm" data-testid="connected-apps-built-in-band">
+            <div className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-canvas-muted theme-brutal:bg-brutal-cream p-3 shadow-raft-xs theme-brutal:shadow-brutal-sm" data-testid="connected-apps-built-in-band">
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <SectionEyebrow as="div">{formatMessage({ id: "settings.connectedApps.builtIn" })}</SectionEyebrow>
-                  <div className="mt-1 text-sm font-bold text-black">{formatMessage({ id: "settings.connectedApps.builtInAvailable" })}</div>
+                  <div className="mt-1 text-sm font-bold text-foreground-strong theme-brutal:text-black">{formatMessage({ id: "settings.connectedApps.builtInAvailable" })}</div>
                 </div>
               </div>
               <div
@@ -6191,7 +6191,7 @@ export function IntegrationsSection() {
                     key={app.id}
                     type="button"
                     onClick={() => setSelectedBuiltInApp(app)}
-                    className={`w-full border-2 border-black bg-white p-3 text-left shadow-brutal-sm transition-shadow hover:shadow-brutal ${
+                    className={`w-full border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white p-3 text-left shadow-raft-xs theme-brutal:shadow-brutal-sm transition-shadow hover:shadow-raft-sm theme-brutal:hover:shadow-brutal ${
                       connectedAppsViewMode === "grid" ? "flex h-full flex-col" : "flex items-center gap-3"
                     }`}
                   >
@@ -6199,17 +6199,17 @@ export function IntegrationsSection() {
                       <ConnectedAppLogo name={app.name} logoUrl={app.logoUrl} seed={app.defaultLogoSeed} />
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
-                          <div className="font-bold text-black">{app.name}</div>
+                          <div className="font-bold text-foreground-strong theme-brutal:text-black">{app.name}</div>
                           <Badge variant="success" uppercase>{formatMessage({ id: "settings.connectedApps.builtIn" })}</Badge>
                         </div>
-                        <div className="mt-0.5 text-xs text-black/55">{formatMessage({ id: "settings.connectedApps.availableAll" })}</div>
+                        <div className="mt-0.5 text-xs text-foreground-muted theme-brutal:text-black/55">{formatMessage({ id: "settings.connectedApps.availableAll" })}</div>
                         {connectedAppsViewMode === "list" && (
                           <ConnectedAppSummary description={app.description} />
                         )}
                       </div>
                     </div>
                     <div className={`${connectedAppsViewMode === "grid" ? "mt-auto pt-3" : "ml-auto"} flex items-center justify-end`}>
-                      <span className="btn-brutal-sm bg-brutal-pink px-2.5 py-1 text-xs">{formatMessage({ id: "settings.connectedApps.open" })}</span>
+                      <span className="btn-brutal-sm bg-accent-soft theme-brutal:bg-brutal-pink px-2.5 py-1 text-xs">{formatMessage({ id: "settings.connectedApps.open" })}</span>
                     </div>
                   </button>
                 ))}
@@ -6226,7 +6226,7 @@ export function IntegrationsSection() {
                 key={app.id}
                 type="button"
                 onClick={() => setSelectedListing(app)}
-                className={`w-full border-2 border-black bg-white p-3 text-left shadow-brutal-sm transition-shadow hover:shadow-brutal ${
+                className={`w-full border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white p-3 text-left shadow-raft-xs theme-brutal:shadow-brutal-sm transition-shadow hover:shadow-raft-sm theme-brutal:hover:shadow-brutal ${
                   connectedAppsViewMode === "grid" ? "flex h-full flex-col" : "flex items-center gap-3"
                 }`}
               >
@@ -6234,10 +6234,10 @@ export function IntegrationsSection() {
                   <ConnectedAppLogo name={app.name} logoUrl={app.logoUrl} seed={app.defaultLogoSeed} />
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <div className="font-bold text-black">{app.name}</div>
+                      <div className="font-bold text-foreground-strong theme-brutal:text-black">{app.name}</div>
                       <ConnectedAppMarketplaceInstallBadge badge={app.marketplaceInstallBadge} />
                     </div>
-                    <div className="mt-0.5 text-xs text-black/55">{formatMessage({ id: "settings.connectedApps.byLine" }, { category: formatMessage({ id: CONNECTED_APP_CATEGORY_LABEL_ID[app.category] ?? "settings.connectedApps.categoryOther" }), developer: app.developer })}</div>
+                    <div className="mt-0.5 text-xs text-foreground-muted theme-brutal:text-black/55">{formatMessage({ id: "settings.connectedApps.byLine" }, { category: formatMessage({ id: CONNECTED_APP_CATEGORY_LABEL_ID[app.category] ?? "settings.connectedApps.categoryOther" }), developer: app.developer })}</div>
                     {connectedAppsViewMode === "list" && (
                       <ConnectedAppSummary description={app.description} />
                     )}
@@ -6247,7 +6247,7 @@ export function IntegrationsSection() {
                   {app.installed ? (
                     <Badge variant="success" uppercase>{formatMessage({ id: "settings.connectedApps.installed" })}</Badge>
                   ) : canManage ? (
-                    <span className="btn-brutal-sm bg-brutal-pink px-2.5 py-1 text-xs">{formatMessage({ id: "settings.connectedApps.install" })}</span>
+                    <span className="btn-brutal-sm bg-accent-soft theme-brutal:bg-brutal-pink px-2.5 py-1 text-xs">{formatMessage({ id: "settings.connectedApps.install" })}</span>
                   ) : (
                     <Badge appearance="outline" uppercase>{formatMessage({ id: "settings.connectedApps.available" })}</Badge>
                   )}
@@ -6256,11 +6256,11 @@ export function IntegrationsSection() {
             ))}
           </div>
           {marketplaceApps.length === 0 && (
-            <div className="border-2 border-black bg-white p-6 text-center text-sm text-black/60 shadow-brutal-sm">
+            <div className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white p-6 text-center text-sm text-foreground-muted theme-brutal:text-black/60 shadow-raft-xs theme-brutal:shadow-brutal-sm">
               {formatMessage({ id: "settings.connectedApps.noMarketplaceMatch" })}
             </div>
           )}
-          <div className="text-center text-xs text-black/55">
+          <div className="text-center text-xs text-foreground-muted theme-brutal:text-black/55">
             {formatMessage({ id: "settings.connectedApps.reviewNote" })}
           </div>
         </div>
@@ -6285,7 +6285,7 @@ export function IntegrationsSection() {
                 <ConnectedAppLogo name={app.name} logoUrl={app.logoUrl} seed={app.defaultLogoSeed} size="sm" />
                 <div className="min-w-0 flex-1">
                   {app.editable ? (
-                    <div className="min-w-0 break-words font-bold text-black">{app.name}</div>
+                    <div className="min-w-0 break-words font-bold text-foreground-strong theme-brutal:text-black">{app.name}</div>
                   ) : (
                     <div
                       role="button"
@@ -6301,12 +6301,12 @@ export function IntegrationsSection() {
                         setError("");
                         setSelectedInstalledApp(app);
                       }}
-                      className="w-fit max-w-full break-words font-bold text-black underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-black"
+                      className="w-fit max-w-full break-words font-bold text-foreground-strong theme-brutal:text-black underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-line-strong theme-brutal:focus-visible:outline-black"
                     >
                       {app.name}
                     </div>
                   )}
-                  <div className="mt-0.5 text-xs text-black/50">
+                  <div className="mt-0.5 text-xs text-foreground-muted theme-brutal:text-black/50">
                     <span>{formatMessage({ id: CONNECTED_APP_CATEGORY_LABEL_ID[app.category] ?? "settings.connectedApps.categoryOther" })}</span>
                     <span aria-hidden="true"> · </span>
                     <span>{app.developer}</span>
@@ -6330,7 +6330,7 @@ export function IntegrationsSection() {
                     const match = clients.find((client) => client.id === (app.sourceClientId ?? app.id));
                     if (match) beginEditClient(match);
                   }}
-                  className={`btn-brutal-sm inline-flex w-fit items-center justify-center gap-1.5 bg-white px-2.5 py-1 text-xs ${connectedAppsViewMode === "grid" ? "mt-auto self-end" : "self-end sm:self-auto"}`}
+                  className={`btn-brutal-sm inline-flex w-fit items-center justify-center gap-1.5 bg-layer-panel theme-brutal:bg-white px-2.5 py-1 text-xs ${connectedAppsViewMode === "grid" ? "mt-auto self-end" : "self-end sm:self-auto"}`}
                 >
                   <Pencil size={14} />
                   {formatMessage({ id: "settings.connectedApps.edit" })}
@@ -6345,7 +6345,7 @@ export function IntegrationsSection() {
                       setMarketplaceUninstallTarget(app);
                     }}
                     disabled={savingClientId === app.id}
-                    className="btn-brutal-sm inline-flex items-center justify-center gap-1.5 bg-white px-2.5 py-1 text-xs disabled:opacity-50"
+                    className="btn-brutal-sm inline-flex items-center justify-center gap-1.5 bg-layer-panel theme-brutal:bg-white px-2.5 py-1 text-xs disabled:opacity-50"
                   >
                     {savingClientId === app.id ? formatMessage({ id: "settings.connectedApps.uninstalling" }) : formatMessage({ id: "settings.connectedApps.uninstall" })}
                   </button>
@@ -6355,7 +6355,7 @@ export function IntegrationsSection() {
           ))}
           </div>
           {filteredInstalledApps.length === 0 && (
-            <div className="border-2 border-black bg-white p-6 text-center text-sm text-black/60 shadow-brutal-sm">
+            <div className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white p-6 text-center text-sm text-foreground-muted theme-brutal:text-black/60 shadow-raft-xs theme-brutal:shadow-brutal-sm">
               {formatMessage({ id: "settings.connectedApps.noInstalledAppsMatch" })}
             </div>
           )}
@@ -6364,13 +6364,13 @@ export function IntegrationsSection() {
 
       {activeTab === "myapps" && (
         <div className="space-y-3" data-testid="connected-apps-my-apps-tab">
-          <div className="text-xs leading-relaxed text-black/60">
+          <div className="text-xs leading-relaxed text-foreground-muted theme-brutal:text-black/60">
             {canManage
               ? formatMessage({ id: "settings.connectedApps.myAppsIntro" })
               : formatMessage({ id: "settings.connectedApps.myAppsReadOnlyIntro" })}
           </div>
           {filteredRegisteredApps.length === 0 ? (
-            <div className="border-2 border-black bg-white p-6 text-center text-sm text-black/60 shadow-brutal-sm">
+            <div className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white p-6 text-center text-sm text-foreground-muted theme-brutal:text-black/60 shadow-raft-xs theme-brutal:shadow-brutal-sm">
               {registeredApps.length === 0
                 ? formatMessage({ id: "settings.connectedApps.noRegisteredApps" })
                 : formatMessage({ id: "settings.connectedApps.noRegisteredAppsMatch" })}
@@ -6392,8 +6392,8 @@ export function IntegrationsSection() {
                   <div className="flex min-w-0 flex-1 items-start gap-3">
                     <ConnectedAppLogo name={app.name} logoUrl={app.logoUrl} seed={app.defaultLogoSeed} size="sm" />
                     <div className="min-w-0 flex-1">
-                      <div className="min-w-0 break-words font-bold text-black">{app.name}</div>
-                      <div className="mt-0.5 text-xs text-black/50">{formatMessage({ id: CONNECTED_APP_CATEGORY_LABEL_ID[app.category] ?? "settings.connectedApps.categoryOther" })}</div>
+                      <div className="min-w-0 break-words font-bold text-foreground-strong theme-brutal:text-black">{app.name}</div>
+                      <div className="mt-0.5 text-xs text-foreground-muted theme-brutal:text-black/50">{formatMessage({ id: CONNECTED_APP_CATEGORY_LABEL_ID[app.category] ?? "settings.connectedApps.categoryOther" })}</div>
                       <div className="mt-2 flex flex-wrap items-center gap-1.5">
                         <ConnectedAppDistributionBadge status={app.status} />
                       </div>
@@ -6403,7 +6403,7 @@ export function IntegrationsSection() {
                       {connectedAppsViewMode === "grid" && (
                         <>
                           {sourceOwnedConnectedAppStatusHint(app.status) && (
-                            <div className="mt-1 line-clamp-2 text-xs leading-relaxed text-black/55" title={formatMessage({ id: sourceOwnedConnectedAppStatusHint(app.status)! })}>
+                            <div className="mt-1 line-clamp-2 text-xs leading-relaxed text-foreground-muted theme-brutal:text-black/55" title={formatMessage({ id: sourceOwnedConnectedAppStatusHint(app.status)! })}>
                               {formatMessage({ id: sourceOwnedConnectedAppStatusHint(app.status)! })}
                             </div>
                           )}
@@ -6415,7 +6415,7 @@ export function IntegrationsSection() {
                   {canManage && (
                     <div className={`flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto ${connectedAppsViewMode === "grid" ? "mt-auto" : ""}`}>
                       {canEditSourceOwnedConnectedApp(app.status) && (
-                        <button type="button" onClick={() => beginEditClient(app)} className="btn-brutal-sm inline-flex items-center justify-center gap-1.5 bg-white px-2.5 py-1 text-xs">
+                        <button type="button" onClick={() => beginEditClient(app)} className="btn-brutal-sm inline-flex items-center justify-center gap-1.5 bg-layer-panel theme-brutal:bg-white px-2.5 py-1 text-xs">
                           <Pencil size={14} />
                           {formatMessage({ id: "settings.connectedApps.edit" })}
                         </button>
@@ -6437,8 +6437,8 @@ export function IntegrationsSection() {
                 <ConnectedAppLogo name={selectedInstalledApp.name} logoUrl={selectedInstalledApp.logoUrl} seed={selectedInstalledApp.defaultLogoSeed} size="lg" />
                 <div className="min-w-0">
                   <SectionEyebrow as="div">{formatMessage({ id: "settings.connectedApps.installedAppEyebrow" })}</SectionEyebrow>
-                  <div className="mt-1 break-words text-xl font-bold text-black">{selectedInstalledApp.name}</div>
-                  <div className="mt-0.5 text-xs text-black/55">{selectedInstalledApp.developer}</div>
+                  <div className="mt-1 break-words text-xl font-bold text-foreground-strong theme-brutal:text-black">{selectedInstalledApp.name}</div>
+                  <div className="mt-0.5 text-xs text-foreground-muted theme-brutal:text-black/55">{selectedInstalledApp.developer}</div>
                 </div>
               </div>
               <Button type="button" onClick={() => setSelectedInstalledApp(null)} shape="icon" aria-label={formatMessage({ id: "settings.connectedApps.closeInstalledAppDetail" })}>
@@ -6457,7 +6457,7 @@ export function IntegrationsSection() {
               canManage={canManage}
               onError={setError}
             />
-            <div className="flex justify-end border-t-2 border-black pt-4">
+            <div className="flex justify-end border-t theme-brutal:border-t-2 border-line-strong theme-brutal:border-black pt-4">
               <Button type="button" onClick={() => setSelectedInstalledApp(null)} size="md">{formatMessage({ id: "settings.common.close" })}</Button>
             </div>
           </div>
@@ -6473,10 +6473,10 @@ export function IntegrationsSection() {
                 <div>
                   <SectionEyebrow as="div">{formatMessage({ id: "settings.connectedApps.appDetail" })}</SectionEyebrow>
                   <div className="mt-1 flex flex-wrap items-center gap-2">
-                    <h2 id="connected-app-detail-title" className="text-xl font-bold text-black">{selectedListing.name}</h2>
+                    <h2 id="connected-app-detail-title" className="text-xl font-bold text-foreground-strong theme-brutal:text-black">{selectedListing.name}</h2>
                     <ConnectedAppMarketplaceInstallBadge badge={selectedListing.marketplaceInstallBadge} />
                   </div>
-                  <div className="mt-0.5 text-xs text-black/55">{formatMessage({ id: "settings.connectedApps.byLine" }, { category: formatMessage({ id: CONNECTED_APP_CATEGORY_LABEL_ID[selectedListing.category] ?? "settings.connectedApps.categoryOther" }), developer: selectedListing.developer })}</div>
+                  <div className="mt-0.5 text-xs text-foreground-muted theme-brutal:text-black/55">{formatMessage({ id: "settings.connectedApps.byLine" }, { category: formatMessage({ id: CONNECTED_APP_CATEGORY_LABEL_ID[selectedListing.category] ?? "settings.connectedApps.categoryOther" }), developer: selectedListing.developer })}</div>
                 </div>
               </div>
               <Button type="button" onClick={() => setSelectedListing(null)} shape="icon" aria-label={formatMessage({ id: "settings.connectedApps.closeAppDetail" })}>
@@ -6485,8 +6485,8 @@ export function IntegrationsSection() {
             </div>
             <ConnectedAppsErrorBanner surface={connectedAppsErrorSurface} target={CONNECTED_APPS_ERROR_LISTING} error={error} />
             <ConnectedAppDetailSection title={formatMessage({ id: "settings.connectedApps.section.profile" })}>
-              <p className="mb-2 text-sm leading-relaxed text-black/70">{selectedListing.description}</p>
-              <div className="divide-y-2 divide-black/10 text-sm">
+              <p className="mb-2 text-sm leading-relaxed text-foreground-muted theme-brutal:text-black/70">{selectedListing.description}</p>
+              <div className="divide-y-2 divide-line-muted theme-brutal:divide-black/10 text-sm">
                 <ConnectedAppDetailRow label={formatMessage({ id: "settings.connectedApps.publisher" })}>
                   {selectedListing.developer}
                 </ConnectedAppDetailRow>
@@ -6494,11 +6494,11 @@ export function IntegrationsSection() {
                   {selectedListing.homepageUrl ? (
                     <ConnectedAppUrlLink url={selectedListing.homepageUrl} />
                   ) : (
-                    <span className="break-all font-mono text-xs font-bold text-black">{selectedListing.homepageDomain}</span>
+                    <span className="break-all font-mono text-xs font-bold text-foreground-strong theme-brutal:text-black">{selectedListing.homepageDomain}</span>
                   )}
                 </ConnectedAppDetailRow>
                 <ConnectedAppDetailRow label={formatMessage({ id: "settings.connectedApps.redirectCallback" })}>
-                  <span className="break-all font-mono text-xs font-bold text-black">{selectedListing.callbackDomain}</span>
+                  <span className="break-all font-mono text-xs font-bold text-foreground-strong theme-brutal:text-black">{selectedListing.callbackDomain}</span>
                 </ConnectedAppDetailRow>
               </div>
             </ConnectedAppDetailSection>
@@ -6520,14 +6520,14 @@ export function IntegrationsSection() {
               />
             </ConnectedAppDetailSection>
             <ConnectedAppDetailSection title={formatMessage({ id: "settings.connectedApps.section.distribution" })} tone="cream">
-              <div className="text-xs leading-relaxed text-black/70">
+              <div className="text-xs leading-relaxed text-foreground-muted theme-brutal:text-black/70">
                 {formatMessage({ id: "settings.connectedApps.listingReviewNote" })}
               </div>
             </ConnectedAppDetailSection>
             {canManage && selectedListing.installed && (
               <ConnectedAppDetailSection title={formatMessage({ id: "settings.connectedApps.section.dangerZone" })}>
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="text-xs leading-relaxed text-black/60">
+                  <div className="text-xs leading-relaxed text-foreground-muted theme-brutal:text-black/60">
                     {formatMessage({ id: "settings.connectedApps.detail.removeInstalledDescription" })}
                   </div>
                   <Button
@@ -6545,7 +6545,7 @@ export function IntegrationsSection() {
                 </div>
               </ConnectedAppDetailSection>
             )}
-            <div className="flex items-center justify-end gap-2 border-t-2 border-black pt-4">
+            <div className="flex items-center justify-end gap-2 border-t theme-brutal:border-t-2 border-line-strong theme-brutal:border-black pt-4">
               <Button type="button" onClick={() => setSelectedListing(null)} size="md">
                 {canManage ? formatMessage({ id: "settings.common.cancel" }) : formatMessage({ id: "settings.common.close" })}
               </Button>
@@ -6573,8 +6573,8 @@ export function IntegrationsSection() {
                 <ConnectedAppLogo name={selectedBuiltInApp.name} logoUrl={selectedBuiltInApp.logoUrl} seed={selectedBuiltInApp.defaultLogoSeed} size="lg" />
                 <div>
                   <SectionEyebrow as="div">{formatMessage({ id: "settings.connectedApps.builtInApp" })}</SectionEyebrow>
-                  <h2 id="connected-built-in-app-detail-title" className="mt-1 text-xl font-bold text-black">{selectedBuiltInApp.name}</h2>
-                  <div className="mt-0.5 text-xs text-black/55">{formatMessage({ id: "settings.connectedApps.builtInAvailableNoInstall" })}</div>
+                  <h2 id="connected-built-in-app-detail-title" className="mt-1 text-xl font-bold text-foreground-strong theme-brutal:text-black">{selectedBuiltInApp.name}</h2>
+                  <div className="mt-0.5 text-xs text-foreground-muted theme-brutal:text-black/55">{formatMessage({ id: "settings.connectedApps.builtInAvailableNoInstall" })}</div>
                 </div>
               </div>
               <Button type="button" onClick={() => setSelectedBuiltInApp(null)} shape="icon" aria-label={formatMessage({ id: "settings.connectedApps.closeBuiltInDetail" })}>
@@ -6583,9 +6583,9 @@ export function IntegrationsSection() {
             </div>
             <ConnectedAppDetailSection title={formatMessage({ id: "settings.connectedApps.section.profile" })}>
               {selectedBuiltInApp.description && (
-                <p className="mb-2 text-sm leading-relaxed text-black/70">{selectedBuiltInApp.description}</p>
+                <p className="mb-2 text-sm leading-relaxed text-foreground-muted theme-brutal:text-black/70">{selectedBuiltInApp.description}</p>
               )}
-              <div className="divide-y-2 divide-black/10 text-sm">
+              <div className="divide-y-2 divide-line-muted theme-brutal:divide-black/10 text-sm">
                 <ConnectedAppDetailRow label={formatMessage({ id: "settings.connectedApps.publisher" })}>
                   {formatMessage({ id: "brand.productName" })}
                 </ConnectedAppDetailRow>
@@ -6593,7 +6593,7 @@ export function IntegrationsSection() {
                   {selectedBuiltInApp.homepageUrl ? (
                     <ConnectedAppUrlLink url={selectedBuiltInApp.homepageUrl} />
                   ) : (
-                    <span className="break-all font-mono text-xs font-bold text-black">{selectedBuiltInApp.homepageDomain ?? formatMessage({ id: "settings.connectedApps.notConfigured" })}</span>
+                    <span className="break-all font-mono text-xs font-bold text-foreground-strong theme-brutal:text-black">{selectedBuiltInApp.homepageDomain ?? formatMessage({ id: "settings.connectedApps.notConfigured" })}</span>
                   )}
                 </ConnectedAppDetailRow>
               </div>
@@ -6609,11 +6609,11 @@ export function IntegrationsSection() {
               />
             </ConnectedAppDetailSection>
             <ConnectedAppDetailSection title={formatMessage({ id: "settings.connectedApps.section.distribution" })} tone="cream">
-              <div className="text-xs leading-relaxed text-black/70">
+              <div className="text-xs leading-relaxed text-foreground-muted theme-brutal:text-black/70">
                 {formatMessage({ id: "settings.connectedApps.builtInFirstParty" })}
               </div>
             </ConnectedAppDetailSection>
-            <div className="flex items-center justify-end gap-2 border-t-2 border-black pt-4">
+            <div className="flex items-center justify-end gap-2 border-t theme-brutal:border-t-2 border-line-strong theme-brutal:border-black pt-4">
               <Button type="button" onClick={() => setSelectedBuiltInApp(null)} size="md">{formatMessage({ id: "settings.common.close" })}</Button>
               <Button
                 type="button"
@@ -6633,11 +6633,11 @@ export function IntegrationsSection() {
         <Modal onClose={closeRegisterDrawer}>
           <form
             onSubmit={handleSaveClient}
-            className="card-brutal flex h-[min(52rem,calc(100dvh-2rem))] max-h-[calc(100dvh-2rem)] w-full max-w-5xl flex-col overflow-hidden bg-white"
+            className="card-brutal flex h-[min(52rem,calc(100dvh-2rem))] max-h-[calc(100dvh-2rem)] w-full max-w-5xl flex-col overflow-hidden bg-layer-panel theme-brutal:bg-white"
             aria-labelledby="connected-app-form-title"
             data-testid="connected-app-editor"
           >
-            <div className="flex flex-col gap-3 border-b-2 border-black bg-brutal-cream px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-col gap-3 border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black bg-layer-canvas-muted theme-brutal:bg-brutal-cream px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex min-w-0 items-center gap-3">
                 <ConnectedAppLogo
                   name={clientName || editingClient?.name || "App"}
@@ -6646,10 +6646,10 @@ export function IntegrationsSection() {
                 />
                 <div className="min-w-0">
                   <SectionEyebrow as="div">{editingClient ? formatMessage({ id: "settings.connectedApps.editApp" }) : formatMessage({ id: "settings.connectedApps.registerApp" })}</SectionEyebrow>
-                  <h2 id="connected-app-form-title" className="mt-0.5 truncate text-xl font-black text-black">
+                  <h2 id="connected-app-form-title" className="mt-0.5 truncate text-xl font-black text-foreground-strong theme-brutal:text-black">
                     {editingClient ? editingClient.name : formatMessage({ id: "settings.connectedApps.newConnectedApp" })}
                   </h2>
-                  <p className="mt-0.5 text-xs text-black/55">{formatMessage({ id: "settings.connectedApps.editor.headerDescription" })}</p>
+                  <p className="mt-0.5 text-xs text-foreground-muted theme-brutal:text-black/55">{formatMessage({ id: "settings.connectedApps.editor.headerDescription" })}</p>
                 </div>
               </div>
               <div className="flex shrink-0 items-center justify-end gap-2">
@@ -6668,7 +6668,7 @@ export function IntegrationsSection() {
               </div>
             </div>
             {(error || createdSecret) && (
-              <div className="space-y-2 border-b-2 border-black bg-white px-4 py-3">
+              <div className="space-y-2 border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white px-4 py-3">
                 <ConnectedAppsErrorBanner surface={connectedAppsErrorSurface} target={CONNECTED_APPS_ERROR_FORM} error={error} />
                 {renderClientSecretReveal()}
               </div>
@@ -6677,7 +6677,7 @@ export function IntegrationsSection() {
             <div className="grid min-h-0 flex-1 grid-rows-[auto_minmax(0,1fr)] md:grid-cols-[220px_minmax(0,1fr)] md:grid-rows-1">
               <nav
                 ref={appEditorRailRef}
-                className="flex gap-2 overflow-x-auto border-b-2 border-black bg-brutal-cream p-3 md:block md:space-y-2 md:overflow-y-auto md:border-b-0 md:border-r-2"
+                className="flex gap-2 overflow-x-auto border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black bg-layer-canvas-muted theme-brutal:bg-brutal-cream p-3 md:block md:space-y-2 md:overflow-y-auto md:border-b-0 theme-brutal:md:border-b-0 md:border-r theme-brutal:md:border-r-2"
                 aria-label={formatMessage({ id: "settings.connectedApps.appEditorSectionsAriaLabel" })}
                 data-testid="connected-app-editor-rail"
               >
@@ -6688,22 +6688,22 @@ export function IntegrationsSection() {
                     data-app-editor-section={section.id}
                     onClick={() => scrollToAppEditorSection(section.id)}
                     aria-current={appEditorSection === section.id ? "true" : undefined}
-                    className={`min-w-[155px] border-2 border-black px-3 py-2 text-left md:min-w-0 md:w-full ${
-                      appEditorSection === section.id ? "bg-soft-signal shadow-brutal-sm" : "bg-white"
+                    className={`min-w-[155px] border theme-brutal:border-2 border-line-strong theme-brutal:border-black px-3 py-2 text-left md:min-w-0 md:w-full ${
+                      appEditorSection === section.id ? "bg-primary-soft theme-brutal:bg-soft-signal shadow-raft-xs theme-brutal:shadow-brutal-sm" : "bg-layer-panel theme-brutal:bg-white"
                     }`}
                   >
-                    <span className="flex items-center gap-2 text-xs font-black text-black">
+                    <span className="flex items-center gap-2 text-xs font-black text-foreground-strong theme-brutal:text-black">
                       {section.icon}
                       {section.label}
                     </span>
-                    <span className="mt-1 block truncate text-[10px] font-bold text-black/50">{section.status}</span>
+                    <span className="mt-1 block truncate text-[10px] font-bold text-foreground-muted theme-brutal:text-black/50">{section.status}</span>
                   </button>
                 ))}
               </nav>
               <div
                 ref={appEditorContentRef}
                 onScroll={syncAppEditorSectionFromScroll}
-                className="min-h-0 space-y-4 overflow-y-auto bg-white p-4"
+                className="min-h-0 space-y-4 overflow-y-auto bg-layer-panel theme-brutal:bg-white p-4"
                 data-testid="connected-app-editor-content"
               >
 
@@ -6722,7 +6722,7 @@ export function IntegrationsSection() {
                   hint={editingClient ? formatMessage({ id: "settings.connectedApps.logoHintEdit" }) : formatMessage({ id: "settings.connectedApps.logoHintNew" })}
                 >
                   <div className="space-y-2">
-                    <div className="flex h-[120px] w-[120px] items-center justify-center border-2 border-dashed border-black bg-brutal-cream">
+                    <div className="flex h-[120px] w-[120px] items-center justify-center border theme-brutal:border-2 border-dashed border-line-strong theme-brutal:border-black bg-layer-canvas-muted theme-brutal:bg-brutal-cream">
                       <ConnectedAppLogo
                         name={clientName || editingClient?.name || "App"}
                         logoUrl={editingClient?.logoUrl}
@@ -6832,7 +6832,7 @@ export function IntegrationsSection() {
                 type="text"
                 value={clientId}
                 onChange={(event) => setClientId(event.target.value)}
-                className="input-brutal w-full font-mono text-sm disabled:bg-black/5 disabled:text-black/45"
+                className="input-brutal w-full font-mono text-sm disabled:bg-fill-muted theme-brutal:disabled:bg-black/5 disabled:text-foreground-hint theme-brutal:disabled:text-black/45"
                 placeholder={formatMessage({ id: "settings.connectedApps.clientIdPlaceholder" })}
                 disabled={!!editingClient}
               />
@@ -6886,25 +6886,25 @@ export function IntegrationsSection() {
               status={distributionStatus}
             >
             {!editingClient ? (
-              <div className="border-l-4 border-black/30 bg-brutal-cream px-3 py-2 text-xs font-bold text-black/60">
+              <div className="border-l-4 border-line-muted theme-brutal:border-black/30 bg-layer-canvas-muted theme-brutal:bg-brutal-cream px-3 py-2 text-xs font-bold text-foreground-muted theme-brutal:text-black/60">
                 {formatMessage({ id: "settings.connectedApps.saveBeforeShareOrReview" })}
               </div>
             ) : null}
             {editingClient && sourceOwnedConnectedAppStatusHint(editingClient.publishStatus) ? (
-              <div className="border-l-4 border-soft-signal bg-soft-signal/20 px-3 py-2 text-xs leading-relaxed text-black/70">
+              <div className="border-l-4 border-soft-signal bg-primary-soft/20 theme-brutal:bg-soft-signal/20 px-3 py-2 text-xs leading-relaxed text-foreground-muted theme-brutal:text-black/70">
                 {formatMessage({ id: sourceOwnedConnectedAppStatusHint(editingClient.publishStatus)! })}
               </div>
             ) : null}
             {editingClient && (editingClient.publishStatus === "private" || editingClient.publishStatus === "rejected") && (
-              <div className="border-2 border-black bg-white p-3 shadow-brutal-sm" data-testid="connected-app-private-share-card">
+              <div className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white p-3 shadow-raft-xs theme-brutal:shadow-brutal-sm" data-testid="connected-app-private-share-card">
                 <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                   <div>
                     <SectionEyebrow as="div">{formatMessage({ id: "settings.connectedApps.privateShareTitle" })}</SectionEyebrow>
-                    <div className="mt-1 text-xs leading-relaxed text-black/60">
+                    <div className="mt-1 text-xs leading-relaxed text-foreground-muted theme-brutal:text-black/60">
                       {formatMessage({ id: "settings.connectedApps.privateShareDesc" })}
                     </div>
                     {shareLink && (
-                      <div className="mt-2 text-xs text-black/55">
+                      <div className="mt-2 text-xs text-foreground-muted theme-brutal:text-black/55">
                         {formatMessage({ id: "settings.connectedApps.activeLinkExpires" }, { when: shareLink.expiresAt ? formatDate(shareLink.expiresAt) : formatMessage({ id: "settings.connectedApps.never" }) })}
                       </div>
                     )}
@@ -6938,9 +6938,9 @@ export function IntegrationsSection() {
               </div>
             )}
             {editingClient && (editingClient.publishStatus === "private" || editingClient.publishStatus === "rejected") && (
-              <div className="border-2 border-black bg-brutal-cream p-3 shadow-brutal-sm">
+              <div className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-canvas-muted theme-brutal:bg-brutal-cream p-3 shadow-raft-xs theme-brutal:shadow-brutal-sm">
                 <SectionEyebrow as="div">{formatMessage({ id: "settings.connectedApps.publishRequestTitle" })}</SectionEyebrow>
-                <div className="mt-1 text-xs leading-relaxed text-black/60">
+                <div className="mt-1 text-xs leading-relaxed text-foreground-muted theme-brutal:text-black/60">
                   {formatMessage({ id: "settings.connectedApps.distributionMetadataNote" })}
                 </div>
                 <div className="mt-3 flex justify-end">
@@ -6957,7 +6957,7 @@ export function IntegrationsSection() {
               </div>
             )}
             {editingClient?.publishStatus === "published" ? (
-              <div className="border-l-4 border-brutal-lime bg-brutal-lime/15 px-3 py-2 text-xs leading-relaxed text-black/70">
+              <div className="border-l-4 border-brutal-lime bg-success-soft/15 theme-brutal:bg-brutal-lime/15 px-3 py-2 text-xs leading-relaxed text-foreground-muted theme-brutal:text-black/70">
                 {formatMessage({ id: "settings.connectedApps.publishedMarketplaceNote" })}
               </div>
             ) : null}
@@ -6973,13 +6973,13 @@ export function IntegrationsSection() {
               tone="warning"
             >
               {!editingClient ? (
-                <div className="text-xs font-bold leading-relaxed text-black/55">{formatMessage({ id: "settings.connectedApps.editor.saveBeforeLifecycle" })}</div>
+                <div className="text-xs font-bold leading-relaxed text-foreground-muted theme-brutal:text-black/55">{formatMessage({ id: "settings.connectedApps.editor.saveBeforeLifecycle" })}</div>
               ) : (
                 <>
-                  <div className="flex flex-col gap-3 border-2 border-black/20 bg-white p-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="flex flex-col gap-3 border theme-brutal:border-2 border-line-muted theme-brutal:border-black/20 bg-layer-panel theme-brutal:bg-white p-3 sm:flex-row sm:items-start sm:justify-between">
                     <div>
                       <SectionEyebrow as="div">{formatMessage({ id: "settings.connectedApps.editor.clientSecretTitle" })}</SectionEyebrow>
-                      <div className="mt-1 text-xs leading-relaxed text-black/60">
+                      <div className="mt-1 text-xs leading-relaxed text-foreground-muted theme-brutal:text-black/60">
                         {formatMessage({ id: "settings.connectedApps.editor.clientSecretDescription" })}
                       </div>
                     </div>
@@ -6997,10 +6997,10 @@ export function IntegrationsSection() {
                     </Button>
                   </div>
                   {canRequestOfflineSourceOwnedConnectedApp(editingClient.publishStatus) ? (
-                    <div className="flex flex-col gap-3 border-2 border-black/20 bg-white p-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="flex flex-col gap-3 border theme-brutal:border-2 border-line-muted theme-brutal:border-black/20 bg-layer-panel theme-brutal:bg-white p-3 sm:flex-row sm:items-start sm:justify-between">
                       <div>
                         <SectionEyebrow as="div">{formatMessage({ id: "settings.connectedApps.editor.marketplaceLifecycleTitle" })}</SectionEyebrow>
-                        <div className="mt-1 text-xs leading-relaxed text-black/60">{formatMessage({ id: "settings.connectedApps.editor.marketplaceLifecycleDescription" })}</div>
+                        <div className="mt-1 text-xs leading-relaxed text-foreground-muted theme-brutal:text-black/60">{formatMessage({ id: "settings.connectedApps.editor.marketplaceLifecycleDescription" })}</div>
                       </div>
                       <Button type="button" size="sm" onClick={() => setOfflineRequestTarget(mapClientToRegisteredApp(editingClient))}>
                         {formatMessage({ id: "settings.connectedApps.editor.requestOffline" })}
@@ -7223,7 +7223,7 @@ function PreJoinAgreementSection() {
         label={formatMessage({ id: "settings.preJoinAgreement.sectionLabel" })}
       />
 
-      <div className="border-2 border-black bg-white shadow-brutal-sm p-4 space-y-4">
+      <div className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white shadow-raft-xs theme-brutal:shadow-brutal-sm p-4 space-y-4">
         <label className={`flex items-start gap-3 ${saving || loading ? "opacity-60" : ""}`}>
           <Checkbox
             size="md"
@@ -7236,8 +7236,8 @@ function PreJoinAgreementSection() {
             className="mt-0.5"
           />
           <span className="min-w-0">
-            <span className="block text-sm font-bold text-black">{formatMessage({ id: "settings.preJoinAgreement.requireTitle" })}</span>
-            <span className="block text-xs text-black/60 mt-0.5">
+            <span className="block text-sm font-bold text-foreground-strong theme-brutal:text-black">{formatMessage({ id: "settings.preJoinAgreement.requireTitle" })}</span>
+            <span className="block text-xs text-foreground-muted theme-brutal:text-black/60 mt-0.5">
               {formatMessage({ id: "settings.preJoinAgreement.requireDescription" })}
             </span>
           </span>
@@ -7254,7 +7254,7 @@ function PreJoinAgreementSection() {
                 }}
                 maxLength={160}
                 disabled={saving || loading}
-                className="w-full border-2 border-black p-2 text-sm shadow-brutal-sm focus:shadow-brutal focus:outline-none disabled:opacity-60"
+                className="w-full border theme-brutal:border-2 border-line-strong theme-brutal:border-black p-2 text-sm shadow-raft-xs theme-brutal:shadow-brutal-sm focus:shadow-raft-sm theme-brutal:focus:shadow-brutal focus:outline-none disabled:opacity-60"
               />
             </FormField>
             <FormField label={formatMessage({ id: "settings.preJoinAgreement.bodyLabel" })} labelStyle="plain" size="compact">
@@ -7272,8 +7272,8 @@ function PreJoinAgreementSection() {
                 className="resize-y font-mono text-xs disabled:opacity-60"
               />
             </FormField>
-            <div className="border-2 border-black/30 bg-brutal-cream p-3">
-              <div className="mb-2 text-[11px] font-bold uppercase tracking-widest text-black/50">{formatMessage({ id: "settings.preJoinAgreement.preview" })}</div>
+            <div className="border theme-brutal:border-2 border-line-muted theme-brutal:border-black/30 bg-layer-canvas-muted theme-brutal:bg-brutal-cream p-3">
+              <div className="mb-2 text-[11px] font-bold uppercase tracking-widest text-foreground-muted theme-brutal:text-black/50">{formatMessage({ id: "settings.preJoinAgreement.preview" })}</div>
               <div className="text-sm">
                 <AgreementBody source={bodyMarkdown} />
               </div>
@@ -7288,14 +7288,14 @@ function PreJoinAgreementSection() {
         )}
 
         <div className="flex flex-col items-start gap-2">
-          <div className="text-[11px] text-black/50">
+          <div className="text-[11px] text-foreground-muted theme-brutal:text-black/50">
             {formatMessage({ id: "settings.preJoinAgreement.versionNote" })}
           </div>
           <button
             type="button"
             onClick={handleSave}
             disabled={!dirty || bodyMarkdownTooLong || saving || loading}
-            className="btn-brutal bg-brutal-pink px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+            className="btn-brutal bg-accent-soft theme-brutal:bg-brutal-pink px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-50"
           >
             {saving ? formatMessage({ id: "settings.common.saving" }) : saved ? formatMessage({ id: "settings.common.saved" }) : formatMessage({ id: "settings.common.save" })}
           </button>
@@ -7339,7 +7339,7 @@ function BillingTabContent() {
           icon={<CreditCard size={16} />}
           label={formatMessage({ id: "billing.billing" })}
         />
-        <div className="border-2 border-black bg-white p-4 text-sm text-black/60 shadow-brutal-sm">
+        <div className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white p-4 text-sm text-foreground-muted theme-brutal:text-black/60 shadow-raft-xs theme-brutal:shadow-brutal-sm">
           {formatMessage({ id: "billing.onlyServerOwnersAndAdminsCanViewBilling" })}
         </div>
       </div>
@@ -7405,7 +7405,7 @@ function AnnouncementSettingsSection() {
         icon={<Bell size={16} />}
         label={formatMessage({ id: "settings.announcements.sectionLabel" })}
       />
-      <form onSubmit={handleSave} className="border-2 border-black bg-white shadow-brutal-sm p-4 space-y-3" data-testid="announcement-settings">
+      <form onSubmit={handleSave} className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white shadow-raft-xs theme-brutal:shadow-brutal-sm p-4 space-y-3" data-testid="announcement-settings">
         <label className={`flex items-start gap-3 ${form.saving ? "opacity-60" : ""}`}>
           <Checkbox
             size="md"
@@ -7419,8 +7419,8 @@ function AnnouncementSettingsSection() {
             data-testid="announcement-settings-toggle"
           />
           <span className="min-w-0">
-            <span className="block text-sm font-bold text-black">{formatMessage({ id: "settings.announcements.enabledTitle" })}</span>
-            <span className="block text-xs text-black/60 mt-0.5">
+            <span className="block text-sm font-bold text-foreground-strong theme-brutal:text-black">{formatMessage({ id: "settings.announcements.enabledTitle" })}</span>
+            <span className="block text-xs text-foreground-muted theme-brutal:text-black/60 mt-0.5">
               {formatMessage({ id: "settings.announcements.enabledDescription" })}
             </span>
           </span>
@@ -7431,7 +7431,7 @@ function AnnouncementSettingsSection() {
         <button
           type="submit"
           disabled={!dirty || form.saving}
-          className="btn-brutal bg-brutal-pink px-3 py-1.5 text-xs flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="btn-brutal bg-accent-soft theme-brutal:bg-brutal-pink px-3 py-1.5 text-xs flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {form.saving ? formatMessage({ id: "settings.common.saving" }) : form.saved ? (
             <><Check size={14} /> {formatMessage({ id: "settings.common.saved" })}</>
@@ -7520,18 +7520,18 @@ function AppearanceSection() {
   return (
     <div className="mb-6">
       <div className="flex items-center gap-2 mb-3">
-        <Type size={16} className="text-black/60" />
-        <span className="text-xs font-bold uppercase text-black/60 tracking-widest">
+        <Type size={16} className="text-foreground-muted theme-brutal:text-black/60" />
+        <span className="text-xs font-bold uppercase text-foreground-muted theme-brutal:text-black/60 tracking-widest">
           {formatMessage({ id: "settings.appearance.sectionLabel" })}
         </span>
       </div>
 
-      <div className="border-2 border-black bg-white shadow-brutal-sm p-4 space-y-4">
+      <div className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white shadow-raft-xs theme-brutal:shadow-brutal-sm p-4 space-y-4">
         {appTheme && THEME_PICKER_ENABLED ? (
-          <div className="space-y-3 border-b border-black/10 pb-4">
+          <div className="space-y-3 border-b border-line-muted theme-brutal:border-black/10 pb-4">
             <div>
-              <div className="text-sm font-bold text-black">{formatMessage({ id: "settings.appearance.themeTitle" })}</div>
-              <p className="mt-1 text-xs text-black/55">
+              <div className="text-sm font-bold text-foreground-strong theme-brutal:text-black">{formatMessage({ id: "settings.appearance.themeTitle" })}</div>
+              <p className="mt-1 text-xs text-foreground-muted theme-brutal:text-black/55">
                 {formatMessage({ id: "settings.appearance.themeDescription" })}
               </p>
             </div>
@@ -7539,8 +7539,8 @@ function AppearanceSection() {
           </div>
         ) : null}
         <div>
-          <div className="text-sm font-bold text-black">{formatMessage({ id: "settings.appearance.messageFontSizeTitle" })}</div>
-          <p className="mt-1 text-xs text-black/55">
+          <div className="text-sm font-bold text-foreground-strong theme-brutal:text-black">{formatMessage({ id: "settings.appearance.messageFontSizeTitle" })}</div>
+          <p className="mt-1 text-xs text-foreground-muted theme-brutal:text-black/55">
             {formatMessage({ id: "settings.appearance.messageFontSizeDescription" })}
           </p>
         </div>
@@ -7550,12 +7550,12 @@ function AppearanceSection() {
           onValueChange={setMessageBodyFontSize}
         />
 
-        <div className="text-[11px] font-bold text-black/45">
+        <div className="text-[11px] font-bold text-foreground-hint theme-brutal:text-black/45">
           {formatMessage({ id: "settings.appearance.savedOnDevice" })}
         </div>
 
         <div className="space-y-2">
-          <div className="text-[10px] font-bold uppercase tracking-widest text-black/50">
+          <div className="text-[10px] font-bold uppercase tracking-widest text-foreground-muted theme-brutal:text-black/50">
             {formatMessage({ id: "settings.appearance.preview" })}
           </div>
           <div className="pointer-events-none -mx-2" aria-label={formatMessage({ id: "settings.appearance.fontSizePreviewAria" })}>
@@ -7570,16 +7570,16 @@ function AppearanceSection() {
         </div>
       </div>
 
-      <div className="mt-4 border-2 border-black bg-white p-4 shadow-brutal-sm">
+      <div className="mt-4 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white p-4 shadow-raft-xs theme-brutal:shadow-brutal-sm">
         <div className="flex items-start justify-between gap-4">
           <span className="min-w-0">
-            <span id="live-agent-activity-setting-label" className="block text-sm font-bold text-black">
+            <span id="live-agent-activity-setting-label" className="block text-sm font-bold text-foreground-strong theme-brutal:text-black">
               {formatMessage({ id: "settings.appearance.liveAgentActivityTitle" })}
             </span>
-            <span id="live-agent-activity-setting-description" className="mt-0.5 block text-xs leading-5 text-black/60">
+            <span id="live-agent-activity-setting-description" className="mt-0.5 block text-xs leading-5 text-foreground-muted theme-brutal:text-black/60">
               {formatMessage({ id: "settings.appearance.liveAgentActivityDescription" })}
             </span>
-            <span className="mt-2 block text-[11px] font-bold text-black/45">
+            <span className="mt-2 block text-[11px] font-bold text-foreground-hint theme-brutal:text-black/45">
               {formatMessage({ id: "settings.appearance.savedOnDevice" })}
             </span>
           </span>
@@ -7594,16 +7594,16 @@ function AppearanceSection() {
         </div>
       </div>
 
-      <div className="mt-4 border-2 border-black bg-white p-4 shadow-brutal-sm">
+      <div className="mt-4 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white p-4 shadow-raft-xs theme-brutal:shadow-brutal-sm">
         <div className="flex items-start justify-between gap-4">
           <span className="min-w-0">
-            <span id="agent-model-name-setting-label" className="block text-sm font-bold text-black">
+            <span id="agent-model-name-setting-label" className="block text-sm font-bold text-foreground-strong theme-brutal:text-black">
               {formatMessage({ id: "settings.appearance.showAgentModelNameTitle" })}
             </span>
-            <span id="agent-model-name-setting-description" className="mt-0.5 block text-xs leading-5 text-black/60">
+            <span id="agent-model-name-setting-description" className="mt-0.5 block text-xs leading-5 text-foreground-muted theme-brutal:text-black/60">
               {formatMessage({ id: "settings.appearance.showAgentModelNameDescription" })}
             </span>
-            <span className="mt-2 block text-[11px] font-bold text-black/45">
+            <span className="mt-2 block text-[11px] font-bold text-foreground-hint theme-brutal:text-black/45">
               {formatMessage({ id: "settings.appearance.savedOnDevice" })}
             </span>
           </span>
@@ -7650,8 +7650,8 @@ export function AboutSection({ appVersion = WEB_APP_VERSION }: { appVersion?: st
         <SectionHeader label={formatMessage({ id: "settings.about.versionSectionLabel" })} icon={<Tag size={16} />} />
         <SurfaceListItem interactive={false} className="space-y-1">
           {/* Product wordmark — catalog brand id; locale values may match. */}
-          <div className="text-sm font-bold text-black">{formatMessage({ id: "brand.productName" })}</div>
-          <div className="text-xs text-black/60">{appVersion}</div>
+          <div className="text-sm font-bold text-foreground-strong theme-brutal:text-black">{formatMessage({ id: "brand.productName" })}</div>
+          <div className="text-xs text-foreground-muted theme-brutal:text-black/60">{appVersion}</div>
         </SurfaceListItem>
       </section>
 
@@ -7666,7 +7666,7 @@ export function AboutSection({ appVersion = WEB_APP_VERSION }: { appVersion?: st
         <SectionHeader label={formatMessage({ id: "settings.mobileApp.sectionLabel" })} icon={<Smartphone size={16} />} />
         <SurfaceListItem interactive={false}>
           <div className="min-w-0 space-y-3">
-            <div className="text-xs text-black/60">{formatMessage({ id: "settings.mobileApp.description" })}</div>
+            <div className="text-xs text-foreground-muted theme-brutal:text-black/60">{formatMessage({ id: "settings.mobileApp.description" })}</div>
             {/* Both buttons are peers, deliberately. A primary/secondary pair
                 reads as a recommendation, and we have no basis for one: the
                 person's phone is not the device rendering this, so we cannot
@@ -7674,7 +7674,7 @@ export function AboutSection({ appVersion = WEB_APP_VERSION }: { appVersion?: st
                 iPhone users looking for the "real" button (@wenyi). */}
             <div className="flex flex-wrap gap-2">
               <a
-                className="btn-brutal-sm bg-white px-3 py-1.5 text-sm font-bold"
+                className="btn-brutal-sm bg-layer-panel theme-brutal:bg-white px-3 py-1.5 text-sm font-bold"
                 href={mobileDownloadUrl("android")}
                 data-testid="mobile-download-android"
               >
@@ -7686,7 +7686,7 @@ export function AboutSection({ appVersion = WEB_APP_VERSION }: { appVersion?: st
                   strands an empty tab behind it. The asymmetry is the point
                   (@wenyi). */}
               <a
-                className="btn-brutal-sm bg-white px-3 py-1.5 text-sm font-bold"
+                className="btn-brutal-sm bg-layer-panel theme-brutal:bg-white px-3 py-1.5 text-sm font-bold"
                 href={mobileDownloadUrl("ios")}
                 target="_blank"
                 rel="noopener noreferrer"
@@ -7715,8 +7715,8 @@ export function AboutSection({ appVersion = WEB_APP_VERSION }: { appVersion?: st
       <section className="space-y-2">
         <SectionHeader label={formatMessage({ id: "settings.about.workspaceSectionLabel" })} icon={<Building2 size={16} />} />
         <SurfaceListItem interactive={false} className="space-y-1">
-          <div className="text-sm font-bold text-black">{currentServer?.name ?? formatMessage({ id: "settings.about.workspaceNameFallback" })}</div>
-          <div className="text-xs text-black/60">{currentServer?.slug ? `/${currentServer.slug}` : formatMessage({ id: "settings.about.workspaceDetailsFallback" })}</div>
+          <div className="text-sm font-bold text-foreground-strong theme-brutal:text-black">{currentServer?.name ?? formatMessage({ id: "settings.about.workspaceNameFallback" })}</div>
+          <div className="text-xs text-foreground-muted theme-brutal:text-black/60">{currentServer?.slug ? `/${currentServer.slug}` : formatMessage({ id: "settings.about.workspaceDetailsFallback" })}</div>
         </SurfaceListItem>
       </section>
     </div>
@@ -7747,10 +7747,10 @@ function WorkspaceModeSettingsCard() {
   if (!availability.resolved || !availability.enabled) return null;
 
   return (
-    <label className="mb-4 flex items-center justify-between gap-4 border-2 border-black bg-brutal-cream p-4 shadow-brutal-sm">
+    <label className="mb-4 flex items-center justify-between gap-4 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-canvas-muted theme-brutal:bg-brutal-cream p-4 shadow-raft-xs theme-brutal:shadow-brutal-sm">
       <span className="min-w-0">
         <span className="block text-sm font-bold">{formatMessage({ id: "settings.workspaceMode.title" })}</span>
-        <span className="mt-1 block text-xs leading-5 text-black/60">{formatMessage({ id: "settings.workspaceMode.description" })}</span>
+        <span className="mt-1 block text-xs leading-5 text-foreground-muted theme-brutal:text-black/60">{formatMessage({ id: "settings.workspaceMode.description" })}</span>
       </span>
       <input
         type="checkbox"
@@ -7811,7 +7811,7 @@ export default function SettingsPanel({
         <PanelHeader
           title={activeLabel}
           icon={<ActiveIcon size={18} />}
-          iconBg="bg-soft-signal text-black"
+          iconBg="bg-primary-soft theme-brutal:bg-soft-signal text-foreground-strong theme-brutal:text-black"
           containerProps={{
             "data-testid": "settings-panel-header",
             "data-slock-settings-tab": settingsTab,
@@ -7823,8 +7823,8 @@ export default function SettingsPanel({
 
       {/* Content */}
       <div className={settingsTab === "feedback"
-        ? "min-h-0 flex-1 bg-white"
-        : "flex-1 overflow-y-auto bg-white px-5 py-4"}
+        ? "min-h-0 flex-1 bg-layer-panel theme-brutal:bg-white"
+        : "flex-1 overflow-y-auto bg-layer-panel theme-brutal:bg-white px-5 py-4"}
       >
         {settingsTab === "account" && <WorkspaceModeSettingsCard />}
         {settingsTab === "account" && (

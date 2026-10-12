@@ -2,11 +2,12 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
+import { brutalView } from "./helpers/brutalView";
 
 const repoRoot = resolve(import.meta.dirname, "..");
 
 function readSource(path: string): string {
-  return readFileSync(resolve(repoRoot, path), "utf8");
+  return brutalView(readFileSync(resolve(repoRoot, path), "utf8"));
 }
 
 function readSettingsSection(startMarker: string, endMarker: string): string {

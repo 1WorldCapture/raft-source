@@ -112,7 +112,7 @@ function ArchivedChannelsSectionContent() {
             >
               <div className="flex min-w-0 flex-1 items-center gap-3">
                 <span
-                  className="flex size-8 shrink-0 items-center justify-center border-2 border-black/30 bg-brutal-stone text-black/65"
+                  className="flex size-8 shrink-0 items-center justify-center border theme-brutal:border-2 border-line-muted theme-brutal:border-black/30 bg-fill-muted theme-brutal:bg-brutal-stone text-foreground-muted theme-brutal:text-black/65"
                   aria-label={typeLabel}
                   title={typeLabel}
                 >
@@ -121,7 +121,7 @@ function ArchivedChannelsSectionContent() {
                 <div className="min-w-0 flex-1">
                   <button
                     type="button"
-                    className="block max-w-full truncate text-left text-sm font-bold text-black underline decoration-2 underline-offset-2 hover:text-black/65"
+                    className="block max-w-full truncate text-left text-sm font-bold text-foreground-strong theme-brutal:text-black underline decoration-2 underline-offset-2 hover:text-foreground-muted theme-brutal:hover:text-black/65"
                     title={channelName}
                     aria-label={formatMessage(
                       { id: "settings.archivedChannels.openAriaLabel" },
@@ -131,7 +131,7 @@ function ArchivedChannelsSectionContent() {
                   >
                     {channelName}
                   </button>
-                  <div className="mt-0.5 truncate text-xs text-black/55">
+                  <div className="mt-0.5 truncate text-xs text-foreground-muted theme-brutal:text-black/55">
                     {formatMessage(
                       { id: "settings.archivedChannels.metadata" },
                       {

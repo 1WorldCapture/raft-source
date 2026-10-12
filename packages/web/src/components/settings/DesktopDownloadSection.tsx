@@ -42,7 +42,7 @@ export function DesktopDownloadSection() {
           target="_blank"
           rel="noopener noreferrer"
           data-testid={`desktop-download-${key}`}
-          className="border-2 border-black bg-white px-2.5 py-1 text-sm font-medium text-black shadow-brutal-sm transition-all hover:bg-soft-signal"
+          className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white px-2.5 py-1 text-sm font-medium text-foreground-strong theme-brutal:text-black shadow-raft-xs theme-brutal:shadow-brutal-sm transition-all hover:bg-primary-soft theme-brutal:hover:bg-soft-signal"
         >
           {key === "arm64"
             ? formatMessage({ id: "settings.desktopDownload.appleSilicon" })

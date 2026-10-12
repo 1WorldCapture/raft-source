@@ -494,7 +494,7 @@ export default function WikiPanel() {
       : "warning";
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-white">
+    <div className="flex min-h-0 flex-1 flex-col bg-layer-panel theme-brutal:bg-white">
       <PanelHeader
         icon={<Network size={18} />}
         title={formatMessage({ id: "wiki.title" })}
@@ -564,19 +564,19 @@ export default function WikiPanel() {
       />
 
       {loading ? (
-        <div className="flex flex-1 flex-col items-center justify-center gap-3 text-sm font-bold uppercase text-black/40">
+        <div className="flex flex-1 flex-col items-center justify-center gap-3 text-sm font-bold uppercase text-foreground-hint theme-brutal:text-black/40">
           <Spinner size="lg" label={formatMessage({ id: "wiki.loading" })} />
           {formatMessage({ id: "wiki.loading" })}
         </div>
       ) : (
         <>
           {error && (
-            <div className="border-b-2 border-black bg-white px-5 py-3">
+            <div className="border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white px-5 py-3">
               <Banner intent="warning" density="sm" withIcon>{error}</Banner>
             </div>
           )}
           {notice && (
-            <div className="border-b-2 border-black bg-white px-5 py-3">
+            <div className="border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white px-5 py-3">
               <Banner intent="info" density="sm" withIcon>{notice}</Banner>
             </div>
           )}
@@ -641,10 +641,10 @@ export default function WikiPanel() {
 function SetupRequiredState({ onSetup }: { onSetup: () => void }) {
   const { formatMessage } = useIntl();
   return (
-    <div className="scrollbar-quiet min-h-0 flex-1 overflow-auto bg-white p-5 safe-bottom">
-      <div className="mx-auto max-w-2xl border-2 border-black bg-white p-5 shadow-brutal-sm">
+    <div className="scrollbar-quiet min-h-0 flex-1 overflow-auto bg-layer-panel theme-brutal:bg-white p-5 safe-bottom">
+      <div className="mx-auto max-w-2xl border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white p-5 shadow-raft-xs theme-brutal:shadow-brutal-sm">
         <div className="mb-5 flex items-center gap-3">
-          <div className="flex size-10 shrink-0 items-center justify-center border-2 border-black bg-soft-signal">
+          <div className="flex size-10 shrink-0 items-center justify-center border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-primary-soft theme-brutal:bg-soft-signal">
             <Network size={20} />
           </div>
           <h2 className="text-xl font-bold leading-tight">{formatMessage({ id: "wiki.setupHeading" })}</h2>
@@ -653,7 +653,7 @@ function SetupRequiredState({ onSetup }: { onSetup: () => void }) {
           <SetupPiece icon={<Bot size={16} />} title={formatMessage({ id: "wiki.setup.agentTitle" })} body={formatMessage({ id: "wiki.setup.agentBody" })} />
           <SetupPiece icon={<Hash size={16} />} title={formatMessage({ id: "wiki.setup.channelTitle" })} body={formatMessage({ id: "wiki.setup.channelBody" })} />
         </div>
-        <p className="mt-4 text-sm text-black/55">
+        <p className="mt-4 text-sm text-foreground-muted theme-brutal:text-black/55">
           {formatMessage({ id: "wiki.setupOnlyCreates" })}
         </p>
         <div className="mt-5">
@@ -670,12 +670,12 @@ function SetupRequiredState({ onSetup }: { onSetup: () => void }) {
 function SetupPiece({ icon, title, body }: { icon: ReactNode; title: string; body: string }) {
   return (
     <div className="flex items-center gap-3">
-      <span className="inline-flex size-8 shrink-0 items-center justify-center border-2 border-black bg-brutal-cream">
+      <span className="inline-flex size-8 shrink-0 items-center justify-center border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-canvas-muted theme-brutal:bg-brutal-cream">
         {icon}
       </span>
       <div className="min-w-0">
         <span className="font-bold">{title}</span>
-        <span className="text-black/55"> — {body}</span>
+        <span className="text-foreground-muted theme-brutal:text-black/55"> — {body}</span>
       </div>
     </div>
   );
@@ -693,21 +693,21 @@ function ReadyState({
   const { formatMessage } = useIntl();
   const { formatShortDateTime } = useTimeFormatter();
   return (
-    <div className="scrollbar-quiet min-h-0 flex-1 overflow-auto bg-white p-5 safe-bottom">
-      <div className="mx-auto max-w-4xl border-2 border-black bg-white p-5 shadow-brutal-sm">
+    <div className="scrollbar-quiet min-h-0 flex-1 overflow-auto bg-layer-panel theme-brutal:bg-white p-5 safe-bottom">
+      <div className="mx-auto max-w-4xl border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white p-5 shadow-raft-xs theme-brutal:shadow-brutal-sm">
         <div className="mb-4">
           <h2 className="text-xl font-bold leading-tight">{formatMessage({ id: "wiki.init.ready" })}</h2>
-          <p className="mt-1 text-sm font-mono text-black/50">{formatMessage({ id: "wiki.startInitHint" })}</p>
+          <p className="mt-1 text-sm font-mono text-foreground-muted theme-brutal:text-black/50">{formatMessage({ id: "wiki.startInitHint" })}</p>
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
           <KeyFact icon={<Bot size={16} />} label={formatMessage({ id: "wiki.agentLabel" })} value={space.wikiAgentName || space.wikiAgentId || formatMessage({ id: "wiki.setup.agentTitle" })} />
           <KeyFact icon={<Hash size={16} />} label={formatMessage({ id: "wiki.setup.channelTitle" })} value={space.wikiChannelName ? `#${space.wikiChannelName}` : space.wikiChannelId || `#${formatMessage({ id: "wiki.channelNameFallback" })}`} />
         </div>
-        <p className="mt-4 text-sm text-black/55">
+        <p className="mt-4 text-sm text-foreground-muted theme-brutal:text-black/55">
           {formatMessage({ id: "wiki.readyParagraph" })}
         </p>
         {space.lastIngestRequestedAt && (
-          <p className="mt-3 text-sm text-black/55">
+          <p className="mt-3 text-sm text-foreground-muted theme-brutal:text-black/55">
             {formatMessage(
               { id: "wiki.init.requestedAt" },
               { date: formatShortDateTime(space.lastIngestRequestedAt) },
@@ -744,7 +744,7 @@ function WikiInitDialog({
           <Banner intent="info" density="sm" title={formatMessage({ id: "wiki.setup.allPublicChannels" })}>
             {formatMessage({ id: "wiki.initBanner" })}
           </Banner>
-          <p className="text-sm leading-relaxed text-black/65">
+          <p className="text-sm leading-relaxed text-foreground-muted theme-brutal:text-black/65">
             {formatMessage({ id: "wiki.initialize.flowDescription" })}
           </p>
         </div>
@@ -787,25 +787,25 @@ function JobState({
   const resumable = Boolean(initialization?.resumable && onResume) && !resuming;
   const spinning = !resumable;
   return (
-    <div className="scrollbar-quiet min-h-0 flex-1 overflow-auto bg-white p-5 safe-bottom">
-      <div className="mx-auto max-w-3xl border-2 border-black bg-white p-5 shadow-brutal-sm">
+    <div className="scrollbar-quiet min-h-0 flex-1 overflow-auto bg-layer-panel theme-brutal:bg-white p-5 safe-bottom">
+      <div className="mx-auto max-w-3xl border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white p-5 shadow-raft-xs theme-brutal:shadow-brutal-sm">
         <div className="mb-4 flex items-center gap-3">
-          <div className="flex size-10 items-center justify-center border-2 border-black bg-brutal-orange">
+          <div className="flex size-10 items-center justify-center border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-warning-soft theme-brutal:bg-brutal-orange">
             <RefreshCw size={18} className={spinning ? "animate-spin" : ""} />
           </div>
           <div>
             <h2 className="text-xl font-bold leading-tight">{title}</h2>
-            <p className="text-sm text-black/60">{description}</p>
+            <p className="text-sm text-foreground-muted theme-brutal:text-black/60">{description}</p>
           </div>
         </div>
         <ProgressBar value={progress} label={job?.progress?.label || formatMessage({ id: "wiki.waitingPublication" })} showPercent={progress !== null} tone="pink" />
-        <div className="mt-4 grid gap-2 text-xs font-mono text-black/50 sm:grid-cols-2">
+        <div className="mt-4 grid gap-2 text-xs font-mono text-foreground-muted theme-brutal:text-black/50 sm:grid-cols-2">
           <span>{formatMessage({ id: "wiki.started" })}: {formatMaybeDateTime(job?.startedAt, formatDateTime, formatMessage({ id: "wiki.status.notYet" }))}</span>
           <span>{formatMessage({ id: "wiki.updated" })}: {formatMaybeDateTime(job?.completedAt ?? job?.createdAt, formatDateTime, formatMessage({ id: "wiki.status.notYet" }))}</span>
         </div>
         {resumable && (
-          <div className="mt-5 border-t-2 border-black pt-4">
-            <p className="text-sm text-black/65">
+          <div className="mt-5 border-t theme-brutal:border-t-2 border-line-strong theme-brutal:border-black pt-4">
+            <p className="text-sm text-foreground-muted theme-brutal:text-black/65">
               {job?.status === "failed"
                 ? formatMessage({ id: "wiki.ingestFailed" })
                 : formatMessage({ id: "wiki.init.interrupted" })}
@@ -830,8 +830,8 @@ function JobState({
 function ErrorState({ job, onRetry, busy }: { job: WikiJobSummary | null; onRetry: () => void; busy: boolean }) {
   const { formatMessage } = useIntl();
   return (
-    <div className="scrollbar-quiet min-h-0 flex-1 overflow-auto bg-white p-5 safe-bottom">
-      <div className="mx-auto max-w-3xl border-2 border-black bg-white p-5 shadow-brutal-sm">
+    <div className="scrollbar-quiet min-h-0 flex-1 overflow-auto bg-layer-panel theme-brutal:bg-white p-5 safe-bottom">
+      <div className="mx-auto max-w-3xl border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white p-5 shadow-raft-xs theme-brutal:shadow-brutal-sm">
         <Banner intent="destructive" withIcon title={formatMessage({ id: "wiki.maintenanceFailed" })}>
           {job?.error || formatMessage({ id: "wiki.maintenanceRunFailed" })}
         </Banner>
@@ -888,9 +888,9 @@ function ActiveWikiState({
   };
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-white">
-      <div className="hidden border-b-2 border-black bg-white px-4 py-1.5 md:block">
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] font-mono text-black/45">
+    <div className="flex min-h-0 flex-1 flex-col bg-layer-panel theme-brutal:bg-white">
+      <div className="hidden border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white px-4 py-1.5 md:block">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] font-mono text-foreground-hint theme-brutal:text-black/45">
           <span>{formatMessage({ id: "wiki.refreshed" })} {formatMaybeDateTime(space.lastScannedAt, formatDateTime, formatMessage({ id: "wiki.status.notYet" }))}</span>
           <span aria-hidden>·</span>
           <span>
@@ -917,7 +917,7 @@ function ActiveWikiState({
           {lastJob?.status === "running" && (
             <>
               <span aria-hidden>·</span>
-              <span className="text-black/60">{formatMessage({ id: "wiki.maintenanceRunning" })}</span>
+              <span className="text-foreground-muted theme-brutal:text-black/60">{formatMessage({ id: "wiki.maintenanceRunning" })}</span>
             </>
           )}
           {lastJob?.status === "failed" && (
@@ -929,9 +929,9 @@ function ActiveWikiState({
         </div>
       </div>
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 bg-white md:grid-cols-[300px_minmax(0,1fr)]">
-        <aside className={`${mobileDocOpen ? "hidden md:flex" : "flex"} min-h-0 flex-col bg-brutal-cream md:border-r-2 md:border-black`}>
-          <div className="shrink-0 border-b-2 border-black bg-white p-3">
+      <div className="grid min-h-0 flex-1 grid-cols-1 bg-layer-panel theme-brutal:bg-white md:grid-cols-[300px_minmax(0,1fr)]">
+        <aside className={`${mobileDocOpen ? "hidden md:flex" : "flex"} min-h-0 flex-col bg-layer-canvas-muted theme-brutal:bg-brutal-cream md:border-r theme-brutal:md:border-r-2 md:border-line-strong theme-brutal:md:border-black`}>
+          <div className="shrink-0 border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white p-3">
             <input
               type="search"
               value={filter}
@@ -966,13 +966,13 @@ function ActiveWikiState({
             )}
           </div>
           {(indexDoc || logDoc) && (
-            <div className="shrink-0 border-t-2 border-black bg-white px-3 py-2 safe-bottom">
+            <div className="shrink-0 border-t theme-brutal:border-t-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white px-3 py-2 safe-bottom">
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-mono">
                 {indexDoc && (
                   <button
                     type="button"
                     onClick={() => openArtifact(indexDoc.id)}
-                    className={`hover:text-black ${selectedArtifactId === indexDoc.id ? "font-bold text-black" : "text-black/50"}`}
+                    className={`hover:text-foreground-strong theme-brutal:hover:text-black ${selectedArtifactId === indexDoc.id ? "font-bold text-foreground-strong theme-brutal:text-black" : "text-foreground-muted theme-brutal:text-black/50"}`}
                   >
                     {formatMessage({ id: "wiki.indexLabel" })}
                   </button>
@@ -981,7 +981,7 @@ function ActiveWikiState({
                   <button
                     type="button"
                     onClick={() => openArtifact(logDoc.id)}
-                    className={`hover:text-black ${selectedArtifactId === logDoc.id ? "font-bold text-black" : "text-black/50"}`}
+                    className={`hover:text-foreground-strong theme-brutal:hover:text-black ${selectedArtifactId === logDoc.id ? "font-bold text-foreground-strong theme-brutal:text-black" : "text-foreground-muted theme-brutal:text-black/50"}`}
                   >
                     {formatMessage({ id: "wiki.logLabel" })}
                   </button>
@@ -991,7 +991,7 @@ function ActiveWikiState({
           )}
         </aside>
 
-        <main className={`${mobileDocOpen ? "block" : "hidden md:block"} scrollbar-quiet min-h-0 overflow-y-auto bg-white p-5 safe-bottom`}>
+        <main className={`${mobileDocOpen ? "block" : "hidden md:block"} scrollbar-quiet min-h-0 overflow-y-auto bg-layer-panel theme-brutal:bg-white p-5 safe-bottom`}>
           <div className="mb-4 md:hidden">
             <Button size="sm" shape="iconText" onClick={() => setMobileDocOpen(false)}>
               <ArrowLeft size={14} />
@@ -999,13 +999,13 @@ function ActiveWikiState({
             </Button>
           </div>
           {pageLoading ? (
-            <div className="flex h-full items-center justify-center text-sm font-bold uppercase text-black/40">
+            <div className="flex h-full items-center justify-center text-sm font-bold uppercase text-foreground-hint theme-brutal:text-black/40">
               {formatMessage({ id: "wiki.loadingDocument" })}
             </div>
           ) : selectedPage ? (
             <WikiDocument page={selectedPage} formatDateTime={formatDateTime} />
           ) : (
-            <div className="flex h-full items-center justify-center text-center text-sm font-bold uppercase text-black/40">
+            <div className="flex h-full items-center justify-center text-center text-sm font-bold uppercase text-foreground-hint theme-brutal:text-black/40">
               {formatMessage({ id: "wiki.emptyDocument" })}
             </div>
           )}
@@ -1028,7 +1028,7 @@ function WikiDocument({ page, formatDateTime }: { page: WikiPageResponse; format
     <div className="mx-auto flex max-w-5xl justify-center gap-8">
     <article className="min-w-0 max-w-3xl flex-1">
       <h1 className="text-2xl font-bold leading-tight sm:text-3xl">{page.title}</h1>
-      <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1.5 text-xs font-mono text-black/50">
+      <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1.5 text-xs font-mono text-foreground-muted theme-brutal:text-black/50">
         {page.status && <Badge variant={ARTIFACT_STATUS_VARIANT[page.status]}>{formatMessage({ id: WIKI_ARTIFACT_STATUS_LABEL_ID[page.status] })}</Badge>}
         {page.confidence && <Badge appearance="outline">{formatMessage({ id: "wiki.pageConfidence" }, { confidence: page.confidence })}</Badge>}
         {page.sourcePolicy === "prefer_live_source" && <Badge variant="warning">{formatMessage({ id: "wiki.preferLiveSource" })}</Badge>}
@@ -1040,34 +1040,34 @@ function WikiDocument({ page, formatDateTime }: { page: WikiPageResponse; format
         <span>{formatMessage({ id: "wiki.updated" })} {formatMaybeDateTime(page.updatedAt, formatDateTime, formatMessage({ id: "wiki.status.notYet" }))}</span>
       </div>
       {page.summary && (
-        <p className="mt-5 border-l-4 border-black pl-3 text-base font-medium leading-relaxed">
+        <p className="mt-5 border-l-4 border-line-strong theme-brutal:border-black pl-3 text-base font-medium leading-relaxed">
           {page.summary}
         </p>
       )}
       {page.currentUnderstanding && (
-        <section className="mt-5 border-2 border-black bg-brutal-cream p-4">
+        <section className="mt-5 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-canvas-muted theme-brutal:bg-brutal-cream p-4">
           <h2 className="text-sm font-bold uppercase tracking-wide">{formatMessage({ id: "wiki.currentUnderstanding" })}</h2>
           <p className="mt-2 text-sm leading-relaxed">{page.currentUnderstanding}</p>
         </section>
       )}
-      <div className="mt-6 border-t-2 border-black pt-5 text-base leading-relaxed">
+      <div className="mt-6 border-t theme-brutal:border-t-2 border-line-strong theme-brutal:border-black pt-5 text-base leading-relaxed">
         {markdown ? (
           <MarkdownContent source={markdown} density="document" enableMermaid components={outlineComponents} />
         ) : (
-          <p className="text-sm font-mono text-black/50">{formatMessage({ id: "wiki.noMarkdownYet" })}</p>
+          <p className="text-sm font-mono text-foreground-muted theme-brutal:text-black/50">{formatMessage({ id: "wiki.noMarkdownYet" })}</p>
         )}
       </div>
       <ReferenceList title={formatMessage({ id: "wiki.sourceRefs" })} items={page.sourceRefs} />
     </article>
     {showOutline && (
       <nav className="hidden w-52 shrink-0 xl:block" aria-label={formatMessage({ id: "wiki.documentOutline" })}>
-        <div className="sticky top-4 border-l-2 border-black/10 pl-3">
-          <div className="mb-2 text-xs font-bold uppercase tracking-wide text-black/40">{formatMessage({ id: "wiki.onThisPage" })}</div>
+        <div className="sticky top-4 border-l theme-brutal:border-l-2 border-line-muted theme-brutal:border-black/10 pl-3">
+          <div className="mb-2 text-xs font-bold uppercase tracking-wide text-foreground-hint theme-brutal:text-black/40">{formatMessage({ id: "wiki.onThisPage" })}</div>
           {outline.map((item) => (
             <a
               key={item.id}
               href={`#${item.id}`}
-              className={`block truncate py-0.5 text-sm text-black/60 hover:text-black ${
+              className={`block truncate py-0.5 text-sm text-foreground-muted theme-brutal:text-black/60 hover:text-foreground-strong theme-brutal:hover:text-black ${
                 item.level === 3 ? "pl-4" : item.level === 2 ? "pl-2" : ""
               }`}
               onClick={(event) => {
@@ -1090,15 +1090,15 @@ function WikiDocument({ page, formatDateTime }: { page: WikiPageResponse; format
 function ReferenceList({ title, items }: { title: string; items?: unknown[] }) {
   if (!Array.isArray(items) || items.length === 0) return null;
   return (
-    <section className="mt-5 border-t-2 border-black pt-4">
+    <section className="mt-5 border-t theme-brutal:border-t-2 border-line-strong theme-brutal:border-black pt-4">
       <h2 className="text-sm font-bold uppercase tracking-wide">{title}</h2>
       <div className="mt-2 space-y-2">
         {items.map((item, index) => (
-          <div key={`${title}-${index}`} className="border border-black bg-white p-2">
+          <div key={`${title}-${index}`} className="border border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white p-2">
             <div className="break-words text-sm font-bold">
               <RefText text={itemTitle(item)} />
             </div>
-            {itemDetail(item) && <div className="mt-1 text-xs text-black/55">{itemDetail(item)}</div>}
+            {itemDetail(item) && <div className="mt-1 text-xs text-foreground-muted theme-brutal:text-black/55">{itemDetail(item)}</div>}
           </div>
         ))}
       </div>
@@ -1233,22 +1233,22 @@ function SetupResourceCard({
 }) {
   const { formatMessage } = useIntl();
   return (
-    <div className="flex min-h-full flex-col border-2 border-black bg-white p-3 shadow-brutal-sm">
+    <div className="flex min-h-full flex-col border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white p-3 shadow-raft-xs theme-brutal:shadow-brutal-sm">
       <div className="flex items-center gap-2">
-        <span className="inline-flex h-7 w-7 items-center justify-center border-2 border-black bg-soft-signal">{icon}</span>
+        <span className="inline-flex h-7 w-7 items-center justify-center border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-primary-soft theme-brutal:bg-soft-signal">{icon}</span>
         <div className="min-w-0">
           <h3 className="text-sm font-bold uppercase tracking-wide">{title}</h3>
-          <p className="truncate text-xs font-mono text-black/55">{value}</p>
+          <p className="truncate text-xs font-mono text-foreground-muted theme-brutal:text-black/55">{value}</p>
         </div>
         <Badge variant={complete ? "success" : "warning"} className="ml-auto">{complete ? formatMessage({ id: "wiki.status.ready" }) : formatMessage({ id: "wiki.setup.required" })}</Badge>
       </div>
-      <p className="mt-3 flex-1 text-sm leading-relaxed text-black/65">{description}</p>
-      {disabled && disabledReason ? <p className="mt-3 text-xs font-mono text-black/45">{disabledReason}</p> : null}
+      <p className="mt-3 flex-1 text-sm leading-relaxed text-foreground-muted theme-brutal:text-black/65">{description}</p>
+      {disabled && disabledReason ? <p className="mt-3 text-xs font-mono text-foreground-hint theme-brutal:text-black/45">{disabledReason}</p> : null}
       <button
         type="button"
         onClick={onAction}
         disabled={disabled}
-        className={`btn-brutal-sm mt-3 w-full px-3 py-2 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-50 ${complete ? "bg-white" : "bg-brutal-pink"}`}
+        className={`btn-brutal-sm mt-3 w-full px-3 py-2 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-50 ${complete ? "bg-layer-panel theme-brutal:bg-white" : "bg-accent-soft theme-brutal:bg-brutal-pink"}`}
       >
         {actionLabel}
       </button>
@@ -1262,15 +1262,15 @@ function ArtifactRow({ artifact, active, onClick }: { artifact: WikiArtifactSumm
     <button
       type="button"
       onClick={onClick}
-      className={`w-full border-2 p-3 text-left transition-colors ${
-        active ? "border-black bg-white shadow-brutal-sm" : "border-transparent bg-white/70 hover:border-black hover:bg-white"
+      className={`w-full border theme-brutal:border-2 p-3 text-left transition-colors ${
+        active ? "border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white shadow-raft-xs theme-brutal:shadow-brutal-sm" : "border-transparent bg-layer-panel/70 theme-brutal:bg-white/70 hover:border-line-strong theme-brutal:hover:border-black hover:bg-layer-panel theme-brutal:hover:bg-white"
       }`}
     >
       <div className="flex items-start gap-2">
         <FileText size={14} className="mt-0.5 shrink-0" />
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-bold">{artifact.title}</div>
-          {artifact.summary && <div className="mt-1 line-clamp-2 text-xs text-black/55">{artifact.summary}</div>}
+          {artifact.summary && <div className="mt-1 line-clamp-2 text-xs text-foreground-muted theme-brutal:text-black/55">{artifact.summary}</div>}
         </div>
       </div>
       {((artifact.status && artifact.status !== "current") || artifact.sourcePolicy === "prefer_live_source") && (
@@ -1287,8 +1287,8 @@ function ArtifactRow({ artifact, active, onClick }: { artifact: WikiArtifactSumm
 
 function KeyFact({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
   return (
-    <div className="border-2 border-black bg-brutal-cream p-3">
-      <div className="mb-1 flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-black/60">
+    <div className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-canvas-muted theme-brutal:bg-brutal-cream p-3">
+      <div className="mb-1 flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-foreground-muted theme-brutal:text-black/60">
         {icon}
         {label}
       </div>
@@ -1299,10 +1299,10 @@ function KeyFact({ icon, label, value }: { icon: React.ReactNode; label: string;
 
 function EmptyList({ label, hint, busy = false }: { label: string; hint?: string; busy?: boolean }) {
   return (
-    <div className="flex flex-col items-center gap-2 border-2 border-dashed border-black/30 bg-white/60 px-4 py-8 text-center">
-      {busy ? <Spinner size="md" label={label} /> : <FileText size={20} className="text-black/30" />}
-      <div className="text-xs font-bold uppercase tracking-wide text-black/40">{label}</div>
-      {hint && <div className="max-w-56 text-xs text-black/40">{hint}</div>}
+    <div className="flex flex-col items-center gap-2 border theme-brutal:border-2 border-dashed border-line-muted theme-brutal:border-black/30 bg-layer-panel/60 theme-brutal:bg-white/60 px-4 py-8 text-center">
+      {busy ? <Spinner size="md" label={label} /> : <FileText size={20} className="text-foreground-placeholder theme-brutal:text-black/30" />}
+      <div className="text-xs font-bold uppercase tracking-wide text-foreground-hint theme-brutal:text-black/40">{label}</div>
+      {hint && <div className="max-w-56 text-xs text-foreground-hint theme-brutal:text-black/40">{hint}</div>}
     </div>
   );
 }

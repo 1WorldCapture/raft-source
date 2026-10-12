@@ -54,10 +54,10 @@ export default function WikiSettingsSection() {
         icon={<Network size={16} />}
         label={formatMessage({ id: "wiki.settings.maintenance" })}
       />
-      <div className="space-y-4 border-2 border-black bg-white p-4 shadow-brutal-sm">
+      <div className="space-y-4 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white p-4 shadow-raft-xs theme-brutal:shadow-brutal-sm">
         <div>
-          <div className="text-sm font-bold text-black">{formatMessage({ id: "wiki.reset.title" })}</div>
-          <p className="mt-1 text-sm leading-relaxed text-black/60">
+          <div className="text-sm font-bold text-foreground-strong theme-brutal:text-black">{formatMessage({ id: "wiki.reset.title" })}</div>
+          <p className="mt-1 text-sm leading-relaxed text-foreground-muted theme-brutal:text-black/60">
             {formatMessage({ id: "wiki.reset.description" })}
           </p>
         </div>

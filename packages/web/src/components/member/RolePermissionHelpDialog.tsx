@@ -59,14 +59,14 @@ export default function RolePermissionHelpDialog({
     >
         <div className="space-y-3">
           {rows.map((row) => (
-            <div key={row.roleId} className="border-2 border-black/20 bg-white p-3">
+            <div key={row.roleId} className="border theme-brutal:border-2 border-line-muted theme-brutal:border-black/20 bg-layer-panel theme-brutal:bg-white p-3">
               <div className="mb-1 flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                <div className="text-sm font-bold text-black">{formatMessage({ id: row.roleId })}</div>
-                <div className="text-xs font-bold text-black/60">
+                <div className="text-sm font-bold text-foreground-strong theme-brutal:text-black">{formatMessage({ id: row.roleId })}</div>
+                <div className="text-xs font-bold text-foreground-muted theme-brutal:text-black/60">
                   {formatMessage({ id: row.summaryId })}
                 </div>
               </div>
-              <p className="text-sm leading-relaxed text-black/75">
+              <p className="text-sm leading-relaxed text-foreground-strong theme-brutal:text-black/75">
                 {formatMessage({ id: row.detailsId })}
               </p>
             </div>

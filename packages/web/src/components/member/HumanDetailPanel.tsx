@@ -54,10 +54,10 @@ import { useServerFeatureFlag } from "../../store/serverFeatureFlags";
 import { getEditableHumanServerRoles } from "./humanRoleTransitions";
 
 const ROLE_CONFIG: Record<ServerRole, { labelId: MessageId; color: string }> = {
-  owner: { labelId: "member.detail.roleOwner", color: "bg-brutal-orange" },
-  admin: { labelId: "member.detail.roleAdmin", color: "bg-brutal-pink" },
-  member: { labelId: "member.detail.roleMember", color: "bg-brutal-lavender" },
-  guest: { labelId: "member.detail.roleGuest", color: "bg-brutal-cyan" },
+  owner: { labelId: "member.detail.roleOwner", color: "bg-warning-soft theme-brutal:bg-brutal-orange" },
+  admin: { labelId: "member.detail.roleAdmin", color: "bg-accent-soft theme-brutal:bg-brutal-pink" },
+  member: { labelId: "member.detail.roleMember", color: "bg-secondary-200 theme-brutal:bg-brutal-lavender" },
+  guest: { labelId: "member.detail.roleGuest", color: "bg-info-soft theme-brutal:bg-brutal-cyan" },
 };
 const EDITABLE_ROLE_OPTIONS: { id: ServerRole; labelId: MessageId }[] = [
   { id: "owner", labelId: "member.detail.roleOwner" },
@@ -321,7 +321,7 @@ export default function HumanDetailPanel({
                     if (ch) nav.toDm(ch.id);
                   }
                 }}
-                className="btn-brutal-sm flex size-7 items-center justify-center bg-white"
+                className="btn-brutal-sm flex size-7 items-center justify-center bg-layer-panel theme-brutal:bg-white"
                 title={formatMessage({ id: "member.detail.message" })}
                 aria-label={formatMessage({ id: "member.detail.message" })}
               >
@@ -331,7 +331,7 @@ export default function HumanDetailPanel({
             {onClose && (
               <button
                 onClick={onClose}
-                className={`btn-brutal-sm size-7 items-center justify-center bg-white ${onBack ? "flex" : "hidden md:flex"}`}
+                className={`btn-brutal-sm size-7 items-center justify-center bg-layer-panel theme-brutal:bg-white ${onBack ? "flex" : "hidden md:flex"}`}
                 title={formatMessage({ id: "common.close" })}
               >
                 <X size={14} />
@@ -342,13 +342,13 @@ export default function HumanDetailPanel({
       />
 
       {/* Profile content — unified cream background, light separators */}
-      <div className="flex-1 overflow-y-auto bg-white">
+      <div className="flex-1 overflow-y-auto bg-layer-panel theme-brutal:bg-white">
         {sourceServerLabel && (
-          <div className="border-b border-black/10 px-5 py-3">
+          <div className="border-b border-line-muted theme-brutal:border-black/10 px-5 py-3">
             <SectionEyebrow as="div" className="mb-1">
               {formatMessage({ id: "member.detail.from" })}
             </SectionEyebrow>
-            <div className="text-sm font-bold text-black">
+            <div className="text-sm font-bold text-foreground-strong theme-brutal:text-black">
               {sourceServerLabel}
             </div>
           </div>
@@ -378,7 +378,7 @@ export default function HumanDetailPanel({
                 humanAvatarUrl={avatarUrl}
                 gravatarHash={human.gravatarHash}
               />
-              <span className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity group-hover:opacity-100">
+              <span className="absolute inset-0 flex items-center justify-center bg-foreground/40 theme-brutal:bg-black/40 opacity-0 transition-opacity group-hover:opacity-100">
                 <Upload size={18} className="text-white" />
               </span>
             </button>
@@ -411,25 +411,25 @@ export default function HumanDetailPanel({
           )}
           <div className="min-w-0 flex-1">
             <div
-              className="min-w-0 truncate text-lg font-bold leading-tight text-black"
+              className="min-w-0 truncate text-lg font-bold leading-tight text-foreground-strong theme-brutal:text-black"
               title={human.displayName || human.name}
             >
               {human.displayName || human.name}
             </div>
             <div className="flex min-w-0 items-center gap-2">
               <span
-                className="min-w-0 truncate text-sm font-mono text-black/50"
+                className="min-w-0 truncate text-sm font-mono text-foreground-muted theme-brutal:text-black/50"
                 title={`@${human.name}`}
               >
                 @{human.name}
               </span>
               {departureLabel && (
-                <span className="inline-flex shrink-0 items-center px-1.5 py-0.5 text-[10px] font-bold uppercase border border-black bg-gray-300 text-black/60">
+                <span className="inline-flex shrink-0 items-center px-1.5 py-0.5 text-[10px] font-bold uppercase border border-line-strong theme-brutal:border-black bg-gray-300 text-foreground-muted theme-brutal:text-black/60">
                   {departureLabelText}
                 </span>
               )}
               {isSelf && (
-                <span className="shrink-0 text-sm text-black/60 font-mono">
+                <span className="shrink-0 text-sm text-foreground-muted theme-brutal:text-black/60 font-mono">
                   {formatMessage({ id: "member.detail.you" })}
                 </span>
               )}
@@ -445,7 +445,7 @@ export default function HumanDetailPanel({
           </div>
         )}
 
-        <div className="px-5 py-4 border-t border-black/10">
+        <div className="px-5 py-4 border-t border-line-muted theme-brutal:border-black/10">
           <div className="flex items-center gap-2 mb-1">
             <SectionEyebrow as="div">
               {formatMessage({ id: "member.detail.description" })}
@@ -460,7 +460,7 @@ export default function HumanDetailPanel({
                     setDescriptionError("");
                     setEditingDescription(true);
                   }}
-                  className="text-black/40 hover:text-black transition-colors"
+                  className="text-foreground-hint theme-brutal:text-black/40 hover:text-foreground-strong theme-brutal:hover:text-black transition-colors"
                   title={formatMessage({ id: "member.detail.editDescription" })}
                   aria-label={formatMessage({
                     id: "member.detail.editDescription",
@@ -485,7 +485,7 @@ export default function HumanDetailPanel({
                   placeholder={formatMessage({
                     id: "member.detail.descriptionPlaceholder",
                   })}
-                  className="m-0 min-h-10 w-full border-2 border-black px-2 py-1 text-sm leading-4 shadow-brutal-sm focus:outline-none focus:shadow-brutal-sm resize-none overflow-hidden"
+                  className="m-0 min-h-10 w-full border theme-brutal:border-2 border-line-strong theme-brutal:border-black px-2 py-1 text-sm leading-4 shadow-raft-xs theme-brutal:shadow-brutal-sm focus:outline-none focus:shadow-raft-xs theme-brutal:focus:shadow-brutal-sm resize-none overflow-hidden"
                 />
                 <div className="flex items-center gap-1.5">
                   <button
@@ -522,7 +522,7 @@ export default function HumanDetailPanel({
                         setDescriptionSaving(false);
                       }
                     }}
-                    className="btn-brutal-sm bg-brutal-pink px-2 py-1 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="btn-brutal-sm bg-accent-soft theme-brutal:bg-brutal-pink px-2 py-1 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
                     disabled={descriptionSaving}
                   >
                     {descriptionSaving
@@ -536,7 +536,7 @@ export default function HumanDetailPanel({
                       setDescriptionError("");
                       setEditingDescription(false);
                     }}
-                    className="btn-brutal-sm bg-white px-2 py-1 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="btn-brutal-sm bg-layer-panel theme-brutal:bg-white px-2 py-1 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
                     disabled={descriptionSaving}
                   >
                     {formatMessage({ id: "member.detail.cancel" })}
@@ -550,25 +550,25 @@ export default function HumanDetailPanel({
                   ) : (
                     <span />
                   )}
-                  <span className="font-mono text-black/50">
+                  <span className="font-mono text-foreground-muted theme-brutal:text-black/50">
                     {descriptionValue.trim().length}/
                     {MAX_HUMAN_DESCRIPTION_LENGTH}
                   </span>
                 </div>
               </div>
             ) : (
-              <p className="text-sm text-black">
+              <p className="text-sm text-foreground-strong theme-brutal:text-black">
                 {human.description || (
-                  <span className="italic text-black/40">
+                  <span className="italic text-foreground-hint theme-brutal:text-black/40">
                     {formatMessage({ id: "member.detail.noDescription" })}
                   </span>
                 )}
               </p>
             )
           ) : (
-            <div className="text-sm text-black">
+            <div className="text-sm text-foreground-strong theme-brutal:text-black">
               {human.description || (
-                <span className="italic text-black/40">
+                <span className="italic text-foreground-hint theme-brutal:text-black/40">
                   {formatMessage({ id: "member.detail.noDescription" })}
                 </span>
               )}
@@ -578,7 +578,7 @@ export default function HumanDetailPanel({
 
         {/* Info */}
         {!isRemoteJointHuman && !isChannelSummaryHuman && (
-          <div className="px-5 py-4 border-t border-black/10">
+          <div className="px-5 py-4 border-t border-line-muted theme-brutal:border-black/10">
             <SectionEyebrow as="div" className="mb-3">
               {formatMessage({ id: "member.detail.info" })}
             </SectionEyebrow>
@@ -586,7 +586,7 @@ export default function HumanDetailPanel({
               {/* Role */}
               <div>
                 <div className="mb-1 flex items-center gap-2">
-                  <div className="text-xs text-black/50">
+                  <div className="text-xs text-foreground-muted theme-brutal:text-black/50">
                     {departureLabel
                       ? formatMessage({ id: "member.detail.status" })
                       : formatMessage({ id: "member.detail.role" })}
@@ -595,7 +595,7 @@ export default function HumanDetailPanel({
                     <button
                       type="button"
                       onClick={() => setShowRoleHelp(true)}
-                      className="text-black/35 transition-colors hover:text-black"
+                      className="text-foreground-placeholder theme-brutal:text-black/35 transition-colors hover:text-foreground-strong theme-brutal:hover:text-black"
                       title={formatMessage({
                         id: "member.detail.rolePermissions",
                       })}
@@ -615,7 +615,7 @@ export default function HumanDetailPanel({
                         setRoleError("");
                         setEditingRole(true);
                       }}
-                      className="text-black/40 hover:text-black transition-colors"
+                      className="text-foreground-hint theme-brutal:text-black/40 hover:text-foreground-strong theme-brutal:hover:text-black transition-colors"
                       title={formatMessage({ id: "member.detail.editRole" })}
                       aria-label={formatMessage({
                         id: "member.detail.editRole",
@@ -626,7 +626,7 @@ export default function HumanDetailPanel({
                   )}
                 </div>
                 {departureLabel ? (
-                  <span className="inline-block border-2 border-black px-2 py-0.5 text-xs font-bold text-black bg-gray-300">
+                  <span className="inline-block border theme-brutal:border-2 border-line-strong theme-brutal:border-black px-2 py-0.5 text-xs font-bold text-foreground-strong theme-brutal:text-black bg-gray-300">
                     {departureLabelText}
                   </span>
                 ) : canEditRole && roleInfo ? (
@@ -682,7 +682,7 @@ export default function HumanDetailPanel({
                               }
                             }}
                             disabled={roleSaving || roleValue === human.role}
-                            className="btn-brutal-sm bg-brutal-pink px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                            className="btn-brutal-sm bg-accent-soft theme-brutal:bg-brutal-pink px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             {formatMessage({ id: "member.detail.save" })}
                           </button>
@@ -695,7 +695,7 @@ export default function HumanDetailPanel({
                               setEditingRole(false);
                             }}
                             disabled={roleSaving}
-                            className="btn-brutal-sm bg-white px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                            className="btn-brutal-sm bg-layer-panel theme-brutal:bg-white px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             {formatMessage({ id: "member.detail.cancel" })}
                           </button>
@@ -703,7 +703,7 @@ export default function HumanDetailPanel({
                       </>
                     ) : (
                       <span
-                        className={`inline-block border-2 border-black px-2 py-0.5 text-xs font-bold text-black ${roleInfo.color}`}
+                        className={`inline-block border theme-brutal:border-2 border-line-strong theme-brutal:border-black px-2 py-0.5 text-xs font-bold text-foreground-strong theme-brutal:text-black ${roleInfo.color}`}
                       >
                         {formatMessage({ id: roleInfo.labelId })}
                       </span>
@@ -711,12 +711,12 @@ export default function HumanDetailPanel({
                   </div>
                 ) : roleInfo ? (
                   <span
-                    className={`inline-block border-2 border-black px-2 py-0.5 text-xs font-bold text-black ${roleInfo.color}`}
+                    className={`inline-block border theme-brutal:border-2 border-line-strong theme-brutal:border-black px-2 py-0.5 text-xs font-bold text-foreground-strong theme-brutal:text-black ${roleInfo.color}`}
                   >
                     {formatMessage({ id: roleInfo.labelId })}
                   </span>
                 ) : (
-                  <span className="inline-block border-2 border-black px-2 py-0.5 text-xs font-bold text-black bg-gray-100">
+                  <span className="inline-block border theme-brutal:border-2 border-line-strong theme-brutal:border-black px-2 py-0.5 text-xs font-bold text-foreground-strong theme-brutal:text-black bg-gray-100">
                     {formatMessage({ id: "member.detail.unknown" })}
                   </span>
                 )}
@@ -747,7 +747,7 @@ export default function HumanDetailPanel({
           </div>
         )}
         {!isRemoteJointHuman && !isChannelSummaryHuman && (
-          <div className="px-5 py-4 border-t border-black/10">
+          <div className="px-5 py-4 border-t border-line-muted theme-brutal:border-black/10">
             <SectionHeader
               className="mb-3"
               label={formatMessage({ id: "member.detail.createdAgents" })}
@@ -798,20 +798,20 @@ export default function HumanDetailPanel({
                 })}
               </div>
             ) : (
-              <span className="text-sm italic text-black/40">
+              <span className="text-sm italic text-foreground-hint theme-brutal:text-black/40">
                 {formatMessage({ id: "member.detail.noCreatedAgents" })}
               </span>
             )}
           </div>
         )}
         {canRemove && (
-          <div className="px-5 py-4 border-t border-black/10">
+          <div className="px-5 py-4 border-t border-line-muted theme-brutal:border-black/10">
             <SectionEyebrow as="div" className="mb-3">
               {formatMessage({ id: "member.detail.actions" })}
             </SectionEyebrow>
             <button
               onClick={() => setShowRemoveConfirm(true)}
-              className="btn-brutal flex w-full items-center justify-center gap-2 bg-brutal-red px-4 py-2 text-sm font-bold"
+              className="btn-brutal flex w-full items-center justify-center gap-2 bg-danger-soft theme-brutal:bg-brutal-red px-4 py-2 text-sm font-bold"
               title={formatMessage({ id: "member.detail.removeMember" })}
             >
               <Trash2 size={14} />
