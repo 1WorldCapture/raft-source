@@ -69,6 +69,13 @@ services:
       HOST: "0.0.0.0"
       DATABASE_URL: postgres://raft:${POSTGRES_PASSWORD}@db:5432/raft
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      # Encrypts stored AI provider connection credentials. Optional at boot:
+      # the server serves a clean 503 on credential storage until it is set,
+      # so stacks that never enable provider_connections_v0 can leave it empty.
+      # Required in practice once provider connections are enabled. Generate:
+      #   openssl rand -base64 32   (base64-encoded 32-byte key, enforced in code)
+      # Losing it makes already-stored credentials undecryptable.
+      SLOCK_PROVIDER_CREDENTIAL_KEY: ${SLOCK_PROVIDER_CREDENTIAL_KEY:-}
       # Public origin of this deployment — REQUIRED. SERVER_URL is what the
       # server hands to agents/daemons to connect back (agentOrchestrator),
       # APP_URL drives link generation; both must be the real browser-facing
@@ -136,6 +143,10 @@ services:
       - ./certs:/etc/nginx/certs:ro
       # Serves /downloads/ directly (alias) so artifact bytes bypass Node.
       - ./downloads:/usr/share/nginx/downloads:ro
+      # Persistent access log (additive copy; docker logs stay unchanged).
+      # Survives container recreation; rotate via deploy/docker/logrotate/.
+      - ./nginx/zz-access-log.conf:/etc/nginx/conf.d/zz-access-log.conf:ro
+      - ./logs/nginx:/var/log/nginx-persist
     ports:
       - "${RAFT_HTTP_PORT:-18443}:443"
     depends_on:

@@ -1,0 +1,13 @@
+# Install to /etc/logrotate.d/ (adjust the container name per stack:
+# raft-prod-web-1 for production, raft-test8443-web-1 for the 8443 stack).
+/opt/raft-prod-docker/logs/nginx/access.log {
+    daily
+    rotate 14
+    maxsize 50M
+    compress
+    missingok
+    notifempty
+    postrotate
+        docker exec raft-prod-web-1 nginx -s reopen 2>/dev/null || true
+    endscript
+}
