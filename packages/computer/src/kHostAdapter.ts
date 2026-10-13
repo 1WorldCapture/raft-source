@@ -292,7 +292,7 @@ export function createKHostAdapter(slockHome: string, deps: KHostAdapterDeps = {
       // graceful SIGTERM + wait-for-exit. The service's own shutdown path is
       // what winds down runners (fork-A: they re-spawn under the successor).
       // stopService is idempotent (not_running / stale pidfile are success).
-      await stopFn({ slockHome });
+      await stopFn({ slockHome, stopCaller: "upgrade" });
     },
 
     async start(slot: KSlot) {
