@@ -69,10 +69,13 @@ services:
       HOST: "0.0.0.0"
       DATABASE_URL: postgres://raft:${POSTGRES_PASSWORD}@db:5432/raft
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
-      # Encrypts stored AI provider connection credentials. Generate:
-      #   openssl rand -hex 32
+      # Encrypts stored AI provider connection credentials. Optional at boot:
+      # the server serves a clean 503 on credential storage until it is set,
+      # so stacks that never enable provider_connections_v0 can leave it empty.
+      # Required in practice once provider connections are enabled. Generate:
+      #   openssl rand -base64 32   (base64-encoded 32-byte key, enforced in code)
       # Losing it makes already-stored credentials undecryptable.
-      SLOCK_PROVIDER_CREDENTIAL_KEY: ${SLOCK_PROVIDER_CREDENTIAL_KEY:?SLOCK_PROVIDER_CREDENTIAL_KEY is required}
+      SLOCK_PROVIDER_CREDENTIAL_KEY: ${SLOCK_PROVIDER_CREDENTIAL_KEY:-}
       # Public origin of this deployment — REQUIRED. SERVER_URL is what the
       # server hands to agents/daemons to connect back (agentOrchestrator),
       # APP_URL drives link generation; both must be the real browser-facing
