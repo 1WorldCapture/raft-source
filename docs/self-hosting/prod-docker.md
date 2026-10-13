@@ -73,7 +73,13 @@ rm /tmp/redis-migrate.rdb
 - **构建起飞门槛（2026-10-13 起，task #37）**：`build-release.sh` 启动即自检磁盘空闲，**<12G 拒绝构建**（`RAFT_BUILD_MIN_FREE_GB` 可调）——磁盘高压期构建曾在 ~87% 出现 containerd 层导出竞态（content digest not found / tmpmount lstat 消失），连续两败后第三次才成
 - journald 上限：`/etc/systemd/journald.conf.d/00-size-cap.conf` `SystemMaxUse=200M`（已配置；不设上限曾涨到 ~10G）
 - 镜像保留（2026-10-08 owner 定）：生产现役+生产上一版（回滚体）+8443 现役，三组之外随发版清理；`docker builder prune` 定期跑（legacy builder 实际为 0，buildkit 场景才有量）
-- **发版收官步（2026-10-13 起）**：切换验证通过后跑 `docker image prune -f`（只清悬空层——legacy builder 的失败中间层会以 dangling 镜像形式堆积，2026-10-13 曾积 3.66G）；systemd timer `raft-image-prune.timer` 每周兜底跑一次
+- **发版收官保留清单（2026-10-13 owner 定，盘定死不可扩——每次发版必须执行，不是想起来才做）**：
+  1. feed：只留当前版+上一版（回滚体）；
+  2. 镜像：只留当前+上一版（两栈同规），然后 `docker image prune -f`（清悬空层——legacy builder 失败中间层以 dangling 镜像堆积，2026-10-13 曾积 3.66G）；
+  3. computer downloads：留当前+上一版，**外加持久化访问日志（14 天）里近 7 天被请求过的任何版本**；
+  4. pre-release 备份：机上只留最近 2 份，更早的拷出机归档（sha256 校验通过后才删服务器侧）。
+  **发版报告必须带磁盘占用百分比。**
+  systemd timer `raft-image-prune.timer` 每周兜底跑一次
 - pre-release 备份保留：**机上只留最近 2 份**，更早的拷出机归档（sha256 校验通过后才删服务器侧）
 - **web 访问日志持久化（2026-10-13 起）**：compose 挂载 `./logs/nginx:/var/log/nginx-persist`+conf.d 追加文件版 access_log（additive，docker logs 不变）；轮转配置=仓库 `deploy/docker/logrotate/raft-nginx-access`（daily/14 份/50M 上限），装到 /etc/logrotate.d/ 并按栈改容器名
 - 大件产物（发行包/桌面安装包）传输后及时清理服务器中转目录
