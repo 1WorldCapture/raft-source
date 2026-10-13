@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import {
+  classifyFeatureFlagRollout,
   currentDate,
   decideFeatureFlagRolloutGuardrail,
   type FeatureFlagRolloutGuardrailDecision,
@@ -61,8 +62,20 @@ export interface FeatureFlagRolloutWriteInput {
   intent: unknown;
   /** Opaque id only. Receipt content is loaded by the trusted provider. */
   receiptId?: unknown;
+  /**
+   * Named person who approved a widening. Set by the production admin CLI.
+   * A widening with this set is recorded as operator_approved and does not
+   * load a receipt. Absent, the existing receipt path remains for a real
+   * evaluator.
+   */
+  operatorApprovedBy?: string;
   actor: FeatureFlagRolloutActor;
 }
+
+export type FeatureFlagRolloutAuthorization =
+  | "narrowing"
+  | "guardrail_passed"
+  | "operator_approved";
 
 export type FeatureFlagRolloutWriteResult =
   | {
@@ -72,13 +85,14 @@ export type FeatureFlagRolloutWriteResult =
     }
   | {
       applied: true;
-      reason: AllowedMutationDecision["reason"];
+      reason: FeatureFlagRolloutAuthorization;
       flagKey: string;
       configVersionBefore: number;
       configVersionAfter: number;
       auditEventId: string;
       operation: AllowedRolloutOperation;
       receiptId: string | null;
+      approvedBy: string | null;
     };
 
 export interface FeatureFlagRolloutWriterDependencies {
@@ -126,6 +140,15 @@ function hasAuthoritativeRolloutIntentKind(intent: unknown): boolean {
   return typeof kind === "string" && AUTHORITATIVE_ROLLOUT_INTENT_KINDS.has(
     kind as AuthoritativeRolloutIntentKind,
   );
+}
+
+function normalizeOperatorApprover(value: string | undefined): string | null {
+  if (value === undefined) return null;
+  const approvedBy = value.trim();
+  if (approvedBy.length === 0 || approvedBy.length > 128) {
+    throw new TypeError("feature flag rollout writer requires an approver name of 1-128 characters");
+  }
+  return approvedBy;
 }
 
 function assertWriterInput(input: FeatureFlagRolloutWriteInput): void {
@@ -413,13 +436,13 @@ async function insertRolloutAuditEvent(
     configVersionAfter: number;
     beforeSnapshot: RolloutAuditSnapshot;
     afterSnapshot: RolloutAuditSnapshot;
-    decision: AllowedMutationDecision;
+    authorization: FeatureFlagRolloutAuthorization;
+    operation: AllowedRolloutOperation;
+    receiptId: string | null;
+    approvedBy: string | null;
   },
 ): Promise<string> {
   const auditEventId = randomUUID();
-  const receiptId = input.decision.reason === "guardrail_passed"
-    ? input.decision.receiptId
-    : null;
   const inserted = await tx.insert(featureFlagRolloutAuditEvents).values({
     id: auditEventId,
     actorType: input.actor.type,
@@ -430,9 +453,10 @@ async function insertRolloutAuditEvent(
     flagKey: input.flagKey,
     configVersionBefore: input.configVersionBefore,
     configVersionAfter: input.configVersionAfter,
-    authorization: input.decision.reason,
-    operation: input.decision.operation,
-    receiptId,
+    authorization: input.authorization,
+    operation: input.operation,
+    receiptId: input.receiptId,
+    approvedBy: input.approvedBy,
     beforeSnapshot: input.beforeSnapshot,
     afterSnapshot: input.afterSnapshot,
   }).returning({ id: featureFlagRolloutAuditEvents.id });
@@ -523,26 +547,62 @@ export function createFeatureFlagRolloutWriterService(
           configVersion: locked.configVersion,
         };
       }
-      const decision = await decideGuardrail(
-        locked.state,
-        input.intent,
-        input.receiptId,
-        dependencies.guardrail,
-      );
-
-      if (!decision.allowed) {
+      const approvedBy = normalizeOperatorApprover(input.operatorApprovedBy);
+      const classification = classifyFeatureFlagRollout(locked.state, input.intent);
+      if (classification.kind === "blocked") {
         return {
           applied: false,
-          reason: decision.reason,
+          reason: classification.reason,
           configVersion: locked.configVersion,
         };
       }
-      if (decision.reason === "no_op") {
+      if (classification.kind === "no_op") {
         return {
           applied: false,
           reason: "no_op",
           configVersion: locked.configVersion,
         };
+      }
+
+      let authorization: FeatureFlagRolloutAuthorization;
+      let operation: AllowedRolloutOperation;
+      let receiptId: string | null;
+      let recordedApprover: string | null;
+      if (classification.kind === "narrowing") {
+        authorization = "narrowing";
+        operation = classification.operation;
+        receiptId = null;
+        recordedApprover = null;
+      } else if (approvedBy) {
+        authorization = "operator_approved";
+        operation = classification.operation;
+        receiptId = null;
+        recordedApprover = approvedBy;
+      } else {
+        const decision = await decideGuardrail(
+          locked.state,
+          input.intent,
+          input.receiptId,
+          dependencies.guardrail,
+        );
+        if (!decision.allowed) {
+          return {
+            applied: false,
+            reason: decision.reason,
+            configVersion: locked.configVersion,
+          };
+        }
+        if (decision.reason !== "guardrail_passed") {
+          return {
+            applied: false,
+            reason: decision.reason === "no_op" ? "no_op" : "invalid_intent",
+            configVersion: locked.configVersion,
+          };
+        }
+        authorization = "guardrail_passed";
+        operation = decision.operation;
+        receiptId = decision.receiptId;
+        recordedApprover = null;
       }
 
       const configVersionAfter = locked.configVersion + 1;
@@ -552,7 +612,7 @@ export function createFeatureFlagRolloutWriterService(
 
       // Only the shared decision's canonical executable operation crosses the
       // mutation boundary. Any downstream failure rolls mutation + audit back.
-      await executeDecisionOperation(tx, input.flagKey, decision.operation);
+      await executeDecisionOperation(tx, input.flagKey, operation);
       if (locked.snapshot === null) {
         throw new FeatureFlagRolloutWriteConflictError("allowed rollout has no before snapshot");
       }
@@ -578,7 +638,10 @@ export function createFeatureFlagRolloutWriterService(
         configVersionAfter,
         beforeSnapshot: locked.snapshot,
         afterSnapshot,
-        decision,
+        authorization,
+        operation,
+        receiptId,
+        approvedBy: recordedApprover,
       });
       const committedVersion = await advanceConfigVersion(tx, {
         expectedVersion: locked.configVersion,
@@ -591,13 +654,14 @@ export function createFeatureFlagRolloutWriterService(
 
       return {
         applied: true,
-        reason: decision.reason,
+        reason: authorization,
         flagKey: input.flagKey,
         configVersionBefore: locked.configVersion,
         configVersionAfter: committedVersion,
         auditEventId,
-        operation: decision.operation,
-        receiptId: decision.reason === "guardrail_passed" ? decision.receiptId : null,
+        operation,
+        receiptId,
+        approvedBy: recordedApprover,
       };
     });
   };

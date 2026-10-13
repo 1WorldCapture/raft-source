@@ -31,45 +31,43 @@
 
 生产上改 feature flag **只走** server 镜像里的管理脚本。它调用 `featureFlagRolloutWriterService`：用当前 global config version 做 CAS，经 guardrail 决定放宽还是收窄，再把规则和审计写在同一个事务里。
 
-**不要**再手写 SQL 改 `feature_flags`、`feature_flag_rules`、`feature_flag_config_versions` 或 `feature_flag_rollout_audit_events`。没有这条路径时，放宽只能把审计记成 `narrowing`，因为 `guardrail_passed` 必须带 receipt。
+**不要**再手写 SQL 改 `feature_flags`、`feature_flag_rules`、`feature_flag_config_versions` 或 `feature_flag_rollout_audit_events`。放宽记成 `operator_approved`，批准人写在 `approved_by`，receipt 留空。现在没有评估器，不要手写 receipt 来换一条 `guardrail_passed`。
 
-脚本打进本变更之后构建的 server 镜像，入口是 `packages/server/dist/flag-rollout.js`。容器里已经有 `DATABASE_URL`，不要把连接串打出来。8443 把容器名换成 `raft-test8443-server-1`。
+脚本打进本变更之后构建的 server 镜像，入口是 `packages/server/dist/flag-rollout.js`。镜像带迁移 0282。容器里已经有 `DATABASE_URL`，不要把连接串打出来。8443 把容器名换成 `raft-test8443-server-1`。
 
 ```bash
 # 只读
 docker exec raft-prod-server-1 \
   node packages/server/dist/flag-rollout.js show --flag provider_connections_v0
 
-# 预览，不写库。放宽会打印 guardrail_passed 和 receipt id；收窄打印 narrowing，receipt 为空。
-docker exec raft-prod-server-1 \
-  node packages/server/dist/flag-rollout.js server_allowlist_remove \
-  --flag provider_connections_v0 \
-  --server <server-uuid> \
-  --actor-type human --actor-name <name> \
-  --reason "why this change" \
-  --dry-run
-
-# 收窄（从 allowlist 去掉一台，或 kill_switch_set --desired true）不需要 receipt。
-# 放宽（加入 allowlist，或 kill_switch_set --desired false）必须带服务器上的受信 receipt 文件。
-# docker exec 不能挂载文件，先拷进容器，跑完删掉。
-docker cp /root/flag-receipt.json raft-prod-server-1:/tmp/flag-receipt.json
+# 预览，不写库。放宽打印 operator_approved 和批准人；收窄打印 narrowing。
 docker exec raft-prod-server-1 \
   node packages/server/dist/flag-rollout.js server_allowlist_add \
   --flag provider_connections_v0 \
   --server <server-uuid> \
   --actor-type human --actor-name <name> \
+  --approved-by <who-decided> \
   --reason "why this change" \
-  --receipt-file /tmp/flag-receipt.json
-docker exec raft-prod-server-1 rm -f /tmp/flag-receipt.json
+  --dry-run
+
+# 收窄（从 allowlist 去掉一台，或 kill_switch_set --desired true）不需要 --approved-by。
+# 放宽（加入 allowlist，或 kill_switch_set --desired false）必须带 --approved-by。
+# 脚本不接受 --receipt-file / --receipt-id。
+docker exec raft-prod-server-1 \
+  node packages/server/dist/flag-rollout.js server_allowlist_add \
+  --flag provider_connections_v0 \
+  --server <server-uuid> \
+  --actor-type human --actor-name <name> \
+  --approved-by <who-decided> \
+  --reason "why this change"
 ```
 
-- `--reason` 必填。`--actor-type` 只允许 `human` 或 `agent`，`--actor-name` 写入审计的 actor id。
-- 一次只改一台 server。下一台用上一次输出里的新 config version 再跑，receipt 才能对上这一步的 version 和 rule。
+- `--reason` 必填。`--actor-type` 只允许 `human` 或 `agent`，`--actor-name` 写入审计的 actor id。放宽的 `--approved-by` 是做决定的人，写入 `approved_by`，和执行人可以不是同一个人。
+- 一次只改一台 server。下一台用上一次输出里的新 config version 再跑。
 - 省略 `--expected-version` 时，脚本读当前 version 填进 writer 的 CAS。传了但和当前不一致就拒绝，不写规则、不写审计、不推进 version。
-- `--dry-run` 只打印 guardrail 决定，不写库。
-- 放宽没有匹配的受信 receipt 时拒绝，不写库。receipt 文件只留在服务器上，不要把内容贴进频道。
-- 控制面 id 默认 `production`（`RAFT_FEATURE_FLAG_CONTROL_PLANE_ID` 可改）。receipt 里的 controlPlaneId 必须和它相同。
-- 成功时 stdout 是一份 JSON：变更前后的 rules、config version、authorization、receipt id、audit event id。
+- `--dry-run` 只打印决定，不写库。放宽没给 `--approved-by` 时拒绝，不写库。
+- 控制面 id 默认 `production`（`RAFT_FEATURE_FLAG_CONTROL_PLANE_ID` 可改）。
+- 成功时 stdout 是一份 JSON：变更前后的 rules、config version、authorization、approvedBy、audit event id。receipt 为空。
 
 ## 备份与回滚
 

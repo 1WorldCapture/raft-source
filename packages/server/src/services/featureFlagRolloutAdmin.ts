@@ -1,9 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { asc, eq } from "drizzle-orm";
 import {
-  decideFeatureFlagRolloutGuardrail,
-  type FeatureFlagRolloutGuardrailDecision,
-  type FeatureFlagRolloutGuardrailDependencies,
+  classifyFeatureFlagRollout,
 } from "@botiverse/raft-shared";
 import { getDb } from "../db/index.js";
 import {
@@ -45,8 +43,7 @@ export interface FlagRolloutRequest {
   reason?: string;
   expectedConfigVersion?: number;
   dryRun: boolean;
-  receiptId?: string;
-  receiptFile?: string;
+  approvedBy?: string;
 }
 
 export interface FlagRuleView {
@@ -82,8 +79,9 @@ export interface FlagRolloutMutationReport {
   configVersionBefore: number;
   configVersionAfter: number;
   auditEventId: string | null;
-  authorization: "narrowing" | "guardrail_passed" | null;
+  authorization: "narrowing" | "guardrail_passed" | "operator_approved" | null;
   receiptId: string | null;
+  approvedBy: string | null;
   operation: unknown | null;
   requestId: string | null;
   rulesBefore: FlagRuleView[];
@@ -94,8 +92,6 @@ export type FlagRolloutReport = FlagRolloutShowReport | FlagRolloutMutationRepor
 
 export interface FlagRolloutDependencies {
   controlPlaneId: string;
-  nowMs?: () => number;
-  loadTrustedReceipt?: (receiptId: string) => Promise<unknown | null>;
   requestId?: string;
 }
 
@@ -134,29 +130,6 @@ function parseExpectedVersion(value: string): number {
   return version;
 }
 
-/**
- * A receipt file is either one guardrail receipt object, or a map from
- * receipt id to receipt object. The file is the trusted store for this
- * process; request JSON is never accepted as receipt evidence.
- */
-export function indexReceiptDocument(document: unknown): Map<string, unknown> {
-  if (!document || typeof document !== "object" || Array.isArray(document)) {
-    usage("receipt file must be a receipt object or a map of receipt id to receipt");
-  }
-  const record = document as Record<string, unknown>;
-  if (typeof record.id === "string" && typeof record.schema === "string") {
-    return new Map([[record.id, document]]);
-  }
-  const entries = Object.entries(record);
-  if (entries.length === 0) usage("receipt file is empty");
-  for (const [id, value] of entries) {
-    if (!UUID_RE.test(id) || !value || typeof value !== "object" || Array.isArray(value)) {
-      usage("receipt map keys must be ids and values must be receipt objects");
-    }
-  }
-  return new Map(entries);
-}
-
 export function parseFlagRolloutArgs(argv: string[], env: NodeJS.ProcessEnv = process.env): FlagRolloutRequest {
   if (!env.DATABASE_URL) usage("DATABASE_URL is required");
   const [command, ...rest] = argv;
@@ -177,8 +150,7 @@ export function parseFlagRolloutArgs(argv: string[], env: NodeJS.ProcessEnv = pr
   let reason: string | undefined;
   let expectedConfigVersion: number | undefined;
   let dryRun = false;
-  let receiptId: string | undefined;
-  let receiptFile: string | undefined;
+  let approvedBy: string | undefined;
 
   for (let index = 0; index < rest.length; index += 1) {
     const token = rest[index];
@@ -224,13 +196,13 @@ export function parseFlagRolloutArgs(argv: string[], env: NodeJS.ProcessEnv = pr
         index += 1;
         break;
       case "--receipt-id":
-        receiptId = takeValue(rest, index, token);
-        if (!UUID_RE.test(receiptId)) usage("--receipt-id must be a uuid");
-        index += 1;
-        break;
       case "--receipt-file":
-        receiptFile = takeValue(rest, index, token);
-        if (receiptFile.length === 0) usage("--receipt-file requires a path");
+        usage("this script does not accept receipts; a widening needs --approved-by");
+        break;
+      case "--approved-by":
+        if (approvedBy !== undefined) usage("--approved-by was provided twice");
+        approvedBy = takeValue(rest, index, token).trim();
+        if (approvedBy.length === 0 || approvedBy.length > 128) usage("--approved-by must be 1-128 characters");
         index += 1;
         break;
       case "--dry-run":
@@ -243,7 +215,7 @@ export function parseFlagRolloutArgs(argv: string[], env: NodeJS.ProcessEnv = pr
 
   flagKey = requireFlagKey(flagKey);
   if (command === "show") {
-    if (dryRun || serverId || desiredKillSwitch !== undefined || actorType || actorName || reason || receiptId || receiptFile || expectedConfigVersion !== undefined) {
+    if (dryRun || serverId || desiredKillSwitch !== undefined || actorType || actorName || reason || approvedBy || expectedConfigVersion !== undefined) {
       usage("show only accepts --flag");
     }
     return { command, flagKey, dryRun: false };
@@ -269,8 +241,7 @@ export function parseFlagRolloutArgs(argv: string[], env: NodeJS.ProcessEnv = pr
     reason,
     expectedConfigVersion,
     dryRun,
-    receiptId,
-    receiptFile,
+    approvedBy,
   };
 }
 
@@ -332,37 +303,6 @@ function buildIntent(request: FlagRolloutRequest, configVersion: number): unknow
   };
 }
 
-function fieldsFromDecision(decision: FeatureFlagRolloutGuardrailDecision): {
-  reason: string;
-  authorization: "narrowing" | "guardrail_passed" | null;
-  receiptId: string | null;
-  operation: unknown | null;
-  ok: boolean;
-} {
-  if (!decision.allowed) {
-    return { reason: decision.reason, authorization: null, receiptId: null, operation: null, ok: false };
-  }
-  if (decision.reason === "no_op") {
-    return { reason: "no_op", authorization: null, receiptId: null, operation: null, ok: true };
-  }
-  if (decision.reason === "narrowing") {
-    return {
-      reason: "narrowing",
-      authorization: "narrowing",
-      receiptId: null,
-      operation: decision.operation,
-      ok: true,
-    };
-  }
-  return {
-    reason: "guardrail_passed",
-    authorization: "guardrail_passed",
-    receiptId: decision.receiptId,
-    operation: decision.operation,
-    ok: true,
-  };
-}
-
 function mutationReport(
   request: FlagRolloutRequest,
   fields: {
@@ -373,8 +313,9 @@ function mutationReport(
     configVersionBefore: number;
     configVersionAfter: number;
     auditEventId: string | null;
-    authorization: "narrowing" | "guardrail_passed" | null;
+    authorization: FlagRolloutMutationReport["authorization"];
     receiptId: string | null;
+    approvedBy: string | null;
     operation: unknown | null;
     requestId: string | null;
     rulesBefore: FlagRuleView[];
@@ -386,13 +327,6 @@ function mutationReport(
     dryRun: request.dryRun,
     flagKey: request.flagKey,
     ...fields,
-  };
-}
-
-function guardrailDependencies(deps: FlagRolloutDependencies): FeatureFlagRolloutGuardrailDependencies {
-  return {
-    loadTrustedReceipt: deps.loadTrustedReceipt ?? (async () => null),
-    nowMs: deps.nowMs ?? (() => Date.now()),
   };
 }
 
@@ -427,6 +361,7 @@ export async function runFlagRollout(
     auditEventId: null,
     authorization: null,
     receiptId: null,
+    approvedBy: null,
     operation: null,
     requestId: null,
     rulesBefore: loaded.rules,
@@ -443,43 +378,50 @@ export async function runFlagRollout(
 
   const configVersion = loaded.configVersion;
   const intent = buildIntent(request, configVersion);
-  const guardrail = guardrailDependencies(deps);
-  if (request.dryRun) {
-    const decision = await decideFeatureFlagRolloutGuardrail(
-      loaded.state,
-      intent,
-      request.receiptId ?? null,
-      guardrail,
-    );
-    const fields = fieldsFromDecision(decision);
+  const classification = classifyFeatureFlagRollout(loaded.state, intent);
+  const preview = (wrote: false): FlagRolloutMutationReport => {
+    if (classification.kind === "blocked") return unchanged(classification.reason, false);
+    if (classification.kind === "no_op") return unchanged("no_op", true);
+    if (classification.kind === "widening" && !request.approvedBy) {
+      return unchanged("operator_approval_required", false);
+    }
+    const widening = classification.kind === "widening";
     return mutationReport(request, {
-      ok: fields.ok,
-      wrote: false,
+      ok: true,
+      wrote,
       applied: false,
-      reason: fields.reason,
+      reason: widening ? "operator_approved" : "narrowing",
       configVersionBefore: configVersion,
       configVersionAfter: configVersion,
       auditEventId: null,
-      authorization: fields.authorization,
-      receiptId: fields.receiptId,
-      operation: fields.operation,
+      authorization: widening ? "operator_approved" : "narrowing",
+      receiptId: null,
+      approvedBy: widening ? request.approvedBy ?? null : null,
+      operation: classification.operation,
       requestId: null,
       rulesBefore: loaded.rules,
       rulesAfter: loaded.rules,
     });
+  };
+  if (request.dryRun) return preview(false);
+  if (classification.kind === "widening" && !request.approvedBy) {
+    return unchanged("operator_approval_required", false);
   }
 
   const requestId = deps.requestId ?? randomUUID();
   const write = createFeatureFlagRolloutWriterService({
     controlPlaneId: deps.controlPlaneId,
-    guardrail,
+    guardrail: {
+      loadTrustedReceipt: async () => null,
+      nowMs: () => Date.now(),
+    },
   });
   const result: FeatureFlagRolloutWriteResult = await write({
     requestId,
     reason: request.reason,
     flagKey: request.flagKey,
     intent,
-    receiptId: request.receiptId,
+    operatorApprovedBy: classification.kind === "widening" ? request.approvedBy : undefined,
     actor: request.actor,
   });
   const after = await loadFlagRolloutView(request.flagKey, deps.controlPlaneId);
@@ -494,6 +436,7 @@ export async function runFlagRollout(
       auditEventId: null,
       authorization: null,
       receiptId: null,
+      approvedBy: null,
       operation: null,
       requestId,
       rulesBefore: loaded.rules,
@@ -510,6 +453,7 @@ export async function runFlagRollout(
     auditEventId: result.auditEventId,
     authorization: result.reason,
     receiptId: result.receiptId,
+    approvedBy: result.approvedBy,
     operation: result.operation,
     requestId,
     rulesBefore: loaded.rules,

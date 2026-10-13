@@ -1968,6 +1968,13 @@
       "when": 1791760000000,
       "tag": "0281_provider_connection_idempotency",
       "breakpoints": true
+    },
+    {
+      "idx": 282,
+      "version": "7",
+      "when": 1791780000000,
+      "tag": "0282_feature_flag_operator_approved",
+      "breakpoints": true
     }
   ]
 }

@@ -1,12 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import { eq } from "drizzle-orm";
-import {
-  FEATURE_FLAG_ROLLOUT_GUARDRAIL_ISSUER,
-  FEATURE_FLAG_ROLLOUT_GUARDRAIL_POLICY_VERSION,
-  FEATURE_FLAG_ROLLOUT_GUARDRAIL_SCHEMA,
-  type FeatureFlagRolloutGuardrailReceiptV1,
-} from "@botiverse/raft-shared";
 import { getDb } from "../db/index.js";
 import {
   featureFlagConfigVersions,
@@ -17,8 +11,6 @@ import {
 import { dbTest } from "../test/integration/dbTest.js";
 import { runNamedCase } from "../test/runNamedCase.js";
 import {
-  FlagRolloutUsageError,
-  indexReceiptDocument,
   parseFlagRolloutArgs,
   runFlagRollout,
   type FlagRolloutRequest,
@@ -27,30 +19,7 @@ import {
 const CONTROL_PLANE_ID = "production";
 const SERVER_A = "00000000-0000-4000-8000-0000000000a1";
 const SERVER_B = "00000000-0000-4000-8000-0000000000b2";
-const RECEIPT_ID = "00000000-0000-4000-8000-0000000000c3";
-const NOW_MS = Date.parse("2026-07-11T00:00:30.000Z");
 const ENV = { DATABASE_URL: "postgres://example.invalid/raft" };
-
-function passingReceipt(input: {
-  id: string;
-  flagKey: string;
-  configVersion: number;
-  operation: FeatureFlagRolloutGuardrailReceiptV1["operation"];
-}): FeatureFlagRolloutGuardrailReceiptV1 {
-  return {
-    schema: FEATURE_FLAG_ROLLOUT_GUARDRAIL_SCHEMA,
-    id: input.id,
-    verdict: "pass",
-    issuer: FEATURE_FLAG_ROLLOUT_GUARDRAIL_ISSUER,
-    controlPlaneId: CONTROL_PLANE_ID,
-    flagKey: input.flagKey,
-    configVersion: input.configVersion,
-    operation: input.operation,
-    policyVersion: FEATURE_FLAG_ROLLOUT_GUARDRAIL_POLICY_VERSION,
-    evaluatedAt: "2026-07-11T00:00:00.000Z",
-    expiresAt: "2026-07-11T00:01:00.000Z",
-  };
-}
 
 function mutation(overrides: Partial<FlagRolloutRequest> & Pick<FlagRolloutRequest, "command" | "flagKey">): FlagRolloutRequest {
   return {
@@ -128,14 +97,30 @@ test("flag rollout CLI rejects incomplete production invocations", () => {
     ], ENV),
     /one --server/,
   );
-  assert.throws(() => indexReceiptDocument(null), FlagRolloutUsageError);
-  const receipt = passingReceipt({
-    id: RECEIPT_ID,
-    flagKey: "provider_connections_v0",
-    configVersion: 1,
-    operation: { kind: "server_allowlist_add", ruleId: null, serverId: SERVER_A },
-  });
-  assert.equal(indexReceiptDocument(receipt).get(RECEIPT_ID), receipt);
+  assert.throws(
+    () => parseFlagRolloutArgs([
+      "server_allowlist_add",
+      "--flag", "provider_connections_v0",
+      "--server", SERVER_A,
+      "--actor-type", "human",
+      "--actor-name", "lyon",
+      "--reason", "owner approved",
+      "--receipt-file", "/tmp/flag-receipt.json",
+    ], ENV),
+    /does not accept receipts/,
+  );
+  assert.equal(
+    parseFlagRolloutArgs([
+      "server_allowlist_add",
+      "--flag", "provider_connections_v0",
+      "--server", SERVER_A,
+      "--actor-type", "human",
+      "--actor-name", "Cursor-mac",
+      "--reason", "owner approved the raftbuild allowlist",
+      "--approved-by", "lyon",
+    ], ENV).approvedBy,
+    "lyon",
+  );
 });
 
 dbTest("feature flag rollout admin uses the writer and prints before and after", async ({ db }) => {
@@ -159,66 +144,57 @@ dbTest("feature flag rollout admin uses the writer and prints before and after",
     assert.equal((await auditFor(flagKey)).length, 0);
   });
 
-  await runNamedCase("dry-run of a widening add reports the receipt and writes nothing", async () => {
+  await runNamedCase("dry-run of a widening add reports operator approval and writes nothing", async () => {
     const flagKey = "admin_dry_run_v0";
     await insertFlag(flagKey);
     const versionBefore = await currentConfigVersion();
     const operation = { kind: "server_allowlist_add" as const, ruleId: null, serverId: SERVER_A };
-    const receipt = passingReceipt({ id: RECEIPT_ID, flagKey, configVersion: versionBefore, operation });
-    let loads = 0;
     const report = await runFlagRollout(mutation({
       command: "server_allowlist_add",
       flagKey,
       serverId: SERVER_A,
       dryRun: true,
-      receiptId: RECEIPT_ID,
+      approvedBy: "lyon",
     }), {
       controlPlaneId: CONTROL_PLANE_ID,
-      nowMs: () => NOW_MS,
-      loadTrustedReceipt: async () => {
-        loads += 1;
-        return receipt;
-      },
     });
     assert.equal(report.command, "server_allowlist_add");
     assert.equal(report.ok, true);
     assert.equal(report.dryRun, true);
     assert.equal(report.wrote, false);
     assert.equal(report.applied, false);
-    assert.equal(report.authorization, "guardrail_passed");
-    assert.equal(report.receiptId, RECEIPT_ID);
+    assert.equal(report.authorization, "operator_approved");
+    assert.equal(report.approvedBy, "lyon");
+    assert.equal(report.receiptId, null);
     assert.deepEqual(report.operation, operation);
     assert.deepEqual(report.rulesBefore, []);
     assert.deepEqual(report.rulesAfter, []);
     assert.equal(report.configVersionBefore, versionBefore);
     assert.equal(report.configVersionAfter, versionBefore);
-    assert.equal(loads, 1);
     assert.equal(await currentConfigVersion(), versionBefore);
     assert.equal((await auditFor(flagKey)).length, 0);
     const rules = await getDb().select().from(featureFlagRules).where(eq(featureFlagRules.flagKey, flagKey));
     assert.equal(rules.length, 0);
   });
 
-  await runNamedCase("allowlist add is a widening with guardrail_passed and a receipt", async () => {
+  await runNamedCase("allowlist add is a widening approved by the named operator", async () => {
     const flagKey = "admin_add_v0";
     await insertFlag(flagKey);
     const versionBefore = await currentConfigVersion();
     const operation = { kind: "server_allowlist_add" as const, ruleId: null, serverId: SERVER_A };
-    const receipt = passingReceipt({ id: RECEIPT_ID, flagKey, configVersion: versionBefore, operation });
     const report = await runFlagRollout(mutation({
       command: "server_allowlist_add",
       flagKey,
       serverId: SERVER_A,
-      receiptId: RECEIPT_ID,
+      approvedBy: "lyon",
     }), {
       controlPlaneId: CONTROL_PLANE_ID,
-      nowMs: () => NOW_MS,
-      loadTrustedReceipt: async () => receipt,
       requestId: "request-admin-add",
     });
     if (report.command === "show" || !report.applied) assert.fail("allowlist add should apply");
-    assert.equal(report.authorization, "guardrail_passed");
-    assert.equal(report.receiptId, RECEIPT_ID);
+    assert.equal(report.authorization, "operator_approved");
+    assert.equal(report.approvedBy, "lyon");
+    assert.equal(report.receiptId, null);
     assert.equal(report.wrote, true);
     assert.equal(report.auditEventId !== null, true);
     assert.equal(report.configVersionBefore, versionBefore);
@@ -228,14 +204,40 @@ dbTest("feature flag rollout admin uses the writer and prints before and after",
     assert.deepEqual(report.rulesAfter[0]?.values, [SERVER_A]);
     const [audit] = await auditFor(flagKey);
     assert.equal(audit.id, report.auditEventId);
-    assert.equal(audit.authorization, "guardrail_passed");
-    assert.equal(audit.receiptId, RECEIPT_ID);
+    assert.equal(audit.authorization, "operator_approved");
+    assert.equal(audit.receiptId, null);
+    assert.equal(audit.approvedBy, "lyon");
     assert.equal(audit.actorType, "human");
     assert.equal(audit.actorId, "lyon");
     assert.equal(audit.reason, "owner asked for this flag change");
     assert.equal(audit.configVersionBefore, versionBefore);
     assert.equal(audit.configVersionAfter, versionBefore + 1);
     assert.deepEqual(audit.operation, operation);
+  });
+
+  await runNamedCase("a widening without an approver writes nothing", async () => {
+    const flagKey = "admin_add_unapproved_v0";
+    await insertFlag(flagKey);
+    const versionBefore = await currentConfigVersion();
+    const report = await runFlagRollout(mutation({
+      command: "server_allowlist_add",
+      flagKey,
+      serverId: SERVER_A,
+    }), {
+      controlPlaneId: CONTROL_PLANE_ID,
+    });
+    if (report.command === "show") assert.fail("missing approver should be a mutation report");
+    assert.equal(report.ok, false);
+    assert.equal(report.wrote, false);
+    assert.equal(report.applied, false);
+    assert.equal(report.reason, "operator_approval_required");
+    assert.equal(report.authorization, null);
+    assert.equal(report.receiptId, null);
+    assert.equal(report.approvedBy, null);
+    assert.equal(await currentConfigVersion(), versionBefore);
+    assert.equal((await auditFor(flagKey)).length, 0);
+    const rules = await getDb().select().from(featureFlagRules).where(eq(featureFlagRules.flagKey, flagKey));
+    assert.equal(rules.length, 0);
   });
 
   await runNamedCase("allowlist remove is a narrowing with a null receipt", async () => {
@@ -251,25 +253,21 @@ dbTest("feature flag rollout admin uses the writer and prints before and after",
       variant: null,
     }).returning();
     const versionBefore = await currentConfigVersion();
-    let loads = 0;
     const report = await runFlagRollout(mutation({
       command: "server_allowlist_remove",
       flagKey,
       serverId: SERVER_B,
       actor: { type: "agent", id: "Cursor-mac" },
       reason: "drop the test server",
+      approvedBy: "lyon",
     }), {
       controlPlaneId: CONTROL_PLANE_ID,
-      nowMs: () => NOW_MS,
-      loadTrustedReceipt: async () => {
-        loads += 1;
-        throw new Error("narrowing must not load a receipt");
-      },
       requestId: "request-admin-remove",
     });
     if (report.command === "show" || !report.applied) assert.fail("allowlist remove should apply");
     assert.equal(report.authorization, "narrowing");
     assert.equal(report.receiptId, null);
+    assert.equal(report.approvedBy, null);
     assert.deepEqual(report.operation, {
       kind: "server_allowlist_remove",
       ruleId: rule.id,
@@ -277,10 +275,10 @@ dbTest("feature flag rollout admin uses the writer and prints before and after",
     });
     assert.deepEqual(report.rulesBefore[0]?.values, [SERVER_B]);
     assert.deepEqual(report.rulesAfter[0]?.values, []);
-    assert.equal(loads, 0);
     const [audit] = await auditFor(flagKey);
     assert.equal(audit.authorization, "narrowing");
     assert.equal(audit.receiptId, null);
+    assert.equal(audit.approvedBy, null);
     assert.equal(audit.actorType, "agent");
     assert.equal(audit.actorId, "Cursor-mac");
     assert.equal(audit.configVersionAfter, versionBefore + 1);
@@ -297,14 +295,11 @@ dbTest("feature flag rollout admin uses the writer and prints before and after",
       reason: "stop the rollout",
     }), {
       controlPlaneId: CONTROL_PLANE_ID,
-      nowMs: () => NOW_MS,
-      loadTrustedReceipt: async () => {
-        throw new Error("kill switch enable must not load a receipt");
-      },
     });
     if (report.command === "show" || !report.applied) assert.fail("kill switch enable should apply");
     assert.equal(report.authorization, "narrowing");
     assert.equal(report.receiptId, null);
+    assert.equal(report.approvedBy, null);
     assert.deepEqual(report.operation, { kind: "kill_switch_enable" });
     assert.equal(report.configVersionAfter, versionBefore + 1);
     const [flag] = await getDb().select({ killSwitch: featureFlags.killSwitch })
@@ -314,6 +309,7 @@ dbTest("feature flag rollout admin uses the writer and prints before and after",
     const [audit] = await auditFor(flagKey);
     assert.equal(audit.authorization, "narrowing");
     assert.equal(audit.receiptId, null);
+    assert.equal(audit.approvedBy, null);
   });
 
   await runNamedCase("a stale expected version is rejected with no writes", async () => {
@@ -322,22 +318,14 @@ dbTest("feature flag rollout admin uses the writer and prints before and after",
     const versionBefore = await currentConfigVersion();
     const auditBefore = (await auditFor(flagKey)).length;
     const staleVersion = versionBefore + 5;
-    const receipt = passingReceipt({
-      id: RECEIPT_ID,
-      flagKey,
-      configVersion: staleVersion,
-      operation: { kind: "server_allowlist_add", ruleId: null, serverId: SERVER_A },
-    });
     const report = await runFlagRollout(mutation({
       command: "server_allowlist_add",
       flagKey,
       serverId: SERVER_A,
       expectedConfigVersion: staleVersion,
-      receiptId: RECEIPT_ID,
+      approvedBy: "lyon",
     }), {
       controlPlaneId: CONTROL_PLANE_ID,
-      nowMs: () => NOW_MS,
-      loadTrustedReceipt: async () => receipt,
     });
     if (report.command === "show") assert.fail("stale version should be a mutation report");
     assert.equal(report.ok, false);
