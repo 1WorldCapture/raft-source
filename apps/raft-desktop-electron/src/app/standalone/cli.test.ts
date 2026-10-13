@@ -162,3 +162,10 @@ test("log lines before the structured error are not shown: the card starts at Wh
   // Without a structured block nothing is dropped except the Help link.
   assert.equal(failureDetail("warn\nport busy\nHelp: https://example.test/help"), "warn\nport busy");
 });
+
+test("service.carrierState loaded_dead is read; anything else (or absent) is null", () => {
+  const withState = (carrierState: unknown) => parseStatusJson(JSON.stringify({ ...STATUS, service: { state: "stopped", desiredState: "running", carrierState } }));
+  assert.equal(withState("loaded_dead").service.carrierState, "loaded_dead");
+  assert.equal(withState("something_new").service.carrierState, null);
+  assert.equal(withState(undefined).service.carrierState, null);
+});
