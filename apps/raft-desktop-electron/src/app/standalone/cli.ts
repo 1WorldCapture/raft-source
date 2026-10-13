@@ -94,10 +94,14 @@ export function parseCommandJson(text: string): CommandResult {
 /**
  * The text of a failed `raft-computer` command for the card. The CLI prints a structured block
  * (`What happened (CODE): ...`, `Next: ...`, then a `Help:` link): taking only the last line used to
- * surface just the link and hide the real error, so keep every line except the help link(s).
+ * surface just the link and hide the real error, so keep every line except the help link(s); when the
+ * structured block is preceded by warning or log lines, start at "What happened".
  */
 export function failureDetail(output: string): string {
-  const lines = output.split("\n").map((line) => line.trim()).filter(Boolean);
+  const all = output.split("\n").map((line) => line.trim()).filter(Boolean);
+  // Warning or log lines can precede the structured block; the block starts at "What happened".
+  const start = all.findIndex((line) => /^What happened\b/.test(line));
+  const lines = start >= 0 ? all.slice(start) : all;
   const useful = lines.filter((line) => !/^help\s*:/i.test(line));
   return (useful.length > 0 ? useful : lines.slice(-1)).join("\n").slice(0, 800);
 }

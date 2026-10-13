@@ -146,3 +146,19 @@ test("a failed start keeps the structured error (What happened / Next) and drops
   // A lone Help line is still better than nothing.
   assert.equal(failureDetail("Help: https://example.test/help"), "Help: https://example.test/help");
 });
+
+test("log lines before the structured error are not shown: the card starts at What happened", () => {
+  const stderr = [
+    "[warn] launchctl print: job not found, retrying",
+    "node:internal/deprecated something",
+    "What happened (HOST_LIFECYCLE_START_FAILED): the service did not become live.",
+    "Next: raft-computer logs --service",
+    "Help: https://example.test/help",
+  ].join("\n");
+  assert.equal(
+    failureDetail(stderr),
+    "What happened (HOST_LIFECYCLE_START_FAILED): the service did not become live.\nNext: raft-computer logs --service",
+  );
+  // Without a structured block nothing is dropped except the Help link.
+  assert.equal(failureDetail("warn\nport busy\nHelp: https://example.test/help"), "warn\nport busy");
+});
