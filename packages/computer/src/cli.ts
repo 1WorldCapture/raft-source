@@ -315,7 +315,7 @@ async function runCallerStopThenStart(
   runtime.emitInfo(
     `Restarting from this terminal: stopping the service (pid ${liveServicePid}), then starting it again.`,
   );
-  await runtime.stop({ signal, hostLifecycleOwner: "cli" });
+  await runtime.stop({ signal, hostLifecycleOwner: "cli", stopCaller: "cli" });
   signal.throwIfAborted();
   try {
     await runtime.start(

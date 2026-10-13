@@ -75,6 +75,11 @@ export interface StopInput {
   /** Explicit durable host-lifecycle owner. Internal callers use `none`; the
    * CLI and Electron adapters bind their actual owner. */
   hostLifecycleOwner?: "cli" | "app" | "none";
+  /** Task #36 point 6: which entry point asked for this stop. Recorded in the
+   *  service log so the next stuck carrier is traceable. Every real call site
+   *  sets it; "unknown" is the honest default for anything that does not —
+   *  deliberately not a guess. */
+  stopCaller?: string;
 }
 
 export type StopStatus =
@@ -102,8 +107,11 @@ export interface StopDeps {
   sleep?: (ms: number) => Promise<void>;
   pollIntervalMs?: number;
   timeoutMs?: number;
-  /** Task #36 point 6: who asked for this stop (desktop / cli / upgrade /
-   *  migrateHome). Recorded in the service log; defaults to "cli". */
+  /** Task #36 point 6: who asked for this stop. Recorded in the service log
+   *  so the next stuck carrier is traceable. Every real call site sets this;
+   *  "unknown" is the honest default for anything that does not, and is
+   *  deliberately NOT a guess — the owner's stuck carrier logged "caller not
+   *  logged", which is most of why it took a day to trace. */
   stopCaller?: string;
   now?: () => number;
   /** Abort the wait path if the caller loses its mutation lock. */
@@ -169,7 +177,7 @@ export async function stop(
   // "caller not logged", which is most of why it took a day to work out where a
   // stuck carrier had come from.
   {
-    const caller = options.stopCaller ?? "cli";
+    const caller = options.stopCaller ?? input.stopCaller ?? "unknown";
     try {
       await appendFile(
         serviceLogPath(slockHome),
@@ -276,7 +284,7 @@ export async function stop(
         pid,
         timeoutMs,
         attachedServers: attachedCount,
-        caller: options.stopCaller ?? "cli",
+        caller: options.stopCaller ?? input.stopCaller ?? "unknown",
         carrierStillLoaded: true,
       })}\n`,
     );

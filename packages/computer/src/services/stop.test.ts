@@ -461,3 +461,51 @@ test("task #36: a timed-out stop says so, and records the caller", async () => {
     assert.match(log, /"kind":"stop\.timed_out"/u);
   });
 });
+
+// --- task #36 point 6: every real call site declares itself ---
+test("task #36: stop records unknown when no caller declared one", async () => {
+  await withHome(async (home) => {
+    await mkdir(join(home, "computer", "run"), { recursive: true });
+    await writeFile(join(home, "computer", "run", "service.pid"), String(process.pid));
+    await assert.rejects(
+      () =>
+        stop(
+          { slockHome: home, hostLifecycleOwner: "cli" },
+          { timeoutMs: 1, killService: () => {}, isProcessAlive: () => true, sleep: async () => {} },
+        ),
+      () => true,
+    );
+    const log = await readFile(serviceLogPath(home), "utf8").catch(() => "");
+    assert.match(log, /"caller":"unknown"/u, "an undeclared caller must log as unknown, not be guessed");
+  });
+});
+
+test("task #36: a caller declared on the input is logged as-is", async () => {
+  await withHome(async (home) => {
+    await mkdir(join(home, "computer", "run"), { recursive: true });
+    await writeFile(join(home, "computer", "run", "service.pid"), String(process.pid));
+    await assert.rejects(
+      () =>
+        stop(
+          { slockHome: home, hostLifecycleOwner: "cli", stopCaller: "upgrade" },
+          { timeoutMs: 1, killService: () => {}, isProcessAlive: () => true, sleep: async () => {} },
+        ),
+      () => true,
+    );
+    const log = await readFile(serviceLogPath(home), "utf8").catch(() => "");
+    assert.match(log, /"caller":"upgrade"/u);
+  });
+});
+
+test("task #36: every real entry point names its own caller", async () => {
+  // The owner's stuck carrier logged "caller not logged". Assert the four
+  // production entry points declare themselves, so a future refactor cannot
+  // silently drop back to "unknown" without a failing test.
+  const { readFileSync } = await import("node:fs");
+  const read = (p: string) => readFileSync(new URL(p, import.meta.url), "utf8");
+  assert.match(read("../lib/api.ts"), /stopCaller: "desktop"/u, "Desktop entry must say desktop");
+  assert.match(read("../kHostAdapter.ts"), /stopCaller: "upgrade"/u, "upgrade path must say upgrade");
+  assert.match(read("../migrateHome.ts"), /stopCaller: "migration"/u, "migration must say migration");
+  assert.match(read("../startStop.ts"), /stopCaller: deps\.stopCaller \?\? "cli"/u, "CLI must say cli");
+  assert.match(read("../cli.ts"), /stopCaller: "cli"/u);
+});

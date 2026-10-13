@@ -190,6 +190,9 @@ export interface RunStopDeps {
   recordLifecycleIntent?: boolean;
   signal?: AbortSignal;
   hostLifecycleOwner?: "cli" | "app" | "none";
+  /** Task #36 point 6: recorded in the service log so a stuck carrier can be
+   *  traced to whoever asked for the stop. */
+  stopCaller?: string;
   convergeHostLifecycle?: typeof convergeCliHostLifecycle;
   hostLifecycleDeps?: MacosHostLifecycleDeps;
 }
@@ -231,6 +234,7 @@ export async function runStop(deps: RunStopDeps = {}): Promise<void> {
       {
         recordLifecycleIntent: deps.recordLifecycleIntent,
         hostLifecycleOwner: deps.hostLifecycleOwner,
+        stopCaller: deps.stopCaller ?? "cli",
       },
     );
   });

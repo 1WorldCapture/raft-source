@@ -237,6 +237,9 @@ export interface ComputerApi {
     options?: {
       recordLifecycleIntent?: boolean;
       hostLifecycleOwner?: "cli" | "app" | "none";
+      /** Task #36 point 6: which entry point asked for the stop. The Desktop
+       *  is the default caller of this API; the CLI passes "cli" explicitly. */
+      stopCaller?: string;
     },
   ): Promise<StopResult>;
 
@@ -505,7 +508,11 @@ export function createComputerApi(slockHome: string, opts?: CreateComputerApiOpt
             slockHome,
             hostLifecycleOwner: options?.hostLifecycleOwner ?? configuredHostLifecycleOwner,
           },
-          { ...(deps ?? {}), ...(onEvent ? { onEvent } : {}) },
+          {
+            ...(deps ?? {}),
+            ...(onEvent ? { onEvent } : {}),
+            ...(options?.stopCaller ? { stopCaller: options.stopCaller } : { stopCaller: "desktop" }),
+          },
         ),
       );
     },
