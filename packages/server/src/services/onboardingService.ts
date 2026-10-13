@@ -1143,6 +1143,8 @@ export async function deliverOwnerFactsContext(
     "what they told you, you know — do not say you were never told.",
   ].filter((line): line is string => line !== null);
 
+  // System context, not a channel message. The label is for the agent; it is
+  // not a channels row, so this must not go through channel visibility.
   const delivery = await agentOrchestrator.deliverMessage(onboardingAgentId, {
     channel_id: channelService.ONBOARDING_CONTEXT_CHANNEL_ID,
     channel_name: channelService.ONBOARDING_CONTEXT_CHANNEL_ID,
@@ -1154,7 +1156,7 @@ export async function deliverOwnerFactsContext(
     timestamp: new Date().toISOString(),
     seq: 0,
     message_id: `onboarding-owner-facts-${serverId}`,
-  }).catch((err: unknown) => {
+  }, { systemContext: true }).catch((err: unknown) => {
     const message = err instanceof Error ? err.message : String(err);
     console.warn(`[Onboarding] Owner facts context failed for agent ${onboardingAgentId}: ${message}`);
     return { status: "dropped", reason: "delivery_threw" } as const;

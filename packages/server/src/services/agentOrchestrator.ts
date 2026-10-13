@@ -1523,6 +1523,12 @@ export interface DeliverMessageOptions {
    */
   adminAuthority?: boolean;
   /**
+   * System context about the agent itself, not a channel message. Skips the
+   * channel visibility lookup. The `inbox:receive` scope gate still applies.
+   * Owner-facts context uses this: its label is not a `channels` row.
+   */
+  systemContext?: boolean;
+  /**
    * Bypass the `inbox:receive` scope gate. Set by intrinsic deliveries that
    * the agent cannot opt out of: reminder fire wakes, action-card execution
    * notices, and other author-owned events about the agent's own state.
@@ -11875,7 +11881,7 @@ export class AgentOrchestrator extends EventEmitter {
       const allowed = await this.hasPassiveDeliveryScope(agentId).catch(() => false);
       if (!allowed) return { status: "dropped", reason: "passive_scope_revoked" };
     }
-    if (!options.intrinsic && !await this.canAgentAccessDeliveryTarget(agentId, agent, message)) {
+    if (!options.intrinsic && !options.systemContext && !await this.canAgentAccessDeliveryTarget(agentId, agent, message)) {
       return { status: "dropped", reason: "target_access_changed" };
     }
     if (requireQueueReceipt && agent.machineId) {

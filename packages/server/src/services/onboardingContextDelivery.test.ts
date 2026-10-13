@@ -8,7 +8,7 @@ import { createAgent, updateAgentStatus } from "./agentService.js";
 import { resetAgentScopesToDefault } from "./agentScopesService.js";
 import { AgentOrchestrator } from "./agentOrchestrator.js";
 import { registerMachine } from "./machineService.js";
-import { deliverOwnerFactsContext } from "./onboardingService.js";
+import { startOnboardingBriefingOnActivation } from "./onboardingBriefingOnActivation.js";
 import { createServer, updateServerOnboardingAgent } from "./serverService.js";
 
 class RecordingOrchestrator extends AgentOrchestrator {
@@ -78,9 +78,23 @@ dbTest("onboarding-context is delivered and a non-uuid channel id does not hit t
   console.warn = (...args: unknown[]) => {
     warnings.push(args.map((part) => (part instanceof Error ? part.message : String(part))).join(" "));
   };
+  const stop = startOnboardingBriefingOnActivation({
+    io: {} as never,
+    orchestrator,
+    trigger: async () => false,
+  });
   try {
-    const delivered = await deliverOwnerFactsContext(orchestrator, server.id, cindy.id);
-    assert.equal(delivered, true, JSON.stringify({ result: orchestrator.lastResult, warnings }));
+    orchestrator.emit("machine:online", { machineId: machine.id, serverId: server.id });
+    for (let attempt = 0; attempt < 50 && orchestrator.lastResult === null; attempt += 1) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    assert.equal(
+      orchestrator.lastResult && typeof orchestrator.lastResult === "object"
+        ? (orchestrator.lastResult as { status?: string }).status
+        : null,
+      "queued",
+      JSON.stringify({ result: orchestrator.lastResult, warnings }),
+    );
     const facts = orchestrator.queued.find((message) => message.channel_id === "onboarding-context");
     assert.ok(facts, "owner facts were queued for the onboarding agent");
     assert.match(facts.content, /Ada Owner/);
@@ -102,6 +116,7 @@ dbTest("onboarding-context is delivered and a non-uuid channel id does not hit t
       0,
     );
   } finally {
+    stop();
     console.warn = originalWarn;
   }
 });
