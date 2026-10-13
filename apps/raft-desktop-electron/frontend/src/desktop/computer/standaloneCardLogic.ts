@@ -83,8 +83,11 @@ export function deriveStandaloneCard(state: StandaloneState | null): StandaloneC
   }
 }
 
-/** One short human line for an error that came back from the main process. */
+/** A readable message for an error that came back from the main process. */
 export function friendlyStandaloneError(raw: string): string {
+  // The CLI's own structured error ("What happened (CODE): ..." / "Next: ...") is the real reason:
+  // show it instead of the generic line, which hid the actual failure.
+  if (/(^|\n)\s*What happened\b/.test(raw)) return raw.trim();
   if (/ENOENT|not installed/i.test(raw)) return "The Computer isn't installed.";
   if (/timeout|timed out/i.test(raw)) return "That took too long — try again.";
   if (/EACCES|permission/i.test(raw)) return "Permission denied while changing the Computer.";
