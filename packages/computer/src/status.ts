@@ -7,6 +7,7 @@
 // report carries server attachment IDENTITY and pid/liveness derived
 // from filesystem state, but NEVER the user access token or any
 // sk_computer_* key — none of those values ever enter the report object.
+import os from "node:os";
 import { readFile, access } from "node:fs/promises";
 import {
   resolveRaftHome,
@@ -23,6 +24,7 @@ import { formatServerSlugDisplay, listServerAttachments } from "./serverState.js
 import { canonicalizeServerUrl } from "./serverUrl.js";
 import { readPidfileAt, isProcessAlive } from "./internal/process-primitives.js";
 import { findLiveServicePidReadOnly } from "./internal/service-pid-fallback.js";
+import { readLoadedButDeadCarrier, resolveStableDispatcherPath } from "./macosLoginCarrier.js";
 import { isDegraded, readTerminalUnlinked } from "./health.js";
 import { info } from "./output.js";
 import { COMPUTER_VERSION } from "./version.js";
@@ -74,7 +76,16 @@ function canonicalServerUrlOrNull(v: unknown): string | null {
   return typeof v === "string" && v.length > 0 ? canonicalizeServerUrl(v) : null;
 }
 
-export type DaemonState = { running: true; pid: number } | { running: false };
+/**
+ * `carrierState: "loaded_dead"` marks the task #36 state: the macOS LaunchAgent
+ * is loaded in launchd but nothing is running behind it, and Start will repair
+ * it with a kickstart. Absent otherwise — including when no carrier is
+ * installed, which is not the same problem and must not be reported as one.
+ * The Desktop card keys off exactly this string (PR #412).
+ */
+export type DaemonState =
+  | { running: true; pid: number }
+  | { running: false; carrierState?: "loaded_dead" };
 export type ServerHealth = "ok" | "degraded" | "offline" | "unlinked";
 
 export interface ProcessVersionStatus {
@@ -131,9 +142,42 @@ async function visibleRunnerLogPath(slockHome: string, serverId: string): Promis
  * surfaced as running — never clearing or otherwise mutating the chain
  * (§3.3.1 read-only + secret-free invariant).
  */
-async function serviceState(slockHome: string): Promise<DaemonState> {
+/**
+ * Task #36. The carrier spec cannot be resolved without a dispatcher path —
+ * `resolveMacosContext` throws HOST_LIFECYCLE_DISPATCHER_UNBOUND without one,
+ * and it only derives the label (a hash of the home) otherwise. Passing the
+ * resolved path is what makes this probe work at runtime; calling the carrier
+ * reader with no deps silently fails every time.
+ */
+async function readLoadedButDeadCarrierFor(home: string): Promise<boolean> {
+  return readLoadedButDeadCarrier(home, {
+    dispatcherPath: resolveStableDispatcherPath(home),
+  });
+}
+
+async function serviceState(
+  slockHome: string,
+  readLoadedButDead: (home: string) => Promise<boolean> = readLoadedButDeadCarrierFor,
+): Promise<DaemonState> {
   const { pid } = await findLiveServicePidReadOnly(slockHome);
-  return pid !== null ? { running: true, pid } : { running: false };
+  if (pid !== null) return { running: true, pid };
+  // Read-only: a launchctl print, never a mutation. Only meaningful on macOS.
+  if (process.platform === "darwin") {
+    try {
+      if (await readLoadedButDead(slockHome)) {
+        return { running: false, carrierState: "loaded_dead" };
+      }
+    } catch (error) {
+      // Never swallow this. A probe that cannot answer must NOT read as
+      // "healthy": an earlier `catch(() => false)` turned a real
+      // HOST_LIFECYCLE_DISPATCHER_UNBOUND into a silently absent
+      // carrierState, and that is exactly the bug task #36 shipped with.
+      // Say so on stdout and omit the field, which keeps consumers on their
+      // existing behaviour instead of acting on a wrong "not loaded-dead".
+      info(`warning: carrier probe failed, omitting carrierState: ${String(error)}`);
+    }
+  }
+  return { running: false };
 }
 
 async function processVersionStatus(
@@ -268,12 +312,20 @@ export interface ComputerStatusReport {
  * handler (PR-impl-2, D-stage) both pass an `installRoot` resolved by
  * their respective entry points.
  */
-export async function buildStatusReport(installRoot: string): Promise<ComputerStatusReport> {
+export async function buildStatusReport(
+  installRoot: string,
+  /** Test seam for the macOS loaded-but-dead probe. Production uses the real
+   *  read-only `launchctl print`; status must stay read-only either way. */
+  readLoadedButDead?: (home: string) => Promise<boolean>,
+): Promise<ComputerStatusReport> {
   const sessionRead = await readUserSession(userSessionPath(installRoot));
   const session = sessionRead.session;
   const attachments = await listServerAttachments(installRoot);
   const service = {
-    ...(await serviceState(installRoot)),
+    ...(await serviceState(
+      installRoot,
+      readLoadedButDead ?? readLoadedButDeadCarrierFor,
+    )),
     logPath: serviceLogPath(installRoot),
   };
   const serviceWithVersion = {

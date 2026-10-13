@@ -33,15 +33,36 @@ import { findLiveServicePid } from "../internal/service-pid-fallback.js";
 import type { ComputerApiEvent } from "../lib/events.js";
 import { ComputerServiceError } from "./errors.js";
 import { servicePidPath } from "../paths.js";
+import { appendFile } from "node:fs/promises";
 import { currentTimeMs } from "@botiverse/raft-shared";
 import {
   convergeCliHostLifecycle,
   resolveStableDispatcherPath,
   type MacosHostLifecycleDeps,
 } from "../macosLoginCarrier.js";
+import { serviceLogPath } from "../paths.js";
+import { listAttachedServerIds } from "../serverState.js";
 
 const STOP_POLL_INTERVAL_MS = 200;
 const STOP_TIMEOUT_MS = 5000;
+/**
+ * Task #36. A fixed 5s budget is wrong for a root stop: the service has to
+ * tear down EVERY attached server, so the work scales with the attached set.
+ * The owner's Mac runs four and raftbuild alone overran 5s — the stop reported
+ * STOP_TIMEOUT, never unloaded the LaunchAgent, and the service then exited on
+ * its own and left a loaded-but-dead carrier behind. Budget per daemon so a
+ * multi-server root is not declared dead while it is still legitimately
+ * shutting down.
+ */
+const STOP_TIMEOUT_PER_SERVER_MS = 2000;
+const STOP_TIMEOUT_MAX_MS = 30000;
+
+/** Stop budget for `count` attached servers: one base plus per-server time,
+ *  capped so a pathological attachment set cannot hang stop indefinitely. */
+export function stopTimeoutMsFor(count: number): number {
+  const n = Number.isFinite(count) && count > 1 ? count : 1;
+  return Math.min(STOP_TIMEOUT_MS + STOP_TIMEOUT_PER_SERVER_MS * (n - 1), STOP_TIMEOUT_MAX_MS);
+}
 
 export interface StopInput {
   /** Reserved for future per-server stop. Unused in v0; the root stop
@@ -81,6 +102,9 @@ export interface StopDeps {
   sleep?: (ms: number) => Promise<void>;
   pollIntervalMs?: number;
   timeoutMs?: number;
+  /** Task #36 point 6: who asked for this stop (desktop / cli / upgrade /
+   *  migrateHome). Recorded in the service log; defaults to "cli". */
+  stopCaller?: string;
   now?: () => number;
   /** Abort the wait path if the caller loses its mutation lock. */
   signal?: AbortSignal;
@@ -137,7 +161,24 @@ export async function stop(
     options.sleep ??
     ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const pollIntervalMs = options.pollIntervalMs ?? STOP_POLL_INTERVAL_MS;
-  const timeoutMs = options.timeoutMs ?? STOP_TIMEOUT_MS;
+  // Task #36: scale the wait with the attached set rather than a flat 5s.
+  const attachedCount = (await listAttachedServerIds(slockHome).catch(() => [])).length;
+  const timeoutMs = options.timeoutMs ?? stopTimeoutMsFor(attachedCount);
+
+  // Task #36 point 6: record WHO asked for the stop. The owner's report had
+  // "caller not logged", which is most of why it took a day to work out where a
+  // stuck carrier had come from.
+  {
+    const caller = options.stopCaller ?? "cli";
+    try {
+      await appendFile(
+        serviceLogPath(slockHome),
+        `${JSON.stringify({ kind: "stop.requested", caller, attachedServers: attachedCount, timeoutMs })}\n`,
+      );
+    } catch {
+      // Log-only; never let an unwritable log change stop semantics.
+    }
+  }
   const now = options.now ?? currentTimeMs;
 
   // OS manager definitions are legacy optional state and never participate in
@@ -224,8 +265,29 @@ export async function stop(
     await sleep(Math.min(pollIntervalMs, remaining));
   }
 
+  // Task #36: the stop did NOT complete. Say so where it can be seen — a caller
+  // that only reads "stopped" would otherwise believe the carrier was unloaded,
+  // while it may still be loaded with no process behind it.
+  try {
+    await appendFile(
+      serviceLogPath(slockHome),
+      `${JSON.stringify({
+        kind: "stop.timed_out",
+        pid,
+        timeoutMs,
+        attachedServers: attachedCount,
+        caller: options.stopCaller ?? "cli",
+        carrierStillLoaded: true,
+      })}\n`,
+    );
+  } catch {
+    // Log-only; the throw below is the authoritative signal.
+  }
   throw new ComputerServiceError(
     "STOP_TIMEOUT",
-    `Service (pid ${pid}) did not exit within ${timeoutMs}ms after SIGTERM. Force-kill with: kill -9 ${pid}`,
+    `Service (pid ${pid}) did not exit within ${timeoutMs}ms after SIGTERM ` +
+      `(budget for ${attachedCount} attached server${attachedCount === 1 ? "" : "s"}). ` +
+      `The stop did NOT complete: on macOS the login carrier may still be loaded with no process behind it. ` +
+      `Run \`raft-computer start\` to recover it, or force-kill with: kill -9 ${pid}`,
   );
 }

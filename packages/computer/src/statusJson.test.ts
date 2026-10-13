@@ -104,3 +104,44 @@ test("projectStatusJson: cursor-sdk manifest and migration result are read from 
     await rm(home, { recursive: true, force: true });
   }
 });
+
+// --- task #36: assert on the path the Desktop card actually reads ---
+// buildStatusReport is NOT what the UI reads; `raft-computer status --json`
+// goes through projectStatusJson. Covering only the former let the field ship
+// absent at runtime with a green suite.
+test("projectStatusJson: a stopped loaded-dead carrier surfaces service.carrierState", async () => {
+  const home = await mkdtemp(path.join(tmpdir(), "status-json-loadeddead-"));
+  try {
+    const json = await projectStatusJson(
+      report({
+        slockHome: home,
+        service: {
+          running: false,
+          carrierState: "loaded_dead",
+          logPath: "/tmp/svc.log",
+          version: { kind: "observed", version: "1.0.49" } as never,
+        },
+      }),
+    );
+    assert.equal(json.service.state, "stopped");
+    assert.equal(json.service.pid, null);
+    assert.equal(json.service.carrierState, "loaded_dead");
+    assert.equal(JSON.parse(JSON.stringify(json.service)).carrierState, "loaded_dead");
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("projectStatusJson: no carrierState when merely stopped, or when running", async () => {
+  const home = await mkdtemp(path.join(tmpdir(), "status-json-plain-"));
+  try {
+    const stopped = await projectStatusJson(
+      report({ slockHome: home, service: { running: false, logPath: "/tmp/svc.log", version: { kind: "unobserved" } as never } }),
+    );
+    assert.equal("carrierState" in stopped.service, false, "absent, not null");
+    const running = await projectStatusJson(report({ slockHome: home }));
+    assert.equal("carrierState" in running.service, false, "a live service is never loaded-dead");
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});

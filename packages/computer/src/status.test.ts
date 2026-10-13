@@ -582,3 +582,64 @@ test("status: stale connected marker + dead pid → serverConnected=false", asyn
     assert.equal(sa?.serverConnected, false, "stale marker with dead process must not report connected");
   });
 });
+
+// --- task #36: the Desktop card keys off exactly service.carrierState ---
+test("status --json reports service.carrierState loaded_dead for a loaded-but-dead carrier", async () => {
+  await withHome(async (home) => {
+    const r = await buildStatusReport(home, async () => true);
+    assert.equal(r.service.running, false);
+    assert.equal(
+      (r.service as { carrierState?: string }).carrierState,
+      "loaded_dead",
+      "the Desktop card keys off exactly this string",
+    );
+    assert.equal(JSON.parse(JSON.stringify(r.service)).carrierState, "loaded_dead");
+  });
+});
+
+test("status --json omits carrierState when the carrier is not loaded-dead", async () => {
+  await withHome(async (home) => {
+    const r = await buildStatusReport(home, async () => false);
+    assert.equal(r.service.running, false);
+    assert.equal(
+      "carrierState" in (r.service as object),
+      false,
+      "absent, not null — an absent carrier is not a loaded-but-dead carrier",
+    );
+  });
+});
+
+test("a running service never reports carrierState", async () => {
+  await withHome(async (home) => {
+    const run = join(home, "computer", "run");
+    await mkdir(run, { recursive: true });
+    await writeFile(join(run, "service.pid"), String(process.pid));
+    const r = await buildStatusReport(home, async () => true);
+    assert.equal(r.service.running, true);
+    assert.equal("carrierState" in (r.service as object), false);
+  });
+});
+
+test("a failing carrier probe is reported, never silently read as healthy", async () => {
+  await withHome(async (home) => {
+    const written: string[] = [];
+    const realWrite = process.stdout.write.bind(process.stdout);
+    (process.stdout as unknown as { write: (c: string) => boolean }).write = (c: string) => {
+      written.push(String(c));
+      return true;
+    };
+    try {
+      const r = await buildStatusReport(home, async () => {
+        throw new Error("HOST_LIFECYCLE_DISPATCHER_UNBOUND: no dispatcher path");
+      });
+      assert.equal(r.service.running, false);
+      // The field must be omitted, NOT invented as a healthy "not loaded-dead".
+      assert.equal("carrierState" in (r.service as object), false);
+    } finally {
+      (process.stdout as unknown as { write: typeof realWrite }).write = realWrite;
+    }
+    const out = written.join("");
+    assert.match(out, /carrier probe failed/u, "the failure must be visible on stdout");
+    assert.match(out, /HOST_LIFECYCLE_DISPATCHER_UNBOUND/u, "the real cause must be surfaced");
+  });
+});

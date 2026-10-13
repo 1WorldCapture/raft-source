@@ -232,6 +232,149 @@ test("start service: macOS CLI carrier becomes the sole background executor befo
   });
 });
 
+// --- Loaded-but-dead macOS carrier (task #36) ---
+// A `stop` that overruns its wait never unloads the LaunchAgent, and the
+// definition has RunAtLoad but no KeepAlive, so launchd will not restart it.
+// Converge still reports the carrier ready, so start used to poll for a pid
+// that could never appear and die with HOST_LIFECYCLE_START_FAILED.
+test("start service: kicks a loaded-but-dead macOS carrier instead of timing out", async () => {
+  await withHome(async (home) => {
+    await writeAttach(home, SERVER_A);
+    const calls: string[][] = [];
+    let live = false;
+    const result = await start(
+      { slockHome: home, hostLifecycleOwner: "cli" },
+      {
+        hostLifecycleDeps: {
+          platform: "darwin",
+          dispatcherPath: "/usr/local/bin/raft-computer",
+          userHome: home,
+          uid: 501,
+          runCommand: async (_command, args) => {
+            calls.push(args);
+            // `launchctl print gui/501` is the domain probe; `print gui/501/<label>`
+            // is the job itself. The job is loaded but its process is gone.
+            if (args[0] === "print" && args[1]?.includes("/build.raft.computer.login.")) {
+              return { stdout: "state = not running\n\truns = 1\n", stderr: "" };
+            }
+            if (args[0] === "kickstart") {
+              // The kicked job comes up: publish a live service pid.
+              live = true;
+              await mkdir(join(servicePidPath(home), ".."), { recursive: true });
+              await writeFile(servicePidPath(home), String(process.pid));
+              await writeServiceVersion(home, COMPUTER_VERSION);
+              await writeReadyRunner(home, SERVER_A);
+              return { stdout: "", stderr: "" };
+            }
+            return { stdout: "", stderr: "" };
+          },
+        },
+        convergeHostLifecycle: async () => ({
+          owner: "cli",
+          enabled: true,
+          status: "converged",
+          label: "build.raft.computer.login.test",
+          definitionPath: "/tmp/test.plist",
+          definition: "plist",
+        }),
+        isProcessAlive: (pid) => live && pid === process.pid,
+      },
+    );
+    const kicked = calls.filter((args) => args[0] === "kickstart");
+    assert.equal(kicked.length, 1, `expected exactly one kickstart, saw ${calls.length} calls`);
+    assert.match(kicked[0][1], /gui\/501\/build\.raft\.computer\.login\./);
+    // `kickstart -k` would kill a live job first — a recovery that causes an outage.
+    assert.ok(!calls.some((args) => args.includes("-k")), "kickstart must never carry -k");
+    assert.equal(result.status, "already_running");
+  });
+});
+
+test("start service: does not kick a carrier that is already running", async () => {
+  await withHome(async (home) => {
+    await writeAttach(home, SERVER_A);
+    const calls: string[][] = [];
+    await start(
+      { slockHome: home, hostLifecycleOwner: "cli" },
+      {
+        hostLifecycleDeps: {
+          platform: "darwin",
+          dispatcherPath: "/usr/local/bin/raft-computer",
+          userHome: home,
+          uid: 501,
+          runCommand: async (_command, args) => {
+            calls.push(args);
+            if (args[0] === "print" && args[1]?.includes("/build.raft.computer.login.")) {
+              return { stdout: "state = running\n\tpid = 4242\n", stderr: "" };
+            }
+            return { stdout: "", stderr: "" };
+          },
+        },
+        convergeHostLifecycle: async () => {
+          // The carrier is alive, so converge publishes the live service pid.
+          await mkdir(join(servicePidPath(home), ".."), { recursive: true });
+          await writeFile(servicePidPath(home), String(process.pid));
+          await writeServiceVersion(home, COMPUTER_VERSION);
+          await writeReadyRunner(home, SERVER_A);
+          return {
+            owner: "cli",
+            enabled: true,
+            status: "converged",
+            label: "build.raft.computer.login.test",
+            definitionPath: "/tmp/test.plist",
+            definition: "plist",
+          };
+        },
+        spawnDetachedService: async () => process.pid,
+        isProcessAlive: () => true,
+      },
+    );
+    assert.ok(!calls.some((args) => args[0] === "kickstart"), "a running carrier must never be kicked");
+  });
+});
+
+test("start service: does not kick when no carrier is loaded at all", async () => {
+  await withHome(async (home) => {
+    await writeAttach(home, SERVER_A);
+    const calls: string[][] = [];
+    await start(
+      { slockHome: home, hostLifecycleOwner: "cli" },
+      {
+        hostLifecycleDeps: {
+          platform: "darwin",
+          dispatcherPath: "/usr/local/bin/raft-computer",
+          userHome: home,
+          uid: 501,
+          runCommand: async (_command, args) => {
+            calls.push(args);
+            // job lookup fails while the GUI domain still answers
+            if (args[0] === "print" && args[1] === "gui/501") {
+              return { stdout: "", stderr: "" };
+            }
+            throw new Error("Could not find service \"gui/501/build.raft.computer.login.x\"");
+          },
+        },
+        convergeHostLifecycle: async () => {
+          await mkdir(join(servicePidPath(home), ".."), { recursive: true });
+          await writeFile(servicePidPath(home), String(process.pid));
+          await writeServiceVersion(home, COMPUTER_VERSION);
+          await writeReadyRunner(home, SERVER_A);
+          return {
+            owner: "cli",
+            enabled: true,
+            status: "converged",
+            label: "build.raft.computer.login.test",
+            definitionPath: "/tmp/test.plist",
+            definition: "plist",
+          };
+        },
+        spawnDetachedService: async () => process.pid,
+        isProcessAlive: () => true,
+      },
+    );
+    assert.ok(!calls.some((args) => args[0] === "kickstart"), "an absent carrier is not a loaded-but-dead carrier");
+  });
+});
+
 // --- Gate 4: START_DAEMON_TIMEOUT (managed daemon never reaches ready) ---
 test("start service: daemon never ready throws START_DAEMON_TIMEOUT (single server label form)", async () => {
   await withHome(async (home) => {
