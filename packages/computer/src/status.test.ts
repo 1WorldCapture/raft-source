@@ -619,3 +619,27 @@ test("a running service never reports carrierState", async () => {
     assert.equal("carrierState" in (r.service as object), false);
   });
 });
+
+test("a failing carrier probe is reported, never silently read as healthy", async () => {
+  await withHome(async (home) => {
+    const written: string[] = [];
+    const realWrite = process.stdout.write.bind(process.stdout);
+    (process.stdout as unknown as { write: (c: string) => boolean }).write = (c: string) => {
+      written.push(String(c));
+      return true;
+    };
+    try {
+      const r = await buildStatusReport(home, async () => {
+        throw new Error("HOST_LIFECYCLE_DISPATCHER_UNBOUND: no dispatcher path");
+      });
+      assert.equal(r.service.running, false);
+      // The field must be omitted, NOT invented as a healthy "not loaded-dead".
+      assert.equal("carrierState" in (r.service as object), false);
+    } finally {
+      (process.stdout as unknown as { write: typeof realWrite }).write = realWrite;
+    }
+    const out = written.join("");
+    assert.match(out, /carrier probe failed/u, "the failure must be visible on stdout");
+    assert.match(out, /HOST_LIFECYCLE_DISPATCHER_UNBOUND/u, "the real cause must be surfaced");
+  });
+});

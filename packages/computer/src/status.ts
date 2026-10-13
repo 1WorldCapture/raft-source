@@ -162,8 +162,20 @@ async function serviceState(
   const { pid } = await findLiveServicePidReadOnly(slockHome);
   if (pid !== null) return { running: true, pid };
   // Read-only: a launchctl print, never a mutation. Only meaningful on macOS.
-  if (process.platform === "darwin" && (await readLoadedButDead(slockHome).catch(() => false))) {
-    return { running: false, carrierState: "loaded_dead" };
+  if (process.platform === "darwin") {
+    try {
+      if (await readLoadedButDead(slockHome)) {
+        return { running: false, carrierState: "loaded_dead" };
+      }
+    } catch (error) {
+      // Never swallow this. A probe that cannot answer must NOT read as
+      // "healthy": an earlier `catch(() => false)` turned a real
+      // HOST_LIFECYCLE_DISPATCHER_UNBOUND into a silently absent
+      // carrierState, and that is exactly the bug task #36 shipped with.
+      // Say so on stdout and omit the field, which keeps consumers on their
+      // existing behaviour instead of acting on a wrong "not loaded-dead".
+      info(`warning: carrier probe failed, omitting carrierState: ${String(error)}`);
+    }
   }
   return { running: false };
 }
