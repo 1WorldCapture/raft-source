@@ -56,6 +56,12 @@ test("error messages are shortened for humans", () => {
   assert.match(friendlyStandaloneError("weird"), /Couldn't complete/);
 });
 
+test("the CLI's structured error is shown as is, not hidden behind the generic line", () => {
+  const raw = "What happened (HOST_LIFECYCLE_START_FAILED): the service did not become live.\nNext: raft-computer logs --service";
+  assert.equal(friendlyStandaloneError(raw), raw);
+  assert.equal(friendlyStandaloneError(`  ${raw}\n`), raw);
+});
+
 test("fresh install with no server connected says so instead of 'stopped unexpectedly'", () => {
   const fresh = deriveStandaloneCard({ ...base, phase: "stopped", status: { agentCount: 0, servers: [], service: { version: "1.0.29" } } });
   assert.deepEqual([fresh.tone, fresh.title], ["idle", "Not connected"]);

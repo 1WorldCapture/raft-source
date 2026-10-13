@@ -67,7 +67,7 @@ export default function StandaloneComputerCard() {
       </div>
       {error || model.actions.length > 0 ? (
         <div className="border-t-2 border-black/10 px-2.5 py-1.5">
-          {error ? <div className="mb-1 text-[11px] font-medium text-brutal-orange">{friendlyStandaloneError(error)}</div> : null}
+          {error ? <div className="mb-1 whitespace-pre-line break-words text-[11px] font-medium text-brutal-orange" data-testid="standalone-card-error">{friendlyStandaloneError(error)}</div> : null}
           {asking ? (
             <div data-testid="standalone-confirm">
               <p className="mb-1 text-[11px] font-medium text-black">{asking.confirm}</p>

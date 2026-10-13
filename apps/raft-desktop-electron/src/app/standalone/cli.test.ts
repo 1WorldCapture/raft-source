@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createStandaloneCli, parseCommandJson, parseStatusJson, type RunCommand } from "./cli.ts";
+import { createStandaloneCli, failureDetail, parseCommandJson, parseStatusJson, type RunCommand } from "./cli.ts";
 
 const STATUS = {
   home: "/Users/x/.slock",
@@ -111,7 +111,7 @@ test("indented multi-line JSON (what the real binary prints) parses, for status 
   assert.deepEqual(parseCommandJson(JSON.stringify({ ok: true, state: "running" }, null, 2)), { ok: true, state: "running", error: null });
 });
 
-test("start/stop without --json: the exit code decides; a failure carries the last output line", async () => {
+test("start/stop without --json: the exit code decides; a failure carries the error output", async () => {
   const outputs = [
     { stdout: "Raft Computer started.\n", stderr: "", code: 0 },
     { stdout: "", stderr: "warn\nport busy\n", code: 1 },
@@ -119,5 +119,30 @@ test("start/stop without --json: the exit code decides; a failure carries the la
   const run: RunCommand = async () => outputs.shift()!;
   const cli = createStandaloneCli({ binaryPath: "/b", home: "/h", run, baseEnv: {} });
   assert.deepEqual(await cli.start(), { ok: true, state: "running", error: null });
-  assert.deepEqual(await cli.stop(), { ok: false, state: null, error: { code: "exit_1", message: "port busy" } });
+  assert.deepEqual(await cli.stop(), { ok: false, state: null, error: { code: "exit_1", message: "warn\nport busy" } });
+});
+
+test("a failed start keeps the structured error (What happened / Next) and drops only the Help link", async () => {
+  const stderr = [
+    "What happened (HOST_LIFECYCLE_START_FAILED): launchd accepted the macOS post-login carrier, but its service did not become live before the startup deadline.",
+    "Next: raft-computer logs --service",
+    "Help: https://example.test/help",
+  ].join("\n");
+  assert.equal(
+    failureDetail(stderr),
+    [
+      "What happened (HOST_LIFECYCLE_START_FAILED): launchd accepted the macOS post-login carrier, but its service did not become live before the startup deadline.",
+      "Next: raft-computer logs --service",
+    ].join("\n"),
+  );
+  const outputs = [{ stdout: "", stderr, code: 1 }];
+  const run: RunCommand = async () => outputs.shift()!;
+  const cli = createStandaloneCli({ binaryPath: "/b", home: "/h", run, baseEnv: {} });
+  const result = await cli.start();
+  assert.equal(result.ok, false);
+  assert.match(result.error?.message ?? "", /^What happened \(HOST_LIFECYCLE_START_FAILED\)/);
+  assert.match(result.error?.message ?? "", /\nNext: raft-computer logs --service$/);
+  assert.doesNotMatch(result.error?.message ?? "", /Help:/);
+  // A lone Help line is still better than nothing.
+  assert.equal(failureDetail("Help: https://example.test/help"), "Help: https://example.test/help");
 });

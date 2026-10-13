@@ -91,12 +91,22 @@ export function parseCommandJson(text: string): CommandResult {
   }
 }
 
+/**
+ * The text of a failed `raft-computer` command for the card. The CLI prints a structured block
+ * (`What happened (CODE): ...`, `Next: ...`, then a `Help:` link): taking only the last line used to
+ * surface just the link and hide the real error, so keep every line except the help link(s).
+ */
+export function failureDetail(output: string): string {
+  const lines = output.split("\n").map((line) => line.trim()).filter(Boolean);
+  const useful = lines.filter((line) => !/^help\s*:/i.test(line));
+  return (useful.length > 0 ? useful : lines.slice(-1)).join("\n").slice(0, 800);
+}
+
 function commandResult(result: { stdout: string; stderr: string; code: number }, okState: "running" | "stopped"): CommandResult {
   const json = parseCommandJson(result.stdout);
   if (json.error?.code !== "bad_output") return json;
   if (result.code === 0) return { ok: true, state: okState, error: null };
-  const detail = (result.stderr.trim() || result.stdout.trim()).split("\n").filter(Boolean).at(-1) ?? "";
-  return { ok: false, state: null, error: { code: "exit_" + result.code, message: detail.slice(0, 300) } };
+  return { ok: false, state: null, error: { code: "exit_" + result.code, message: failureDetail(result.stderr.trim() || result.stdout.trim()) } };
 }
 
 export type RunCommand = (file: string, args: string[], options: { env: NodeJS.ProcessEnv; timeoutMs: number }) => Promise<{ stdout: string; stderr: string; code: number }>;
