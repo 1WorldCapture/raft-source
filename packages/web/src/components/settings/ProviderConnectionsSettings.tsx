@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { CheckCircle2, KeyRound, Pencil, Plus, Power, RefreshCw, Send, Trash2, XCircle } from "lucide-react";
 import { useIntl } from "react-intl";
@@ -508,6 +508,10 @@ function CreateProviderConnectionModal({
   const [supportsImageInput, setSupportsImageInput] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const idempotencyKey = useRef(crypto.randomUUID());
+  const rotateIdempotencyKey = () => {
+    idempotencyKey.current = crypto.randomUUID();
+  };
   const gateway = isGatewayProviderId(providerId, providerOptions);
 
   const submit = async (event: FormEvent) => {
@@ -520,6 +524,7 @@ function CreateProviderConnectionModal({
         providerId,
         ...(gateway ? { endpointUrl, supportsImageInput } : {}),
         apiKey,
+        idempotencyKey: idempotencyKey.current,
       });
       await onCreated();
     } catch {
@@ -533,13 +538,18 @@ function CreateProviderConnectionModal({
     <DialogCard onClose={onClose} title={formatMessage({ id: "settings.providers.createTitle" })} testId="provider-connection-create-dialog">
       <form onSubmit={submit} className="space-y-4" data-testid="provider-connection-create-form">
         <FormField label={formatMessage({ id: "settings.providers.name" })}>
-          <input className="input-brutal w-full" value={name} onChange={(event) => setName(event.target.value)} maxLength={120} required />
+          <input className="input-brutal w-full" value={name} onChange={(event) => {
+            setName(event.target.value);
+            rotateIdempotencyKey();
+          }} maxLength={120} required />
         </FormField>
         <FormField label={formatMessage({ id: "settings.providers.provider" })}>
           <Select
             value={providerId}
             onValueChange={(value) => {
-              if (value != null) setProviderId(value as ProviderConnectionProviderId);
+              if (value == null || value === providerId) return;
+              setProviderId(value as ProviderConnectionProviderId);
+              rotateIdempotencyKey();
             }}
             items={providerOptions.map((provider) => ({
               value: provider.id,
@@ -564,15 +574,24 @@ function CreateProviderConnectionModal({
         </FormField>
         {gateway && (
           <FormField label={formatMessage({ id: "settings.providers.endpoint" })}>
-            <input className="input-brutal w-full" type="url" value={endpointUrl} onChange={(event) => setEndpointUrl(event.target.value)} placeholder="https://gateway.example.com/v1" required />
+            <input className="input-brutal w-full" type="url" value={endpointUrl} onChange={(event) => {
+              setEndpointUrl(event.target.value);
+              rotateIdempotencyKey();
+            }} placeholder="https://gateway.example.com/v1" required />
           </FormField>
         )}
         <FormField label={formatMessage({ id: "settings.providers.apiKey" })} hint={formatMessage({ id: "settings.providers.apiKeyHint" })}>
-          <input className="input-brutal w-full" type="password" autoComplete="new-password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} required />
+          <input className="input-brutal w-full" type="password" autoComplete="new-password" value={apiKey} onChange={(event) => {
+            setApiKey(event.target.value);
+            rotateIdempotencyKey();
+          }} required />
         </FormField>
         {gateway && (
           <label className="flex items-center gap-2 text-sm font-medium">
-            <Checkbox checked={supportsImageInput} onChange={(event) => setSupportsImageInput(event.target.checked)} />
+            <Checkbox checked={supportsImageInput} onChange={(event) => {
+              setSupportsImageInput(event.target.checked);
+              rotateIdempotencyKey();
+            }} />
             {formatMessage({ id: "settings.providers.imageInput" })}
           </label>
         )}

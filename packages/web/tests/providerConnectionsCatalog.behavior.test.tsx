@@ -39,6 +39,56 @@ test("create-provider picker renders the complete server-projected builtin schem
   }
 });
 
+test("a failed create reuses its idempotency key until the API key changes", async (t) => {
+  const posts: Array<Record<string, unknown>> = [];
+  let fail = true;
+  t.mock.method(api, "post", async (url: string, body?: unknown) => {
+    assert.equal(url, "/provider-connections");
+    assert.equal(body !== null && typeof body === "object", true);
+    posts.push(body as Record<string, unknown>);
+    if (fail) throw new Error("create failed");
+    return { data: {} };
+  });
+
+  render(
+    <TestIntlProvider>
+      <CreateProviderConnectionModal
+        providerOptions={[{ id: "deepseek", label: "DeepSeek", providerKind: "preset" }]}
+        onClose={() => undefined}
+        onCreated={async () => undefined}
+      />
+    </TestIntlProvider>,
+  );
+
+  const form = screen.getByTestId("provider-connection-create-form");
+  const name = form.querySelector("input:not([type='password'])");
+  const apiKey = form.querySelector("input[type='password']");
+  assert.ok(name instanceof HTMLInputElement);
+  assert.ok(apiKey instanceof HTMLInputElement);
+  fireEvent.change(name, { target: { value: "Team DeepSeek" } });
+  fireEvent.change(apiKey, { target: { value: "sk-old" } });
+  fireEvent.submit(form);
+  await screen.findByText("The provider connection could not be created.");
+
+  const firstKey = posts[0]?.idempotencyKey;
+  assert.equal(typeof firstKey, "string");
+  assert.equal(posts[0]?.apiKey, "sk-old");
+
+  fireEvent.submit(form);
+  await waitFor(() => assert.equal(posts.length, 2));
+  assert.equal(posts[1]?.idempotencyKey, firstKey);
+  assert.equal(posts[1]?.apiKey, "sk-old");
+
+  fireEvent.change(apiKey, { target: { value: "sk-fixed" } });
+  fail = false;
+  fireEvent.submit(form);
+  await waitFor(() => assert.equal(posts.length, 3));
+  assert.notEqual(posts[2]?.idempotencyKey, firstKey);
+  assert.equal(posts[2]?.apiKey, "sk-fixed");
+  assert.equal(posts[2]?.name, "Team DeepSeek");
+  assert.equal(posts[2]?.providerId, "deepseek");
+});
+
 test("connection test keeps manual model entry available when discovery fails and sends the selected request", async (t) => {
   const connection: ProviderConnectionSummary = {
     id: "736b2dc6-dbe6-4733-b1ec-8b52daf25e27",
