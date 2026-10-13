@@ -95,6 +95,7 @@ import * as agentRuntimeProfileService from "./agentRuntimeProfileService.js";
 import * as machineService from "./machineService.js";
 import { maybeProvisionServerPm } from "./serverPmProvisioning.js";
 import * as channelService from "./channelService.js";
+import { UUID_RE } from "../lib/messageId.js";
 import * as messageService from "./messageService.js";
 import * as mentionDeliveryOccurrenceService from "./mentionDeliveryOccurrenceService.js";
 import {
@@ -9998,6 +9999,13 @@ export class AgentOrchestrator extends EventEmitter {
 
   protected async canAgentAccessDeliveryTarget(agentId: string, agent: CachedAgentState, message: AgentMessage): Promise<boolean> {
     if (message.third_party_event) return true;
+    if (!UUID_RE.test(message.channel_id)) {
+      if (await channelService.isOnboardingContextDelivery(agentId, agent.serverId, message.channel_id)) {
+        return true;
+      }
+      console.warn(`[Agent ${agentId}] Dropping delivery for ${message.channel_id}: channel id is not a uuid`);
+      return false;
+    }
     try {
       const channel = await channelService.getChannel(message.channel_id);
       if (!channel || channel.serverId !== agent.serverId) {

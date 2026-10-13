@@ -1144,8 +1144,8 @@ export async function deliverOwnerFactsContext(
   ].filter((line): line is string => line !== null);
 
   const delivery = await agentOrchestrator.deliverMessage(onboardingAgentId, {
-    channel_id: "onboarding-context",
-    channel_name: "onboarding-context",
+    channel_id: channelService.ONBOARDING_CONTEXT_CHANNEL_ID,
+    channel_name: channelService.ONBOARDING_CONTEXT_CHANNEL_ID,
     channel_type: "channel",
     sender_id: "system",
     sender_name: "system",
