@@ -69,9 +69,12 @@ rm /tmp/redis-migrate.rdb
 
 ## 磁盘治理（39G 盘）
 
-- 常态线：**至少 6G 空闲**；每小时 `/root/bin/disk-alert.sh` cron 检查，>85% 写 syslog + `/var/log/disk-alert.log`（运维日常巡检该文件，超线在 #prod-docker 报告）
+- 常态线：**至少 6G 空闲**；每小时 `/root/bin/disk-alert.sh` cron 检查，>85% 写 syslog + `/var/log/disk-alert.log`（运维日常巡检该文件，超线在 #all 报告）
+- **构建起飞门槛（2026-10-13 起，task #37）**：`build-release.sh` 启动即自检磁盘空闲，**<12G 拒绝构建**（`RAFT_BUILD_MIN_FREE_GB` 可调）——磁盘高压期构建曾在 ~87% 出现 containerd 层导出竞态（content digest not found / tmpmount lstat 消失），连续两败后第三次才成
 - journald 上限：`/etc/systemd/journald.conf.d/00-size-cap.conf` `SystemMaxUse=200M`（已配置；不设上限曾涨到 ~10G）
 - 镜像保留（2026-10-08 owner 定）：生产现役+生产上一版（回滚体）+8443 现役，三组之外随发版清理；`docker builder prune` 定期跑（legacy builder 实际为 0，buildkit 场景才有量）
+- **发版收官步（2026-10-13 起）**：切换验证通过后跑 `docker image prune -f`（只清悬空层——legacy builder 的失败中间层会以 dangling 镜像形式堆积，2026-10-13 曾积 3.66G）；systemd timer `raft-image-prune.timer` 每周兜底跑一次
+- pre-release 备份保留：**机上只留最近 2 份**，更早的拷出机归档（sha256 校验通过后才删服务器侧）
 - 大件产物（发行包/桌面安装包）传输后及时清理服务器中转目录
 
 ## 已知坑（实战记录）
