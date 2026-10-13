@@ -6532,8 +6532,12 @@ export const providerConnections = pgTable("provider_connections", {
   updatedByUserId: uuid("updated_by_user_id").references(() => users.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  // Nullable so existing rows and creates without a key stay distinct.
+  // A present key is unique per server and replays the original insert.
+  idempotencyKey: text("idempotency_key"),
 }, (t) => [
   uniqueIndex("idx_provider_connections_server_name").on(t.serverId, t.name),
+  uniqueIndex("idx_provider_connections_server_idempotency").on(t.serverId, t.idempotencyKey),
   index("idx_provider_connections_server").on(t.serverId),
 ]);
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { CheckCircle2, KeyRound, Pencil, Plus, Power, RefreshCw, Send, Trash2, XCircle } from "lucide-react";
 import { useIntl } from "react-intl";
@@ -508,6 +508,7 @@ function CreateProviderConnectionModal({
   const [supportsImageInput, setSupportsImageInput] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const idempotencyKey = useRef(crypto.randomUUID());
   const gateway = isGatewayProviderId(providerId, providerOptions);
 
   const submit = async (event: FormEvent) => {
@@ -520,6 +521,7 @@ function CreateProviderConnectionModal({
         providerId,
         ...(gateway ? { endpointUrl, supportsImageInput } : {}),
         apiKey,
+        idempotencyKey: idempotencyKey.current,
       });
       await onCreated();
     } catch {

@@ -734,6 +734,111 @@ test("provider API key containing a non-Latin-1 character is rejected on the dec
   );
 });
 
+test("creating a provider connection replays one idempotency key and still inserts when the key is absent", async () => {
+  const { user, server } = await seed();
+  const key = randomUUID();
+  const first = await createProviderConnection({
+    serverId: server.id,
+    userId: user.id,
+    name: "Retry DeepSeek",
+    providerId: "deepseek",
+    apiKey: "first-private-value",
+    idempotencyKey: key,
+  });
+  assert.equal(first.credentialVersion, 1);
+  assert.equal(first.assignedAgentCount, 0);
+  assert.equal(first.latestVerified, null);
+  assert.equal(first.hasCredential, true);
+  assert.equal(JSON.stringify(first).includes("first-private-value"), false);
+
+  const [stored] = await getDb().select({
+    encryptedApiKey: providerConnectionCredentials.encryptedApiKey,
+  }).from(providerConnectionCredentials).where(eq(providerConnectionCredentials.connectionId, first.id));
+  const replay = await createProviderConnection({
+    serverId: server.id,
+    userId: user.id,
+    name: "Retry DeepSeek",
+    providerId: "deepseek",
+    apiKey: "second-private-value",
+    idempotencyKey: key,
+  });
+  assert.equal(replay.id, first.id);
+  assert.equal(replay.credentialVersion, 1);
+  assert.equal(JSON.stringify(replay).includes("second-private-value"), false);
+
+  const rows = await getDb().select({ id: providerConnections.id }).from(providerConnections).where(eq(
+    providerConnections.serverId,
+    server.id,
+  ));
+  assert.deepEqual(rows.map((row) => row.id), [first.id]);
+  const [still] = await getDb().select({
+    encryptedApiKey: providerConnectionCredentials.encryptedApiKey,
+  }).from(providerConnectionCredentials).where(eq(providerConnectionCredentials.connectionId, first.id));
+  assert.equal(still.encryptedApiKey, stored.encryptedApiKey);
+  const audits = await getDb().select({ id: integrationAuditEvents.id }).from(integrationAuditEvents).where(eq(
+    integrationAuditEvents.targetId,
+    first.id,
+  ));
+  assert.equal(audits.length, 1);
+
+  await assert.rejects(
+    () => createProviderConnection({
+      serverId: server.id,
+      userId: user.id,
+      name: "Different name",
+      providerId: "deepseek",
+      apiKey: "third-private-value",
+      idempotencyKey: key,
+    }),
+    (error: unknown) => error instanceof ProviderConnectionError && error.code === "provider_connection_idempotency_mismatch",
+  );
+  const afterMismatch = await getDb().select({ id: providerConnections.id }).from(providerConnections).where(eq(
+    providerConnections.serverId,
+    server.id,
+  ));
+  assert.equal(afterMismatch.length, 1);
+
+  await assert.rejects(
+    () => createProviderConnection({
+      serverId: server.id,
+      userId: user.id,
+      name: "Blank key",
+      providerId: "deepseek",
+      apiKey: "blank-private-value",
+      idempotencyKey: " ",
+    }),
+    (error: unknown) => error instanceof ProviderConnectionError && error.code === "provider_connection_invalid",
+  );
+
+  const again = await createProviderConnection({
+    serverId: server.id,
+    userId: user.id,
+    name: "No key once",
+    providerId: "deepseek",
+    apiKey: "fourth-private-value",
+  });
+  const plain = await createProviderConnection({
+    serverId: server.id,
+    userId: user.id,
+    name: "No key twice",
+    providerId: "deepseek",
+    apiKey: "fifth-private-value",
+  });
+  assert.notEqual(again.id, first.id);
+  assert.notEqual(plain.id, again.id);
+
+  const { user: otherUser, server: otherServer } = await seed();
+  const elsewhere = await createProviderConnection({
+    serverId: otherServer.id,
+    userId: otherUser.id,
+    name: "Same key, other server",
+    providerId: "deepseek",
+    apiKey: "other-server-value",
+    idempotencyKey: key,
+  });
+  assert.notEqual(elsewhere.id, first.id);
+});
+
 test("all apiKey usages that build HTTP headers are confined to the two known functions", async () => {
   const sourcePath = fileURLToPath(new URL("./providerConnectionService.ts", import.meta.url));
   const source = await readFile(sourcePath, "utf8");

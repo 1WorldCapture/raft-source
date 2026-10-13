@@ -50,6 +50,7 @@ export type ProviderConnectionErrorCode =
   | "provider_connection_not_found"
   | "provider_connection_in_use"
   | "provider_connection_unavailable"
+  | "provider_connection_idempotency_mismatch"
   | "provider_connection_model_list_failed"
   | "provider_connection_test_failed";
 
@@ -190,6 +191,31 @@ function normalizeEndpointUrl(providerId: ProviderConnectionProviderId, value: u
   }
 }
 
+const MAX_IDEMPOTENCY_KEY_CHARS = 200;
+
+function normalizeIdempotencyKey(value: unknown): string | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "string" || value.length === 0 || value.length > MAX_IDEMPOTENCY_KEY_CHARS || value !== value.trim()) {
+    throw new ProviderConnectionError("Idempotency key is invalid", "provider_connection_invalid");
+  }
+  return value;
+}
+
+function sameCreateIdentity(
+  existing: typeof providerConnections.$inferSelect,
+  fields: {
+    name: string;
+    providerId: ProviderConnectionProviderId;
+    endpointUrl: string | null;
+    supportsImageInput: boolean;
+  },
+): boolean {
+  return existing.name === fields.name
+    && existing.providerId === fields.providerId
+    && existing.endpointUrl === fields.endpointUrl
+    && existing.supportsImageInput === fields.supportsImageInput;
+}
+
 function normalizeSupportsImageInput(providerId: ProviderConnectionProviderId, value: unknown): boolean {
   if (value !== undefined && typeof value !== "boolean") {
     throw new ProviderConnectionError("Image input support must be a boolean", "provider_connection_invalid");
@@ -294,15 +320,18 @@ export async function createProviderConnection(input: {
   endpointUrl?: unknown;
   supportsImageInput?: unknown;
   apiKey: unknown;
+  idempotencyKey?: unknown;
 }): Promise<ProviderConnectionSummary> {
-  const id = randomUUID();
   const name = normalizeName(input.name);
   const providerId = normalizeProviderId(input.providerId);
   const endpointUrl = normalizeEndpointUrl(providerId, input.endpointUrl);
   const apiKey = normalizeApiKey(input.apiKey);
   const supportsImageInput = normalizeSupportsImageInput(providerId, input.supportsImageInput);
-  await getDb().transaction(async (tx) => {
-    await tx.insert(providerConnections).values({
+  const idempotencyKey = normalizeIdempotencyKey(input.idempotencyKey);
+  const identity = { name, providerId, endpointUrl, supportsImageInput };
+  return getDb().transaction(async (tx) => {
+    const id = randomUUID();
+    const insert = tx.insert(providerConnections).values({
       id,
       serverId: input.serverId,
       name,
@@ -311,11 +340,50 @@ export async function createProviderConnection(input: {
       supportsImageInput,
       createdByUserId: input.userId,
       updatedByUserId: input.userId,
+      ...(idempotencyKey ? { idempotencyKey } : {}),
     });
+    // Conflict handling is only for the idempotency key. A duplicate name
+    // still raises, and a missing key keeps the old insert-every-time behavior.
+    const inserted = idempotencyKey
+      ? await insert.onConflictDoNothing({
+        target: [providerConnections.serverId, providerConnections.idempotencyKey],
+      }).returning()
+      : await insert.returning();
+    const connection = inserted[0];
+    if (!connection) {
+      const [existing] = await tx.select().from(providerConnections).where(and(
+        eq(providerConnections.serverId, input.serverId),
+        eq(providerConnections.idempotencyKey, idempotencyKey ?? ""),
+      )).limit(1);
+      if (!existing || !idempotencyKey) {
+        throw new ProviderConnectionError("Provider connection was not created", "provider_connection_unavailable");
+      }
+      if (!sameCreateIdentity(existing, identity)) {
+        throw new ProviderConnectionError(
+          "Idempotency key was already used for a different provider connection",
+          "provider_connection_idempotency_mismatch",
+        );
+      }
+      const [credential] = await tx.select({
+        credentialVersion: providerConnectionCredentials.credentialVersion,
+      }).from(providerConnectionCredentials).where(and(
+        eq(providerConnectionCredentials.serverId, input.serverId),
+        eq(providerConnectionCredentials.connectionId, existing.id),
+      )).limit(1);
+      const [usage] = await tx.select({ count: sql<number>`count(*)::int` }).from(agentProviderConnections).where(and(
+        eq(agentProviderConnections.serverId, input.serverId),
+        eq(agentProviderConnections.connectionId, existing.id),
+      ));
+      return projectSummary({
+        connection: existing,
+        credentialVersion: credential?.credentialVersion ?? null,
+        assignedAgentCount: usage?.count ?? 0,
+      });
+    }
     await tx.insert(providerConnectionCredentials).values({
       serverId: input.serverId,
-      connectionId: id,
-      encryptedApiKey: encryptApiKey(apiKey, `${input.serverId}:${id}`),
+      connectionId: connection.id,
+      encryptedApiKey: encryptApiKey(apiKey, `${input.serverId}:${connection.id}`),
     });
     await recordIntegrationAuditEvent({
       serverId: input.serverId,
@@ -323,13 +391,15 @@ export async function createProviderConnection(input: {
       outcome: "success",
       source: "web",
       actor: { type: "human", id: input.userId },
-      target: { type: "provider_connection", id },
+      target: { type: "provider_connection", id: connection.id },
       metadata: { providerId, configVersion: 1, credentialVersion: 1, status: "unchecked" },
     }, tx);
+    return projectSummary({
+      connection,
+      credentialVersion: 1,
+      assignedAgentCount: 0,
+    });
   });
-  const result = (await listProviderConnections(input.serverId)).find((connection) => connection.id === id);
-  if (!result) throw new ProviderConnectionError("Provider connection was not created", "provider_connection_unavailable");
-  return result;
 }
 
 export async function updateProviderConnection(input: {

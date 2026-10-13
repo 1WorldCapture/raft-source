@@ -137,7 +137,7 @@ providerConnectionRouter.get("/", requireCapability("manageExternalAuth"), async
 
 providerConnectionRouter.post("/", requireCapability("manageExternalAuth"), async (req, res, next) => {
   try {
-    const input = exactBody(req, ["name", "providerId", "endpointUrl", "supportsImageInput", "apiKey"]);
+    const input = exactBody(req, ["name", "providerId", "endpointUrl", "supportsImageInput", "apiKey", "idempotencyKey"]);
     res.status(201).json(await createProviderConnection({
       serverId: req.serverId!,
       userId: req.userId!,
@@ -146,6 +146,7 @@ providerConnectionRouter.post("/", requireCapability("manageExternalAuth"), asyn
       endpointUrl: input.endpointUrl,
       supportsImageInput: input.supportsImageInput,
       apiKey: input.apiKey,
+      idempotencyKey: input.idempotencyKey,
     }));
   } catch (error) {
     sendError(error, res, next);
