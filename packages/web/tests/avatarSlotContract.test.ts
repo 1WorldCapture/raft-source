@@ -25,7 +25,7 @@ test("AvatarSlot carries identity-keyed placeholder bg AND real images must fill
   // state; real avatar images cover it edge-to-edge.
   assert.match(
     avatarSlotSource,
-    /type === "agent"[\s\S]*\? "bg-info-soft theme-brutal:bg-brutal-cyan"[\s\S]*: type === "human"[\s\S]*\? "bg-secondary-200 theme-brutal:bg-brutal-lavender"[\s\S]*: type === "app"[\s\S]*\? "bg-primary-soft theme-brutal:bg-soft-signal text-foreground-strong theme-brutal:text-black font-display font-black"[\s\S]*: "bg-foreground-strong theme-brutal:bg-black text-soft-signal font-display font-bold"/,
+    /type === "agent"[\s\S]*\? "bg-info-soft theme-brutal:bg-brutal-cyan"[\s\S]*: type === "human"[\s\S]*\? "bg-secondary-200 dark:bg-secondary-800 theme-brutal:bg-brutal-lavender"[\s\S]*: type === "app"[\s\S]*\? "bg-primary-soft theme-brutal:bg-soft-signal text-foreground-strong theme-brutal:text-black font-display font-black"[\s\S]*: "bg-foreground-strong dark:bg-layer-canvas-muted theme-brutal:bg-black text-soft-signal font-display font-bold"/,
     "AvatarSlot should derive an identity-keyed placeholder bg (cyan agent / lavender human / yellow app / black-yellow server)",
   );
   assert.match(
