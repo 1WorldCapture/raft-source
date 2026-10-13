@@ -31,6 +31,7 @@
     "test:source-available": "node --test scripts/source-available/export-snapshot.test.mjs scripts/source-available/release.test.mjs",
     "test:downloads": "node --test scripts/build-downloads.test.mjs scripts/build-release-artifacts.test.mjs",
     "test:build-provenance": "node --test scripts/build-provenance.test.mjs",
+    "test:upstream-port": "node --test scripts/upstream-port-completeness.test.mjs scripts/ready-capability-contract.test.mjs",
     "test:drill": "bash scripts/drill/selftest.sh",
     "typecheck:raftdev": "tsc -p tsconfig.raftdev.json",
     "test:web": "node packages/web/scripts/run-vitest-tests.mjs",
