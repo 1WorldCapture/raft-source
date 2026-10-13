@@ -1,16 +1,13 @@
-// The daemon's real ready list must include every capability constant the
-// server checks on that list. 0.2.7 missed PROVIDER_PROBE_CAPABILITY in
-// BUILT_IN_READY_CAPABILITIES; tests still passed because they put the
-// capability on a stand-in carrier. This module reads core.ts and
-// registry.manifest.ts. It does not construct a carrier.
+// The capabilities on a DaemonCore `ready` message must include every
+// capability constant the server checks on that list. 0.2.7 missed
+// PROVIDER_PROBE_CAPABILITY; tests still passed because they advertised it
+// on a stand-in carrier. Pass the capabilities array from a real ready
+// message. This module only scans the server for those checks.
 
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 
-const MANIFEST_PATH = "packages/daemon/src/registry.manifest.ts";
-const CORE_PATH = "packages/daemon/src/core.ts";
 const SERVER_SRC = "packages/server/src";
-const BUILT_IN_SPREAD = "BUILT_IN_READY_CAPABILITIES";
 
 // Absence of these is a supported server path. They are not part of the
 // current daemon ready list, and a stand-in must not be required to invent
@@ -29,62 +26,13 @@ const OPTIONAL_READY_CAPABILITIES = new Map([
 const INCLUDES_PATTERN = /(?<!transport\.)capabilities\??\.(?:includes|has)\(\s*([A-Z][A-Z0-9_]*)\s*\)/g;
 const HAS_MACHINE_PATTERN = /hasMachineCapability\(\s*(?:[^()]|\([^()]*\))*?,\s*([A-Z][A-Z0-9_]*)\s*\)/g;
 
-export function manifestWithoutProviderProbe(source) {
-  return source.replace(
-    /(export const BUILT_IN_READY_CAPABILITIES = \[)([\s\S]*?)(\] as const)/,
-    (_match, open, body, close) => `${open}${body.replace(/\n[ \t]*PROVIDER_PROBE_CAPABILITY,/, "\n")}${close}`,
-  );
-}
-
-export function evaluateReadyCapabilityContract(repoRoot, overrides = {}) {
-  const read = (relPath) => {
-    if (Object.prototype.hasOwnProperty.call(overrides, relPath)) return overrides[relPath];
-    return readFileSync(join(repoRoot, relPath), "utf8");
-  };
-  const coreSource = read(CORE_PATH);
-  const manifestSource = read(MANIFEST_PATH);
-  const scanned = scanReadyElements(coreSource);
+export function evaluateReadyCapabilityContract(repoRoot, readyCapabilities) {
+  if (!Array.isArray(readyCapabilities) || readyCapabilities.some((value) => typeof value !== "string")) {
+    throw new Error("readyCapabilities must be the capabilities array from a DaemonCore ready message");
+  }
+  const read = (relPath) => readFileSync(join(repoRoot, relPath), "utf8");
+  const readyValues = new Set(readyCapabilities);
   const gaps = [];
-  if (!scanned.spreads.includes(BUILT_IN_SPREAD)) {
-    gaps.push({
-      name: BUILT_IN_SPREAD,
-      value: null,
-      file: CORE_PATH,
-      reason: "the ready message does not spread BUILT_IN_READY_CAPABILITIES",
-    });
-  }
-
-  const readyValues = new Set(scanned.strings);
-  const manifestNames = builtInNames(manifestSource);
-  if (scanned.spreads.includes(BUILT_IN_SPREAD)) {
-    for (const name of manifestNames) {
-      const value = resolveConstant(repoRoot, join(repoRoot, MANIFEST_PATH), name, read);
-      if (!value) {
-        gaps.push({
-          name,
-          value: null,
-          file: MANIFEST_PATH,
-          reason: "built-in ready capability has no string value",
-        });
-        continue;
-      }
-      readyValues.add(value);
-    }
-  }
-  for (const name of scanned.idents) {
-    const value = resolveConstant(repoRoot, join(repoRoot, CORE_PATH), name, read);
-    if (!value) {
-      gaps.push({
-        name,
-        value: null,
-        file: CORE_PATH,
-        reason: "ready-list capability has no string value",
-      });
-      continue;
-    }
-    readyValues.add(value);
-  }
-
   const checks = scanServerChecks(repoRoot, read);
   const seenChecks = new Set();
   for (const check of checks) {
@@ -119,29 +67,7 @@ export function evaluateReadyCapabilityContract(repoRoot, overrides = {}) {
       });
     }
   }
-  return { gaps, readyValues: [...readyValues].sort(), checks };
-}
-
-export function scanReadyElements(coreSource) {
-  const marker = coreSource.indexOf('type: "ready"');
-  if (marker < 0) throw new Error("daemon ready message not found");
-  const capabilitiesAt = coreSource.indexOf("capabilities:", marker);
-  if (capabilitiesAt < 0 || capabilitiesAt - marker > 500) {
-    throw new Error("ready message has no capabilities array");
-  }
-  const open = coreSource.indexOf("[", capabilitiesAt);
-  const body = bracketBody(coreSource, open);
-  return tokenizeCapabilityBody(body);
-}
-
-function builtInNames(manifestSource) {
-  const match = manifestSource.match(/export const BUILT_IN_READY_CAPABILITIES = \[([\s\S]*?)\] as const/);
-  if (!match) throw new Error("BUILT_IN_READY_CAPABILITIES not found");
-  const names = [];
-  const ident = /\b([A-Z][A-Z0-9_]+)\b/g;
-  let found;
-  while ((found = ident.exec(match[1]))) names.push(found[1]);
-  return names;
+  return { gaps, checks };
 }
 
 function scanServerChecks(repoRoot, read) {
@@ -256,76 +182,4 @@ function resolveModule(repoRoot, fromFile, spec) {
   if (!candidate) return null;
   const options = [candidate, `${candidate}.ts`, `${candidate}.tsx`];
   return options.find((option) => existsSync(option)) ?? null;
-}
-
-function bracketBody(source, openIndex) {
-  let depth = 0;
-  for (let index = openIndex; index < source.length; index += 1) {
-    const char = source[index];
-    if (char === "[") depth += 1;
-    else if (char === "]") {
-      depth -= 1;
-      if (depth === 0) return source.slice(openIndex + 1, index);
-    }
-  }
-  throw new Error("unterminated capabilities array");
-}
-
-function tokenizeCapabilityBody(body) {
-  const strings = [];
-  const idents = [];
-  const spreads = [];
-  let index = 0;
-  while (index < body.length) {
-    const char = body[index];
-    if (/\s/.test(char) || char === "," || char === "(" || char === ")" || char === "[" || char === "]" || char === "?" || char === ":") {
-      index += 1;
-      continue;
-    }
-    if (char === "/" && body[index + 1] === "/") {
-      while (index < body.length && body[index] !== "\n") index += 1;
-      continue;
-    }
-    if (char === "\"" || char === "'") {
-      const quote = char;
-      index += 1;
-      let value = "";
-      while (index < body.length && body[index] !== quote) {
-        if (body[index] === "\\") {
-          value += body[index + 1] ?? "";
-          index += 2;
-          continue;
-        }
-        value += body[index];
-        index += 1;
-      }
-      index += 1;
-      strings.push(value);
-      continue;
-    }
-    if (body.startsWith("...", index)) {
-      index += 3;
-      const ident = readIdent(body, index);
-      if (ident) {
-        spreads.push(ident);
-        index += ident.length;
-      }
-      continue;
-    }
-    if (/[A-Za-z_]/.test(char)) {
-      const ident = readIdent(body, index);
-      index += ident.length;
-      if (body[index] === "." || body[index] === "(") continue;
-      if (/^[A-Z][A-Z0-9_]+$/.test(ident)) idents.push(ident);
-      continue;
-    }
-    index += 1;
-  }
-  return { strings, idents, spreads };
-}
-
-function readIdent(body, index) {
-  let end = index;
-  while (end < body.length && /[A-Za-z0-9_]/.test(body[end])) end += 1;
-  return body.slice(index, end);
 }
