@@ -75,6 +75,7 @@ rm /tmp/redis-migrate.rdb
 - 镜像保留（2026-10-08 owner 定）：生产现役+生产上一版（回滚体）+8443 现役，三组之外随发版清理；`docker builder prune` 定期跑（legacy builder 实际为 0，buildkit 场景才有量）
 - **发版收官步（2026-10-13 起）**：切换验证通过后跑 `docker image prune -f`（只清悬空层——legacy builder 的失败中间层会以 dangling 镜像形式堆积，2026-10-13 曾积 3.66G）；systemd timer `raft-image-prune.timer` 每周兜底跑一次
 - pre-release 备份保留：**机上只留最近 2 份**，更早的拷出机归档（sha256 校验通过后才删服务器侧）
+- **web 访问日志持久化（2026-10-13 起）**：compose 挂载 `./logs/nginx:/var/log/nginx-persist`+conf.d 追加文件版 access_log（additive，docker logs 不变）；轮转配置=仓库 `deploy/docker/logrotate/raft-nginx-access`（daily/14 份/50M 上限），装到 /etc/logrotate.d/ 并按栈改容器名
 - 大件产物（发行包/桌面安装包）传输后及时清理服务器中转目录
 
 ## 已知坑（实战记录）
