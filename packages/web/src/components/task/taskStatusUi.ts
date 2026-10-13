@@ -64,7 +64,7 @@ export const TASK_STATUS_UI: Record<TaskStatus, TaskStatusUi> = {
   in_review: {
     labelId: "task.status.inReview",
     bg: "bg-brutal-lavender",
-    bgElegant: "bg-secondary-200",
+    bgElegant: "bg-secondary-200 dark:bg-secondary-800",
     variant: "accent",
     appearance: "solid",
     icon: Eye,

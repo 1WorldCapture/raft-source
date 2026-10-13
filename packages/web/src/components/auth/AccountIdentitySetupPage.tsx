@@ -69,7 +69,7 @@ function PreviewAvatar({
   // a User icon on the lavender placeholder background (same look as AvatarSlot
   // type="human"). Sized to its container so all avatars stay consistent.
   return (
-    <div className="flex h-full w-full items-center justify-center bg-secondary-200 theme-brutal:bg-brutal-lavender text-foreground-strong theme-brutal:text-black">
+    <div className="flex h-full w-full items-center justify-center bg-secondary-200 dark:bg-secondary-800 theme-brutal:bg-brutal-lavender text-foreground-strong theme-brutal:text-black">
       <GravatarAvatar gravatarHash={gravatarHash} email={email} size={size} iconSize={iconSize} />
     </div>
   );
@@ -123,7 +123,7 @@ function IdentityImpactPreview({
               </header>
               <div className="space-y-4 p-4">
                 <div className="flex items-start gap-2.5">
-                  <div className="mt-px flex size-7 shrink-0 items-center justify-center border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-secondary-200/70 theme-brutal:bg-brutal-lavender/70 text-[11px] font-black">
+                  <div className="mt-px flex size-7 shrink-0 items-center justify-center border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-secondary-200/70 dark:bg-secondary-800/70 theme-brutal:bg-brutal-lavender/70 text-[11px] font-black">
                     M
                   </div>
                   <div className="min-w-0">

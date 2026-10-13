@@ -1,8 +1,8 @@
 .r-mermaid-diagram {
   position: relative;
   margin-block: 0.5rem;
-  border: 2px solid var(--color-black);
-  background: var(--color-white);
+  border: 1px solid var(--color-line-strong);
+  background: var(--color-layer-panel);
 }
 
 .r-mermaid-toolbar {
@@ -13,8 +13,8 @@
   align-items: center;
   justify-content: flex-end;
   gap: 0.5rem;
-  border-bottom: 2px solid var(--color-black);
-  background: var(--color-white);
+  border-bottom: 1px solid var(--color-line-strong);
+  background: var(--color-layer-panel);
   padding: 0.375rem 0.5rem;
 }
 
@@ -41,7 +41,7 @@
 }
 
 .r-mermaid-tooltip {
-  background: var(--color-white);
+  background: var(--color-layer-panel);
   font-weight: 400;
 }
 
@@ -63,7 +63,7 @@
 
 .r-mermaid-source__code {
   overflow-x: auto;
-  border: 2px solid var(--color-black);
+  border: 1px solid var(--color-line-strong);
   background: var(--color-code-surface);
   padding: 0.75rem 3rem 0.75rem 0.75rem;
   color: var(--color-code-foreground);
@@ -96,7 +96,7 @@
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  background: var(--color-white);
+  background: var(--color-layer-panel);
   padding: 0.75rem;
 }
 
@@ -110,20 +110,20 @@
 }
 
 .r-mermaid-diagram__loading {
-  color: rgb(0 0 0 / 60%);
+  color: var(--color-foreground-muted);
 }
 
 .r-mermaid-render-error {
   flex-direction: column;
-  color: rgb(0 0 0 / 45%);
+  color: var(--color-foreground-hint);
   font-weight: 500;
 }
 
 .r-mermaid-diagram__alert {
-  border-top: 2px solid var(--color-black);
-  background: color-mix(in srgb, var(--color-brutal-orange) 25%, transparent);
+  border-top: 1px solid var(--color-line-strong);
+  background: var(--color-warning-soft);
   padding: 0.5rem 0.75rem;
-  color: var(--color-black);
+  color: var(--color-foreground-strong);
   font-family: var(--font-mono);
   font-size: 0.75rem;
   line-height: 1rem;
@@ -140,7 +140,7 @@
   position: relative;
   display: flex;
   overflow: hidden;
-  background: var(--color-white);
+  background: var(--color-layer-panel);
   container-type: size;
 }
 
@@ -204,8 +204,8 @@
   flex-direction: column;
   margin-inline: auto;
   overflow: hidden;
-  border: 2px solid var(--color-black);
-  background: var(--color-white);
+  border: 1px solid var(--color-line-strong);
+  background: var(--color-layer-panel);
   box-shadow: var(--shadow-brutal-lg);
 }
 
@@ -249,4 +249,41 @@
   .r-mermaid-fullscreen {
     padding: 1.5rem;
   }
+}
+
+/* Brutal keeps its original hard black/white recipe; every other theme uses the semantic tokens above. */
+[data-theme="brutal"] .r-mermaid-diagram {
+  border: 2px solid var(--color-black);
+  background: var(--color-white);
+}
+[data-theme="brutal"] .r-mermaid-toolbar {
+  border-bottom: 2px solid var(--color-black);
+  background: var(--color-white);
+}
+[data-theme="brutal"] .r-mermaid-tooltip {
+  background: var(--color-white);
+}
+[data-theme="brutal"] .r-mermaid-source__code {
+  border: 2px solid var(--color-black);
+}
+[data-theme="brutal"] .r-mermaid-capture-snapshot__viewport {
+  background: var(--color-white);
+}
+[data-theme="brutal"] .r-mermaid-diagram__loading {
+  color: rgb(0 0 0 / 60%);
+}
+[data-theme="brutal"] .r-mermaid-render-error {
+  color: rgb(0 0 0 / 45%);
+}
+[data-theme="brutal"] .r-mermaid-diagram__alert {
+  border-top: 2px solid var(--color-black);
+  background: color-mix(in srgb, var(--color-brutal-orange) 25%, transparent);
+  color: var(--color-black);
+}
+[data-theme="brutal"] .r-mermaid-viewport {
+  background: var(--color-white);
+}
+[data-theme="brutal"] .r-mermaid-fullscreen__panel {
+  border: 2px solid var(--color-black);
+  background: var(--color-white);
 }

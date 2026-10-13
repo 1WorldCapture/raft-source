@@ -155,7 +155,7 @@ function ComputerStepsArea({
       <CommandRows steps={steps} copiedCommand={copiedCommand} onCopy={onCopy} />
       {mode === "unknown" ? (
         <p
-          className="border theme-brutal:border-2 border-amber-500 bg-amber-50 px-3 py-2 text-xs font-bold leading-5 text-amber-800"
+          className="border theme-brutal:border-2 border-amber-500 bg-amber-50 dark:bg-amber-950/40 px-3 py-2 text-xs font-bold leading-5 text-amber-800 dark:text-amber-300"
           data-testid="computer-commands-mode-unknown"
         >
           {notice}

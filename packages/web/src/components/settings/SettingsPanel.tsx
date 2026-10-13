@@ -651,7 +651,7 @@ export function AccountSection({
               aria-readonly="true"
               tabIndex={-1}
               prefix="@"
-              className="border-line-muted theme-brutal:border-black/30 bg-gray-50 shadow-none focus-within:shadow-none"
+              className="border-line-muted theme-brutal:border-black/30 bg-gray-50 dark:bg-layer-canvas-muted shadow-none focus-within:shadow-none"
               inputClassName="cursor-default text-sm text-foreground-muted theme-brutal:text-black/60"
             />
           </FormField>
@@ -1897,7 +1897,7 @@ function ProfileSection() {
             ) : (
               <div
                 data-testid="server-profile-name-readonly"
-                className="w-full border theme-brutal:border-2 border-line-muted theme-brutal:border-black/30 bg-gray-50 p-2 text-sm font-mono text-foreground-muted theme-brutal:text-black/60"
+                className="w-full border theme-brutal:border-2 border-line-muted theme-brutal:border-black/30 bg-gray-50 dark:bg-layer-canvas-muted p-2 text-sm font-mono text-foreground-muted theme-brutal:text-black/60"
               >
                 {server.name}
               </div>
@@ -1911,7 +1911,7 @@ function ProfileSection() {
               readOnly
               aria-readonly="true"
               tabIndex={-1}
-              className="border-line-muted theme-brutal:border-black/30 bg-gray-50 shadow-none focus-within:shadow-none"
+              className="border-line-muted theme-brutal:border-black/30 bg-gray-50 dark:bg-layer-canvas-muted shadow-none focus-within:shadow-none"
               inputClassName="cursor-default text-sm text-foreground-muted theme-brutal:text-black/60"
             />
           </FormField>
@@ -1985,7 +1985,7 @@ function PublicChannelList({ channels }: { channels: PublicVisibilityReadback["e
   const scrollFrameClass = "max-h-[7.5rem] overflow-y-scroll";
   if (channels.length === 0) {
     return (
-      <div className={`border theme-brutal:border-2 border-dashed border-line-muted theme-brutal:border-black/25 bg-gray-50 px-3 py-4 text-center text-xs text-foreground-muted theme-brutal:text-black/55 ${scrollFrameClass}`}>
+      <div className={`border theme-brutal:border-2 border-dashed border-line-muted theme-brutal:border-black/25 bg-gray-50 dark:bg-layer-canvas-muted px-3 py-4 text-center text-xs text-foreground-muted theme-brutal:text-black/55 ${scrollFrameClass}`}>
         {formatMessage({ id: "settings.publicVisibility.emptyChannels" })}
       </div>
     );
@@ -2144,7 +2144,7 @@ export function PublicVisibilitySection() {
             {formatMessage({ id: "settings.publicVisibility.channelListLabel" })}
           </p>
           {loading ? (
-            <div className="h-16 animate-pulse border theme-brutal:border-2 border-line-muted theme-brutal:border-black/15 bg-gray-100" data-testid="public-visibility-loading" />
+            <div className="h-16 animate-pulse border theme-brutal:border-2 border-line-muted theme-brutal:border-black/15 bg-gray-100 dark:bg-fill-muted" data-testid="public-visibility-loading" />
           ) : <PublicChannelList channels={channels} />}
         </div>
 
@@ -4133,7 +4133,7 @@ export function PlanSection() {
             <div className="space-y-3">
               {currentIncludedFeatures.map((feature) => (
                 <div key={feature} className="flex items-start gap-3 text-sm text-foreground-strong theme-brutal:text-black">
-                  <Check size={16} className="mt-0.5 shrink-0 text-green-700" />
+                  <Check size={16} className="mt-0.5 shrink-0 text-green-700 dark:text-green-300" />
                   <span>{feature}</span>
                 </div>
               ))}

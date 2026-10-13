@@ -814,7 +814,7 @@ const ChannelRow = memo(function ChannelRow({
         <span className={`min-w-0 ${allowWrap ? "whitespace-normal break-words leading-tight" : "truncate"} ${dimmed ? "text-foreground-hint theme-brutal:text-black/40" : activityMuted ? "text-foreground-muted theme-brutal:text-black/70" : ""} ${showLoudUnreadBadge ? "font-bold" : ""}`}>{channel.name}</span>
         {channel.bridge?.provider === "slack" && (
           <span
-            className="ml-1 shrink-0 border border-line-strong theme-brutal:border-black bg-secondary-200 theme-brutal:bg-brutal-lavender px-1 font-mono text-[9px] font-bold uppercase leading-4 text-foreground-strong theme-brutal:text-black"
+            className="ml-1 shrink-0 border border-line-strong theme-brutal:border-black bg-secondary-200 dark:bg-secondary-800 theme-brutal:bg-brutal-lavender px-1 font-mono text-[9px] font-bold uppercase leading-4 text-foreground-strong theme-brutal:text-black"
             title={formatMessage({ id: "settings.slackBridge.providerBadge" })}
           >
             {formatMessage({ id: "settings.slackBridge.providerBadge" })}
@@ -4286,7 +4286,7 @@ export default function Sidebar({ mobileInline, bottomSlot, workspaceRailMode }:
                   {!collapsed.humans && (
                     <>
                       {membersLoadError ? (
-                        <div className="px-2 text-xs text-red-700 font-mono">{formatMessage({ id: "layout.sidebar.humansFailedToLoad" })}</div>
+                        <div className="px-2 text-xs text-red-700 dark:text-red-300 font-mono">{formatMessage({ id: "layout.sidebar.humansFailedToLoad" })}</div>
                       ) : members.length === 0 ? (
                         <SidebarSectionDescription>{formatMessage({ id: "layout.sidebar.noHumans" })}</SidebarSectionDescription>
                       ) : (

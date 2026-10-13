@@ -71,7 +71,7 @@ export function MemberRoleTag({ role }: { role: ServerRole }) {
   return (
     <span
       data-testid={isGuest ? "member-page-role-channel-guest" : "member-page-role-channel-admin"}
-      className={`shrink-0 border-[1.5px] border-line-strong theme-brutal:border-black px-1.5 py-0.5 font-mono text-[10px] leading-3 ${isGuest ? "bg-info-soft theme-brutal:bg-brutal-cyan" : "bg-secondary-200 theme-brutal:bg-brutal-lavender"}`}
+      className={`shrink-0 border-[1.5px] border-line-strong theme-brutal:border-black px-1.5 py-0.5 font-mono text-[10px] leading-3 ${isGuest ? "bg-info-soft theme-brutal:bg-brutal-cyan" : "bg-secondary-200 dark:bg-secondary-800 theme-brutal:bg-brutal-lavender"}`}
     >
       {formatMessage({ id: isGuest
         ? "channel.membersPage.role.channelGuest"

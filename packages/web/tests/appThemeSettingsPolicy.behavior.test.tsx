@@ -131,7 +131,8 @@ pickerTest("selected theme cards use their own visual personality", () => {
   assert.match(brutalCard.className, /border-line-muted/);
 });
 
-pickerTest("while Elegant dark is hidden Settings offers only the Brutal and Elegant light themes and saves the choice", () => {
+// Only meaningful while Elegant dark is switched off (the dark-on PR flips the constant).
+test("while Elegant dark is hidden Settings offers only the Brutal and Elegant light themes and saves the choice", { skip: ELEGANT_DARK_ENABLED || !THEME_PICKER_ENABLED }, () => {
   window.localStorage.setItem(APP_THEME_STORAGE_KEY, "brutal");
   observedPreset = "";
   render(<ProductAppearance />);

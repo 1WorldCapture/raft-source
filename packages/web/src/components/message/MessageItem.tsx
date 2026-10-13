@@ -1207,7 +1207,7 @@ function renderContent(
                 colorClass={
                   isCurrentServer
                     ? "bg-primary-soft/40 theme-brutal:bg-soft-signal/40 text-foreground-strong theme-brutal:text-black hover:bg-primary-soft theme-brutal:hover:bg-soft-signal"
-                    : "bg-layer-panel theme-brutal:bg-white text-blue-700 hover:bg-fill-muted theme-brutal:hover:bg-black/5"
+                    : "bg-layer-panel theme-brutal:bg-white text-blue-700 dark:text-blue-300 hover:bg-fill-muted theme-brutal:hover:bg-black/5"
                 }
                 label={channelLabel}
                 trailing={quotedMessageUnavailable ? undefined : (
@@ -1221,7 +1221,7 @@ function renderContent(
               href={href}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-blue-700 underline decoration-2 underline-offset-2 hover:text-brutal-pink select-text"
+              className="text-blue-700 dark:text-blue-300 underline decoration-2 underline-offset-2 hover:text-brutal-pink select-text"
             >
               {children}
             </a>
@@ -4345,12 +4345,12 @@ const MessageItem = memo(function MessageItem({ message, mentionMap, channels, p
             </span>
           )}
           {isDeactivatedAgent && (
-            <span className="inline-flex shrink-0 items-center whitespace-nowrap px-1.5 py-0.5 text-[10px] font-bold uppercase border border-line-strong theme-brutal:border-black bg-gray-300 text-foreground-muted theme-brutal:text-black/60">
+            <span className="inline-flex shrink-0 items-center whitespace-nowrap px-1.5 py-0.5 text-[10px] font-bold uppercase border border-line-strong theme-brutal:border-black bg-gray-300 dark:bg-fill-muted text-foreground-muted theme-brutal:text-black/60">
               {formatMessage({ id: "message.messageItem.deletedBadge" })}
             </span>
           )}
           {humanDepartureLabel && (
-            <span className="inline-flex shrink-0 items-center whitespace-nowrap px-1.5 py-0.5 text-[10px] font-bold uppercase border border-line-strong theme-brutal:border-black bg-gray-300 text-foreground-muted theme-brutal:text-black/60">
+            <span className="inline-flex shrink-0 items-center whitespace-nowrap px-1.5 py-0.5 text-[10px] font-bold uppercase border border-line-strong theme-brutal:border-black bg-gray-300 dark:bg-fill-muted text-foreground-muted theme-brutal:text-black/60">
               {humanDepartureLabel}
             </span>
           )}

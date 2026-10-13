@@ -245,7 +245,7 @@ const PUBLIC_AGENT_TABS = new Set<AgentTab>(["profile"]);
 // they no longer match AGENT_TABS.
 const AGENT_ROLE_CONFIG: Record<Extract<ServerRole, "admin" | "member">, { labelId: MessageId; color: string }> = {
   admin: { labelId: "agent.detail.roleAdmin", color: "bg-accent-soft theme-brutal:bg-brutal-pink" },
-  member: { labelId: "agent.detail.roleMember", color: "bg-secondary-200 theme-brutal:bg-brutal-lavender" },
+  member: { labelId: "agent.detail.roleMember", color: "bg-secondary-200 dark:bg-secondary-800 theme-brutal:bg-brutal-lavender" },
 };
 const EDITABLE_AGENT_ROLE_OPTIONS: { id: Extract<ServerRole, "admin" | "member">; labelId: MessageId }[] = [
   { id: "admin", labelId: "agent.detail.roleAdmin" },
@@ -2086,7 +2086,7 @@ function AgentProfileInfo({ agent, canManageAgent, canChangeAgentRole, onOpenPro
                   </span>
                 ) : serverRoleDisplay.kind === "unrecognized" ? (
                   <span
-                    className="inline-block border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-gray-100 px-2 py-0.5 text-xs font-bold text-foreground-strong theme-brutal:text-black"
+                    className="inline-block border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-gray-100 dark:bg-fill-muted px-2 py-0.5 text-xs font-bold text-foreground-strong theme-brutal:text-black"
                     title={agent.serverRole ?? undefined}
                   >
                     {serverRoleDisplay.label}
@@ -2109,7 +2109,7 @@ function AgentProfileInfo({ agent, canManageAgent, canChangeAgentRole, onOpenPro
                       </button>
                       <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-foreground-muted theme-brutal:text-black/50">
                         <StatusDot
-                          tone={machineStatus === "online" ? "bg-success-soft theme-brutal:bg-brutal-lime" : "bg-gray-400"}
+                          tone={machineStatus === "online" ? "bg-success-soft theme-brutal:bg-brutal-lime" : "bg-gray-400 dark:bg-fill-muted"}
                           className="shrink-0"
                         />
                         <span>
@@ -2218,7 +2218,7 @@ function AgentProfileInfo({ agent, canManageAgent, canChangeAgentRole, onOpenPro
                   <KeyValueRow
                     label={formatMessage({ id: "agent.runtimeConfig.model" })}
                     value={
-                      <span className="inline-block border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-secondary-200 theme-brutal:bg-brutal-lavender px-2 py-0.5 text-xs font-bold text-foreground-strong theme-brutal:text-black">
+                      <span className="inline-block border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-secondary-200 dark:bg-secondary-800 theme-brutal:bg-brutal-lavender px-2 py-0.5 text-xs font-bold text-foreground-strong theme-brutal:text-black">
                         {currentRuntimeModelLabel}
                       </span>
                     }
@@ -2615,7 +2615,7 @@ function AgentStatusBadge({ agentId, showDetail, fallbackStatus, externalStatus 
       : ageMs !== null && ageMs < RECENT_THRESHOLD_MS
         ? "bg-info-soft theme-brutal:bg-brutal-cyan"
         : setupState === "waiting_for_login"
-          ? "bg-gray-400"
+          ? "bg-gray-400 dark:bg-fill-muted"
           : "bg-info-soft theme-brutal:bg-brutal-cyan";
 
     // showDetail=false: external agents show only "External" (withhold timestamp detail)
@@ -3382,7 +3382,7 @@ function AgentMigrationDialog({
             </Banner>
           ) : null}
         </div>
-        <div className="flex justify-end gap-2 border-t theme-brutal:border-t-2 border-line-strong theme-brutal:border-black bg-gray-50 px-4 py-3">
+        <div className="flex justify-end gap-2 border-t theme-brutal:border-t-2 border-line-strong theme-brutal:border-black bg-gray-50 dark:bg-layer-canvas-muted px-4 py-3">
           {error?.recovery === "open_computers_and_retry" ? (
             <button
               type="button"
@@ -3717,7 +3717,7 @@ function AgentDetailHeader({ agent, canControlAgentRuntime, canMessageAgent, onM
       titleSuffix={
         isDeleted ? (
           <div className="flex min-w-0 items-center gap-1.5">
-            <span className="inline-flex shrink-0 items-center px-1.5 py-0.5 text-[10px] font-bold uppercase border border-line-strong theme-brutal:border-black bg-gray-300 text-foreground-muted theme-brutal:text-black/60">
+            <span className="inline-flex shrink-0 items-center px-1.5 py-0.5 text-[10px] font-bold uppercase border border-line-strong theme-brutal:border-black bg-gray-300 dark:bg-fill-muted text-foreground-muted theme-brutal:text-black/60">
               {formatMessage({ id: "agent.detail.deleted" })}
             </span>
           </div>

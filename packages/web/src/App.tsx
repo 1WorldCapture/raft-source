@@ -835,7 +835,7 @@ export function DegradedRestoreStatus({
             <span className="font-mono">{errorText}</span>
           </div>
         </div>
-        <p className="mt-4 text-sm text-neutral-700">{formatMessage({ id: "auth.bootstrap.degradedHint" })}</p>
+        <p className="mt-4 text-sm text-neutral-700 dark:text-neutral-300">{formatMessage({ id: "auth.bootstrap.degradedHint" })}</p>
         <div className="mt-6 flex gap-3">
           <button
             type="button"

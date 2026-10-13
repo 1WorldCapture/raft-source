@@ -124,7 +124,7 @@ export default function QuotedMessageCard({
           {attachments?.length ? (
             <div className="mt-2 flex flex-wrap gap-1.5">
               {attachments.map((attachment) => (
-                <Tag key={attachment.label} className="bg-secondary-200 theme-brutal:bg-brutal-lavender font-mono text-[10px] font-bold text-foreground-strong theme-brutal:text-black">
+                <Tag key={attachment.label} className="bg-secondary-200 dark:bg-secondary-800 theme-brutal:bg-brutal-lavender font-mono text-[10px] font-bold text-foreground-strong theme-brutal:text-black">
                   {attachment.label}
                 </Tag>
               ))}

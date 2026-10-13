@@ -94,7 +94,7 @@ export function countMachinesNeedingAttention(
 
 export function getComputerAttentionDotTone(status: ComputerAttentionStatus): string | undefined {
   if (status === "upgrade") return "bg-accent-soft theme-brutal:bg-brutal-pink";
-  if (status === "offline") return "bg-gray-400";
+  if (status === "offline") return "bg-gray-400 dark:bg-fill-muted";
   return undefined;
 }
 
@@ -113,7 +113,7 @@ export function getComputerRowDotStatus(machine: ComputerAttentionMachine): Comp
 export function getComputerRowDotTone(status: ComputerRowDotStatus): string {
   if (status === "upgrade") return "bg-accent-soft theme-brutal:bg-brutal-pink";
   if (status === "online") return "bg-success-soft theme-brutal:bg-brutal-lime";
-  return "bg-gray-400";
+  return "bg-gray-400 dark:bg-fill-muted";
 }
 
 export type ComputerRowDotTitleDescriptor =

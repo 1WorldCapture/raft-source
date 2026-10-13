@@ -8,5 +8,8 @@
  * `theme-brutal:` prefix removed, which gives back exactly the pre-sweep class text.
  */
 export function brutalView(text: string): string {
-  return text.replace(/(?<=^|[\s"'`{(])[^\s"'`]+ theme-brutal:(?=[^\s"'`])/g, "");
+  return text
+    .replace(/(?<=^|[\s"'`{(])[^\s"'`]+ theme-brutal:(?=[^\s"'`])/g, "")
+    // Brutal is never dark: the `dark:` twins that make Elegant dark readable are not part of its recipe.
+    .replace(/ dark:[^\s"'`]+/g, "");
 }

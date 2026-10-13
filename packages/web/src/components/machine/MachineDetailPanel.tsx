@@ -138,7 +138,7 @@ function WorkspacesSection({ machineId, canManageMachines }: { machineId: string
       )}
 
       {scanned && deletedCount > 0 && (
-        <div className="mb-2 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-gray-200 px-3 py-2 text-xs text-foreground-strong theme-brutal:text-black">
+        <div className="mb-2 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-gray-200 dark:bg-fill-muted px-3 py-2 text-xs text-foreground-strong theme-brutal:text-black">
           {formatMessage(
             { id: "machine.detail.deletedWorkspaceBanner" },
             { count: deletedCount, strong: (chunks) => <strong key="strong">{chunks}</strong> },
@@ -155,7 +155,7 @@ function WorkspacesSection({ machineId, canManageMachines }: { machineId: string
                 ws.status === "orphan"
                   ? "border-brutal-orange bg-warning-soft/10 theme-brutal:bg-brutal-orange/10"
                   : ws.status === "deleted"
-                    ? "border-line-strong theme-brutal:border-black bg-gray-100"
+                    ? "border-line-strong theme-brutal:border-black bg-gray-100 dark:bg-fill-muted"
                     : "border-line-muted theme-brutal:border-black/30"
               }`}
             >
@@ -170,9 +170,9 @@ function WorkspacesSection({ machineId, canManageMachines }: { machineId: string
                       ws.status === "active"
                         ? "bg-success-soft theme-brutal:bg-brutal-lime"
                         : ws.status === "stopped"
-                          ? "bg-gray-200"
+                          ? "bg-gray-200 dark:bg-fill-muted"
                           : ws.status === "deleted"
-                            ? "bg-gray-300"
+                            ? "bg-gray-300 dark:bg-fill-muted"
                             : "bg-warning-soft theme-brutal:bg-brutal-orange"
                     }`}
                   >
@@ -437,7 +437,7 @@ function MachineAgentList({ machine, canManageMachines }: { machine: Machine; ca
         ) : (
           <div className="space-y-2">
             {canManageMachines && selectedCount > 0 && (
-              <SurfaceListItem selected interactive={false} className="bg-gray-100 px-3 py-2">
+              <SurfaceListItem selected interactive={false} className="bg-gray-100 dark:bg-fill-muted px-3 py-2">
                 <div className="flex flex-wrap items-center gap-2">
                   <SectionEyebrow className="mr-auto !text-foreground-strong theme-brutal:!text-black">
                     {formatMessage({ id: "machine.detail.selectedCount" }, { count: selectedCount })}
@@ -521,7 +521,7 @@ function MachineAgentList({ machine, canManageMachines }: { machine: Machine; ca
                   <SurfaceListItem
                     key={agent.id}
                     selected={canManageMachines && selected}
-                    className={`group px-3 py-2 ${selected ? "" : "bg-gray-100 hover:bg-layer-panel theme-brutal:hover:bg-white"}`}
+                    className={`group px-3 py-2 ${selected ? "" : "bg-gray-100 dark:bg-fill-muted hover:bg-layer-panel theme-brutal:hover:bg-white"}`}
                   >
                     <button
                       type="button"
@@ -570,7 +570,7 @@ function MachineAgentList({ machine, canManageMachines }: { machine: Machine; ca
                   rightContent={rightStatus}
                   onClick={() => nav.toAgent(agent.id)}
                   selected={false}
-                  className="bg-gray-100 hover:bg-layer-panel theme-brutal:hover:bg-white"
+                  className="bg-gray-100 dark:bg-fill-muted hover:bg-layer-panel theme-brutal:hover:bg-white"
                 />
               );
             })}
@@ -1030,7 +1030,7 @@ export default function MachineDetailPanel({
             <div className="min-w-0 truncate text-lg font-bold leading-tight text-foreground-strong theme-brutal:text-black" title={machine.name}>{machine.name}</div>
             <div className="flex min-w-0 items-center gap-2">
               <StatusDot
-                tone={machine.status === "online" ? "bg-success-soft theme-brutal:bg-brutal-lime" : "bg-gray-400"}
+                tone={machine.status === "online" ? "bg-success-soft theme-brutal:bg-brutal-lime" : "bg-gray-400 dark:bg-fill-muted"}
                 className="shrink-0"
               />
               <span className="shrink-0 text-sm text-foreground-muted theme-brutal:text-black/60 font-mono">
@@ -1256,7 +1256,7 @@ export default function MachineDetailPanel({
                     const detected = machine.runtimes.includes(r.id);
                     const chipClassName = detected
                       ? "h-6 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-info-soft theme-brutal:bg-brutal-cyan px-2 py-0.5 text-xs font-bold text-foreground-strong theme-brutal:text-black"
-                      : "h-6 border theme-brutal:border-2 border-line-muted theme-brutal:border-black/30 bg-gray-100 px-2 py-0.5 text-xs font-bold text-foreground-hint theme-brutal:text-black/40";
+                      : "h-6 border theme-brutal:border-2 border-line-muted theme-brutal:border-black/30 bg-gray-100 dark:bg-fill-muted px-2 py-0.5 text-xs font-bold text-foreground-hint theme-brutal:text-black/40";
                     return (
                       <RuntimeAccountUsageGateChip
                         key={r.id}
