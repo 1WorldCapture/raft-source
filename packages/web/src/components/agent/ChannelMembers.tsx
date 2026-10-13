@@ -593,7 +593,7 @@ function GatedChannelMembers({
       name={(
         <span className="flex min-w-0 items-center gap-1.5">
           <span className="truncate">{member.displayName}</span>
-          <span className="border border-line-strong theme-brutal:border-black bg-secondary-200 theme-brutal:bg-brutal-lavender px-1 font-mono text-[10px] font-bold uppercase leading-4 text-foreground-strong theme-brutal:text-black">
+          <span className="border border-line-strong theme-brutal:border-black bg-secondary-200 dark:bg-secondary-800 theme-brutal:bg-brutal-lavender px-1 font-mono text-[10px] font-bold uppercase leading-4 text-foreground-strong theme-brutal:text-black">
             {formatMessage({ id: "settings.slackBridge.providerBadge" })}
           </span>
         </span>
@@ -942,7 +942,7 @@ function GatedChannelMembers({
               ? "bg-danger-soft/25 theme-brutal:bg-brutal-red/25"
               : kind === "agent"
                 ? "bg-info-soft theme-brutal:bg-brutal-cyan"
-                : "bg-secondary-200 theme-brutal:bg-brutal-lavender";
+                : "bg-secondary-200 dark:bg-secondary-800 theme-brutal:bg-brutal-lavender";
             return (
               <span
                 key={key}

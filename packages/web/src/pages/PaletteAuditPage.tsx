@@ -409,7 +409,7 @@ function realComponentsFor(
             <span>
               <a
                 href="#"
-                className="bg-secondary-200/40 theme-brutal:bg-brutal-lavender/40 px-1 text-sm font-bold text-foreground-strong theme-brutal:text-black border border-line-strong theme-brutal:border-black hover:bg-secondary-200 theme-brutal:hover:bg-brutal-lavender"
+                className="bg-secondary-200/40 dark:bg-secondary-800/40 theme-brutal:bg-brutal-lavender/40 px-1 text-sm font-bold text-foreground-strong theme-brutal:text-black border border-line-strong theme-brutal:border-black hover:bg-secondary-200 dark:hover:bg-secondary-800 theme-brutal:hover:bg-brutal-lavender"
               >
                 @stdrc
               </a>{" "}
@@ -433,14 +433,14 @@ function realComponentsFor(
 
           {/* from AgentRemindersSection.tsx:60 — reminder timestamp pill */}
           <Sample source="AgentRemindersSection.tsx:60 — reminder pill">
-            <span className="inline-flex items-center gap-1 border border-line-strong theme-brutal:border-black bg-secondary-200/30 theme-brutal:bg-brutal-lavender/30 px-1.5 py-0.5 font-mono text-[11px] text-foreground-strong theme-brutal:text-black">
+            <span className="inline-flex items-center gap-1 border border-line-strong theme-brutal:border-black bg-secondary-200/30 dark:bg-secondary-800/30 theme-brutal:bg-brutal-lavender/30 px-1.5 py-0.5 font-mono text-[11px] text-foreground-strong theme-brutal:text-black">
               fires 14:35
             </span>
           </Sample>
 
           {/* from ThreadsInbox.tsx:117 — in-review task badge */}
           <Sample source="ThreadsInbox.tsx:117 — in-review task badge">
-            <span className="inline-flex items-center gap-1 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-secondary-200 theme-brutal:bg-brutal-lavender px-1.5 py-0.5 text-[10px] font-bold uppercase">
+            <span className="inline-flex items-center gap-1 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-secondary-200 dark:bg-secondary-800 theme-brutal:bg-brutal-lavender px-1.5 py-0.5 text-[10px] font-bold uppercase">
               In review
             </span>
           </Sample>

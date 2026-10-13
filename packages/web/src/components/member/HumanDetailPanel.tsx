@@ -56,7 +56,7 @@ import { getEditableHumanServerRoles } from "./humanRoleTransitions";
 const ROLE_CONFIG: Record<ServerRole, { labelId: MessageId; color: string }> = {
   owner: { labelId: "member.detail.roleOwner", color: "bg-warning-soft theme-brutal:bg-brutal-orange" },
   admin: { labelId: "member.detail.roleAdmin", color: "bg-accent-soft theme-brutal:bg-brutal-pink" },
-  member: { labelId: "member.detail.roleMember", color: "bg-secondary-200 theme-brutal:bg-brutal-lavender" },
+  member: { labelId: "member.detail.roleMember", color: "bg-secondary-200 dark:bg-secondary-800 theme-brutal:bg-brutal-lavender" },
   guest: { labelId: "member.detail.roleGuest", color: "bg-info-soft theme-brutal:bg-brutal-cyan" },
 };
 const EDITABLE_ROLE_OPTIONS: { id: ServerRole; labelId: MessageId }[] = [

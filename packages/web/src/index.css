@@ -253,6 +253,19 @@
     background-color: #FFFFFF;
   }
 
+  /* Elegant dark: the canvas behind the app (overscroll, pages without their own surface) matches the
+     dark chrome colour in app-theme-bootstrap.js instead of flashing white. */
+  html.dark,
+  html.dark body {
+    background-color: #141411;
+  }
+
+  /* Text with no colour class of its own (headings and copy on auth pages, for example) inherits the body
+     colour: Slock Ink on a dark canvas would be unreadable. */
+  html.dark body {
+    color: var(--color-foreground-strong);
+  }
+
   /* Prevent rubber-band bounce on desktop; mobile needs it for native-feeling scroll */
   @media (hover: hover) {
     html, body {

@@ -245,7 +245,7 @@ const PUBLIC_AGENT_TABS = new Set<AgentTab>(["profile"]);
 // they no longer match AGENT_TABS.
 const AGENT_ROLE_CONFIG: Record<Extract<ServerRole, "admin" | "member">, { labelId: MessageId; color: string }> = {
   admin: { labelId: "agent.detail.roleAdmin", color: "bg-accent-soft theme-brutal:bg-brutal-pink" },
-  member: { labelId: "agent.detail.roleMember", color: "bg-secondary-200 theme-brutal:bg-brutal-lavender" },
+  member: { labelId: "agent.detail.roleMember", color: "bg-secondary-200 dark:bg-secondary-800 theme-brutal:bg-brutal-lavender" },
 };
 const EDITABLE_AGENT_ROLE_OPTIONS: { id: Extract<ServerRole, "admin" | "member">; labelId: MessageId }[] = [
   { id: "admin", labelId: "agent.detail.roleAdmin" },
@@ -2218,7 +2218,7 @@ function AgentProfileInfo({ agent, canManageAgent, canChangeAgentRole, onOpenPro
                   <KeyValueRow
                     label={formatMessage({ id: "agent.runtimeConfig.model" })}
                     value={
-                      <span className="inline-block border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-secondary-200 theme-brutal:bg-brutal-lavender px-2 py-0.5 text-xs font-bold text-foreground-strong theme-brutal:text-black">
+                      <span className="inline-block border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-secondary-200 dark:bg-secondary-800 theme-brutal:bg-brutal-lavender px-2 py-0.5 text-xs font-bold text-foreground-strong theme-brutal:text-black">
                         {currentRuntimeModelLabel}
                       </span>
                     }

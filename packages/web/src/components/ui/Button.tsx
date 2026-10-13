@@ -19,7 +19,7 @@ const BUTTON_TONE_CLASSES = {
   yellow: "bg-primary-soft theme-brutal:bg-soft-signal text-foreground-strong theme-brutal:text-black",
   pink: "bg-accent-soft theme-brutal:bg-brutal-pink text-foreground-strong theme-brutal:text-black",
   cyan: "bg-info-soft theme-brutal:bg-brutal-cyan text-foreground-strong theme-brutal:text-black",
-  lavender: "bg-secondary-200 theme-brutal:bg-brutal-lavender text-foreground-strong theme-brutal:text-black",
+  lavender: "bg-secondary-200 dark:bg-secondary-800 theme-brutal:bg-brutal-lavender text-foreground-strong theme-brutal:text-black",
   orange: "bg-warning-soft theme-brutal:bg-brutal-orange text-foreground-strong theme-brutal:text-black",
   lime: "bg-success-soft theme-brutal:bg-brutal-lime text-foreground-strong theme-brutal:text-black",
   red: "bg-danger-soft theme-brutal:bg-brutal-red text-foreground-strong theme-brutal:text-black",

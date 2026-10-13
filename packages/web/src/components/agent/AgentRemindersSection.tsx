@@ -59,7 +59,7 @@ function ReminderCard({
           {reminder.recurrence && (
             <span
               title={reminder.recurrence.description}
-              className="inline-flex items-center gap-1 border border-line-strong theme-brutal:border-black bg-secondary-200/30 theme-brutal:bg-brutal-lavender/30 px-1.5 py-0.5 font-mono text-[11px] text-foreground-strong theme-brutal:text-black"
+              className="inline-flex items-center gap-1 border border-line-strong theme-brutal:border-black bg-secondary-200/30 dark:bg-secondary-800/30 theme-brutal:bg-brutal-lavender/30 px-1.5 py-0.5 font-mono text-[11px] text-foreground-strong theme-brutal:text-black"
             >
               <Repeat size={11} />
               {reminder.recurrence.description}
