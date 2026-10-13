@@ -487,9 +487,9 @@ async function advanceConfigVersion(
 /**
  * Build the server-owned authoritative rollout writer. Receipt dependencies
  * are bound once when the service is constructed and are never accepted from
- * an individual request. Legacy admin/internal generic rule CRUD still
- * bypasses this writer and remains an explicit cutover blocker; keep this
- * service unwired until those production paths are closed or isolated.
+ * an individual request. The production admin CLI (scripts/flag-rollout.ts)
+ * is the supported caller. Legacy admin/internal generic rule CRUD still
+ * bypasses this writer and remains an explicit cutover blocker.
  */
 export function createFeatureFlagRolloutWriterService(
   dependencies: FeatureFlagRolloutWriterDependencies,

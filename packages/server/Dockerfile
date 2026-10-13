@@ -1,6 +1,6 @@
 ARG NODE_VERSION=24.15.0
 
-# ---- Builder: install dev deps, esbuild-bundle the four runtime entries,
+# ---- Builder: install dev deps, esbuild-bundle the five runtime entries,
 # and assemble the production dependency tree (server-image stage 1).
 FROM node:${NODE_VERSION}-bookworm-slim AS builder
 RUN corepack enable
@@ -27,7 +27,7 @@ COPY packages/sync-core/ packages/sync-core/
 COPY packages/shared/ packages/shared/
 COPY packages/server/ packages/server/
 
-# Bundle the four runtime entries into packages/server/dist/
+# Bundle the five runtime entries into packages/server/dist/
 RUN pnpm --filter @botiverse/raft-server run bundle
 
 # Production dependency tree for the runtime image. --legacy keeps the
