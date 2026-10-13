@@ -70,6 +70,8 @@ export function startOnboardingBriefingOnActivation(deps: {
         // Deliberately before the opener trigger and deliberately not gated on it: a server
         // that finished onboarding weeks ago still needs its Cindy to know who she works for
         // when her laptop wakes up.
+        // Owner facts are system context. The delivery labels itself
+        // onboarding-context and does not look up a channel.
         await deliverOwnerFacts(
           deps.orchestrator,
           event.serverId,

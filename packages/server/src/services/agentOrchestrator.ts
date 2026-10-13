@@ -95,6 +95,7 @@ import * as agentRuntimeProfileService from "./agentRuntimeProfileService.js";
 import * as machineService from "./machineService.js";
 import { maybeProvisionServerPm } from "./serverPmProvisioning.js";
 import * as channelService from "./channelService.js";
+import { UUID_RE } from "../lib/messageId.js";
 import * as messageService from "./messageService.js";
 import * as mentionDeliveryOccurrenceService from "./mentionDeliveryOccurrenceService.js";
 import {
@@ -1521,6 +1522,12 @@ export interface DeliverMessageOptions {
    * agent's ordinary inbox notifications are disabled.
    */
   adminAuthority?: boolean;
+  /**
+   * System context about the agent itself, not a channel message. Skips the
+   * channel visibility lookup. The `inbox:receive` scope gate still applies.
+   * Owner-facts context uses this: its label is not a `channels` row.
+   */
+  systemContext?: boolean;
   /**
    * Bypass the `inbox:receive` scope gate. Set by intrinsic deliveries that
    * the agent cannot opt out of: reminder fire wakes, action-card execution
@@ -9998,6 +10005,13 @@ export class AgentOrchestrator extends EventEmitter {
 
   protected async canAgentAccessDeliveryTarget(agentId: string, agent: CachedAgentState, message: AgentMessage): Promise<boolean> {
     if (message.third_party_event) return true;
+    if (!UUID_RE.test(message.channel_id)) {
+      if (await channelService.isOnboardingContextDelivery(agentId, agent.serverId, message.channel_id)) {
+        return true;
+      }
+      console.warn(`[Agent ${agentId}] Dropping delivery for ${message.channel_id}: channel id is not a uuid`);
+      return false;
+    }
     try {
       const channel = await channelService.getChannel(message.channel_id);
       if (!channel || channel.serverId !== agent.serverId) {
@@ -11867,7 +11881,7 @@ export class AgentOrchestrator extends EventEmitter {
       const allowed = await this.hasPassiveDeliveryScope(agentId).catch(() => false);
       if (!allowed) return { status: "dropped", reason: "passive_scope_revoked" };
     }
-    if (!options.intrinsic && !await this.canAgentAccessDeliveryTarget(agentId, agent, message)) {
+    if (!options.intrinsic && !options.systemContext && !await this.canAgentAccessDeliveryTarget(agentId, agent, message)) {
       return { status: "dropped", reason: "target_access_changed" };
     }
     if (requireQueueReceipt && agent.machineId) {
