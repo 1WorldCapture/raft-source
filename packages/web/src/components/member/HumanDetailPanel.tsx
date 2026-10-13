@@ -424,7 +424,7 @@ export default function HumanDetailPanel({
                 @{human.name}
               </span>
               {departureLabel && (
-                <span className="inline-flex shrink-0 items-center px-1.5 py-0.5 text-[10px] font-bold uppercase border border-line-strong theme-brutal:border-black bg-gray-300 text-foreground-muted theme-brutal:text-black/60">
+                <span className="inline-flex shrink-0 items-center px-1.5 py-0.5 text-[10px] font-bold uppercase border border-line-strong theme-brutal:border-black bg-gray-300 dark:bg-fill-muted text-foreground-muted theme-brutal:text-black/60">
                   {departureLabelText}
                 </span>
               )}
@@ -626,7 +626,7 @@ export default function HumanDetailPanel({
                   )}
                 </div>
                 {departureLabel ? (
-                  <span className="inline-block border theme-brutal:border-2 border-line-strong theme-brutal:border-black px-2 py-0.5 text-xs font-bold text-foreground-strong theme-brutal:text-black bg-gray-300">
+                  <span className="inline-block border theme-brutal:border-2 border-line-strong theme-brutal:border-black px-2 py-0.5 text-xs font-bold text-foreground-strong theme-brutal:text-black bg-gray-300 dark:bg-fill-muted">
                     {departureLabelText}
                   </span>
                 ) : canEditRole && roleInfo ? (
@@ -716,7 +716,7 @@ export default function HumanDetailPanel({
                     {formatMessage({ id: roleInfo.labelId })}
                   </span>
                 ) : (
-                  <span className="inline-block border theme-brutal:border-2 border-line-strong theme-brutal:border-black px-2 py-0.5 text-xs font-bold text-foreground-strong theme-brutal:text-black bg-gray-100">
+                  <span className="inline-block border theme-brutal:border-2 border-line-strong theme-brutal:border-black px-2 py-0.5 text-xs font-bold text-foreground-strong theme-brutal:text-black bg-gray-100 dark:bg-fill-muted">
                     {formatMessage({ id: "member.detail.unknown" })}
                   </span>
                 )}

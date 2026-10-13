@@ -1058,4 +1058,44 @@
     background-color: #0a0a0a;
     border-color: #0a0a0a;
   }
+
+  /* Elegant DARK register for the same brutal families. The light register above uses literal
+     light values (#CACACE hairline, #0A0A0A ink, white card surface), which are unreadable on the
+     dark canvas, so under `.dark` they read the semantic tokens instead. Higher specificity than
+     the light rules; brutal and elegant light are untouched. */
+  html.dark[data-theme="elegant"] .btn-brutal,
+  html.dark[data-theme="elegant"] .btn-brutal-sm,
+  html.dark[data-theme="elegant"] .btn-brutal-high {
+    border-color: var(--color-line-strong);
+    box-shadow: 0 1px 8px rgba(0, 0, 0, 0.4);
+  }
+  html.dark[data-theme="elegant"] .btn-brutal.text-black,
+  html.dark[data-theme="elegant"] .btn-brutal-sm.text-black,
+  html.dark[data-theme="elegant"] .btn-brutal-high.text-black {
+    color: var(--color-foreground-strong);
+  }
+  html.dark[data-theme="elegant"] .card-brutal {
+    border-color: var(--color-line-strong);
+    background-color: var(--color-layer-panel);
+    color: var(--color-foreground-strong);
+    box-shadow: 0 1px 8px rgba(0, 0, 0, 0.4);
+  }
+  html.dark[data-theme="elegant"] .card-brutal .card-register-muted {
+    color: var(--color-foreground-muted);
+  }
+  html.dark[data-theme="elegant"] .input-brutal {
+    border-color: var(--color-line-strong);
+    color: var(--color-foreground-strong);
+  }
+  /* The base recipe paints the field white; a field that sets its own background utility keeps it. */
+  html.dark[data-theme="elegant"] .input-brutal:not([class*="bg-"]) {
+    background-color: var(--color-layer-canvas-muted);
+  }
+  html.dark[data-theme="elegant"] .check-marker-brutal {
+    border-color: var(--color-line-strong);
+  }
+  html.dark[data-theme="elegant"] .check-marker-brutal.bg-black {
+    background-color: var(--color-foreground-strong);
+    border-color: var(--color-foreground-strong);
+  }
 }

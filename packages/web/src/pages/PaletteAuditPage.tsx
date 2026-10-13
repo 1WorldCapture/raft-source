@@ -160,7 +160,7 @@ function realComponentsFor(
             <div className="hidden md:flex h-32 w-[64px] shrink-0 flex-col items-center border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-primary-soft theme-brutal:bg-soft-signal gap-1.5 py-2">
               <button
                 type="button"
-                className="relative inline-flex size-10 items-center justify-center border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-foreground-strong theme-brutal:bg-black font-display text-base font-bold text-soft-signal shadow-raft-xs theme-brutal:shadow-brutal-sm"
+                className="relative inline-flex size-10 items-center justify-center border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-foreground-strong dark:bg-layer-canvas-muted theme-brutal:bg-black font-display text-base font-bold text-soft-signal shadow-raft-xs theme-brutal:shadow-brutal-sm"
               >
                 S
               </button>

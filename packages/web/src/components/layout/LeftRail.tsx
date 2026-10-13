@@ -466,7 +466,7 @@ export function LeftRail({ hidden, workspaceModeAvailable = false, side = "left"
             // #proj-uiux:8e7df837 task #98 followup 54fbf722: "server name
             // 按钮怎么没修？" — keep server-initial in step with the rail
             // tabs, not pinned at size-icon-header (36 across all viewports).
-            className={`relative inline-flex items-center justify-center border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-foreground-strong theme-brutal:bg-black font-display font-bold text-soft-signal transition-all duration-100 ${workspaceEnabled ? "size-9 text-sm shadow-none theme-brutal:shadow-brutal-active hover:shadow-raft-xs theme-brutal:hover:shadow-brutal-sm" : "size-10 text-base shadow-raft-xs theme-brutal:shadow-brutal-sm hover:shadow-raft-sm theme-brutal:hover:shadow-brutal [@media(max-height:600px)]:h-9 [@media(max-height:600px)]:w-9"}`}
+            className={`relative inline-flex items-center justify-center border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-foreground-strong dark:bg-layer-canvas-muted theme-brutal:bg-black font-display font-bold text-soft-signal transition-all duration-100 ${workspaceEnabled ? "size-9 text-sm shadow-none theme-brutal:shadow-brutal-active hover:shadow-raft-xs theme-brutal:hover:shadow-brutal-sm" : "size-10 text-base shadow-raft-xs theme-brutal:shadow-brutal-sm hover:shadow-raft-sm theme-brutal:hover:shadow-brutal [@media(max-height:600px)]:h-9 [@media(max-height:600px)]:w-9"}`}
           >
             {hasOtherServerUnread && (
               <AttentionDot

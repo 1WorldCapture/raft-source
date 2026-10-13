@@ -406,7 +406,7 @@ export function AttachmentCommentsPanel({
                 ) : null
               }
             />
-            {error ? <p className="mt-1 text-[10px] font-bold text-red-600">{error}</p> : null}
+            {error ? <p className="mt-1 text-[10px] font-bold text-red-600 dark:text-red-300">{error}</p> : null}
           </>
         ) : (
           <p

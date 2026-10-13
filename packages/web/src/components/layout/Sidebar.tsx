@@ -4286,7 +4286,7 @@ export default function Sidebar({ mobileInline, bottomSlot, workspaceRailMode }:
                   {!collapsed.humans && (
                     <>
                       {membersLoadError ? (
-                        <div className="px-2 text-xs text-red-700 font-mono">{formatMessage({ id: "layout.sidebar.humansFailedToLoad" })}</div>
+                        <div className="px-2 text-xs text-red-700 dark:text-red-300 font-mono">{formatMessage({ id: "layout.sidebar.humansFailedToLoad" })}</div>
                       ) : members.length === 0 ? (
                         <SidebarSectionDescription>{formatMessage({ id: "layout.sidebar.noHumans" })}</SidebarSectionDescription>
                       ) : (

@@ -20,7 +20,7 @@ export default function AgentUnavailablePanel({ onClose }: { onClose?: () => voi
           title: formatMessage({ id: "common.announcement.back" }),
         }}
         icon={<Bot size={18} />}
-        iconBg="bg-gray-200"
+        iconBg="bg-gray-200 dark:bg-fill-muted"
         actions={onClose ? (
           <button
             type="button"

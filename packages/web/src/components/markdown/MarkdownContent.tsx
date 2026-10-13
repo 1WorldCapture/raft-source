@@ -288,7 +288,7 @@ export const BASE_MARKDOWN_COMPONENTS: Components = {
       target="_blank"
       rel="noopener noreferrer"
       {...externalTranslationGuardProps(
-        "text-blue-700 underline decoration-2 underline-offset-2 hover:text-brutal-pink select-text",
+        "text-blue-700 dark:text-blue-300 underline decoration-2 underline-offset-2 hover:text-brutal-pink select-text",
       )}
     >
       {children}

@@ -167,7 +167,7 @@ export default function CursorSdkLoginButton({ serverId, machineId, onBound, pol
           </button>
         </span>
       ) : null}
-      {error ? <span className="text-red-600">{" "}{error}</span> : null}
+      {error ? <span className="text-red-600 dark:text-red-300">{" "}{error}</span> : null}
     </>
   );
 }

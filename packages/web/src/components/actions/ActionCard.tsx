@@ -747,7 +747,7 @@ function ActionDetail({ action }: { action: ActionCardAction }) {
             {formatMessage({ id: "actionCard.registerOwnerNote" })}
           </div>
           {action.unsafeDemoUrlOverride ? (
-            <div className="font-bold text-amber-700">{formatMessage({ id: "actionCard.unsafeDemoUrlOverride" })}</div>
+            <div className="font-bold text-amber-700 dark:text-amber-300">{formatMessage({ id: "actionCard.unsafeDemoUrlOverride" })}</div>
           ) : null}
         </div>
       );
@@ -790,7 +790,7 @@ function ActionDetail({ action }: { action: ActionCardAction }) {
             </div>
           ) : null}
           {action.unsafeDemoUrlOverride ? (
-            <div className="font-bold text-amber-700">{formatMessage({ id: "actionCard.unsafeDemoUrlOverride" })}</div>
+            <div className="font-bold text-amber-700 dark:text-amber-300">{formatMessage({ id: "actionCard.unsafeDemoUrlOverride" })}</div>
           ) : null}
         </div>
       );
@@ -807,7 +807,7 @@ function ActionDetail({ action }: { action: ActionCardAction }) {
             <span className="text-foreground-hint theme-brutal:text-black/45">{formatMessage({ id: "actionCard.field.recoveryOwner" })}</span>{" "}
             <span className="text-foreground-strong theme-brutal:text-black/75">@{target?.name ?? action.targetAgent.slice(0, 8)}</span>
           </div>
-          <div className="font-bold text-amber-700">
+          <div className="font-bold text-amber-700 dark:text-amber-300">
             {formatMessage({ id: "actionCard.adminRecoveryOnly" })}
           </div>
         </div>
