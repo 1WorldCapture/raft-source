@@ -19,6 +19,14 @@ export interface JsonServiceState {
   version: string | null;
   lastError: string | null;
   desiredState: "running" | "stopped";
+  /**
+   * Task #36. "loaded_dead" = the macOS LaunchAgent is loaded in launchd with
+   * no process behind it; `raft-computer start` repairs it with a kickstart.
+   * Omitted otherwise — including when no carrier is installed, which is a
+   * different condition and must not be reported as this one. The Desktop
+   * Computer card keys off exactly this string.
+   */
+  carrierState?: "loaded_dead";
 }
 
 export interface JsonServerRow {
@@ -105,6 +113,12 @@ export async function projectStatusJson(report: ComputerStatusReport): Promise<C
     version: versionString(report.service.version) ?? report.cliVersion,
     lastError: null,
     desiredState: await readDesiredState(home),
+    // Only meaningful while stopped; a live service is never loaded-dead.
+    ...(running
+      ? {}
+      : report.service.carrierState === "loaded_dead"
+        ? { carrierState: "loaded_dead" as const }
+        : {}),
   };
   const servers: JsonServerRow[] = report.servers.map((row) => ({
     serverId: row.serverId,

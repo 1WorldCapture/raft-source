@@ -24,7 +24,7 @@ import { formatServerSlugDisplay, listServerAttachments } from "./serverState.js
 import { canonicalizeServerUrl } from "./serverUrl.js";
 import { readPidfileAt, isProcessAlive } from "./internal/process-primitives.js";
 import { findLiveServicePidReadOnly } from "./internal/service-pid-fallback.js";
-import { readLoadedButDeadCarrier } from "./macosLoginCarrier.js";
+import { readLoadedButDeadCarrier, resolveStableDispatcherPath } from "./macosLoginCarrier.js";
 import { isDegraded, readTerminalUnlinked } from "./health.js";
 import { info } from "./output.js";
 import { COMPUTER_VERSION } from "./version.js";
@@ -142,18 +142,27 @@ async function visibleRunnerLogPath(slockHome: string, serverId: string): Promis
  * surfaced as running — never clearing or otherwise mutating the chain
  * (§3.3.1 read-only + secret-free invariant).
  */
-async function readLoadedButDeadCarrierHere(): Promise<boolean> {
-  return readLoadedButDeadCarrier(os.homedir());
+/**
+ * Task #36. The carrier spec cannot be resolved without a dispatcher path —
+ * `resolveMacosContext` throws HOST_LIFECYCLE_DISPATCHER_UNBOUND without one,
+ * and it only derives the label (a hash of the home) otherwise. Passing the
+ * resolved path is what makes this probe work at runtime; calling the carrier
+ * reader with no deps silently fails every time.
+ */
+async function readLoadedButDeadCarrierFor(home: string): Promise<boolean> {
+  return readLoadedButDeadCarrier(home, {
+    dispatcherPath: resolveStableDispatcherPath(home),
+  });
 }
 
 async function serviceState(
   slockHome: string,
-  readLoadedButDead: () => Promise<boolean> = readLoadedButDeadCarrierHere,
+  readLoadedButDead: (home: string) => Promise<boolean> = readLoadedButDeadCarrierFor,
 ): Promise<DaemonState> {
   const { pid } = await findLiveServicePidReadOnly(slockHome);
   if (pid !== null) return { running: true, pid };
   // Read-only: a launchctl print, never a mutation. Only meaningful on macOS.
-  if (process.platform === "darwin" && (await readLoadedButDead().catch(() => false))) {
+  if (process.platform === "darwin" && (await readLoadedButDead(slockHome).catch(() => false))) {
     return { running: false, carrierState: "loaded_dead" };
   }
   return { running: false };
@@ -295,7 +304,7 @@ export async function buildStatusReport(
   installRoot: string,
   /** Test seam for the macOS loaded-but-dead probe. Production uses the real
    *  read-only `launchctl print`; status must stay read-only either way. */
-  readLoadedButDead?: () => Promise<boolean>,
+  readLoadedButDead?: (home: string) => Promise<boolean>,
 ): Promise<ComputerStatusReport> {
   const sessionRead = await readUserSession(userSessionPath(installRoot));
   const session = sessionRead.session;
@@ -303,7 +312,7 @@ export async function buildStatusReport(
   const service = {
     ...(await serviceState(
       installRoot,
-      readLoadedButDead ?? readLoadedButDeadCarrierHere,
+      readLoadedButDead ?? readLoadedButDeadCarrierFor,
     )),
     logPath: serviceLogPath(installRoot),
   };
