@@ -37,6 +37,10 @@ import {
 } from "../service.js";
 import { connectService } from "../lib/ipc-client.js";
 import {
+  kickstartLoadedCarrier,
+  readLoadedButDeadCarrier,
+} from "../macosLoginCarrier.js";
+import {
   serverRunnerLogReadFallback,
   serviceLogPath,
   serviceVersionPath,
@@ -370,6 +374,10 @@ async function startInner(input: StartInput, options: StartOptions = {}): Promis
 
   const hostLifecycleOwner = input.hostLifecycleOwner ?? "none";
   let hostLifecycle: HostLifecycleConvergenceResult | null = null;
+  // Built unconditionally so the kickstart recovery below can reuse the same
+  // deps (platform, uid, dispatcher, command runner) that converge resolved.
+  const hostDeps = { ...(options.hostLifecycleDeps ?? {}) };
+  if (hostDeps.platform === undefined) hostDeps.platform = process.platform;
   if (hostLifecycleOwner !== "none") {
     if (hostLifecycleOwner === "cli" && input.foreground && process.platform === "darwin") {
       throw new ComputerServiceError(
@@ -377,8 +385,6 @@ async function startInner(input: StartInput, options: StartOptions = {}): Promis
         "macOS post-login recovery cannot be verified for `--foreground`. Run `raft-computer start` without `--foreground`.",
       );
     }
-    const hostDeps = { ...(options.hostLifecycleDeps ?? {}) };
-    if (hostDeps.platform === undefined) hostDeps.platform = process.platform;
     if (hostDeps.platform === "darwin" && hostDeps.dispatcherPath === undefined) {
       hostDeps.dispatcherPath = resolveStableDispatcherPath(slockHome);
     }
@@ -410,6 +416,17 @@ async function startInner(input: StartInput, options: StartOptions = {}): Promis
   ) {
     const sleep = options.sleep ?? delay;
     const deadline = currentTimeMs() + (options.ensureTimeoutMs ?? START_ENSURE_TIMEOUT_MS);
+    // A stop that overran its wait can leave the LaunchAgent loaded with no
+    // process behind it: the definition has RunAtLoad but no KeepAlive, so
+    // launchd never restarts it and the pid we are about to poll for can never
+    // appear. Converge already reported the carrier as ready, so the only way
+    // out used to be a hand-run `launchctl kickstart`. Do it here instead —
+    // once, only when the job is actually loaded-but-dead, and never with -k
+    // (which would kill a live job and turn a recovery into an outage).
+    if (hostDeps.platform === "darwin" && (await readLoadedButDeadCarrier(slockHome, hostDeps))) {
+      emit(options, { kind: "start.kickstarted_loaded_carrier" });
+      await kickstartLoadedCarrier(slockHome, hostDeps).catch(() => undefined);
+    }
     // We hold the mutation lock while the carrier's service boots; tell it so it does not queue for the same lock.
     await markStartAwaitingService(slockHome).catch(() => undefined);
     try {

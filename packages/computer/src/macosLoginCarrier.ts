@@ -712,6 +712,53 @@ async function bootoutCarrier(
   return "booted-out";
 }
 
+/**
+ * True when the carrier job is still loaded in launchd but has no live
+ * process behind it.
+ *
+ * How that state arises: `stop` that overruns its wait reports STOP_TIMEOUT and
+ * never unloads the LaunchAgent; the service then exits 0 by itself. The
+ * definition carries only RunAtLoad and no KeepAlive, so launchd will never
+ * bring it back on its own. The job stays loaded with `runs` climbing and
+ * nothing running.
+ */
+export async function readLoadedButDeadCarrier(
+  slockHome: string,
+  deps: MacosHostLifecycleDeps = {},
+): Promise<boolean> {
+  const context = resolveMacosContext(slockHome, deps);
+  if (context.spec === null) return false;
+  const runCommand = bindCommandSignal(context.runCommand, deps.signal);
+  const job = await printJob(context.spec, runCommand);
+  if (job === null) return false; // not loaded at all — that is a different path
+  return /^\s*state\s*=\s*not\s+running\s*$/im.test(job);
+}
+
+/**
+ * Kick a loaded-but-dead carrier back to life.
+ *
+ * Deliberately no `-k`: `kickstart -k` kills whatever is running first, which
+ * would turn a recovery into an outage whenever the job is in fact alive. A
+ * plain kickstart on a running job is a no-op, so this is safe to attempt
+ * without having proved the process is dead.
+ *
+ * Returns false when there is no macOS carrier to kick.
+ */
+export async function kickstartLoadedCarrier(
+  slockHome: string,
+  deps: MacosHostLifecycleDeps = {},
+): Promise<boolean> {
+  const context = resolveMacosContext(slockHome, deps);
+  if (context.spec === null) return false;
+  const runCommand = bindCommandSignal(context.runCommand, deps.signal);
+  if ((await printJob(context.spec, runCommand)) === null) return false;
+  await runCommand("/bin/launchctl", [
+    "kickstart",
+    `${context.spec.domain}/${context.spec.label}`,
+  ]);
+  return true;
+}
+
 async function removeCliCarrier(
   spec: MacosLoginCarrierSpec,
   runCommand: HostLifecycleCommandRunner,
