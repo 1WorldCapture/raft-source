@@ -21,13 +21,13 @@ export const DEFAULT_APP_THEME_PRESET: AppThemePreset = "brutal";
 export const THEME_PICKER_ENABLED = true;
 
 /**
- * Elegant dark is ported but hidden until the component sweep to semantic
- * colour tokens has landed (hard-coded black text is unreadable on it). While
- * false, stored or legacy dark/system preferences resolve to light and the
- * Settings picker offers no mode control. Flip it in the PR that finishes the
- * sweep; nothing else needs to change.
+ * Elegant dark is on: the component sweep to semantic colour tokens is complete, so Settings
+ * offers the light / dark / system mode control. The DEFAULT stays light + Brutal (see
+ * DEFAULT_APP_THEME_PREFERENCES): nobody gets dark unless they pick it. When false, stored or
+ * legacy dark/system preferences resolve to light and the picker offers no mode control. The
+ * bootstrap script's `elegantDarkEnabled` must match.
  */
-export const ELEGANT_DARK_ENABLED = false;
+export const ELEGANT_DARK_ENABLED = true;
 
 export const APP_THEME_IDS = ["brutal", "elegant"] as const;
 export type AppThemeId = (typeof APP_THEME_IDS)[number];
@@ -67,7 +67,9 @@ export interface AppThemePreferences {
 }
 
 export const DEFAULT_APP_THEME_PREFERENCES: AppThemePreferences = {
-  mode: ELEGANT_DARK_ENABLED ? "system" : "light",
+  // Light on purpose, with dark enabled or not: a user who never opens the picker keeps Brutal
+  // whatever their OS scheme says. Dark and system are opt-in.
+  mode: "light",
   lightThemeId: "brutal",
   darkThemeId: "elegant",
 };

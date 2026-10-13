@@ -1,4 +1,5 @@
 import type { MermaidRenderResult } from "./mermaidRenderer";
+import { MERMAID_PALETTES } from "./mermaidTheme";
 
 function contentHash(content: string) {
   let hash = 0x811c9dc5;
@@ -42,7 +43,7 @@ export async function svgToPngBlob(
     canvas.height = height;
     const context = canvas.getContext("2d");
     if (!context) throw new Error(messages.canvasUnavailable);
-    context.fillStyle = "#ffffff";
+    context.fillStyle = MERMAID_PALETTES[result.theme].background;
     context.fillRect(0, 0, width, height);
     context.drawImage(image, 0, 0, width, height);
     const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));

@@ -8,6 +8,7 @@ import {
   APP_THEME_PRESET_STORAGE_KEY_PREFIX,
   APP_THEME_STORAGE_KEY,
   DEFAULT_APP_THEME_PREFERENCES,
+  ELEGANT_DARK_ENABLED,
   THEME_PICKER_ENABLED,
 } from "../src/theme/appTheme";
 
@@ -130,11 +131,11 @@ pickerTest("a legacy device preset is promoted once when the current key is empt
     systemDark: false,
   });
 
-  // The saved choice is kept (dark comes back with the flag), but it renders light for now.
+  // The saved choice is kept; it renders dark when Elegant dark is on, light while it is hidden.
   assert.equal(root.dataset.theme, "elegant");
-  assert.equal(classes.has("dark"), false);
-  assert.equal(classes.has("light"), true);
-  assert.equal(themeColor.content, "#FFFFFF");
+  assert.equal(classes.has("dark"), ELEGANT_DARK_ENABLED);
+  assert.equal(classes.has("light"), !ELEGANT_DARK_ENABLED);
+  assert.equal(themeColor.content, ELEGANT_DARK_ENABLED ? "#141411" : "#FFFFFF");
   assert.equal(storageEntries[APP_THEME_PREFERENCES_STORAGE_KEY], JSON.stringify({
     mode: "dark",
     lightThemeId: "elegant",
@@ -144,7 +145,7 @@ pickerTest("a legacy device preset is promoted once when the current key is empt
   storageEntries[APP_THEME_STORAGE_KEY] = "brutal";
   const second = executeBootstrap({ storageEntries, systemDark: false });
   assert.equal(second.root.dataset.theme, "elegant");
-  assert.equal(second.classes.has("dark"), false);
+  assert.equal(second.classes.has("dark"), ELEGANT_DARK_ENABLED);
 });
 
 pickerTest("one old account preference migrates, but several accounts do not", () => {

@@ -1,6 +1,7 @@
 import { ImageOff, X } from "lucide-react";
 import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useIntl } from "react-intl";
+import { useOptionalAppTheme } from "../../../hooks/useAppTheme";
 import { registerDomCaptureSnapshot } from "../../../utils/domCaptureSnapshot";
 import {
   PROGRAMMATIC_ZOOM_ANIMATION_MS,
@@ -20,6 +21,7 @@ import {
 import { svgToPngBlob } from "./mermaidDownload";
 import type {
   MermaidRenderResult,
+  MermaidRenderTheme,
 } from "./mermaidRenderer";
 
 type MermaidRenderState =
@@ -72,10 +74,10 @@ function MermaidRenderError() {
 export function MermaidDiagram({ code }: { code: string }) {
   const { formatMessage } = useIntl();
   const rootRef = useRef<HTMLDivElement>(null);
-  // Raft's current web shell is light-only. The renderer cache already keys
-  // by theme, but wiring a dark mode here before the app exposes a real theme
-  // signal would invent state that no user can change.
-  const theme = "light" as const;
+  // The SVG lives in an opaque iframe (no app CSS variables), so it is rendered with the
+  // palette of the resolved app mode; the renderer cache keys by theme.
+  const appTheme = useOptionalAppTheme();
+  const theme: MermaidRenderTheme = appTheme?.resolvedMode === "dark" ? "dark" : "light";
   const renderKey = `${theme}\u0000${code}`;
   const renderCounterRef = useRef(0);
   const [settledState, setSettledState] = useState<MermaidRenderState>({
