@@ -1370,7 +1370,7 @@ export class AgentProcessManager {
       lastEventAtMs: ap.runtimeProgress.lastEventAt,
       liveSessionId: ap.sessionId,
     }));
-    for (const stop of await selectColdIdleRecycleStops(views, { homeDir: this.runtimeSessionHomeDir })) {
+    for (const stop of await selectColdIdleRecycleStops(views, { homeDir: this.runtimeSessionHomeDir, onDecision: (d) => { if (d.reason !== "flag_off") logger.info(`[ColdIdleSweep] agent ${d.agentId} ${d.outcome}: ${JSON.stringify(d)}`); } })) {
       const ap = this.agents.get(stop.agentId);
       if (!ap || !this.isApmIdle(ap) || this.hasUntoldInboxWork(ap) || ap.exit.kind !== "live") continue;
       logger.info(`[Agent ${stop.agentId}] Stopping cold idle runtime (idle ${Math.round(stop.idleMs / 60_000)}m, ~${Math.round(stop.priorContextTokens / 1000)}k context, session ${stop.sessionId}, ${ap.inbox.length} notified unread); next wake decides resume vs fresh briefing`);

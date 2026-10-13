@@ -11,6 +11,7 @@ import {
   readClaudeSessionResumeFacts,
   resolveWakeRecycleConfig,
   selectColdIdleRecycleStops,
+  type ColdIdleSweepDecision,
   type ColdIdleRuntimeView,
   type SessionResumeFacts,
   type WakeRecycleConfig,
@@ -155,6 +156,7 @@ test("cold-idle sweep selects only enabled, idle, cold runtimes with readable fa
     ...overrides,
   });
 
+  const decisions: ColdIdleSweepDecision[] = [];
   const stops = await selectColdIdleRecycleStops([
     view({}),
     view({ agentId: "agent-busy", idle: false }),
@@ -162,8 +164,21 @@ test("cold-idle sweep selects only enabled, idle, cold runtimes with readable fa
     view({ agentId: "agent-disabled", config: { runtime: "claude", sessionId: null, constructedWakeContext: true, envVars: { RAFT_WAKE_RECYCLE: "0" } } as unknown as ColdIdleRuntimeView["config"] }),
     view({ agentId: "agent-codex", config: { runtime: "codex", sessionId: null, constructedWakeContext: true, envVars: enabledEnv } as unknown as ColdIdleRuntimeView["config"] }),
     view({ agentId: "agent-no-session", liveSessionId: null }),
-  ], { nowMs, homeDir: home, processEnv: {} });
+  ], { nowMs, homeDir: home, processEnv: {}, onDecision: (d) => decisions.push(d) });
 
+  assert.deepEqual(Object.fromEntries(decisions.map((d) => [d.agentId, d.reason])), {
+    "agent-cold": "selected",
+    "agent-busy": "not_idle",
+    "agent-warm-memory": "in_memory_clock_recent",
+    "agent-disabled": "flag_off",
+    "agent-codex": "no_transcript_facts",
+    "agent-no-session": "no_session",
+  });
+  const cold = decisions.find((d) => d.agentId === "agent-cold")!;
+  assert.equal(cold.outcome, "stop");
+  assert.equal(cold.idleSource, "transcript");
+  assert.equal(cold.idleMs, 3 * HOUR_MS);
+  assert.equal(cold.contextTokens, 400_005);
   assert.deepEqual(stops.map((s) => s.agentId), ["agent-cold"]);
   assert.equal(stops[0]!.sessionId, coldSession);
   assert.equal(stops[0]!.priorContextTokens, 400_005);

@@ -325,6 +325,25 @@ export interface ColdIdleRuntimeView {
   liveSessionId: string | null;
 }
 
+/** One sweep verdict for one agent, for the debug log: why a process was or
+ * was not stopped, with the idle clocks the verdict was based on (epoch ms;
+ * absent when the gate failed before that source was read). */
+export interface ColdIdleSweepDecision {
+  agentId: string;
+  outcome: "stop" | "skip";
+  reason:
+    | "flag_off" | "not_idle" | "runtime_not_enabled" | "no_session" | "in_memory_clock_recent"
+    | "no_transcript_facts" | "activity_recent" | "context_small" | "no_transcript_path"
+    | "background_tasks" | "selected";
+  lastEventAtMs: number;
+  transcriptActivityAtMs?: number | null;
+  sidecarActivityAtMs?: number | null;
+  idleSource?: "lastEvent" | "transcript" | "sidecar";
+  idleMs?: number;
+  contextTokens?: number | null;
+  outstandingBackgroundTasks?: number | null;
+}
+
 export interface ColdIdleRecycleStop {
   agentId: string;
   sessionId: string;
@@ -342,19 +361,25 @@ export interface ColdIdleRecycleStop {
  */
 export async function selectColdIdleRecycleStops(
   views: readonly ColdIdleRuntimeView[],
-  opts: { nowMs?: number; homeDir?: string; processEnv?: NodeJS.ProcessEnv } = {},
+  opts: { nowMs?: number; homeDir?: string; processEnv?: NodeJS.ProcessEnv; onDecision?: (decision: ColdIdleSweepDecision) => void } = {},
 ): Promise<ColdIdleRecycleStop[]> {
   const nowMs = opts.nowMs ?? Date.now();
   const out: ColdIdleRecycleStop[] = [];
   for (const view of views) {
+    const decide = (outcome: ColdIdleSweepDecision["outcome"], reason: ColdIdleSweepDecision["reason"], extra: Partial<ColdIdleSweepDecision> = {}): void =>
+      opts.onDecision?.({ agentId: view.agentId, outcome, reason, lastEventAtMs: view.lastEventAtMs, ...extra });
     const cfg = resolveWakeRecycleConfig(view.config.constructedWakeContext, view.config.envVars, opts.processEnv ?? process.env);
-    if (!cfg.enabled || !view.idle) continue;
-    if (!WAKE_RECYCLE_ENABLED_RUNTIMES.has(view.config.runtime ?? "claude")) continue;
+    if (!cfg.enabled) { decide("skip", "flag_off"); continue; }
+    if (!view.idle) { decide("skip", "not_idle"); continue; }
+    if (!WAKE_RECYCLE_ENABLED_RUNTIMES.has(view.config.runtime ?? "claude")) { decide("skip", "runtime_not_enabled"); continue; }
     const sessionId = view.liveSessionId ?? view.config.sessionId;
-    if (!sessionId) continue;
-    if (nowMs - view.lastEventAtMs <= cfg.minColdGapMs) continue;
+    if (!sessionId) { decide("skip", "no_session"); continue; }
+    if (nowMs - view.lastEventAtMs <= cfg.minColdGapMs) { decide("skip", "in_memory_clock_recent", { idleSource: "lastEvent", idleMs: nowMs - view.lastEventAtMs }); continue; }
     const facts = await readRuntimeSessionResumeFacts(view.config.runtime ?? "claude", sessionId, opts.homeDir);
-    if (facts.lastActivityAtMs === null || facts.lastContextTokens === null) continue;
+    if (facts.lastActivityAtMs === null || facts.lastContextTokens === null) {
+      decide("skip", "no_transcript_facts", { transcriptActivityAtMs: facts.lastActivityAtMs, contextTokens: facts.lastContextTokens });
+      continue;
+    }
     // A turn-idle runtime can still host live background work (subagents,
     // monitors) whose activity lands in the session's sidecar directory, not
     // the main transcript. Stopping mid-subagent loses that work — count the
@@ -364,14 +389,18 @@ export async function selectColdIdleRecycleStops(
       ? await latestMtimeUnder(facts.transcriptPath.replace(/\.jsonl$/, ""))
       : null;
     const lastActive = Math.max(facts.lastActivityAtMs, view.lastEventAtMs, sidecarActivityAtMs ?? 0);
-    if (nowMs - lastActive <= cfg.minColdGapMs) continue;
-    if (facts.lastContextTokens <= cfg.minContextTokens) continue;
+    // Which clock was freshest: this is what decides when the first eligible tick can fire.
+    const idleSource: ColdIdleSweepDecision["idleSource"] = lastActive === (sidecarActivityAtMs ?? -1) ? "sidecar" : lastActive === facts.lastActivityAtMs ? "transcript" : "lastEvent";
+    const clocks = { transcriptActivityAtMs: facts.lastActivityAtMs, sidecarActivityAtMs, idleSource, idleMs: nowMs - lastActive, contextTokens: facts.lastContextTokens };
+    if (nowMs - lastActive <= cfg.minColdGapMs) { decide("skip", "activity_recent", clocks); continue; }
+    if (facts.lastContextTokens <= cfg.minContextTokens) { decide("skip", "context_small", clocks); continue; }
     // Sweep only sessions with DEFINITELY zero outstanding background tasks
     // right now: a runtime holding an armed monitor/background task may have
     // silent pending intent the daemon cannot see; leave it alone.
-    if (!facts.transcriptPath) continue;
+    if (!facts.transcriptPath) { decide("skip", "no_transcript_path", clocks); continue; }
     const outstanding = await transcriptOutstandingBackgroundTasks(facts.transcriptPath);
-    if (outstanding === null || outstanding > 0) continue;
+    if (outstanding === null || outstanding > 0) { decide("skip", "background_tasks", { ...clocks, outstandingBackgroundTasks: outstanding }); continue; }
+    decide("stop", "selected", { ...clocks, outstandingBackgroundTasks: outstanding });
     out.push({
       agentId: view.agentId,
       sessionId,
