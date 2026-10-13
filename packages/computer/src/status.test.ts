@@ -582,3 +582,40 @@ test("status: stale connected marker + dead pid → serverConnected=false", asyn
     assert.equal(sa?.serverConnected, false, "stale marker with dead process must not report connected");
   });
 });
+
+// --- task #36: the Desktop card keys off exactly service.carrierState ---
+test("status --json reports service.carrierState loaded_dead for a loaded-but-dead carrier", async () => {
+  await withHome(async (home) => {
+    const r = await buildStatusReport(home, async () => true);
+    assert.equal(r.service.running, false);
+    assert.equal(
+      (r.service as { carrierState?: string }).carrierState,
+      "loaded_dead",
+      "the Desktop card keys off exactly this string",
+    );
+    assert.equal(JSON.parse(JSON.stringify(r.service)).carrierState, "loaded_dead");
+  });
+});
+
+test("status --json omits carrierState when the carrier is not loaded-dead", async () => {
+  await withHome(async (home) => {
+    const r = await buildStatusReport(home, async () => false);
+    assert.equal(r.service.running, false);
+    assert.equal(
+      "carrierState" in (r.service as object),
+      false,
+      "absent, not null — an absent carrier is not a loaded-but-dead carrier",
+    );
+  });
+});
+
+test("a running service never reports carrierState", async () => {
+  await withHome(async (home) => {
+    const run = join(home, "computer", "run");
+    await mkdir(run, { recursive: true });
+    await writeFile(join(run, "service.pid"), String(process.pid));
+    const r = await buildStatusReport(home, async () => true);
+    assert.equal(r.service.running, true);
+    assert.equal("carrierState" in (r.service as object), false);
+  });
+});
