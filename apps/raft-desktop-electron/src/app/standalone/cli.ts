@@ -6,7 +6,7 @@ export type ServiceState = "running" | "stopped" | "starting" | "failed";
 
 export interface StandaloneStatus {
   home: string;
-  service: { state: ServiceState; pid: number | null; version: string | null; lastError: string | null };
+  service: { state: ServiceState; pid: number | null; version: string | null; lastError: string | null; carrierState?: "loaded_dead" | null };
   /** The user's persisted intent (set by start/stop). "stopped" = the user stopped it on purpose. */
   desiredState: "running" | "stopped" | null;
   servers: Array<{ serverId: string; slug: string; serverUrl: string; daemonState: string; lastError: string | null; agentCount: number }>;
@@ -52,6 +52,8 @@ export function parseStatusJson(text: string): StandaloneStatus {
       pid: typeof service.pid === "number" ? service.pid : null,
       version: str(service.version),
       lastError: str(service.lastError),
+      // macOS: the login job is loaded in launchd but its service process is gone (Start repairs it).
+      carrierState: service.carrierState === "loaded_dead" ? "loaded_dead" : null,
     },
     // v1 puts the user's intent under service; accept the top level too.
     desiredState: [service.desiredState, root.desiredState].find((value) => value === "running" || value === "stopped") as "running" | "stopped" | undefined ?? null,
