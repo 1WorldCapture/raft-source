@@ -32,4 +32,4 @@
  * constant was MessageItem-local. Shared module + contract test pins it.
  */
 export const MSG_REF_CHIP =
-  "inline-block max-w-full overflow-hidden text-ellipsis whitespace-nowrap align-bottom border border-line-strong theme-brutal:border-black px-1 py-0 [font-size:0.875em] font-bold leading-[1.3em] select-text";
+  "inline-block max-w-full overflow-hidden text-ellipsis whitespace-nowrap align-bottom border border-line-muted theme-brutal:border-black px-1 py-0 [font-size:0.875em] font-bold leading-[1.3em] select-text";
