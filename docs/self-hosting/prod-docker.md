@@ -27,6 +27,48 @@
 
 **deploy.sh 已不再用于生产**（pm2 源码栈时代的工具，随栈退役；保留在仓库供源码栈部署场景使用）。
 
+## Feature flag 变更（唯一支持方式）
+
+生产上改 feature flag **只走** server 镜像里的管理脚本。它调用 `featureFlagRolloutWriterService`：用当前 global config version 做 CAS，经 guardrail 决定放宽还是收窄，再把规则和审计写在同一个事务里。
+
+**不要**再手写 SQL 改 `feature_flags`、`feature_flag_rules`、`feature_flag_config_versions` 或 `feature_flag_rollout_audit_events`。放宽记成 `operator_approved`，批准人写在 `approved_by`，receipt 留空。现在没有评估器，不要手写 receipt 来换一条 `guardrail_passed`。
+
+脚本打进本变更之后构建的 server 镜像，入口是 `packages/server/dist/flag-rollout.js`。镜像带迁移 0282。容器里已经有 `DATABASE_URL`，不要把连接串打出来。8443 把容器名换成 `raft-test8443-server-1`。
+
+```bash
+# 只读
+docker exec raft-prod-server-1 \
+  node packages/server/dist/flag-rollout.js show --flag provider_connections_v0
+
+# 预览，不写库。放宽打印 operator_approved 和批准人；收窄打印 narrowing。
+docker exec raft-prod-server-1 \
+  node packages/server/dist/flag-rollout.js server_allowlist_add \
+  --flag provider_connections_v0 \
+  --server <server-uuid> \
+  --actor-type human --actor-name <name> \
+  --approved-by <who-decided> \
+  --reason "why this change" \
+  --dry-run
+
+# 收窄（从 allowlist 去掉一台，或 kill_switch_set --desired true）不需要 --approved-by。
+# 放宽（加入 allowlist，或 kill_switch_set --desired false）必须带 --approved-by。
+# 脚本不接受 --receipt-file / --receipt-id。
+docker exec raft-prod-server-1 \
+  node packages/server/dist/flag-rollout.js server_allowlist_add \
+  --flag provider_connections_v0 \
+  --server <server-uuid> \
+  --actor-type human --actor-name <name> \
+  --approved-by <who-decided> \
+  --reason "why this change"
+```
+
+- `--reason` 必填。`--actor-type` 只允许 `human` 或 `agent`，`--actor-name` 写入审计的 actor id。放宽的 `--approved-by` 是做决定的人，写入 `approved_by`，和执行人可以不是同一个人。
+- 一次只改一台 server。下一台用上一次输出里的新 config version 再跑。
+- 省略 `--expected-version` 时，脚本读当前 version 填进 writer 的 CAS。传了但和当前不一致就拒绝，不写规则、不写审计、不推进 version。
+- `--dry-run` 只打印决定，不写库。放宽没给 `--approved-by` 时拒绝，不写库。
+- 控制面 id 默认 `production`（`RAFT_FEATURE_FLAG_CONTROL_PLANE_ID` 可改）。
+- 成功时 stdout 是一份 JSON：变更前后的 rules、config version、authorization、approvedBy、audit event id。receipt 为空。
+
 ## 备份与回滚
 
 - **每日备份 cron**：04:15 UTC `docker exec raft-prod-db-1 pg_dump` → `/root/raft-prod-backups/raft-prod-<ts>.dump`（umask 077、容器侧 pg_restore 核读、滚动留 14 份）——**校验必须用容器内 pg_restore**（宿主 pg16 读不了 pg17 的 1.16 格式头）
