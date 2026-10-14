@@ -42,6 +42,14 @@ import {
 } from "../macosLoginCarrier.js";
 import { serviceLogPath } from "../paths.js";
 import { listAttachedServerIds } from "../serverState.js";
+import { info } from "../output.js";
+import {
+  detectLegacyOsSupervisorCarriers,
+  retireLegacyOsSupervisor,
+  type OwnedHistoricalLaunchdDefinition,
+  type SupervisorCommandOptions,
+  type SupervisorCommandRunner,
+} from "../osSupervisorRuntime.js";
 
 const STOP_POLL_INTERVAL_MS = 200;
 const STOP_TIMEOUT_MS = 5000;
@@ -95,6 +103,44 @@ export interface StopResult {
   /** Path of the service pidfile (so adapters can render hints
    *  without re-resolving paths). */
   pidfilePath: string;
+}
+
+/**
+ * Task #38. A legacy osSupervisor carrier is written with `KeepAlive <true/>`,
+ * so while it is loaded launchd undoes the user's own Stop and the Computer
+ * never goes idle — which means a converge-time "retire only when idle" rule
+ * would wait forever.
+ *
+ * Stop is the one moment the user has asked for the service to go down, so it is
+ * also the safest moment to unload that carrier: booting it out here is the stop
+ * they asked for, not an extra outage. The next Start then comes up under the
+ * login item with the safe KeepAlive. Never fatal — a failure to retire must not
+ * fail the stop.
+ */
+async function retireLegacyOsSupervisorOnStop(
+  slockHome: string,
+  dispatcherPath: string,
+  deps: StopOptions,
+): Promise<void> {
+  try {
+    const run = deps.hostLifecycleDeps?.runCommand;
+    const osDeps = {
+      platform: deps.hostLifecycleDeps?.platform,
+      userHome: deps.hostLifecycleDeps?.userHome,
+      uid: deps.hostLifecycleDeps?.uid,
+      runCommand: run
+        ? ((command, args, _options?: SupervisorCommandOptions) =>
+            run(command, args, deps.signal)) as SupervisorCommandRunner
+        : undefined,
+    };
+    const carriers: OwnedHistoricalLaunchdDefinition[] =
+      await detectLegacyOsSupervisorCarriers(slockHome, osDeps);
+    if (carriers.length === 0) return;
+    const result = await retireLegacyOsSupervisor(slockHome, dispatcherPath, osDeps);
+    info(`[computer] retired legacy OS autostart (${result.status}) on stop.`);
+  } catch (error) {
+    info(`[computer] legacy OS autostart retire skipped: ${String(error)}`);
+  }
 }
 
 export interface StopDeps {
@@ -217,6 +263,14 @@ export async function stop(
       // is rendered (preserves the pre-fallback-chain behavior for the
       // single-candidate case).
       await disableHostLifecycle();
+      // Task #38: a dead service under a legacy carrier's KeepAlive <true/> is
+      // exactly what launchd restarts behind the user's back, so this path
+      // needs the same retirement as the normal stop.
+      await retireLegacyOsSupervisorOnStop(
+        slockHome,
+        resolveStableDispatcherPath(slockHome),
+        options,
+      );
       emit(options, { kind: "stop.stale_pidfile_cleared", pid: firstStalePid });
       return {
         status: "stale_pidfile_cleared",
@@ -265,6 +319,15 @@ export async function stop(
       await clearPidfileAt(pidfilePath);
       options.signal?.throwIfAborted?.();
       await disableHostLifecycle();
+      // Task #38: the service is down — the one moment a legacy osSupervisor
+      // carrier can be unloaded without costing anything. Without this, its
+      // KeepAlive <true/> would undo this very stop and the Computer would
+      // never stay stopped.
+      await retireLegacyOsSupervisorOnStop(
+        slockHome,
+        resolveStableDispatcherPath(slockHome),
+        options,
+      );
       emit(options, { kind: "stop.stopped", pid });
       return { status: "stopped", pid, pidfilePath };
     }

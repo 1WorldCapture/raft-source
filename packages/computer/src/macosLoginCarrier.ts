@@ -12,6 +12,14 @@ import {
 } from "@botiverse/raft-shared";
 
 import { writeDurableTextFile } from "./durableFile.js";
+import { info } from "./output.js";
+import {
+  detectLegacyOsSupervisorCarriers,
+  retireLegacyOsSupervisor,
+  type OwnedHistoricalLaunchdDefinition,
+  type SupervisorCommandOptions,
+  type SupervisorCommandRunner,
+} from "./osSupervisorRuntime.js";
 import { plistsSemanticallyEqual } from "./plistCompare.js";
 import { ComputerServiceError } from "./services/errors.js";
 
@@ -1235,6 +1243,54 @@ async function enableCliCarrier(
   }
 }
 
+/**
+ * Task #38. A legacy osSupervisor carrier is written with `KeepAlive <true/>`,
+ * so while it is loaded the user's own Stop is undone by launchd and the
+ * Computer never goes idle on its own. Retire it here — but ONLY while it is
+ * idle, because booting out a job that is running the service kills the
+ * service. The "running" case is handled at Stop instead, which is the one
+ * moment the user asked for the service to go down.
+ *
+ * Never let this break a start: it is a safety net, not a dependency.
+ */
+async function retireIdleLegacyCarrierForConverge(
+  slockHome: string,
+  dispatcherPath: string,
+  deps: MacosHostLifecycleDeps,
+): Promise<void> {
+  try {
+    // The two command runners take the same argv but name their third
+    // parameter differently; adapt rather than drop the seam, so tests can
+    // still drive launchctl through `runCommand`.
+    const run = deps.runCommand;
+    const osDeps = {
+      platform: deps.platform,
+      userHome: deps.userHome,
+      uid: deps.uid,
+      runCommand: run
+        ? ((command, args, _options?: SupervisorCommandOptions) =>
+            run(command, args, deps.signal)) as SupervisorCommandRunner
+        : undefined,
+    };
+    const carriers = await detectLegacyOsSupervisorCarriers(slockHome, osDeps);
+    if (carriers.length === 0) return;
+    const { findLiveServicePidReadOnly } = await import(
+      "./internal/service-pid-fallback.js"
+    );
+    const { pid } = await findLiveServicePidReadOnly(slockHome);
+    if (pid !== null) {
+      info(
+        `[computer] legacy OS autostart ${carriers.map((c: OwnedHistoricalLaunchdDefinition) => c.id).join(", ")} is still present; leaving it because a service is running (Stop retires it).`,
+      );
+      return;
+    }
+    const result = await retireLegacyOsSupervisor(slockHome, dispatcherPath, osDeps);
+    info(`[computer] retired legacy OS autostart (${result.status}) before adopting the login item.`);
+  } catch (error) {
+    info(`[computer] legacy OS autostart check skipped: ${String(error)}`);
+  }
+}
+
 export async function convergeCliHostLifecycle(
   slockHome: string,
   desired: "enabled" | "disabled",
@@ -1285,6 +1341,14 @@ export async function convergeCliHostLifecycle(
     label: spec.label,
     definitionPath: spec.definitionPath,
   };
+  // Task #38: clear a legacy osSupervisor carrier out of the way before the
+  // login item adopts the service, so the two can never race. Only when idle —
+  // the running case is retired by Stop, which is the user's own "go down".
+  // An `owner === "app"` marker has already returned above, so reaching here
+  // always means the CLI carrier is the one taking over.
+  if (desired === "enabled") {
+    await retireIdleLegacyCarrierForConverge(slockHome, spec.dispatcherPath, deps);
+  }
   let deferredRefresh: HostLifecycleConvergenceResult["deferredRefresh"];
   if (desired === "enabled") {
     ({ deferredRefresh } = await enableCliCarrier(
