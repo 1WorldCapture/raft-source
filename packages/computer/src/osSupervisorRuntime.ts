@@ -274,7 +274,7 @@ async function hasLegacyRetirementReceipt(
   }
 }
 
-type OwnedHistoricalLaunchdDefinition = {
+export type OwnedHistoricalLaunchdDefinition = {
   id: string;
   definitionPath: string;
   definition: string;
@@ -419,6 +419,36 @@ async function proveRetiredManagerAbsent(
  * This function never throws a cleanup failure into the install hard path.
  * Runtime start/stop/status/doctor do not call it.
  */
+/**
+ * Task #38. Read-only: list the legacy osSupervisor carriers this home still
+ * owns. Returns the on-disk definitions; performs NO launchctl mutation.
+ *
+ * Exposed separately from `retireLegacyOsSupervisor` so callers can decide
+ * *when* it is safe to retire: booting out a job that is currently running the
+ * service kills the service, so the caller must own that judgement.
+ *
+ * Recognition (unchanged, and deliberately not content-based): the label must
+ * match HISTORICAL_LAUNCHD_LABEL_RE, the ProgramArguments must carry
+ * __service / --slock-home <home> / --os-supervised launchd-user in order, and
+ * the plist must contain the owner marker. The plist body — KeepAlive
+ * included — is never compared.
+ */
+export async function detectLegacyOsSupervisorCarriers(
+  slockHome: string,
+  deps: OsSupervisorRuntimeDeps = {},
+): Promise<OwnedHistoricalLaunchdDefinition[]> {
+  if ((deps.platform ?? process.platform) !== "darwin") return [];
+  try {
+    return await listOwnedHistoricalLaunchdDefinitions(
+      slockHome,
+      deps.userHome ?? os.homedir(),
+    );
+  } catch {
+    // Detection is a safety net. It must never turn a start into a failure.
+    return [];
+  }
+}
+
 export async function retireLegacyOsSupervisor(
   slockHome: string,
   binaryPath: string,
