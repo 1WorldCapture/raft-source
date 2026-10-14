@@ -513,7 +513,7 @@ export default function ForwardedBundleCard({
         })}
         {!expanded && (
           <div
-            className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-white via-white/80 to-white/0"
+            className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-white via-white/80 to-white/0 dark:from-layer-panel dark:via-layer-panel/80 dark:to-layer-panel/0"
             data-testid="forwarded-bundle-fade"
           />
         )}
