@@ -11,9 +11,30 @@ import { join } from "node:path";
 import { test } from "vitest";
 
 import { ComputerServiceError } from "./errors.js";
-import { stop } from "./stop.js";
+import { stop, stopTimeoutMsFor } from "./stop.js";
+import { serverAttachmentPath, serviceLogPath, servicePidPath } from "../paths.js";
 import type { ComputerApiEvent } from "../lib/events.js";
-import { servicePidPath } from "../paths.js";
+
+
+const SERVER_A = "11111111-1111-4111-8111-111111111111";
+const SERVER_B = "22222222-2222-4222-8222-222222222222";
+
+async function writeAttach(home: string, serverId: string): Promise<void> {
+  const p = serverAttachmentPath(home, serverId);
+  await mkdir(join(p, ".."), { recursive: true });
+  await writeFile(
+    p,
+    JSON.stringify({
+      kind: "computer-attachment",
+      serverId,
+      serverMachineId: `cm-${serverId}`,
+      serverSlug: serverId === SERVER_A ? "alpha" : "beta",
+      apiKey: `sk_computer_${serverId}`,
+      serverUrl: "https://raft.example.test",
+    }),
+    { mode: 0o600 },
+  );
+}
 
 async function withHome<T>(fn: (home: string) => Promise<T>): Promise<T> {
   const home = await mkdtemp(join(tmpdir(), "raft-computer-stop-svc-"));
@@ -392,4 +413,99 @@ test("failed asynchronous identity verification preserves pidfile and sends no s
     }), /identity changed/);
     assert.equal(await readFile(servicePidPath(home), "utf8"), "12345");
   });
+});
+
+// --- task #36 points 3 and 6 ---
+test("task #36: the stop wait budget scales with the attached server count", () => {
+  assert.equal(stopTimeoutMsFor(1), 5000);
+  assert.equal(stopTimeoutMsFor(2), 7000);
+  assert.equal(stopTimeoutMsFor(4), 11000, "the owner's four-server root must clear 5s");
+  assert.equal(stopTimeoutMsFor(0), 5000, "an empty root keeps the base budget");
+  assert.ok(
+    stopTimeoutMsFor(1000) <= 30000,
+    "a pathological attachment set must not hang stop indefinitely",
+  );
+});
+
+test("task #36: a timed-out stop says so, and records the caller", async () => {
+  await withHome(async (home) => {
+    await writeAttach(home, SERVER_A);
+    await writeAttach(home, SERVER_B);
+    await mkdir(join(home, "computer", "run"), { recursive: true });
+    await writeFile(join(home, "computer", "run", "service.pid"), String(process.pid));
+    await assert.rejects(
+      () =>
+        stop(
+          { slockHome: home, hostLifecycleOwner: "cli" },
+          {
+            stopCaller: "desktop",
+            timeoutMs: 1,
+            // Never signal a real pid from a test — the pidfile above holds the
+            // worker's own pid, and stop would SIGTERM the test runner.
+            killService: () => {},
+            isProcessAlive: () => true,
+            sleep: async () => {},
+          },
+        ),
+      (err: unknown) => {
+        assert.ok(err instanceof ComputerServiceError);
+        assert.equal((err as ComputerServiceError).code, "STOP_TIMEOUT");
+        assert.match((err as ComputerServiceError).message, /did NOT complete/u);
+        assert.match((err as ComputerServiceError).message, /2 attached servers/u);
+        return true;
+      },
+    );
+    const log = await readFile(join(home, "computer", "run", "service.log"), "utf8").catch(() => "");
+    assert.match(log, /"kind":"stop\.requested"/u);
+    assert.match(log, /"caller":"desktop"/u);
+    assert.match(log, /"kind":"stop\.timed_out"/u);
+  });
+});
+
+// --- task #36 point 6: every real call site declares itself ---
+test("task #36: stop records unknown when no caller declared one", async () => {
+  await withHome(async (home) => {
+    await mkdir(join(home, "computer", "run"), { recursive: true });
+    await writeFile(join(home, "computer", "run", "service.pid"), String(process.pid));
+    await assert.rejects(
+      () =>
+        stop(
+          { slockHome: home, hostLifecycleOwner: "cli" },
+          { timeoutMs: 1, killService: () => {}, isProcessAlive: () => true, sleep: async () => {} },
+        ),
+      () => true,
+    );
+    const log = await readFile(serviceLogPath(home), "utf8").catch(() => "");
+    assert.match(log, /"caller":"unknown"/u, "an undeclared caller must log as unknown, not be guessed");
+  });
+});
+
+test("task #36: a caller declared on the input is logged as-is", async () => {
+  await withHome(async (home) => {
+    await mkdir(join(home, "computer", "run"), { recursive: true });
+    await writeFile(join(home, "computer", "run", "service.pid"), String(process.pid));
+    await assert.rejects(
+      () =>
+        stop(
+          { slockHome: home, hostLifecycleOwner: "cli", stopCaller: "upgrade" },
+          { timeoutMs: 1, killService: () => {}, isProcessAlive: () => true, sleep: async () => {} },
+        ),
+      () => true,
+    );
+    const log = await readFile(serviceLogPath(home), "utf8").catch(() => "");
+    assert.match(log, /"caller":"upgrade"/u);
+  });
+});
+
+test("task #36: every real entry point names its own caller", async () => {
+  // The owner's stuck carrier logged "caller not logged". Assert the four
+  // production entry points declare themselves, so a future refactor cannot
+  // silently drop back to "unknown" without a failing test.
+  const { readFileSync } = await import("node:fs");
+  const read = (p: string) => readFileSync(new URL(p, import.meta.url), "utf8");
+  assert.match(read("../lib/api.ts"), /stopCaller: "desktop"/u, "Desktop entry must say desktop");
+  assert.match(read("../kHostAdapter.ts"), /stopCaller: "upgrade"/u, "upgrade path must say upgrade");
+  assert.match(read("../migrateHome.ts"), /stopCaller: "migration"/u, "migration must say migration");
+  assert.match(read("../startStop.ts"), /stopCaller: deps\.stopCaller \?\? "cli"/u, "CLI must say cli");
+  assert.match(read("../cli.ts"), /stopCaller: "cli"/u);
 });

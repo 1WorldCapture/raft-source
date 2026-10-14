@@ -44,7 +44,7 @@ const ChatPanel = memo(
 const PANEL_TONE: Record<WorkspacePanelConfig["accent"], string> = {
   yellow: "bg-primary-soft theme-brutal:bg-soft-signal",
   cyan: "bg-info-soft theme-brutal:bg-brutal-cyan",
-  lavender: "bg-secondary-200 theme-brutal:bg-brutal-lavender",
+  lavender: "bg-secondary-200 dark:bg-secondary-800 theme-brutal:bg-brutal-lavender",
   pink: "bg-accent-soft theme-brutal:bg-brutal-pink",
   lime: "bg-success-soft theme-brutal:bg-brutal-lime",
 };

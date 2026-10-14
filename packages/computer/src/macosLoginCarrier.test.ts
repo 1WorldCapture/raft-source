@@ -69,7 +69,7 @@ function launchctlHarness() {
   return { calls, jobs, run };
 }
 
-test("macOS CLI login carrier is a distinct RunAtLoad job without KeepAlive or retired argv", async () => {
+test("macOS CLI login carrier is a RunAtLoad job whose KeepAlive only covers crashes", async () => {
   const spec = buildMacosLoginCarrierSpec({
     slockHome: "/Users/example/.slock",
     dispatcherPath: "/Users/example/.local/bin/raft-computer",
@@ -79,8 +79,23 @@ test("macOS CLI login carrier is a distinct RunAtLoad job without KeepAlive or r
   assert.match(spec.label, /^build\.raft\.computer\.login\.[0-9a-f]{16}$/u);
   assert.deepEqual(spec.args, ["__service", "--slock-home", "/Users/example/.slock"]);
   assert.match(spec.definition, /<key>RunAtLoad<\/key>\s*<true\/>/u);
-  assert.doesNotMatch(spec.definition, /<key>KeepAlive<\/key>/u);
   assert.doesNotMatch(spec.definition, /--os-supervised|RAFT_COMPUTER_SUPERVISOR_OWNER/u);
+  // Task #36. This used to assert KeepAlive was ABSENT, which is what left the
+  // Computer dead after any crash until someone ran launchctl by hand. The
+  // replacement has to stay restart-on-crash WITHOUT becoming restart-always,
+  // otherwise it would fight an explicit stop: `SuccessfulExit: false` means a
+  // clean exit 0 (a deliberate stop) keeps it down, and only a non-zero exit
+  // (a crash) brings it back.
+  assert.match(
+    spec.definition,
+    /<key>KeepAlive<\/key>\s*<dict>\s*<key>SuccessfulExit<\/key>\s*<false\/>\s*<\/dict>/u,
+    "KeepAlive must be { SuccessfulExit: false } — restart on crash, stay down on clean exit",
+  );
+  assert.doesNotMatch(
+    spec.definition,
+    /<key>KeepAlive<\/key>\s*<true\/>/u,
+    "plain <true/> KeepAlive would restart after a clean stop and fight it",
+  );
 });
 
 test("markerless CLI-only Mac with no Desktop claims exactly one carrier", async () => {
@@ -1002,6 +1017,130 @@ test("remove seam fails closed for App ownership unless Electron removal is read
     });
     assert.equal(openAtLogin, false);
     assert.equal(await readHostLifecycleMarker(slockHome), null);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("task #36: an old plist and a RUNNING service are not torn down just to add KeepAlive", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "raft-macos-keepalive-"));
+  const home = path.join(root, "user");
+  const slockHome = path.join(home, ".slock");
+  const dispatcherPath = path.join(home, ".local", "bin", "raft-computer");
+  // Build the pre-0.2.8 plist by removing KeepAlive from the real spec, so the
+  // label and formatting are exactly what an upgraded install would present.
+  const spec = buildMacosLoginCarrierSpec({
+    slockHome, dispatcherPath, userHome: home, uid: 501,
+  });
+  const oldDefinition = spec.definition.replace(
+    /\s*<key>KeepAlive<\/key>\s*<dict>\s*<key>SuccessfulExit<\/key>\s*<false\/>\s*<\/dict>/u,
+    "",
+  );
+  assert.doesNotMatch(oldDefinition, /<key>KeepAlive<\/key>/u, "fixture must be a pre-KeepAlive plist");
+  const calls: string[][] = [];
+  const run: HostLifecycleCommandRunner = async (command, args) => {
+    calls.push([command, ...args]);
+    assert.equal(command, "/bin/launchctl");
+    if (args[0] === "print" && /^gui\/\d+$/.test(args[1]!)) {
+      return { stdout: `${args[1]} = { type = domain }\n`, stderr: "" };
+    }
+    if (args[0] === "print") {
+      return {
+        stdout: `${args[1]} = {\n\tstate = running\n\tpid = 4242\n${spec.definition}}\n`,
+        stderr: "",
+      };
+    }
+    if (args[0] === "bootout" || args[0] === "bootstrap") {
+      throw new Error("must not mutate a running carrier just to refresh the plist");
+    }
+    throw new Error(`unexpected command: ${command} ${args.join(" ")}`);
+  };
+  try {
+    await mkdir(path.dirname(spec.definitionPath), { recursive: true });
+    await mkdir(path.dirname(dispatcherPath), { recursive: true });
+    await writeFile(dispatcherPath, "#!/bin/sh\n", { mode: 0o755 });
+    await writeFile(spec.definitionPath, oldDefinition);
+
+    const result = await convergeCliHostLifecycle(slockHome, "enabled", {
+      platform: "darwin", userHome: home, uid: 501, dispatcherPath,
+      legacyDesktopBundlePath: path.join(root, "Applications", "Raft Computer.app"),
+      runCommand: run,
+    });
+    assert.equal(
+      result.deferredRefresh?.deferredDefinition,
+      true,
+      "a running service must defer the plist refresh",
+    );
+    assert.equal(
+      calls.filter((c) => c[1] === "bootout" || c[1] === "bootstrap").length,
+      0,
+      "no launchctl mutation may happen while the service is running",
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("task #36: the deferred plist refresh lands once no service is running", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "raft-macos-keepalive2-"));
+  const home = path.join(root, "user");
+  const slockHome = path.join(home, ".slock");
+  const dispatcherPath = path.join(home, ".local", "bin", "raft-computer");
+  const spec = buildMacosLoginCarrierSpec({
+    slockHome, dispatcherPath, userHome: home, uid: 501,
+  });
+  const oldDefinition = spec.definition.replace(
+    /\s*<key>KeepAlive<\/key>\s*<dict>\s*<key>SuccessfulExit<\/key>\s*<false\/>\s*<\/dict>/u,
+    "",
+  );
+  const calls: string[][] = [];
+  let running = false;
+  const run: HostLifecycleCommandRunner = async (command, args) => {
+    calls.push([command, ...args]);
+    assert.equal(command, "/bin/launchctl");
+    if (args[0] === "print" && /^gui\/\d+$/.test(args[1]!)) {
+      return { stdout: `${args[1]} = { type = domain }\n`, stderr: "" };
+    }
+    if (args[0] === "print") {
+      return {
+        stdout: running
+          ? `${args[1]} = {\n\tstate = running\n\tpid = 4242\n${spec.definition}}\n`
+          : `${args[1]} = {\n\tstate = not running\n\truns = 1\n${spec.definition}}\n`,
+        stderr: "",
+      };
+    }
+    if (args[0] === "bootout") return { stdout: "", stderr: "" };
+    if (args[0] === "bootstrap") return { stdout: "", stderr: "" };
+    throw new Error(`unexpected command: ${command} ${args.join(" ")}`);
+  };
+  try {
+    await mkdir(path.dirname(spec.definitionPath), { recursive: true });
+    await mkdir(path.dirname(dispatcherPath), { recursive: true });
+    await writeFile(dispatcherPath, "#!/bin/sh\n", { mode: 0o755 });
+    await writeFile(spec.definitionPath, oldDefinition);
+
+    running = true;
+    const deferred = await convergeCliHostLifecycle(slockHome, "enabled", {
+      platform: "darwin", userHome: home, uid: 501, dispatcherPath,
+      legacyDesktopBundlePath: path.join(root, "Applications", "Raft Computer.app"),
+      runCommand: run,
+    });
+    assert.equal(deferred.deferredRefresh?.deferredDefinition, true);
+
+    // Service down: the refresh must now be allowed through.
+    running = false;
+    const before = calls.length;
+    const applied = await convergeCliHostLifecycle(slockHome, "enabled", {
+      platform: "darwin", userHome: home, uid: 501, dispatcherPath,
+      legacyDesktopBundlePath: path.join(root, "Applications", "Raft Computer.app"),
+      runCommand: run,
+    });
+    assert.equal(applied.deferredRefresh, undefined, "the refresh must land when nothing is running");
+    assert.ok(
+      calls.slice(before).some((c) => c[1] === "bootout"),
+      "expected the deferred swap to happen once the service is down",
+    );
+    assert.match(await readFile(spec.definitionPath, "utf8"), /<key>KeepAlive<\/key>/u);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

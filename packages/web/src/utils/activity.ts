@@ -37,7 +37,7 @@ export function getActivityDotClass(activity: AgentActivity): string {
       return "bg-warning-soft theme-brutal:bg-brutal-orange";
     case "offline":
     default:
-      return "bg-gray-400";
+      return "bg-gray-400 dark:bg-fill-muted";
   }
 }
 

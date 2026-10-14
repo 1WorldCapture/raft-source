@@ -2667,10 +2667,30 @@ async function pruneThreadFollowsOutsideParentMembership(
   });
 }
 
+/** Synthetic delivery target for owner-facts context. It is not a channels row. */
+export const ONBOARDING_CONTEXT_CHANNEL_ID = "onboarding-context";
+
+export async function isOnboardingContextDelivery(
+  agentId: string,
+  serverId: string,
+  channelId: string,
+): Promise<boolean> {
+  if (channelId !== ONBOARDING_CONTEXT_CHANNEL_ID) return false;
+  if (!UUID_RE.test(agentId) || !UUID_RE.test(serverId)) return false;
+  const [server] = await getDb()
+    .select({ onboardingAgentId: servers.onboardingAgentId })
+    .from(servers)
+    .where(and(eq(servers.id, serverId), isNull(servers.deletedAt)));
+  return server?.onboardingAgentId === agentId;
+}
+
 export async function getChannel(
   channelId: string,
   opts?: { includeDeleted?: boolean; executor?: DatabaseExecutor },
 ) {
+  if (!UUID_RE.test(channelId)) {
+    throw new Error("channel id is not a uuid");
+  }
   const db = opts?.executor ?? getDb();
   const conditions = [eq(channels.id, channelId)];
   if (!opts?.includeDeleted) {

@@ -1,6 +1,6 @@
 import { StrictMode } from "react";
 import ReactDOM from "react-dom/client";
-import VisualTestingCases, { requestedTheme } from "./VisualTestingCases";
+import VisualTestingCases, { requestedMode, requestedTheme } from "./VisualTestingCases";
 import { VisualTestingRoot } from "./VisualTestingRoot";
 import { useTranslationStore } from "../src/store/translationStore";
 import fixtureData from "../../visual-testing/shared/fixtureData.json";
@@ -24,7 +24,7 @@ useTranslationStore.setState((state) => ({
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <VisualTestingRoot defaultTheme={requestedTheme()}>
+    <VisualTestingRoot defaultTheme={requestedTheme()} defaultMode={requestedMode()}>
       <VisualTestingCases />
     </VisualTestingRoot>
   </StrictMode>

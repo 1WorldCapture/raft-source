@@ -8,8 +8,8 @@ import {
   resolveAppThemePreset,
 } from "../src/theme/appTheme";
 
-test("Elegant dark is hidden: dark and system preferences resolve to light", () => {
-  assert.equal(ELEGANT_DARK_ENABLED, false);
+// Only meaningful while Elegant dark is switched off (the dark-on PR flips the constant).
+test("Elegant dark is hidden: dark and system preferences resolve to light", { skip: ELEGANT_DARK_ENABLED }, () => {
   const dark = resolveAppThemePreferences({ mode: "dark", lightThemeId: "elegant", darkThemeId: "elegant" }, "dark");
   assert.equal(dark.resolvedMode, "light");
   assert.equal(dark.preset, THEME_PICKER_ENABLED ? "elegant-light" : "brutal");

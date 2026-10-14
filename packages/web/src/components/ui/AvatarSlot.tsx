@@ -297,10 +297,10 @@ export default function AvatarSlot({
   const fallbackBg = type === "agent"
     ? "bg-info-soft theme-brutal:bg-brutal-cyan"
     : type === "human"
-      ? "bg-secondary-200 theme-brutal:bg-brutal-lavender"
+      ? "bg-secondary-200 dark:bg-secondary-800 theme-brutal:bg-brutal-lavender"
       : type === "app"
         ? "bg-primary-soft theme-brutal:bg-soft-signal text-foreground-strong theme-brutal:text-black font-display font-black"
-        : "bg-foreground-strong theme-brutal:bg-black text-soft-signal font-display font-bold";
+        : "bg-foreground-strong dark:bg-layer-canvas-muted theme-brutal:bg-black text-soft-signal font-display font-bold";
   const baseClass = `relative flex shrink-0 items-center justify-center overflow-hidden ${spec.size} ${spec.border} border-line-strong theme-brutal:border-black ${fallbackBg}`;
 
   if (type === "agent") {

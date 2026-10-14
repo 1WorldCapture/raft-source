@@ -1910,7 +1910,7 @@ async function runMigrateHomeCommandInner(
     stopServiceAt: async (home) => {
       const { createComputerApi } = await import("./lib/api.js");
       const api = createComputerApi(home);
-      await api.stop(() => {}, {}, { hostLifecycleOwner: "none" });
+      await api.stop(() => {}, {}, { hostLifecycleOwner: "none", stopCaller: "migration" });
     },
     // runStart resolves the home from the environment at call time, so pin
     // it for the duration of the call. Its own desiredState write records

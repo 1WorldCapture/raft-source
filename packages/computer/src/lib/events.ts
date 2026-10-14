@@ -64,6 +64,8 @@ export type ComputerApiEvent =
 
   // --- start (StartService) ---
   | { kind: "start.starting"; managedTargets: string[]; attachedCount: number; foreground: boolean }
+  /** The macOS carrier was loaded with no process behind it and had to be kicked. */
+  | { kind: "start.kickstarted_loaded_carrier" }
   | { kind: "start.already_running"; servicePid: number; managedTargets: string[]; attachedCount: number }
   | { kind: "start.running"; managedTargets: string[]; attachedCount: number }
   | { kind: "start.spawned"; servicePid: number; managedTargets: string[]; attachedCount: number }

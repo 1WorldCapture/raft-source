@@ -6,7 +6,7 @@ export type ServiceState = "running" | "stopped" | "starting" | "failed";
 
 export interface StandaloneStatus {
   home: string;
-  service: { state: ServiceState; pid: number | null; version: string | null; lastError: string | null };
+  service: { state: ServiceState; pid: number | null; version: string | null; lastError: string | null; carrierState?: "loaded_dead" | null };
   /** The user's persisted intent (set by start/stop). "stopped" = the user stopped it on purpose. */
   desiredState: "running" | "stopped" | null;
   servers: Array<{ serverId: string; slug: string; serverUrl: string; daemonState: string; lastError: string | null; agentCount: number }>;
@@ -52,6 +52,8 @@ export function parseStatusJson(text: string): StandaloneStatus {
       pid: typeof service.pid === "number" ? service.pid : null,
       version: str(service.version),
       lastError: str(service.lastError),
+      // macOS: the login job is loaded in launchd but its service process is gone (Start repairs it).
+      carrierState: service.carrierState === "loaded_dead" ? "loaded_dead" : null,
     },
     // v1 puts the user's intent under service; accept the top level too.
     desiredState: [service.desiredState, root.desiredState].find((value) => value === "running" || value === "stopped") as "running" | "stopped" | undefined ?? null,
@@ -91,12 +93,26 @@ export function parseCommandJson(text: string): CommandResult {
   }
 }
 
+/**
+ * The text of a failed `raft-computer` command for the card. The CLI prints a structured block
+ * (`What happened (CODE): ...`, `Next: ...`, then a `Help:` link): taking only the last line used to
+ * surface just the link and hide the real error, so keep every line except the help link(s); when the
+ * structured block is preceded by warning or log lines, start at "What happened".
+ */
+export function failureDetail(output: string): string {
+  const all = output.split("\n").map((line) => line.trim()).filter(Boolean);
+  // Warning or log lines can precede the structured block; the block starts at "What happened".
+  const start = all.findIndex((line) => /^What happened\b/.test(line));
+  const lines = start >= 0 ? all.slice(start) : all;
+  const useful = lines.filter((line) => !/^help\s*:/i.test(line));
+  return (useful.length > 0 ? useful : lines.slice(-1)).join("\n").slice(0, 800);
+}
+
 function commandResult(result: { stdout: string; stderr: string; code: number }, okState: "running" | "stopped"): CommandResult {
   const json = parseCommandJson(result.stdout);
   if (json.error?.code !== "bad_output") return json;
   if (result.code === 0) return { ok: true, state: okState, error: null };
-  const detail = (result.stderr.trim() || result.stdout.trim()).split("\n").filter(Boolean).at(-1) ?? "";
-  return { ok: false, state: null, error: { code: "exit_" + result.code, message: detail.slice(0, 300) } };
+  return { ok: false, state: null, error: { code: "exit_" + result.code, message: failureDetail(result.stderr.trim() || result.stdout.trim()) } };
 }
 
 export type RunCommand = (file: string, args: string[], options: { env: NodeJS.ProcessEnv; timeoutMs: number }) => Promise<{ stdout: string; stderr: string; code: number }>;

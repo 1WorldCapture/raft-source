@@ -58,7 +58,7 @@ import SurfaceListItem from "./SurfaceListItem";
  *
  * **Padding & background**: matches the canonical MachineDetailPanel row
  * (`px-3 py-2`). Pass `className` to override per-row background tint
- * (e.g. `bg-gray-100 hover:bg-white` for "not currently active" rows
+ * (e.g. `bg-gray-100 dark:bg-fill-muted hover:bg-white` for "not currently active" rows
  * inside MachineDetail).
  */
 export interface AvatarListRowProps {

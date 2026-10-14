@@ -39,7 +39,7 @@ function pendingMentionTargetInitial(action: PendingMentionAction): string {
 
 function PendingMentionTargetAvatar({ action }: { action: PendingMentionAction }) {
   if ((action.targetType === "agent" || action.targetType === "user") && action.targetAvatarUrl) {
-    const fallbackBg = action.targetType === "agent" ? "bg-info-soft theme-brutal:bg-brutal-cyan" : "bg-secondary-200 theme-brutal:bg-brutal-lavender";
+    const fallbackBg = action.targetType === "agent" ? "bg-info-soft theme-brutal:bg-brutal-cyan" : "bg-secondary-200 dark:bg-secondary-800 theme-brutal:bg-brutal-lavender";
     return (
       <span data-testid="pending-mention-target-avatar">
         <span className={`flex size-5 shrink-0 items-center justify-center overflow-hidden border border-line-strong theme-brutal:border-black ${fallbackBg}`}>

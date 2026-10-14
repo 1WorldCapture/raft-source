@@ -379,14 +379,14 @@ export function AgentMcpTab({
                         <div className="min-w-0 flex-1">
                           <div className="flex flex-wrap items-center gap-2">
                             <h4 className="break-words text-sm font-bold text-foreground-strong theme-brutal:text-black">{server.name}</h4>
-                            {!server.enabled && <span className="border border-line-strong theme-brutal:border-black bg-gray-200 px-1.5 py-0.5 text-[10px] font-bold uppercase">{formatMessage({ id: "agent.mcp.disabledBadge" })}</span>}
+                            {!server.enabled && <span className="border border-line-strong theme-brutal:border-black bg-gray-200 dark:bg-fill-muted px-1.5 py-0.5 text-[10px] font-bold uppercase">{formatMessage({ id: "agent.mcp.disabledBadge" })}</span>}
                             <span className="border border-line-strong theme-brutal:border-black bg-layer-panel theme-brutal:bg-white px-1.5 py-0.5 text-[10px] font-bold uppercase">{server.provider}</span>
                             {server.authMode === "oauth" ? (
-                              <span className={`border border-line-strong theme-brutal:border-black px-1.5 py-0.5 text-[10px] font-bold uppercase ${server.oauthStatus === "connected" ? "bg-success-soft theme-brutal:bg-brutal-lime" : server.oauthStatus === "error" ? "bg-danger-soft/30 theme-brutal:bg-brutal-red/30" : "bg-secondary-200/40 theme-brutal:bg-brutal-lavender/40"}`}>
+                              <span className={`border border-line-strong theme-brutal:border-black px-1.5 py-0.5 text-[10px] font-bold uppercase ${server.oauthStatus === "connected" ? "bg-success-soft theme-brutal:bg-brutal-lime" : server.oauthStatus === "error" ? "bg-danger-soft/30 theme-brutal:bg-brutal-red/30" : "bg-secondary-200/40 dark:bg-secondary-800/40 theme-brutal:bg-brutal-lavender/40"}`}>
                                 {formatMessage({ id: "agent.mcp.oauthStatus" }, { status: server.oauthStatus })}
                               </span>
                             ) : server.hasCredentials ? (
-                              <span className="border border-line-strong theme-brutal:border-black bg-secondary-200/40 theme-brutal:bg-brutal-lavender/40 px-1.5 py-0.5 text-[10px] font-bold uppercase">{formatMessage({ id: "agent.mcp.credentialsStoredBadge" })}</span>
+                              <span className="border border-line-strong theme-brutal:border-black bg-secondary-200/40 dark:bg-secondary-800/40 theme-brutal:bg-brutal-lavender/40 px-1.5 py-0.5 text-[10px] font-bold uppercase">{formatMessage({ id: "agent.mcp.credentialsStoredBadge" })}</span>
                             ) : null}
                           </div>
                           {server.description && <p className="mt-1 text-sm text-foreground-muted theme-brutal:text-black/70">{server.description}</p>}

@@ -38,7 +38,7 @@ export interface StatusDotProps extends Omit<SpanPassthroughProps, "children"> {
   /** Agent activity state; drives the color via `getActivityDotClass()`. */
   activity?: AgentActivity;
   /** Explicit Tailwind bg token for non-activity uses (e.g.
-   *  `"bg-brutal-lime"`, `"bg-brutal-orange"`, `"bg-gray-400"`). Ignored
+   *  `"bg-brutal-lime"`, `"bg-brutal-orange"`, `"bg-gray-400 dark:bg-fill-muted"`). Ignored
    *  when `activity` is provided (unless `external` is true). */
   tone?: string;
   /** When true, renders neutral `bg-brutal-cyan` tone regardless of `activity`.
@@ -70,7 +70,7 @@ export default function StatusDot({
 }: StatusDotProps) {
   const colorClass = external
     ? "bg-info-soft theme-brutal:bg-brutal-cyan"
-    : activity ? getActivityDotClass(activity) : tone ?? "bg-gray-400";
+    : activity ? getActivityDotClass(activity) : tone ?? "bg-gray-400 dark:bg-fill-muted";
   return (
     <span
       {...rest}

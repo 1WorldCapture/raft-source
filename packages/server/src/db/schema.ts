@@ -622,11 +622,12 @@ export const featureFlagRolloutAuditEvents = pgTable("feature_flag_rollout_audit
   flagKey: text("flag_key").notNull(),
   configVersionBefore: bigint("config_version_before", { mode: "number" }).notNull(),
   configVersionAfter: bigint("config_version_after", { mode: "number" }).notNull(),
-  authorization: text("authorization", { enum: ["narrowing", "guardrail_passed"] }).notNull(),
+  authorization: text("authorization", { enum: ["narrowing", "guardrail_passed", "operator_approved"] }).notNull(),
   operation: jsonb("operation").$type<
     FeatureFlagRolloutNarrowingOperation | FeatureFlagRolloutWideningOperation
   >().notNull(),
   receiptId: uuid("receipt_id"),
+  approvedBy: text("approved_by"),
   beforeSnapshot: jsonb("before_snapshot").$type<Record<string, unknown>>().notNull(),
   afterSnapshot: jsonb("after_snapshot").$type<Record<string, unknown>>().notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -643,13 +644,14 @@ export const featureFlagRolloutAuditEvents = pgTable("feature_flag_rollout_audit
   ),
   check(
     "feature_flag_rollout_audit_authorization_valid",
-    sql`${t.authorization} IN ('narrowing', 'guardrail_passed')`,
+    sql`${t.authorization} IN ('narrowing', 'guardrail_passed', 'operator_approved')`,
   ),
   check(
     "feature_flag_rollout_audit_receipt_matches_authorization",
     sql`(
-      (${t.authorization} = 'narrowing' AND ${t.receiptId} IS NULL)
-      OR (${t.authorization} = 'guardrail_passed' AND ${t.receiptId} IS NOT NULL)
+      (${t.authorization} = 'narrowing' AND ${t.receiptId} IS NULL AND ${t.approvedBy} IS NULL)
+      OR (${t.authorization} = 'guardrail_passed' AND ${t.receiptId} IS NOT NULL AND ${t.approvedBy} IS NULL)
+      OR (${t.authorization} = 'operator_approved' AND ${t.receiptId} IS NULL AND ${t.approvedBy} IS NOT NULL AND length(btrim(${t.approvedBy})) > 0)
     )`,
   ),
   check(
@@ -6532,8 +6534,12 @@ export const providerConnections = pgTable("provider_connections", {
   updatedByUserId: uuid("updated_by_user_id").references(() => users.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  // Nullable so existing rows and creates without a key stay distinct.
+  // A present key is unique per server and replays the original insert.
+  idempotencyKey: text("idempotency_key"),
 }, (t) => [
   uniqueIndex("idx_provider_connections_server_name").on(t.serverId, t.name),
+  uniqueIndex("idx_provider_connections_server_idempotency").on(t.serverId, t.idempotencyKey),
   index("idx_provider_connections_server").on(t.serverId),
 ]);
 

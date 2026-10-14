@@ -958,7 +958,7 @@ export default function CreateAgentDialog({
   // "Create Agent 那个也可以编辑了").
   const nameLocked = onboarding;
   const descriptionLocked = onboarding;
-  const lockedFieldClass = "bg-gray-100 text-foreground-muted theme-brutal:text-black/50 cursor-not-allowed";
+  const lockedFieldClass = "bg-gray-100 dark:bg-fill-muted text-foreground-muted theme-brutal:text-black/50 cursor-not-allowed";
   /**
    * One validator, two questions: "is this name usable?" and "should we say so
    * yet?" — previously conflated, which is why the empty case was unreachable.

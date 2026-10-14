@@ -173,7 +173,7 @@ export function ChannelSlackBridgeField({
     <section className="space-y-3 border-t theme-brutal:border-t-2 border-line-strong theme-brutal:border-black pt-4" data-testid="channel-slack-bridge-field">
       <div>
         <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-foreground-muted theme-brutal:text-black/65">
-          <span className="border border-line-strong theme-brutal:border-black bg-secondary-200 theme-brutal:bg-brutal-lavender px-1.5 py-0.5 text-[10px] text-foreground-strong theme-brutal:text-black">
+          <span className="border border-line-strong theme-brutal:border-black bg-secondary-200 dark:bg-secondary-800 theme-brutal:bg-brutal-lavender px-1.5 py-0.5 text-[10px] text-foreground-strong theme-brutal:text-black">
             {formatMessage({ id: "settings.slackBridge.providerBadge" })}
           </span>
           {formatMessage({ id: "channel.bridge.fieldTitle" })}

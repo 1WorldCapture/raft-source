@@ -583,7 +583,7 @@ export default function AgentWorkspace({ agentId, compact }: { agentId: string; 
                           href={href}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="text-blue-700 underline decoration-2 underline-offset-2 hover:text-brutal-pink"
+                          className="text-blue-700 dark:text-blue-300 underline decoration-2 underline-offset-2 hover:text-brutal-pink"
                         >
                           {children}
                         </a>

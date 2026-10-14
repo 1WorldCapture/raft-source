@@ -19,6 +19,18 @@ mkdir -p "$LOGDIR"
 echo $$ > "$LOGDIR/pid"   # callers verify liveness via this pidfile, not pgrep
 log(){ echo "[$(date -u +%H:%M:%S)] $*"; }
 
+# Free-space gate: builds fail unpredictably on a nearly-full disk (observed
+# layer-export corruption above ~87% on the 39G prod box). Refuse to start
+# unless the build filesystem has enough headroom. Override with
+# RAFT_BUILD_MIN_FREE_GB (in GiB) if a smaller box ever needs it.
+MIN_FREE_GB=${RAFT_BUILD_MIN_FREE_GB:-12}
+FREE_GB=$(df -BG --output=avail . | tail -1 | tr -dc '0-9')
+if [ "$FREE_GB" -lt "$MIN_FREE_GB" ]; then
+  echo "ABORT: ${FREE_GB}G free (< ${MIN_FREE_GB}G floor) on $(df --output=source . | tail -1) — clean up first (docs/self-hosting/prod-docker.md, 磁盘治理)" >&2
+  exit 1
+fi
+log "free-space gate OK: ${FREE_GB}G ≥ ${MIN_FREE_GB}G"
+
 git -C . rev-parse --verify "$SHA^{commit}" >/dev/null || { echo "unknown commit $SHA" >&2; exit 1; }
 git checkout -q "$SHA"
 

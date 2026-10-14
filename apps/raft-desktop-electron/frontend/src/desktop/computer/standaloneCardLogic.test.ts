@@ -56,10 +56,31 @@ test("error messages are shortened for humans", () => {
   assert.match(friendlyStandaloneError("weird"), /Couldn't complete/);
 });
 
+test("the CLI's structured error is shown as is, not hidden behind the generic line", () => {
+  const raw = "What happened (HOST_LIFECYCLE_START_FAILED): the service did not become live.\nNext: raft-computer logs --service";
+  assert.equal(friendlyStandaloneError(raw), raw);
+  assert.equal(friendlyStandaloneError(`  ${raw}\n`), raw);
+});
+
 test("fresh install with no server connected says so instead of 'stopped unexpectedly'", () => {
   const fresh = deriveStandaloneCard({ ...base, phase: "stopped", status: { agentCount: 0, servers: [], service: { version: "1.0.29" } } });
   assert.deepEqual([fresh.tone, fresh.title], ["idle", "Not connected"]);
   assert.match(fresh.detail ?? "", /raft-computer setup/);
   const withError = deriveStandaloneCard({ ...base, phase: "stopped", error: "boom", status: { agentCount: 0, servers: [], service: { version: "1.0.29" } } });
   assert.equal(withError.title, "Not running");
+});
+
+test("a loaded-but-dead login job says so and offers Start instead of 'stopped unexpectedly'", () => {
+  const status = { agentCount: 0, servers: [{ daemonState: "offline" }], service: { version: "1.0.43", carrierState: "loaded_dead" as const } };
+  const model = deriveStandaloneCard({ phase: "stopped", error: null, upgradeAvailable: false, bundledAvailable: true, status });
+  assert.equal(model.title, "Not running");
+  assert.equal(model.detail, "The Computer's background service is loaded but not running. Click Start to bring it back.");
+  assert.deepEqual(model.actions.map((a) => a.id), ["start"]);
+  assert.equal(model.actions[0]!.primary, true);
+  // Without the field the old wording stays.
+  const plain = deriveStandaloneCard({ phase: "stopped", error: null, upgradeAvailable: false, bundledAvailable: true, status: { ...status, service: { version: "1.0.43" } } });
+  assert.equal(plain.detail, "The Computer stopped unexpectedly.");
+  // A stop the user asked for is still "Stopped".
+  const byUser = deriveStandaloneCard({ phase: "stopped_by_user", error: null, upgradeAvailable: false, bundledAvailable: true, status });
+  assert.equal(byUser.title, "Stopped");
 });

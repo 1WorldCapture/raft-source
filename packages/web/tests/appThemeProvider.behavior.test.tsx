@@ -206,7 +206,8 @@ pickerTest("a storage event refreshes the device preference", () => {
   assert.equal(screen.getByTestId("preset").textContent, "elegant-light");
 });
 
-pickerTest("while Elegant dark is hidden a saved dark preference renders as Elegant light and keeps the saved value", async () => {
+// Only meaningful while Elegant dark is switched off (the dark-on PR flips the constant).
+test("while Elegant dark is hidden a saved dark preference renders as Elegant light and keeps the saved value", { skip: ELEGANT_DARK_ENABLED || !THEME_PICKER_ENABLED }, async () => {
   window.localStorage.setItem(APP_THEME_STORAGE_KEY, "elegant-dark");
 
   render(
@@ -215,7 +216,6 @@ pickerTest("while Elegant dark is hidden a saved dark preference renders as Eleg
     </AppThemeProvider>,
   );
 
-  assert.equal(ELEGANT_DARK_ENABLED, false);
   assert.equal(screen.getByTestId("preset").textContent, "elegant-light");
   await waitFor(() => {
     assert.equal(document.documentElement.dataset.theme, "elegant");

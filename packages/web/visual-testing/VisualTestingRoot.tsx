@@ -8,12 +8,14 @@ import { LocaleProvider } from "../src/i18n/LocaleProvider";
 export function VisualTestingRoot({
   children,
   defaultTheme,
+  defaultMode = "light",
 }: {
   children: ReactNode;
   defaultTheme: "brutal" | "elegant";
+  defaultMode?: "light" | "dark";
 }) {
   return (
-    <ThemeProvider defaultTheme={defaultTheme} defaultMode="light">
+    <ThemeProvider defaultTheme={defaultTheme} defaultMode={defaultMode}>
       <TooltipProvider>
         <BrowserRouter>
           <LocaleProvider>

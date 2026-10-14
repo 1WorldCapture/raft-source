@@ -95,7 +95,7 @@ function RuntimeUsageContents({
 
   const stale = result.state === "stale";
   return (
-    <div className={stale ? "bg-gray-50" : "bg-layer-panel theme-brutal:bg-white"}>
+    <div className={stale ? "bg-gray-50 dark:bg-layer-canvas-muted" : "bg-layer-panel theme-brutal:bg-white"}>
       {stale && (
         <div className="border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black bg-warning-soft/20 theme-brutal:bg-brutal-orange/20 px-4 py-2 text-xs font-bold">
           {formatMessage({ id: "machine.runtimeUsage.stale" })}

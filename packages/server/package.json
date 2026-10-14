@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "start": "node dist/server.js",
+    "flag:rollout": "tsx scripts/flag-rollout.ts",
     "build": "tsc",
     "generate:wiki-workspace-pack": "node scripts/generateWikiWorkspacePack.mjs",
     "check:wiki-workspace-pack-fresh": "pnpm generate:wiki-workspace-pack && git diff --exit-code src/generated/wikiAgentWorkspacePack.ts",

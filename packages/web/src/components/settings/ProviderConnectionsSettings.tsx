@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { CheckCircle2, KeyRound, Pencil, Plus, Power, RefreshCw, Send, Trash2, XCircle } from "lucide-react";
 import { useIntl } from "react-intl";
@@ -126,7 +126,7 @@ export default function ProviderConnectionsSettings() {
       <p className="text-sm text-foreground-muted theme-brutal:text-black/60">{formatMessage({ id: "settings.providers.description" })}</p>
 
       {(error || actionError) && (
-        <div className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-red-50 px-3 py-2 text-sm font-medium text-red-800">
+        <div className="border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-red-50 dark:bg-red-950/40 px-3 py-2 text-sm font-medium text-red-800 dark:text-red-300">
           {actionError || formatMessage({ id: "settings.providers.loadError" })}
         </div>
       )}
@@ -244,7 +244,7 @@ function ConnectionRow({
     <div className="flex flex-col gap-3 p-4" data-testid={`provider-connection-${connection.id}`}>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
       <div className="flex min-w-0 flex-1 items-start gap-3">
-        <span className={`mt-0.5 flex size-8 shrink-0 items-center justify-center border theme-brutal:border-2 border-line-strong theme-brutal:border-black ${ready ? "bg-green-100" : "bg-fill-muted theme-brutal:bg-black/5"}`}>
+        <span className={`mt-0.5 flex size-8 shrink-0 items-center justify-center border theme-brutal:border-2 border-line-strong theme-brutal:border-black ${ready ? "bg-green-100 dark:bg-green-950/40" : "bg-fill-muted theme-brutal:bg-black/5"}`}>
           {ready ? <CheckCircle2 size={17} /> : <XCircle size={17} />}
         </span>
         <div className="min-w-0">
@@ -369,7 +369,7 @@ function ProviderConnectionTestModal({
           </datalist>
         </FormField>
         <div className="flex items-center justify-between gap-3">
-          <p className={`text-xs ${modelError ? "text-red-700" : "text-foreground-muted theme-brutal:text-black/55"}`}>
+          <p className={`text-xs ${modelError ? "text-red-700 dark:text-red-300" : "text-foreground-muted theme-brutal:text-black/55"}`}>
             {modelError || formatMessage({ id: "settings.providers.testModelHint" })}
           </p>
           <Button type="button" size="sm" disabled={loadingModels || submitting} onClick={() => void loadModels()}>
@@ -390,7 +390,7 @@ function ProviderConnectionTestModal({
             required
           />
         </FormField>
-        {error && <div className="text-sm font-medium text-red-700">{error}</div>}
+        {error && <div className="text-sm font-medium text-red-700 dark:text-red-300">{error}</div>}
         <div className="flex justify-end gap-2">
           <Button type="button" onClick={onClose}>{formatMessage({ id: "settings.common.cancel" })}</Button>
           <Button type="submit" disabled={submitting || !model.trim() || !message.trim()}>
@@ -477,7 +477,7 @@ function ProviderConnectionActionModal({
             )}
           </>
         )}
-        {error && <div className="text-sm font-medium text-red-700">{error}</div>}
+        {error && <div className="text-sm font-medium text-red-700 dark:text-red-300">{error}</div>}
         <div className="flex justify-end gap-2">
           <Button type="button" onClick={onClose}>{formatMessage({ id: "settings.common.cancel" })}</Button>
           <Button type="submit" disabled={submitting || (action === "rename" ? !name.trim() : !apiKey.trim() || (gateway && !endpointUrl.trim()))}>
@@ -508,6 +508,10 @@ function CreateProviderConnectionModal({
   const [supportsImageInput, setSupportsImageInput] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const idempotencyKey = useRef(crypto.randomUUID());
+  const rotateIdempotencyKey = () => {
+    idempotencyKey.current = crypto.randomUUID();
+  };
   const gateway = isGatewayProviderId(providerId, providerOptions);
 
   const submit = async (event: FormEvent) => {
@@ -520,6 +524,7 @@ function CreateProviderConnectionModal({
         providerId,
         ...(gateway ? { endpointUrl, supportsImageInput } : {}),
         apiKey,
+        idempotencyKey: idempotencyKey.current,
       });
       await onCreated();
     } catch {
@@ -533,13 +538,18 @@ function CreateProviderConnectionModal({
     <DialogCard onClose={onClose} title={formatMessage({ id: "settings.providers.createTitle" })} testId="provider-connection-create-dialog">
       <form onSubmit={submit} className="space-y-4" data-testid="provider-connection-create-form">
         <FormField label={formatMessage({ id: "settings.providers.name" })}>
-          <input className="input-brutal w-full" value={name} onChange={(event) => setName(event.target.value)} maxLength={120} required />
+          <input className="input-brutal w-full" value={name} onChange={(event) => {
+            setName(event.target.value);
+            rotateIdempotencyKey();
+          }} maxLength={120} required />
         </FormField>
         <FormField label={formatMessage({ id: "settings.providers.provider" })}>
           <Select
             value={providerId}
             onValueChange={(value) => {
-              if (value != null) setProviderId(value as ProviderConnectionProviderId);
+              if (value == null || value === providerId) return;
+              setProviderId(value as ProviderConnectionProviderId);
+              rotateIdempotencyKey();
             }}
             items={providerOptions.map((provider) => ({
               value: provider.id,
@@ -564,19 +574,28 @@ function CreateProviderConnectionModal({
         </FormField>
         {gateway && (
           <FormField label={formatMessage({ id: "settings.providers.endpoint" })}>
-            <input className="input-brutal w-full" type="url" value={endpointUrl} onChange={(event) => setEndpointUrl(event.target.value)} placeholder="https://gateway.example.com/v1" required />
+            <input className="input-brutal w-full" type="url" value={endpointUrl} onChange={(event) => {
+              setEndpointUrl(event.target.value);
+              rotateIdempotencyKey();
+            }} placeholder="https://gateway.example.com/v1" required />
           </FormField>
         )}
         <FormField label={formatMessage({ id: "settings.providers.apiKey" })} hint={formatMessage({ id: "settings.providers.apiKeyHint" })}>
-          <input className="input-brutal w-full" type="password" autoComplete="new-password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} required />
+          <input className="input-brutal w-full" type="password" autoComplete="new-password" value={apiKey} onChange={(event) => {
+            setApiKey(event.target.value);
+            rotateIdempotencyKey();
+          }} required />
         </FormField>
         {gateway && (
           <label className="flex items-center gap-2 text-sm font-medium">
-            <Checkbox checked={supportsImageInput} onChange={(event) => setSupportsImageInput(event.target.checked)} />
+            <Checkbox checked={supportsImageInput} onChange={(event) => {
+              setSupportsImageInput(event.target.checked);
+              rotateIdempotencyKey();
+            }} />
             {formatMessage({ id: "settings.providers.imageInput" })}
           </label>
         )}
-        {error && <div className="text-sm font-medium text-red-700">{error}</div>}
+        {error && <div className="text-sm font-medium text-red-700 dark:text-red-300">{error}</div>}
         <div className="flex justify-end gap-2">
           <Button type="button" onClick={onClose}>{formatMessage({ id: "settings.common.cancel" })}</Button>
           <Button type="submit" disabled={submitting || !name.trim() || !apiKey.trim() || (gateway && !endpointUrl.trim())}>
@@ -594,7 +613,7 @@ function VerifiedOnChip({ latestVerified }: { latestVerified: ProviderConnection
   return (
     <div data-testid="provider-connection-verified-on">
       <span
-        className="border theme-brutal:border-2 border-line-muted theme-brutal:border-black/30 bg-green-50 px-2 py-0.5 text-xs font-bold text-foreground-muted theme-brutal:text-black/70"
+        className="border theme-brutal:border-2 border-line-muted theme-brutal:border-black/30 bg-green-50 dark:bg-green-950/40 px-2 py-0.5 text-xs font-bold text-foreground-muted theme-brutal:text-black/70"
         title={formatMessage(
           { id: "settings.providers.verifiedOnDetail" },
           {
@@ -774,7 +793,7 @@ function VerifyProviderConnectionModal({
         )}
         {phase === "done" && result && outcome === "success" && (
           <div className="space-y-2" data-testid="provider-connection-verify-success">
-            <p className="text-sm font-bold text-green-800">
+            <p className="text-sm font-bold text-green-800 dark:text-green-300">
               {formatMessage({ id: "settings.providers.verifySuccess" }, { computer: computerName })}
               {" · "}
               {formatMessage({ id: "settings.providers.verifyLatency" }, { ms: result.probe.latencyMs ?? 0 })}
@@ -797,7 +816,7 @@ function VerifyProviderConnectionModal({
         )}
         {phase === "done" && (outcome === "failure" || failure) && (
           <div className="space-y-1" data-testid="provider-connection-verify-failure">
-            <p className="text-sm font-bold text-red-700">
+            <p className="text-sm font-bold text-red-700 dark:text-red-300">
               {failure || formatMessage({ id: "settings.providers.verifyFailure" }, {
                 category: category ? formatMessage({ id: probeCategoryMessageId(category) }) : "",
               })}

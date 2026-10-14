@@ -31,7 +31,7 @@ export function DesktopDownloadSection() {
       data-testid="desktop-download-section"
       className="flex flex-wrap items-center gap-2"
     >
-      <span className="inline-flex items-center gap-1.5 text-sm text-neutral-600">
+      <span className="inline-flex items-center gap-1.5 text-sm text-neutral-600 dark:text-neutral-300">
         <Monitor size={15} />
         {formatMessage({ id: "settings.desktopDownload.title" }, { version: desktop.version })}
       </span>
@@ -49,7 +49,7 @@ export function DesktopDownloadSection() {
             : formatMessage({ id: "settings.desktopDownload.intel" })}
         </a>
       ))}
-      <span className="w-full text-xs text-neutral-500">
+      <span className="w-full text-xs text-neutral-500 dark:text-neutral-400">
         {formatMessage({ id: "settings.desktopDownload.hint" })}
       </span>
     </div>

@@ -188,7 +188,7 @@ export default function ServerCreatePreview({
           <div className="flex h-panel-header items-center gap-2 border-b theme-brutal:border-b-2 border-line-strong theme-brutal:border-black bg-primary-soft theme-brutal:bg-soft-signal px-3">
             <span
               key={previewName}
-              className="onboarding-preview-pop inline-flex max-w-full items-center gap-1.5 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-foreground-strong theme-brutal:bg-black px-2 py-1 text-xs font-bold text-soft-signal shadow-raft-xs theme-brutal:shadow-brutal-sm [--onboarding-pop-rotate:-2deg]"
+              className="onboarding-preview-pop inline-flex max-w-full items-center gap-1.5 border theme-brutal:border-2 border-line-strong theme-brutal:border-black bg-foreground-strong dark:bg-layer-canvas-muted theme-brutal:bg-black px-2 py-1 text-xs font-bold text-soft-signal shadow-raft-xs theme-brutal:shadow-brutal-sm [--onboarding-pop-rotate:-2deg]"
               data-testid="server-preview-sidebar-badge"
             >
               <span className="truncate">{previewName}</span>

@@ -13,7 +13,7 @@ export interface StandaloneState {
   status: {
     agentCount: number;
     servers: Array<{ daemonState: string }>;
-    service: { version: string | null };
+    service: { version: string | null; carrierState?: "loaded_dead" | null };
   } | null;
 }
 
@@ -59,6 +59,10 @@ export function deriveStandaloneCard(state: StandaloneState | null): StandaloneC
       if (state.status && state.status.servers.length === 0 && !state.error) {
         return { tone: "idle", title: "Not connected", detail: "No server is connected to this Computer yet. In a terminal, run: raft-computer setup /<your-server>", version, actions: [act("refresh", "Check again", true), ...upgrade] };
       }
+      // macOS: the login job is loaded but its service is gone. Start revives it, so say that instead of "stopped unexpectedly".
+      if (state.status?.service.carrierState === "loaded_dead") {
+        return { tone: "warn", title: "Not running", detail: "The Computer's background service is loaded but not running. Click Start to bring it back.", version, actions: [act("start", "Start", true), ...upgrade] };
+      }
       return { tone: "warn", title: "Not running", detail: state.error || "The Computer stopped unexpectedly.", version, actions: [act("start", "Start", true), ...upgrade] };
     case "starting":
       return { tone: "warn", title: "Starting…", detail: null, version, actions: [] };
@@ -83,8 +87,11 @@ export function deriveStandaloneCard(state: StandaloneState | null): StandaloneC
   }
 }
 
-/** One short human line for an error that came back from the main process. */
+/** A readable message for an error that came back from the main process. */
 export function friendlyStandaloneError(raw: string): string {
+  // The CLI's own structured error ("What happened (CODE): ..." / "Next: ...") is the real reason:
+  // show it instead of the generic line, which hid the actual failure.
+  if (/(^|\n)\s*What happened\b/.test(raw)) return raw.trim();
   if (/ENOENT|not installed/i.test(raw)) return "The Computer isn't installed.";
   if (/timeout|timed out/i.test(raw)) return "That took too long — try again.";
   if (/EACCES|permission/i.test(raw)) return "Permission denied while changing the Computer.";

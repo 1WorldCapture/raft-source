@@ -214,7 +214,7 @@ export default function SelectShareLightbox({
           {copyError && (
             <p
               role="alert"
-              className="mr-auto text-sm font-medium text-red-700"
+              className="mr-auto text-sm font-medium text-red-700 dark:text-red-300"
               data-testid="select-share-lightbox-copy-error"
             >
               {copyError}

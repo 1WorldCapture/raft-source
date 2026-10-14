@@ -1,5 +1,5 @@
 // Bundle the server for the slim runtime image (server-image stage 1).
-// Produces esbuild single-file ESM bundles + external source maps for the four
+// Produces esbuild single-file ESM bundles + external source maps for the five
 // runtime entry points, into packages/server/dist/. Native/wasm-heavy packages
 // stay external and are installed into the runtime image's node_modules instead.
 //
@@ -34,6 +34,7 @@ const ENTRIES = [
   ["scripts/migration-preflight.ts", "dist/migration-preflight.js"],
   ["scripts/migrate-deploy.ts", "dist/migrate-deploy.js"],
   ["scripts/verify-feature-flag-admin-privileges.ts", "dist/verify-feature-flag-admin-privileges.js"],
+  ["scripts/flag-rollout.ts", "dist/flag-rollout.js"],
 ];
 
 const banner = `import { createRequire as __raftCreateRequire } from "node:module";
