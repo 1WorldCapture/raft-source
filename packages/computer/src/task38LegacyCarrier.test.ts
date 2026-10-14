@@ -3,10 +3,7 @@ import { mkdtemp, mkdir, writeFile, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import {
-  detectLegacyOsSupervisorCarriers,
-  isOwnedHistoricalLaunchdDefinition,
-} from "./osSupervisor.js";
+import { isOwnedHistoricalLaunchdDefinition } from "./osSupervisor.js";
 import { detectLegacyOsSupervisorCarriers } from "./osSupervisorRuntime.js";
 import { buildMacosLoginCarrierSpec } from "./macosLoginCarrier.js";
 

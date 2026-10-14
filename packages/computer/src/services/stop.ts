@@ -246,6 +246,18 @@ export async function stop(
   // alone (instead of by liveness) would let a stale current pidfile
   // mask a still-live legacy service — see
   // `internal/service-pid-fallback.ts` doc-comment.
+  // Task #38: unload a legacy OS-supervisor carrier FIRST, before anything
+  // reads or clears a pidfile. Its `KeepAlive <true/>` means launchd can
+  // resurrect the service inside the SIGTERM-and-wait window; retiring later
+  // would let clearPidfileAt delete the RELAUNCHED process's pidfile just
+  // before the bootout killed it. Booting the carrier out here *is* the stop
+  // the user asked for, so doing it first removes that race entirely.
+  await retireLegacyOsSupervisorOnStop(
+    slockHome,
+    resolveStableDispatcherPath(slockHome),
+    options,
+  );
+
   const { pid, pidfilePath, firstStalePidfile, firstStalePid } =
     await findLiveServicePid(slockHome, {
       readPidfile,
@@ -263,14 +275,6 @@ export async function stop(
       // is rendered (preserves the pre-fallback-chain behavior for the
       // single-candidate case).
       await disableHostLifecycle();
-      // Task #38: a dead service under a legacy carrier's KeepAlive <true/> is
-      // exactly what launchd restarts behind the user's back, so this path
-      // needs the same retirement as the normal stop.
-      await retireLegacyOsSupervisorOnStop(
-        slockHome,
-        resolveStableDispatcherPath(slockHome),
-        options,
-      );
       emit(options, { kind: "stop.stale_pidfile_cleared", pid: firstStalePid });
       return {
         status: "stale_pidfile_cleared",
@@ -319,15 +323,6 @@ export async function stop(
       await clearPidfileAt(pidfilePath);
       options.signal?.throwIfAborted?.();
       await disableHostLifecycle();
-      // Task #38: the service is down — the one moment a legacy osSupervisor
-      // carrier can be unloaded without costing anything. Without this, its
-      // KeepAlive <true/> would undo this very stop and the Computer would
-      // never stay stopped.
-      await retireLegacyOsSupervisorOnStop(
-        slockHome,
-        resolveStableDispatcherPath(slockHome),
-        options,
-      );
       emit(options, { kind: "stop.stopped", pid });
       return { status: "stopped", pid, pidfilePath };
     }

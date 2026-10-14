@@ -173,3 +173,52 @@ test("#38 stop retires the legacy carrier on the normal (graceful) path too", as
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("#38 Stop boots out the legacy carrier BEFORE it clears any pidfile", async () => {
+  // The ordering bug PM caught: if the bootout happens after SIGTERM-and-wait,
+  // `KeepAlive true` can resurrect the service inside that window, and
+  // clearPidfileAt then deletes the RELAUNCHED process's pidfile just before
+  // the bootout kills it. The bootout must come first.
+  const root = await mkdtemp(join(tmpdir(), "t38order-"));
+  const home = join(root, ".slock");
+  const calls = await seed(home, true);
+  try {
+    await writeFile(servicePidPath(home), String(process.pid));
+    let alive = true;
+    await stop(
+      { slockHome: home, hostLifecycleOwner: "cli" },
+      {
+        hostLifecycleDeps: {
+          platform: "darwin", userHome: home, uid: 501,
+          runCommand: async (command: string, args: string[]) => {
+            calls.push([command, ...args]);
+            if (args[0] === "print" && /^gui\/\d+$/.test(args[1] ?? "")) {
+              return { stdout: `${args[1]} = { type = domain }\n`, stderr: "" };
+            }
+            if (args[0] === "print") return { stdout: `${args[1]} = { state = running }\n`, stderr: "" };
+            return { stdout: "", stderr: "" };
+          },
+        },
+        convergeHostLifecycle: async () => ({
+          owner: "cli" as const, enabled: false, status: "converged" as const,
+          label: null, definitionPath: null, definition: null,
+        }),
+        killService: () => { alive = false; },
+        isProcessAlive: () => alive,
+        sleep: async () => {},
+      },
+    );
+    const bootoutIdx = calls.findIndex((c) => c[1] === "bootout" && (c[2] ?? "").includes(LEGACY_LABEL));
+    expect(bootoutIdx, `expected a legacy bootout, saw ${JSON.stringify(calls)}`).toBeGreaterThanOrEqual(0);
+    // Every launchctl mutation before the bootout must be a read-only print.
+    const mutationsBefore = calls
+      .slice(0, bootoutIdx)
+      .filter((c) => !["print"].includes(c[1]));
+    expect(
+      mutationsBefore,
+      `no launchctl mutation may precede the legacy bootout, saw ${JSON.stringify(mutationsBefore)}`,
+    ).toEqual([]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
